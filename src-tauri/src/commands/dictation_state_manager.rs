@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::constants::events;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
-use crate::constants::events;
 
 /// Centralized dictation state that coordinates all components
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -344,7 +344,10 @@ impl DictationStateManager {
         let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
         if is_active {
             // Register escape key when dictation becomes active
-            if let Err(e) = coordinator.register_escape_user(app_handle, "dictation_state").await {
+            if let Err(e) = coordinator
+                .register_escape_user(app_handle, "dictation_state")
+                .await
+            {
                 warn!(
                     "[StateManager] Failed to register escape key for dictation: {}",
                     e
@@ -354,7 +357,10 @@ impl DictationStateManager {
             }
         } else {
             // Unregister escape key when dictation becomes inactive
-            if let Err(e) = coordinator.unregister_escape_user(app_handle, "dictation_state").await {
+            if let Err(e) = coordinator
+                .unregister_escape_user(app_handle, "dictation_state")
+                .await
+            {
                 warn!(
                     "[StateManager] Failed to unregister escape key for dictation: {}",
                     e
@@ -469,8 +475,6 @@ impl DictationStateManager {
             _ => false,
         }
     }
-
-
 }
 
 // Global state manager instance
@@ -579,7 +583,7 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
     }
 
     // Reset floating bar with proper dictation mode change
-            crate::commands::ui_commands::handle_dictation_mode_change(app_handle, false).await;
+    crate::commands::ui_commands::handle_dictation_mode_change(app_handle, false).await;
 
     // Reset manager's internal component states
     *manager.component_states.write().await = ComponentStates {

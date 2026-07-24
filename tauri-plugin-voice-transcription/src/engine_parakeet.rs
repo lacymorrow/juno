@@ -1,8 +1,8 @@
+use crate::engine::{TranscriptionEngine, TranscriptionSession};
+use parakeet_rs::{Parakeet, Transcriber};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use parakeet_rs::{Parakeet, Transcriber};
-use tracing::{info, error};
-use crate::engine::{TranscriptionEngine, TranscriptionSession};
+use tracing::{error, info};
 
 /// STT engine backed by NVIDIA Parakeet CTC 0.6B via ONNX Runtime.
 ///
@@ -21,7 +21,10 @@ impl ParakeetEngine {
     /// Load the Parakeet CTC model from `model_dir`. Returns an error if the
     /// directory does not exist or model files are missing.
     pub fn new(model_dir: &Path) -> Result<Self, String> {
-        info!("[ParakeetEngine] Loading Parakeet CTC model from {:?}", model_dir);
+        info!(
+            "[ParakeetEngine] Loading Parakeet CTC model from {:?}",
+            model_dir
+        );
 
         if !model_dir.exists() {
             return Err(format!(
@@ -83,11 +86,13 @@ impl TranscriptionSession for ParakeetSession {
             return Ok(None);
         }
 
-        let mut guard = self.model
+        let mut guard = self
+            .model
             .lock()
             .map_err(|e| format!("Parakeet model lock poisoned: {}", e))?;
 
-        let model = guard.as_mut()
+        let model = guard
+            .as_mut()
             .ok_or_else(|| "Parakeet model not loaded".to_string())?;
 
         match model.transcribe_samples(audio.to_vec(), 16000, 1, None) {
@@ -110,14 +115,17 @@ impl TranscriptionSession for ParakeetSession {
             return Ok(String::new());
         }
 
-        let mut guard = self.model
+        let mut guard = self
+            .model
             .lock()
             .map_err(|e| format!("Parakeet model lock poisoned: {}", e))?;
 
-        let model = guard.as_mut()
+        let model = guard
+            .as_mut()
             .ok_or_else(|| "Parakeet model not loaded".to_string())?;
 
-        model.transcribe_samples(audio.to_vec(), 16000, 1, None)
+        model
+            .transcribe_samples(audio.to_vec(), 16000, 1, None)
             .map(|r| r.text)
             .map_err(|e| format!("Parakeet final transcription failed: {}", e))
     }

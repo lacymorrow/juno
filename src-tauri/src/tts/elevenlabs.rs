@@ -1,9 +1,9 @@
+use crate::constants::http_headers;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use tracing::{error, info};
-use crate::constants::http_headers;
 
 // --- ElevenLabs API Structures ---
 #[derive(Deserialize, Debug)]
@@ -32,9 +32,7 @@ struct ElevenLabsPayload {
 
 // --- ElevenLabs TTS Command ---
 #[tauri::command]
-pub async fn invoke_elevenlabs_tts(
-    text: String,
-) -> Result<String, String> {
+pub async fn invoke_elevenlabs_tts(text: String) -> Result<String, String> {
     info!("Invoking ElevenLabs TTS for text: {}", text);
 
     // Check if stop was requested before starting
@@ -45,8 +43,8 @@ pub async fn invoke_elevenlabs_tts(
 
     let api_key = env::var("ELEVENLABS_API_KEY")
         .map_err(|_| "ELEVENLABS_API_KEY environment variable not set".to_string())?;
-    let voice_id = env::var("ELEVENLABS_VOICE_ID")
-        .unwrap_or_else(|_| "21m00Tcm4TlvDq8ikWAM".to_string());
+    let voice_id =
+        env::var("ELEVENLABS_VOICE_ID").unwrap_or_else(|_| "21m00Tcm4TlvDq8ikWAM".to_string());
     info!("Using ElevenLabs Voice ID: {}", voice_id);
 
     let url = format!("https://api.elevenlabs.io/v1/text-to-speech/{}", voice_id);
@@ -57,10 +55,14 @@ pub async fn invoke_elevenlabs_tts(
         voice_settings: ElevenLabsVoiceSettings {
             stability: 0.5,
             similarity_boost: 0.75,
-        }
+        },
     };
 
-    info!("Sending request to ElevenLabs: URL={}, Payload snippet: {{ text: '{}...', ... }}", url, text.chars().take(20).collect::<String>());
+    info!(
+        "Sending request to ElevenLabs: URL={}, Payload snippet: {{ text: '{}...', ... }}",
+        url,
+        text.chars().take(20).collect::<String>()
+    );
 
     // Check if stop was requested before sending the request
     if crate::tts::is_tts_stop_requested() {
@@ -84,7 +86,10 @@ pub async fn invoke_elevenlabs_tts(
 
     match response {
         Ok(res) => {
-            info!("Received response from ElevenLabs with status: {}", res.status());
+            info!(
+                "Received response from ElevenLabs with status: {}",
+                res.status()
+            );
             if res.status().is_success() {
                 // Check if stop was requested before processing the audio
                 if crate::tts::is_tts_stop_requested() {
@@ -96,12 +101,17 @@ pub async fn invoke_elevenlabs_tts(
                     Ok(audio_bytes) => {
                         // Final check before encoding
                         if crate::tts::is_tts_stop_requested() {
-                            info!("TTS stop was requested before encoding ElevenLabs audio, aborting");
+                            info!(
+                                "TTS stop was requested before encoding ElevenLabs audio, aborting"
+                            );
                             return Ok("TTS_STOPPED_BY_USER".to_string());
                         }
 
                         let base64_audio = BASE64_STANDARD.encode(&audio_bytes);
-                        info!("Successfully received and encoded ElevenLabs audio ({} bytes).", audio_bytes.len());
+                        info!(
+                            "Successfully received and encoded ElevenLabs audio ({} bytes).",
+                            audio_bytes.len()
+                        );
                         Ok(base64_audio)
                     }
                     Err(e) => {
@@ -112,12 +122,23 @@ pub async fn invoke_elevenlabs_tts(
                 }
             } else {
                 let status = res.status();
-                let error_body = res.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
+                let error_body = res
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Failed to read error body".to_string());
                 // Try to parse the specific error structure
-                let detailed_error = match serde_json::from_str::<ElevenLabsErrorResponse>(&error_body) {
-                    Ok(parsed_error) => format!("{} - {}", status, parsed_error.detail.and_then(|d| d.message).unwrap_or_else(|| error_body.clone())),
-                    Err(_) => format!("{} - {}", status, error_body) // Fallback to raw body
-                };
+                let detailed_error =
+                    match serde_json::from_str::<ElevenLabsErrorResponse>(&error_body) {
+                        Ok(parsed_error) => format!(
+                            "{} - {}",
+                            status,
+                            parsed_error
+                                .detail
+                                .and_then(|d| d.message)
+                                .unwrap_or_else(|| error_body.clone())
+                        ),
+                        Err(_) => format!("{} - {}", status, error_body), // Fallback to raw body
+                    };
                 error!("ElevenLabs API request failed: {}", detailed_error);
                 Err(format!("ElevenLabs API Error: {}", detailed_error))
             }
@@ -130,4 +151,3 @@ pub async fn invoke_elevenlabs_tts(
     }
 }
 // --- End ElevenLabs TTS Command ---
-

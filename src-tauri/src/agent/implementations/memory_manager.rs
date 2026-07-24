@@ -1,18 +1,16 @@
-use crate::agent::core::{
-    AgentError,
-    Message,
-    Role,
-};
+use crate::agent::core::{AgentError, Message, Role};
 use crate::agent::traits::MemoryManager;
-use crate::constants::memory::{limits, tokens, visual, summary, patterns, performance, COMMON_WORDS};
+use crate::constants::memory::{
+    limits, patterns, performance, summary, tokens, visual, COMMON_WORDS,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use tokio::sync::RwLock;
 use std::sync::Arc;
-use std::time::{Instant, Duration, SystemTime};
-use uuid::Uuid;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::RwLock;
+use uuid::Uuid;
 
 /// Configuration for advanced memory management
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,14 +66,19 @@ pub struct VisualContextConfig {
 impl Default for VisualContextConfig {
     fn default() -> Self {
         // Use the corrected defaults for computer use
-        let (enable_compression, retention_seconds, immediate_compression, max_screenshots, fallback_description) =
-            crate::constants::memory::defaults::get_visual_config();
+        let (
+            enable_compression,
+            retention_seconds,
+            immediate_compression,
+            max_screenshots,
+            fallback_description,
+        ) = crate::constants::memory::defaults::get_visual_config();
 
         Self {
             enable_screenshot_compression: enable_compression,
             screenshot_retention_seconds: retention_seconds,
-            immediate_compression,  // NOW FALSE - allows computer use agents to see screenshots!
-            max_base64_screenshots: max_screenshots,  // NOW 8 - allows multiple screenshots
+            immediate_compression, // NOW FALSE - allows computer use agents to see screenshots!
+            max_base64_screenshots: max_screenshots, // NOW 8 - allows multiple screenshots
             fallback_to_generic_description: fallback_description,
         }
     }
@@ -201,17 +204,23 @@ impl AdvancedMemoryManager {
         total_tokens += Self::estimate_content_tokens(content);
 
         // Add tool call tokens
-        let tool_call_tokens = message.tool_calls.as_ref()
+        let tool_call_tokens = message
+            .tool_calls
+            .as_ref()
             .map(|calls| {
-                calls.iter().map(|call| {
-                    let base_tokens = call.name.len() / tokens::CHARS_PER_TOKEN_TEXT + tokens::BASE_TOOL_CALL_TOKENS;
+                calls
+                    .iter()
+                    .map(|call| {
+                        let base_tokens = call.name.len() / tokens::CHARS_PER_TOKEN_TEXT
+                            + tokens::BASE_TOOL_CALL_TOKENS;
 
-                    // Estimate tool call input tokens with mixed content parsing
-                    let input_str = call.input.to_string();
-                    let input_tokens = Self::estimate_content_tokens(&input_str);
+                        // Estimate tool call input tokens with mixed content parsing
+                        let input_str = call.input.to_string();
+                        let input_tokens = Self::estimate_content_tokens(&input_str);
 
-                    base_tokens + input_tokens
-                }).sum()
+                        base_tokens + input_tokens
+                    })
+                    .sum()
             })
             .unwrap_or(0);
 
@@ -219,7 +228,11 @@ impl AdvancedMemoryManager {
 
         // Log warning for very large messages
         if total_tokens > limits::LARGE_MESSAGE_WARNING_TOKENS {
-            log::warn!("Large message detected: ~{} tokens (content length: {})", total_tokens, content.len());
+            log::warn!(
+                "Large message detected: ~{} tokens (content length: {})",
+                total_tokens,
+                content.len()
+            );
         }
 
         total_tokens
@@ -287,7 +300,11 @@ impl AdvancedMemoryManager {
 
                     // Log significant base64 content
                     if base64_tokens > limits::LARGE_MESSAGE_WARNING_TOKENS / 2 {
-                        log::warn!("Large base64 content detected: {} chars = ~{} tokens", base64_length, base64_tokens);
+                        log::warn!(
+                            "Large base64 content detected: {} chars = ~{} tokens",
+                            base64_length,
+                            base64_tokens
+                        );
                     }
                 }
 
@@ -296,7 +313,8 @@ impl AdvancedMemoryManager {
             } else {
                 // No prefixed images found - check for pure base64 content without prefixes
                 // This handles the critical case where base64 data lacks data URL prefixes
-                let pure_base64_detected = Self::detect_and_process_pure_base64(remaining_content, &mut total_tokens);
+                let pure_base64_detected =
+                    Self::detect_and_process_pure_base64(remaining_content, &mut total_tokens);
 
                 if !pure_base64_detected {
                     // No base64 content found, count remaining as text
@@ -315,7 +333,8 @@ impl AdvancedMemoryManager {
     fn detect_and_process_pure_base64(content: &str, total_tokens: &mut usize) -> bool {
         // Check for large base64 content using the same logic as is_screenshot_content
         if content.len() > visual::MIN_SCREENSHOT_CONTENT_LENGTH {
-            let base64_char_count = content.chars()
+            let base64_char_count = content
+                .chars()
                 .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=')
                 .count();
 
@@ -342,7 +361,8 @@ impl AdvancedMemoryManager {
         while pos < content.len() {
             // Find start of potential base64 sequence using byte-based search
             let remaining_slice = &content[pos..];
-            let base64_char_start = remaining_slice.find(|c: char| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=');
+            let base64_char_start = remaining_slice
+                .find(|c: char| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=');
 
             if let Some(start_offset) = base64_char_start {
                 let start = pos + start_offset;
@@ -352,7 +372,12 @@ impl AdvancedMemoryManager {
                 let remaining_from_start = &content[start..];
 
                 for (byte_offset, ch) in remaining_from_start.char_indices() {
-                    if ch.is_ascii_alphanumeric() || ch == '+' || ch == '/' || ch == '=' || ch.is_ascii_whitespace() {
+                    if ch.is_ascii_alphanumeric()
+                        || ch == '+'
+                        || ch == '/'
+                        || ch == '='
+                        || ch.is_ascii_whitespace()
+                    {
                         end = start + byte_offset + ch.len_utf8();
                     } else {
                         break;
@@ -360,17 +385,23 @@ impl AdvancedMemoryManager {
                 }
 
                 let segment = &content[start..end];
-                let clean_segment = segment.chars()
+                let clean_segment = segment
+                    .chars()
                     .filter(|c| !c.is_whitespace())
                     .collect::<String>();
 
                 // Check if this segment is likely base64 (minimum length and high base64 char percentage)
-                if clean_segment.len() > 1000 { // Minimum reasonable base64 chunk size
-                    let base64_chars = clean_segment.chars()
-                        .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=')
+                if clean_segment.len() > 1000 {
+                    // Minimum reasonable base64 chunk size
+                    let base64_chars = clean_segment
+                        .chars()
+                        .filter(|c| {
+                            c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '='
+                        })
                         .count();
 
-                    if base64_chars >= clean_segment.len() * 90 / 100 { // 90% threshold for segments
+                    if base64_chars >= clean_segment.len() * 90 / 100 {
+                        // 90% threshold for segments
                         // Count text before this base64 segment as regular text
                         if start > pos {
                             let text_before = &content[pos..start];
@@ -378,11 +409,15 @@ impl AdvancedMemoryManager {
                         }
 
                         // Count the base64 segment as image tokens
-                        let segment_tokens = clean_segment.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
+                        let segment_tokens =
+                            clean_segment.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
                         temp_tokens += segment_tokens;
 
-                        log::info!("Pure base64 segment detected: {} chars = ~{} tokens",
-                                  clean_segment.len(), segment_tokens);
+                        log::info!(
+                            "Pure base64 segment detected: {} chars = ~{} tokens",
+                            clean_segment.len(),
+                            segment_tokens
+                        );
 
                         found_any_base64 = true;
                         pos = end;
@@ -420,9 +455,7 @@ impl AdvancedMemoryManager {
     /// Estimate total token count for all messages
     async fn estimate_total_tokens(&self) -> usize {
         let messages = self.messages.read().await;
-        messages.iter()
-            .map(Self::estimate_message_tokens)
-            .sum()
+        messages.iter().map(Self::estimate_message_tokens).sum()
     }
 
     /// Update memory metrics after operations
@@ -436,16 +469,15 @@ impl AdvancedMemoryManager {
         let messages = self.messages.read().await;
 
         metrics.total_messages = messages.len();
-        metrics.estimated_tokens = messages.iter()
-            .map(Self::estimate_message_tokens)
-            .sum();
+        metrics.estimated_tokens = messages.iter().map(Self::estimate_message_tokens).sum();
 
         let operation_time = operation_start.elapsed().as_millis() as f64;
         metrics.average_response_time_ms =
             (metrics.average_response_time_ms + operation_time) / 2.0;
 
         // Calculate efficiency ratio
-        let useful_messages = messages.iter()
+        let useful_messages = messages
+            .iter()
             .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
             .count();
         metrics.memory_efficiency_ratio = if !messages.is_empty() {
@@ -476,19 +508,23 @@ impl AdvancedMemoryManager {
         let normal_threshold = config.max_tokens;
 
         let needs_emergency_pruning = estimated_tokens >= emergency_threshold;
-        let needs_normal_pruning = messages_count >= config.max_messages ||
-                                 estimated_tokens >= normal_threshold;
+        let needs_normal_pruning =
+            messages_count >= config.max_messages || estimated_tokens >= normal_threshold;
 
         if needs_emergency_pruning {
             log::error!("EMERGENCY: Token count ({}) approaching API limit (200K)! Aggressive pruning required.", estimated_tokens);
             // Keep only the most recent messages
-            let emergency_keep = std::cmp::max(config.min_messages_to_keep, limits::EMERGENCY_MIN_KEEP);
+            let emergency_keep =
+                std::cmp::max(config.min_messages_to_keep, limits::EMERGENCY_MIN_KEEP);
             drop(config);
             self.prune_memory(Some(emergency_keep)).await?;
             Ok(true)
         } else if needs_normal_pruning {
-            log::info!("Memory pruning triggered: {} messages, ~{} tokens",
-                      messages_count, estimated_tokens);
+            log::info!(
+                "Memory pruning triggered: {} messages, ~{} tokens",
+                messages_count,
+                estimated_tokens
+            );
             drop(config);
             self.prune_memory(None).await?;
             Ok(true)
@@ -499,15 +535,21 @@ impl AdvancedMemoryManager {
     }
 
     /// Create a summary of conversation segments
-    async fn create_conversation_summary(&self, messages: &[Message]) -> Result<ConversationSummary, AgentError> {
+    async fn create_conversation_summary(
+        &self,
+        messages: &[Message],
+    ) -> Result<ConversationSummary, AgentError> {
         if messages.is_empty() {
-            return Err(AgentError::ConfigurationError("Cannot summarize empty message list".to_string()));
+            return Err(AgentError::ConfigurationError(
+                "Cannot summarize empty message list".to_string(),
+            ));
         }
 
         // Simple summarization logic (in production, you'd use an LLM)
         let summary = if messages.len() <= summary::SHORT_CONVERSATION_MAX_MESSAGES {
             // For short conversations, just concatenate key points
-            messages.iter()
+            messages
+                .iter()
                 .filter(|m| !m.content.is_empty())
                 .map(|m| {
                     let content = if m.content.len() > summary::MAX_SHORT_CONTENT_LENGTH {
@@ -522,8 +564,12 @@ impl AdvancedMemoryManager {
         } else {
             // For longer conversations, create a structured summary
             let user_messages = messages.iter().filter(|m| m.role == Role::User).count();
-            let assistant_messages = messages.iter().filter(|m| m.role == Role::Assistant).count();
-            let tool_calls = messages.iter()
+            let assistant_messages = messages
+                .iter()
+                .filter(|m| m.role == Role::Assistant)
+                .count();
+            let tool_calls = messages
+                .iter()
                 .filter_map(|m| m.tool_calls.as_ref())
                 .map(|calls| calls.len())
                 .sum::<usize>();
@@ -533,7 +579,8 @@ impl AdvancedMemoryManager {
         };
 
         // Extract key topics (simple keyword extraction)
-        let all_content = messages.iter()
+        let all_content = messages
+            .iter()
             .map(|m| m.content.as_str())
             .collect::<Vec<_>>()
             .join(" ");
@@ -541,12 +588,10 @@ impl AdvancedMemoryManager {
 
         let time_range = (
             SystemTime::now() - Duration::from_secs(summary::CONVERSATION_START_OFFSET_SECONDS),
-            SystemTime::now()
+            SystemTime::now(),
         );
 
-        let estimated_tokens = messages.iter()
-            .map(Self::estimate_message_tokens)
-            .sum();
+        let estimated_tokens = messages.iter().map(Self::estimate_message_tokens).sum();
 
         Ok(ConversationSummary {
             id: Uuid::new_v4().to_string(),
@@ -561,8 +606,12 @@ impl AdvancedMemoryManager {
     /// Extract key topics from text (simple implementation)
     fn extract_key_topics(&self, text: &str) -> Vec<String> {
         // Simple keyword extraction (in production, use NLP libraries)
-        let words: Vec<&str> = text.split_whitespace()
-            .filter(|word| word.len() > summary::MIN_KEYWORD_LENGTH && !COMMON_WORDS.contains(&word.to_lowercase().as_str()))
+        let words: Vec<&str> = text
+            .split_whitespace()
+            .filter(|word| {
+                word.len() > summary::MIN_KEYWORD_LENGTH
+                    && !COMMON_WORDS.contains(&word.to_lowercase().as_str())
+            })
             .collect();
 
         // Count word frequencies
@@ -575,7 +624,8 @@ impl AdvancedMemoryManager {
         let mut sorted_words: Vec<_> = word_counts.into_iter().collect();
         sorted_words.sort_by(|a, b| b.1.cmp(&a.1));
 
-        sorted_words.into_iter()
+        sorted_words
+            .into_iter()
             .take(summary::MAX_KEYWORDS_TO_EXTRACT)
             .map(|(word, _)| word)
             .collect()
@@ -596,9 +646,13 @@ impl AdvancedMemoryManager {
 
         // Create summary of messages being removed if summarization is enabled
         if config.enable_summarization && config.summarization_batch_size > 0 {
-            let messages_to_summarize = &messages[..messages_to_remove.min(config.summarization_batch_size)];
+            let messages_to_summarize =
+                &messages[..messages_to_remove.min(config.summarization_batch_size)];
             if !messages_to_summarize.is_empty() {
-                match self.create_conversation_summary(messages_to_summarize).await {
+                match self
+                    .create_conversation_summary(messages_to_summarize)
+                    .await
+                {
                     Ok(summary) => {
                         let mut summaries = self.summaries.write().await;
                         summaries.push(summary);
@@ -625,8 +679,11 @@ impl AdvancedMemoryManager {
             metrics.last_prune_time = Some(SystemTime::now());
         }
 
-        log::info!("Pruned {} messages from memory, {} remaining",
-                   messages_to_remove, messages.len());
+        log::info!(
+            "Pruned {} messages from memory, {} remaining",
+            messages_to_remove,
+            messages.len()
+        );
 
         Ok(messages_to_remove)
     }
@@ -678,8 +735,10 @@ impl AdvancedMemoryManager {
 
         self.update_metrics(start_time).await?;
 
-        log::info!("Memory optimization completed in {}ms",
-                   start_time.elapsed().as_millis());
+        log::info!(
+            "Memory optimization completed in {}ms",
+            start_time.elapsed().as_millis()
+        );
 
         Ok(())
     }
@@ -739,7 +798,10 @@ impl AdvancedMemoryManager {
     }
 
     /// Preload essential context at session start (industry best practice)
-    pub async fn preload_session_context(&self, user_preferences: Option<serde_json::Value>) -> Result<(), AgentError> {
+    pub async fn preload_session_context(
+        &self,
+        user_preferences: Option<serde_json::Value>,
+    ) -> Result<(), AgentError> {
         let start_time = Instant::now();
 
         // Preload user preferences into memory if provided
@@ -771,13 +833,14 @@ impl AdvancedMemoryManager {
     }
 
     /// Smart context retrieval with tiered access patterns
-    pub async fn get_tiered_context(&self, max_immediate_tokens: usize) -> Result<(Vec<Message>, Vec<Message>), AgentError> {
+    pub async fn get_tiered_context(
+        &self,
+        max_immediate_tokens: usize,
+    ) -> Result<(Vec<Message>, Vec<Message>), AgentError> {
         let hot_context = self.get_hot_context().await?;
 
         // Calculate hot context token usage
-        let hot_tokens: usize = hot_context.iter()
-            .map(Self::estimate_message_tokens)
-            .sum();
+        let hot_tokens: usize = hot_context.iter().map(Self::estimate_message_tokens).sum();
 
         if hot_tokens <= max_immediate_tokens {
             // Hot context fits in immediate budget
@@ -836,7 +899,9 @@ impl AdvancedMemoryManager {
             if message.role == Role::Assistant {
                 if let Some(tool_calls) = &message.tool_calls {
                     // Check if all tool calls in this message have results
-                    let all_resolved = tool_calls.iter().all(|tc| resolved_tool_calls.contains(&tc.id));
+                    let all_resolved = tool_calls
+                        .iter()
+                        .all(|tc| resolved_tool_calls.contains(&tc.id));
                     if !all_resolved {
                         // Mark these tool calls as orphaned
                         for tc in tool_calls {
@@ -844,8 +909,10 @@ impl AdvancedMemoryManager {
                                 orphaned_tool_call_ids.insert(tc.id.clone());
                             }
                         }
-                        log::warn!("Removing orphaned Assistant message with unresolved tool calls: {:?}",
-                                   tool_calls.iter().map(|tc| &tc.id).collect::<Vec<_>>());
+                        log::warn!(
+                            "Removing orphaned Assistant message with unresolved tool calls: {:?}",
+                            tool_calls.iter().map(|tc| &tc.id).collect::<Vec<_>>()
+                        );
                         return false; // Remove this message
                     }
                 }
@@ -864,7 +931,8 @@ impl AdvancedMemoryManager {
 
                 // Calculate memory efficiency ratio after cleanup
                 // Use the existing messages variable instead of acquiring a new lock
-                let useful_messages = messages.iter()
+                let useful_messages = messages
+                    .iter()
                     .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
                     .count();
                 metrics.memory_efficiency_ratio = if !messages.is_empty() {
@@ -881,14 +949,20 @@ impl AdvancedMemoryManager {
                 log::warn!("Could not acquire metrics lock for orphaned tool calls update");
             }
 
-            log::info!("Cleaned up {} orphaned tool calls: {:?} (operation took {}ms)",
-                       orphaned_tool_call_ids.len(), orphaned_tool_call_ids, start_time.elapsed().as_millis());
+            log::info!(
+                "Cleaned up {} orphaned tool calls: {:?} (operation took {}ms)",
+                orphaned_tool_call_ids.len(),
+                orphaned_tool_call_ids,
+                start_time.elapsed().as_millis()
+            );
         }
         Ok(())
     }
 
     /// Cleans only orphaned tool calls from previous executions, not from the current one
-    pub async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
+    pub async fn clean_orphaned_tool_calls_from_previous_executions(
+        &mut self,
+    ) -> Result<(), AgentError> {
         let start_time = Instant::now();
         let current_execution_id_option = {
             let guard = self.current_execution_id.read().await;
@@ -903,8 +977,10 @@ impl AdvancedMemoryManager {
                 return self.clean_orphaned_tool_calls().await;
             }
         };
-        log::info!("Cleaning orphaned tool calls from previous executions (current execution: {})",
-                  current_execution_id);
+        log::info!(
+            "Cleaning orphaned tool calls from previous executions (current execution: {})",
+            current_execution_id
+        );
 
         let mut messages = self.messages.write().await;
         let mut pending = self.pending_tool_calls.write().await;
@@ -957,7 +1033,9 @@ impl AdvancedMemoryManager {
         });
 
         // Clean up pending tool calls (only from previous executions)
-        pending.retain(|id| !orphaned_tool_call_ids.contains(id) || id.contains(&current_execution_id));
+        pending.retain(|id| {
+            !orphaned_tool_call_ids.contains(id) || id.contains(&current_execution_id)
+        });
 
         if !orphaned_tool_call_ids.is_empty() {
             // Update metrics safely with enhanced tracking
@@ -965,7 +1043,8 @@ impl AdvancedMemoryManager {
                 metrics.orphaned_tool_calls_cleaned += orphaned_tool_call_ids.len();
 
                 // Calculate memory efficiency ratio after cleanup
-                let useful_messages = messages.iter()
+                let useful_messages = messages
+                    .iter()
                     .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
                     .count();
                 metrics.memory_efficiency_ratio = if !messages.is_empty() {
@@ -1046,7 +1125,8 @@ impl AdvancedMemoryManager {
                 metrics.orphaned_tool_calls_cleaned += orphaned_count;
 
                 // Calculate memory efficiency ratio after cleanup
-                let useful_messages = messages.iter()
+                let useful_messages = messages
+                    .iter()
                     .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
                     .count();
                 metrics.memory_efficiency_ratio = if !messages.is_empty() {
@@ -1063,8 +1143,12 @@ impl AdvancedMemoryManager {
                 log::warn!("Could not acquire metrics lock for orphaned tool results update");
             }
 
-            log::info!("Cleaned up {} orphaned tool results: {:?} (operation took {}ms)",
-                       orphaned_count, orphaned_ids, start_time.elapsed().as_millis());
+            log::info!(
+                "Cleaned up {} orphaned tool results: {:?} (operation took {}ms)",
+                orphaned_count,
+                orphaned_ids,
+                start_time.elapsed().as_millis()
+            );
         }
         Ok(orphaned_count)
     }
@@ -1072,15 +1156,21 @@ impl AdvancedMemoryManager {
     /// Detect if content contains a screenshot/base64 image
     fn is_screenshot_content(content: &str) -> bool {
         // Enhanced detection for screenshots specifically
-        if content.contains(patterns::PNG_DATA_URL_PREFIX) ||
-           content.contains(patterns::JPEG_DATA_URL_PREFIX) ||
-           content.contains(patterns::WEBP_DATA_URL_PREFIX) {
+        if content.contains(patterns::PNG_DATA_URL_PREFIX)
+            || content.contains(patterns::JPEG_DATA_URL_PREFIX)
+            || content.contains(patterns::WEBP_DATA_URL_PREFIX)
+        {
             return true;
         }
 
         // Check for large base64 content that's likely a screenshot
-        if content.len() > visual::MIN_SCREENSHOT_CONTENT_LENGTH &&
-           content.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=').count() > content.len() * visual::BASE64_CHAR_THRESHOLD_PERCENT / 100 {
+        if content.len() > visual::MIN_SCREENSHOT_CONTENT_LENGTH
+            && content
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '=')
+                .count()
+                > content.len() * visual::BASE64_CHAR_THRESHOLD_PERCENT / 100
+        {
             return true;
         }
 
@@ -1104,11 +1194,11 @@ impl AdvancedMemoryManager {
 
         // Calculate complexity score based on content size and characteristics
         let complexity_score = match content_length {
-            0..=50000 => 0.2,      // Simple interface
+            0..=50000 => 0.2,       // Simple interface
             50001..=150000 => 0.5,  // Moderate complexity
             150001..=300000 => 0.7, // Complex interface
             300001..=500000 => 0.9, // Very complex
-            _ => 1.0,              // Maximum complexity
+            _ => 1.0,               // Maximum complexity
         };
 
         // Enhanced UI element detection based on content patterns
@@ -1117,8 +1207,18 @@ impl AdvancedMemoryManager {
             "Application windows".to_string(),
             "Menu bars and toolbars".to_string(),
             "Interactive elements".to_string(),
-            if complexity_score > 0.7 { "Complex visual layout" } else { "Simple layout" }.to_string(),
-            if content_length > 200000 { "High detail screenshot" } else { "Standard detail" }.to_string(),
+            if complexity_score > 0.7 {
+                "Complex visual layout"
+            } else {
+                "Simple layout"
+            }
+            .to_string(),
+            if content_length > 200000 {
+                "High detail screenshot"
+            } else {
+                "Standard detail"
+            }
+            .to_string(),
         ];
 
         // Estimate text content presence
@@ -1137,11 +1237,19 @@ impl AdvancedMemoryManager {
                 x if x > 0.6 => "high",
                 x if x > 0.4 => "moderate",
                 x if x > 0.2 => "low",
-                _ => "minimal"
+                _ => "minimal",
             },
             ui_elements.len(),
-            if content_length > 250000 { "dense" } else { "standard" },
-            if complexity_score > 0.7 { "complex" } else { "standard" }
+            if content_length > 250000 {
+                "dense"
+            } else {
+                "standard"
+            },
+            if complexity_score > 0.7 {
+                "complex"
+            } else {
+                "standard"
+            }
         );
 
         ScreenshotContentAnalysis {
@@ -1154,7 +1262,10 @@ impl AdvancedMemoryManager {
     }
 
     /// Compress a screenshot to text summary with enhanced analysis
-    async fn compress_screenshot_to_text(&self, base64_content: &str) -> Result<VisualContextSummary, AgentError> {
+    async fn compress_screenshot_to_text(
+        &self,
+        base64_content: &str,
+    ) -> Result<VisualContextSummary, AgentError> {
         let _start_time = Instant::now();
         let original_tokens = base64_content.len() / tokens::CHARS_PER_TOKEN_BASE64_IMAGE;
 
@@ -1162,10 +1273,17 @@ impl AdvancedMemoryManager {
         let analysis = self.analyze_screenshot_content(base64_content).await;
 
         // Create comprehensive summary with enhanced analysis
-        let summary = if self.visual_config.read().await.fallback_to_generic_description {
+        let summary = if self
+            .visual_config
+            .read()
+            .await
+            .fallback_to_generic_description
+        {
             let timestamp = SystemTime::now();
-            let time_str = format!("{:?}", 
-                timestamp.duration_since(SystemTime::UNIX_EPOCH)
+            let time_str = format!(
+                "{:?}",
+                timestamp
+                    .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap_or_else(|_| Duration::from_secs(0))
                     .as_secs()
             );
@@ -1178,7 +1296,10 @@ impl AdvancedMemoryManager {
                 chrono::DateTime::<chrono::Utc>::from(timestamp).format("%Y-%m-%d %H:%M:%S UTC"),
                 analysis.content_type,
                 analysis.visual_context,
-                analysis.estimated_text_content.as_deref().unwrap_or("No text analysis available"),
+                analysis
+                    .estimated_text_content
+                    .as_deref()
+                    .unwrap_or("No text analysis available"),
                 analysis.complexity_score,
                 original_tokens
             )
@@ -1206,7 +1327,7 @@ impl AdvancedMemoryManager {
             summary,
             dominant_colors: vec![
                 format!("Content type: {}", analysis.content_type),
-                format!("Complexity: {:.1}/1.0", analysis.complexity_score)
+                format!("Complexity: {:.1}/1.0", analysis.complexity_score),
             ],
             ui_elements: analysis.ui_elements,
             text_content: analysis.estimated_text_content,
@@ -1229,7 +1350,10 @@ impl AdvancedMemoryManager {
 
         // Check if this message contains a screenshot
         if Self::is_screenshot_content(&message.content) {
-            log::info!("Detected screenshot in message ({}+ chars), processing for compression...", message.content.len());
+            log::info!(
+                "Detected screenshot in message ({}+ chars), processing for compression...",
+                message.content.len()
+            );
 
             // Get current visual summaries to check retention limits
             let mut visual_summaries = self.visual_summaries.write().await;
@@ -1237,9 +1361,15 @@ impl AdvancedMemoryManager {
 
             // ALWAYS compress if immediate_compression is enabled OR we've exceeded the limit
             // With max_base64_screenshots set to 0, this should always compress
-            if visual_config.immediate_compression || current_base64_count >= visual_config.max_base64_screenshots {
-                log::info!("Compressing screenshot: immediate_compression={}, count={}/{}",
-                          visual_config.immediate_compression, current_base64_count, visual_config.max_base64_screenshots);
+            if visual_config.immediate_compression
+                || current_base64_count >= visual_config.max_base64_screenshots
+            {
+                log::info!(
+                    "Compressing screenshot: immediate_compression={}, count={}/{}",
+                    visual_config.immediate_compression,
+                    current_base64_count,
+                    visual_config.max_base64_screenshots
+                );
 
                 // Compress to text summary
                 match self.compress_screenshot_to_text(&message.content).await {
@@ -1265,22 +1395,33 @@ impl AdvancedMemoryManager {
                         log::error!("CRITICAL: Failed to compress screenshot: {} - keeping original - THIS MAY CAUSE TOKEN OVERFLOW!", e);
                         // In case of compression failure, we should still try to truncate the content to prevent overflow
                         if message.content.len() > limits::LARGE_MESSAGE_WARNING_TOKENS {
-                            log::warn!("Truncating oversized screenshot content to prevent API failure");
+                            log::warn!(
+                                "Truncating oversized screenshot content to prevent API failure"
+                            );
                             message.content = format!("[SCREENSHOT - TRUNCATED DUE TO COMPRESSION FAILURE] Original size: {} chars. Error: {}", message.content.len(), e);
                         }
                     }
                 }
             } else {
-                log::warn!("Keeping screenshot as base64 (count: {}/{})", current_base64_count, visual_config.max_base64_screenshots);
+                log::warn!(
+                    "Keeping screenshot as base64 (count: {}/{})",
+                    current_base64_count,
+                    visual_config.max_base64_screenshots
+                );
             }
         }
 
         // Clean up old visual summaries
         let cutoff_time = SystemTime::now()
-            .checked_sub(Duration::from_secs(visual_config.screenshot_retention_seconds))
+            .checked_sub(Duration::from_secs(
+                visual_config.screenshot_retention_seconds,
+            ))
             .unwrap_or(SystemTime::UNIX_EPOCH);
 
-        self.visual_summaries.write().await.retain(|summary| summary.timestamp > cutoff_time);
+        self.visual_summaries
+            .write()
+            .await
+            .retain(|summary| summary.timestamp > cutoff_time);
 
         Ok(was_compressed)
     }
@@ -1291,7 +1432,10 @@ impl AdvancedMemoryManager {
     }
 
     /// Update visual context configuration
-    pub async fn update_visual_config(&self, new_config: VisualContextConfig) -> Result<(), AgentError> {
+    pub async fn update_visual_config(
+        &self,
+        new_config: VisualContextConfig,
+    ) -> Result<(), AgentError> {
         let mut config = self.visual_config.write().await;
         *config = new_config;
         log::info!("Updated visual context configuration");
@@ -1330,7 +1474,10 @@ impl AdvancedMemoryManager {
             }
         }
 
-        log::info!("Compressed {} screenshots to text summaries", compressed_count);
+        log::info!(
+            "Compressed {} screenshots to text summaries",
+            compressed_count
+        );
         Ok(compressed_count)
     }
 }
@@ -1364,7 +1511,10 @@ impl MemoryManager for AdvancedMemoryManager {
                     if pending.remove(tool_call_id) {
                         log::debug!("Resolved pending tool call: {}", tool_call_id);
                     } else {
-                        log::warn!("Received tool result for unknown tool call ID: {}", tool_call_id);
+                        log::warn!(
+                            "Received tool result for unknown tool call ID: {}",
+                            tool_call_id
+                        );
                     }
                 }
             }
@@ -1379,7 +1529,7 @@ impl MemoryManager for AdvancedMemoryManager {
 
         log::debug!("Memory: Added message. Role={:?}", message.role);
 
-                // RE-ENABLED: Auto-pruning and metrics with safer implementation
+        // RE-ENABLED: Auto-pruning and metrics with safer implementation
         self.prune_memory_if_needed().await?;
 
         // RE-ENABLED: Metrics update with safer timing (non-critical path)
@@ -1396,8 +1546,11 @@ impl MemoryManager for AdvancedMemoryManager {
         let messages = self.messages.read().await;
         let pending = self.pending_tool_calls.read().await;
 
-        log::debug!("Memory: Retrieved {} messages, {} pending tool calls",
-                    messages.len(), pending.len());
+        log::debug!(
+            "Memory: Retrieved {} messages, {} pending tool calls",
+            messages.len(),
+            pending.len()
+        );
 
         let result = messages.clone();
         drop(messages);
@@ -1421,7 +1574,10 @@ impl MemoryManager for AdvancedMemoryManager {
 
         // RE-ENABLED: Metrics update with error handling
         if let Err(e) = self.update_metrics(start_time).await {
-            log::warn!("Failed to update metrics after getting last N messages: {}", e);
+            log::warn!(
+                "Failed to update metrics after getting last N messages: {}",
+                e
+            );
             // Continue execution - metrics failure shouldn't block message retrieval
         }
 
@@ -1479,7 +1635,9 @@ impl MemoryManager for AdvancedMemoryManager {
         AdvancedMemoryManager::set_current_execution_id(self, execution_id).await
     }
 
-    async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
+    async fn clean_orphaned_tool_calls_from_previous_executions(
+        &mut self,
+    ) -> Result<(), AgentError> {
         AdvancedMemoryManager::clean_orphaned_tool_calls_from_previous_executions(self).await
     }
 }
@@ -1521,7 +1679,10 @@ impl MemoryManager for DelegatedMemoryManager {
                     let mut pending = self.local_pending_tool_calls.write().await;
                     for tool_call in tool_calls {
                         pending.insert(tool_call.id.clone());
-                        log::debug!("DelegatedMemory: Tracking pending tool call locally: {}", tool_call.id);
+                        log::debug!(
+                            "DelegatedMemory: Tracking pending tool call locally: {}",
+                            tool_call.id
+                        );
                     }
                 }
             }
@@ -1530,9 +1691,15 @@ impl MemoryManager for DelegatedMemoryManager {
                     // Remove from LOCAL pending list when result is added
                     let mut pending = self.local_pending_tool_calls.write().await;
                     if pending.remove(tool_call_id) {
-                        log::debug!("DelegatedMemory: Resolved pending tool call locally: {}", tool_call_id);
+                        log::debug!(
+                            "DelegatedMemory: Resolved pending tool call locally: {}",
+                            tool_call_id
+                        );
                     } else {
-                        log::warn!("DelegatedMemory: Received tool result for unknown tool call ID: {}", tool_call_id);
+                        log::warn!(
+                            "DelegatedMemory: Received tool result for unknown tool call ID: {}",
+                            tool_call_id
+                        );
                     }
                 }
             }
@@ -1572,7 +1739,10 @@ impl MemoryManager for DelegatedMemoryManager {
         let orphan_count = pending.len();
 
         if orphan_count > 0 {
-            log::info!("DelegatedMemory: Cleaning {} orphaned tool calls from local tracking", orphan_count);
+            log::info!(
+                "DelegatedMemory: Cleaning {} orphaned tool calls from local tracking",
+                orphan_count
+            );
             pending.clear();
         }
 

@@ -6,9 +6,9 @@
 //!
 //! Used by: Anthropic Computer Use tools for enhanced GUI element grounding
 
+use image::{ImageBuffer, Rgba};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
-use image::{ImageBuffer, Rgba};
 
 /// Configuration for Universal Block Parsing
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,22 +44,34 @@ impl UBPConfig {
     /// Validates the configuration and returns an error if invalid
     pub fn validate(&self) -> Result<(), UBPError> {
         if self.block_size == 0 {
-            return Err(UBPError::InvalidInput("block_size cannot be zero".to_string()));
+            return Err(UBPError::InvalidInput(
+                "block_size cannot be zero".to_string(),
+            ));
         }
         if self.min_block_size == 0 {
-            return Err(UBPError::InvalidInput("min_block_size cannot be zero".to_string()));
+            return Err(UBPError::InvalidInput(
+                "min_block_size cannot be zero".to_string(),
+            ));
         }
         if self.max_block_size == 0 {
-            return Err(UBPError::InvalidInput("max_block_size cannot be zero".to_string()));
+            return Err(UBPError::InvalidInput(
+                "max_block_size cannot be zero".to_string(),
+            ));
         }
         if self.min_block_size > self.max_block_size {
-            return Err(UBPError::InvalidInput("min_block_size cannot be greater than max_block_size".to_string()));
+            return Err(UBPError::InvalidInput(
+                "min_block_size cannot be greater than max_block_size".to_string(),
+            ));
         }
         if self.block_overlap < 0.0 || self.block_overlap >= 1.0 {
-            return Err(UBPError::InvalidInput("block_overlap must be between 0.0 and 1.0 (exclusive)".to_string()));
+            return Err(UBPError::InvalidInput(
+                "block_overlap must be between 0.0 and 1.0 (exclusive)".to_string(),
+            ));
         }
         if self.detection_confidence < 0.0 || self.detection_confidence > 1.0 {
-            return Err(UBPError::InvalidInput("detection_confidence must be between 0.0 and 1.0 (inclusive)".to_string()));
+            return Err(UBPError::InvalidInput(
+                "detection_confidence must be between 0.0 and 1.0 (inclusive)".to_string(),
+            ));
         }
         Ok(())
     }
@@ -169,15 +181,20 @@ impl UniversalBlockParser {
     ) -> Result<UBPResult, UBPError> {
         let start_time = std::time::Instant::now();
 
-        info!("Starting UBP parsing for {}x{} image", image_buffer.width(), image_buffer.height());
-
-        // Step 1: Create grid layout and get actual block size
-        let (blocks_x, blocks_y, actual_block_size) = self.calculate_grid_dimensions_with_size(
+        info!(
+            "Starting UBP parsing for {}x{} image",
             image_buffer.width(),
-            image_buffer.height(),
+            image_buffer.height()
         );
 
-        debug!("UBP grid dimensions: {}x{} blocks with actual block size: {}", blocks_x, blocks_y, actual_block_size);
+        // Step 1: Create grid layout and get actual block size
+        let (blocks_x, blocks_y, actual_block_size) =
+            self.calculate_grid_dimensions_with_size(image_buffer.width(), image_buffer.height());
+
+        debug!(
+            "UBP grid dimensions: {}x{} blocks with actual block size: {}",
+            blocks_x, blocks_y, actual_block_size
+        );
 
         // Step 2: Generate blocks with position embeddings
         let mut blocks = Vec::new();
@@ -186,13 +203,9 @@ impl UniversalBlockParser {
         for row in 0..blocks_y {
             for col in 0..blocks_x {
                 let block_id = row * blocks_x + col;
-                let block = self.create_block_with_size(
-                    block_id,
-                    col,
-                    row,
-                    actual_block_size,
-                    image_buffer,
-                ).await?;
+                let block = self
+                    .create_block_with_size(block_id, col, row, actual_block_size, image_buffer)
+                    .await?;
 
                 total_elements += block.elements.len() as u32;
                 blocks.push(block);
@@ -239,14 +252,14 @@ impl UniversalBlockParser {
         // Check for zero block size to prevent division by zero
         if ubp_result.actual_block_size == 0 {
             return Err(UBPError::InvalidInput(
-                "Block size cannot be zero".to_string()
+                "Block size cannot be zero".to_string(),
             ));
         }
 
         // Check for zero grid dimensions to prevent underflow
         if blocks_x == 0 || blocks_y == 0 {
             return Err(UBPError::InvalidInput(
-                "Grid dimensions cannot be zero".to_string()
+                "Grid dimensions cannot be zero".to_string(),
             ));
         }
 
@@ -297,7 +310,8 @@ impl UniversalBlockParser {
             })
         } else {
             Err(UBPError::InvalidInput(format!(
-                "No block found for coordinates ({}, {})", global_x, global_y
+                "No block found for coordinates ({}, {})",
+                global_x, global_y
             )))
         }
     }
@@ -309,13 +323,16 @@ impl UniversalBlockParser {
         block_coords: &BlockCoordinates,
     ) -> Result<(f64, f64), UBPError> {
         if let Some(block) = ubp_result.blocks.get(block_coords.block_index as usize) {
-            let global_x = block.global_x as f64 + (block_coords.relative_x as f64 * block.width as f64);
-            let global_y = block.global_y as f64 + (block_coords.relative_y as f64 * block.height as f64);
+            let global_x =
+                block.global_x as f64 + (block_coords.relative_x as f64 * block.width as f64);
+            let global_y =
+                block.global_y as f64 + (block_coords.relative_y as f64 * block.height as f64);
 
             Ok((global_x, global_y))
         } else {
             Err(UBPError::InvalidInput(format!(
-                "Invalid block index: {}", block_coords.block_index
+                "Invalid block index: {}",
+                block_coords.block_index
             )))
         }
     }
@@ -360,7 +377,8 @@ impl UniversalBlockParser {
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
     ) -> Result<UBPBlock, UBPError> {
         let block_size = self.config.block_size;
-        self.create_block_with_size(block_id, col, row, block_size, image_buffer).await
+        self.create_block_with_size(block_id, col, row, block_size, image_buffer)
+            .await
     }
 
     /// Creates a single block with position embedding and element detection using specified block size
@@ -380,16 +398,18 @@ impl UniversalBlockParser {
         let height = block_size.min(image_buffer.height() - global_y);
 
         // Generate 2D position embedding
-        let position_embedding = self.generate_position_embedding(col, row, image_buffer.width(), image_buffer.height(), block_size);
+        let position_embedding = self.generate_position_embedding(
+            col,
+            row,
+            image_buffer.width(),
+            image_buffer.height(),
+            block_size,
+        );
 
         // Detect UI elements within this block
-        let elements = self.detect_elements_in_block(
-            image_buffer,
-            global_x,
-            global_y,
-            width,
-            height,
-        ).await?;
+        let elements = self
+            .detect_elements_in_block(image_buffer, global_x, global_y, width, height)
+            .await?;
 
         // Calculate content density
         let density_score = elements.len() as f32 / (width * height) as f32 * 10000.0; // Scale to reasonable range
@@ -407,12 +427,27 @@ impl UniversalBlockParser {
     }
 
     /// Generates 2D position embedding for spatial relationships
-    fn generate_position_embedding(&self, col: u32, row: u32, image_width: u32, image_height: u32, actual_block_size: u32) -> Vec<f32> {
+    fn generate_position_embedding(
+        &self,
+        col: u32,
+        row: u32,
+        image_width: u32,
+        image_height: u32,
+        actual_block_size: u32,
+    ) -> Vec<f32> {
         let mut embedding = Vec::with_capacity(16); // 16-dimensional embedding
 
         // Calculate grid dimensions using actual block size to prevent division by zero
-        let blocks_x = if actual_block_size > 0 { image_width.div_ceil(actual_block_size) } else { 1 };
-        let blocks_y = if actual_block_size > 0 { image_height.div_ceil(actual_block_size) } else { 1 };
+        let blocks_x = if actual_block_size > 0 {
+            image_width.div_ceil(actual_block_size)
+        } else {
+            1
+        };
+        let blocks_y = if actual_block_size > 0 {
+            image_height.div_ceil(actual_block_size)
+        } else {
+            1
+        };
 
         // Ensure we don't divide by zero
         let blocks_x_f32 = blocks_x.max(1) as f32;
@@ -427,8 +462,16 @@ impl UniversalBlockParser {
         let center_y = blocks_y_f32 / 2.0;
 
         // Distance from center (normalized)
-        let dist_from_center_x = if center_x > 0.0 { (col as f32 - center_x) / center_x } else { 0.0 };
-        let dist_from_center_y = if center_y > 0.0 { (row as f32 - center_y) / center_y } else { 0.0 };
+        let dist_from_center_x = if center_x > 0.0 {
+            (col as f32 - center_x) / center_x
+        } else {
+            0.0
+        };
+        let dist_from_center_y = if center_y > 0.0 {
+            (row as f32 - center_y) / center_y
+        } else {
+            0.0
+        };
         embedding.push(dist_from_center_x);
         embedding.push(dist_from_center_y);
 
@@ -464,7 +507,8 @@ impl UniversalBlockParser {
         let mut elements = Vec::new();
 
         // Extract block region for analysis
-        let block_region = self.extract_block_region(image_buffer, block_x, block_y, block_width, block_height)?;
+        let block_region =
+            self.extract_block_region(image_buffer, block_x, block_y, block_width, block_height)?;
 
         // Simple element detection based on visual patterns
         // In a production implementation, this would use a trained ML model
@@ -501,7 +545,10 @@ impl UniversalBlockParser {
     }
 
     /// Detects button-like elements within a block
-    async fn detect_buttons(&self, block_region: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<Vec<BlockElement>, UBPError> {
+    async fn detect_buttons(
+        &self,
+        block_region: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ) -> Result<Vec<BlockElement>, UBPError> {
         let mut buttons = Vec::new();
 
         // Simple button detection using edge detection and color analysis
@@ -521,7 +568,10 @@ impl UniversalBlockParser {
     }
 
     /// Detects text field elements within a block
-    async fn detect_text_fields(&self, block_region: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<Vec<BlockElement>, UBPError> {
+    async fn detect_text_fields(
+        &self,
+        block_region: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ) -> Result<Vec<BlockElement>, UBPError> {
         let mut text_fields = Vec::new();
 
         // Simple text field detection using horizontal line patterns
@@ -530,7 +580,9 @@ impl UniversalBlockParser {
 
         for y in (0..height).step_by(4) {
             for x in (0..width).step_by(8) {
-                if let Some(text_field) = self.analyze_potential_text_field(block_region, x, y, 64, 20) {
+                if let Some(text_field) =
+                    self.analyze_potential_text_field(block_region, x, y, 64, 20)
+                {
                     text_fields.push(text_field);
                 }
             }
@@ -567,7 +619,8 @@ impl UniversalBlockParser {
 
                 // Check for edge characteristics (border pixels)
                 if (dx == 0 || dx == width - 1 || dy == 0 || dy == height - 1)
-                    && !(50.0..=200.0).contains(&brightness) {
+                    && !(50.0..=200.0).contains(&brightness)
+                {
                     edge_pixels += 1;
                 }
             }
@@ -688,7 +741,10 @@ mod tests {
 
         let result = parser.global_to_block_coordinates(&ubp_result, 10.0, 10.0);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Grid dimensions cannot be zero"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Grid dimensions cannot be zero"));
     }
 
     #[test]
@@ -718,7 +774,7 @@ mod tests {
             total_elements_detected: 0,
         };
 
-                // Test with out-of-bounds coordinates (should be clamped)
+        // Test with out-of-bounds coordinates (should be clamped)
         let result = parser.global_to_block_coordinates(&ubp_result, 100.0, 100.0);
         assert!(result.is_ok());
 

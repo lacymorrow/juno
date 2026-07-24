@@ -11,22 +11,22 @@
 //!
 //! Used by: Anthropic Computer Use tools for optimized screenshot processing
 
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
-use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
 pub mod config;
-pub mod rgb_analyzer;
-pub mod token_reducer;
 pub mod display_optimizer;
 pub mod performance;
+pub mod rgb_analyzer;
+pub mod token_reducer;
 
 pub use config::TokenSelectionConfig;
+pub use display_optimizer::DisplayOptimizer;
+pub use performance::{PerformanceMetrics, PerformanceTracker};
 pub use rgb_analyzer::RGBConnectedGraphAnalyzer;
 pub use token_reducer::TokenReducer;
-pub use display_optimizer::DisplayOptimizer;
-pub use performance::{PerformanceTracker, PerformanceMetrics};
 
 /// Errors that can occur during UI token selection processing
 #[derive(Debug, thiserror::Error)]
@@ -187,7 +187,11 @@ impl UITokenSelector {
         let start_time = Instant::now();
 
         info!("Processing screenshot with UI-Guided Visual Token Selection");
-        debug!("Image data size: {} bytes, Display info: {:?}", image_data.len(), display_info);
+        debug!(
+            "Image data size: {} bytes, Display info: {:?}",
+            image_data.len(),
+            display_info
+        );
 
         // Step 1: Parse and validate image
         let image = self.parse_image(image_data)?;
@@ -195,19 +199,27 @@ impl UITokenSelector {
 
         // Step 2: RGB Connected Graph Analysis
         let rgb_start = Instant::now();
-        let rgb_graph = self.rgb_analyzer.analyze_image(&image).await
+        let rgb_graph = self
+            .rgb_analyzer
+            .analyze_image(&image)
+            .await
             .map_err(|e| TokenSelectionError::RGBAnalysis(e.to_string()))?;
         let rgb_analysis_time = rgb_start.elapsed();
 
         // Step 3: Token Reduction based on connected graph
         let token_start = Instant::now();
-        let (tokens, reduction_stats) = self.token_reducer.reduce_tokens(&rgb_graph).await
+        let (tokens, reduction_stats) = self
+            .token_reducer
+            .reduce_tokens(&rgb_graph)
+            .await
             .map_err(|e| TokenSelectionError::TokenReduction(e.to_string()))?;
         let token_reduction_time = token_start.elapsed();
 
         // Step 4: Display-specific optimization (if multi-monitor info available)
         let optimized_tokens = if let Some(ref display) = display_info {
-            self.display_optimizer.optimize_for_display(tokens, display).await
+            self.display_optimizer
+                .optimize_for_display(tokens, display)
+                .await
                 .map_err(|e| TokenSelectionError::DisplayOptimization(e.to_string()))?
         } else {
             tokens
@@ -236,18 +248,24 @@ impl UITokenSelector {
         };
 
         // Step 6: Update performance metrics
-        self.performance_tracker.record_operation(
-            reduction_stats.original_count,
-            optimized_tokens.len() as u32,
-            total_processing_time,
-            display_info.as_ref().map(|d| d.id).unwrap_or(0),
-            display_info.as_ref().map(|d| (d.bounds.width as u32, d.bounds.height as u32)).unwrap_or((width, height)),
-            0.0, // TODO: Implement actual memory tracking
-        ).map_err(|e| TokenSelectionError::PerformanceTracking(e.to_string()))?;
+        self.performance_tracker
+            .record_operation(
+                reduction_stats.original_count,
+                optimized_tokens.len() as u32,
+                total_processing_time,
+                display_info.as_ref().map(|d| d.id).unwrap_or(0),
+                display_info
+                    .as_ref()
+                    .map(|d| (d.bounds.width as u32, d.bounds.height as u32))
+                    .unwrap_or((width, height)),
+                0.0, // TODO: Implement actual memory tracking
+            )
+            .map_err(|e| TokenSelectionError::PerformanceTracking(e.to_string()))?;
 
         info!(
             "Screenshot processing complete: {}x{} -> {} tokens ({:.1}% reduction) in {}ms",
-            width, height,
+            width,
+            height,
             optimized_tokens.len(),
             reduction_stats.reduction_percentage,
             total_processing_time.as_millis()
@@ -262,11 +280,15 @@ impl UITokenSelector {
     }
 
     /// Updates configuration (useful for runtime optimization)
-    pub fn update_config(&mut self, new_config: TokenSelectionConfig) -> Result<(), TokenSelectionError> {
+    pub fn update_config(
+        &mut self,
+        new_config: TokenSelectionConfig,
+    ) -> Result<(), TokenSelectionError> {
         debug!("Updating UITokenSelector configuration");
 
         // Validate new configuration
-        new_config.validate()
+        new_config
+            .validate()
             .map_err(TokenSelectionError::Configuration)?;
 
         self.config = new_config;
@@ -285,8 +307,9 @@ impl UITokenSelector {
 
     /// Parses image data into a usable image format
     fn parse_image(&self, image_data: &[u8]) -> Result<image::DynamicImage, TokenSelectionError> {
-        image::load_from_memory(image_data)
-            .map_err(|e| TokenSelectionError::ImageProcessing(format!("Failed to parse image: {}", e)))
+        image::load_from_memory(image_data).map_err(|e| {
+            TokenSelectionError::ImageProcessing(format!("Failed to parse image: {}", e))
+        })
     }
 }
 

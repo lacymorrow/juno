@@ -10,6 +10,7 @@
 //! - Resource management and security validation
 
 use crate::agent::tools::timer_tools::{TimerTask, TimerType};
+use crate::constants::{errors::templates, events};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,11 +19,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
-use crate::constants::{events, errors::templates};
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 
 /// Agent system states for determining restart eligibility
@@ -284,10 +286,7 @@ impl TimerEventHandler {
             }
         }
 
-        info!(
-            "Successfully processed timer-expired event: {}",
-            timer_id
-        );
+        info!("Successfully processed timer-expired event: {}", timer_id);
         Ok(())
     }
 
@@ -429,7 +428,7 @@ impl TimerEventHandler {
             return Err(TimerEventError::AgentUnavailable(format_error(
                 templates::FAILED_TO_START,
                 "agent restart",
-                e
+                e,
             )));
         }
 
@@ -450,7 +449,10 @@ impl TimerEventHandler {
 
         // Emit event to notify about queued timer
         if let Err(e) = self.app_handle.emit(events::timer::QUEUED, &timer_data) {
-            warn!("{}", format_error(templates::FAILED_TO_EMIT, "timer-queued event", e));
+            warn!(
+                "{}",
+                format_error(templates::FAILED_TO_EMIT, "timer-queued event", e)
+            );
         }
 
         Ok(())
@@ -512,13 +514,23 @@ impl TimerEventHandler {
                     pending.push(remaining_timer);
                 }
 
-                info!("Agent became busy, re-queued {} unprocessed timers", pending.len());
+                info!(
+                    "Agent became busy, re-queued {} unprocessed timers",
+                    pending.len()
+                );
                 break;
             }
 
             // Process the timer
             if let Err(e) = self.process_timer_internal(timer.clone()).await {
-                error!("{}", format_error(templates::FAILED_TO_PROCESS, &format!("queued timer {}", timer.id), e));
+                error!(
+                    "{}",
+                    format_error(
+                        templates::FAILED_TO_PROCESS,
+                        &format!("queued timer {}", timer.id),
+                        e
+                    )
+                );
                 continue;
             }
 

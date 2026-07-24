@@ -119,14 +119,17 @@ impl GeminiBrain {
 
         // Use centralized defaults from provider configuration
         let model = model.unwrap_or_else(|| Provider::Gemini.default_model().to_string());
-        let max_tokens = max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_COMPACT);
+        let max_tokens =
+            max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_COMPACT);
         let temperature = temperature.unwrap_or(0.1); // Low temperature for consistent routing decisions
 
         Ok(GeminiBrain {
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()
-                .map_err(|e| AgentError::ConfigurationError(format!("Failed to create HTTP client: {}", e)))?,
+                .map_err(|e| {
+                    AgentError::ConfigurationError(format!("Failed to create HTTP client: {}", e))
+                })?,
             api_key,
             model,
             max_tokens,
@@ -139,13 +142,23 @@ impl GeminiBrain {
     /// Falls back to the GEMINI_API_KEY env var if the config has no api_key.
     /// Note: GeminiBrain uses i32 for max_tokens, CentralizedProviderConfig uses u32.
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
-        let api_key = config.api_key.clone()
+        let api_key = config
+            .api_key
+            .clone()
             .or_else(|| env::var("GEMINI_API_KEY").ok())
-            .ok_or_else(|| AgentError::ConfigurationError(
-                "Gemini API key not found in settings or GEMINI_API_KEY env var".into()
-            ))?;
+            .ok_or_else(|| {
+                AgentError::ConfigurationError(
+                    "Gemini API key not found in settings or GEMINI_API_KEY env var".into(),
+                )
+            })?;
         let max_tokens = config.max_tokens.map(|t| t as i32);
-        Self::new(api_key, config.model.clone(), max_tokens, config.system_prompt.clone(), config.temperature)
+        Self::new(
+            api_key,
+            config.model.clone(),
+            max_tokens,
+            config.system_prompt.clone(),
+            config.temperature,
+        )
     }
 
     fn convert_message_to_gemini(message: &Message) -> Result<GeminiContent, AgentError> {

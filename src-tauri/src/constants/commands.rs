@@ -103,8 +103,10 @@ pub mod permissions {
     pub const CHECK_PERMISSIONS_STATUS: &str = "check_permissions_status_native";
     pub const REQUEST_ACCESSIBILITY_PERMISSION: &str = "request_accessibility_permission_native";
     pub const REQUEST_MICROPHONE_PERMISSION: &str = "request_microphone_permission_native";
-    pub const REQUEST_SCREEN_RECORDING_PERMISSION: &str = "request_screen_recording_permission_native";
-    pub const REQUEST_INPUT_MONITORING_PERMISSION: &str = "request_input_monitoring_permission_native";
+    pub const REQUEST_SCREEN_RECORDING_PERMISSION: &str =
+        "request_screen_recording_permission_native";
+    pub const REQUEST_INPUT_MONITORING_PERMISSION: &str =
+        "request_input_monitoring_permission_native";
     pub const TEST_MICROPHONE_FUNCTIONALITY: &str = "test_microphone_functionality";
 }
 

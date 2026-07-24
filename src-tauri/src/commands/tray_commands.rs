@@ -4,9 +4,9 @@
 //! These commands allow the frontend to manually trigger tray icon state changes for testing
 //! and debugging purposes.
 
+use crate::menu::tray_menu::{set_tray_icon_state, update_tray_icon_state, TrayIconState};
 use tauri::command;
 use tracing::info;
-use crate::menu::tray_menu::{TrayIconState, update_tray_icon_state, set_tray_icon_state};
 
 /// Set the tray icon to default state
 #[command]

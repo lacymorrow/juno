@@ -11,10 +11,7 @@ extern "C" {
     /// Convert a PID to a ProcessSerialNumber (deprecated since 10.9 but still present
     /// in macOS 13-15; used only by the SLPSPostEventRecordTo focus-without-raise path).
     #[allow(dead_code)]
-    pub(crate) fn GetProcessForPID(
-        pid: libc::pid_t,
-        psn: *mut ProcessSerialNumber,
-    ) -> i32;
+    pub(crate) fn GetProcessForPID(pid: libc::pid_t, psn: *mut ProcessSerialNumber) -> i32;
 }
 
 /// Carbon ProcessSerialNumber — required by SLPSPostEventRecordTo.

@@ -3,11 +3,11 @@
 //! Implements token reduction algorithms based on the ShowUI paper's approach
 //! to achieve 33% computational cost reduction while preserving critical UI elements.
 
-use crate::agent::tools::ui_token_selector::{
-    TokenSelectionError, VisualToken, TokenType, TokenReductionStats
-};
 use crate::agent::tools::ui_token_selector::config::TokenSelectionConfig;
 use crate::agent::tools::ui_token_selector::rgb_analyzer::RGBConnectedGraph;
+use crate::agent::tools::ui_token_selector::{
+    TokenReductionStats, TokenSelectionError, TokenType, VisualToken,
+};
 use tracing::{debug, info, warn};
 
 /// Token Reducer that implements ShowUI's reduction algorithms
@@ -30,24 +30,35 @@ impl TokenReducer {
     ) -> Result<(Vec<VisualToken>, TokenReductionStats), String> {
         let original_count = rgb_graph.tokens.len();
 
-        info!("Reducing {} tokens with target reduction: {:.1}%",
-              original_count, self.config.token_reduction.target_reduction_percentage * 100.0);
+        info!(
+            "Reducing {} tokens with target reduction: {:.1}%",
+            original_count,
+            self.config.token_reduction.target_reduction_percentage * 100.0
+        );
 
         // Step 1: Preserve critical tokens (interactive and text elements)
         let mut preserved_tokens = self.preserve_critical_tokens(&rgb_graph.tokens).await?;
         debug!("Preserved {} critical tokens", preserved_tokens.len());
 
         // Step 2: Reduce redundant tokens using connected graph information
-        let reduced_tokens = self.reduce_redundant_tokens(
-            &mut preserved_tokens,
-            &rgb_graph.redundancy_groups,
-            &rgb_graph.connections,
-        ).await?;
-        debug!("After redundancy reduction: {} tokens", reduced_tokens.len());
+        let reduced_tokens = self
+            .reduce_redundant_tokens(
+                &mut preserved_tokens,
+                &rgb_graph.redundancy_groups,
+                &rgb_graph.connections,
+            )
+            .await?;
+        debug!(
+            "After redundancy reduction: {} tokens",
+            reduced_tokens.len()
+        );
 
         // Step 3: Apply background simplification
         let simplified_tokens = self.simplify_background_tokens(reduced_tokens).await?;
-        debug!("After background simplification: {} tokens", simplified_tokens.len());
+        debug!(
+            "After background simplification: {} tokens",
+            simplified_tokens.len()
+        );
 
         // Step 4: Final importance-based filtering
         let final_tokens = self.apply_importance_filtering(simplified_tokens).await?;
@@ -64,12 +75,19 @@ impl TokenReducer {
     }
 
     /// Preserves critical tokens that should not be reduced
-    async fn preserve_critical_tokens(&self, tokens: &[VisualToken]) -> Result<Vec<VisualToken>, String> {
+    async fn preserve_critical_tokens(
+        &self,
+        tokens: &[VisualToken],
+    ) -> Result<Vec<VisualToken>, String> {
         let mut preserved = Vec::new();
 
         for token in tokens {
             let should_preserve = match token.token_type {
-                TokenType::Interactive if self.config.token_reduction.preserve_interactive_elements => true,
+                TokenType::Interactive
+                    if self.config.token_reduction.preserve_interactive_elements =>
+                {
+                    true
+                }
                 TokenType::Text if self.config.token_reduction.preserve_text_elements => true,
                 _ => {
                     // Preserve tokens with high importance regardless of type
@@ -181,7 +199,10 @@ impl TokenReducer {
     }
 
     /// Simplifies background tokens based on configuration
-    async fn simplify_background_tokens(&self, tokens: Vec<VisualToken>) -> Result<Vec<VisualToken>, String> {
+    async fn simplify_background_tokens(
+        &self,
+        tokens: Vec<VisualToken>,
+    ) -> Result<Vec<VisualToken>, String> {
         let simplification_level = self.config.token_reduction.background_simplification_level;
 
         if simplification_level == 0 {
@@ -190,10 +211,10 @@ impl TokenReducer {
 
         // Calculate how aggressively to simplify based on level (0-3)
         let reduction_factor = match simplification_level {
-            1 => 0.8,  // Keep 80% of background tokens
-            2 => 0.6,  // Keep 60% of background tokens
-            3 => 0.4,  // Keep 40% of background tokens
-            _ => 1.0,  // Keep all tokens
+            1 => 0.8, // Keep 80% of background tokens
+            2 => 0.6, // Keep 60% of background tokens
+            3 => 0.4, // Keep 40% of background tokens
+            _ => 1.0, // Keep all tokens
         };
 
         // Separate background tokens from others
@@ -211,7 +232,11 @@ impl TokenReducer {
             .collect();
 
         // Sort background tokens by importance (keep the most important ones)
-        background_tokens.sort_by(|a, b| b.1.importance_score.partial_cmp(&a.1.importance_score).unwrap_or(std::cmp::Ordering::Equal));
+        background_tokens.sort_by(|a, b| {
+            b.1.importance_score
+                .partial_cmp(&a.1.importance_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Keep only the top fraction of background tokens
         let keep_count = (background_tokens.len() as f32 * reduction_factor).ceil() as usize;
@@ -227,15 +252,17 @@ impl TokenReducer {
 
         debug!(
             "Background simplification (level {}): kept {} background tokens",
-            simplification_level,
-            keep_count
+            simplification_level, keep_count
         );
 
         Ok(result_tokens)
     }
 
     /// Applies final importance-based filtering to meet target reduction
-    async fn apply_importance_filtering(&self, mut tokens: Vec<VisualToken>) -> Result<Vec<VisualToken>, String> {
+    async fn apply_importance_filtering(
+        &self,
+        mut tokens: Vec<VisualToken>,
+    ) -> Result<Vec<VisualToken>, String> {
         let current_count = tokens.len();
         let target_reduction = self.config.token_reduction.target_reduction_percentage;
 
@@ -249,7 +276,8 @@ impl TokenReducer {
 
         // Sort tokens by importance (descending)
         tokens.sort_by(|a, b| {
-            b.importance_score.partial_cmp(&a.importance_score)
+            b.importance_score
+                .partial_cmp(&a.importance_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
@@ -275,31 +303,42 @@ impl TokenReducer {
 
         // Check that we actually reduced tokens
         if reduced_count >= original_count {
-            warn!("Token reduction did not reduce token count: {} -> {}", original_count, reduced_count);
+            warn!(
+                "Token reduction did not reduce token count: {} -> {}",
+                original_count, reduced_count
+            );
             return Ok(false);
         }
 
         // Check that important tokens are preserved
-        let original_interactive_count = original_tokens.iter()
+        let original_interactive_count = original_tokens
+            .iter()
             .filter(|t| matches!(t.token_type, TokenType::Interactive))
             .count();
-        let reduced_interactive_count = reduced_tokens.iter()
+        let reduced_interactive_count = reduced_tokens
+            .iter()
             .filter(|t| matches!(t.token_type, TokenType::Interactive))
             .count();
 
-        if self.config.token_reduction.preserve_interactive_elements &&
-           reduced_interactive_count < original_interactive_count {
-            debug!("Some interactive elements were reduced: {} -> {}",
-                   original_interactive_count, reduced_interactive_count);
+        if self.config.token_reduction.preserve_interactive_elements
+            && reduced_interactive_count < original_interactive_count
+        {
+            debug!(
+                "Some interactive elements were reduced: {} -> {}",
+                original_interactive_count, reduced_interactive_count
+            );
         }
 
         // Check that reduction is within reasonable bounds
-        let reduction_percentage = ((original_count - reduced_count) as f32 / original_count as f32) * 100.0;
+        let reduction_percentage =
+            ((original_count - reduced_count) as f32 / original_count as f32) * 100.0;
         let target_percentage = self.config.token_reduction.target_reduction_percentage * 100.0;
 
         if reduction_percentage < target_percentage * 0.5 {
-            warn!("Reduction percentage ({:.1}%) is much lower than target ({:.1}%)",
-                  reduction_percentage, target_percentage);
+            warn!(
+                "Reduction percentage ({:.1}%) is much lower than target ({:.1}%)",
+                reduction_percentage, target_percentage
+            );
         }
 
         Ok(true)
@@ -309,7 +348,7 @@ impl TokenReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::tools::ui_token_selector::{RGBColor, config::TokenSelectionConfig};
+    use crate::agent::tools::ui_token_selector::{config::TokenSelectionConfig, RGBColor};
 
     fn create_test_token(token_type: TokenType, importance: f32) -> VisualToken {
         VisualToken {
@@ -317,7 +356,11 @@ mod tests {
             y: 0,
             width: 10,
             height: 10,
-            dominant_color: RGBColor { r: 100, g: 100, b: 100 },
+            dominant_color: RGBColor {
+                r: 100,
+                g: 100,
+                b: 100,
+            },
             color_variance: 0.5,
             importance_score: importance,
             token_type,
@@ -349,8 +392,12 @@ mod tests {
 
         // Should preserve interactive and text tokens
         assert!(preserved.len() >= 2);
-        assert!(preserved.iter().any(|t| matches!(t.token_type, TokenType::Interactive)));
-        assert!(preserved.iter().any(|t| matches!(t.token_type, TokenType::Text)));
+        assert!(preserved
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::Interactive)));
+        assert!(preserved
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::Text)));
     }
 
     #[test]
@@ -388,12 +435,14 @@ mod tests {
         let simplified = reducer.simplify_background_tokens(tokens).await.unwrap();
 
         // Should keep all non-background tokens + some background tokens
-        let non_background_count = simplified.iter()
+        let non_background_count = simplified
+            .iter()
             .filter(|t| !matches!(t.token_type, TokenType::Background))
             .count();
         assert_eq!(non_background_count, 2); // Interactive + Text
 
-        let background_count = simplified.iter()
+        let background_count = simplified
+            .iter()
             .filter(|t| matches!(t.token_type, TokenType::Background))
             .count();
         assert!(background_count <= 2); // Should reduce 3 background tokens
@@ -410,9 +459,7 @@ mod tests {
             create_test_token(TokenType::Background, 0.1),
         ];
 
-        let reduced = vec![
-            create_test_token(TokenType::Interactive, 0.8),
-        ];
+        let reduced = vec![create_test_token(TokenType::Interactive, 0.8)];
 
         let is_valid = reducer.validate_reduction(&original, &reduced).unwrap();
         assert!(is_valid);

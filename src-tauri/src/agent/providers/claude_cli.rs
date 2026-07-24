@@ -239,11 +239,7 @@ impl ClaudeCliBrain {
         info!(
             "Spawning Claude CLI: {} {}",
             self.binary_path.display(),
-            args.iter()
-                .take(6)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(" ")
+            args.iter().take(6).cloned().collect::<Vec<_>>().join(" ")
         );
 
         let mut child = tokio::process::Command::new(&self.binary_path)
@@ -253,9 +249,7 @@ impl ClaudeCliBrain {
             .stdin(Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|e| {
-                AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e))
-            })?;
+            .map_err(|e| AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e)))?;
 
         let stdout = child.stdout.take().ok_or_else(|| {
             AgentError::LlmError("Failed to capture Claude CLI stdout".to_string())
@@ -380,9 +374,10 @@ impl ClaudeCliBrain {
         };
 
         // Wait for subprocess to finish
-        let status = child.wait().await.map_err(|e| {
-            AgentError::LlmError(format!("Claude CLI process error: {}", e))
-        })?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| AgentError::LlmError(format!("Claude CLI process error: {}", e)))?;
 
         // Collect stderr output — log on both success and failure for debuggability
         if let Some(handle) = stderr_handle {
@@ -460,10 +455,7 @@ impl ClaudeCliBrain {
                         }
                     };
 
-                    let event_type = parsed
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let event_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
                     match event_type {
                         "assistant" => {
@@ -494,8 +486,7 @@ impl ClaudeCliBrain {
                         }
                         "result" => {
                             // Final result — extract the result text
-                            if let Some(result_text) =
-                                parsed.get("result").and_then(|v| v.as_str())
+                            if let Some(result_text) = parsed.get("result").and_then(|v| v.as_str())
                             {
                                 final_result = Some(result_text.to_string());
                             }
@@ -560,9 +551,7 @@ impl AgentBrain for ClaudeCliBrain {
         message_id: Option<String>,
     ) -> Result<AgentAction, AgentError> {
         let query = Self::extract_query(messages);
-        let result = self
-            .run_streaming(&query, app_handle, message_id)
-            .await?;
+        let result = self.run_streaming(&query, app_handle, message_id).await?;
         Ok(AgentAction::Finish(result))
     }
 }

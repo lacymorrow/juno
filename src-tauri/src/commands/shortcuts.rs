@@ -1,18 +1,19 @@
 // Commands for managing keyboard shortcuts configuration
 
-use crate::state::{AppState, KeyboardShortcuts};
 use crate::settings::manager::SettingsManager;
-use tauri::{State, AppHandle};
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
-use tracing::{debug, info, error, warn};
+use crate::state::{AppState, KeyboardShortcuts};
 use serde_json;
+use tauri::{AppHandle, State};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use tracing::{debug, error, info, warn};
 
 /// Get the current keyboard shortcuts configuration
 #[tauri::command]
 pub async fn get_keyboard_shortcuts(
     state: State<'_, AppState>,
 ) -> Result<KeyboardShortcuts, String> {
-    state.get_keyboard_shortcuts()
+    state
+        .get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))
 }
 
@@ -28,14 +29,16 @@ pub async fn set_keyboard_shortcut(
     validate_shortcut_format(&shortcut_value)?;
 
     // Get current shortcuts for conflict checking
-    let current_shortcuts = state.get_keyboard_shortcuts()
+    let current_shortcuts = state
+        .get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     // Check for conflicts (excluding the current shortcut being edited)
     check_shortcut_conflicts(&shortcut_value, &current_shortcuts, Some(&shortcut_name))?;
 
     // Get current shortcuts and update the specific one
-    let mut shortcuts = state.get_keyboard_shortcuts()
+    let mut shortcuts = state
+        .get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     match shortcut_name.as_str() {
@@ -48,7 +51,8 @@ pub async fn set_keyboard_shortcut(
     }
 
     // Update the shortcut in state
-    state.set_keyboard_shortcuts(shortcuts)
+    state
+        .set_keyboard_shortcuts(shortcuts)
         .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))?;
 
     // Save to centralized settings
@@ -57,7 +61,10 @@ pub async fn set_keyboard_shortcut(
     // Re-register global shortcuts with new values
     update_global_shortcuts(&app, &state).await?;
 
-    info!("Updated keyboard shortcut '{}' to '{}'", shortcut_name, shortcut_value);
+    info!(
+        "Updated keyboard shortcut '{}' to '{}'",
+        shortcut_name, shortcut_value
+    );
     Ok(())
 }
 
@@ -86,8 +93,11 @@ pub async fn set_keyboard_shortcuts(
 
     for (i, (name1, shortcut1)) in shortcut_pairs.iter().enumerate() {
         for (name2, shortcut2) in shortcut_pairs.iter().skip(i + 1) {
-            if shortcut1.to_lowercase().replace(" ", "") == shortcut2.to_lowercase().replace(" ", "") {
-                return Err(format!("Shortcuts '{}' and '{}' cannot have the same value: '{}'",
+            if shortcut1.to_lowercase().replace(" ", "")
+                == shortcut2.to_lowercase().replace(" ", "")
+            {
+                return Err(format!(
+                    "Shortcuts '{}' and '{}' cannot have the same value: '{}'",
                     get_shortcut_display_name_for_validation(name1),
                     get_shortcut_display_name_for_validation(name2),
                     shortcut1
@@ -97,7 +107,8 @@ pub async fn set_keyboard_shortcuts(
     }
 
     // Update state
-    state.set_keyboard_shortcuts(shortcuts.clone())
+    state
+        .set_keyboard_shortcuts(shortcuts.clone())
         .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))?;
 
     // Save to centralized settings
@@ -119,7 +130,8 @@ pub async fn reset_keyboard_shortcuts(
     let default_shortcuts = KeyboardShortcuts::default();
 
     // Update state
-    state.set_keyboard_shortcuts(default_shortcuts.clone())
+    state
+        .set_keyboard_shortcuts(default_shortcuts.clone())
         .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))?;
 
     // Save to centralized settings
@@ -133,7 +145,10 @@ pub async fn reset_keyboard_shortcuts(
 }
 
 /// Load keyboard shortcuts from centralized settings
-pub async fn load_shortcuts_from_centralized_settings(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub async fn load_shortcuts_from_centralized_settings(
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
@@ -141,14 +156,19 @@ pub async fn load_shortcuts_from_centralized_settings(app: &AppHandle, state: &A
         Ok(settings_shortcuts) => {
             // Convert from settings::KeyboardShortcuts to state::KeyboardShortcuts
             let state_shortcuts = convert_settings_to_state_shortcuts(&settings_shortcuts);
-            state.set_keyboard_shortcuts(state_shortcuts)
+            state
+                .set_keyboard_shortcuts(state_shortcuts)
                 .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))?;
             info!("Loaded keyboard shortcuts from centralized settings");
         }
         Err(e) => {
-            warn!("Failed to load shortcuts from centralized settings: {}, using defaults", e);
+            warn!(
+                "Failed to load shortcuts from centralized settings: {}, using defaults",
+                e
+            );
             let default_shortcuts = crate::state::KeyboardShortcuts::default();
-            state.set_keyboard_shortcuts(default_shortcuts)
+            state
+                .set_keyboard_shortcuts(default_shortcuts)
                 .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))?;
         }
     }
@@ -157,17 +177,23 @@ pub async fn load_shortcuts_from_centralized_settings(app: &AppHandle, state: &A
 }
 
 /// Save keyboard shortcuts to centralized settings
-async fn save_shortcuts_to_centralized_settings(app: &AppHandle, state: &AppState) -> Result<(), String> {
+async fn save_shortcuts_to_centralized_settings(
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let state_shortcuts = state.get_keyboard_shortcuts()
+    let state_shortcuts = state
+        .get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     // Convert from state::KeyboardShortcuts to settings::KeyboardShortcuts
     let settings_shortcuts = convert_state_to_settings_shortcuts(&state_shortcuts);
 
-    settings_manager.set_keyboard_shortcuts(&settings_shortcuts).await
+    settings_manager
+        .set_keyboard_shortcuts(&settings_shortcuts)
+        .await
         .map_err(|e| format!("Failed to save shortcuts to centralized settings: {}", e))?;
 
     info!("Saved keyboard shortcuts to centralized settings");
@@ -175,7 +201,9 @@ async fn save_shortcuts_to_centralized_settings(app: &AppHandle, state: &AppStat
 }
 
 /// Convert from settings::KeyboardShortcuts to state::KeyboardShortcuts
-fn convert_settings_to_state_shortcuts(settings: &crate::settings::KeyboardShortcuts) -> crate::state::KeyboardShortcuts {
+fn convert_settings_to_state_shortcuts(
+    settings: &crate::settings::KeyboardShortcuts,
+) -> crate::state::KeyboardShortcuts {
     crate::state::KeyboardShortcuts {
         agent_mode: settings.agent_mode.clone(),
         dictation_input: settings.dictation_input.clone(),
@@ -186,7 +214,9 @@ fn convert_settings_to_state_shortcuts(settings: &crate::settings::KeyboardShort
 }
 
 /// Convert from state::KeyboardShortcuts to settings::KeyboardShortcuts
-fn convert_state_to_settings_shortcuts(state: &crate::state::KeyboardShortcuts) -> crate::settings::KeyboardShortcuts {
+fn convert_state_to_settings_shortcuts(
+    state: &crate::state::KeyboardShortcuts,
+) -> crate::settings::KeyboardShortcuts {
     crate::settings::KeyboardShortcuts {
         agent_mode: state.agent_mode.clone(),
         dictation_input: state.dictation_input.clone(),
@@ -213,44 +243,44 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 
     // Enhanced system shortcuts detection with platform awareness
     let system_shortcuts = vec![
-        ("cmd+q", "Quit application", true),        // Critical on macOS
-        ("ctrl+q", "Quit application", false),      // Critical on Linux/Windows
-        ("cmd+w", "Close window", true),            // Critical on macOS
-        ("ctrl+w", "Close window", false),          // Critical on Linux/Windows
-        ("cmd+a", "Select all", true),              // Common on macOS
-        ("ctrl+a", "Select all", false),            // Common on Linux/Windows
-        ("cmd+c", "Copy", true),                    // Common on macOS
-        ("ctrl+c", "Copy", false),                  // Common on Linux/Windows
-        ("cmd+v", "Paste", true),                   // Common on macOS
-        ("ctrl+v", "Paste", false),                 // Common on Linux/Windows
-        ("cmd+x", "Cut", true),                     // Common on macOS
-        ("ctrl+x", "Cut", false),                   // Common on Linux/Windows
-        ("cmd+z", "Undo", true),                    // Common on macOS
-        ("ctrl+z", "Undo", false),                  // Common on Linux/Windows
-        ("cmd+y", "Redo", true),                    // Common on macOS
-        ("ctrl+y", "Redo", false),                  // Common on Linux/Windows
-        ("cmd+shift+z", "Redo", true),              // Alternative redo on macOS
-        ("ctrl+shift+z", "Redo", false),            // Alternative redo on Linux/Windows
-        ("cmd+tab", "Switch applications", true),   // Critical on macOS
-        ("ctrl+tab", "Switch tabs", false),         // Common on Linux/Windows
-        ("alt+tab", "Switch applications", false),  // Critical on Windows/Linux
-        ("cmd+space", "Spotlight search", true),    // Critical on macOS
+        ("cmd+q", "Quit application", true),       // Critical on macOS
+        ("ctrl+q", "Quit application", false),     // Critical on Linux/Windows
+        ("cmd+w", "Close window", true),           // Critical on macOS
+        ("ctrl+w", "Close window", false),         // Critical on Linux/Windows
+        ("cmd+a", "Select all", true),             // Common on macOS
+        ("ctrl+a", "Select all", false),           // Common on Linux/Windows
+        ("cmd+c", "Copy", true),                   // Common on macOS
+        ("ctrl+c", "Copy", false),                 // Common on Linux/Windows
+        ("cmd+v", "Paste", true),                  // Common on macOS
+        ("ctrl+v", "Paste", false),                // Common on Linux/Windows
+        ("cmd+x", "Cut", true),                    // Common on macOS
+        ("ctrl+x", "Cut", false),                  // Common on Linux/Windows
+        ("cmd+z", "Undo", true),                   // Common on macOS
+        ("ctrl+z", "Undo", false),                 // Common on Linux/Windows
+        ("cmd+y", "Redo", true),                   // Common on macOS
+        ("ctrl+y", "Redo", false),                 // Common on Linux/Windows
+        ("cmd+shift+z", "Redo", true),             // Alternative redo on macOS
+        ("ctrl+shift+z", "Redo", false),           // Alternative redo on Linux/Windows
+        ("cmd+tab", "Switch applications", true),  // Critical on macOS
+        ("ctrl+tab", "Switch tabs", false),        // Common on Linux/Windows
+        ("alt+tab", "Switch applications", false), // Critical on Windows/Linux
+        ("cmd+space", "Spotlight search", true),   // Critical on macOS
         ("cmd+shift+space", "Previous input source", true), // macOS system
         ("ctrl+space", "Input method/Autocomplete", false), // Common on Linux/Windows
-        ("cmd+`", "Switch windows", true),          // macOS window cycling
-        ("alt+`", "Switch windows", false),         // Windows/Linux alt-tab variant
-        ("f11", "Fullscreen toggle", false),        // Cross-platform
-        ("alt+f4", "Close window", false),          // Critical on Windows
-        ("cmd+m", "Minimize window", true),         // macOS minimize
+        ("cmd+`", "Switch windows", true),         // macOS window cycling
+        ("alt+`", "Switch windows", false),        // Windows/Linux alt-tab variant
+        ("f11", "Fullscreen toggle", false),       // Cross-platform
+        ("alt+f4", "Close window", false),         // Critical on Windows
+        ("cmd+m", "Minimize window", true),        // macOS minimize
         ("ctrl+alt+del", "System interrupt", false), // Windows system
-        ("cmd+ctrl+space", "Emoji picker", true),   // macOS emoji
+        ("cmd+ctrl+space", "Emoji picker", true),  // macOS emoji
         ("cmd+option+esc", "Force quit dialog", true), // macOS force quit
-        ("ctrl+shift+esc", "Task manager", false),  // Windows task manager
-        ("cmd+shift+3", "Screenshot", true),        // macOS full screenshot
-        ("cmd+shift+4", "Area screenshot", true),   // macOS area screenshot
+        ("ctrl+shift+esc", "Task manager", false), // Windows task manager
+        ("cmd+shift+3", "Screenshot", true),       // macOS full screenshot
+        ("cmd+shift+4", "Area screenshot", true),  // macOS area screenshot
         ("cmd+shift+5", "Screenshot options", true), // macOS screenshot tool
-        ("print", "Print screen", false),           // Windows/Linux screenshot
-        ("printscreen", "Print screen", false),     // Alternative print screen
+        ("print", "Print screen", false),          // Windows/Linux screenshot
+        ("printscreen", "Print screen", false),    // Alternative print screen
     ];
 
     // Check current platform for more specific warnings
@@ -276,16 +306,44 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 
         // Expanded list of allowed standalone keys
         let allowed_standalone = [
-            "escape", "esc",
-            "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
-            "f13", "f14", "f15", "f16", "f17", "f18", "f19", "f20", // Extended function keys
-            "home", "end", "pageup", "pagedown", "insert", "delete",
-            "printscreen", "print", "scrolllock", "pause"
+            "escape",
+            "esc",
+            "f1",
+            "f2",
+            "f3",
+            "f4",
+            "f5",
+            "f6",
+            "f7",
+            "f8",
+            "f9",
+            "f10",
+            "f11",
+            "f12",
+            "f13",
+            "f14",
+            "f15",
+            "f16",
+            "f17",
+            "f18",
+            "f19",
+            "f20", // Extended function keys
+            "home",
+            "end",
+            "pageup",
+            "pagedown",
+            "insert",
+            "delete",
+            "printscreen",
+            "print",
+            "scrolllock",
+            "pause",
         ];
 
         if !allowed_standalone.contains(&single_key.as_str()) {
             // Provide more specific guidance based on key type
-            if single_key.len() == 1 && single_key.chars().next().is_some_and(|c| c.is_alphabetic()) {
+            if single_key.len() == 1 && single_key.chars().next().is_some_and(|c| c.is_alphabetic())
+            {
                 return Err(format!("Letter keys like '{}' should include a modifier (Alt, Ctrl, Cmd, Shift) to avoid conflicts with typing. Try 'Alt+{}' or 'Ctrl+{}'.", shortcut, shortcut.to_uppercase(), shortcut.to_uppercase()));
             } else if single_key.chars().all(|c| c.is_ascii_digit()) {
                 return Err(format!("Number keys like '{}' should include a modifier to avoid conflicts with typing. Try 'Alt+{}' or 'Ctrl+{}'.", shortcut, shortcut, shortcut));
@@ -298,7 +356,10 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
     // Additional validation for complex modifier combinations
     let parts: Vec<&str> = shortcut.split('+').map(|s| s.trim()).collect();
     if parts.len() > 4 {
-        return Err("Shortcuts with more than 3 modifiers plus one key are not recommended for usability".to_string());
+        return Err(
+            "Shortcuts with more than 3 modifiers plus one key are not recommended for usability"
+                .to_string(),
+        );
     }
 
     // Check for duplicate modifiers (e.g., "Ctrl+Ctrl+A")
@@ -314,7 +375,10 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
         };
 
         if !seen_modifiers.insert(normalized_modifier) {
-            return Err(format!("Duplicate modifier '{}' in shortcut '{}'. Each modifier should only appear once.", modifier, shortcut));
+            return Err(format!(
+                "Duplicate modifier '{}' in shortcut '{}'. Each modifier should only appear once.",
+                modifier, shortcut
+            ));
         }
     }
 
@@ -327,7 +391,11 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 }
 
 /// Check for conflicts between shortcuts
-fn check_shortcut_conflicts(new_shortcut: &str, current_shortcuts: &crate::state::KeyboardShortcuts, exclude_key: Option<&str>) -> Result<(), String> {
+fn check_shortcut_conflicts(
+    new_shortcut: &str,
+    current_shortcuts: &crate::state::KeyboardShortcuts,
+    exclude_key: Option<&str>,
+) -> Result<(), String> {
     let normalized_new = new_shortcut.to_lowercase().replace(" ", "");
 
     let shortcuts_to_check = [
@@ -347,7 +415,11 @@ fn check_shortcut_conflicts(new_shortcut: &str, current_shortcuts: &crate::state
 
         let normalized_existing = existing_shortcut.to_lowercase().replace(" ", "");
         if normalized_new == normalized_existing {
-            return Err(format!("Shortcut '{}' is already assigned to '{}'", new_shortcut, get_shortcut_display_name_for_validation(key)));
+            return Err(format!(
+                "Shortcut '{}' is already assigned to '{}'",
+                new_shortcut,
+                get_shortcut_display_name_for_validation(key)
+            ));
         }
     }
 
@@ -381,10 +453,14 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
 
     // Unregister existing shortcuts with error handling
     if let Err(e) = app.global_shortcut().unregister_all() {
-        warn!("Failed to unregister existing shortcuts (this is often normal): {}", e);
+        warn!(
+            "Failed to unregister existing shortcuts (this is often normal): {}",
+            e
+        );
     }
 
-    let shortcuts = state.get_keyboard_shortcuts()
+    let shortcuts = state
+        .get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     // Import parse_shortcut_string from lib.rs
@@ -394,15 +470,21 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     if let Some(shortcut) = parse_shortcut_string(&shortcuts.agent_mode) {
         match app.global_shortcut().register(shortcut) {
             Ok(()) => {
-                info!("✅ Successfully registered agent mode shortcut: {}", shortcuts.agent_mode);
-            },
+                info!(
+                    "✅ Successfully registered agent mode shortcut: {}",
+                    shortcuts.agent_mode
+                );
+            }
             Err(e) => {
                 error!("❌ Failed to register agent mode shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.agent_mode, e);
                 // Don't fail - continue with other shortcuts
             }
         }
     } else {
-        warn!("Failed to parse agent mode shortcut: {}", shortcuts.agent_mode);
+        warn!(
+            "Failed to parse agent mode shortcut: {}",
+            shortcuts.agent_mode
+        );
     }
 
     // Register the dictation input shortcut with error handling
@@ -413,29 +495,41 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
         );
         match app.global_shortcut().register(shortcut) {
             Ok(()) => {
-                info!("✅ Successfully registered dictation input shortcut: {} -> {:?}", shortcuts.dictation_input, shortcut);
-            },
+                info!(
+                    "✅ Successfully registered dictation input shortcut: {} -> {:?}",
+                    shortcuts.dictation_input, shortcut
+                );
+            }
             Err(e) => {
                 error!("❌ Failed to register dictation input shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.dictation_input, e);
                 // Don't fail - continue with other shortcuts
             }
         }
     } else {
-        warn!("Failed to parse dictation input shortcut: {}", shortcuts.dictation_input);
+        warn!(
+            "Failed to parse dictation input shortcut: {}",
+            shortcuts.dictation_input
+        );
     }
 
     // Register the voice activation shortcut with error handling
     if let Some(shortcut) = parse_shortcut_string(&shortcuts.voice_activation) {
         match app.global_shortcut().register(shortcut) {
             Ok(()) => {
-                info!("✅ Successfully registered voice activation shortcut: {}", shortcuts.voice_activation);
-            },
+                info!(
+                    "✅ Successfully registered voice activation shortcut: {}",
+                    shortcuts.voice_activation
+                );
+            }
             Err(e) => {
                 error!("❌ Failed to register voice activation shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.voice_activation, e);
             }
         }
     } else {
-        warn!("Failed to parse voice activation shortcut: {}", shortcuts.voice_activation);
+        warn!(
+            "Failed to parse voice activation shortcut: {}",
+            shortcuts.voice_activation
+        );
     }
 
     // NOTE: Escape key is now registered dynamically only when needed
@@ -450,7 +544,8 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
 /// Check if input monitoring permissions are granted (macOS only)
 /// This is required for global shortcuts to work
 pub fn check_input_monitoring_permissions() -> Result<bool, String> {
-    crate::commands::native_permissions::NativePermissionChecker::check_input_monitoring_permission()
+    crate::commands::native_permissions::NativePermissionChecker::check_input_monitoring_permission(
+    )
 }
 
 /// Validate a keyboard shortcut in real-time (for frontend feedback)
@@ -468,11 +563,16 @@ pub async fn validate_keyboard_shortcut(
     validate_shortcut_format(&shortcut_value)?;
 
     // Get current shortcuts for conflict checking
-    let current_shortcuts = state.get_keyboard_shortcuts()
+    let current_shortcuts = state
+        .get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     // Check for conflicts
-    check_shortcut_conflicts(&shortcut_value, &current_shortcuts, shortcut_name.as_deref())?;
+    check_shortcut_conflicts(
+        &shortcut_value,
+        &current_shortcuts,
+        shortcut_name.as_deref(),
+    )?;
 
     Ok("Valid shortcut".to_string())
 }
@@ -486,7 +586,8 @@ pub async fn get_shortcut_suggestions(
     let is_macos = cfg!(target_os = "macos");
 
     // Get current shortcuts to avoid suggesting conflicts
-    let current_shortcuts = state.get_keyboard_shortcuts()
+    let current_shortcuts = state
+        .get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     let mut suggestions = Vec::new();
@@ -514,7 +615,7 @@ pub async fn get_shortcut_suggestions(
                     "Ctrl+Shift+A".to_string(),
                 ]);
             }
-        },
+        }
         "dictation_input" => {
             if is_macos {
                 suggestions.extend([
@@ -537,7 +638,7 @@ pub async fn get_shortcut_suggestions(
                     "Ctrl+Shift+V".to_string(),
                 ]);
             }
-        },
+        }
         "stop_current_task" => {
             suggestions.extend([
                 "Escape".to_string(),
@@ -549,7 +650,7 @@ pub async fn get_shortcut_suggestions(
             } else {
                 suggestions.push("Ctrl+Break".to_string());
             }
-        },
+        }
         "voice_activation" => {
             if is_macos {
                 suggestions.extend([
@@ -568,7 +669,7 @@ pub async fn get_shortcut_suggestions(
                     "Alt+Shift+R".to_string(),
                 ]);
             }
-        },
+        }
         _ => {
             // Generic suggestions for unknown shortcut types
             if is_macos {
@@ -600,9 +701,9 @@ pub async fn get_shortcut_suggestions(
 
     suggestions.retain(|suggestion| {
         let normalized_suggestion = suggestion.to_lowercase().replace(" ", "");
-        !current_values.iter().any(|current| {
-            current.to_lowercase().replace(" ", "") == normalized_suggestion
-        })
+        !current_values
+            .iter()
+            .any(|current| current.to_lowercase().replace(" ", "") == normalized_suggestion)
     });
 
     // Validate each suggestion and keep only valid ones

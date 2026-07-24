@@ -439,9 +439,7 @@ async fn screenshot_returns_decodable_png() {
     );
 
     // Screenshotting something that isn't there is an error, not a blank image.
-    let missing = controller
-        .screenshot(&json!({ "selector": "#nope" }))
-        .await;
+    let missing = controller.screenshot(&json!({ "selector": "#nope" })).await;
     assert!(missing.is_err(), "missing element should error");
 
     restore(controller, &original).await;

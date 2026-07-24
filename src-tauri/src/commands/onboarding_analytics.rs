@@ -77,7 +77,11 @@ fn append_event(app: &AppHandle, name: &str, payload: Value) -> Result<(), Strin
     store
         .save()
         .map_err(|e| format!("Failed to save analytics store: {}", e))?;
-    debug!("[onboarding-analytics] recorded {} (buffer={})", name, events.len());
+    debug!(
+        "[onboarding-analytics] recorded {} (buffer={})",
+        name,
+        events.len()
+    );
     Ok(())
 }
 
@@ -128,7 +132,9 @@ pub async fn get_last_onboarding_phase(app: AppHandle) -> Result<Option<String>,
     let store = app
         .store(STORE_NAME)
         .map_err(|e| format!("Failed to open analytics store: {}", e))?;
-    Ok(store.get(LAST_PHASE_KEY).and_then(|v| v.as_str().map(String::from)))
+    Ok(store
+        .get(LAST_PHASE_KEY)
+        .and_then(|v| v.as_str().map(String::from)))
 }
 
 /// Backend helper: fire `onboarding_first_query` once if the user has

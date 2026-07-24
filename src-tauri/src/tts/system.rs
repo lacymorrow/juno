@@ -1,26 +1,26 @@
 #[cfg(target_os = "macos")]
+use crate::constants::errors::templates;
+#[cfg(target_os = "macos")]
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+#[cfg(target_os = "macos")]
 use std::fs;
 #[cfg(target_os = "macos")]
 use std::process::Command;
 #[cfg(target_os = "macos")]
 use tempfile::NamedTempFile;
 #[cfg(target_os = "macos")]
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-#[cfg(target_os = "macos")]
 use tracing::{error, info};
-#[cfg(target_os = "macos")]
-use crate::constants::errors::templates;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
-pub async fn invoke_system_tts(
-    text: String,
-) -> Result<String, String> {
+pub async fn invoke_system_tts(text: String) -> Result<String, String> {
     info!("Invoking macOS system TTS for text: {}", text);
 
     // Check if stop was requested before starting
@@ -73,7 +73,9 @@ pub async fn invoke_system_tts(
 
                 // Check again before reading the file
                 if crate::tts::is_tts_stop_requested() {
-                    info!("TTS stop was requested after system TTS completion, not returning audio");
+                    info!(
+                        "TTS stop was requested after system TTS completion, not returning audio"
+                    );
                     let _ = fs::remove_file(&output_path);
                     return Ok("TTS_STOPPED_BY_USER".to_string());
                 }
@@ -88,7 +90,11 @@ pub async fn invoke_system_tts(
                         Ok(base64_audio)
                     }
                     Err(e) => {
-                        let err_msg = format_error(templates::FAILED_TO_LOAD, &format!("generated audio file '{}'", output_path_str), e);
+                        let err_msg = format_error(
+                            templates::FAILED_TO_LOAD,
+                            &format!("generated audio file '{}'", output_path_str),
+                            e,
+                        );
                         error!("{}", err_msg);
                         // Attempt cleanup even on error
                         let _ = fs::remove_file(&output_path);
@@ -97,7 +103,10 @@ pub async fn invoke_system_tts(
                 }
             } else {
                 let stderr = String::from_utf8_lossy(&cmd_output.stderr);
-                let err_msg = format!("'say' command failed with status {}: {}", cmd_output.status, stderr);
+                let err_msg = format!(
+                    "'say' command failed with status {}: {}",
+                    cmd_output.status, stderr
+                );
                 error!("{}", err_msg);
                 // Attempt cleanup even on error
                 let _ = fs::remove_file(&output_path);
@@ -119,9 +128,10 @@ pub async fn invoke_system_tts(
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-pub async fn invoke_system_tts(
-    text: String,
-) -> Result<String, String> {
-    tracing::warn!("System TTS invoked on non-macOS platform for text: {}", text);
+pub async fn invoke_system_tts(text: String) -> Result<String, String> {
+    tracing::warn!(
+        "System TTS invoked on non-macOS platform for text: {}",
+        text
+    );
     Err("System TTS is currently only implemented for macOS.".to_string())
 }

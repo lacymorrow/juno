@@ -115,18 +115,20 @@ pub async fn safari_clear_cache() -> Result<ToolResult, String> {
 
 /// Execute Safari tool with parameters (for agent integration)
 #[command]
-pub async fn execute_safari_tool(tool_name: String, parameters: Value) -> Result<ToolResult, String> {
+pub async fn execute_safari_tool(
+    tool_name: String,
+    parameters: Value,
+) -> Result<ToolResult, String> {
     let result = match tool_name.as_str() {
-        "safari_extract_dom" => {
-            match get_safari_tools().extract_dom() {
-                Ok(output) => Ok(output),
-                Err(e) => Err(e.to_string()),
-            }
-        }
+        "safari_extract_dom" => match get_safari_tools().extract_dom() {
+            Ok(output) => Ok(output),
+            Err(e) => Err(e.to_string()),
+        },
         "safari_click_element" => {
             let element_id = parameters["element_id"]
                 .as_u64()
-                .ok_or("Missing or invalid element_id parameter")? as u32;
+                .ok_or("Missing or invalid element_id parameter")?
+                as u32;
             match get_safari_tools().click_element(element_id) {
                 Ok(output) => Ok(output),
                 Err(e) => Err(e.to_string()),
@@ -135,7 +137,8 @@ pub async fn execute_safari_tool(tool_name: String, parameters: Value) -> Result
         "safari_type_text" => {
             let element_id = parameters["element_id"]
                 .as_u64()
-                .ok_or("Missing or invalid element_id parameter")? as u32;
+                .ok_or("Missing or invalid element_id parameter")?
+                as u32;
             let text = parameters["text"]
                 .as_str()
                 .ok_or("Missing or invalid text parameter")?;
@@ -144,12 +147,10 @@ pub async fn execute_safari_tool(tool_name: String, parameters: Value) -> Result
                 Err(e) => Err(e.to_string()),
             }
         }
-        "safari_get_url" => {
-            match get_safari_tools().get_current_url() {
-                Ok(output) => Ok(output),
-                Err(e) => Err(e.to_string()),
-            }
-        }
+        "safari_get_url" => match get_safari_tools().get_current_url() {
+            Ok(output) => Ok(output),
+            Err(e) => Err(e.to_string()),
+        },
         "safari_navigate" => {
             let url = parameters["url"]
                 .as_str()
@@ -159,12 +160,10 @@ pub async fn execute_safari_tool(tool_name: String, parameters: Value) -> Result
                 Err(e) => Err(e.to_string()),
             }
         }
-        "safari_list_clickable_elements" => {
-            match get_safari_tools().list_clickable_elements() {
-                Ok(output) => Ok(output),
-                Err(e) => Err(e.to_string()),
-            }
-        }
+        "safari_list_clickable_elements" => match get_safari_tools().list_clickable_elements() {
+            Ok(output) => Ok(output),
+            Err(e) => Err(e.to_string()),
+        },
         "safari_execute_javascript" => {
             let js = parameters["javascript"]
                 .as_str()
@@ -174,12 +173,10 @@ pub async fn execute_safari_tool(tool_name: String, parameters: Value) -> Result
                 Err(e) => Err(e.to_string()),
             }
         }
-        "safari_clear_cache" => {
-            match get_safari_tools().clear_cache() {
-                Ok(output) => Ok(output),
-                Err(e) => Err(e.to_string()),
-            }
-        }
+        "safari_clear_cache" => match get_safari_tools().clear_cache() {
+            Ok(output) => Ok(output),
+            Err(e) => Err(e.to_string()),
+        },
         _ => Err(format!("Unknown Safari tool: {}", tool_name)),
     };
 

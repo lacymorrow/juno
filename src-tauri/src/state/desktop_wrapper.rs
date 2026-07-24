@@ -12,7 +12,9 @@ impl DesktopWrapper {
     }
 
     pub fn element_at_position(&self, x: f64, y: f64) -> Option<computer_use_ai_sdk::UIElement> {
-        self.desktop.as_ref().and_then(|d| d.element_at_position(x, y))
+        self.desktop
+            .as_ref()
+            .and_then(|d| d.element_at_position(x, y))
     }
 
     pub fn applications(&self) -> Result<Vec<computer_use_ai_sdk::UIElement>, String> {
@@ -29,21 +31,31 @@ impl DesktopWrapper {
         }
     }
 
-    pub fn locator(&self, selector: impl Into<computer_use_ai_sdk::Selector>) -> Result<computer_use_ai_sdk::Locator, String> {
+    pub fn locator(
+        &self,
+        selector: impl Into<computer_use_ai_sdk::Selector>,
+    ) -> Result<computer_use_ai_sdk::Locator, String> {
         match &self.desktop {
             Some(desktop) => Ok(desktop.locator(selector)),
             None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
         }
     }
 
-    pub fn open_application(&self, app_name: &str) -> Result<computer_use_ai_sdk::UIElement, String> {
+    pub fn open_application(
+        &self,
+        app_name: &str,
+    ) -> Result<computer_use_ai_sdk::UIElement, String> {
         match &self.desktop {
             Some(desktop) => desktop.open_application(app_name).map_err(|e| e.to_string()),
             None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
         }
     }
 
-    pub fn open_url(&self, url: &str, browser: Option<&str>) -> Result<computer_use_ai_sdk::UIElement, String> {
+    pub fn open_url(
+        &self,
+        url: &str,
+        browser: Option<&str>,
+    ) -> Result<computer_use_ai_sdk::UIElement, String> {
         match &self.desktop {
             Some(desktop) => desktop.open_url(url, browser).map_err(|e| e.to_string()),
             None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
@@ -114,7 +126,12 @@ impl DesktopWrapper {
     }
 
     /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
-    pub fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, String> {
+    pub fn left_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<&'static str, String> {
         match &self.desktop {
             Some(desktop) => desktop.left_click_no_warp(x, y, modifiers).map_err(|e| e.to_string()),
             None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
@@ -130,7 +147,12 @@ impl DesktopWrapper {
     }
 
     /// Double-click without warping the cursor.
-    pub fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, String> {
+    pub fn double_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<&'static str, String> {
         match &self.desktop {
             Some(desktop) => desktop.double_click_no_warp(x, y, modifiers).map_err(|e| e.to_string()),
             None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
@@ -179,7 +201,13 @@ impl DesktopWrapper {
         }
     }
 
-    pub fn left_click_drag(&self, start_x: f64, start_y: f64, end_x: f64, end_y: f64) -> Result<(), String> {
+    pub fn left_click_drag(
+        &self,
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+    ) -> Result<(), String> {
         match &self.desktop {
             Some(desktop) => desktop.left_click_drag(start_x, start_y, end_x, end_y).map_err(|e| e.to_string()),
             None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
@@ -193,7 +221,13 @@ impl DesktopWrapper {
         }
     }
 
-    pub fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), String> {
+    pub fn scroll_at_position(
+        &self,
+        x: f64,
+        y: f64,
+        direction: &str,
+        amount: f64,
+    ) -> Result<(), String> {
         match &self.desktop {
             Some(desktop) => desktop.scroll_at_position(x, y, direction, amount).map_err(|e| e.to_string()),
             None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),

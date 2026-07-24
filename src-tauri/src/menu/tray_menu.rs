@@ -12,11 +12,17 @@
 //! - Error: Red-tinted icon when there's an error
 //! - Processing: Animated or pulsing icon during processing
 
-use crate::constants::{events, menus::tray_menu_ids, errors::{templates, prefixes}};
+use crate::constants::{
+    errors::{prefixes, templates},
+    events,
+    menus::tray_menu_ids,
+};
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 use crate::state::AppState;
 use std::sync::Arc;
@@ -156,7 +162,9 @@ async fn get_tray_icon_manager() -> Arc<TokioMutex<TrayIconManager>> {
 }
 
 /// Load tray icon from embedded data
-fn load_tray_icon_from_data(icon_data: &[u8]) -> Result<TauriImage<'static>, Box<dyn std::error::Error>> {
+fn load_tray_icon_from_data(
+    icon_data: &[u8],
+) -> Result<TauriImage<'static>, Box<dyn std::error::Error>> {
     let loaded_image = image::load_from_memory(icon_data)?;
     let width = loaded_image.width();
     let height = loaded_image.height();
@@ -186,7 +194,11 @@ pub fn create_state_aware_tray_menu(
     let _shortcuts = match get_keyboard_shortcuts(app) {
         Ok(shortcuts) => shortcuts,
         Err(e) => {
-            error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
+            error!(
+                "{} {}",
+                prefixes::TRAY_MENU,
+                format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e)
+            );
             // Use defaults if we can't get from state
             crate::state::KeyboardShortcuts::default()
         }
@@ -490,7 +502,7 @@ async fn determine_current_state(app_handle: &AppHandle) -> TrayIconState {
     let is_agent = app_state.is_agent_executing();
     let is_dictation = app_state.is_dictation_active();
     let is_always_listening = app_state.get_always_listening_active().unwrap_or(false);
-    
+
     info!(
         "🔍 Tray icon state check - Agent: {}, Dictation: {}, Always Listening: {}",
         is_agent, is_dictation, is_always_listening
@@ -520,7 +532,11 @@ pub async fn update_tray_icon_state(new_state: TrayIconState) {
     let mut manager_guard = manager.lock().await;
 
     if let Err(e) = manager_guard.update_icon_state(new_state).await {
-        error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_EMIT, "tray state updated", e));
+        error!(
+            "{} {}",
+            prefixes::TRAY_MENU,
+            format_error(templates::FAILED_TO_EMIT, "tray state updated", e)
+        );
     }
 }
 
@@ -588,19 +604,31 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
         tray_menu_ids::NEW_CHAT => {
             info!("[TrayMenu] New Chat menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::NEW_CHAT_REQUESTED, ()) {
-                error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_EMIT, "new chat", e));
+                error!(
+                    "{} {}",
+                    prefixes::TRAY_MENU,
+                    format_error(templates::FAILED_TO_EMIT, "new chat", e)
+                );
             }
         }
         tray_menu_ids::SHOW_HIDE_FLOATING_BAR => {
             info!("[TrayMenu] Show/Hide Floating Bar menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
-                error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_EMIT, "toggle floating bar", e));
+                error!(
+                    "{} {}",
+                    prefixes::TRAY_MENU,
+                    format_error(templates::FAILED_TO_EMIT, "toggle floating bar", e)
+                );
             }
         }
         tray_menu_ids::DEVELOPER_TOOLS => {
             info!("[TrayMenu] Developer Tools menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::DEVTOOLS_REQUESTED, ()) {
-                error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_EMIT, "devtools", e));
+                error!(
+                    "{} {}",
+                    prefixes::TRAY_MENU,
+                    format_error(templates::FAILED_TO_EMIT, "devtools", e)
+                );
             }
         }
         tray_menu_ids::SETTINGS => {
@@ -608,8 +636,14 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
             // Call open_settings_window directly instead of emitting event
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                    error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_PROCESS, "settings window open", e));
+                if let Err(e) =
+                    crate::window_management::open_settings_window(app_handle_clone).await
+                {
+                    error!(
+                        "{} {}",
+                        prefixes::TRAY_MENU,
+                        format_error(templates::FAILED_TO_PROCESS, "settings window open", e)
+                    );
                 }
             });
         }
@@ -672,7 +706,11 @@ pub fn refresh_tray_menu(app_handle: &AppHandle) {
             // Note: Tauri v2 will handle menu updates automatically through the state
         }
         Err(e) => {
-            error!("{} {}", prefixes::TRAY_MENU, format_error(templates::FAILED_TO_LOAD, "tray menu refresh", e));
+            error!(
+                "{} {}",
+                prefixes::TRAY_MENU,
+                format_error(templates::FAILED_TO_LOAD, "tray menu refresh", e)
+            );
         }
     }
 }
@@ -712,7 +750,6 @@ mod tests {
         assert_eq!(TrayIconState::Processing.description(), "Juno - Processing");
         assert_eq!(TrayIconState::Error.description(), "Juno - Error");
     }
-
 
     #[test]
     fn test_tray_menu_constants() {

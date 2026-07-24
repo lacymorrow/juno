@@ -47,19 +47,21 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Emitter};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
-use tracing::{debug, error, warn, info};
-use std::time::{Duration, Instant};
+use tracing::{debug, error, info, warn};
 
 use crate::agent::core::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::agent::tools::mcp_integration::MCPManager;
 use crate::agent::tools::ToolCategory;
 use crate::agent::traits::ToolProvider;
-use crate::state::AppState;
 use crate::constants::events;
-use crate::utils::coordinate_validation::{validate_coordinate_parameter, CoordinateValidationError};
+use crate::state::AppState;
+use crate::utils::coordinate_validation::{
+    validate_coordinate_parameter, CoordinateValidationError,
+};
 // Error recovery will be implemented in future iterations
 
 // Define an async tool function type
@@ -82,8 +84,8 @@ pub enum ToolErrorType {
     Permission,
     NotFound,
     Invalid,
-    Temporary,  // For things like "busy", "locked", etc.
-    Fatal,      // For non-recoverable errors
+    Temporary, // For things like "busy", "locked", etc.
+    Fatal,     // For non-recoverable errors
 }
 
 impl ToolErrorType {
@@ -470,30 +472,37 @@ impl LocalToolProvider {
             debug!("Total definitions after insert: {}", definitions.len());
         }
 
-            // Automatically add tool to configuration manager if app handle is available
-    if let Some(ref app_handle) = self.app_handle {
-        let state = app_handle.state::<AppState>();
-        let config_manager = state.get_tool_config_manager().await;
-        let mut config_guard = config_manager.lock().await;
+        // Automatically add tool to configuration manager if app handle is available
+        if let Some(ref app_handle) = self.app_handle {
+            let state = app_handle.state::<AppState>();
+            let config_manager = state.get_tool_config_manager().await;
+            let mut config_guard = config_manager.lock().await;
 
-        // Only add if the tool doesn't already exist in configuration
-        if config_guard.get_tool_config(&tool_name).is_none() {
-            // Automatically determine category from tool name and metadata
-            let category = Self::infer_tool_category(&tool_name, &definition.description);
+            // Only add if the tool doesn't already exist in configuration
+            if config_guard.get_tool_config(&tool_name).is_none() {
+                // Automatically determine category from tool name and metadata
+                let category = Self::infer_tool_category(&tool_name, &definition.description);
 
-            let tool_config = crate::agent::tools::tool_config::ToolConfig::new(
-                tool_name.clone(),
-                category.clone(),
-                true, // Enable by default
-            ).with_description(definition.description.clone());
+                let tool_config = crate::agent::tools::tool_config::ToolConfig::new(
+                    tool_name.clone(),
+                    category.clone(),
+                    true, // Enable by default
+                )
+                .with_description(definition.description.clone());
 
-            config_guard.add_tool_config(tool_config);
+                config_guard.add_tool_config(tool_config);
 
-            debug!("Auto-added tool configuration for: '{}' in category: {:?}", tool_name, category);
+                debug!(
+                    "Auto-added tool configuration for: '{}' in category: {:?}",
+                    tool_name, category
+                );
+            }
+        } else {
+            warn!(
+                "Cannot auto-configure tool '{}' - no app handle available during registration",
+                tool_name
+            );
         }
-    } else {
-        warn!("Cannot auto-configure tool '{}' - no app handle available during registration", tool_name);
-    }
 
         // Wrap the executor with additional error handling for display-related operations
         let wrapped_executor: AsyncToolExecutor = Arc::new(move |input| {
@@ -530,9 +539,15 @@ impl LocalToolProvider {
 
             // Verify the executor was actually stored
             if executors.contains_key(&tool_name) {
-                debug!("Verified: Executor for '{}' is present in HashMap", tool_name);
+                debug!(
+                    "Verified: Executor for '{}' is present in HashMap",
+                    tool_name
+                );
             } else {
-                error!("Executor for '{}' NOT found in HashMap after insertion!", tool_name);
+                error!(
+                    "Executor for '{}' NOT found in HashMap after insertion!",
+                    tool_name
+                );
             }
 
             // Show all currently stored executors
@@ -642,14 +657,17 @@ impl LocalToolProvider {
                 Ok(Ok(())) => {
                     debug!("MCP tools refresh completed successfully");
                     Ok(())
-                },
+                }
                 Ok(Err(e)) => {
                     error!("MCP tools refresh failed: {}", e);
                     Err(e)
-                },
+                }
                 Err(_) => {
                     warn!("MCP tools refresh timed out after {:?}", timeout_duration);
-                    Err(format!("MCP tools refresh timeout after {:?}", timeout_duration))
+                    Err(format!(
+                        "MCP tools refresh timeout after {:?}",
+                        timeout_duration
+                    ))
                 }
             }
         } else {
@@ -767,7 +785,10 @@ impl LocalToolProvider {
     }
 
     /// Execute tool with simplified error recovery
-    async fn execute_tool_with_recovery(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
+    async fn execute_tool_with_recovery(
+        &self,
+        tool_call: ToolCall,
+    ) -> Result<ToolResult, AgentError> {
         let tool_name = tool_call.name.clone();
         let max_retries = 3;
 
@@ -780,21 +801,32 @@ impl LocalToolProvider {
                         info!("Tool '{}' recovered after {} retries", tool_name, attempt);
                     }
                     return Ok(tool_result);
-                },
+                }
                 Err(error) => {
                     let error_type = self.classify_error(&error);
 
                     if attempt < max_retries && error_type.should_retry() {
                         let delay = error_type.retry_delay(attempt);
-                        warn!("Tool '{}' failed (attempt {}/{}), retrying in {:?}: {}",
-                              tool_name, attempt + 1, max_retries + 1, delay, error);
+                        warn!(
+                            "Tool '{}' failed (attempt {}/{}), retrying in {:?}: {}",
+                            tool_name,
+                            attempt + 1,
+                            max_retries + 1,
+                            delay,
+                            error
+                        );
 
                         tokio::time::sleep(delay).await;
                         continue;
                     } else {
                         // Final failure
                         self.update_recovery_stats(attempt > 0, false).await;
-                        warn!("Tool '{}' failed after {} attempts: {}", tool_name, attempt + 1, error);
+                        warn!(
+                            "Tool '{}' failed after {} attempts: {}",
+                            tool_name,
+                            attempt + 1,
+                            error
+                        );
                         return Err(error);
                     }
                 }
@@ -813,12 +845,12 @@ impl LocalToolProvider {
                 info!("Resetting computer tool state");
                 // Implementation would go here
                 Ok(())
-            },
+            }
             "browser" => {
                 // Reset browser tool state
                 info!("Resetting browser tool state");
                 Ok(())
-            },
+            }
             _ => {
                 // Generic reset - just log
                 info!("No specific reset logic for tool '{}'", tool_name);
@@ -858,7 +890,10 @@ impl LocalToolProvider {
 
                 // Add comprehensive logging to diagnose the executor lookup issue
                 let available_executors: Vec<String> = executors_guard.keys().cloned().collect();
-                debug!("Tool execution attempt - Available executors: {:?}", available_executors);
+                debug!(
+                    "Tool execution attempt - Available executors: {:?}",
+                    available_executors
+                );
                 debug!("Looking for executor: '{}'", tool_name);
                 debug!("Total executor count: {}", executors_guard.len());
 
@@ -878,9 +913,13 @@ impl LocalToolProvider {
 
                     // Also check definitions HashMap for comparison
                     let definitions_guard = self.definitions.read().await;
-                    let available_definitions: Vec<String> = definitions_guard.keys().cloned().collect();
+                    let available_definitions: Vec<String> =
+                        definitions_guard.keys().cloned().collect();
                     error!("Available definitions: {:?}", available_definitions);
-                    error!("Tool exists in definitions: {}", definitions_guard.contains_key(tool_name));
+                    error!(
+                        "Tool exists in definitions: {}",
+                        definitions_guard.contains_key(tool_name)
+                    );
 
                     Err(AgentError::ToolNotFound(tool_call.name.clone()))
                 }
@@ -921,7 +960,8 @@ impl LocalToolProvider {
     async fn validate_tool_call(&self, tool_call: &ToolCall) -> Result<(), AgentError> {
         // 1. Check if tool exists
         let definitions = self.definitions.read().await;
-        let tool_def = definitions.get(&tool_call.name)
+        let tool_def = definitions
+            .get(&tool_call.name)
             .ok_or_else(|| AgentError::ToolNotFound(tool_call.name.clone()))?;
 
         // 2. Validate required parameters
@@ -931,12 +971,16 @@ impl LocalToolProvider {
                 if let Some(required) = schema.get("required").and_then(|r| r.as_array()) {
                     for req_field in required {
                         if let Some(field_name) = req_field.as_str() {
-                            if !tool_call.input.as_object()
+                            if !tool_call
+                                .input
+                                .as_object()
                                 .map(|obj| obj.contains_key(field_name))
-                                .unwrap_or(false) {
-                                return Err(AgentError::InvalidInput(
-                                    format!("Tool '{}' missing required parameter: {}", tool_call.name, field_name)
-                                ));
+                                .unwrap_or(false)
+                            {
+                                return Err(AgentError::InvalidInput(format!(
+                                    "Tool '{}' missing required parameter: {}",
+                                    tool_call.name, field_name
+                                )));
                             }
                         }
                     }
@@ -946,11 +990,13 @@ impl LocalToolProvider {
                 if let Some(args_obj) = tool_call.input.as_object() {
                     for (param_name, param_value) in args_obj {
                         if let Some(param_schema) = properties.get(param_name) {
-                            if let Err(validation_error) = self.validate_parameter_value(param_name, param_value, param_schema) {
-                                return Err(AgentError::InvalidInput(
-                                    format!("Tool '{}' parameter '{}' validation failed: {}",
-                                           tool_call.name, param_name, validation_error)
-                                ));
+                            if let Err(validation_error) =
+                                self.validate_parameter_value(param_name, param_value, param_schema)
+                            {
+                                return Err(AgentError::InvalidInput(format!(
+                                    "Tool '{}' parameter '{}' validation failed: {}",
+                                    tool_call.name, param_name, validation_error
+                                )));
                             }
                         }
                     }
@@ -971,7 +1017,12 @@ impl LocalToolProvider {
     }
 
     /// Validate individual parameter values against schema
-    fn validate_parameter_value(&self, _param_name: &str, value: &Value, schema: &Value) -> Result<(), String> {
+    fn validate_parameter_value(
+        &self,
+        _param_name: &str,
+        value: &Value,
+        schema: &Value,
+    ) -> Result<(), String> {
         // Type validation
         if let Some(expected_type) = schema.get("type").and_then(|t| t.as_str()) {
             let actual_type = match value {
@@ -983,8 +1034,13 @@ impl LocalToolProvider {
                 Value::Null => "null",
             };
 
-            if expected_type != actual_type && !(expected_type == "integer" && actual_type == "number") {
-                return Err(format!("Expected type '{}', got '{}'", expected_type, actual_type));
+            if expected_type != actual_type
+                && !(expected_type == "integer" && actual_type == "number")
+            {
+                return Err(format!(
+                    "Expected type '{}', got '{}'",
+                    expected_type, actual_type
+                ));
             }
         }
 
@@ -1017,12 +1073,20 @@ impl LocalToolProvider {
         if let Some(string_val) = value.as_str() {
             if let Some(min_len) = schema.get("minLength").and_then(|m| m.as_u64()) {
                 if (string_val.len() as u64) < min_len {
-                    return Err(format!("String length {} is below minimum {}", string_val.len(), min_len));
+                    return Err(format!(
+                        "String length {} is below minimum {}",
+                        string_val.len(),
+                        min_len
+                    ));
                 }
             }
             if let Some(max_len) = schema.get("maxLength").and_then(|m| m.as_u64()) {
                 if (string_val.len() as u64) > max_len {
-                    return Err(format!("String length {} is above maximum {}", string_val.len(), max_len));
+                    return Err(format!(
+                        "String length {} is above maximum {}",
+                        string_val.len(),
+                        max_len
+                    ));
                 }
             }
         }
@@ -1031,12 +1095,20 @@ impl LocalToolProvider {
         if let Some(array_val) = value.as_array() {
             if let Some(min_items) = schema.get("minItems").and_then(|m| m.as_u64()) {
                 if (array_val.len() as u64) < min_items {
-                    return Err(format!("Array length {} is below minimum {}", array_val.len(), min_items));
+                    return Err(format!(
+                        "Array length {} is below minimum {}",
+                        array_val.len(),
+                        min_items
+                    ));
                 }
             }
             if let Some(max_items) = schema.get("maxItems").and_then(|m| m.as_u64()) {
                 if (array_val.len() as u64) > max_items {
-                    return Err(format!("Array length {} is above maximum {}", array_val.len(), max_items));
+                    return Err(format!(
+                        "Array length {} is above maximum {}",
+                        array_val.len(),
+                        max_items
+                    ));
                 }
             }
         }
@@ -1057,32 +1129,40 @@ impl LocalToolProvider {
             if let Some(action) = args.get("action").and_then(|a| a.as_str()) {
                 // Coordinate validation for actions that need them
                 match action {
-                    "left_click" | "right_click" | "middle_click" | "double_click" | "mouse_move" | "scroll" => {
+                    "left_click" | "right_click" | "middle_click" | "double_click"
+                    | "mouse_move" | "scroll" => {
                         // Use strict coordinate validation per Anthropic Computer Use API specification
                         match validate_coordinate_parameter(&tool_call.input, "coordinate") {
                             Ok(_) => {
                                 // Coordinate is valid according to Anthropic spec
-                                debug!("Computer tool coordinate validation passed for action '{}'", action);
+                                debug!(
+                                    "Computer tool coordinate validation passed for action '{}'",
+                                    action
+                                );
                             }
                             Err(CoordinateValidationError::Missing) => {
-                                return Err(AgentError::InvalidInput(
-                                    format!("Computer tool action '{}' requires coordinate parameter", action)
-                                ));
+                                return Err(AgentError::InvalidInput(format!(
+                                    "Computer tool action '{}' requires coordinate parameter",
+                                    action
+                                )));
                             }
                             Err(CoordinateValidationError::NotArray) => {
                                 return Err(AgentError::InvalidInput(
-                                    "Computer tool coordinate parameter must be a list/array".to_string()
+                                    "Computer tool coordinate parameter must be a list/array"
+                                        .to_string(),
                                 ));
                             }
                             Err(CoordinateValidationError::InvalidLength(len)) => {
-                                return Err(AgentError::InvalidInput(
-                                    format!("Computer tool coordinate must have exactly 2 elements, got {}", len)
-                                ));
+                                return Err(AgentError::InvalidInput(format!(
+                                    "Computer tool coordinate must have exactly 2 elements, got {}",
+                                    len
+                                )));
                             }
                             Err(CoordinateValidationError::NotInteger(index, value)) => {
-                                return Err(AgentError::InvalidInput(
-                                    format!("Computer tool coordinate[{}] must be an integer, got '{}'", index, value)
-                                ));
+                                return Err(AgentError::InvalidInput(format!(
+                                    "Computer tool coordinate[{}] must be an integer, got '{}'",
+                                    index, value
+                                )));
                             }
                             Err(CoordinateValidationError::OutOfBounds(index, value)) => {
                                 return Err(AgentError::InvalidInput(
@@ -1090,31 +1170,34 @@ impl LocalToolProvider {
                                 ));
                             }
                         }
-                    },
+                    }
                     "type" => {
                         if !args.contains_key("text") {
                             return Err(AgentError::InvalidInput(
-                                "Computer tool 'type' action requires text parameter".to_string()
+                                "Computer tool 'type' action requires text parameter".to_string(),
                             ));
                         }
                         // Validate text length (prevent extremely long inputs)
                         if let Some(text) = args.get("text").and_then(|t| t.as_str()) {
                             if text.len() > 10000 {
                                 return Err(AgentError::InvalidInput(
-                                    "Computer tool text parameter too long (max 10000 characters)".to_string()
+                                    "Computer tool text parameter too long (max 10000 characters)"
+                                        .to_string(),
                                 ));
                             }
                         }
-                    },
+                    }
                     "wait" => {
                         if let Some(duration) = args.get("duration").and_then(|d| d.as_u64()) {
-                            if duration > 30000 { // Max 30 seconds
+                            if duration > 30000 {
+                                // Max 30 seconds
                                 return Err(AgentError::InvalidInput(
-                                    "Computer tool wait duration too long (max 30000ms)".to_string()
+                                    "Computer tool wait duration too long (max 30000ms)"
+                                        .to_string(),
                                 ));
                             }
                         }
-                    },
+                    }
                     _ => {} // Other actions validated by schema
                 }
             }
@@ -1133,15 +1216,19 @@ impl LocalToolProvider {
             // Validate URL parameters
             if let Some(url) = args.get("url").and_then(|u| u.as_str()) {
                 // Basic URL validation
-                if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("file://") {
+                if !url.starts_with("http://")
+                    && !url.starts_with("https://")
+                    && !url.starts_with("file://")
+                {
                     return Err(AgentError::InvalidInput(
-                        "Browser tool URL must start with http://, https://, or file://".to_string()
+                        "Browser tool URL must start with http://, https://, or file://"
+                            .to_string(),
                     ));
                 }
                 // Prevent local file access in production
                 if url.starts_with("file://") && !cfg!(debug_assertions) {
                     return Err(AgentError::InvalidInput(
-                        "Browser tool file:// URLs not allowed in production".to_string()
+                        "Browser tool file:// URLs not allowed in production".to_string(),
                     ));
                 }
             }
@@ -1157,12 +1244,17 @@ impl LocalToolProvider {
     /// - Error pattern detection improves reliability by 28% (Microsoft Azure AI Foundry, 2025)
     /// - Screenshot validation critical for computer use agents (https://azure.microsoft.com/en-us/blog/announcing-the-responses-api-and-computer-using-agent-in-azure-ai-foundry/)
     #[allow(dead_code)]
-    async fn validate_tool_output(&self, tool_name: &str, tool_result: &ToolResult) -> Result<(), AgentError> {
+    async fn validate_tool_output(
+        &self,
+        tool_name: &str,
+        tool_result: &ToolResult,
+    ) -> Result<(), AgentError> {
         // 1. Basic structure validation
         if tool_result.output.is_null() {
-            return Err(AgentError::InvalidOutput(
-                format!("Tool '{}' returned null output", tool_name)
-            ));
+            return Err(AgentError::InvalidOutput(format!(
+                "Tool '{}' returned null output",
+                tool_name
+            )));
         }
 
         // 2. Tool-specific output validation
@@ -1175,29 +1267,46 @@ impl LocalToolProvider {
 
         // 3. Size validation (prevent extremely large outputs)
         let output_size = tool_result.output.to_string().len();
-        if output_size > 10_000_000 { // 10MB limit
-            return Err(AgentError::InvalidOutput(
-                format!("Tool '{}' output too large: {} bytes (max 10MB)", tool_name, output_size)
-            ));
+        if output_size > 10_000_000 {
+            // 10MB limit
+            return Err(AgentError::InvalidOutput(format!(
+                "Tool '{}' output too large: {} bytes (max 10MB)",
+                tool_name, output_size
+            )));
         }
 
         // 4. Check for error indicators in output
         if let Some(output_str) = tool_result.output.as_str() {
             // Common error patterns that indicate tool failure
             let error_patterns = [
-                "error:", "ERROR:", "Error:",
-                "failed:", "FAILED:", "Failed:",
-                "exception:", "Exception:", "EXCEPTION:",
-                "timeout:", "Timeout:", "TIMEOUT:",
-                "permission denied", "access denied",
-                "not found", "does not exist",
-                "invalid", "malformed"
+                "error:",
+                "ERROR:",
+                "Error:",
+                "failed:",
+                "FAILED:",
+                "Failed:",
+                "exception:",
+                "Exception:",
+                "EXCEPTION:",
+                "timeout:",
+                "Timeout:",
+                "TIMEOUT:",
+                "permission denied",
+                "access denied",
+                "not found",
+                "does not exist",
+                "invalid",
+                "malformed",
             ];
 
             for pattern in &error_patterns {
                 if output_str.to_lowercase().contains(&pattern.to_lowercase()) {
-                    warn!("Tool '{}' output contains error pattern '{}': {}",
-                          tool_name, pattern, output_str.chars().take(200).collect::<String>());
+                    warn!(
+                        "Tool '{}' output contains error pattern '{}': {}",
+                        tool_name,
+                        pattern,
+                        output_str.chars().take(200).collect::<String>()
+                    );
                     // Don't fail here, just warn - some tools legitimately return error info
                 }
             }
@@ -1208,7 +1317,10 @@ impl LocalToolProvider {
 
     /// Computer tool specific output validation
     #[allow(dead_code)]
-    async fn validate_computer_tool_output(&self, tool_result: &ToolResult) -> Result<(), AgentError> {
+    async fn validate_computer_tool_output(
+        &self,
+        tool_result: &ToolResult,
+    ) -> Result<(), AgentError> {
         if let Some(output_obj) = tool_result.output.as_object() {
             // Screenshot validation
             if let Some(screenshot) = output_obj.get("screenshot") {
@@ -1216,14 +1328,15 @@ impl LocalToolProvider {
                     // Validate base64 format
                     if !screenshot_str.starts_with("data:image/") {
                         return Err(AgentError::InvalidOutput(
-                            "Computer tool screenshot must be base64 data URL".to_string()
+                            "Computer tool screenshot must be base64 data URL".to_string(),
                         ));
                     }
                     // Basic size check (reasonable screenshot size)
                     if screenshot_str.len() < 1000 || screenshot_str.len() > 50_000_000 {
-                        return Err(AgentError::InvalidOutput(
-                            format!("Computer tool screenshot size unreasonable: {} bytes", screenshot_str.len())
-                        ));
+                        return Err(AgentError::InvalidOutput(format!(
+                            "Computer tool screenshot size unreasonable: {} bytes",
+                            screenshot_str.len()
+                        )));
                     }
                 }
             }
@@ -1233,7 +1346,7 @@ impl LocalToolProvider {
                 if let Some(coords) = cursor_pos.as_array() {
                     if coords.len() != 2 {
                         return Err(AgentError::InvalidOutput(
-                            "Computer tool cursor_position must be [x, y] array".to_string()
+                            "Computer tool cursor_position must be [x, y] array".to_string(),
                         ));
                     }
                 }
@@ -1244,14 +1357,20 @@ impl LocalToolProvider {
 
     /// Browser tool specific output validation
     #[allow(dead_code)]
-    async fn validate_browser_tool_output(&self, tool_result: &ToolResult) -> Result<(), AgentError> {
+    async fn validate_browser_tool_output(
+        &self,
+        tool_result: &ToolResult,
+    ) -> Result<(), AgentError> {
         if let Some(output_obj) = tool_result.output.as_object() {
             // URL validation
             if let Some(url) = output_obj.get("url") {
                 if let Some(url_str) = url.as_str() {
-                    if !url_str.starts_with("http://") && !url_str.starts_with("https://") && !url_str.starts_with("file://") {
+                    if !url_str.starts_with("http://")
+                        && !url_str.starts_with("https://")
+                        && !url_str.starts_with("file://")
+                    {
                         return Err(AgentError::InvalidOutput(
-                            "Browser tool URL output must be valid URL".to_string()
+                            "Browser tool URL output must be valid URL".to_string(),
                         ));
                     }
                 }
@@ -1260,10 +1379,12 @@ impl LocalToolProvider {
             // HTML content size check
             if let Some(html) = output_obj.get("html") {
                 if let Some(html_str) = html.as_str() {
-                    if html_str.len() > 5_000_000 { // 5MB limit for HTML
-                        return Err(AgentError::InvalidOutput(
-                            format!("Browser tool HTML output too large: {} bytes", html_str.len())
-                        ));
+                    if html_str.len() > 5_000_000 {
+                        // 5MB limit for HTML
+                        return Err(AgentError::InvalidOutput(format!(
+                            "Browser tool HTML output too large: {} bytes",
+                            html_str.len()
+                        )));
                     }
                 }
             }
@@ -1281,7 +1402,7 @@ impl LocalToolProvider {
                     // Basic path validation
                     if path_str.contains("..") || path_str.starts_with("/") {
                         return Err(AgentError::InvalidOutput(
-                            "File tool path output contains invalid characters".to_string()
+                            "File tool path output contains invalid characters".to_string(),
                         ));
                     }
                 }
@@ -1290,10 +1411,12 @@ impl LocalToolProvider {
             // File content size validation
             if let Some(content) = output_obj.get("content") {
                 if let Some(content_str) = content.as_str() {
-                    if content_str.len() > 20_000_000 { // 20MB limit for file content
-                        return Err(AgentError::InvalidOutput(
-                            format!("File tool content output too large: {} bytes", content_str.len())
-                        ));
+                    if content_str.len() > 20_000_000 {
+                        // 20MB limit for file content
+                        return Err(AgentError::InvalidOutput(format!(
+                            "File tool content output too large: {} bytes",
+                            content_str.len()
+                        )));
                     }
                 }
             }
@@ -1336,60 +1459,96 @@ impl LocalToolProvider {
     }
 
     /// Automatically determine tool category based on tool name and description
-    pub fn infer_tool_category(tool_name: &str, description: &str) -> crate::agent::tools::ToolCategory {
+    pub fn infer_tool_category(
+        tool_name: &str,
+        description: &str,
+    ) -> crate::agent::tools::ToolCategory {
         use crate::agent::tools::ToolCategory;
 
         let name_lower = tool_name.to_lowercase();
         let desc_lower = description.to_lowercase();
 
         // Check for Anthropic Computer Use tools
-        if matches!(tool_name, "computer" | "bash" | "str_replace_based_edit_tool") ||
-           name_lower.contains("screenshot") || name_lower.contains("click") ||
-           name_lower.contains("type") || name_lower.contains("key") ||
-           name_lower.contains("scroll") || name_lower.contains("drag") ||
-           name_lower.contains("move") || name_lower.contains("accessibility_interface") {
+        if matches!(
+            tool_name,
+            "computer" | "bash" | "str_replace_based_edit_tool"
+        ) || name_lower.contains("screenshot")
+            || name_lower.contains("click")
+            || name_lower.contains("type")
+            || name_lower.contains("key")
+            || name_lower.contains("scroll")
+            || name_lower.contains("drag")
+            || name_lower.contains("move")
+            || name_lower.contains("accessibility_interface")
+        {
             return ToolCategory::AnthropicComputerUse;
         }
 
         // Check for Browser tools
-        if name_lower.starts_with("browser_") || name_lower.starts_with("safari_") ||
-           name_lower.contains("navigate") || name_lower.contains("web") ||
-           desc_lower.contains("browser") || desc_lower.contains("web") ||
-           desc_lower.contains("url") || desc_lower.contains("safari") {
+        if name_lower.starts_with("browser_")
+            || name_lower.starts_with("safari_")
+            || name_lower.contains("navigate")
+            || name_lower.contains("web")
+            || desc_lower.contains("browser")
+            || desc_lower.contains("web")
+            || desc_lower.contains("url")
+            || desc_lower.contains("safari")
+        {
             return ToolCategory::Browser;
         }
 
         // Check for Timer tools
-        if name_lower.contains("timer") || name_lower.contains("schedule") ||
-           name_lower.contains("monitor") || name_lower.contains("expired") ||
-           desc_lower.contains("timer") || desc_lower.contains("schedule") ||
-           desc_lower.contains("monitor") {
+        if name_lower.contains("timer")
+            || name_lower.contains("schedule")
+            || name_lower.contains("monitor")
+            || name_lower.contains("expired")
+            || desc_lower.contains("timer")
+            || desc_lower.contains("schedule")
+            || desc_lower.contains("monitor")
+        {
             return ToolCategory::Timer;
         }
 
         // Check for Desktop tools
-        if name_lower.contains("window") || name_lower.contains("application") ||
-           name_lower.contains("desktop") || name_lower.contains("clipboard") ||
-           name_lower.contains("cursor") || name_lower.contains("element") ||
-           name_lower.contains("focus") || name_lower.contains("launch") ||
-           desc_lower.contains("desktop") || desc_lower.contains("application") ||
-           desc_lower.contains("window") || desc_lower.contains("macos") {
+        if name_lower.contains("window")
+            || name_lower.contains("application")
+            || name_lower.contains("desktop")
+            || name_lower.contains("clipboard")
+            || name_lower.contains("cursor")
+            || name_lower.contains("element")
+            || name_lower.contains("focus")
+            || name_lower.contains("launch")
+            || desc_lower.contains("desktop")
+            || desc_lower.contains("application")
+            || desc_lower.contains("window")
+            || desc_lower.contains("macos")
+        {
             return ToolCategory::Desktop;
         }
 
         // Check for MCP tools
-        if name_lower.contains("mcp") || name_lower.starts_with("mcp_") ||
-           desc_lower.contains("mcp") || desc_lower.contains("external") {
+        if name_lower.contains("mcp")
+            || name_lower.starts_with("mcp_")
+            || desc_lower.contains("mcp")
+            || desc_lower.contains("external")
+        {
             return ToolCategory::MCP;
         }
 
         // Check for Basic tools (file operations, commands, etc.)
-        if name_lower.contains("file") || name_lower.contains("read") ||
-           name_lower.contains("write") || name_lower.contains("command") ||
-           name_lower.contains("terminal") || name_lower.contains("bash") ||
-           name_lower.contains("shell") || name_lower.contains("execute") ||
-           desc_lower.contains("file") || desc_lower.contains("command") ||
-           desc_lower.contains("terminal") || desc_lower.contains("bash") {
+        if name_lower.contains("file")
+            || name_lower.contains("read")
+            || name_lower.contains("write")
+            || name_lower.contains("command")
+            || name_lower.contains("terminal")
+            || name_lower.contains("bash")
+            || name_lower.contains("shell")
+            || name_lower.contains("execute")
+            || desc_lower.contains("file")
+            || desc_lower.contains("command")
+            || desc_lower.contains("terminal")
+            || desc_lower.contains("bash")
+        {
             return ToolCategory::Basic;
         }
 
@@ -1507,7 +1666,10 @@ impl ToolProvider for LocalToolProvider {
                         enabled_tools.push(tool);
                     } else {
                         disabled_count += 1;
-                        debug!("Tool '{}' is disabled, excluding from available tools", tool_name);
+                        debug!(
+                            "Tool '{}' is disabled, excluding from available tools",
+                            tool_name
+                        );
                     }
                 } else {
                     // Tool is unconfigured — allow by default.
@@ -1522,7 +1684,10 @@ impl ToolProvider for LocalToolProvider {
                 info!("Filtered out {} disabled tools", disabled_count);
             }
             if unconfigured_count > 0 {
-                info!("Included {} unconfigured tools (allowed by default)", unconfigured_count);
+                info!(
+                    "Included {} unconfigured tools (allowed by default)",
+                    unconfigured_count
+                );
             }
 
             all_tools = enabled_tools;
@@ -1545,10 +1710,13 @@ impl ToolProvider for LocalToolProvider {
 
         // Emit command execution start event if app handle is available
         if let Some(ref app_handle) = self.app_handle {
-            if let Err(e) = app_handle.emit(events::tools::COMMAND_EXECUTION_START, serde_json::json!({
-                "command": tool_name,
-                "id": command_id
-            })) {
+            if let Err(e) = app_handle.emit(
+                events::tools::COMMAND_EXECUTION_START,
+                serde_json::json!({
+                    "command": tool_name,
+                    "id": command_id
+                }),
+            ) {
                 error!("Failed to emit command-execution-start event: {}", e);
             }
         }
@@ -1564,12 +1732,15 @@ impl ToolProvider for LocalToolProvider {
                 warn!("{}", error_msg);
 
                 // Emit execution end event with error
-                if let Err(e) = app_handle.emit(events::tools::COMMAND_EXECUTION_END, serde_json::json!({
-                    "id": command_id,
-                    "success": false,
-                    "duration": start_time.elapsed().as_millis() as u64,
-                    "error": error_msg
-                })) {
+                if let Err(e) = app_handle.emit(
+                    events::tools::COMMAND_EXECUTION_END,
+                    serde_json::json!({
+                        "id": command_id,
+                        "success": false,
+                        "duration": start_time.elapsed().as_millis() as u64,
+                        "error": error_msg
+                    }),
+                ) {
                     error!("Failed to emit command-execution-end event: {}", e);
                 }
 
@@ -1579,16 +1750,22 @@ impl ToolProvider for LocalToolProvider {
 
         // 1. Validate the tool call before execution
         if let Err(validation_error) = self.validate_tool_call(&tool_call).await {
-            warn!("Tool call validation failed for '{}': {}", tool_name, validation_error);
+            warn!(
+                "Tool call validation failed for '{}': {}",
+                tool_name, validation_error
+            );
 
             // Emit validation failure event
             if let Some(ref app_handle) = self.app_handle {
-                if let Err(e) = app_handle.emit(events::tools::COMMAND_EXECUTION_END, serde_json::json!({
-                    "id": command_id,
-                    "success": false,
-                    "duration": start_time.elapsed().as_millis() as u64,
-                    "error": format!("Validation failed: {}", validation_error)
-                })) {
+                if let Err(e) = app_handle.emit(
+                    events::tools::COMMAND_EXECUTION_END,
+                    serde_json::json!({
+                        "id": command_id,
+                        "success": false,
+                        "duration": start_time.elapsed().as_millis() as u64,
+                        "error": format!("Validation failed: {}", validation_error)
+                    }),
+                ) {
                     error!("Failed to emit command-execution-end event: {}", e);
                 }
             }
@@ -1609,12 +1786,15 @@ impl ToolProvider for LocalToolProvider {
                 Err(e) => (false, Some(e.to_string())),
             };
 
-            if let Err(e) = app_handle.emit(events::tools::COMMAND_EXECUTION_END, serde_json::json!({
-                "id": command_id,
-                "success": success,
-                "duration": duration_ms,
-                "error": error_msg
-            })) {
+            if let Err(e) = app_handle.emit(
+                events::tools::COMMAND_EXECUTION_END,
+                serde_json::json!({
+                    "id": command_id,
+                    "success": success,
+                    "duration": duration_ms,
+                    "error": error_msg
+                }),
+            ) {
                 error!("Failed to emit command-execution-end event: {}", e);
             }
         }

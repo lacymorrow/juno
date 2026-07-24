@@ -3,17 +3,17 @@
 //! Provides commands for UI-Guided Visual Token Selection system,
 //! including performance benchmarking and 33% cost reduction validation.
 
-use crate::agent::tools::ui_token_selector::{
-    UITokenSelector, TokenSelectionConfig, DisplayInfo, DisplayBounds
-};
 use crate::agent::tools::ui_token_selector::performance::{
-    PerformanceTracker, BenchmarkResult, PerformanceMetrics, CostReductionTracker
+    BenchmarkResult, CostReductionTracker, PerformanceMetrics, PerformanceTracker,
+};
+use crate::agent::tools::ui_token_selector::{
+    DisplayBounds, DisplayInfo, TokenSelectionConfig, UITokenSelector,
 };
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{command, State};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// Configuration for UI token selection operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,11 +75,14 @@ pub async fn test_ui_token_selection(
     image_data: Vec<u8>,
     display_resolution: (u32, u32),
 ) -> Result<UITokenSelectionResult, String> {
-    info!("Testing UI token selection with {}x{} display", display_resolution.0, display_resolution.1);
+    info!(
+        "Testing UI token selection with {}x{} display",
+        display_resolution.0, display_resolution.1
+    );
 
     let config = TokenSelectionConfig::default_multi_monitor();
-    let selector = UITokenSelector::new(config)
-        .map_err(|e| format!("Failed to create selector: {}", e))?;
+    let selector =
+        UITokenSelector::new(config).map_err(|e| format!("Failed to create selector: {}", e))?;
 
     let display_info = DisplayInfo {
         id: 1,
@@ -94,7 +97,10 @@ pub async fn test_ui_token_selection(
 
     let start_time = std::time::Instant::now();
 
-    match selector.process_screenshot(&image_data, Some(display_info)).await {
+    match selector
+        .process_screenshot(&image_data, Some(display_info))
+        .await
+    {
         Ok(result) => {
             let processing_time = start_time.elapsed();
 
@@ -138,18 +144,27 @@ pub async fn run_performance_benchmark(
             let scenarios_passed = benchmark_results.iter().filter(|r| r.meets_target).count();
 
             let average_reduction = if !benchmark_results.is_empty() {
-                benchmark_results.iter().map(|r| r.reduction_percentage).sum::<f64>() / benchmark_results.len() as f64
+                benchmark_results
+                    .iter()
+                    .map(|r| r.reduction_percentage)
+                    .sum::<f64>()
+                    / benchmark_results.len() as f64
             } else {
                 0.0
             };
 
             let average_processing_time = if !benchmark_results.is_empty() {
-                benchmark_results.iter().map(|r| r.processing_time_ms as f64).sum::<f64>() / benchmark_results.len() as f64
+                benchmark_results
+                    .iter()
+                    .map(|r| r.processing_time_ms as f64)
+                    .sum::<f64>()
+                    / benchmark_results.len() as f64
             } else {
                 0.0
             };
 
-            let cost_reduction_achieved = performance_tracker.validate_cost_reduction_target()
+            let cost_reduction_achieved = performance_tracker
+                .validate_cost_reduction_target()
                 .unwrap_or(false);
 
             info!(
@@ -182,7 +197,8 @@ pub async fn get_performance_metrics(
 
     let performance_tracker = PerformanceTracker::new();
 
-    performance_tracker.get_metrics()
+    performance_tracker
+        .get_metrics()
         .map_err(|e| format!("Failed to get metrics: {}", e))
 }
 
@@ -195,7 +211,8 @@ pub async fn validate_cost_reduction_target(
 
     let performance_tracker = PerformanceTracker::new();
 
-    performance_tracker.validate_cost_reduction_target()
+    performance_tracker
+        .validate_cost_reduction_target()
         .map_err(|e| format!("Failed to validate target: {}", e))
 }
 
@@ -208,7 +225,8 @@ pub async fn get_cost_reduction_data(
 
     let performance_tracker = PerformanceTracker::new();
 
-    performance_tracker.get_cost_reduction_data()
+    performance_tracker
+        .get_cost_reduction_data()
         .map_err(|e| format!("Failed to get cost data: {}", e))
 }
 
@@ -218,11 +236,14 @@ pub async fn test_multi_monitor_optimization(
     _app_state: State<'_, AppState>,
     display_configs: Vec<(u32, u32, bool)>, // (width, height, is_main)
 ) -> Result<Vec<UITokenSelectionResult>, String> {
-    info!("Testing multi-monitor optimization with {} displays", display_configs.len());
+    info!(
+        "Testing multi-monitor optimization with {} displays",
+        display_configs.len()
+    );
 
     let config = TokenSelectionConfig::default_multi_monitor();
-    let selector = UITokenSelector::new(config)
-        .map_err(|e| format!("Failed to create selector: {}", e))?;
+    let selector =
+        UITokenSelector::new(config).map_err(|e| format!("Failed to create selector: {}", e))?;
 
     let mut results = Vec::new();
 
@@ -244,7 +265,10 @@ pub async fn test_multi_monitor_optimization(
 
         let start_time = std::time::Instant::now();
 
-        match selector.process_screenshot(&test_image_data, Some(display_info.clone())).await {
+        match selector
+            .process_screenshot(&test_image_data, Some(display_info.clone()))
+            .await
+        {
             Ok(result) => {
                 let processing_time = start_time.elapsed();
 
@@ -273,16 +297,18 @@ pub async fn test_multi_monitor_optimization(
     }
 
     let successful_tests = results.iter().filter(|r| r.success).count();
-    info!("Multi-monitor optimization test completed: {}/{} displays successful", successful_tests, display_configs.len());
+    info!(
+        "Multi-monitor optimization test completed: {}/{} displays successful",
+        successful_tests,
+        display_configs.len()
+    );
 
     Ok(results)
 }
 
 /// Resets performance metrics for fresh benchmarking
 #[command]
-pub async fn reset_performance_metrics(
-    _app_state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn reset_performance_metrics(_app_state: State<'_, AppState>) -> Result<String, String> {
     info!("Resetting UI token selection performance metrics");
 
     // Create a new tracker instance (which starts fresh)
@@ -347,10 +373,10 @@ pub async fn get_ui_token_config(
 mod tests {
     use super::*;
 
-
     #[tokio::test]
     async fn test_benchmark_summary_calculation() {
-        let benchmark_results = [BenchmarkResult {
+        let benchmark_results = [
+            BenchmarkResult {
                 test_name: "Test 1".to_string(),
                 timestamp: 0,
                 original_tokens: 1000,
@@ -371,11 +397,16 @@ mod tests {
                 memory_usage_mb: 75.0,
                 display_resolution: (3840, 2160),
                 meets_target: true,
-            }];
+            },
+        ];
 
         let total_scenarios = benchmark_results.len();
         let scenarios_passed = benchmark_results.iter().filter(|r| r.meets_target).count();
-        let average_reduction = benchmark_results.iter().map(|r| r.reduction_percentage).sum::<f64>() / benchmark_results.len() as f64;
+        let average_reduction = benchmark_results
+            .iter()
+            .map(|r| r.reduction_percentage)
+            .sum::<f64>()
+            / benchmark_results.len() as f64;
 
         assert_eq!(total_scenarios, 2);
         assert_eq!(scenarios_passed, 2);

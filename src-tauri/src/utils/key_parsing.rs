@@ -29,7 +29,10 @@ pub fn parse_key_combination(key_combo: &str) -> Result<ParsedKeyCombo, String> 
     let key = parts[parts.len() - 1].clone();
     let modifiers = parts[0..parts.len() - 1].to_vec();
 
-    debug!("Parsed key combo '{}' -> key: '{}', modifiers: {:?}", key_combo, key, modifiers);
+    debug!(
+        "Parsed key combo '{}' -> key: '{}', modifiers: {:?}",
+        key_combo, key, modifiers
+    );
 
     Ok(ParsedKeyCombo { key, modifiers })
 }
@@ -124,7 +127,10 @@ pub fn to_applescript_format(key_combo: &str) -> Result<String, String> {
                 };
                 if c.is_ascii_lowercase() {
                     // This is a simplified mapping - in reality you'd need a full key code table
-                    return Ok(format!("tell application \"System Events\" to keystroke \"{}\"", apple_key));
+                    return Ok(format!(
+                        "tell application \"System Events\" to keystroke \"{}\"",
+                        apple_key
+                    ));
                 }
             }
             return Err(format!("Unsupported key for AppleScript: {}", apple_key));
@@ -143,7 +149,12 @@ pub fn to_applescript_format(key_combo: &str) -> Result<String, String> {
                 "shift" => apple_modifiers.push("shift down"),
                 "option" => apple_modifiers.push("option down"),
                 "control" => apple_modifiers.push("control down"),
-                _ => return Err(format!("Unsupported modifier for AppleScript: {}", modifier)),
+                _ => {
+                    return Err(format!(
+                        "Unsupported modifier for AppleScript: {}",
+                        modifier
+                    ))
+                }
             }
         }
         script.push_str(&apple_modifiers.join(", "));

@@ -1,17 +1,17 @@
-use tauri::{
-    AppHandle,
-    Emitter,
-    Manager,
-    menu::{Menu, SubmenuBuilder, MenuItemBuilder, AboutMetadata}
-};
-use tracing::{info, error};
 use crate::constants;
+use crate::constants::errors::{prefixes, templates};
 use crate::constants::events;
-use crate::constants::errors::{templates, prefixes};
+use tauri::{
+    menu::{AboutMetadata, Menu, MenuItemBuilder, SubmenuBuilder},
+    AppHandle, Emitter, Manager,
+};
+use tracing::{error, info};
 
 /// Helper function to format error messages with proper template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 
 /// Setup the application menu for the main window
@@ -195,7 +195,14 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
 
     // Build the complete menu
     let app_menu = tauri::menu::MenuBuilder::new(app)
-        .items(&[&app_submenu, &file_submenu, &edit_submenu, &view_submenu, &window_submenu, &help_submenu])
+        .items(&[
+            &app_submenu,
+            &file_submenu,
+            &edit_submenu,
+            &view_submenu,
+            &window_submenu,
+            &help_submenu,
+        ])
         .build()?;
 
     info!("✅ Application menu setup completed");
@@ -209,15 +216,25 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::CHECK_FOR_UPDATES => {
             info!("[Menu] Check for Updates menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::UPDATE_CHECK_REQUESTED, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "update check", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "update check", e)
+                );
             }
         }
         constants::app_menu_ids::SETTINGS => {
             info!("[Menu] Settings menu item clicked");
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                    error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_PROCESS, "settings window open", e));
+                if let Err(e) =
+                    crate::window_management::open_settings_window(app_handle_clone).await
+                {
+                    error!(
+                        "{} {}",
+                        prefixes::MENU,
+                        format_error(templates::FAILED_TO_PROCESS, "settings window open", e)
+                    );
                 }
             });
         }
@@ -229,45 +246,76 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::NEW_CHAT => {
             info!("[Menu] New Chat menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::NEW_CHAT_REQUESTED, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "new chat", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "new chat", e)
+                );
             }
         }
         constants::app_menu_ids::IMPORT_CHAT => {
             info!("[Menu] Import Chat menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::IMPORT_CHAT_REQUESTED, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "import chat", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "import chat", e)
+                );
             }
         }
         constants::app_menu_ids::EXPORT_CHAT => {
             info!("[Menu] Export Chat menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::EXPORT_CHAT_REQUESTED, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "export chat", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "export chat", e)
+                );
             }
         }
 
         // View Menu
         constants::app_menu_ids::TOGGLE_FLOATING_BAR => {
             info!("[Menu] Toggle Floating Bar menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::menu::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "toggle floating bar", e));
+            if let Err(e) =
+                app_handle.emit(constants::events::menu::TOGGLE_FLOATING_BAR_REQUESTED, ())
+            {
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "toggle floating bar", e)
+                );
             }
         }
         constants::app_menu_ids::TOGGLE_DEV_PANEL => {
             info!("[Menu] Toggle Dev Panel menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::menu::TOGGLE_DEV_PANEL_REQUESTED, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "toggle dev panel", e));
+            if let Err(e) = app_handle.emit(constants::events::menu::TOGGLE_DEV_PANEL_REQUESTED, ())
+            {
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "toggle dev panel", e)
+                );
             }
         }
         constants::app_menu_ids::SHOW_DEVTOOLS => {
             info!("[Menu] Developer Tools menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::DEVTOOLS_REQUESTED, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "devtools", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "devtools", e)
+                );
             }
         }
         constants::app_menu_ids::SHOW_PERMISSIONS => {
             info!("[Menu] Permissions menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::PERMISSIONS_REQUESTED, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "permissions", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "permissions", e)
+                );
             }
         }
 
@@ -275,7 +323,11 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::ZOOM_IN => {
             info!("[Menu] Zoom In menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::ZOOM_IN, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "zoom in", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "zoom in", e)
+                );
             }
             // Also apply zoom directly to the focused webview
             apply_zoom_to_focused_window(&app_handle, ZoomAction::In);
@@ -283,27 +335,39 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::ZOOM_OUT => {
             info!("[Menu] Zoom Out menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::ZOOM_OUT, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "zoom out", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "zoom out", e)
+                );
             }
             apply_zoom_to_focused_window(&app_handle, ZoomAction::Out);
         }
         constants::app_menu_ids::ACTUAL_SIZE => {
             info!("[Menu] Actual Size menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::RESET_ZOOM, ()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "reset zoom", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "reset zoom", e)
+                );
             }
             apply_zoom_to_focused_window(&app_handle, ZoomAction::Reset);
         }
 
         // Window Menu - handled by window management module
-        constants::app_menu_ids::MINIMIZE |
-        constants::app_menu_ids::ZOOM |
-        constants::app_menu_ids::BRING_ALL_TO_FRONT |
-        constants::app_menu_ids::TOGGLE_FULLSCREEN => {
+        constants::app_menu_ids::MINIMIZE
+        | constants::app_menu_ids::ZOOM
+        | constants::app_menu_ids::BRING_ALL_TO_FRONT
+        | constants::app_menu_ids::TOGGLE_FULLSCREEN => {
             let app_handle_clone = app_handle.clone();
             let event_id_owned = event_id.to_string(); // Convert to owned String
             tauri::async_runtime::spawn(async move {
-                crate::window_management::handle_window_menu_event(&app_handle_clone, &event_id_owned).await;
+                crate::window_management::handle_window_menu_event(
+                    &app_handle_clone,
+                    &event_id_owned,
+                )
+                .await;
             });
         }
 
@@ -311,32 +375,52 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::HELP => {
             info!("[Menu] Help menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::SHOW_HELP, "general") {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "help", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "help", e)
+                );
             }
         }
         constants::app_menu_ids::KEYBOARD_SHORTCUTS => {
             info!("[Menu] Keyboard Shortcuts menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::SHOW_HELP, "shortcuts") {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "keyboard shortcuts", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "keyboard shortcuts", e)
+                );
             }
         }
         constants::app_menu_ids::SEND_FEEDBACK => {
             info!("[Menu] Send Feedback menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::SHOW_FEEDBACK, "feedback") {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "feedback", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "feedback", e)
+                );
             }
         }
         constants::app_menu_ids::REPORT_ISSUE => {
             info!("[Menu] Report Issue menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::SHOW_FEEDBACK, "issue") {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_EMIT, "report issue", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_EMIT, "report issue", e)
+                );
             }
         }
         constants::app_menu_ids::VISIT_WEBSITE => {
             info!("[Menu] Visit Website menu item clicked");
             // Open website in default browser
             if let Err(e) = open::that("https://github.com/juno-ai") {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_PROCESS, "website open", e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(templates::FAILED_TO_PROCESS, "website open", e)
+                );
             }
         }
 
@@ -345,8 +429,14 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             info!("[Menu] Received tray menu settings ID, redirecting to settings");
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                    error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_PROCESS, "settings window open", e));
+                if let Err(e) =
+                    crate::window_management::open_settings_window(app_handle_clone).await
+                {
+                    error!(
+                        "{} {}",
+                        prefixes::MENU,
+                        format_error(templates::FAILED_TO_PROCESS, "settings window open", e)
+                    );
                 }
             });
         }
@@ -409,7 +499,9 @@ fn apply_zoom_to_focused_window(app_handle: &AppHandle, action: ZoomAction) {
 }
 
 /// Setup menu for all windows that should support Edit menu functionality
-pub fn setup_menu_for_all_windows(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub fn setup_menu_for_all_windows(
+    app_handle: &AppHandle,
+) -> Result<(), Box<dyn std::error::Error>> {
     info!("🔗 Setting up menu for all windows...");
 
     // Get the app menu
@@ -424,7 +516,15 @@ pub fn setup_menu_for_all_windows(app_handle: &AppHandle) -> Result<(), Box<dyn 
     for label in window_labels {
         if let Some(window) = app_handle.get_window(label) {
             if let Err(e) = window.set_menu(app_menu.clone()) {
-                error!("{} {}", prefixes::MENU, format_error(templates::FAILED_TO_CONFIGURE, &format!("menu for window '{}'", label), e));
+                error!(
+                    "{} {}",
+                    prefixes::MENU,
+                    format_error(
+                        templates::FAILED_TO_CONFIGURE,
+                        &format!("menu for window '{}'", label),
+                        e
+                    )
+                );
             } else {
                 info!("[Menu] ✅ Menu set for window '{}'", label);
             }

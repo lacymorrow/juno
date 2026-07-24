@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local};
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use tracing::{info, warn, error, debug};
+use std::sync::{Arc, Mutex};
+use tracing::{debug, error, info, warn};
 
 /// Log grouping configuration
 #[derive(Debug, Clone)]
@@ -98,12 +98,7 @@ fn format_timestamp(timestamp_ms: u64, use_24h: bool) -> String {
 }
 
 /// Enhanced logging function with Slack/Apple Messages style grouping
-pub fn log_with_grouping(
-    level: &str,
-    component: &str,
-    message: &str,
-    timestamp_ms: Option<u64>,
-) {
+pub fn log_with_grouping(level: &str, component: &str, message: &str, timestamp_ms: Option<u64>) {
     let timestamp = timestamp_ms.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -117,7 +112,8 @@ pub fn log_with_grouping(
     let should_show_timestamp = {
         match LOG_TRACKERS.lock() {
             Ok(mut trackers) => {
-                let tracker = trackers.entry(tracker_key.clone())
+                let tracker = trackers
+                    .entry(tracker_key.clone())
                     .or_insert_with(|| LogGroupTracker::new(config.clone()));
 
                 let show = tracker.should_show_timestamp(timestamp);
@@ -126,7 +122,10 @@ pub fn log_with_grouping(
             }
             Err(e) => {
                 // If the mutex is poisoned, log the error and fallback to showing timestamp
-                eprintln!("Log tracker mutex poisoned: {}. Showing timestamp as fallback.", e);
+                eprintln!(
+                    "Log tracker mutex poisoned: {}. Showing timestamp as fallback.",
+                    e
+                );
                 true // Safe fallback - show timestamp when uncertain
             }
         }
@@ -135,7 +134,13 @@ pub fn log_with_grouping(
     // Format the log message
     let formatted_message = if should_show_timestamp {
         let time_str = format_timestamp(timestamp, config.use_24h_format);
-        format!("\n⏰ {} - {}\n🔧 {}: {}", time_str, component, level.to_uppercase(), message)
+        format!(
+            "\n⏰ {} - {}\n🔧 {}: {}",
+            time_str,
+            component,
+            level.to_uppercase(),
+            message
+        )
     } else {
         format!("   🔧 {}: {}", level.to_uppercase(), message)
     };
@@ -167,10 +172,15 @@ pub fn log_tool_complete(tool_name: &str, success: bool, duration_ms: Option<u64
         .map(|d| format!(" ({}ms)", d))
         .unwrap_or_default();
 
-    let message = format!("{} Tool '{}' {}{}",
+    let message = format!(
+        "{} Tool '{}' {}{}",
         status_icon,
         tool_name,
-        if success { "completed successfully" } else { "failed" },
+        if success {
+            "completed successfully"
+        } else {
+            "failed"
+        },
         duration_str
     );
 
@@ -195,7 +205,10 @@ pub fn reset_grouping(component: &str) {
             trackers.remove(component);
         }
         Err(e) => {
-            eprintln!("Failed to reset log grouping for '{}': {}. Continuing without reset.", component, e);
+            eprintln!(
+                "Failed to reset log grouping for '{}': {}. Continuing without reset.",
+                component, e
+            );
         }
     }
 }
