@@ -44,7 +44,7 @@ jobs:
   # build script downloaded a 2021 driver from a decommissioned Microsoft CDN
   # and panicked on any clean checkout. See docs/ci-rust-blocker.md.)
   rust:
-    name: Rust (test)
+    name: Rust (fmt + clippy + test)
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -52,6 +52,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       # Keyed on Cargo.lock; without it every run pays the full ~20min build.
       - name: Cache cargo registry and target
@@ -69,17 +71,16 @@ jobs:
           bun install
           bun run build
 
+      # Cheapest gate first: fails in seconds without compiling anything.
+      - name: Check formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      # `--all-targets` covers tests and examples, not just the lib — that is
+      # where most of the original findings were.
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
       # Excludes the `#[ignore]`d suites that need a live Chrome on :9222
       # (tests/browser_cdp_live.rs) — those are run by hand during QA.
-      #
-      # `cargo fmt --check` and `cargo clippy -D warnings` are deliberately NOT
-      # gated yet. Both fail on pre-existing debt unrelated to any current
-      # change, and a gate that is red on arrival trains people to ignore CI:
-      #   - rustfmt: 3,589 hunks across 222 files. Fixing it is a mechanical but
-      #     enormous diff that would bury real changes and rewrite git blame.
-      #   - clippy: 46 warnings, 26 auto-fixable via `cargo clippy --fix`. The
-      #     rest are assertion lints, including 11 tests whose only assertion is
-      #     `assert!(true, "...")` — those need deciding, not silencing.
-      # Land those cleanups on their own, then add the gates here.
       - name: Test
         run: cargo test --manifest-path src-tauri/Cargo.toml
