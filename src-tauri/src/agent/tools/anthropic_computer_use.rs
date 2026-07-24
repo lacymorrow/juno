@@ -49,6 +49,18 @@ const AGENT_CURSOR_COLORS: &[&str] = &[
     "#F97316", // orange
 ];
 
+/// Identity of the parallel agent session that owns a tool registration
+/// (LAC-1432). When present, the agent's overlay cursor is keyed by the
+/// session id and drawn in the session's identity color, and physical
+/// input is attributed to the session in the input arbiter. When absent
+/// (legacy callers), a process-unique `agent-N` cursor id and the legacy
+/// palette are used instead.
+#[derive(Clone, Debug)]
+pub struct SessionToolContext {
+    pub session_id: String,
+    pub color: String,
+}
+
 /// Emit a cursor position update for a named agent. No-op if the app_handle cannot emit.
 fn emit_agent_cursor_update(
     app_handle: &tauri::AppHandle,
@@ -73,10 +85,13 @@ fn emit_agent_cursor_update(
 }
 
 /// Emit cursor removal for a named agent (call on agent completion or cancellation).
-#[allow(dead_code)] // Symmetric counterpart to emit_agent_cursor_update — staged for completion/cancel paths
-fn emit_agent_cursor_remove(app_handle: &tauri::AppHandle, agent_id: &str) {
-    let state_manager = app_handle.state::<AppState>();
-    state_manager.remove_agent_cursor(agent_id);
+///
+/// Called from `SessionHandle::drop` so every session end path — complete,
+/// cancel, error, panic unwind — clears the session's overlay cursor.
+pub(crate) fn emit_agent_cursor_remove(app_handle: &tauri::AppHandle, agent_id: &str) {
+    if let Some(state_manager) = app_handle.try_state::<AppState>() {
+        state_manager.remove_agent_cursor(agent_id);
+    }
     let payload = serde_json::json!({ "agent_id": agent_id });
     if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_REMOVE, &payload) {
         tracing::debug!("agent cursor remove emit failed: {}", e);
@@ -910,9 +925,15 @@ macro_rules! handle_anthropic_result {
 // --- Main computer tool execution function ---
 
 /// Execute computer tool
+///
+/// `session_id` identifies the parallel agent session issuing the action
+/// (LAC-1432). It attributes physical input in the arbiter and drives the
+/// session's "current action" shown in the roster/switcher UI. Legacy
+/// callers without a session pass `None`.
 pub async fn execute_computer_tool(
     app_handle: &tauri::AppHandle,
     input: Value,
+    session_id: Option<&str>,
 ) -> Result<Value, String> {
     let action = match input["action"].as_str() {
         Some(action) => action,
@@ -927,6 +948,19 @@ pub async fn execute_computer_tool(
     // Enhanced logging with descriptive tool name and action details
     info!("🖥️ Computer Use: {} → {}", descriptive_tool_name, action);
 
+    // Record this session's current action so the roster/switcher UI can
+    // show what each parallel agent is doing right now.
+    if let Some(session_id) = session_id {
+        let registry = state_manager.agent_sessions();
+        let id = crate::agents::AgentSessionId::from(session_id.to_string());
+        if let Some(session) = registry.get(&id).await {
+            session
+                .set_current_action(Some(descriptive_tool_name.clone()))
+                .await;
+            crate::agents::broadcast_sessions_updated(app_handle, &registry).await;
+        }
+    }
+
     // Log enhanced tool call request with descriptive name
     crate::agent::tool_logger::log_enhanced_tool_call_request(
         app_handle,
@@ -938,6 +972,30 @@ pub async fn execute_computer_tool(
 
     // Enforce cooldown between rapid UI actions to prevent "clicked too fast" failures
     enforce_action_cooldown(action).await;
+
+    // Serialize coordinate-based physical input across parallel sessions
+    // (LAC-1432). macOS has one hardware pointer, so CGEvent-based actions
+    // from different sessions must not interleave. Actions listed here are
+    // ALWAYS physical; the click/type actions that attempt AX-grounded
+    // interaction first acquire the guard inside their physical fallback
+    // blocks instead, so AX-only actions keep running in parallel.
+    let always_physical = matches!(
+        action,
+        "middle_click"
+            | "triple_click"
+            | "left_click_drag"
+            | "mouse_move"
+            | "left_mouse_down"
+            | "left_mouse_up"
+            | "key"
+            | "hold_key"
+            | "scroll"
+    );
+    let _physical_input_guard = if always_physical {
+        Some(state_manager.input_arbiter().acquire(session_id).await)
+    } else {
+        None
+    };
 
     // --- Safety checks ---
     // 1. Self-automation prevention + blocked app check
@@ -1038,6 +1096,8 @@ pub async fn execute_computer_tool(
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
                     if !ax_result.used_ax_click {
+                        // Physical fallback — serialize with other sessions' input.
+                        let _guard = state_manager.input_arbiter().acquire(session_id).await;
                         // Tier 2-4: process-targeted injection (SkyLight → CGEventPostToPid → HID-restore)
                         // Bypasses AX; works on canvas, games, Chromium web content, and non-AX apps.
                         let click_method = state_manager.desktop.left_click_no_warp(
@@ -1082,6 +1142,8 @@ pub async fn execute_computer_tool(
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
                     if !ax_result.used_ax_click {
+                        // Physical fallback — serialize with other sessions' input.
+                        let _guard = state_manager.input_arbiter().acquire(session_id).await;
                         // Tier 2-4: process-targeted injection, no cursor warp
                         let click_method = state_manager.desktop.right_click_no_warp(screen_x, screen_y);
                         match click_method {
@@ -1135,6 +1197,8 @@ pub async fn execute_computer_tool(
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
                     if !ax_result.used_ax_click {
+                        // Physical fallback — serialize with other sessions' input.
+                        let _guard = state_manager.input_arbiter().acquire(session_id).await;
                         // Tier 2-4: process-targeted double-click, no cursor warp
                         let click_method = state_manager.desktop.double_click_no_warp(
                             screen_x,
@@ -1342,6 +1406,9 @@ pub async fn execute_computer_tool(
                     // keyboard simulation (clipboard paste) when AX isn't supported.
                     let typed_via_ax = try_ax_type_focused(app_handle, text);
                     if !typed_via_ax {
+                        // Physical fallback (clipboard + CGEvent paste) —
+                        // serialize with other sessions' input.
+                        let _guard = state_manager.input_arbiter().acquire(session_id).await;
                         handle_anthropic_result!(crate::commands::keyboard::type_text(
                             text.to_string(),
                             app_handle.clone(),
@@ -1943,7 +2010,21 @@ pub async fn register_anthropic_computer_use_tools(
     provider: &mut LocalToolProvider,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    register_anthropic_computer_use_tools_with_version(provider, app_handle, None).await
+    register_anthropic_computer_use_tools_with_version(provider, app_handle, None, None).await
+}
+
+/// Register Anthropic Computer Use tools bound to a parallel agent session.
+///
+/// The session's id becomes the overlay cursor id and its identity color is
+/// used for the cursor ring, so the desktop overlay and the roster UI agree
+/// on which agent is which (LAC-1432).
+pub async fn register_anthropic_computer_use_tools_for_session(
+    provider: &mut LocalToolProvider,
+    app_handle: tauri::AppHandle,
+    session: SessionToolContext,
+) -> Result<(), String> {
+    register_anthropic_computer_use_tools_with_version(provider, app_handle, None, Some(session))
+        .await
 }
 
 /// Register Anthropic Computer Use tools with specific API version
@@ -1951,6 +2032,7 @@ pub async fn register_anthropic_computer_use_tools_with_version(
     provider: &mut LocalToolProvider,
     app_handle: tauri::AppHandle,
     version_config: Option<ToolVersionConfig>,
+    session: Option<SessionToolContext>,
 ) -> Result<(), String> {
     let version_info = version_config
         .as_ref()
@@ -1959,11 +2041,22 @@ pub async fn register_anthropic_computer_use_tools_with_version(
 
     info!("Registering official Anthropic Computer Use tools (API version: {})...", version_info);
 
-    // Assign a unique cursor ID and color to this agent instance at registration time.
-    // The ID is captured by the closure so every tool call from this agent shares it.
-    let cursor_slot = NEXT_AGENT_CURSOR_ID.fetch_add(1, Ordering::Relaxed);
-    let agent_cursor_id = format!("agent-{}", cursor_slot);
-    let agent_cursor_color = AGENT_CURSOR_COLORS[(cursor_slot as usize - 1) % AGENT_CURSOR_COLORS.len()].to_string();
+    // Cursor identity: prefer the parallel-session identity (session id +
+    // palette color) so overlay cursors match the roster UI. Legacy callers
+    // without a session get a process-unique `agent-N` id and the legacy
+    // palette, exactly as before.
+    let (agent_cursor_id, agent_cursor_color, session_id) = match session {
+        Some(ctx) => (ctx.session_id.clone(), ctx.color, Some(ctx.session_id)),
+        None => {
+            let cursor_slot = NEXT_AGENT_CURSOR_ID.fetch_add(1, Ordering::Relaxed);
+            (
+                format!("agent-{}", cursor_slot),
+                AGENT_CURSOR_COLORS[(cursor_slot as usize - 1) % AGENT_CURSOR_COLORS.len()]
+                    .to_string(),
+                None,
+            )
+        }
+    };
 
     info!("🖱️ Agent cursor ID: {} (color: {})", agent_cursor_id, agent_cursor_color);
 
@@ -1978,12 +2071,16 @@ pub async fn register_anthropic_computer_use_tools_with_version(
                     let handle = app_handle.clone();
                     let cursor_id = agent_cursor_id.clone();
                     let cursor_color = agent_cursor_color.clone();
+                    let session_id = session_id.clone();
                     move |input: Value| {
                         let handle = handle.clone();
                         let cursor_id = cursor_id.clone();
                         let cursor_color = cursor_color.clone();
+                        let session_id = session_id.clone();
                         async move {
-                            let result = execute_computer_tool(&handle, input.clone()).await;
+                            let result =
+                                execute_computer_tool(&handle, input.clone(), session_id.as_deref())
+                                    .await;
                             // Emit cursor position for the agent overlay (non-blocking)
                             if result.is_ok() {
                                 let action = input["action"].as_str().unwrap_or("");

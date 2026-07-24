@@ -9,6 +9,7 @@ export type AgentSessionStatus =
 	| "running"
 	| "needs_input"
 	| "cancelling"
+	| "cancelled"
 	| "finished"
 	| "failed";
 
@@ -16,6 +17,8 @@ export type AgentSessionStatus =
 export interface AgentSessionInfo {
 	id: string;
 	agent_name: string;
+	/** 0-7 index into the fixed identity palette (LAC-2830 spec section 2). */
+	color_slot: number;
 	display_color: string;
 	status: AgentSessionStatus;
 	current_action: string | null;

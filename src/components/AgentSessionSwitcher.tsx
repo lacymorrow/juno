@@ -14,6 +14,7 @@ const STATUS_LABELS: Record<AgentSessionStatus, string> = {
 	running: "Working",
 	needs_input: "Needs input",
 	cancelling: "Stopping",
+	cancelled: "Cancelled",
 	finished: "Done",
 	failed: "Failed",
 };

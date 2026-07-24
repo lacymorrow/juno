@@ -1,6 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -11,31 +10,53 @@ use uuid::Uuid;
 
 use crate::agent::input_arbiter::InputArbiter;
 use crate::constants::events;
+use crate::constants::ui::agent_session_colors;
 
-/// Distinct display colors for parallel agent sessions.
-///
-/// Assigned round-robin as sessions are created so each session's cursor
-/// overlay and switcher row is visually distinguishable. Kept small and
-/// perceptually distinct — sequential runs of the same color are only a
-/// concern if the user exceeds the parallel cap (typically 12), and even
-/// then the collision is not a correctness issue.
-const SESSION_COLORS: &[&str] = &[
-    "#ff5c8a", // rose
-    "#5cc8ff", // cyan
-    "#ffb45c", // amber
-    "#5cff9d", // mint
-    "#c85cff", // violet
-    "#ffe45c", // yellow
-    "#5c7dff", // indigo
-    "#ff5c5c", // red
+/// Fixed 8-slot identity palette for parallel agent sessions
+/// (LAC-2830 spec section 2). Index = color slot.
+pub const SESSION_COLOR_SLOTS: [&str; 8] = [
+    agent_session_colors::SLOT_0,
+    agent_session_colors::SLOT_1,
+    agent_session_colors::SLOT_2,
+    agent_session_colors::SLOT_3,
+    agent_session_colors::SLOT_4,
+    agent_session_colors::SLOT_5,
+    agent_session_colors::SLOT_6,
+    agent_session_colors::SLOT_7,
 ];
 
-static NEXT_COLOR_INDEX: AtomicUsize = AtomicUsize::new(0);
+/// Round-robin color slot allocator with slot reuse.
+///
+/// Freed slots are handed out before fresh ones so long-lived fleets keep
+/// stable, distinct colors. If more sessions run than palette slots, slots
+/// repeat — a visual collision, not a correctness issue (LAC-2830 spec).
+#[derive(Default)]
+struct ColorAllocator {
+    next_slot: u8,
+    freed: BTreeSet<u8>,
+}
 
-/// Pick the next round-robin session color.
-pub fn next_session_color() -> String {
-    let i = NEXT_COLOR_INDEX.fetch_add(1, Ordering::Relaxed);
-    SESSION_COLORS[i % SESSION_COLORS.len()].to_string()
+impl ColorAllocator {
+    fn allocate(&mut self) -> u8 {
+        if let Some(slot) = self.freed.iter().next().copied() {
+            self.freed.remove(&slot);
+            return slot;
+        }
+        let slot = self.next_slot;
+        self.next_slot = (self.next_slot + 1) % SESSION_COLOR_SLOTS.len() as u8;
+        slot
+    }
+
+    fn free(&mut self, slot: u8) {
+        if (slot as usize) < SESSION_COLOR_SLOTS.len() {
+            self.freed.insert(slot);
+        }
+    }
+}
+
+/// Hex color for a palette slot.
+pub fn color_for_slot(slot: u8) -> &'static str {
+    SESSION_COLOR_SLOTS[slot as usize % SESSION_COLOR_SLOTS.len()]
 }
 
 /// Unique identifier for a parallel agent session.
@@ -76,8 +97,16 @@ pub enum AgentSessionStatus {
     Running,
     NeedsInput,
     Cancelling,
+    Cancelled,
     Finished,
     Failed,
+}
+
+impl AgentSessionStatus {
+    /// Terminal states — the session is done and will be removed shortly.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Cancelled | Self::Finished | Self::Failed)
+    }
 }
 
 /// Snapshot of a session's user-facing metadata.
@@ -89,6 +118,7 @@ pub enum AgentSessionStatus {
 pub struct AgentSessionInfo {
     pub id: String,
     pub agent_name: String,
+    pub color_slot: u8,
     pub display_color: String,
     pub status: AgentSessionStatus,
     pub current_action: Option<String>,
@@ -114,7 +144,7 @@ fn now_ms() -> u64 {
 pub struct AgentSession {
     id: AgentSessionId,
     agent_name: String,
-    display_color: String,
+    color_slot: u8,
     cancel_tx: watch::Sender<bool>,
     cancel_rx: watch::Receiver<bool>,
     started_at_ms: u64,
@@ -128,17 +158,13 @@ struct AgentSessionInner {
 }
 
 impl AgentSession {
-    fn new_with_id(
-        id: AgentSessionId,
-        agent_name: String,
-        display_color: String,
-    ) -> Arc<Self> {
+    fn new_with_id(id: AgentSessionId, agent_name: String, color_slot: u8) -> Arc<Self> {
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let started_at_ms = now_ms();
         Arc::new(Self {
             id,
             agent_name,
-            display_color,
+            color_slot,
             cancel_tx,
             cancel_rx,
             started_at_ms,
@@ -158,8 +184,12 @@ impl AgentSession {
         &self.agent_name
     }
 
-    pub fn display_color(&self) -> &str {
-        &self.display_color
+    pub fn color_slot(&self) -> u8 {
+        self.color_slot
+    }
+
+    pub fn display_color(&self) -> &'static str {
+        color_for_slot(self.color_slot)
     }
 
     /// Clone the cancellation receiver so the agent's execution loop can
@@ -199,7 +229,8 @@ impl AgentSession {
         AgentSessionInfo {
             id: self.id.0.clone(),
             agent_name: self.agent_name.clone(),
-            display_color: self.display_color.clone(),
+            color_slot: self.color_slot,
+            display_color: self.display_color().to_string(),
             status: guard.status,
             current_action: guard.current_action.clone(),
             started_at_ms: self.started_at_ms,
@@ -221,6 +252,7 @@ impl AgentSession {
 pub struct AgentSessionRegistry {
     sessions: TokioMutex<HashMap<AgentSessionId, Arc<AgentSession>>>,
     focused: StdMutex<Option<AgentSessionId>>,
+    colors: StdMutex<ColorAllocator>,
     input_arbiter: Arc<InputArbiter>,
     max_parallel: usize,
 }
@@ -230,6 +262,7 @@ impl AgentSessionRegistry {
         Self {
             sessions: TokioMutex::new(HashMap::new()),
             focused: StdMutex::new(None),
+            colors: StdMutex::new(ColorAllocator::default()),
             input_arbiter,
             max_parallel,
         }
@@ -245,13 +278,11 @@ impl AgentSessionRegistry {
 
     /// Create a new session and register it. Fails if the parallel cap is hit.
     ///
-    /// The first session created becomes the focused session automatically;
-    /// callers can override focus later via [`set_focused`].
-    pub async fn create(
-        &self,
-        agent_name: String,
-        display_color: String,
-    ) -> Result<Arc<AgentSession>, String> {
+    /// Assigns the next free identity-color slot (LAC-2830 palette); the slot
+    /// is returned to the allocator when the session is removed. The first
+    /// session created becomes the focused session automatically; callers can
+    /// override focus later via [`set_focused`].
+    pub async fn create(&self, agent_name: String) -> Result<Arc<AgentSession>, String> {
         let mut sessions = self.sessions.lock().await;
         if sessions.len() >= self.max_parallel {
             return Err(format!(
@@ -259,8 +290,12 @@ impl AgentSessionRegistry {
                 self.max_parallel
             ));
         }
+        let color_slot = {
+            let mut colors = self.colors.lock().unwrap_or_else(|e| e.into_inner());
+            colors.allocate()
+        };
         let id = AgentSessionId::new();
-        let session = AgentSession::new_with_id(id.clone(), agent_name, display_color);
+        let session = AgentSession::new_with_id(id.clone(), agent_name, color_slot);
         sessions.insert(id.clone(), session.clone());
         drop(sessions);
 
@@ -282,11 +317,15 @@ impl AgentSessionRegistry {
         // Capture the next candidate before releasing the sessions lock so we
         // don't need to re-acquire it inside the focused critical section.
         let mut sessions = self.sessions.lock().await;
-        if sessions.remove(id).is_some() {
-            debug!("Removed agent session {} from registry", id);
-        }
+        let removed = sessions.remove(id);
         let next_id = sessions.keys().next().cloned();
         drop(sessions);
+
+        if let Some(session) = removed {
+            debug!("Removed agent session {} from registry", id);
+            let mut colors = self.colors.lock().unwrap_or_else(|e| e.into_inner());
+            colors.free(session.color_slot());
+        }
 
         let mut focused = self.focused.lock().unwrap_or_else(|e| e.into_inner());
         if focused.as_ref() == Some(id) {
@@ -398,14 +437,47 @@ impl SessionHandle {
         &self.session
     }
 
-    /// Mark the session as finished/failed and broadcast the state before
-    /// the RAII cleanup removes the row entirely. Callers that know
+    /// Mark the session as finished/failed/cancelled and broadcast the state
+    /// before the RAII cleanup removes the row entirely. Callers that know
     /// whether the run succeeded or failed should call this to give the
     /// UI a final status snapshot instead of the row just disappearing.
+    ///
+    /// Also emits the discrete lifecycle event for the terminal state
+    /// (completed / cancelled / failed) so the roster UI can play its
+    /// pulse / shake animations and the backend can decide whether to fire
+    /// a system notification.
     pub async fn mark_terminal(&self, status: AgentSessionStatus) {
         self.session.set_status(status).await;
+        let focused = self.registry.focused().as_ref() == Some(self.session.id());
+        let snapshot = self.session.snapshot(focused).await;
+        let event = match status {
+            AgentSessionStatus::Cancelled => Some(events::agent_sessions::CANCELLED),
+            AgentSessionStatus::Finished => Some(events::agent_sessions::COMPLETED),
+            AgentSessionStatus::Failed => Some(events::agent_sessions::FAILED),
+            _ => None,
+        };
+        if let Some(event) = event {
+            if let Err(e) = self.app_handle.emit(event, &snapshot) {
+                warn!("Failed to emit {} for session {}: {}", event, snapshot.id, e);
+            }
+        }
         broadcast_sessions_updated(&self.app_handle, &self.registry).await;
     }
+
+    /// True when this session is the currently focused one.
+    pub fn is_focused(&self) -> bool {
+        self.registry.focused().as_ref() == Some(self.session.id())
+    }
+}
+
+/// Remove any cursor overlay identity left behind by a session.
+///
+/// The desktop cursor overlay renders one cursor slot per agent id; the
+/// computer-use tool registers cursors under the session id (LAC-1432), so
+/// clearing that id here guarantees the overlay cursor disappears on every
+/// session end path — complete, cancel, or error.
+fn cleanup_session_cursor(app_handle: &AppHandle, session_id: &str) {
+    crate::agent::tools::anthropic_computer_use::emit_agent_cursor_remove(app_handle, session_id);
 }
 
 impl Drop for SessionHandle {
@@ -417,6 +489,7 @@ impl Drop for SessionHandle {
         let session_id = self.session.id().clone();
         let app_handle = self.app_handle.clone();
         tauri::async_runtime::spawn(async move {
+            cleanup_session_cursor(&app_handle, session_id.as_str());
             registry.remove(&session_id).await;
             broadcast_sessions_updated(&app_handle, &registry).await;
         });
@@ -436,11 +509,11 @@ mod tests {
     async fn creates_and_lists_sessions() {
         let registry = AgentSessionRegistry::new(4, arbiter());
         let a = registry
-            .create("desktop".into(), "#ff00aa".into())
+            .create("desktop".into())
             .await
             .expect("first session created");
         let b = registry
-            .create("browser".into(), "#00aaff".into())
+            .create("browser".into())
             .await
             .expect("second session created");
 
@@ -459,10 +532,10 @@ mod tests {
     async fn enforces_parallel_cap() {
         let registry = AgentSessionRegistry::new(1, arbiter());
         registry
-            .create("first".into(), "#111111".into())
+            .create("first".into())
             .await
             .expect("first ok");
-        let result = registry.create("second".into(), "#222222".into()).await;
+        let result = registry.create("second".into()).await;
         let err = match result {
             Ok(_) => panic!("expected second create to fail"),
             Err(e) => e,
@@ -474,11 +547,11 @@ mod tests {
     async fn cancel_focused_kills_only_focused_session() {
         let registry = AgentSessionRegistry::new(4, arbiter());
         let focused_session = registry
-            .create("focused".into(), "#f".into())
+            .create("focused".into())
             .await
             .expect("focused created");
         let background = registry
-            .create("background".into(), "#b".into())
+            .create("background".into())
             .await
             .expect("background created");
 
@@ -501,8 +574,8 @@ mod tests {
     #[tokio::test]
     async fn remove_clears_and_reassigns_focus() {
         let registry = AgentSessionRegistry::new(4, arbiter());
-        let a = registry.create("a".into(), "#a".into()).await.unwrap();
-        let b = registry.create("b".into(), "#b".into()).await.unwrap();
+        let a = registry.create("a".into()).await.unwrap();
+        let b = registry.create("b".into()).await.unwrap();
 
         assert_eq!(registry.focused().as_ref(), Some(a.id()));
         registry.remove(a.id()).await;
@@ -512,6 +585,27 @@ mod tests {
         registry.remove(b.id()).await;
         assert!(registry.focused().is_none());
         assert_eq!(registry.len().await, 0);
+    }
+
+    #[tokio::test]
+    async fn color_slots_assigned_round_robin_and_freed_on_remove() {
+        let registry = AgentSessionRegistry::new(12, arbiter());
+        let a = registry.create("a".into()).await.unwrap();
+        let b = registry.create("b".into()).await.unwrap();
+        let c = registry.create("c".into()).await.unwrap();
+        assert_eq!(a.color_slot(), 0);
+        assert_eq!(b.color_slot(), 1);
+        assert_eq!(c.color_slot(), 2);
+        assert_eq!(a.display_color(), SESSION_COLOR_SLOTS[0]);
+
+        // Removing a session frees its slot; the next session reuses the
+        // lowest freed slot instead of advancing the round-robin counter.
+        registry.remove(b.id()).await;
+        let d = registry.create("d".into()).await.unwrap();
+        assert_eq!(d.color_slot(), 1, "freed slot must be reused first");
+
+        let e = registry.create("e".into()).await.unwrap();
+        assert_eq!(e.color_slot(), 3, "fresh slots continue round-robin");
     }
 
     #[tokio::test]

@@ -38,12 +38,25 @@ pub mod agent {
 /// fires additionally when the focused session changes so cursor
 /// overlays can key off the focus change without diffing the list.
 pub mod agent_sessions {
-    /// Full snapshot of all live sessions (`Vec<AgentSessionInfo>` payload).
-    pub const UPDATED: &str = "agent-sessions-updated";
-    /// Focus changed. Payload has a nullable `session_id` string field.
+    /// Full snapshot of all live sessions. Payload is a list of
+    /// AgentSessionInfo values. Also serves as the action-update channel:
+    /// it fires whenever a session's current action or status changes.
     /// NOTE: no curly braces in doc comments here — generate-ts-constants.js
     /// silently drops constants that follow one.
+    pub const UPDATED: &str = "agent-sessions-updated";
+    /// Focus changed. Payload has a nullable `session_id` string field.
     pub const FOCUSED: &str = "agent-session-focused";
+    /// A new session started. Payload: AgentSessionInfo snapshot.
+    pub const STARTED: &str = "agent-session-started";
+    /// A session finished successfully. Payload: AgentSessionInfo snapshot.
+    pub const COMPLETED: &str = "agent-session-completed";
+    /// A session was cancelled by the user. Payload: AgentSessionInfo snapshot.
+    pub const CANCELLED: &str = "agent-session-cancelled";
+    /// A session failed with an error. Payload: AgentSessionInfo snapshot.
+    pub const FAILED: &str = "agent-session-failed";
+    /// A session is blocked waiting on user input. Payload: AgentSessionInfo
+    /// snapshot. Reserved: no backend path triggers this yet.
+    pub const NEEDS_INPUT: &str = "agent-session-needs-input";
 }
 
 /// Streaming events
