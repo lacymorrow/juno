@@ -344,12 +344,11 @@ impl ToolCircuitBreaker {
                     info!("Circuit breaker closed - tool recovered");
                 }
             }
-            CircuitBreakerState::Closed => {
+            CircuitBreakerState::Closed if self.failure_count > 0 => {
                 // Reset failure count on success
-                if self.failure_count > 0 {
-                    self.failure_count = 0;
-                }
+                self.failure_count = 0;
             }
+            CircuitBreakerState::Closed => {}
             _ => {}
         }
     }

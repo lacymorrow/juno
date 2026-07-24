@@ -1014,7 +1014,7 @@ impl MCPManager {
         let mut servers = self.servers.write().await;
 
         // Find the server that has this tool
-        for (_, connection) in servers.iter_mut() {
+        for connection in servers.values_mut() {
             if connection.get_tools().iter().any(|t| t.name == tool_name) {
                 match connection.execute_tool(tool_name, input, call_id).await {
                     Ok(result) => return Ok(result),
