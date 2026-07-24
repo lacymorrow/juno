@@ -21,6 +21,8 @@ export const EVENTS = {
   AGENT_FORCE_STOP: 'agent-force-stop',
   AGENT_FORCE_CLEANUP: 'agent-force-cleanup',
   AGENT_QUERY_READY: 'agent-query-ready',
+  AGENT_SESSIONS_UPDATED: 'agent-sessions-updated',
+  AGENT_SESSIONS_FOCUSED: 'agent-session-focused',
   STREAMING_TEXT_STREAM: 'agent-text-stream',
   STREAMING_STREAM_START: 'agent-stream-start',
   STREAMING_STREAM_END: 'agent-stream-end',

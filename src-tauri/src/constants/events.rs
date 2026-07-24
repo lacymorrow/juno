@@ -40,7 +40,9 @@ pub mod agent {
 pub mod agent_sessions {
     /// Full snapshot of all live sessions (`Vec<AgentSessionInfo>` payload).
     pub const UPDATED: &str = "agent-sessions-updated";
-    /// Focus changed. Payload is `{ "session_id": Option<String> }`.
+    /// Focus changed. Payload has a nullable `session_id` string field.
+    /// NOTE: no curly braces in doc comments here — generate-ts-constants.js
+    /// silently drops constants that follow one.
     pub const FOCUSED: &str = "agent-session-focused";
 }
 
