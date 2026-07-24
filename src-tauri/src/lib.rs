@@ -1023,22 +1023,20 @@ pub fn run() {
                         label,
                         event: tauri::WindowEvent::Destroyed,
                         ..
-                    } => {
+                    } if label.as_str() == "onboarding" => {
                         // Clean up escape key registration when onboarding window is closed
                         // (e.g., user clicks the red X instead of completing/skipping)
-                        if label.as_str() == "onboarding" {
-                            let app_handle = app_handle.clone();
-                            tauri::async_runtime::spawn(async move {
-                                if let Err(e) =
-                                    commands::set_onboarding_active(app_handle, false).await
-                                {
-                                    warn!(
-                                        "Failed to clean up onboarding state on window close: {}",
-                                        e
-                                    );
-                                }
-                            });
-                        }
+                        let app_handle = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) =
+                                commands::set_onboarding_active(app_handle, false).await
+                            {
+                                warn!(
+                                    "Failed to clean up onboarding state on window close: {}",
+                                    e
+                                );
+                            }
+                        });
                     }
                     _ => {}
                 }

@@ -508,7 +508,7 @@ fn analyze_file_types(structure: &Value) -> Value {
     collect_file_types(structure, &mut file_types);
 
     let mut types_vec: Vec<_> = file_types.into_iter().collect();
-    types_vec.sort_by(|a, b| b.1.cmp(&a.1));
+    types_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     json!(types_vec.into_iter().take(10).collect::<Vec<_>>())
 }
