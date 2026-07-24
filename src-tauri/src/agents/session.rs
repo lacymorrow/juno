@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -214,9 +214,13 @@ impl AgentSession {
 /// Owns the input arbiter shared by all sessions so coordinate-based
 /// physical input is serialized across the fleet (macOS has one pointer).
 /// AX-grounded actions do not touch the arbiter and run in parallel.
+///
+/// `sessions` uses a `TokioMutex` because `list()` calls `session.snapshot().await`
+/// while iterating. `focused` uses a plain `StdMutex` — no async work happens
+/// while holding it, so the lighter-weight lock is appropriate.
 pub struct AgentSessionRegistry {
     sessions: TokioMutex<HashMap<AgentSessionId, Arc<AgentSession>>>,
-    focused: TokioMutex<Option<AgentSessionId>>,
+    focused: StdMutex<Option<AgentSessionId>>,
     input_arbiter: Arc<InputArbiter>,
     max_parallel: usize,
 }
@@ -225,7 +229,7 @@ impl AgentSessionRegistry {
     pub fn new(max_parallel: usize, input_arbiter: Arc<InputArbiter>) -> Self {
         Self {
             sessions: TokioMutex::new(HashMap::new()),
-            focused: TokioMutex::new(None),
+            focused: StdMutex::new(None),
             input_arbiter,
             max_parallel,
         }
@@ -261,15 +265,12 @@ impl AgentSessionRegistry {
         drop(sessions);
 
         // Auto-focus the first session so escape has an obvious target.
-        let mut focused = self.focused.lock().await;
-        if focused.is_none() {
+        let mut focused = self.focused.lock().unwrap_or_else(|e| e.into_inner());
+        let is_focused = focused.is_none();
+        if is_focused {
             *focused = Some(id.clone());
         }
-        info!(
-            "Registered agent session {} (focused={})",
-            id,
-            focused.as_ref().map(|f| f == &id).unwrap_or(false)
-        );
+        info!("Registered agent session {} (focused={})", id, is_focused);
         Ok(session)
     }
 
@@ -278,19 +279,18 @@ impl AgentSessionRegistry {
     }
 
     pub async fn remove(&self, id: &AgentSessionId) {
+        // Capture the next candidate before releasing the sessions lock so we
+        // don't need to re-acquire it inside the focused critical section.
         let mut sessions = self.sessions.lock().await;
         if sessions.remove(id).is_some() {
             debug!("Removed agent session {} from registry", id);
         }
+        let next_id = sessions.keys().next().cloned();
         drop(sessions);
 
-        let mut focused = self.focused.lock().await;
+        let mut focused = self.focused.lock().unwrap_or_else(|e| e.into_inner());
         if focused.as_ref() == Some(id) {
-            *focused = None;
-            let sessions = self.sessions.lock().await;
-            if let Some(next) = sessions.keys().next().cloned() {
-                *focused = Some(next);
-            }
+            *focused = next_id;
         }
     }
 
@@ -309,7 +309,7 @@ impl AgentSessionRegistry {
     /// Escape handling uses this so pressing escape only kills the agent
     /// the user is watching; background sessions keep running.
     pub async fn cancel_focused(&self) -> Result<bool, String> {
-        let focused = self.focused.lock().await.clone();
+        let focused = self.focused.lock().unwrap_or_else(|e| e.into_inner()).clone();
         match focused {
             Some(id) => {
                 self.cancel(&id).await?;
@@ -326,17 +326,17 @@ impl AgentSessionRegistry {
                 return Err(format!("Cannot focus unknown session {}", candidate));
             }
         }
-        *self.focused.lock().await = id;
+        *self.focused.lock().unwrap_or_else(|e| e.into_inner()) = id;
         Ok(())
     }
 
-    pub async fn focused(&self) -> Option<AgentSessionId> {
-        self.focused.lock().await.clone()
+    pub fn focused(&self) -> Option<AgentSessionId> {
+        self.focused.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// List a snapshot of every session for the switcher/status-bar UI.
     pub async fn list(&self) -> Vec<AgentSessionInfo> {
-        let focused = self.focused.lock().await.clone();
+        let focused = self.focused.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let sessions = self.sessions.lock().await.clone();
         let mut out = Vec::with_capacity(sessions.len());
         for (id, session) in sessions.iter() {
@@ -450,7 +450,7 @@ mod tests {
         assert!(listed.iter().any(|s| s.id == b.id().to_string()));
 
         // First session auto-focused; snapshot exposes it.
-        let focused_id = registry.focused().await.expect("focused set");
+        let focused_id = registry.focused().expect("focused set");
         assert_eq!(&focused_id, a.id());
         assert!(listed.iter().any(|s| s.focused && s.id == a.id().to_string()));
     }
@@ -504,13 +504,13 @@ mod tests {
         let a = registry.create("a".into(), "#a".into()).await.unwrap();
         let b = registry.create("b".into(), "#b".into()).await.unwrap();
 
-        assert_eq!(registry.focused().await.as_ref(), Some(a.id()));
+        assert_eq!(registry.focused().as_ref(), Some(a.id()));
         registry.remove(a.id()).await;
         // Focus falls back to the remaining session.
-        assert_eq!(registry.focused().await.as_ref(), Some(b.id()));
+        assert_eq!(registry.focused().as_ref(), Some(b.id()));
 
         registry.remove(b.id()).await;
-        assert!(registry.focused().await.is_none());
+        assert!(registry.focused().is_none());
         assert_eq!(registry.len().await, 0);
     }
 

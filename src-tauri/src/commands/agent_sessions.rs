@@ -71,7 +71,6 @@ pub async fn get_focused_agent_session(
     Ok(state
         .agent_sessions()
         .focused()
-        .await
         .map(|id| id.to_string()))
 }
 
