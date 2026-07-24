@@ -51,21 +51,13 @@ impl BrowserAgent {
         })?;
 
         match tool_call.name.as_str() {
-            "browser_navigate" => {
-                browser_controller.navigate(&tool_call.input).await
-            }
+            "browser_navigate" => browser_controller.navigate(&tool_call.input).await,
             "browser_click" | "browser_type" | "browser_interact" => {
                 browser_controller.interact(&tool_call.input).await
             }
-            "browser_screenshot" => {
-                browser_controller.screenshot(&tool_call.input).await
-            }
-            "browser_extract_content" => {
-                browser_controller.extract_content(&tool_call.input).await
-            }
-            "browser_get_current_url" => {
-                browser_controller.get_current_url(&tool_call.input).await
-            }
+            "browser_screenshot" => browser_controller.screenshot(&tool_call.input).await,
+            "browser_extract_content" => browser_controller.extract_content(&tool_call.input).await,
+            "browser_get_current_url" => browser_controller.get_current_url(&tool_call.input).await,
             _ => Err(AgentError::ToolNotFound(tool_call.name.clone())),
         }
     }

@@ -1663,10 +1663,16 @@ impl DefaultPrompts {
 
         // Only include development prompt in debug builds
         if cfg!(debug_assertions) {
-            templates.insert(PromptType::SystemDefaultDevelopment, Self::system_default_development());
+            templates.insert(
+                PromptType::SystemDefaultDevelopment,
+                Self::system_default_development(),
+            );
         }
 
-        templates.insert(PromptType::OrchestratorPersonality, Self::orchestrator_personality());
+        templates.insert(
+            PromptType::OrchestratorPersonality,
+            Self::orchestrator_personality(),
+        );
         templates.insert(PromptType::BrowserExpert, Self::browser_expert());
         templates.insert(PromptType::CodingExpert, Self::coding_expert());
         templates.insert(PromptType::DesktopExpert, Self::desktop_expert());
@@ -1849,10 +1855,18 @@ Focus on web-based tasks and use browser tools efficiently.
         PromptTemplate {
             id: "browser_expert".to_string(),
             name: "Browser Expert Agent".to_string(),
-            description: "Focused browser expert with Safari automation capabilities and TTS speech format".to_string(),
+            description:
+                "Focused browser expert with Safari automation capabilities and TTS speech format"
+                    .to_string(),
             content,
             variables: vec!["available_tools".to_string()],
-            tags: vec!["expert".to_string(), "browser".to_string(), "web".to_string(), "safari-enabled".to_string(), "tts-enabled".to_string()],
+            tags: vec![
+                "expert".to_string(),
+                "browser".to_string(),
+                "web".to_string(),
+                "safari-enabled".to_string(),
+                "tts-enabled".to_string(),
+            ],
             version: "2.4.0".to_string(),
             customizable: true,
         }
@@ -1891,10 +1905,16 @@ Remember: You're a collaborative development partner that enhances the entire co
         PromptTemplate {
             id: "coding_expert".to_string(),
             name: "Enhanced Coding Expert".to_string(),
-            description: "Focused system prompt for the coding expert agent with TTS speech format".to_string(),
+            description: "Focused system prompt for the coding expert agent with TTS speech format"
+                .to_string(),
             content,
             variables: vec!["available_tools".to_string(), "project_context".to_string()],
-            tags: vec!["expert".to_string(), "coding".to_string(), "development".to_string(), "tts-enabled".to_string()],
+            tags: vec![
+                "expert".to_string(),
+                "coding".to_string(),
+                "development".to_string(),
+                "tts-enabled".to_string(),
+            ],
             version: "2.3.0".to_string(),
             customizable: true,
         }
@@ -1983,10 +2003,17 @@ Provide helpful, accurate responses for general inquiries.
         PromptTemplate {
             id: "general_expert".to_string(),
             name: "General Expert Agent".to_string(),
-            description: "Focused system prompt for the general expert agent with TTS speech format".to_string(),
+            description:
+                "Focused system prompt for the general expert agent with TTS speech format"
+                    .to_string(),
             content,
             variables: vec!["available_tools".to_string()],
-            tags: vec!["expert".to_string(), "general".to_string(), "research".to_string(), "tts-enabled".to_string()],
+            tags: vec![
+                "expert".to_string(),
+                "general".to_string(),
+                "research".to_string(),
+                "tts-enabled".to_string(),
+            ],
             version: "2.3.0".to_string(),
             customizable: true,
         }
@@ -2041,10 +2068,17 @@ Be careful with file operations - always verify paths and permissions. When edit
         PromptTemplate {
             id: "file_expert".to_string(),
             name: "File Operations Expert".to_string(),
-            description: "Focused expert agent for file operations and coding tasks with TTS speech format".to_string(),
+            description:
+                "Focused expert agent for file operations and coding tasks with TTS speech format"
+                    .to_string(),
             content,
             variables: vec!["available_tools".to_string(), "project_path".to_string()],
-            tags: vec!["expert".to_string(), "files".to_string(), "coding".to_string(), "tts-enabled".to_string()],
+            tags: vec![
+                "expert".to_string(),
+                "files".to_string(),
+                "coding".to_string(),
+                "tts-enabled".to_string(),
+            ],
             version: "2.3.0".to_string(),
             customizable: true,
         }

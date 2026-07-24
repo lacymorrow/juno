@@ -1,12 +1,12 @@
 // Computer Use API commands - Official Anthropic Computer Use implementation
 // This provides a unified interface for all mouse, keyboard, and screen operations
 
+use crate::commands::core::ScreenshotResult as CoreScreenshotResult;
 use crate::state::AppState;
 use crate::utils::coordinates;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tracing::{error, info};
-use crate::commands::core::ScreenshotResult as CoreScreenshotResult;
 
 /// Computer action input structure matching the official Anthropic Computer Use API
 #[derive(Debug, Deserialize)]
@@ -53,7 +53,12 @@ pub async fn computer(
         }
         "type" | "key" | "hold_key" => {
             // Light rate limiting for keyboard operations
-            if let Err(e) = state.rate_limiters.file_operations.check("default_user").await {
+            if let Err(e) = state
+                .rate_limiters
+                .file_operations
+                .check("default_user")
+                .await
+            {
                 return Err(e.to_user_message());
             }
         }
@@ -107,10 +112,14 @@ pub async fn computer(
 
 // --- Action Handlers ---
 
-async fn handle_screenshot(app_handle: &AppHandle, state: &State<'_, AppState>) -> Result<ComputerResult, String> {
-    let screenshot_result = crate::commands::core::capture_screenshot_command(app_handle.clone(), state.clone())
-        .await
-        .map_err(|e| format!("Screenshot failed: {}", e))?;
+async fn handle_screenshot(
+    app_handle: &AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<ComputerResult, String> {
+    let screenshot_result =
+        crate::commands::core::capture_screenshot_command(app_handle.clone(), state.clone())
+            .await
+            .map_err(|e| format!("Screenshot failed: {}", e))?;
 
     Ok(ComputerResult {
         success: true,
@@ -127,7 +136,9 @@ async fn handle_click(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
+    let coordinates = input
+        .coordinate
+        .as_ref()
         .ok_or("Click action requires coordinate parameter")?;
 
     if coordinates.len() != 2 {
@@ -156,7 +167,9 @@ async fn handle_right_click(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
+    let coordinates = input
+        .coordinate
+        .as_ref()
         .ok_or("Right click action requires coordinate parameter")?;
 
     if coordinates.len() != 2 {
@@ -185,7 +198,9 @@ async fn handle_middle_click(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
+    let coordinates = input
+        .coordinate
+        .as_ref()
         .ok_or("Middle click action requires coordinate parameter")?;
 
     if coordinates.len() != 2 {
@@ -214,7 +229,9 @@ async fn handle_double_click(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
+    let coordinates = input
+        .coordinate
+        .as_ref()
         .ok_or("Double click action requires coordinate parameter")?;
 
     if coordinates.len() != 2 {
@@ -243,7 +260,9 @@ async fn handle_triple_click(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
+    let coordinates = input
+        .coordinate
+        .as_ref()
         .ok_or("Triple click action requires coordinate parameter")?;
 
     if coordinates.len() != 2 {
@@ -274,7 +293,9 @@ async fn handle_drag(
 ) -> Result<ComputerResult, String> {
     // Following official Anthropic Computer Use specification:
     // Drag starts from current cursor position and ends at 'coordinate'
-    let end_coords = input.coordinate.as_ref()
+    let end_coords = input
+        .coordinate
+        .as_ref()
         .ok_or("Drag action requires coordinate parameter (end position)")?;
 
     if end_coords.len() != 2 {
@@ -282,9 +303,10 @@ async fn handle_drag(
     }
 
     // Get current cursor position as start point (returns screen coordinates)
-    let (start_x, start_y) = crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone())
-        .await
-        .map_err(|e| format!("Failed to get cursor position: {}", e))?;
+    let (start_x, start_y) =
+        crate::commands::mouse::get_cursor_position(app_handle.clone(), state.clone())
+            .await
+            .map_err(|e| format!("Failed to get cursor position: {}", e))?;
 
     let end_x = end_coords[0];
     let end_y = end_coords[1];
@@ -306,7 +328,10 @@ async fn handle_drag(
     Ok(ComputerResult {
         success: true,
         action: "left_click_drag".to_string(),
-        message: Some(format!("Dragged from cursor position ({:.1}, {:.1}) to screen coordinates ({:.1}, {:.1})", start_x, start_y, screen_end_x, screen_end_y)),
+        message: Some(format!(
+            "Dragged from cursor position ({:.1}, {:.1}) to screen coordinates ({:.1}, {:.1})",
+            start_x, start_y, screen_end_x, screen_end_y
+        )),
         screenshot: None,
         error: None,
         coordinate: None,
@@ -318,7 +343,9 @@ async fn handle_move(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
+    let coordinates = input
+        .coordinate
+        .as_ref()
         .ok_or("Move action requires coordinate parameter")?;
 
     if coordinates.len() != 2 {
@@ -347,7 +374,9 @@ async fn handle_scroll(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let coordinates = input.coordinate.as_ref()
+    let coordinates = input
+        .coordinate
+        .as_ref()
         .ok_or("Scroll action requires coordinate parameter")?;
 
     if coordinates.len() != 2 {
@@ -377,7 +406,10 @@ async fn handle_scroll(
     Ok(ComputerResult {
         success: true,
         action: "scroll".to_string(),
-        message: Some(format!("Scrolled {} {} times at ({}, {})", direction, scroll_count, x, y)),
+        message: Some(format!(
+            "Scrolled {} {} times at ({}, {})",
+            direction, scroll_count, x, y
+        )),
         screenshot: None,
         error: None,
         coordinate: None,
@@ -389,7 +421,9 @@ async fn handle_type(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let text = input.text.as_ref()
+    let text = input
+        .text
+        .as_ref()
         .ok_or("Type action requires text parameter")?;
 
     crate::commands::keyboard::global_type_text(text.clone(), app_handle.clone(), state)
@@ -411,7 +445,9 @@ async fn handle_key(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let key = input.text.as_ref()
+    let key = input
+        .text
+        .as_ref()
         .ok_or("Key action requires text parameter")?;
 
     crate::commands::keyboard::press_key(key.clone(), None, app_handle.clone(), state)
@@ -433,7 +469,9 @@ async fn handle_hold_key(
     app_handle: &AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ComputerResult, String> {
-    let key = input.text.as_ref()
+    let key = input
+        .text
+        .as_ref()
         .ok_or("Hold key action requires text parameter")?;
 
     let duration = input.duration.unwrap_or(1000);

@@ -136,32 +136,32 @@ impl TokenSelectionConfig {
                 edge_detection_sensitivity: 0.3,  // Moderate sensitivity
             },
             token_reduction: TokenReductionConfig {
-                target_reduction_percentage: 0.70, // 70% reduction target
-                min_importance_threshold: 0.2,     // Keep moderately important tokens
-                enable_redundancy_grouping: true,  // Essential for efficiency
-                max_tokens_per_group: 3,           // Small groups for precision
+                target_reduction_percentage: 0.70,   // 70% reduction target
+                min_importance_threshold: 0.2,       // Keep moderately important tokens
+                enable_redundancy_grouping: true,    // Essential for efficiency
+                max_tokens_per_group: 3,             // Small groups for precision
                 preserve_interactive_elements: true, // Critical for functionality
-                preserve_text_elements: true,      // Important for readability
-                background_simplification_level: 2, // High background simplification
+                preserve_text_elements: true,        // Important for readability
+                background_simplification_level: 2,  // High background simplification
             },
             multi_monitor: MultiMonitorConfig {
                 enable_display_optimization: true,
                 scale_by_resolution: true,
-                primary_display_reduction: 0.65,   // Less aggressive on primary
+                primary_display_reduction: 0.65, // Less aggressive on primary
                 secondary_display_reduction: 0.75, // More aggressive on secondary
                 enable_cross_display_correlation: true,
-                max_concurrent_displays: 4,        // Support up to 4 displays
+                max_concurrent_displays: 4, // Support up to 4 displays
                 display_processing_timeout_ms: 5000, // 5 second timeout
             },
             performance: PerformanceConfig {
                 enable_parallel_processing: true,
-                worker_threads: 0,                  // Auto-detect
-                memory_limit_mb: 512,               // 512MB limit
-                processing_timeout_ms: 10000,       // 10 second timeout
+                worker_threads: 0,            // Auto-detect
+                memory_limit_mb: 512,         // 512MB limit
+                processing_timeout_ms: 10000, // 10 second timeout
                 enable_metrics: true,
-                metrics_interval_ms: 1000,          // 1 second intervals
+                metrics_interval_ms: 1000, // 1 second intervals
                 enable_caching: true,
-                cache_size_mb: 128,                 // 128MB cache
+                cache_size_mb: 128, // 128MB cache
             },
         }
     }
@@ -224,7 +224,9 @@ impl TokenSelectionConfig {
     /// Validates the configuration for consistency and reasonable values
     pub fn validate(&self) -> Result<(), String> {
         // Validate RGB analysis config
-        if self.rgb_analysis.color_similarity_threshold < 0.0 || self.rgb_analysis.color_similarity_threshold > 1.0 {
+        if self.rgb_analysis.color_similarity_threshold < 0.0
+            || self.rgb_analysis.color_similarity_threshold > 1.0
+        {
             return Err("color_similarity_threshold must be between 0.0 and 1.0".to_string());
         }
 
@@ -232,16 +234,22 @@ impl TokenSelectionConfig {
             return Err("min_patch_size must be less than max_patch_size".to_string());
         }
 
-        if self.rgb_analysis.edge_detection_sensitivity < 0.0 || self.rgb_analysis.edge_detection_sensitivity > 1.0 {
+        if self.rgb_analysis.edge_detection_sensitivity < 0.0
+            || self.rgb_analysis.edge_detection_sensitivity > 1.0
+        {
             return Err("edge_detection_sensitivity must be between 0.0 and 1.0".to_string());
         }
 
         // Validate token reduction config
-        if self.token_reduction.target_reduction_percentage < 0.0 || self.token_reduction.target_reduction_percentage > 1.0 {
+        if self.token_reduction.target_reduction_percentage < 0.0
+            || self.token_reduction.target_reduction_percentage > 1.0
+        {
             return Err("target_reduction_percentage must be between 0.0 and 1.0".to_string());
         }
 
-        if self.token_reduction.min_importance_threshold < 0.0 || self.token_reduction.min_importance_threshold > 1.0 {
+        if self.token_reduction.min_importance_threshold < 0.0
+            || self.token_reduction.min_importance_threshold > 1.0
+        {
             return Err("min_importance_threshold must be between 0.0 and 1.0".to_string());
         }
 
@@ -250,11 +258,15 @@ impl TokenSelectionConfig {
         }
 
         // Validate multi-monitor config
-        if self.multi_monitor.primary_display_reduction < 0.0 || self.multi_monitor.primary_display_reduction > 1.0 {
+        if self.multi_monitor.primary_display_reduction < 0.0
+            || self.multi_monitor.primary_display_reduction > 1.0
+        {
             return Err("primary_display_reduction must be between 0.0 and 1.0".to_string());
         }
 
-        if self.multi_monitor.secondary_display_reduction < 0.0 || self.multi_monitor.secondary_display_reduction > 1.0 {
+        if self.multi_monitor.secondary_display_reduction < 0.0
+            || self.multi_monitor.secondary_display_reduction > 1.0
+        {
             return Err("secondary_display_reduction must be between 0.0 and 1.0".to_string());
         }
 
@@ -352,8 +364,17 @@ mod tests {
     fn test_duration_conversions() {
         let config = TokenSelectionConfig::default();
 
-        assert_eq!(config.processing_timeout().as_millis(), config.performance.processing_timeout_ms as u128);
-        assert_eq!(config.display_processing_timeout().as_millis(), config.multi_monitor.display_processing_timeout_ms as u128);
-        assert_eq!(config.metrics_interval().as_millis(), config.performance.metrics_interval_ms as u128);
+        assert_eq!(
+            config.processing_timeout().as_millis(),
+            config.performance.processing_timeout_ms as u128
+        );
+        assert_eq!(
+            config.display_processing_timeout().as_millis(),
+            config.multi_monitor.display_processing_timeout_ms as u128
+        );
+        assert_eq!(
+            config.metrics_interval().as_millis(),
+            config.performance.metrics_interval_ms as u128
+        );
     }
 }

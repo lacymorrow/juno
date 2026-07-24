@@ -253,7 +253,10 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
         if matches!(trigger_mode, AgentTriggerMode::Tap) {
             info!("[AgentMonitor] Tap trigger: starting agent transcription on release");
             if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
-                error!("[AgentMonitor] Failed to emit agent-transcription-start: {}", e);
+                error!(
+                    "[AgentMonitor] Failed to emit agent-transcription-start: {}",
+                    e
+                );
             }
         }
         debug!(

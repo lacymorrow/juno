@@ -1,12 +1,12 @@
+use crate::AutomationError;
 use core_graphics::display::{
     CGDirectDisplayID, CGDisplayBounds, CGGetActiveDisplayList, CGMainDisplayID, CGRect,
 };
 use core_graphics::geometry::CGPoint;
 #[cfg(test)]
 use core_graphics::geometry::CGSize;
-use tracing::{debug, trace};
-use crate::AutomationError;
 use std::collections::HashMap;
+use tracing::{debug, trace};
 
 /// Information about a display
 #[derive(Debug, Clone)]
@@ -30,9 +30,10 @@ pub fn get_active_displays() -> Result<Vec<DisplayInfo>, AutomationError> {
         );
 
         if result != 0 {
-            return Err(AutomationError::PlatformError(
-                format!("Failed to get active display list: {}", result)
-            ));
+            return Err(AutomationError::PlatformError(format!(
+                "Failed to get active display list: {}",
+                result
+            )));
         }
 
         display_ids.truncate(display_count as usize);
@@ -91,12 +92,15 @@ pub fn find_display_containing_point(point: CGPoint) -> Result<DisplayInfo, Auto
     // First, check if point is exactly within any display bounds
     for display_info in &displays {
         if point_in_rect(point, display_info.bounds) {
-            debug!("Point ({}, {}) found in display {}", point.x, point.y, display_info.id);
+            debug!(
+                "Point ({}, {}) found in display {}",
+                point.x, point.y, display_info.id
+            );
             return Ok(display_info.clone());
         }
     }
 
-        // If not found in any display, find the closest display
+    // If not found in any display, find the closest display
     let mut closest_display = None;
     let mut min_distance = f64::MAX;
 
@@ -110,8 +114,10 @@ pub fn find_display_containing_point(point: CGPoint) -> Result<DisplayInfo, Auto
 
     match closest_display {
         Some(display_info) => {
-            debug!("Point ({}, {}) not in any display, using closest display {}",
-                   point.x, point.y, display_info.id);
+            debug!(
+                "Point ({}, {}) not in any display, using closest display {}",
+                point.x, point.y, display_info.id
+            );
             Ok(display_info)
         }
         None => {
@@ -127,7 +133,7 @@ pub fn find_display_containing_point(point: CGPoint) -> Result<DisplayInfo, Auto
 pub fn adjust_coordinates_for_display(
     x: f64,
     y: f64,
-    target_display: Option<DisplayInfo>
+    target_display: Option<DisplayInfo>,
 ) -> Result<(f64, f64), AutomationError> {
     let point = CGPoint::new(x, y);
 
@@ -139,13 +145,19 @@ pub fn adjust_coordinates_for_display(
 
     // Clamp coordinates to display bounds to ensure they're valid
     let bounds = display_info.bounds;
-    let adjusted_x = x.max(bounds.origin.x).min(bounds.origin.x + bounds.size.width - 1.0);
-    let adjusted_y = y.max(bounds.origin.y).min(bounds.origin.y + bounds.size.height - 1.0);
+    let adjusted_x = x
+        .max(bounds.origin.x)
+        .min(bounds.origin.x + bounds.size.width - 1.0);
+    let adjusted_y = y
+        .max(bounds.origin.y)
+        .min(bounds.origin.y + bounds.size.height - 1.0);
 
     // Log if coordinates were adjusted
     if x != adjusted_x || y != adjusted_y {
-        debug!("Coordinates clamped to display {}: ({}, {}) → ({}, {})",
-               display_info.id, x, y, adjusted_x, adjusted_y);
+        debug!(
+            "Coordinates clamped to display {}: ({}, {}) → ({}, {})",
+            display_info.id, x, y, adjusted_x, adjusted_y
+        );
     }
 
     Ok((adjusted_x, adjusted_y))
@@ -157,7 +169,9 @@ pub fn get_displays_debug_info() -> String {
         Ok(displays) => {
             let mut info = format!("Active displays ({}): ", displays.len());
             for (i, display_info) in displays.iter().enumerate() {
-                if i > 0 { info.push_str(", "); }
+                if i > 0 {
+                    info.push_str(", ");
+                }
                 info.push_str(&format!(
                     "{}[{}x{}+{}+{}{}]",
                     display_info.id,
@@ -218,14 +232,19 @@ const CG_WINDOW_LIST_EXCLUDE_DESKTOP_ELEMENTS: u32 = 1 << 4;
 // Caller must ensure `s` remains valid for the duration of the call.
 unsafe fn cfstring_to_rust(s: core_foundation_sys::string::CFStringRef) -> Option<String> {
     use core_foundation_sys::base::CFIndex;
-    use core_foundation_sys::string::{CFStringGetCString, kCFStringEncodingUTF8};
+    use core_foundation_sys::string::{kCFStringEncodingUTF8, CFStringGetCString};
     use std::ffi::CStr;
 
     if s.is_null() {
         return None;
     }
     let mut buf = [0i8; 1024];
-    let ok = CFStringGetCString(s, buf.as_mut_ptr(), buf.len() as CFIndex, kCFStringEncodingUTF8);
+    let ok = CFStringGetCString(
+        s,
+        buf.as_mut_ptr(),
+        buf.len() as CFIndex,
+        kCFStringEncodingUTF8,
+    );
     if ok as u8 != 0 {
         let cstr = CStr::from_ptr(buf.as_ptr());
         Some(cstr.to_string_lossy().into_owned())
@@ -251,8 +270,16 @@ unsafe fn dict_get_f64(
         return None;
     }
     let mut out: f64 = 0.0;
-    let ok = CFNumberGetValue(val as CFNumberRef, kCFNumberFloat64Type, &mut out as *mut f64 as *mut c_void);
-    if ok as u8 != 0 { Some(out) } else { None }
+    let ok = CFNumberGetValue(
+        val as CFNumberRef,
+        kCFNumberFloat64Type,
+        &mut out as *mut f64 as *mut c_void,
+    );
+    if ok as u8 != 0 {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 // Read an i32 from a CFNumberRef stored under `key` in a CFDictionaryRef.
@@ -272,8 +299,16 @@ unsafe fn dict_get_i32(
         return None;
     }
     let mut out: i32 = 0;
-    let ok = CFNumberGetValue(val as CFNumberRef, kCFNumberSInt32Type, &mut out as *mut i32 as *mut c_void);
-    if ok as u8 != 0 { Some(out) } else { None }
+    let ok = CFNumberGetValue(
+        val as CFNumberRef,
+        kCFNumberSInt32Type,
+        &mut out as *mut i32 as *mut c_void,
+    );
+    if ok as u8 != 0 {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// Returns all visible user application windows sorted front-to-back.
@@ -326,10 +361,8 @@ pub fn list_visible_windows() -> Result<Vec<VisibleWindowInfo>, AutomationError>
 
             // App name — skip headless system processes
             let owner_key = CFString::new("kCGWindowOwnerName");
-            let owner_ptr = CFDictionaryGetValue(
-                dict_ref,
-                owner_key.as_concrete_TypeRef() as *const c_void,
-            );
+            let owner_ptr =
+                CFDictionaryGetValue(dict_ref, owner_key.as_concrete_TypeRef() as *const c_void);
             let app_name = match cfstring_to_rust(owner_ptr as CFStringRef) {
                 Some(n) => n,
                 None => continue,
@@ -340,18 +373,14 @@ pub fn list_visible_windows() -> Result<Vec<VisibleWindowInfo>, AutomationError>
 
             // Window title (optional — absent when screen recording not granted)
             let name_key = CFString::new("kCGWindowName");
-            let name_ptr = CFDictionaryGetValue(
-                dict_ref,
-                name_key.as_concrete_TypeRef() as *const c_void,
-            );
+            let name_ptr =
+                CFDictionaryGetValue(dict_ref, name_key.as_concrete_TypeRef() as *const c_void);
             let window_title = cfstring_to_rust(name_ptr as CFStringRef);
 
             // Bounds — nested CFDictionary with keys "X", "Y", "Width", "Height"
             let bounds_key = CFString::new("kCGWindowBounds");
-            let bounds_ptr = CFDictionaryGetValue(
-                dict_ref,
-                bounds_key.as_concrete_TypeRef() as *const c_void,
-            );
+            let bounds_ptr =
+                CFDictionaryGetValue(dict_ref, bounds_key.as_concrete_TypeRef() as *const c_void);
             let (x, y, w, h) = if !bounds_ptr.is_null() {
                 let bd = bounds_ptr as CFDictionaryRef;
                 (
@@ -431,10 +460,8 @@ pub(crate) fn get_pid_at_screen_point(x: f64, y: f64) -> Option<i32> {
 
             // Read window bounds
             let bounds_key = CFString::new("kCGWindowBounds");
-            let bounds_ptr = CFDictionaryGetValue(
-                dict,
-                bounds_key.as_concrete_TypeRef() as *const c_void,
-            );
+            let bounds_ptr =
+                CFDictionaryGetValue(dict, bounds_key.as_concrete_TypeRef() as *const c_void);
             if bounds_ptr.is_null() {
                 continue;
             }
@@ -465,10 +492,7 @@ mod tests {
 
     #[test]
     fn test_point_in_rect() {
-        let rect = CGRect::new(
-            &CGPoint::new(0.0, 0.0),
-            &CGSize::new(100.0, 100.0)
-        );
+        let rect = CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(100.0, 100.0));
 
         assert!(point_in_rect(CGPoint::new(50.0, 50.0), rect));
         assert!(point_in_rect(CGPoint::new(0.0, 0.0), rect));
@@ -479,10 +503,7 @@ mod tests {
 
     #[test]
     fn test_distance_to_rect_center() {
-        let rect = CGRect::new(
-            &CGPoint::new(0.0, 0.0),
-            &CGSize::new(100.0, 100.0)
-        );
+        let rect = CGRect::new(&CGPoint::new(0.0, 0.0), &CGSize::new(100.0, 100.0));
 
         // Center point should have 0 distance
         let distance = distance_to_rect_center(CGPoint::new(50.0, 50.0), rect);

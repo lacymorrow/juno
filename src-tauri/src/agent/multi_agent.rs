@@ -6,18 +6,16 @@ use std::sync::Arc;
 use tracing::{debug, warn};
 use uuid;
 
-use crate::agent::core::{
-    AgentAction, AgentError, Message, Role, ToolDefinition,
-};
-use crate::agent::traits::{AgentBrain, MemoryManager, ToolProvider};
-use crate::agent::providers::gemini::GeminiBrain;
-use crate::agent::providers::anthropic::AnthropicBrain;
-use crate::agent::providers::openai::OpenAIBrain;
-use crate::state::CancelReceiver;
-use crate::agent::prompts::PromptManager;
-use crate::agent::tools::ToolMappingService;
-use crate::settings::manager::SettingsManager;
+use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolDefinition};
 use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
+use crate::agent::prompts::PromptManager;
+use crate::agent::providers::anthropic::AnthropicBrain;
+use crate::agent::providers::gemini::GeminiBrain;
+use crate::agent::providers::openai::OpenAIBrain;
+use crate::agent::tools::ToolMappingService;
+use crate::agent::traits::{AgentBrain, MemoryManager, ToolProvider};
+use crate::settings::manager::SettingsManager;
+use crate::state::CancelReceiver;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum AgentType {
@@ -94,9 +92,13 @@ impl MultiAgentOrchestrator {
             // Create settings manager from app handle
             match SettingsManager::new(handle.clone()) {
                 Ok(settings_manager) => {
-                    crate::agent::prompts::PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|_| crate::agent::prompts::PromptManager::new())
+                    crate::agent::prompts::PromptManager::load_from_centralized_settings(
+                        &settings_manager,
+                    )
+                    .await
+                    .unwrap_or_else(|_| crate::agent::prompts::PromptManager::new())
                 }
-                Err(_) => crate::agent::prompts::PromptManager::new()
+                Err(_) => crate::agent::prompts::PromptManager::new(),
             }
         } else {
             crate::agent::prompts::PromptManager::new()
@@ -107,49 +109,78 @@ impl MultiAgentOrchestrator {
         let config = crate::agent::providers::config::load_provider_config(app_handle);
 
         // Create orchestrator (Gemini Flash for fast routing decisions)
-        let gemini_config = config.resolve_provider(Provider::Gemini)
-            .ok_or_else(|| AgentError::ConfigurationError("Gemini provider not configured".into()))?;
+        let gemini_config = config.resolve_provider(Provider::Gemini).ok_or_else(|| {
+            AgentError::ConfigurationError("Gemini provider not configured".into())
+        })?;
         let orchestrator_brain = Arc::new(GeminiBrain::from_config(&gemini_config)?);
 
         // Create expert agents with different models
         let mut experts = HashMap::new();
 
         // Resolve provider configs for specialists
-        let anthropic_config = config.resolve_provider(Provider::Anthropic)
-            .ok_or_else(|| AgentError::ConfigurationError("Anthropic provider not configured".into()))?;
-        let openai_config = config.resolve_provider(Provider::OpenAI)
-            .ok_or_else(|| AgentError::ConfigurationError("OpenAI provider not configured".into()))?;
+        let anthropic_config = config
+            .resolve_provider(Provider::Anthropic)
+            .ok_or_else(|| {
+                AgentError::ConfigurationError("Anthropic provider not configured".into())
+            })?;
+        let openai_config = config.resolve_provider(Provider::OpenAI).ok_or_else(|| {
+            AgentError::ConfigurationError("OpenAI provider not configured".into())
+        })?;
 
         // Browser Expert - Use Anthropic for vision and web understanding
-        let browser_tools = Self::get_tools_for_agent(&AgentType::BrowserExpert, &tool_provider).await;
+        let browser_tools =
+            Self::get_tools_for_agent(&AgentType::BrowserExpert, &tool_provider).await;
         let browser_brain = Arc::new(AnthropicBrain::from_config(&anthropic_config)?);
         experts.insert(
             AgentType::BrowserExpert,
-            ExpertAgent::new(AgentType::BrowserExpert, browser_brain, browser_tools, &prompt_manager)
+            ExpertAgent::new(
+                AgentType::BrowserExpert,
+                browser_brain,
+                browser_tools,
+                &prompt_manager,
+            ),
         );
 
         // Coding Expert - Use OpenAI for code generation
-        let coding_tools = Self::get_tools_for_agent(&AgentType::CodingExpert, &tool_provider).await;
+        let coding_tools =
+            Self::get_tools_for_agent(&AgentType::CodingExpert, &tool_provider).await;
         let coding_brain = Arc::new(OpenAIBrain::from_config(&openai_config)?);
         experts.insert(
             AgentType::CodingExpert,
-            ExpertAgent::new(AgentType::CodingExpert, coding_brain, coding_tools, &prompt_manager)
+            ExpertAgent::new(
+                AgentType::CodingExpert,
+                coding_brain,
+                coding_tools,
+                &prompt_manager,
+            ),
         );
 
         // Desktop Expert - Use Anthropic for complex desktop automation
-        let desktop_tools = Self::get_tools_for_agent(&AgentType::DesktopExpert, &tool_provider).await;
+        let desktop_tools =
+            Self::get_tools_for_agent(&AgentType::DesktopExpert, &tool_provider).await;
         let desktop_brain = Arc::new(AnthropicBrain::from_config(&anthropic_config)?);
         experts.insert(
             AgentType::DesktopExpert,
-            ExpertAgent::new(AgentType::DesktopExpert, desktop_brain, desktop_tools, &prompt_manager)
+            ExpertAgent::new(
+                AgentType::DesktopExpert,
+                desktop_brain,
+                desktop_tools,
+                &prompt_manager,
+            ),
         );
 
         // General Expert - Use Gemini Pro for general tasks
-        let general_tools = Self::get_tools_for_agent(&AgentType::GeneralExpert, &tool_provider).await;
+        let general_tools =
+            Self::get_tools_for_agent(&AgentType::GeneralExpert, &tool_provider).await;
         let general_brain = Arc::new(GeminiBrain::from_config(&gemini_config)?);
         experts.insert(
             AgentType::GeneralExpert,
-            ExpertAgent::new(AgentType::GeneralExpert, general_brain, general_tools, &prompt_manager)
+            ExpertAgent::new(
+                AgentType::GeneralExpert,
+                general_brain,
+                general_tools,
+                &prompt_manager,
+            ),
         );
 
         // Initialize AdvancedMemoryManager directly
@@ -177,9 +208,13 @@ impl MultiAgentOrchestrator {
 
         // Use ToolMappingService to filter tools instead of string matching
         let tool_names: Vec<String> = all_tools.iter().map(|t| t.name.clone()).collect();
-        let matching_tool_names = ToolMappingService::get_tools_for_agent(&tool_names, &Self::convert_agent_type(agent_type));
+        let matching_tool_names = ToolMappingService::get_tools_for_agent(
+            &tool_names,
+            &Self::convert_agent_type(agent_type),
+        );
 
-        all_tools.into_iter()
+        all_tools
+            .into_iter()
             .filter(|tool| matching_tool_names.contains(&tool.name))
             .collect()
     }
@@ -196,7 +231,9 @@ impl MultiAgentOrchestrator {
     }
 
     // Helper to convert from mapping service AgentType
-    fn convert_from_mapping_agent_type(agent_type: crate::agent::tools::tool_mapping::AgentType) -> AgentType {
+    fn convert_from_mapping_agent_type(
+        agent_type: crate::agent::tools::tool_mapping::AgentType,
+    ) -> AgentType {
         match agent_type {
             crate::agent::tools::tool_mapping::AgentType::Orchestrator => AgentType::Orchestrator,
             crate::agent::tools::tool_mapping::AgentType::BrowserExpert => AgentType::BrowserExpert,
@@ -213,7 +250,10 @@ impl MultiAgentOrchestrator {
         self.analyze_request_for_routing(messages).await
     }
 
-    async fn analyze_request_for_routing(&self, messages: &[Message]) -> Result<AgentType, AgentError> {
+    async fn analyze_request_for_routing(
+        &self,
+        messages: &[Message],
+    ) -> Result<AgentType, AgentError> {
         if let Some(last_message) = messages.last() {
             // Use ToolMappingService to analyze user intent instead of keyword matching
             let mapping_agent = ToolMappingService::analyze_user_intent(&last_message.content);
@@ -248,9 +288,15 @@ impl MultiAgentOrchestrator {
             // Filter tools for this expert
             let expert_tools = self.filter_tools_for_expert(&expert_type, &expert.tools);
 
-            expert.brain.decide_next_action(&expert_messages, &expert_tools).await
+            expert
+                .brain
+                .decide_next_action(&expert_messages, &expert_tools)
+                .await
         } else {
-            Err(AgentError::ConfigurationError(format!("Expert not found: {:?}", expert_type)))
+            Err(AgentError::ConfigurationError(format!(
+                "Expert not found: {:?}",
+                expert_type
+            )))
         }
     }
 }
@@ -294,9 +340,13 @@ impl MultiAgentOrchestrator {
     ) -> Vec<ToolDefinition> {
         // Use ToolMappingService instead of pattern matching
         let tool_names: Vec<String> = available_tools.iter().map(|t| t.name.clone()).collect();
-        let matching_tool_names = ToolMappingService::get_tools_for_agent(&tool_names, &Self::convert_agent_type(expert_type));
+        let matching_tool_names = ToolMappingService::get_tools_for_agent(
+            &tool_names,
+            &Self::convert_agent_type(expert_type),
+        );
 
-        available_tools.iter()
+        available_tools
+            .iter()
             .filter(|tool| matching_tool_names.contains(&tool.name))
             .cloned()
             .collect()

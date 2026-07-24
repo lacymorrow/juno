@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use super::core::{AgentAction, AgentError, Message, ToolCall, ToolDefinition, ToolResult};
 use crate::state::CancelReceiver;
+use async_trait::async_trait;
 use tauri::AppHandle;
 
 /// Manages the agent's memory (conversation history).
@@ -42,7 +42,9 @@ pub trait MemoryManager: Send + Sync {
     /// Removes orphaned tool calls only from previous executions, not from the current one.
     /// This allows safe cleanup without affecting tools currently in progress.
     /// Default implementation falls back to the regular clean_orphaned_tool_calls method.
-    async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
+    async fn clean_orphaned_tool_calls_from_previous_executions(
+        &mut self,
+    ) -> Result<(), AgentError> {
         self.clean_orphaned_tool_calls().await // Default implementation calls the regular method
     }
 
@@ -62,7 +64,10 @@ pub trait ToolProvider: Send + Sync {
 
     /// Executes multiple tool calls as a batch for improved performance.
     /// Default implementation falls back to sequential execution.
-    async fn execute_batch_tools(&self, tool_calls: Vec<ToolCall>) -> Result<Vec<ToolResult>, AgentError> {
+    async fn execute_batch_tools(
+        &self,
+        tool_calls: Vec<ToolCall>,
+    ) -> Result<Vec<ToolResult>, AgentError> {
         let mut results = Vec::new();
         for tool_call in tool_calls {
             results.push(self.execute_tool(tool_call).await?);
@@ -121,10 +126,7 @@ pub trait AgentRunnable: Send + Sync {
     ) -> Result<String, AgentError>;
 
     /// Executes a single step of the agent loop.
-    async fn step(
-        &mut self,
-        cancel_rx: CancelReceiver,
-    ) -> Result<AgentAction, AgentError>;
+    async fn step(&mut self, cancel_rx: CancelReceiver) -> Result<AgentAction, AgentError>;
 
     // Maybe add methods for pausing, resuming, stopping?
     // async fn pause(&mut self) -> Result<(), AgentError>;

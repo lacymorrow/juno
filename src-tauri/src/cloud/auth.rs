@@ -1,9 +1,9 @@
+use super::config::CloudConfig;
+use super::types::{AuthResponse, CloudError, DeviceRegistration};
+use crate::utils::current_timestamp_secs;
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use super::types::{CloudError, DeviceRegistration, AuthResponse};
-use super::config::CloudConfig;
-use base64::{Engine as _, engine::general_purpose};
-use crate::utils::current_timestamp_secs;
 
 /// Device authentication credentials
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,13 +37,16 @@ impl DeviceAuth {
 
     /// Create device registration payload
     pub fn create_registration(&self) -> Result<DeviceRegistration, CloudError> {
-        let device_id = self.config.device_id
+        let device_id = self
+            .config
+            .device_id
             .clone()
             .unwrap_or_else(Self::generate_device_id);
 
-        let api_key = self.config.api_key
-            .clone()
-            .ok_or_else(|| CloudError::AuthenticationFailed("No API key configured".to_string()))?;
+        let api_key =
+            self.config.api_key.clone().ok_or_else(|| {
+                CloudError::AuthenticationFailed("No API key configured".to_string())
+            })?;
 
         let capabilities = self.get_device_capabilities();
 
@@ -89,9 +92,9 @@ impl DeviceAuth {
 
     /// Create authentication message for WebSocket
     pub fn create_auth_message(&self) -> Result<serde_json::Value, CloudError> {
-        let creds = self.credentials
-            .as_ref()
-            .ok_or_else(|| CloudError::AuthenticationFailed("No credentials available".to_string()))?;
+        let creds = self.credentials.as_ref().ok_or_else(|| {
+            CloudError::AuthenticationFailed("No credentials available".to_string())
+        })?;
 
         let timestamp = current_timestamp_secs();
 
@@ -111,19 +114,24 @@ impl DeviceAuth {
     pub fn validate_auth_response(&mut self, response: AuthResponse) -> Result<(), CloudError> {
         if !response.success {
             return Err(CloudError::AuthenticationFailed(
-                response.error.unwrap_or_else(|| "Authentication failed".to_string())
+                response
+                    .error
+                    .unwrap_or_else(|| "Authentication failed".to_string()),
             ));
         }
 
-        let token = response.token
+        let token = response
+            .token
             .ok_or_else(|| CloudError::AuthenticationFailed("No token in response".to_string()))?;
 
-        let device_id = response.device_id
-            .ok_or_else(|| CloudError::AuthenticationFailed("No device ID in response".to_string()))?;
+        let device_id = response.device_id.ok_or_else(|| {
+            CloudError::AuthenticationFailed("No device ID in response".to_string())
+        })?;
 
-        let api_key = self.config.api_key
-            .clone()
-            .ok_or_else(|| CloudError::AuthenticationFailed("No API key configured".to_string()))?;
+        let api_key =
+            self.config.api_key.clone().ok_or_else(|| {
+                CloudError::AuthenticationFailed("No API key configured".to_string())
+            })?;
 
         self.credentials = Some(CloudCredentials {
             device_id,
@@ -158,18 +166,14 @@ impl DeviceAuth {
 
         #[cfg(target_os = "windows")]
         {
-            capabilities.extend_from_slice(&[
-                "windows_automation".to_string(),
-                "win32_api".to_string(),
-            ]);
+            capabilities
+                .extend_from_slice(&["windows_automation".to_string(), "win32_api".to_string()]);
         }
 
         #[cfg(target_os = "linux")]
         {
-            capabilities.extend_from_slice(&[
-                "x11_automation".to_string(),
-                "gtk_integration".to_string(),
-            ]);
+            capabilities
+                .extend_from_slice(&["x11_automation".to_string(), "gtk_integration".to_string()]);
         }
 
         capabilities
@@ -192,7 +196,8 @@ impl DeviceAuth {
 
     /// Create signature for command validation
     pub fn create_signature(&self, data: &str) -> Result<String, CloudError> {
-        let creds = self.credentials
+        let creds = self
+            .credentials
             .as_ref()
             .ok_or_else(|| CloudError::SecurityError("No credentials for signing".to_string()))?;
 
@@ -216,5 +221,3 @@ impl DeviceAuth {
         Ok(expected_signature == signature)
     }
 }
-
-

@@ -5,7 +5,7 @@
 //! and API compatibility as required by the official specification.
 
 use crate::agent::core::ToolDefinition;
-use crate::constants::api::{computer_use_api_types, beta_flags, tool_version_groups};
+use crate::constants::api::{beta_flags, computer_use_api_types, tool_version_groups};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -247,14 +247,8 @@ mod tests {
 
     #[test]
     fn test_api_version_strings() {
-        assert_eq!(
-            ApiVersion::Computer20241022.as_str(),
-            "computer_20241022"
-        );
-        assert_eq!(
-            ApiVersion::Computer20250124.as_str(),
-            "computer_20250124"
-        );
+        assert_eq!(ApiVersion::Computer20241022.as_str(), "computer_20241022");
+        assert_eq!(ApiVersion::Computer20250124.as_str(), "computer_20250124");
     }
 
     #[test]

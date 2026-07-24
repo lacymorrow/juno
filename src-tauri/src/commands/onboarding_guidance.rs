@@ -127,7 +127,10 @@ async fn wait_for_settings_window(timeout_ms: u64) -> Option<(f64, f64, f64, f64
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
     loop {
         // Run the AX call on a blocking thread to avoid stalling the async runtime
-        let bounds = tokio::task::spawn_blocking(find_system_settings_window_bounds).await.ok().flatten();
+        let bounds = tokio::task::spawn_blocking(find_system_settings_window_bounds)
+            .await
+            .ok()
+            .flatten();
         if let Some(b) = bounds {
             return Some(b);
         }
@@ -190,7 +193,10 @@ fn find_juno_control_bounds() -> Option<(f64, f64, f64, f64)> {
                     for sib in &siblings {
                         if let Ok(b) = sib.bounds() {
                             let role = sib.role().to_lowercase();
-                            if role.contains("checkbox") || role.contains("switch") || role.contains("button") {
+                            if role.contains("checkbox")
+                                || role.contains("switch")
+                                || role.contains("button")
+                            {
                                 return Some(b);
                             }
                         }
@@ -239,8 +245,20 @@ async fn fly_and_announce(
         // Using animate_cursor_to with a tiny source delta still emits frames,
         // so we instead use the highlight + bubble at the target and rely on
         // the overlay being positionable through subsequent events.
-        crate::commands::onboarding::show_cursor_highlight(app.clone(), to.0, to.1, Some(ring_radius)).await?;
-        crate::commands::onboarding::show_cursor_bubble(app.clone(), to.0, to.1, bubble.to_string()).await?;
+        crate::commands::onboarding::show_cursor_highlight(
+            app.clone(),
+            to.0,
+            to.1,
+            Some(ring_radius),
+        )
+        .await?;
+        crate::commands::onboarding::show_cursor_bubble(
+            app.clone(),
+            to.0,
+            to.1,
+            bubble.to_string(),
+        )
+        .await?;
         return Ok(());
     }
 
@@ -276,10 +294,12 @@ async fn fly_and_announce(
     }
 
     // 4. Pulsing highlight ring at target
-    crate::commands::onboarding::show_cursor_highlight(app.clone(), to.0, to.1, Some(ring_radius)).await?;
+    crate::commands::onboarding::show_cursor_highlight(app.clone(), to.0, to.1, Some(ring_radius))
+        .await?;
 
     // 5. Speech bubble (frontend handles the typewriter reveal)
-    crate::commands::onboarding::show_cursor_bubble(app.clone(), to.0, to.1, bubble.to_string()).await?;
+    crate::commands::onboarding::show_cursor_bubble(app.clone(), to.0, to.1, bubble.to_string())
+        .await?;
 
     Ok(())
 }
@@ -363,14 +383,26 @@ pub async fn guide_to_system_settings(
 
     // Step 2: Tier 2 — AX tree walk for Juno-specific control
     if window_bounds.is_some() {
-        let juno_bounds = tokio::task::spawn_blocking(find_juno_control_bounds).await
+        let juno_bounds = tokio::task::spawn_blocking(find_juno_control_bounds)
+            .await
             .ok()
             .flatten();
         if let Some((x, y, w, h)) = juno_bounds {
             let cx = x + w / 2.0;
             let cy = y + h / 2.0;
-            info!("[onboarding-guidance] Tier 2 success: AX-located Juno at ({}, {})", cx, cy);
-            fly_and_announce(&app, origin, (cx, cy), perm.bubble_text(), 28.0, already_open).await?;
+            info!(
+                "[onboarding-guidance] Tier 2 success: AX-located Juno at ({}, {})",
+                cx, cy
+            );
+            fly_and_announce(
+                &app,
+                origin,
+                (cx, cy),
+                perm.bubble_text(),
+                28.0,
+                already_open,
+            )
+            .await?;
             return Ok(GuidanceResult {
                 tier: 2,
                 target_x: cx,
@@ -392,8 +424,19 @@ pub async fn guide_to_system_settings(
         // App toggles in the apps list — first row is usually ~210px from the pane top.
         let target_x = right_pane_x + right_pane_w - 60.0; // toggle column near right edge
         let target_y = wy + (wh * 0.45).clamp(140.0, 380.0);
-        info!("[onboarding-guidance] Tier 1: window-bounds estimate ({}, {})", target_x, target_y);
-        fly_and_announce(&app, origin, (target_x, target_y), perm.bubble_text(), 36.0, already_open).await?;
+        info!(
+            "[onboarding-guidance] Tier 1: window-bounds estimate ({}, {})",
+            target_x, target_y
+        );
+        fly_and_announce(
+            &app,
+            origin,
+            (target_x, target_y),
+            perm.bubble_text(),
+            36.0,
+            already_open,
+        )
+        .await?;
         return Ok(GuidanceResult {
             tier: 1,
             target_x,
@@ -441,10 +484,7 @@ pub async fn guide_to_system_settings(
 /// - **microphone**: prompt the user to speak; transcription verification is out of scope here.
 /// - **input_monitoring**: prompt the user to press Option+D.
 #[tauri::command]
-pub async fn run_permission_demo(
-    app: AppHandle,
-    permission_type: String,
-) -> Result<(), String> {
+pub async fn run_permission_demo(app: AppHandle, permission_type: String) -> Result<(), String> {
     let perm = GuidedPermission::from_str(&permission_type)
         .ok_or_else(|| format!("Unknown permission type: {}", permission_type))?;
 
@@ -547,8 +587,13 @@ async fn demo_accessibility(app: &AppHandle) -> Result<(), String> {
     sleep(Duration::from_millis(950)).await;
 
     // A small pulse at the dock — pure visual flourish, no click.
-    crate::commands::onboarding::show_cursor_highlight(app.clone(), dock_target.0, dock_target.1, Some(40.0))
-        .await?;
+    crate::commands::onboarding::show_cursor_highlight(
+        app.clone(),
+        dock_target.0,
+        dock_target.1,
+        Some(40.0),
+    )
+    .await?;
     sleep(Duration::from_millis(700)).await;
 
     // Return home
@@ -621,10 +666,19 @@ mod tests {
 
     #[test]
     fn permission_parsing_round_trip() {
-        for s in ["screen_recording", "accessibility", "microphone", "input_monitoring"] {
+        for s in [
+            "screen_recording",
+            "accessibility",
+            "microphone",
+            "input_monitoring",
+        ] {
             let p = GuidedPermission::from_str(s).expect("known permission");
             // Pane label and bubble text should both be non-empty for every variant.
-            assert!(!p.settings_pane_label().is_empty(), "pane label for {:?}", p);
+            assert!(
+                !p.settings_pane_label().is_empty(),
+                "pane label for {:?}",
+                p
+            );
             assert!(!p.bubble_text().is_empty(), "bubble text for {:?}", p);
         }
         assert!(GuidedPermission::from_str("nope").is_none());

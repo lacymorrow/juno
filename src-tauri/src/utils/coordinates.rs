@@ -1,14 +1,12 @@
-use std::sync::RwLock;
-use once_cell::sync::Lazy;
-use tracing::info;
-use serde::Serialize;
 use crate::constants::ui::standard_resolutions;
+use once_cell::sync::Lazy;
+use serde::Serialize;
+use std::sync::RwLock;
+use tracing::info;
 
 /// The model name currently in use. Updated at the start of each agent run so
 /// that the screenshot pipeline can pick the right resolution tier.
-pub static CURRENT_MODEL: Lazy<RwLock<String>> = Lazy::new(|| {
-    RwLock::new(String::new())
-});
+pub static CURRENT_MODEL: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(String::new()));
 
 /// Update the current model name (called at agent start).
 pub fn set_current_model(model: &str) {
@@ -19,10 +17,7 @@ pub fn set_current_model(model: &str) {
 
 /// Read the current model name.
 pub fn get_current_model() -> String {
-    CURRENT_MODEL
-        .read()
-        .map(|m| m.clone())
-        .unwrap_or_default()
+    CURRENT_MODEL.read().map(|m| m.clone()).unwrap_or_default()
 }
 
 // Global state to store the current screenshot scaling information
@@ -101,7 +96,11 @@ pub fn update_standard_resolution_scaling(
     let (standard_width, standard_height) = if model.is_empty() {
         standard_resolutions::select_best_resolution(display_width, display_height)
     } else {
-        standard_resolutions::select_best_resolution_for_model(display_width, display_height, &model)
+        standard_resolutions::select_best_resolution_for_model(
+            display_width,
+            display_height,
+            &model,
+        )
     };
 
     // Calculate scaling factors from display to standard resolution
@@ -131,33 +130,49 @@ pub fn update_standard_resolution_scaling(
     };
 
     // Validate scale factors
-    let safe_display_scale_x = if display_to_standard_scale_x.is_finite() && display_to_standard_scale_x > 0.0 {
-        display_to_standard_scale_x
-    } else {
-        tracing::warn!("Invalid display to standard X scale factor: {}, using 1.0", display_to_standard_scale_x);
-        1.0
-    };
+    let safe_display_scale_x =
+        if display_to_standard_scale_x.is_finite() && display_to_standard_scale_x > 0.0 {
+            display_to_standard_scale_x
+        } else {
+            tracing::warn!(
+                "Invalid display to standard X scale factor: {}, using 1.0",
+                display_to_standard_scale_x
+            );
+            1.0
+        };
 
-    let safe_display_scale_y = if display_to_standard_scale_y.is_finite() && display_to_standard_scale_y > 0.0 {
-        display_to_standard_scale_y
-    } else {
-        tracing::warn!("Invalid display to standard Y scale factor: {}, using 1.0", display_to_standard_scale_y);
-        1.0
-    };
+    let safe_display_scale_y =
+        if display_to_standard_scale_y.is_finite() && display_to_standard_scale_y > 0.0 {
+            display_to_standard_scale_y
+        } else {
+            tracing::warn!(
+                "Invalid display to standard Y scale factor: {}, using 1.0",
+                display_to_standard_scale_y
+            );
+            1.0
+        };
 
-    let safe_screenshot_scale_x = if screenshot_to_standard_scale_x.is_finite() && screenshot_to_standard_scale_x > 0.0 {
-        screenshot_to_standard_scale_x
-    } else {
-        tracing::warn!("Invalid screenshot to standard X scale factor: {}, using 1.0", screenshot_to_standard_scale_x);
-        1.0
-    };
+    let safe_screenshot_scale_x =
+        if screenshot_to_standard_scale_x.is_finite() && screenshot_to_standard_scale_x > 0.0 {
+            screenshot_to_standard_scale_x
+        } else {
+            tracing::warn!(
+                "Invalid screenshot to standard X scale factor: {}, using 1.0",
+                screenshot_to_standard_scale_x
+            );
+            1.0
+        };
 
-    let safe_screenshot_scale_y = if screenshot_to_standard_scale_y.is_finite() && screenshot_to_standard_scale_y > 0.0 {
-        screenshot_to_standard_scale_y
-    } else {
-        tracing::warn!("Invalid screenshot to standard Y scale factor: {}, using 1.0", screenshot_to_standard_scale_y);
-        1.0
-    };
+    let safe_screenshot_scale_y =
+        if screenshot_to_standard_scale_y.is_finite() && screenshot_to_standard_scale_y > 0.0 {
+            screenshot_to_standard_scale_y
+        } else {
+            tracing::warn!(
+                "Invalid screenshot to standard Y scale factor: {}, using 1.0",
+                screenshot_to_standard_scale_y
+            );
+            1.0
+        };
 
     if let Ok(mut scaling) = SCREENSHOT_SCALE.write() {
         *scaling = ScalingInfo {
@@ -202,7 +217,11 @@ pub fn update_standard_resolution_scaling_with_display(
     let (standard_width, standard_height) = if model.is_empty() {
         standard_resolutions::select_best_resolution(display_width, display_height)
     } else {
-        standard_resolutions::select_best_resolution_for_model(display_width, display_height, &model)
+        standard_resolutions::select_best_resolution_for_model(
+            display_width,
+            display_height,
+            &model,
+        )
     };
 
     // Calculate scaling factors from display to standard resolution
@@ -232,33 +251,49 @@ pub fn update_standard_resolution_scaling_with_display(
     };
 
     // Validate scale factors
-    let safe_display_scale_x = if display_to_standard_scale_x.is_finite() && display_to_standard_scale_x > 0.0 {
-        display_to_standard_scale_x
-    } else {
-        tracing::warn!("Invalid display to standard X scale factor: {}, using 1.0", display_to_standard_scale_x);
-        1.0
-    };
+    let safe_display_scale_x =
+        if display_to_standard_scale_x.is_finite() && display_to_standard_scale_x > 0.0 {
+            display_to_standard_scale_x
+        } else {
+            tracing::warn!(
+                "Invalid display to standard X scale factor: {}, using 1.0",
+                display_to_standard_scale_x
+            );
+            1.0
+        };
 
-    let safe_display_scale_y = if display_to_standard_scale_y.is_finite() && display_to_standard_scale_y > 0.0 {
-        display_to_standard_scale_y
-    } else {
-        tracing::warn!("Invalid display to standard Y scale factor: {}, using 1.0", display_to_standard_scale_y);
-        1.0
-    };
+    let safe_display_scale_y =
+        if display_to_standard_scale_y.is_finite() && display_to_standard_scale_y > 0.0 {
+            display_to_standard_scale_y
+        } else {
+            tracing::warn!(
+                "Invalid display to standard Y scale factor: {}, using 1.0",
+                display_to_standard_scale_y
+            );
+            1.0
+        };
 
-    let safe_screenshot_scale_x = if screenshot_to_standard_scale_x.is_finite() && screenshot_to_standard_scale_x > 0.0 {
-        screenshot_to_standard_scale_x
-    } else {
-        tracing::warn!("Invalid screenshot to standard X scale factor: {}, using 1.0", screenshot_to_standard_scale_x);
-        1.0
-    };
+    let safe_screenshot_scale_x =
+        if screenshot_to_standard_scale_x.is_finite() && screenshot_to_standard_scale_x > 0.0 {
+            screenshot_to_standard_scale_x
+        } else {
+            tracing::warn!(
+                "Invalid screenshot to standard X scale factor: {}, using 1.0",
+                screenshot_to_standard_scale_x
+            );
+            1.0
+        };
 
-    let safe_screenshot_scale_y = if screenshot_to_standard_scale_y.is_finite() && screenshot_to_standard_scale_y > 0.0 {
-        screenshot_to_standard_scale_y
-    } else {
-        tracing::warn!("Invalid screenshot to standard Y scale factor: {}, using 1.0", screenshot_to_standard_scale_y);
-        1.0
-    };
+    let safe_screenshot_scale_y =
+        if screenshot_to_standard_scale_y.is_finite() && screenshot_to_standard_scale_y > 0.0 {
+            screenshot_to_standard_scale_y
+        } else {
+            tracing::warn!(
+                "Invalid screenshot to standard Y scale factor: {}, using 1.0",
+                screenshot_to_standard_scale_y
+            );
+            1.0
+        };
 
     // Update scaling information with ALL values including display origin
     if let Ok(mut scaling) = SCREENSHOT_SCALE.write() {
@@ -282,10 +317,14 @@ pub fn update_standard_resolution_scaling_with_display(
             display_width, display_height, display_origin_x, display_origin_y, standard_width, standard_height, screenshot_width, screenshot_height);
         info!("Scale factors - display→standard: x={:.3}, y={:.3} | screenshot→standard: x={:.3}, y={:.3}",
             safe_display_scale_x, safe_display_scale_y, safe_screenshot_scale_x, safe_screenshot_scale_y);
-        info!("Display origin preserved: ({}, {}), display ID: {:?}",
-            display_origin_x, display_origin_y, display_id);
+        info!(
+            "Display origin preserved: ({}, {}), display ID: {:?}",
+            display_origin_x, display_origin_y, display_id
+        );
     } else {
-        tracing::error!("Failed to acquire write lock on SCREENSHOT_SCALE for display origin update");
+        tracing::error!(
+            "Failed to acquire write lock on SCREENSHOT_SCALE for display origin update"
+        );
     }
 }
 
@@ -295,9 +334,13 @@ pub fn update_standard_resolution_scaling_with_display(
 pub fn transform_standard_to_screen_coordinates(standard_x: f64, standard_y: f64) -> (f64, f64) {
     if let Ok(scaling) = SCREENSHOT_SCALE.read() {
         // Skip transformation if no scaling was applied or dimensions are invalid
-        if scaling.display_width == 0 || scaling.display_height == 0 ||
-           scaling.standard_width == 0 || scaling.standard_height == 0 ||
-           scaling.display_to_standard_scale_x <= 0.0 || scaling.display_to_standard_scale_y <= 0.0 {
+        if scaling.display_width == 0
+            || scaling.display_height == 0
+            || scaling.standard_width == 0
+            || scaling.standard_height == 0
+            || scaling.display_to_standard_scale_x <= 0.0
+            || scaling.display_to_standard_scale_y <= 0.0
+        {
             return (standard_x, standard_y);
         }
 
@@ -326,9 +369,13 @@ pub fn transform_standard_to_screen_coordinates(standard_x: f64, standard_y: f64
 pub fn transform_screen_to_standard_coordinates(screen_x: f64, screen_y: f64) -> (f64, f64) {
     if let Ok(scaling) = SCREENSHOT_SCALE.read() {
         // Skip transformation if no scaling was applied or dimensions are invalid
-        if scaling.display_width == 0 || scaling.display_height == 0 ||
-           scaling.standard_width == 0 || scaling.standard_height == 0 ||
-           scaling.display_to_standard_scale_x <= 0.0 || scaling.display_to_standard_scale_y <= 0.0 {
+        if scaling.display_width == 0
+            || scaling.display_height == 0
+            || scaling.standard_width == 0
+            || scaling.standard_height == 0
+            || scaling.display_to_standard_scale_x <= 0.0
+            || scaling.display_to_standard_scale_y <= 0.0
+        {
             return (screen_x, screen_y);
         }
 
@@ -349,7 +396,8 @@ pub fn transform_screen_to_standard_coordinates(screen_x: f64, screen_y: f64) ->
 
 /// Get the current standard resolution being used
 pub fn get_current_standard_resolution() -> Result<(u32, u32), String> {
-    SCREENSHOT_SCALE.read()
+    SCREENSHOT_SCALE
+        .read()
         .map(|scaling| (scaling.standard_width, scaling.standard_height))
         .map_err(|_| "Failed to acquire read lock on SCREENSHOT_SCALE".to_string())
 }
@@ -370,7 +418,8 @@ pub fn transform_to_scaled_coordinates(original_x: f64, original_y: f64) -> (f64
 
 /// Get current scaling information (for debugging/testing)
 pub fn get_scaling_info() -> Result<ScalingInfo, String> {
-    SCREENSHOT_SCALE.read()
+    SCREENSHOT_SCALE
+        .read()
         .map(|scaling| *scaling)
         .map_err(|_| "Failed to acquire read lock on SCREENSHOT_SCALE".to_string())
 }

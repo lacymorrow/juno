@@ -144,7 +144,9 @@ impl ToolChoiceIntelligence {
         // 1. Pattern-based analysis
         for (category, matchers) in &self.pattern_matchers {
             for matcher in matchers {
-                if matcher.pattern.is_match(user_input) && matcher.confidence >= self.config.confidence_threshold {
+                if matcher.pattern.is_match(user_input)
+                    && matcher.confidence >= self.config.confidence_threshold
+                {
                     decisions.push(ToolChoiceDecision {
                         tool_choice: match matcher.force_mode {
                             ForceMode::ForceSpecific => Some(ToolChoice::Tool {
@@ -197,10 +199,10 @@ impl ToolChoiceIntelligence {
 
     /// Helper method to create patterns from configurations with safe regex compilation
     fn create_patterns_from_configs(
-        configs: Vec<(&str, &str, f32, &str, ForceMode)>
+        configs: Vec<(&str, &str, f32, &str, ForceMode)>,
     ) -> Vec<PatternMatcher> {
         let mut patterns = Vec::new();
-        
+
         for (pattern_str, tool_name, confidence, description, force_mode) in configs {
             match Regex::new(pattern_str) {
                 Ok(pattern) => {
@@ -213,35 +215,69 @@ impl ToolChoiceIntelligence {
                     });
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to compile pattern regex '{}': {}",
-                        pattern_str, e
-                    );
+                    tracing::warn!("Failed to compile pattern regex '{}': {}", pattern_str, e);
                 }
             }
         }
-        
+
         patterns
     }
 
     /// Initialize screenshot tool patterns
     fn initialize_screenshot_patterns(&mut self) {
         let pattern_configs = vec![
-            (r"(?i)\b(take|capture|get|grab)\s+(a\s+)?(screenshot|screen\s*shot|screen\s*cap)\b", "screenshot", 0.9, "Direct screenshot command", ForceMode::ForceSpecific),
-            (r"(?i)\b(show\s+me\s+the\s+screen|what('s|\s+is)\s+on\s+screen)\b", "screenshot", 0.8, "Implicit screenshot request", ForceMode::ForceSpecific),
-            (r"(?i)\b(screen\s*shot|screenshot)\b", "screenshot", 0.7, "Screenshot keyword", ForceMode::Suggest),
+            (
+                r"(?i)\b(take|capture|get|grab)\s+(a\s+)?(screenshot|screen\s*shot|screen\s*cap)\b",
+                "screenshot",
+                0.9,
+                "Direct screenshot command",
+                ForceMode::ForceSpecific,
+            ),
+            (
+                r"(?i)\b(show\s+me\s+the\s+screen|what('s|\s+is)\s+on\s+screen)\b",
+                "screenshot",
+                0.8,
+                "Implicit screenshot request",
+                ForceMode::ForceSpecific,
+            ),
+            (
+                r"(?i)\b(screen\s*shot|screenshot)\b",
+                "screenshot",
+                0.7,
+                "Screenshot keyword",
+                ForceMode::Suggest,
+            ),
         ];
 
         let patterns = Self::create_patterns_from_configs(pattern_configs);
-        self.pattern_matchers.insert("screenshot".to_string(), patterns);
+        self.pattern_matchers
+            .insert("screenshot".to_string(), patterns);
     }
 
     /// Initialize click tool patterns
     fn initialize_click_patterns(&mut self) {
         let pattern_configs = vec![
-            (r"(?i)\b(click|press|tap)\s+(on\s+)?(the\s+)?(\w+\s+)?(button|link|icon|element)\b", "click", 0.9, "Direct click command", ForceMode::ForceSpecific),
-            (r"(?i)\b(left\s+click|right\s+click|double\s+click)\b", "click", 0.9, "Specific click type", ForceMode::ForceSpecific),
-            (r"(?i)\bclick\s+(here|there|this|that)\b", "click", 0.8, "Contextual click command", ForceMode::ForceSpecific),
+            (
+                r"(?i)\b(click|press|tap)\s+(on\s+)?(the\s+)?(\w+\s+)?(button|link|icon|element)\b",
+                "click",
+                0.9,
+                "Direct click command",
+                ForceMode::ForceSpecific,
+            ),
+            (
+                r"(?i)\b(left\s+click|right\s+click|double\s+click)\b",
+                "click",
+                0.9,
+                "Specific click type",
+                ForceMode::ForceSpecific,
+            ),
+            (
+                r"(?i)\bclick\s+(here|there|this|that)\b",
+                "click",
+                0.8,
+                "Contextual click command",
+                ForceMode::ForceSpecific,
+            ),
         ];
 
         let patterns = Self::create_patterns_from_configs(pattern_configs);
@@ -255,33 +291,77 @@ impl ToolChoiceIntelligence {
         } else {
             ForceMode::Suggest
         };
-        
+
         let pattern_configs = vec![
-            (r"(?i)\b(type|enter|input|write)\s+", "key", 0.8, "Text input command", force_mode_for_text),
-            (r"(?i)\b(press|hit)\s+(the\s+)?(enter|return|space|tab|escape|esc)\s+(key|button)?\b", "key", 0.9, "Specific key press", ForceMode::ForceSpecific),
-            (r"(?i)\b(keyboard\s+shortcut|hotkey|key\s+combo)\b", "key", 0.8, "Keyboard shortcut command", ForceMode::ForceSpecific),
+            (
+                r"(?i)\b(type|enter|input|write)\s+",
+                "key",
+                0.8,
+                "Text input command",
+                force_mode_for_text,
+            ),
+            (
+                r"(?i)\b(press|hit)\s+(the\s+)?(enter|return|space|tab|escape|esc)\s+(key|button)?\b",
+                "key",
+                0.9,
+                "Specific key press",
+                ForceMode::ForceSpecific,
+            ),
+            (
+                r"(?i)\b(keyboard\s+shortcut|hotkey|key\s+combo)\b",
+                "key",
+                0.8,
+                "Keyboard shortcut command",
+                ForceMode::ForceSpecific,
+            ),
         ];
 
         let patterns = Self::create_patterns_from_configs(pattern_configs);
-        self.pattern_matchers.insert("keyboard".to_string(), patterns);
+        self.pattern_matchers
+            .insert("keyboard".to_string(), patterns);
     }
 
     /// Initialize browser-specific patterns
     fn initialize_browser_patterns(&mut self) {
         let pattern_configs = vec![
-            (r"(?i)\b(open|navigate|go\s+to)\s+(a\s+)?(browser|web\s*page|url|website)\b", "browser_navigate", 0.8, "Browser navigation command", ForceMode::ForceAny),
-            (r"(?i)\b(refresh|reload)\s+(the\s+)?(page|browser)\b", "browser_refresh", 0.9, "Page refresh command", ForceMode::ForceSpecific),
+            (
+                r"(?i)\b(open|navigate|go\s+to)\s+(a\s+)?(browser|web\s*page|url|website)\b",
+                "browser_navigate",
+                0.8,
+                "Browser navigation command",
+                ForceMode::ForceAny,
+            ),
+            (
+                r"(?i)\b(refresh|reload)\s+(the\s+)?(page|browser)\b",
+                "browser_refresh",
+                0.9,
+                "Page refresh command",
+                ForceMode::ForceSpecific,
+            ),
         ];
 
         let patterns = Self::create_patterns_from_configs(pattern_configs);
-        self.pattern_matchers.insert("browser".to_string(), patterns);
+        self.pattern_matchers
+            .insert("browser".to_string(), patterns);
     }
 
     /// Initialize file operation patterns
     fn initialize_file_patterns(&mut self) {
         let pattern_configs = vec![
-            (r"(?i)\b(open|read|view)\s+(a\s+|the\s+)?file\b", "str_replace_editor", 0.8, "File read command", ForceMode::ForceAny),
-            (r"(?i)\b(save|write|create)\s+(a\s+|the\s+)?file\b", "str_replace_editor", 0.8, "File write command", ForceMode::ForceAny),
+            (
+                r"(?i)\b(open|read|view)\s+(a\s+|the\s+)?file\b",
+                "str_replace_editor",
+                0.8,
+                "File read command",
+                ForceMode::ForceAny,
+            ),
+            (
+                r"(?i)\b(save|write|create)\s+(a\s+|the\s+)?file\b",
+                "str_replace_editor",
+                0.8,
+                "File write command",
+                ForceMode::ForceAny,
+            ),
         ];
 
         let patterns = Self::create_patterns_from_configs(pattern_configs);
@@ -291,12 +371,25 @@ impl ToolChoiceIntelligence {
     /// Initialize desktop interaction patterns
     fn initialize_desktop_patterns(&mut self) {
         let pattern_configs = vec![
-            (r"(?i)\b(minimize|maximize|close)\s+(the\s+)?(window|app|application)\b", "window_control", 0.9, "Window control command", ForceMode::ForceAny),
-            (r"(?i)\b(switch\s+to|focus\s+on)\s+(the\s+)?(\w+\s+)?(window|app|application)\b", "window_focus", 0.8, "Window focus command", ForceMode::ForceAny),
+            (
+                r"(?i)\b(minimize|maximize|close)\s+(the\s+)?(window|app|application)\b",
+                "window_control",
+                0.9,
+                "Window control command",
+                ForceMode::ForceAny,
+            ),
+            (
+                r"(?i)\b(switch\s+to|focus\s+on)\s+(the\s+)?(\w+\s+)?(window|app|application)\b",
+                "window_focus",
+                0.8,
+                "Window focus command",
+                ForceMode::ForceAny,
+            ),
         ];
 
         let patterns = Self::create_patterns_from_configs(pattern_configs);
-        self.pattern_matchers.insert("desktop".to_string(), patterns);
+        self.pattern_matchers
+            .insert("desktop".to_string(), patterns);
     }
 
     /// Initialize context-based decision rules
@@ -357,7 +450,8 @@ impl ToolChoiceIntelligence {
     ) -> ToolChoiceDecision {
         // Sort by confidence, highest first
         decisions.sort_by(|a, b| {
-            b.confidence.partial_cmp(&a.confidence)
+            b.confidence
+                .partial_cmp(&a.confidence)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 

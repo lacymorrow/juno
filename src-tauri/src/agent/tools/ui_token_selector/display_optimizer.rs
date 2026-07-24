@@ -3,8 +3,8 @@
 //! Provides display-specific optimizations for token selection based on
 //! display characteristics, resolution, and multi-monitor configurations.
 
-use crate::agent::tools::ui_token_selector::{TokenSelectionError, VisualToken, DisplayInfo};
 use crate::agent::tools::ui_token_selector::config::TokenSelectionConfig;
+use crate::agent::tools::ui_token_selector::{DisplayInfo, TokenSelectionError, VisualToken};
 use tracing::{debug, info};
 
 /// Display Optimizer for multi-monitor token selection optimization
@@ -39,7 +39,9 @@ impl DisplayOptimizer {
         );
 
         // Step 1: Apply display-specific reduction targets
-        tokens = self.apply_display_specific_reduction(tokens, display_info).await?;
+        tokens = self
+            .apply_display_specific_reduction(tokens, display_info)
+            .await?;
 
         // Step 2: Scale optimization based on resolution
         if self.config.multi_monitor.scale_by_resolution {
@@ -47,7 +49,9 @@ impl DisplayOptimizer {
         }
 
         // Step 3: Apply display-aware importance adjustments
-        tokens = self.adjust_importance_for_display(tokens, display_info).await?;
+        tokens = self
+            .adjust_importance_for_display(tokens, display_info)
+            .await?;
 
         debug!(
             "Display optimization complete: {} tokens optimized for display {}",
@@ -80,7 +84,8 @@ impl DisplayOptimizer {
 
         // Sort by importance and keep the most important tokens
         tokens.sort_by(|a, b| {
-            b.importance_score.partial_cmp(&a.importance_score)
+            b.importance_score
+                .partial_cmp(&a.importance_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
@@ -91,7 +96,11 @@ impl DisplayOptimizer {
             current_count,
             target_count,
             reduction_target * 100.0,
-            if display_info.is_main { "primary" } else { "secondary" }
+            if display_info.is_main {
+                "primary"
+            } else {
+                "secondary"
+            }
         );
 
         Ok(tokens)
@@ -127,9 +136,7 @@ impl DisplayOptimizer {
 
         debug!(
             "Applied resolution scaling for {:?} display ({}x{})",
-            resolution_category,
-            display_info.bounds.width,
-            display_info.bounds.height
+            resolution_category, display_info.bounds.width, display_info.bounds.height
         );
 
         Ok(tokens)
@@ -151,7 +158,10 @@ impl DisplayOptimizer {
     }
 
     /// Applies high DPI specific optimizations
-    async fn apply_high_dpi_optimization(&self, tokens: Vec<VisualToken>) -> Result<Vec<VisualToken>, String> {
+    async fn apply_high_dpi_optimization(
+        &self,
+        tokens: Vec<VisualToken>,
+    ) -> Result<Vec<VisualToken>, String> {
         // For high DPI displays, we can be more aggressive with background reduction
         // since there's typically redundant detail
 
@@ -160,25 +170,37 @@ impl DisplayOptimizer {
         let mut background_tokens: Vec<_> = tokens
             .iter()
             .enumerate()
-            .filter(|(_, token)| matches!(token.token_type, crate::agent::tools::ui_token_selector::TokenType::Background))
+            .filter(|(_, token)| {
+                matches!(
+                    token.token_type,
+                    crate::agent::tools::ui_token_selector::TokenType::Background
+                )
+            })
             .collect();
 
         let non_background_tokens: Vec<_> = tokens
             .iter()
             .enumerate()
-            .filter(|(_, token)| !matches!(token.token_type, crate::agent::tools::ui_token_selector::TokenType::Background))
+            .filter(|(_, token)| {
+                !matches!(
+                    token.token_type,
+                    crate::agent::tools::ui_token_selector::TokenType::Background
+                )
+            })
             .map(|(_, token)| token.clone())
             .collect();
 
         // Sort background tokens by importance
         background_tokens.sort_by(|a, b| {
-            b.1.importance_score.partial_cmp(&a.1.importance_score)
+            b.1.importance_score
+                .partial_cmp(&a.1.importance_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Keep only the most important background tokens
         // Use ceil to avoid overly aggressive reduction for small counts
-        let keep_count = (background_tokens.len() as f32 * background_reduction_factor).ceil() as usize;
+        let keep_count =
+            (background_tokens.len() as f32 * background_reduction_factor).ceil() as usize;
         let kept_background_tokens: Vec<_> = background_tokens
             .into_iter()
             .take(keep_count)
@@ -188,13 +210,19 @@ impl DisplayOptimizer {
         let mut result = non_background_tokens;
         result.extend(kept_background_tokens);
 
-        debug!("Applied high DPI optimization: kept {} background tokens", keep_count);
+        debug!(
+            "Applied high DPI optimization: kept {} background tokens",
+            keep_count
+        );
 
         Ok(result)
     }
 
     /// Applies low resolution specific optimizations
-    async fn apply_low_resolution_optimization(&self, tokens: Vec<VisualToken>) -> Result<Vec<VisualToken>, String> {
+    async fn apply_low_resolution_optimization(
+        &self,
+        tokens: Vec<VisualToken>,
+    ) -> Result<Vec<VisualToken>, String> {
         // For low resolution displays, preserve more detail since every pixel matters
         // We'll boost the importance of all tokens slightly to prevent over-reduction
 
@@ -299,8 +327,8 @@ impl DisplayOptimizer {
 /// Resolution categories for optimization
 #[derive(Debug, Clone, PartialEq)]
 enum ResolutionCategory {
-    HighDPI,      // 4K and above
-    Standard,     // 1080p to 4K
+    HighDPI,       // 4K and above
+    Standard,      // 1080p to 4K
     LowResolution, // Below 1080p
 }
 
@@ -308,11 +336,7 @@ enum ResolutionCategory {
 mod tests {
     use super::*;
     use crate::agent::tools::ui_token_selector::{
-        config::TokenSelectionConfig,
-        VisualToken,
-        TokenType,
-        RGBColor,
-        DisplayBounds
+        config::TokenSelectionConfig, DisplayBounds, RGBColor, TokenType, VisualToken,
     };
 
     fn create_test_display(is_main: bool, width: f64, height: f64) -> DisplayInfo {
@@ -334,7 +358,11 @@ mod tests {
             y,
             width: 10,
             height: 10,
-            dominant_color: RGBColor { r: 100, g: 100, b: 100 },
+            dominant_color: RGBColor {
+                r: 100,
+                g: 100,
+                b: 100,
+            },
             color_variance: 0.5,
             importance_score: importance,
             token_type,
@@ -356,9 +384,18 @@ mod tests {
         let optimizer = DisplayOptimizer::new(&config).unwrap();
 
         // Test different resolution categories
-        assert_eq!(optimizer.categorize_resolution(1920.0 * 1080.0), ResolutionCategory::Standard);
-        assert_eq!(optimizer.categorize_resolution(3840.0 * 2160.0), ResolutionCategory::HighDPI);
-        assert_eq!(optimizer.categorize_resolution(1280.0 * 720.0), ResolutionCategory::LowResolution);
+        assert_eq!(
+            optimizer.categorize_resolution(1920.0 * 1080.0),
+            ResolutionCategory::Standard
+        );
+        assert_eq!(
+            optimizer.categorize_resolution(3840.0 * 2160.0),
+            ResolutionCategory::HighDPI
+        );
+        assert_eq!(
+            optimizer.categorize_resolution(1280.0 * 720.0),
+            ResolutionCategory::LowResolution
+        );
     }
 
     #[tokio::test]
@@ -378,11 +415,17 @@ mod tests {
 
         // Test primary display (less aggressive reduction)
         let primary_display = create_test_display(true, 1920.0, 1080.0);
-        let primary_result = optimizer.apply_display_specific_reduction(tokens.clone(), &primary_display).await.unwrap();
+        let primary_result = optimizer
+            .apply_display_specific_reduction(tokens.clone(), &primary_display)
+            .await
+            .unwrap();
 
         // Test secondary display (more aggressive reduction)
         let secondary_display = create_test_display(false, 1920.0, 1080.0);
-        let secondary_result = optimizer.apply_display_specific_reduction(tokens.clone(), &secondary_display).await.unwrap();
+        let secondary_result = optimizer
+            .apply_display_specific_reduction(tokens.clone(), &secondary_display)
+            .await
+            .unwrap();
 
         // Secondary display should have fewer tokens due to higher reduction target
         assert!(secondary_result.len() <= primary_result.len());
@@ -403,12 +446,14 @@ mod tests {
         let optimized = optimizer.apply_high_dpi_optimization(tokens).await.unwrap();
 
         // Should preserve interactive elements and reduce background tokens
-        let interactive_count = optimized.iter()
+        let interactive_count = optimized
+            .iter()
             .filter(|t| matches!(t.token_type, TokenType::Interactive))
             .count();
         assert_eq!(interactive_count, 1);
 
-        let background_count = optimized.iter()
+        let background_count = optimized
+            .iter()
             .filter(|t| matches!(t.token_type, TokenType::Background))
             .count();
         // With less aggressive reduction for small counts, we allow keeping all
@@ -423,11 +468,14 @@ mod tests {
 
         let tokens = vec![
             create_test_token(TokenType::Interactive, 0.5, 500, 500), // Center position
-            create_test_token(TokenType::Text, 0.5, 100, 100),       // Edge position
+            create_test_token(TokenType::Text, 0.5, 100, 100),        // Edge position
         ];
 
         let primary_display = create_test_display(true, 1000.0, 1000.0);
-        let adjusted = optimizer.adjust_importance_for_display(tokens, &primary_display).await.unwrap();
+        let adjusted = optimizer
+            .adjust_importance_for_display(tokens, &primary_display)
+            .await
+            .unwrap();
 
         // Interactive token in center should have boosted importance
         let center_token = &adjusted[0];

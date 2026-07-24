@@ -1,8 +1,8 @@
 // Commands related to opening applications and URLs
 
-use tauri::State;
 use crate::state::AppState;
-use tracing::{info, error};
+use tauri::State;
+use tracing::{error, info};
 
 // ============================================================================
 // MACOS HELPERS: RUNNING APP DETECTION
@@ -38,8 +38,7 @@ fn find_running_app_pid(app_name: &str) -> Option<i32> {
             if name_obj.is_null() {
                 continue;
             }
-            let bytes: *const std::os::raw::c_char =
-                msg_send![name_obj, UTF8String];
+            let bytes: *const std::os::raw::c_char = msg_send![name_obj, UTF8String];
             let len: usize =
                 msg_send![name_obj, lengthOfBytesUsingEncoding: NS_UTF8_STRING_ENCODING];
             if bytes.is_null() || len == 0 {
@@ -81,10 +80,8 @@ fn is_app_frontmost(app_name: &str) -> bool {
         if name_obj.is_null() {
             return false;
         }
-        let bytes: *const std::os::raw::c_char =
-            msg_send![name_obj, UTF8String];
-        let len: usize =
-            msg_send![name_obj, lengthOfBytesUsingEncoding: NS_UTF8_STRING_ENCODING];
+        let bytes: *const std::os::raw::c_char = msg_send![name_obj, UTF8String];
+        let len: usize = msg_send![name_obj, lengthOfBytesUsingEncoding: NS_UTF8_STRING_ENCODING];
         if bytes.is_null() || len == 0 {
             return false;
         }
@@ -113,7 +110,10 @@ pub async fn open_application(
     app_name: String,
     debug_mode: Option<bool>,
 ) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, DebugOperation, should_enable_debug, validators::non_empty_text, send_debug_notification};
+    use crate::commands::debug_utils::{
+        send_debug_notification, should_enable_debug, validators::non_empty_text, DebugConfig,
+        DebugOperation,
+    };
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
         DebugConfig::development_mode()
@@ -143,14 +143,20 @@ pub async fn open_application(
     if let Some(_pid) = find_running_app_pid(&app_name) {
         if is_app_frontmost(&app_name) {
             if debug_config.log_operations {
-                info!("[APP] App '{}' already running and is frontmost, no action needed", app_name);
+                info!(
+                    "[APP] App '{}' already running and is frontmost, no action needed",
+                    app_name
+                );
             }
             debug_op.complete(Some(&app_handle), true);
             return Ok(());
         }
 
         if debug_config.log_operations {
-            info!("[APP] App '{}' already running, focusing instead of launching", app_name);
+            info!(
+                "[APP] App '{}' already running, focusing instead of launching",
+                app_name
+            );
         }
 
         let name_for_focus = app_name.clone();
@@ -239,7 +245,10 @@ pub async fn open_url(
     url: String,
     debug_mode: Option<bool>,
 ) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, DebugOperation, should_enable_debug, validators::non_empty_text, send_debug_notification};
+    use crate::commands::debug_utils::{
+        send_debug_notification, should_enable_debug, validators::non_empty_text, DebugConfig,
+        DebugOperation,
+    };
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
         DebugConfig::development_mode()
@@ -249,7 +258,7 @@ pub async fn open_url(
 
     let debug_op = DebugOperation::start("open_url", debug_config.clone());
 
-        // Debug validation
+    // Debug validation
     if debug_config.validate_inputs {
         if let Err(e) = non_empty_text(&url) {
             let err_msg = format!("Invalid URL: {}", e);
@@ -261,8 +270,14 @@ pub async fn open_url(
         }
 
         // Basic URL validation
-        if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("file://") && !url.starts_with("ftp://") {
-            let err_msg = "URL must start with a valid protocol (http://, https://, file://, or ftp://)".to_string();
+        if !url.starts_with("http://")
+            && !url.starts_with("https://")
+            && !url.starts_with("file://")
+            && !url.starts_with("ftp://")
+        {
+            let err_msg =
+                "URL must start with a valid protocol (http://, https://, file://, or ftp://)"
+                    .to_string();
             if debug_config.send_notifications {
                 send_debug_notification(&app_handle, "Open URL Error", &err_msg)?;
             }
@@ -282,11 +297,7 @@ pub async fn open_url(
                 info!("[APP] Successfully opened URL: {}", url);
             }
             if debug_config.send_notifications {
-                send_debug_notification(
-                    &app_handle,
-                    "Open URL",
-                    &format!("Opened URL: {}", url),
-                )?;
+                send_debug_notification(&app_handle, "Open URL", &format!("Opened URL: {}", url))?;
             }
             debug_op.complete(Some(&app_handle), true);
             Ok(())

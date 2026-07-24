@@ -2,7 +2,7 @@
 //!
 //! Safari-specific browser automation tools using AppleScript and JavaScript injection.
 //! Provides fast Safari DOM analysis and interaction capabilities as an alternative to
-//! Playwright-based browser automation for Safari-specific workflows.
+//! JavaScript-injection browser automation for Safari-specific workflows.
 //!
 //! ## Core Capabilities:
 //! - Direct Safari JavaScript injection via AppleScript
@@ -22,11 +22,11 @@
 //! Registration: Tool definitions returned by `get_safari_tool_definitions()`
 
 use crate::agent::core::{AgentError, ToolDefinition};
+use crate::utils::current_timestamp_secs;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use crate::utils::current_timestamp_secs;
 
 /// Escapes a string for safe inclusion in AppleScript string literals
 ///
@@ -68,9 +68,18 @@ fn escape_for_applescript(input: &str) -> String {
             // Bells
             '\x07' => result.push_str("\\a"),
             // Other control characters (0x01-0x1F except those handled above)
-            c if c.is_control() && c != '\n' && c != '\r' && c != '\t' && c != '\0' && c != '\x0B' && c != '\x0C' && c != '\x08' && c != '\x07' => {
+            c if c.is_control()
+                && c != '\n'
+                && c != '\r'
+                && c != '\t'
+                && c != '\0'
+                && c != '\x0B'
+                && c != '\x0C'
+                && c != '\x08'
+                && c != '\x07' =>
+            {
                 result.push_str(&format!("\\u{:04x}", c as u32));
-            },
+            }
             // Regular characters pass through unchanged
             c => result.push(c),
         }
@@ -110,7 +119,10 @@ fn validate_javascript_safety(javascript: &str) -> Result<(), AgentError> {
     let js_lower = javascript.to_lowercase();
     for pattern in &dangerous_patterns {
         if js_lower.contains(pattern) {
-            log::warn!("Potentially dangerous JavaScript pattern detected: {}", pattern);
+            log::warn!(
+                "Potentially dangerous JavaScript pattern detected: {}",
+                pattern
+            );
             return Err(AgentError::ToolError(format!(
                 "JavaScript contains potentially dangerous pattern: {}. Use with caution.",
                 pattern
@@ -121,7 +133,7 @@ fn validate_javascript_safety(javascript: &str) -> Result<(), AgentError> {
     // Check for excessive length (prevent DoS)
     if javascript.len() > 50000 {
         return Err(AgentError::ToolError(
-            "JavaScript code exceeds maximum allowed length (50KB)".to_string()
+            "JavaScript code exceeds maximum allowed length (50KB)".to_string(),
         ));
     }
 
@@ -176,13 +188,20 @@ impl SafariTools {
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!("Failed to get active application: {}", error)));
+            return Err(AgentError::ToolError(format!(
+                "Failed to get active application: {}",
+                error
+            )));
         }
 
         let active_app = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let is_safari = active_app == "Safari";
 
-        log::debug!("Active application: {}, is Safari: {}", active_app, is_safari);
+        log::debug!(
+            "Active application: {}, is Safari: {}",
+            active_app,
+            is_safari
+        );
         Ok(is_safari)
     }
 
@@ -191,7 +210,9 @@ impl SafariTools {
         log::info!("Extracting Safari DOM structure");
 
         if !self.is_safari_active()? {
-            return Err(AgentError::ToolError("Safari is not the active application".to_string()));
+            return Err(AgentError::ToolError(
+                "Safari is not the active application".to_string(),
+            ));
         }
 
         // JavaScript function to serialize DOM structure (enhanced from Opus)
@@ -274,15 +295,23 @@ JSON.stringify(serializeDOMWithIds(document.body));
             .arg("-e")
             .arg(&applescript)
             .output()
-            .map_err(|e| AgentError::ToolError(format!("Failed to execute Safari JavaScript: {}", e)))?;
+            .map_err(|e| {
+                AgentError::ToolError(format!("Failed to execute Safari JavaScript: {}", e))
+            })?;
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!("Safari JavaScript execution failed: {}", error)));
+            return Err(AgentError::ToolError(format!(
+                "Safari JavaScript execution failed: {}",
+                error
+            )));
         }
 
         let dom_json = String::from_utf8_lossy(&output.stdout);
-        log::debug!("Safari DOM extraction completed, JSON length: {}", dom_json.len());
+        log::debug!(
+            "Safari DOM extraction completed, JSON length: {}",
+            dom_json.len()
+        );
 
         // Parse and cache the DOM elements
         match serde_json::from_str::<Value>(&dom_json) {
@@ -296,7 +325,10 @@ JSON.stringify(serializeDOMWithIds(document.body));
             }
             Err(e) => {
                 log::warn!("Failed to parse Safari DOM JSON: {}", e);
-                Err(AgentError::ToolError(format!("Failed to parse DOM structure: {}", e)))
+                Err(AgentError::ToolError(format!(
+                    "Failed to parse DOM structure: {}",
+                    e
+                )))
             }
         }
     }
@@ -317,34 +349,32 @@ JSON.stringify(serializeDOMWithIds(document.body));
     }
 
     /// Recursively caches elements from DOM structure
-    fn cache_elements_recursive(&self, node: &Value, cache: &mut HashMap<u32, SafariElement>, timestamp: u64) {
+    fn cache_elements_recursive(
+        &self,
+        node: &Value,
+        cache: &mut HashMap<u32, SafariElement>,
+        timestamp: u64,
+    ) {
         if let Some(obj) = node.as_object() {
-            if let (
-                Some(id_val),
-                Some(tag_val),
-                Some(clickable_val),
-                Some(selector_val)
-            ) = (
+            if let (Some(id_val), Some(tag_val), Some(clickable_val), Some(selector_val)) = (
                 obj.get("id"),
                 obj.get("tag"),
                 obj.get("clickable"),
-                obj.get("selector")
+                obj.get("selector"),
             ) {
-                if let (
-                    Some(id),
-                    Some(tag),
-                    Some(clickable),
-                    Some(selector)
-                ) = (
+                if let (Some(id), Some(tag), Some(clickable), Some(selector)) = (
                     id_val.as_u64().map(|i| i as u32),
                     tag_val.as_str(),
                     clickable_val.as_bool(),
-                    selector_val.as_str()
+                    selector_val.as_str(),
                 ) {
                     let element = SafariElement {
                         id,
                         tag: tag.to_string(),
-                        element_id: obj.get("elementId").and_then(|v| v.as_str()).map(String::from),
+                        element_id: obj
+                            .get("elementId")
+                            .and_then(|v| v.as_str())
+                            .map(String::from),
                         class: obj.get("class").and_then(|v| v.as_str()).map(String::from),
                         role: obj.get("role").and_then(|v| v.as_str()).map(String::from),
                         text: obj.get("text").and_then(|v| v.as_str()).map(String::from),
@@ -371,7 +401,9 @@ JSON.stringify(serializeDOMWithIds(document.body));
         log::info!("Clicking Safari element ID: {}", element_id);
 
         if !self.is_safari_active()? {
-            return Err(AgentError::ToolError("Safari is not the active application".to_string()));
+            return Err(AgentError::ToolError(
+                "Safari is not the active application".to_string(),
+            ));
         }
 
         let cache = self.element_cache.lock().map_err(|e| {
@@ -383,7 +415,10 @@ JSON.stringify(serializeDOMWithIds(document.body));
         })?;
 
         if !element.clickable {
-            return Err(AgentError::ToolError(format!("Element {} is not clickable", element_id)));
+            return Err(AgentError::ToolError(format!(
+                "Element {} is not clickable",
+                element_id
+            )));
         }
 
         // Generate JavaScript to click the element
@@ -407,16 +442,24 @@ if (element) {{
             escaped_js
         );
 
-        log::debug!("Executing Safari click JavaScript for element {}", element_id);
+        log::debug!(
+            "Executing Safari click JavaScript for element {}",
+            element_id
+        );
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&applescript)
             .output()
-            .map_err(|e| AgentError::ToolError(format!("Failed to execute click JavaScript: {}", e)))?;
+            .map_err(|e| {
+                AgentError::ToolError(format!("Failed to execute click JavaScript: {}", e))
+            })?;
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!("Click execution failed: {}", error)));
+            return Err(AgentError::ToolError(format!(
+                "Click execution failed: {}",
+                error
+            )));
         }
 
         let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -433,7 +476,10 @@ if (element) {{
                 "method": "Safari JavaScript injection"
             }))
         } else {
-            Err(AgentError::ToolError(format!("Failed to click element {}: {}", element_id, result)))
+            Err(AgentError::ToolError(format!(
+                "Failed to click element {}: {}",
+                element_id, result
+            )))
         }
     }
 
@@ -442,7 +488,9 @@ if (element) {{
         log::info!("Typing text into Safari element ID: {}", element_id);
 
         if !self.is_safari_active()? {
-            return Err(AgentError::ToolError("Safari is not the active application".to_string()));
+            return Err(AgentError::ToolError(
+                "Safari is not the active application".to_string(),
+            ));
         }
 
         let cache = self.element_cache.lock().map_err(|e| {
@@ -455,7 +503,12 @@ if (element) {{
 
         // Generate JavaScript to type in the element
         // Escape text for JavaScript string literals (single quotes used in JS)
-        let js_escaped_text = text.replace('\\', "\\\\").replace('\'', "\\'").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
+        let js_escaped_text = text
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
         let type_js = format!(
             r#"
 var element = document.querySelector('[data-juno-safari-id="{}"]');
@@ -485,16 +538,24 @@ if (element) {{
             escaped_js
         );
 
-        log::debug!("Executing Safari type JavaScript for element {}", element_id);
+        log::debug!(
+            "Executing Safari type JavaScript for element {}",
+            element_id
+        );
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&applescript)
             .output()
-            .map_err(|e| AgentError::ToolError(format!("Failed to execute type JavaScript: {}", e)))?;
+            .map_err(|e| {
+                AgentError::ToolError(format!("Failed to execute type JavaScript: {}", e))
+            })?;
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!("Type execution failed: {}", error)));
+            return Err(AgentError::ToolError(format!(
+                "Type execution failed: {}",
+                error
+            )));
         }
 
         let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -511,7 +572,10 @@ if (element) {{
                 "method": "Safari JavaScript injection"
             }))
         } else {
-            Err(AgentError::ToolError(format!("Failed to type in element {}: {}", element_id, result)))
+            Err(AgentError::ToolError(format!(
+                "Failed to type in element {}: {}",
+                element_id, result
+            )))
         }
     }
 
@@ -529,7 +593,10 @@ if (element) {{
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!("URL retrieval failed: {}", error)));
+            return Err(AgentError::ToolError(format!(
+                "URL retrieval failed: {}",
+                error
+            )));
         }
 
         let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -559,7 +626,10 @@ if (element) {{
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!("Navigation failed: {}", error)));
+            return Err(AgentError::ToolError(format!(
+                "Navigation failed: {}",
+                error
+            )));
         }
 
         // Wait for navigation to complete
@@ -582,17 +652,22 @@ if (element) {{
         let clickable_elements: Vec<_> = cache
             .values()
             .filter(|element| element.clickable)
-            .map(|element| json!({
-                "id": element.id,
-                "tag": element.tag,
-                "text": element.text,
-                "role": element.role,
-                "class": element.class,
-                "selector": element.selector
-            }))
+            .map(|element| {
+                json!({
+                    "id": element.id,
+                    "tag": element.tag,
+                    "text": element.text,
+                    "role": element.role,
+                    "class": element.class,
+                    "selector": element.selector
+                })
+            })
             .collect();
 
-        log::debug!("Found {} clickable Safari elements", clickable_elements.len());
+        log::debug!(
+            "Found {} clickable Safari elements",
+            clickable_elements.len()
+        );
 
         Ok(json!({
             "clickable_elements": clickable_elements,
@@ -606,7 +681,9 @@ if (element) {{
         log::info!("Executing custom JavaScript in Safari");
 
         if !self.is_safari_active()? {
-            return Err(AgentError::ToolError("Safari is not the active application".to_string()));
+            return Err(AgentError::ToolError(
+                "Safari is not the active application".to_string(),
+            ));
         }
 
         // Validate JavaScript for basic safety
@@ -627,7 +704,10 @@ if (element) {{
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!("JavaScript execution failed: {}", error)));
+            return Err(AgentError::ToolError(format!(
+                "JavaScript execution failed: {}",
+                error
+            )));
         }
 
         let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -674,7 +754,7 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             name: "safari_extract_dom".to_string(),
-            description: "Extracts structured DOM from the current Safari tab using JavaScript injection. Much faster than Playwright for Safari-specific automation. Caches elements with IDs for subsequent interaction.".to_string(),
+            description: "Extracts structured DOM from the current Safari tab using JavaScript injection. Much faster than driving a full CDP session for Safari-specific automation. Caches elements with IDs for subsequent interaction.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {},
@@ -821,9 +901,15 @@ mod tests {
 
         // Test control characters
         assert_eq!(escape_for_applescript("test\x07bell"), "test\\abell");
-        assert_eq!(escape_for_applescript("test\x08backspace"), "test\\bbackspace");
+        assert_eq!(
+            escape_for_applescript("test\x08backspace"),
+            "test\\bbackspace"
+        );
         assert_eq!(escape_for_applescript("test\x0Bvtab"), "test\\vvtab");
-        assert_eq!(escape_for_applescript("test\x0Cformfeed"), "test\\fformfeed");
+        assert_eq!(
+            escape_for_applescript("test\x0Cformfeed"),
+            "test\\fformfeed"
+        );
 
         // Test complex JavaScript injection scenario
         let malicious_js = r#"';alert("XSS");var x='"#;

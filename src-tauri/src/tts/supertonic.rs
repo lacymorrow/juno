@@ -1,4 +1,4 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use reqwest::Client;
 use serde::Serialize;
 use std::sync::OnceLock;
@@ -120,8 +120,7 @@ pub async fn invoke_supertonic_tts(
                     .text()
                     .await
                     .unwrap_or_else(|_| "Failed to read error body".to_string());
-                let err_msg =
-                    format!("[Supertonic] Server returned {}: {}", status, error_body);
+                let err_msg = format!("[Supertonic] Server returned {}: {}", status, error_body);
                 error!("{}", err_msg);
                 Err(err_msg)
             }

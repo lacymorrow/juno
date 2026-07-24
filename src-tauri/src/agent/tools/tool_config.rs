@@ -2,8 +2,8 @@
 //! Handles categorization, enablement controls, persistence, and MCP server integration.
 //! Used by: Agent initialization and settings management for tool control.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use tracing::info;
 
@@ -14,7 +14,9 @@ use crate::constants::agent::tool_names;
 pub use super::mcp_integration::{MCPServerConfig, MCPServerStatus, MCPToolInfo};
 
 // Add centralized settings support
-use crate::settings::{ToolSettings, ToolConfig as SettingsToolConfig, MCPServerConfig as SettingsMCPServerConfig};
+use crate::settings::{
+    MCPServerConfig as SettingsMCPServerConfig, ToolConfig as SettingsToolConfig, ToolSettings,
+};
 
 /// Tool category definitions for organizing tools by functionality.
 /// Used by: Settings UI and tool management for logical grouping.
@@ -52,7 +54,9 @@ impl ToolCategory {
     /// Used by: Settings UI for tooltips and help text.
     pub fn description(&self) -> &'static str {
         match self {
-            ToolCategory::AnthropicComputerUse => "Official Anthropic Computer Use tools for screen interaction",
+            ToolCategory::AnthropicComputerUse => {
+                "Official Anthropic Computer Use tools for screen interaction"
+            }
             ToolCategory::Desktop => "macOS desktop automation and application control",
             ToolCategory::Browser => "Web browser automation and control",
             ToolCategory::Timer => "Task scheduling and timer management",
@@ -188,7 +192,9 @@ impl ToolConfigManager {
     /// Load configuration from centralized settings manager.
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Application startup for configuration initialization.
-    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, String> {
+    pub async fn load_from_centralized_settings(
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<Self, String> {
         let tool_settings = settings_manager.get_tool_settings().await?;
         let config_manager = Self::from_centralized_settings(&tool_settings)?;
         info!("Loaded tool configuration from centralized settings");
@@ -198,10 +204,15 @@ impl ToolConfigManager {
     /// Save configuration to centralized settings manager.
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Settings UI and application shutdown for persistence.
-    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), String> {
+    pub async fn save_to_centralized_settings(
+        &self,
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<(), String> {
         // Read existing settings to preserve fields that ToolConfigManager doesn't own
         // (e.g., smooth_mouse_movement is a UI setting, not a tool config concern)
-        let existing_smooth = settings_manager.get_tool_settings().await
+        let existing_smooth = settings_manager
+            .get_tool_settings()
+            .await
             .map(|s| s.smooth_mouse_movement)
             .unwrap_or(true);
 
@@ -247,7 +258,10 @@ impl ToolConfigManager {
                 description: settings_server.description.clone(),
                 command: settings_server.command.clone(),
                 args: settings_server.args.clone(),
-                working_directory: settings_server.working_directory.as_ref().map(std::path::PathBuf::from),
+                working_directory: settings_server
+                    .working_directory
+                    .as_ref()
+                    .map(std::path::PathBuf::from),
                 environment_variables: settings_server.environment_variables.clone(),
                 enabled: settings_server.enabled,
                 auto_start: settings_server.auto_start,
@@ -309,7 +323,10 @@ impl ToolConfigManager {
                 description: server_config.description.clone(),
                 command: server_config.command.clone(),
                 args: server_config.args.clone(),
-                working_directory: server_config.working_directory.as_ref().map(|p| p.to_string_lossy().to_string()),
+                working_directory: server_config
+                    .working_directory
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string()),
                 environment_variables: server_config.environment_variables.clone(),
                 enabled: server_config.enabled,
                 auto_start: server_config.auto_start,
@@ -360,17 +377,24 @@ impl ToolConfigManager {
     /// * `tool_name` - Name of the tool to check
     pub fn is_tool_enabled(&self, tool_name: &str) -> bool {
         if let Some(tool_config) = self.tools.get(tool_name) {
-
-			if tool_config.required {
+            if tool_config.required {
                 tracing::debug!("Tool '{}' is required and always enabled", tool_name);
                 return true; // Required tools are always enabled
             }
 
             // Check both tool-specific and category-wide settings
-            let category_enabled = self.category_enabled.get(&tool_config.category).unwrap_or(&true);
+            let category_enabled = self
+                .category_enabled
+                .get(&tool_config.category)
+                .unwrap_or(&true);
             let result = tool_config.enabled && *category_enabled;
-            tracing::debug!("Tool '{}' enabled check: tool_enabled={}, category_enabled={}, result={}",
-                tool_name, tool_config.enabled, category_enabled, result);
+            tracing::debug!(
+                "Tool '{}' enabled check: tool_enabled={}, category_enabled={}, result={}",
+                tool_name,
+                tool_config.enabled,
+                category_enabled,
+                result
+            );
             result
         } else {
             // Unknown/unconfigured tools are allowed by default.
@@ -405,7 +429,9 @@ impl ToolConfigManager {
     pub fn set_category_enabled(&mut self, category: &ToolCategory, enabled: bool) {
         // Don't disable categories with required tools
         if !enabled {
-            let has_required = self.tools.iter()
+            let has_required = self
+                .tools
+                .iter()
                 .any(|(_, config)| config.category == *category && config.required);
             if has_required {
                 return;
@@ -421,7 +447,8 @@ impl ToolConfigManager {
     /// # Arguments
     /// * `category` - Category to filter by
     pub fn get_tools_by_category(&self, category: &ToolCategory) -> Vec<&ToolConfig> {
-        self.tools.values()
+        self.tools
+            .values()
             .filter(|config| config.category == *category)
             .collect()
     }
@@ -430,7 +457,8 @@ impl ToolConfigManager {
     /// Returns all tool configurations that are currently enabled.
     /// Used by: Tool discovery and agent initialization.
     pub fn get_enabled_tools(&self) -> Vec<&ToolConfig> {
-        self.tools.iter()
+        self.tools
+            .iter()
             .filter(|(name, _)| self.is_tool_enabled(name))
             .map(|(_, config)| config)
             .collect()
@@ -458,7 +486,8 @@ impl ToolConfigManager {
     /// Returns a list of names for all currently enabled tools.
     /// Used by: Agent system for building available tool lists.
     pub fn get_enabled_tool_names(&self) -> Vec<String> {
-        self.tools.iter()
+        self.tools
+            .iter()
             .filter(|(name, _)| self.is_tool_enabled(name))
             .map(|(name, _)| name.clone())
             .collect()
@@ -491,30 +520,49 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_anthropic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let anthropic_tools = vec![
-            (tool_names::COMPUTER, "Use mouse and keyboard to interact with computer, and take screenshots"),
-            (tool_names::ACCESSIBILITY_INTERFACE, "Use macOS accessibility APIs for precise UI interaction (preferred method)"),
-            (tool_names::STR_REPLACE_BASED_EDIT_TOOL, "Create, view, and edit files with precise text operations"),
-            (tool_names::BASH, "Execute bash commands and shell operations"),
-            (tool_names::SCREENSHOT, "Take a screenshot of the current screen"),
+            (
+                tool_names::COMPUTER,
+                "Use mouse and keyboard to interact with computer, and take screenshots",
+            ),
+            (
+                tool_names::ACCESSIBILITY_INTERFACE,
+                "Use macOS accessibility APIs for precise UI interaction (preferred method)",
+            ),
+            (
+                tool_names::STR_REPLACE_BASED_EDIT_TOOL,
+                "Create, view, and edit files with precise text operations",
+            ),
+            (
+                tool_names::BASH,
+                "Execute bash commands and shell operations",
+            ),
+            (
+                tool_names::SCREENSHOT,
+                "Take a screenshot of the current screen",
+            ),
             (tool_names::LEFT_CLICK, "Click on screen coordinates"),
             (tool_names::TYPE, "Type text into the focused application"),
             (tool_names::KEY, "Press keyboard keys and combinations"),
             (tool_names::SCROLL, "Scroll in a direction"),
             (tool_names::WAIT, "Wait for a specified duration"),
             (tool_names::MOUSE_MOVE, "Move mouse to coordinates"),
-            (tool_names::LEFT_CLICK_DRAG, "Drag from one coordinate to another"),
+            (
+                tool_names::LEFT_CLICK_DRAG,
+                "Drag from one coordinate to another",
+            ),
         ];
 
         // Essential tools that are required for core functionality
-        let essential_tools = [tool_names::COMPUTER, tool_names::SCREENSHOT, tool_names::BASH];
+        let essential_tools = [
+            tool_names::COMPUTER,
+            tool_names::SCREENSHOT,
+            tool_names::BASH,
+        ];
 
         for (name, description) in anthropic_tools {
-            let mut config = ToolConfig::new(
-                name.to_string(),
-                ToolCategory::AnthropicComputerUse,
-                true,
-            )
-            .with_description(description.to_string());
+            let mut config =
+                ToolConfig::new(name.to_string(), ToolCategory::AnthropicComputerUse, true)
+                    .with_description(description.to_string());
 
             // Only mark essential tools as required
             if essential_tools.contains(&name) {
@@ -530,8 +578,14 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_desktop_tools(tools: &mut HashMap<String, ToolConfig>) {
         let desktop_tools = vec![
-            (tool_names::LAUNCH_APPLICATION, "Launch applications by name"),
-            (tool_names::GET_RUNNING_APPLICATIONS, "List currently running applications"),
+            (
+                tool_names::LAUNCH_APPLICATION,
+                "Launch applications by name",
+            ),
+            (
+                tool_names::GET_RUNNING_APPLICATIONS,
+                "List currently running applications",
+            ),
             (tool_names::FOCUS_APPLICATION, "Bring application to front"),
             (tool_names::QUIT_APPLICATION, "Quit an application"),
             (tool_names::GET_SYSTEM_INFO, "Get system information"),
@@ -539,11 +593,8 @@ impl ToolConfigManager {
         ];
 
         for (name, description) in desktop_tools {
-            let config = ToolConfig::new(
-                name.to_string(),
-                ToolCategory::Desktop,
-                true,
-            ).with_description(description.to_string());
+            let config = ToolConfig::new(name.to_string(), ToolCategory::Desktop, true)
+                .with_description(description.to_string());
 
             tools.insert(name.to_string(), config);
         }
@@ -564,23 +615,38 @@ impl ToolConfigManager {
 
         // Safari tools (specialized Safari automation - disabled by default)
         let safari_tools = vec![
-            (tool_names::SAFARI_EXTRACT_DOM, "Extract DOM from current Safari tab using JavaScript injection"),
-            (tool_names::SAFARI_CLICK_ELEMENT, "Click DOM elements in Safari by ID using JavaScript injection"),
-            (tool_names::SAFARI_TYPE_TEXT, "Type text in Safari forms using JavaScript injection"),
+            (
+                tool_names::SAFARI_EXTRACT_DOM,
+                "Extract DOM from current Safari tab using JavaScript injection",
+            ),
+            (
+                tool_names::SAFARI_CLICK_ELEMENT,
+                "Click DOM elements in Safari by ID using JavaScript injection",
+            ),
+            (
+                tool_names::SAFARI_TYPE_TEXT,
+                "Type text in Safari forms using JavaScript injection",
+            ),
             (tool_names::SAFARI_GET_URL, "Get current Safari tab URL"),
-            (tool_names::SAFARI_NAVIGATE, "Navigate Safari to specified URL"),
-            (tool_names::SAFARI_LIST_CLICKABLE_ELEMENTS, "List clickable elements in Safari"),
-            (tool_names::SAFARI_EXECUTE_JAVASCRIPT, "Execute custom JavaScript in Safari"),
+            (
+                tool_names::SAFARI_NAVIGATE,
+                "Navigate Safari to specified URL",
+            ),
+            (
+                tool_names::SAFARI_LIST_CLICKABLE_ELEMENTS,
+                "List clickable elements in Safari",
+            ),
+            (
+                tool_names::SAFARI_EXECUTE_JAVASCRIPT,
+                "Execute custom JavaScript in Safari",
+            ),
             (tool_names::SAFARI_CLEAR_CACHE, "Clear Safari browser cache"),
         ];
 
         // Add standard browser tools (enabled by default)
         for (name, description) in browser_tools {
-            let config = ToolConfig::new(
-                name.to_string(),
-                ToolCategory::Browser,
-                true,
-            ).with_description(description.to_string());
+            let config = ToolConfig::new(name.to_string(), ToolCategory::Browser, true)
+                .with_description(description.to_string());
 
             tools.insert(name.to_string(), config);
         }
@@ -591,7 +657,8 @@ impl ToolConfigManager {
                 name.to_string(),
                 ToolCategory::Browser,
                 false, // Disabled by default - users can enable if needed
-            ).with_description(description.to_string());
+            )
+            .with_description(description.to_string());
 
             tools.insert(name.to_string(), config);
         }
@@ -609,11 +676,8 @@ impl ToolConfigManager {
         ];
 
         for (name, description) in timer_tools {
-            let config = ToolConfig::new(
-                name.to_string(),
-                ToolCategory::Timer,
-                true,
-            ).with_description(description.to_string());
+            let config = ToolConfig::new(name.to_string(), ToolCategory::Timer, true)
+                .with_description(description.to_string());
 
             tools.insert(name.to_string(), config);
         }
@@ -634,11 +698,8 @@ impl ToolConfigManager {
         ];
 
         for (name, description) in basic_tools {
-            let config = ToolConfig::new(
-                name.to_string(),
-                ToolCategory::Basic,
-                true,
-            ).with_description(description.to_string());
+            let config = ToolConfig::new(name.to_string(), ToolCategory::Basic, true)
+                .with_description(description.to_string());
 
             tools.insert(name.to_string(), config);
         }
@@ -729,7 +790,8 @@ impl ToolConfigManager {
                 tool_info.tool_definition.name.clone(),
                 server_id.to_string(),
                 tool_info.enabled,
-            ).with_description(tool_info.tool_definition.description);
+            )
+            .with_description(tool_info.tool_definition.description);
 
             self.add_tool_config(tool_config);
         }
@@ -742,10 +804,11 @@ impl ToolConfigManager {
     /// # Arguments
     /// * `server_id` - ID of the server to filter by
     pub fn get_mcp_tools_for_server(&self, server_id: &str) -> Vec<&ToolConfig> {
-        self.tools.values()
+        self.tools
+            .values()
             .filter(|config| {
-                config.category == ToolCategory::MCP &&
-                config.server_id.as_ref() == Some(&server_id.to_string())
+                config.category == ToolCategory::MCP
+                    && config.server_id.as_ref() == Some(&server_id.to_string())
             })
             .collect()
     }
@@ -757,7 +820,8 @@ impl ToolConfigManager {
     /// # Arguments
     /// * `server_id` - ID of the server to check
     pub fn is_mcp_server_enabled(&self, server_id: &str) -> bool {
-        self.mcp_servers.get(server_id)
+        self.mcp_servers
+            .get(server_id)
             .map(|config| config.enabled)
             .unwrap_or(false)
     }
@@ -772,7 +836,7 @@ impl ToolConfigManager {
 /// * `state` - Application state containing tool config manager
 pub async fn load_tool_config_from_centralized_settings(
     settings_manager: &crate::settings::manager::SettingsManager,
-    state: &crate::state::AppState
+    state: &crate::state::AppState,
 ) -> Result<(), String> {
     let loaded_config = ToolConfigManager::load_from_centralized_settings(settings_manager).await?;
 
@@ -792,8 +856,10 @@ pub async fn load_tool_config_from_centralized_settings(
 /// * `state` - Application state containing tool config manager
 pub async fn save_tool_config_to_centralized_settings(
     settings_manager: &crate::settings::manager::SettingsManager,
-    state: &crate::state::AppState
+    state: &crate::state::AppState,
 ) -> Result<(), String> {
     let config_guard = state.tool_config_manager.lock().await;
-    config_guard.save_to_centralized_settings(settings_manager).await
+    config_guard
+        .save_to_centralized_settings(settings_manager)
+        .await
 }

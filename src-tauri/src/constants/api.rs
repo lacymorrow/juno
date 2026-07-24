@@ -72,25 +72,16 @@ pub mod tool_version_groups {
     use super::computer_use_api_types::*;
 
     /// Tools available in computer use 2024-10-22
-    pub const COMPUTER_USE_2024_10_22_TOOLS: &[&str] = &[
-        COMPUTER_20241022,
-        EDIT_TOOL_20250124,
-        BASH_20250124,
-    ];
+    pub const COMPUTER_USE_2024_10_22_TOOLS: &[&str] =
+        &[COMPUTER_20241022, EDIT_TOOL_20250124, BASH_20250124];
 
     /// Tools available in computer use 2025-01-24
-    pub const COMPUTER_USE_2025_01_24_TOOLS: &[&str] = &[
-        COMPUTER_20250124,
-        EDIT_TOOL_20250429,
-        BASH_20250124,
-    ];
+    pub const COMPUTER_USE_2025_01_24_TOOLS: &[&str] =
+        &[COMPUTER_20250124, EDIT_TOOL_20250429, BASH_20250124];
 
     /// Tools available in computer use 2025-11-24 (Opus 4.5+)
-    pub const COMPUTER_USE_2025_11_24_TOOLS: &[&str] = &[
-        COMPUTER_20251124,
-        EDIT_TOOL_20250728,
-        BASH_20250124,
-    ];
+    pub const COMPUTER_USE_2025_11_24_TOOLS: &[&str] =
+        &[COMPUTER_20251124, EDIT_TOOL_20250728, BASH_20250124];
 }
 
 // HTTP headers

@@ -82,7 +82,7 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
         // Extract content from page using CSS selectors
         ToolDefinition {
             name: "browser_extract_content".to_string(),
-            description: "Extracts content (text or attributes) from the current browser page using CSS selectors.".to_string(),
+            description: "Extracts content (text, HTML attributes, or live DOM properties) from the current browser page using CSS selectors.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -92,7 +92,11 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "attribute": {
                         "type": "string",
-                        "description": "Optional attribute to extract (e.g., 'href', 'src'). If omitted, extracts text content."
+                        "description": "Optional HTML attribute to extract (e.g., 'href', 'src') via getAttribute. Reads static markup only; use 'property' for state that changes at runtime. Mutually exclusive with 'property'. If both omitted, extracts text content."
+                    },
+                    "property": {
+                        "type": "string",
+                        "description": "Optional live DOM property to read (e.g., 'value', 'checked'). Reflects current state after typing or toggling, which attributes do not. Mutually exclusive with 'attribute'."
                     },
                     "multiple": {
                         "type": "boolean",

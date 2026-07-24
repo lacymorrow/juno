@@ -2,7 +2,7 @@ use super::constants::{K_AXVALUE_CGPOINT_TYPE, K_AXVALUE_CGSIZE_TYPE};
 use super::ffi::AXValueGetValue;
 use accessibility::AXUIElement;
 use core_foundation::array::{
-    CFArrayGetCount, CFArrayGetTypeID, CFArrayGetValueAtIndex, __CFArray,
+    __CFArray, CFArrayGetCount, CFArrayGetTypeID, CFArrayGetValueAtIndex,
 };
 use core_foundation::base::{CFGetTypeID, TCFType};
 use core_foundation::boolean::CFBoolean;

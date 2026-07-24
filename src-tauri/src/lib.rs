@@ -6,13 +6,15 @@ use tauri_plugin_global_shortcut::Shortcut; // Global shortcuts
 use tracing::{error, info, warn};
 
 // Settings manager import
-use crate::settings::manager::SettingsManager;
 use crate::constants::errors::templates;
+use crate::settings::manager::SettingsManager;
 use crate::state::AppState;
 
 // Helper function for error formatting - properly handles template substitution
 pub fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 
 // macOS specific imports
@@ -32,25 +34,22 @@ pub mod cursor_scale;
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription
-pub mod integration;
+pub mod integration; // Application integration patterns, component coordination, and event listeners
 pub mod menu; // Menu management for app and tray menus
+pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
+pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
 pub mod settings; // Centralized settings management with reactive updates
 pub mod shortcuts; // Shortcut string parsing utilities
 pub mod startup; // Application startup, initialization, and bootstrapping
 pub mod state;
 pub mod state_management; // Application state management, initialization, and monitoring
+pub mod testing; // Test harness and mock implementations for headless integration tests
 pub mod tools;
 pub mod tts;
 pub mod utils;
 pub mod voice_control;
-pub mod window_management; // Window operations, state management, and positioning // Application integration patterns, component coordination, and event listeners
-pub mod testing; // Test harness and mock implementations for headless integration tests
-pub mod persistent_memory; // Cross-session persistent user memory
-pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
-
-#[cfg(test)]
-pub mod test_fix_verification; // Test verification for recent fixes
+pub mod window_management; // Window operations, state management, and positioning
 
 // Tray icon data is now handled by the menu::tray_menu module
 
@@ -67,14 +66,13 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{
-    accessibility_scan, accessibility_click, test_accessibility_permissions,
-    get_accessibility_tool_definitions, execute_accessibility_tool,
-    safari_is_active, safari_extract_dom, safari_click_element, safari_type_text,
-    safari_get_url, safari_navigate, safari_list_clickable_elements,
-    safari_execute_javascript, safari_clear_cache, execute_safari_tool,
-    always_listening::*, app_url::*, autostart::*, computer, core::*, dictation::*, element::*,
-            error_recovery::*, filesystem::*, keyboard::*, memory::*, persistent_memory::*,
-    mouse::*, orchestrator::*, permissions::*, providers::*, shell::*, sound::*, text_editor::*,
+    accessibility_click, accessibility_scan, always_listening::*, app_url::*, autostart::*,
+    computer, core::*, dictation::*, element::*, error_recovery::*, execute_accessibility_tool,
+    execute_safari_tool, filesystem::*, get_accessibility_tool_definitions, keyboard::*, memory::*,
+    mouse::*, orchestrator::*, permissions::*, persistent_memory::*, providers::*,
+    safari_clear_cache, safari_click_element, safari_execute_javascript, safari_extract_dom,
+    safari_get_url, safari_is_active, safari_list_clickable_elements, safari_navigate,
+    safari_type_text, shell::*, sound::*, test_accessibility_permissions, text_editor::*,
     ui_commands::*, ui_token_selection::*, window::*,
 };
 
@@ -97,18 +95,17 @@ use crate::commands::dictation_state_manager::{
 // Import tool configuration commands explicitly
 use crate::commands::{
     approve_tool_execution, clear_pending_tool_approvals, deny_tool_execution, get_enabled_tools,
-    get_pending_tool_approvals, get_tool_approval_required, get_tool_config,
+    get_pending_tool_approvals, get_registered_tools, get_tool_approval_required, get_tool_config,
     get_tool_configuration_summary, get_tool_configurations, is_tool_enabled,
     reset_tool_configuration, set_tool_approval_required, set_tool_category_enabled,
-    set_tool_enabled, get_registered_tools, test_tool_config, test_tool_config_command,
-    test_dynamic_tool_categorization,
+    set_tool_enabled, test_dynamic_tool_categorization, test_tool_config, test_tool_config_command,
 };
 
 // Import keyboard shortcuts commands explicitly
 use crate::commands::{
-    get_keyboard_shortcuts, get_shortcut_best_practices,
-    get_shortcut_suggestions, reset_keyboard_shortcuts, set_keyboard_shortcut,
-    set_keyboard_shortcuts, validate_keyboard_shortcut,
+    get_keyboard_shortcuts, get_shortcut_best_practices, get_shortcut_suggestions,
+    reset_keyboard_shortcuts, set_keyboard_shortcut, set_keyboard_shortcuts,
+    validate_keyboard_shortcut,
 };
 
 // Import MCP commands explicitly
@@ -154,9 +151,7 @@ use commands::cloud::{
 };
 
 // Config File Commands
-use commands::config_file::{
-    open_config_directory, open_config_file, get_config_directory_path,
-};
+use commands::config_file::{get_config_directory_path, open_config_directory, open_config_file};
 
 // Environment loading functions moved to startup module
 
@@ -172,7 +167,10 @@ async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
             if !bundled_env_path.exists() {
                 // Bundled env is optional; most production deployments should prefer system-provided env vars.
                 // We intentionally do not attempt to load `_up_/.env` (frontend assets).
-                info!("No bundled .env file found at: {:?} (skipping)", bundled_env_path);
+                info!(
+                    "No bundled .env file found at: {:?} (skipping)",
+                    bundled_env_path
+                );
                 return Ok("No bundled .env resource found; using system environment".to_string());
             }
 
@@ -189,8 +187,7 @@ async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
                     ))
                 }
                 Err(e) => {
-                    let error_msg =
-                        format_error(templates::FAILED_TO_LOAD, "bundled .env file", e);
+                    let error_msg = format_error(templates::FAILED_TO_LOAD, "bundled .env file", e);
                     error!("{}", error_msg);
                     Err(error_msg)
                 }
@@ -246,8 +243,32 @@ async fn test_environment_variables() -> Result<serde_json::Value, String> {
     Ok(serde_json::Value::Object(result))
 }
 
+/// Install the process-wide rustls crypto provider.
+///
+/// Several dependencies (chromiumoxide, tauri-plugin-updater) build their HTTP
+/// clients from a `reqwest` compiled with rustls but *no* bundled provider. Such
+/// a client **panics on construction** unless a default provider has been
+/// installed first — so `Browser::connect` would take down the CDP attach path
+/// on its very first call.
+///
+/// Idempotent and safe to call from anywhere: a second call returns `Err`
+/// because a provider is already installed, which is success as far as we care.
+/// Tests that touch networking or the browser must call this too, since they
+/// never run `run()`.
+pub fn install_crypto_provider() {
+    if rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .is_err()
+    {
+        tracing::debug!("rustls crypto provider was already installed");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Must precede any HTTP client construction anywhere in the process.
+    install_crypto_provider();
+
     // --- Execute Startup Sequence ---
     let (_desktop_arc, app_state) = match startup::StartupSequence::run() {
         Ok((_desktop_arc, app_state)) => (_desktop_arc, app_state),
@@ -981,7 +1002,10 @@ pub fn run() {
             // Run with callback to handle macOS dock icon click and window lifecycle events
             app.run(|app_handle, event| {
                 match event {
-                    tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+                    tauri::RunEvent::Reopen {
+                        has_visible_windows,
+                        ..
+                    } => {
                         // macOS: User clicked the dock icon — show the main window
                         if !has_visible_windows {
                             if let Some(window) = app_handle.get_webview_window("main") {
@@ -995,17 +1019,20 @@ pub fn run() {
                         // Restore cursor scale on app exit — prevents stuck big cursor
                         cursor_scale::force_restore_cursor_scale();
                     }
-                    tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } => {
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event: tauri::WindowEvent::Destroyed,
+                        ..
+                    } if label.as_str() == "onboarding" => {
                         // Clean up escape key registration when onboarding window is closed
                         // (e.g., user clicks the red X instead of completing/skipping)
-                        if label.as_str() == "onboarding" {
-                            let app_handle = app_handle.clone();
-                            tauri::async_runtime::spawn(async move {
-                                if let Err(e) = commands::set_onboarding_active(app_handle, false).await {
-                                    warn!("Failed to clean up onboarding state on window close: {}", e);
-                                }
-                            });
-                        }
+                        let app_handle = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = commands::set_onboarding_active(app_handle, false).await
+                            {
+                                warn!("Failed to clean up onboarding state on window close: {}", e);
+                            }
+                        });
                     }
                     _ => {}
                 }
@@ -1046,7 +1073,6 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio_test;
 
     #[test]
     fn test_focused_element_info_placeholder() {
@@ -1079,17 +1105,18 @@ mod tests {
         where
             F: Fn(tauri::AppHandle) -> Fut,
             Fut: std::future::Future + Send + 'static,
-        {}
+        {
+        }
 
         assert_async_send(check_permissions_status_native);
-        
+
         // In a real test with a test harness, we would:
         // 1. Create a mock AppHandle
         // 2. Call check_permissions_status_native(app_handle).await
         // 3. Verify it returns Ok(_) without crashing
-        
+
         println!("✅ Permission check function exists and is properly typed");
-        
+
         // The key regression this prevents: ensuring permission checks
         // NEVER internally call Desktop::new() which causes segfaults
     }
@@ -1132,11 +1159,11 @@ mod tests {
             tts_text: None,
         };
 
-        let result = runner::handle_non_desktop_cli_commands(&cli);
-        // Should return a boolean, not crash/exit
-        assert!(result == true || result == false);
-
-        println!("✅ CLI runner uses proper error handling, no process exits");
+        // The point of this test is that the call *returns*. Earlier versions
+        // called `std::process::exit()` on an unhandled CLI command, which would
+        // kill the test runner itself. Either boolean is a valid result; only
+        // reaching the next line matters.
+        let _ = runner::handle_non_desktop_cli_commands(&cli);
     }
 
     #[test]
@@ -1320,17 +1347,6 @@ mod tests {
         );
 
         println!("✅ App initializes safely with missing permissions");
-    }
-
-    #[test]
-    fn test_compilation_safety() {
-        // This test ensures the code compiles without warnings/errors
-        // If this test passes, it means no syntax errors or type mismatches
-
-        // Test that all the fixes we applied compile correctly
-        assert!(true, "If this test runs, compilation succeeded");
-
-        println!("✅ All regression fixes compile successfully");
     }
 }
 

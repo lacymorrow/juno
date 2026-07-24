@@ -13,11 +13,7 @@ use crate::state::RiskLevel;
 pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
     match tool_name {
         // Shell execution — highest-variance category
-        "bash"
-        | "execute_bash"
-        | "run_bash_command"
-        | "shell_execute"
-        | "execute_command"
+        "bash" | "execute_bash" | "run_bash_command" | "shell_execute" | "execute_command"
         | "run_command" => classify_shell_risk(tool_input),
 
         // Computer use actions (screenshot/cursor are safe; keyboard combos vary)
@@ -67,9 +63,7 @@ pub fn extract_target_app(tool_name: &str, tool_input: &Value) -> Option<String>
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             // Extract the binary name from the command
-            cmd.split_whitespace()
-                .next()
-                .map(|s| s.to_string())
+            cmd.split_whitespace().next().map(|s| s.to_string())
         }
         "browser_navigate" | "navigate_to_url" | "open_url" => tool_input
             .get("url")
@@ -166,10 +160,21 @@ fn classify_file_write_risk(input: &Value) -> RiskLevel {
 
     // Writing to system directories is critical (absolute or relative prefixes)
     let system_prefixes: &[&str] = &[
-        "/etc/", "/usr/", "/bin/", "/sbin/", "/System/", "/Library/",
-        "etc/", "usr/", "bin/", "sbin/",
+        "/etc/",
+        "/usr/",
+        "/bin/",
+        "/sbin/",
+        "/System/",
+        "/Library/",
+        "etc/",
+        "usr/",
+        "bin/",
+        "sbin/",
     ];
-    if system_prefixes.iter().any(|prefix| path.starts_with(prefix)) {
+    if system_prefixes
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    {
         RiskLevel::Critical
     } else {
         RiskLevel::Low
@@ -249,7 +254,10 @@ mod tests {
 
     #[test]
     fn payment_url_is_high() {
-        let r = classify_risk("browser_navigate", &json!({"url": "https://example.com/checkout"}));
+        let r = classify_risk(
+            "browser_navigate",
+            &json!({"url": "https://example.com/checkout"}),
+        );
         assert_eq!(r, RiskLevel::High);
     }
 

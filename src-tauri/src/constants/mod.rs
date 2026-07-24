@@ -51,10 +51,10 @@ pub use timeouts::*;
 // For modules with potential conflicts, re-export specific items only
 pub use agent::monitor_sessions;
 pub use api::http_headers;
-pub use app::{APP_NAME, PRODUCT_NAME, BUNDLE_IDENTIFIER};
+pub use app::{APP_NAME, BUNDLE_IDENTIFIER, PRODUCT_NAME};
 pub use browser::chrome_debug_urls;
 pub use commands::core::*;
-pub use errors::{templates, prefixes};
+pub use errors::{prefixes, templates};
 pub use menus::app_menu_ids;
 pub use settings::cloud_keys;
 pub use ui::{bar_states, window_labels};
