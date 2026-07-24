@@ -49,9 +49,6 @@ pub mod testing; // Test harness and mock implementations for headless integrati
 pub mod persistent_memory; // Cross-session persistent user memory
 pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
 
-#[cfg(test)]
-pub mod test_fix_verification; // Test verification for recent fixes
-
 // Tray icon data is now handled by the menu::tray_menu module
 
 /// Get the Tauri context - centralized to avoid duplicate symbol errors
@@ -1346,16 +1343,6 @@ mod tests {
         println!("✅ App initializes safely with missing permissions");
     }
 
-    #[test]
-    fn test_compilation_safety() {
-        // This test ensures the code compiles without warnings/errors
-        // If this test passes, it means no syntax errors or type mismatches
-
-        // Test that all the fixes we applied compile correctly
-        assert!(true, "If this test runs, compilation succeeded");
-
-        println!("✅ All regression fixes compile successfully");
-    }
 }
 
 // macOS tracking functionality moved to platform::macos::mouse_tracking module

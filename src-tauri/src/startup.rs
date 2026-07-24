@@ -427,29 +427,22 @@ pub fn quick_startup() -> Result<(Option<Arc<Desktop>>, state::AppState), String
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_startup_sequence_creation() {
-        // Test that StartupSequence can be created and basic methods work
-        // This is a basic structure test since full startup requires system resources
-        assert!(true, "StartupSequence should be constructible");
-    }
 
+    /// Smoke test: validation must not panic on whatever environment the test
+    /// runner happens to have. Reaching the end of the function *is* the
+    /// assertion; there is no return value to inspect.
     #[test]
     fn test_environment_validation_safety() {
-        // Test that environment validation doesn't crash
         validate_environment_variables();
-        assert!(true, "Environment validation should complete safely");
     }
 
+    /// Smoke test: startup must surface a missing desktop engine or absent
+    /// permissions as `Err`, never as a panic. Either outcome is valid — CI has
+    /// no accessibility grants, a dev machine does — so the assertion is that we
+    /// return at all.
     #[test]
     fn test_quick_startup_safety() {
-        // Test that quick startup handles missing permissions gracefully
-        // In test environment, desktop engine may fail, but should not crash
-        match quick_startup() {
-            Ok(_) => println!("Quick startup succeeded"),
-            Err(e) => println!("Quick startup handled error gracefully: {}", e),
-        }
-        assert!(true, "Quick startup should handle errors gracefully");
+        let _ = quick_startup();
     }
 
     #[test]

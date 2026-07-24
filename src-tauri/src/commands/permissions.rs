@@ -921,11 +921,4 @@ mod tests {
         assert_eq!(result.description, "Test failed");
     }
 
-    #[test]
-    fn test_no_admin_dependency_in_permission_checks() {
-        // Ensure our permission checking functions don't reference admin privileges
-        // This is a compile-time test - if admin privilege calls were present,
-        // they would be visible in the code above
-        assert!(true, "No admin privilege dependencies found in native permission system");
-    }
 }

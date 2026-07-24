@@ -713,15 +713,6 @@ mod tests {
         assert_eq!(TrayIconState::Error.description(), "Juno - Error");
     }
 
-    #[tokio::test]
-    async fn test_get_window_states_no_panic() {
-        // This is a placeholder test since we can't easily mock AppHandle
-        // In a real test environment, we would mock the AppHandle and windows
-        assert!(
-            true,
-            "get_window_states should handle missing windows gracefully"
-        );
-    }
 
     #[test]
     fn test_tray_menu_constants() {
