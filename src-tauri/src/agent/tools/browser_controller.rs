@@ -7,6 +7,7 @@ use futures::StreamExt;
 use serde_json::Value;
 use std::env;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::async_runtime::JoinHandle;
@@ -49,10 +50,23 @@ pub struct BrowserController {
     connection_method: String,
     // Keeps the CDP event pump alive; aborted on cleanup.
     handler_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    // True when we opened the current tab ourselves, false when we adopted one
+    // that was already there. Cleanup closes only tabs we own — closing a tab
+    // the user opened destroys their work, but never closing one leaks a tab per
+    // session.
+    owns_page: Arc<AtomicBool>,
 }
 
 impl BrowserController {
     pub async fn new() -> ControllerResult<Self> {
+        // chromiumoxide builds a reqwest client with rustls but no bundled
+        // crypto provider, and such a client *panics* on construction unless a
+        // default provider is already installed. `run()` installs one at
+        // startup, but this type is also reached from the CLI, headless mode,
+        // and tests, none of which go through `run()`. Installing here makes the
+        // guarantee local to the code that depends on it.
+        crate::install_crypto_provider();
+
         log::info!("BrowserController::new called - attempting optimized browser connection...");
 
         // Try three connection strategies in order of speed/preference
@@ -95,13 +109,17 @@ impl BrowserController {
         let task = spawn_cdp_handler(handler);
 
         // Prefer an already-open page so we attach to what the user is looking at.
+        let mut owns_page = false;
         let page = match browser.pages().await {
             Ok(pages) if !pages.is_empty() => {
                 log::info!("Using existing page from browser");
                 Some(pages[0].clone())
             }
             _ => match browser.new_page("about:blank").await {
-                Ok(page) => Some(page),
+                Ok(page) => {
+                    owns_page = true;
+                    Some(page)
+                }
                 Err(e) => {
                     log::warn!("Failed to create page: {}", e);
                     None
@@ -114,6 +132,7 @@ impl BrowserController {
             page: Arc::new(Mutex::new(page)),
             connection_method,
             handler_task: Arc::new(Mutex::new(Some(task))),
+            owns_page: Arc::new(AtomicBool::new(owns_page)),
         })
     }
 
@@ -625,6 +644,8 @@ impl BrowserController {
             page,
             connection_method: "Fresh".to_string(),
             handler_task: Arc::new(Mutex::new(Some(handler_task))),
+            // We launched this browser and opened this page; both are ours.
+            owns_page: Arc::new(AtomicBool::new(true)),
         })
     }
 
@@ -900,6 +921,8 @@ impl BrowserController {
                 Ok(new_page) => {
                     let mut page_guard = self.page.lock().await;
                     *page_guard = Some(new_page);
+                    // We opened this one, so cleanup is responsible for it.
+                    self.owns_page.store(true, Ordering::SeqCst);
                     log::info!("New page created successfully on attempt {}", attempt);
                     return Ok(());
                 }
@@ -1452,13 +1475,23 @@ impl BrowserController {
     pub async fn cleanup(&self) -> Result<(), AgentError> {
         log::info!("Cleaning up browser controller resources...");
 
-        // Close the page if it exists
+        // A CDP attach means we borrowed a browser the user already had open,
+        // and adopted one of their existing tabs. Closing either would destroy
+        // work we do not own — `Browser.close` over CDP terminates the whole
+        // application, every window and tab with it. Detach instead: drop our
+        // handles and stop pumping events, leaving their session as we found it.
+        // Browsers we launched ourselves are ours to shut down.
+        let attached_to_user_browser = self.connection_method.starts_with("CDP:");
+
+        // Close the page if it exists — but only if we opened it.
         {
             // Scope for page_guard
             let mut page_guard = self.page.lock().await; // Lock mutex
             if let Some(page) = page_guard.take() {
-                // Take ownership from Option — `Page::close` consumes self
-                if let Err(e) = page.close().await {
+                if !self.owns_page.load(Ordering::SeqCst) {
+                    log::info!("Adopted tab: leaving it open for the user.");
+                } else if let Err(e) = page.close().await {
+                    // Take ownership from Option — `Page::close` consumes self
                     log::error!("Failed to close browser page gracefully: {}", e);
                 } else {
                     log::info!("Browser page closed.");
@@ -1467,7 +1500,9 @@ impl BrowserController {
         } // MutexGuard is dropped here
 
         // Close the browser
-        {
+        if attached_to_user_browser {
+            log::info!("Attached session: leaving the user's browser running.");
+        } else {
             let mut browser = self.browser.lock().await;
             if let Err(e) = browser.close().await {
                 log::error!("Failed to close browser gracefully: {}", e);
@@ -1572,12 +1607,25 @@ impl BrowserController {
 // Implement Drop to ensure cleanup happens if controller goes out of scope unexpectedly
 impl Drop for BrowserController {
     fn drop(&mut self) {
+        // This type is `Clone`, and every field is behind an `Arc`, so clones
+        // share one browser. Without this guard the first clone to go out of
+        // scope would tear down the browser that every surviving clone is still
+        // using. Only the last handle standing is allowed to clean up.
+        if Arc::strong_count(&self.browser) > 1 {
+            return;
+        }
+
+        // See `cleanup()`: a browser we merely attached to belongs to the user.
+        // Never close it or its tabs out from under them.
+        let attached_to_user_browser = self.connection_method.starts_with("CDP:");
+
         // Check if Tokio runtime exists before attempting async cleanup
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let connection_method = self.connection_method.clone();
             let browser = self.browser.clone();
             let page = self.page.clone();
             let handler_task = self.handler_task.clone();
+            let owns_page = self.owns_page.clone();
 
             // Schedule async cleanup in a detached task
             handle.spawn(async move {
@@ -1587,14 +1635,18 @@ impl Drop for BrowserController {
             {
                 let mut page_guard = page.lock().await;
                 if let Some(page) = page_guard.take() {
-                    if let Err(e) = page.close().await {
+                    if !owns_page.load(Ordering::SeqCst) {
+                        log::info!("Adopted tab: leaving it open for the user.");
+                    } else if let Err(e) = page.close().await {
                         log::error!("Failed to close browser page in Drop: {}", e);
                     }
                 }
             }
 
             // Close the browser
-            {
+            if attached_to_user_browser {
+                log::info!("Attached session: leaving the user's browser running.");
+            } else {
                 let mut browser = browser.lock().await;
                 if let Err(e) = browser.close().await {
                     log::error!("Failed to close browser in Drop: {}", e);

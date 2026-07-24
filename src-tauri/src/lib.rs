@@ -246,8 +246,32 @@ async fn test_environment_variables() -> Result<serde_json::Value, String> {
     Ok(serde_json::Value::Object(result))
 }
 
+/// Install the process-wide rustls crypto provider.
+///
+/// Several dependencies (chromiumoxide, tauri-plugin-updater) build their HTTP
+/// clients from a `reqwest` compiled with rustls but *no* bundled provider. Such
+/// a client **panics on construction** unless a default provider has been
+/// installed first — so `Browser::connect` would take down the CDP attach path
+/// on its very first call.
+///
+/// Idempotent and safe to call from anywhere: a second call returns `Err`
+/// because a provider is already installed, which is success as far as we care.
+/// Tests that touch networking or the browser must call this too, since they
+/// never run `run()`.
+pub fn install_crypto_provider() {
+    if rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .is_err()
+    {
+        tracing::debug!("rustls crypto provider was already installed");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Must precede any HTTP client construction anywhere in the process.
+    install_crypto_provider();
+
     // --- Execute Startup Sequence ---
     let (_desktop_arc, app_state) = match startup::StartupSequence::run() {
         Ok((_desktop_arc, app_state)) => (_desktop_arc, app_state),

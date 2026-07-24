@@ -17,14 +17,6 @@ permissions:
 jobs:
   # TypeScript typecheck + Vite bundle. Cheap and fast; catches the most common
   # breakage class in this codebase.
-  #
-  # NOTE: there is deliberately no Rust `cargo check`/`test` job yet. src-tauri
-  # cannot currently build from a clean checkout — the `playwright` crate
-  # (v0.0.20, abandoned) downloads a hardcoded 2021 browser driver from
-  # playwright.azureedge.net, which Microsoft decommissioned (now HTTP 404), so
-  # its build script panics on any machine without a stale cached driver. That
-  # must be fixed at the dependency level before Rust CI is reproducible.
-  # See docs/ci-rust-blocker.md.
   frontend:
     name: Frontend (typecheck + build)
     runs-on: ubuntu-latest
@@ -41,3 +33,53 @@ jobs:
       # `bun run build` is `tsc && vite build` — gates the typecheck and bundle.
       - name: Build frontend
         run: bun run build
+
+  # Rust backend: formatting, lints, and the hermetic test suite.
+  #
+  # This must run on macOS. src-tauri links Apple frameworks through
+  # core-graphics/objc for the Computer Use APIs, so a Linux runner fails at
+  # link time with "link kind `framework` is only supported on Apple targets".
+  #
+  # (This job was impossible until the `playwright` crate was dropped — its
+  # build script downloaded a 2021 driver from a decommissioned Microsoft CDN
+  # and panicked on any clean checkout. See docs/ci-rust-blocker.md.)
+  rust:
+    name: Rust (test)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Keyed on Cargo.lock; without it every run pays the full ~20min build.
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      # tauri-build reads `frontendDist` (../dist) at compile time, so the
+      # frontend bundle has to exist before any cargo invocation.
+      - name: Build frontend for tauri-build
+        run: |
+          bun install
+          bun run build
+
+      # Excludes the `#[ignore]`d suites that need a live Chrome on :9222
+      # (tests/browser_cdp_live.rs) — those are run by hand during QA.
+      #
+      # `cargo fmt --check` and `cargo clippy -D warnings` are deliberately NOT
+      # gated yet. Both fail on pre-existing debt unrelated to any current
+      # change, and a gate that is red on arrival trains people to ignore CI:
+      #   - rustfmt: 3,589 hunks across 222 files. Fixing it is a mechanical but
+      #     enormous diff that would bury real changes and rewrite git blame.
+      #   - clippy: 46 warnings, 26 auto-fixable via `cargo clippy --fix`. The
+      #     rest are assertion lints, including 11 tests whose only assertion is
+      #     `assert!(true, "...")` — those need deciding, not silencing.
+      # Land those cleanups on their own, then add the gates here.
+      - name: Test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
