@@ -150,3 +150,8 @@ pub mod cloud {
     pub const EXECUTE_REMOTE_COMMAND: &str = "execute_remote_command";
     pub const GET_CLOUD_CONNECTION_DIAGNOSTICS: &str = "get_cloud_connection_diagnostics";
 }
+
+/// Skill discovery command names for slash-command autocomplete
+pub mod skills {
+    pub const LIST_AVAILABLE_SKILLS: &str = "list_available_skills";
+}

@@ -5,7 +5,7 @@
 //! Cocoa/AppKit integrations needed for proper macOS behavior.
 
 use tauri::{AppHandle, Manager, Emitter};
-use tracing::{info, warn, error};
+use tracing::{debug, info, warn, error};
 use crate::constants;
 use crate::constants::{events, errors::templates};
 
@@ -46,6 +46,9 @@ pub fn apply_macos_setup(app_handle: &AppHandle) {
         // Setup main window
         setup_main_window(app_handle);
 
+        // Setup desktop cursor overlay (pre-created in config as visible:false)
+        setup_desktop_cursor_overlay_window(app_handle);
+
         info!("macOS specific setup completed");
     }
 
@@ -67,23 +70,25 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
             Ok(ns_window_ptr) => {
                 let ns_window = ns_window_ptr as cocoa_id;
                 unsafe {
-                    // Keep window floating above others - Use integer value for Floating level
-                    ns_window.setLevel_(5); // kCGFloatingWindowLevelKey is typically 5
-                    // Allow clicks to pass through transparent areas
+                    // Keep window floating above others
+                    ns_window.setLevel_(5);
                     ns_window.setOpaque_(NO);
-                    ns_window.setHasShadow_(NO); // Optional: remove shadow if desired
-                    // Keep it visible across spaces
+                    ns_window.setHasShadow_(NO);
+                    // Visible across all spaces, full-screen apps, and Cmd+` cycle excluded
                     ns_window.setCollectionBehavior_(
                         NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary | // Keeps it stationary during space switching
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
+                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary |
+                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle |
+                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
                     );
 
-                    // Enable mouse events for floating bar only when it needs them
-                    // This fixes the issue where floating bar interferes with main window clicks
-                    #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
+                    // Enable mouse events for floating bar interactions
+                    #[allow(unexpected_cfgs)]
                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
-                    info!("macOS Setup: Floating bar mouse events configured.");
+
+                    // Stay visible when the user switches to another app — this is the key
+                    // non-activating behavior: Juno overlays must persist across app switches
+                    ns_window.setHidesOnDeactivate_(NO);
 
                     info!("macOS standard styling applied to floating-bar.");
                 }
@@ -116,39 +121,40 @@ fn setup_floating_panel_window(app_handle: &AppHandle) {
             Ok(ns_window_ptr) => {
                 let ns_window = ns_window_ptr as cocoa_id;
                 unsafe {
-                    // PRODUCTION READY: Use appropriate window level for accessory windows
-                    // NSFloatingWindowLevel (3) is better than hardcoded 5 for production
-                    ns_window.setLevel_(3); // NSFloatingWindowLevel - appropriate for accessory windows
-
-                    // PRODUCTION READY: Proper window configuration
+                    // NSFloatingWindowLevel (3) — appropriate for accessory windows
+                    ns_window.setLevel_(3);
                     ns_window.setOpaque_(NO);
-                    ns_window.setHasShadow_(NO); // Clean look without system shadow
+                    ns_window.setHasShadow_(NO);
                     ns_window.setBackgroundColor_(msg_send![class!(NSColor), clearColor]);
 
-                    // PRODUCTION READY: Proper macOS window behavior
+                    // Visible across all spaces and full-screen apps; excluded from Cmd+` cycle.
+                    // NSWindowCollectionBehaviorTransient is intentionally omitted: it conflicts
+                    // with Stationary and would cause macOS to hide the panel on app deactivation,
+                    // negating the setHidesOnDeactivate_(NO) call below.
                     ns_window.setCollectionBehavior_(
                         NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
                         NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary |
                         NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorTransient // Mark as transient accessory
+                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
                     );
 
-                    // PRODUCTION READY: Start with click-through enabled (default state)
-                    // Panel should be non-interactive by default, only interactive when hovered/expanded
+                    // Click-through by default; toggled interactively via ui_set_panel_click_through
                     #[allow(unexpected_cfgs)]
                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
 
-                    // PRODUCTION READY: Proper window role for accessibility
+                    // Stay visible when user switches to another app — non-activating behavior
+                    ns_window.setHidesOnDeactivate_(NO);
+
+                    // Accessibility role and label
                     #[allow(unexpected_cfgs)]
                     let accessibility_role_string: cocoa_id = msg_send![class!(NSString), stringWithUTF8String: "AXFloatingWindow".as_ptr()];
                     let _: () = msg_send![ns_window, setAccessibilityRole: accessibility_role_string];
 
-                    // PRODUCTION READY: Set proper window description for accessibility
                     #[allow(unexpected_cfgs)]
                     let accessibility_label_string: cocoa_id = msg_send![class!(NSString), stringWithUTF8String: "Juno AI Assistant Panel".as_ptr()];
                     let _: () = msg_send![ns_window, setAccessibilityLabel: accessibility_label_string];
 
-                    info!("macOS Setup: Floating panel configured with production-ready settings.");
+                    info!("macOS Setup: Floating panel configured.");
                 }
             }
             Err(e) => {
@@ -201,25 +207,75 @@ fn setup_main_window(app_handle: &AppHandle) {
     }
 }
 
-/// Activate the floating bar window with proper timing
+/// Setup macOS-specific behavior for the desktop cursor overlay window.
+///
+/// This window shows the AI agent's cursor position during computer-use tasks.
+/// It must be:
+///   - At NSScreenSaverWindowLevel (1000) so it appears above all app content
+///   - Fully click-through (ignoresMouseEvents) so it never blocks user input
+///   - Non-activating: must not steal focus from the user's active application
+///   - Persistent across spaces and full-screen apps
+#[cfg(target_os = "macos")]
+fn setup_desktop_cursor_overlay_window(app_handle: &AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("desktop-cursor-overlay") {
+        info!("Found desktop-cursor-overlay for macOS setup.");
+
+        match window.ns_window() {
+            Ok(ns_window_ptr) => {
+                let ns_window = ns_window_ptr as cocoa_id;
+                unsafe {
+                    // NSScreenSaverWindowLevel (1000) — above all app content including full-screen
+                    ns_window.setLevel_(1000);
+
+                    // Fully click-through: agent cursor must never intercept user input
+                    #[allow(unexpected_cfgs)]
+                    let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
+
+                    // Visible across all spaces and above full-screen apps
+                    ns_window.setCollectionBehavior_(
+                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
+                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary |
+                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary |
+                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle
+                    );
+
+                    // Stay visible when user switches to another app
+                    ns_window.setHidesOnDeactivate_(NO);
+
+                    ns_window.setOpaque_(NO);
+                    ns_window.setHasShadow_(NO);
+
+                    info!("macOS Setup: Desktop cursor overlay configured at screen-saver level, fully click-through.");
+                }
+            }
+            Err(e) => {
+                error!("Error getting NSWindow for styling desktop-cursor-overlay: {}", e);
+            }
+        }
+    } else {
+        // Window is pre-created as visible:false in tauri.conf.json, so this should not happen
+        // at app startup. Log as info (not error) since it may not be created yet in all builds.
+        info!("desktop-cursor-overlay not found during macOS setup — will be configured on first open.");
+    }
+}
+
+/// Show the floating bar without stealing application focus.
+///
+/// Overlay windows must never call set_focus()/makeKeyAndOrderFront: — that
+/// triggers [NSApp activateIgnoringOtherApps:YES] which yanks keyboard focus
+/// away from whatever app the user is currently in.  orderFront: (via show())
+/// makes the window visible without changing the active application.
 #[cfg(target_os = "macos")]
 fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
     tauri::async_runtime::spawn(async move {
         // Small delay to ensure window setup is complete
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        // Single, safe focus attempt without aggressive looping
-        if let Err(e) = window.set_focus() {
-            warn!("{}", format_error(templates::FAILED_TO_UPDATE, "focus on floating bar window", e));
-        } else {
-            info!("Floating bar window focus set successfully");
-        }
-
-        // Simple window show to ensure visibility - much safer than NSWindow API calls
+        // Only show — never steal focus. Overlays must not activate Juno.
         if let Err(e) = window.show() {
             warn!("{}", format_error(templates::FAILED_TO_PROCESS, "show floating bar window", e));
         } else {
-            info!("Floating bar window shown successfully");
+            info!("Floating bar window shown successfully (no focus steal)");
         }
     });
 }
@@ -248,7 +304,7 @@ pub mod mouse_tracking {
 
     /// Mouse entered event handler - now receives delegate pointer to identify window
     extern "C" fn mouse_entered(this: &Object, _cmd: Sel, _event: cocoa_id) {
-        info!("[Tracking Delegate] Mouse Entered");
+        debug!("[Tracking Delegate] Mouse Entered");
         let delegate_ptr = this as *const Object as u64;
 
         let app_handle = match APP_HANDLE.lock() {
@@ -271,7 +327,7 @@ pub mod mouse_tracking {
             if let Some(window_label) = window_label {
                 if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit(events::system::MOUSE_ENTERED_WINDOW, ()); // Emit specific event
-                    info!("[Tracking Delegate] Emitted mouse-entered-window for window: {}", window_label);
+                    debug!("[Tracking Delegate] Emitted mouse-entered-window for window: {}", window_label);
                 } else {
                     error!("[Tracking Delegate Error] Window '{}' not found for mouse_entered emit.", window_label);
                 }
@@ -283,7 +339,7 @@ pub mod mouse_tracking {
 
     /// Mouse exited event handler - now receives delegate pointer to identify window
     extern "C" fn mouse_exited(this: &Object, _cmd: Sel, _event: cocoa_id) {
-        info!("[Tracking Delegate] Mouse Exited");
+        debug!("[Tracking Delegate] Mouse Exited");
         let delegate_ptr = this as *const Object as u64;
 
         let app_handle = match APP_HANDLE.lock() {
@@ -306,7 +362,7 @@ pub mod mouse_tracking {
             if let Some(window_label) = window_label {
                 if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit(events::system::MOUSE_LEFT_WINDOW, ()); // Emit specific event
-                    info!("[Tracking Delegate] Emitted mouse-left-window for window: {}", window_label);
+                    debug!("[Tracking Delegate] Emitted mouse-left-window for window: {}", window_label);
                 } else {
                     error!("[Tracking Delegate Error] Window '{}' not found for mouse_exited emit.", window_label);
                 }
@@ -319,7 +375,7 @@ pub mod mouse_tracking {
     /// Setup mouse tracking area for a window
     pub fn setup_tracking_area(window: &tauri::WebviewWindow<tauri::Wry>, app_handle: AppHandle) -> Result<(), String> {
         let window_label = window.label().to_string();
-        info!("Setting up macOS tracking area for window: {}", window_label);
+        debug!("Setting up macOS tracking area for window: {}", window_label);
 
         // Store the AppHandle (only needs to be set once)
         let should_store_handle = match APP_HANDLE.lock() {
@@ -361,7 +417,7 @@ pub mod mouse_tracking {
 
             // Declare class only if it doesn't exist yet
             if delegate_class.is_none() {
-                info!("Declaring {} class...", delegate_class_name);
+                debug!("Declaring {} class...", delegate_class_name);
                 #[allow(unexpected_cfgs)] // Allow cfg from class! macro
                 let superclass = class!(NSObject);
                 let mut decl = match ClassDecl::new(&delegate_class_name, superclass) {
@@ -387,7 +443,7 @@ pub mod mouse_tracking {
                 );
 
                 delegate_class = Some(decl.register());
-                info!("{} class registered.", delegate_class_name);
+                debug!("{} class registered.", delegate_class_name);
             }
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
@@ -398,14 +454,14 @@ pub mod mouse_tracking {
                     return Err("Failed to get delegate class".to_string());
                 }
             };
-            info!("{} instance created: {:?}", delegate_class_name, delegate);
+            debug!("{} instance created: {:?}", delegate_class_name, delegate);
 
             // Store the mapping between delegate pointer and window label
             let delegate_ptr = delegate as u64;
             match TRACKED_WINDOWS.lock() {
                 Ok(mut tracked) => {
                     tracked.insert(delegate_ptr, window_label.clone());
-                    info!("Registered delegate pointer {} for window: {}", delegate_ptr, window_label);
+                    debug!("Registered delegate pointer {} for window: {}", delegate_ptr, window_label);
                 }
                 Err(e) => {
                     error!("Failed to register delegate pointer for window '{}': {}", window_label, e);
@@ -418,7 +474,7 @@ pub mod mouse_tracking {
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let bounds: NSRect = msg_send![view, bounds];
-            info!("Got view bounds for tracking area.");
+            debug!("Got view bounds for tracking area.");
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send and class! macros
             let tracking_area: cocoa_id = msg_send![class!(NSTrackingArea), alloc];
@@ -430,7 +486,7 @@ pub mod mouse_tracking {
                 owner: delegate // Use the delegate instance as the owner
                 userInfo: nil
             ];
-            info!("NSTrackingArea created: {:?}", tracking_area_ptr);
+            debug!("NSTrackingArea created: {:?}", tracking_area_ptr);
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let _: () = msg_send![view, addTrackingArea: tracking_area_ptr];

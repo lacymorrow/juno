@@ -26,18 +26,21 @@ import {
 } from "lucide-react";
 
 // ============================================================
-// Security: Command validation (currently disabled)
+// Security: Command validation
 // ============================================================
 
-// TODO: Re-enable command whitelist before production release.
-// When re-enabled, only ALLOWED_COMMANDS should be invocable from
-// agent-rendered JSX. The whitelist was:
-//   open_url, open_application, get_system_info, capture_screenshot,
-//   submit_query, ui_handle_interaction
-// See TODO.md for tracking.
+const ALLOWED_COMMANDS = new Set([
+  "open_url",
+  "open_application",
+  "capture_screenshot_command",
+  "submit_query",
+  "get_system_stats",
+  "get_clipboard",
+  "set_clipboard",
+]);
 
-function isCommandAllowed(_command: string): boolean {
-  return true;
+function isCommandAllowed(command: string): boolean {
+  return ALLOWED_COMMANDS.has(command);
 }
 
 // ============================================================
@@ -83,17 +86,18 @@ export function ActionButton({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleClick = useCallback(async () => {
-    if (!isCommandAllowed(command)) {
-      setStatus("error");
-      setErrorMsg(`Command not allowed: ${command}`);
-      return;
-    }
-
     setStatus("loading");
     setErrorMsg(null);
 
     try {
-      await invoke(command, args || {});
+      if (isCommandAllowed(command)) {
+        await invoke(command, args || {});
+      } else {
+        const query = args && Object.keys(args).length > 0
+          ? `${command} ${JSON.stringify(args)}`
+          : command.replace(/_/g, " ");
+        await invoke("submit_query", { query });
+      }
       setStatus("success");
       setTimeout(() => setStatus("idle"), 2000);
     } catch (err) {

@@ -23,8 +23,13 @@ import {
   ModelSelectorLogo,
   ModelSelectorName,
 } from "@/components/ai-elements/model-selector";
-import { useSettings } from "@/hooks/useSettings";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { COMMANDS } from "@/lib/constants.generated";
+import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
+import {
+  SkillGhostText,
+  SkillSuggestionList,
+} from "@/components/SkillAutocomplete";
 
 interface ChatInputProps {
   query: string;
@@ -33,6 +38,7 @@ interface ChatInputProps {
   onQueryChange: (value: string) => void;
   onSubmit: (text: string) => void;
   onStop: () => void;
+  placeholder?: string;
 }
 
 export const ChatInput = React.memo(function ChatInput({
@@ -42,8 +48,9 @@ export const ChatInput = React.memo(function ChatInput({
   onQueryChange,
   onSubmit,
   onStop,
+  placeholder,
 }: ChatInputProps) {
-  const settings = useSettings();
+  const settings = useSettingsContext();
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
 
   const chatStatus: ChatStatus = isProcessing ? "streaming" : "ready";
@@ -130,17 +137,47 @@ export const ChatInput = React.memo(function ChatInput({
     [onSubmit]
   );
 
+  // Slash-command autocomplete: typing "/pap" ghost-completes to
+  // "/paperclip" with a fuzzy-matched dropdown (Tab/Enter accepts).
+  const skillAutocomplete = useSkillAutocomplete({
+    value: query,
+    onAccept: onQueryChange,
+    enabled: !isProcessing && canSubmit,
+  });
+
   const hasModels = sortedProviders.length > 0;
 
   return (
+    <div className="relative">
+      {skillAutocomplete.open && (
+        <div className="absolute bottom-full left-0 right-0 z-50 mb-2">
+          <SkillSuggestionList
+            variant="chat"
+            suggestions={skillAutocomplete.suggestions}
+            selectedIndex={skillAutocomplete.selectedIndex}
+            onSelect={skillAutocomplete.accept}
+            onHighlight={skillAutocomplete.setSelectedIndex}
+          />
+        </div>
+      )}
     <PromptInput onSubmit={handleSubmit}>
       <PromptInputTextarea
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={skillAutocomplete.handleKeyDown}
         placeholder={
-          isProcessing ? "Processing..." : "Ask anything..."
+          placeholder ?? (isProcessing ? "Processing..." : "Ask anything...")
         }
         disabled={isProcessing || !canSubmit}
+      />
+      {/* Inline ghost completion aligned to the textarea's first line —
+          rendered inside InputGroup, so only the textarea's own px-3 py-3
+          metrics apply (the group border is outside inset-0). */}
+      <SkillGhostText
+        value={query}
+        ghostText={skillAutocomplete.ghostText}
+        className="px-3 py-3 text-base md:text-sm"
+        ghostClassName="text-muted-foreground/50"
       />
       <PromptInputFooter>
         <PromptInputTools>
@@ -236,5 +273,6 @@ export const ChatInput = React.memo(function ChatInput({
         />
       </PromptInputFooter>
     </PromptInput>
+    </div>
   );
 });

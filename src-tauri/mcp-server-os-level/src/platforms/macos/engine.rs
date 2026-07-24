@@ -2319,4 +2319,38 @@ impl AccessibilityEngine for MacOSEngine {
     fn get_element_tree(&self, element: &UIElement) -> Result<ElementTreeNode, AutomationError> {
         element.get_tree() // Delegate to the UIElement's get_tree method
     }
+
+    fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+        let flags = modifiers.map(|m| parse_modifiers(Some(m)));
+        let flags_opt = if flags.is_none_or(|f| f.is_empty()) { None } else { flags };
+        interaction::left_click_no_warp(x, y, flags_opt)
+    }
+
+    fn right_click_no_warp(&self, x: f64, y: f64) -> Result<&'static str, AutomationError> {
+        interaction::right_click_no_warp(x, y)
+    }
+
+    fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+        let flags = modifiers.map(|m| parse_modifiers(Some(m)));
+        let flags_opt = if flags.is_none_or(|f| f.is_empty()) { None } else { flags };
+        interaction::double_click_no_warp(x, y, flags_opt)
+    }
+
+    fn post_mouse_event_to_pid(&self, pid: i32, event_type_str: &str, x: f64, y: f64) -> Result<(), AutomationError> {
+        use core_graphics::event::CGMouseButton;
+        use core_graphics::geometry::CGPoint;
+        let position = CGPoint::new(x, y);
+        let (event_type, button) = match event_type_str {
+            "left_down" => (core_graphics::event::CGEventType::LeftMouseDown, CGMouseButton::Left),
+            "left_up" => (core_graphics::event::CGEventType::LeftMouseUp, CGMouseButton::Left),
+            "right_down" => (core_graphics::event::CGEventType::RightMouseDown, CGMouseButton::Right),
+            "right_up" => (core_graphics::event::CGEventType::RightMouseUp, CGMouseButton::Right),
+            _ => return Err(AutomationError::InvalidArgument(format!("Unknown event type: {}", event_type_str))),
+        };
+        interaction::post_mouse_event_to_pid(pid, event_type, position, button, None)
+    }
+
+    fn post_key_event_to_pid(&self, pid: i32, keycode: u16, key_down: bool) -> Result<(), AutomationError> {
+        interaction::post_key_event_to_pid(pid, keycode, key_down)
+    }
 }

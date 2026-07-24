@@ -46,10 +46,18 @@ fn format_error(template: &'static str, context: &str, error: impl std::fmt::Dis
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyboardShortcuts {
-    pub agent_mode: String, // Default: Alt+D (Option+D on macOS)
+    pub agent_mode: String,        // Default: Alt+D (Option+D on macOS)
     pub dictation_input: String,   // Default: Alt+Space (Option+Space on macOS)
     pub stop_current_task: String, // Default: Escape
     pub open_settings: String,     // Default: Cmd+, (Ctrl+, on non-macOS)
+    #[serde(default = "KeyboardShortcuts::default_voice_activation")]
+    pub voice_activation: String,  // Default: Option+Shift+V — always-on global voice shortcut
+}
+
+impl KeyboardShortcuts {
+    fn default_voice_activation() -> String {
+        defaults::VOICE_ACTIVATION.to_string()
+    }
 }
 
 /// Agent trigger mode configuration
@@ -75,6 +83,7 @@ impl Default for KeyboardShortcuts {
             dictation_input: defaults::DICTATION_INPUT.to_string(),
             stop_current_task: defaults::STOP_CURRENT_TASK.to_string(),
             open_settings: defaults::OPEN_SETTINGS.to_string(),
+            voice_activation: defaults::VOICE_ACTIVATION.to_string(),
         }
     }
 }
@@ -110,6 +119,29 @@ type CancelSender = watch::Sender<bool>;
 // Define a type alias for the cancellation receiver for clarity
 pub type CancelReceiver = watch::Receiver<bool>;
 
+/// Per-agent cursor position for the desktop overlay (Phase 4 multi-agent cursors).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCursorState {
+    pub agent_id: String,
+    pub x: f64,
+    pub y: f64,
+    /// "idle" | "moving" | "clicking" | "thinking"
+    pub state: String,
+    /// CSS color string for this agent's cursor sprite
+    pub color: String,
+}
+
+/// Risk level for tool approval requests
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RiskLevel {
+    #[default]
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
 /// Tool approval request structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolApprovalRequest {
@@ -119,6 +151,9 @@ pub struct ToolApprovalRequest {
     pub description: String,
     pub timestamp: u64,
     pub approved: Option<bool>, // None = pending, Some(true) = approved, Some(false) = denied
+    pub risk_level: RiskLevel,
+    pub target_app: Option<String>,
+    pub timeout_seconds: u64,
 }
 
 impl ToolApprovalRequest {
@@ -130,10 +165,28 @@ impl ToolApprovalRequest {
             description,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_millis() as u64,
             approved: None,
+            risk_level: RiskLevel::default(),
+            target_app: None,
+            timeout_seconds: 60,
         }
+    }
+
+    pub fn with_risk(mut self, risk_level: RiskLevel) -> Self {
+        self.risk_level = risk_level;
+        self
+    }
+
+    pub fn with_target_app(mut self, app: String) -> Self {
+        self.target_app = Some(app);
+        self
+    }
+
+    pub fn with_timeout(mut self, seconds: u64) -> Self {
+        self.timeout_seconds = seconds;
+        self
     }
 }
 
@@ -143,6 +196,13 @@ impl ToolApprovalRequest {
 #[derive(Clone, Debug)]
 pub struct AudioSettings {
     pub tts_provider: String,
+    pub kokoro_voice: String,
+    pub chatterbox_reference_audio_url: Option<String>,
+    pub chatterbox_exaggeration: f32,
+    pub chatterbox_use_hd: bool,
+    pub supertonic_server_url: String,
+    pub supertonic_voice: String,
+    pub supertonic_speed: f64,
     pub dictation_active: bool,
     pub dictation_clipboard_enabled: bool,
     pub sound_enabled: bool,
@@ -166,6 +226,13 @@ impl Default for AudioSettings {
                     "elevenlabs".to_string()
                 }
             },
+            kokoro_voice: "af_bella".to_string(),
+            chatterbox_reference_audio_url: None,
+            chatterbox_exaggeration: 0.5,
+            chatterbox_use_hd: false,
+            supertonic_server_url: crate::tts::supertonic::DEFAULT_SERVER_URL.to_string(),
+            supertonic_voice: crate::tts::supertonic::DEFAULT_VOICE.to_string(),
+            supertonic_speed: crate::tts::supertonic::DEFAULT_SPEED,
             dictation_active: false,
             dictation_clipboard_enabled: true,
             sound_enabled: true,
@@ -264,6 +331,10 @@ pub struct AppState {
     pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>,
     pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>,
 
+    // Pre-captured screenshot from PTT release (set during STT finalization, consumed on first agent screenshot call).
+    // Tuple stores (screenshot, capture_time) so stale entries can be discarded.
+    pub pending_ptt_screenshot: Arc<TokioMutex<Option<(crate::commands::core::ScreenshotResult, std::time::Instant)>>>,
+
     // Simple state fields
     pub permissions_checked: Arc<StdMutex<bool>>,
     pub cloud_enabled: Arc<StdMutex<bool>>,
@@ -281,6 +352,8 @@ pub struct AppState {
     // continue to run in parallel.
     agent_sessions: Arc<AgentSessionRegistry>,
 
+    // Per-agent cursor positions for multi-agent overlay (Phase 4)
+    pub agent_cursors: Arc<StdMutex<HashMap<String, AgentCursorState>>>,
     // Dynamic storage for other state components
     state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
@@ -346,6 +419,7 @@ impl AppState {
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
+            pending_ptt_screenshot: Arc::new(TokioMutex::new(None)),
 
             // Initialize simple state
             permissions_checked: Arc::new(StdMutex::new(false)),
@@ -365,6 +439,8 @@ impl AppState {
                 Arc::new(InputArbiter::new(Duration::from_millis(500))),
             )),
 
+            // Initialize per-agent cursor tracking
+            agent_cursors: Arc::new(StdMutex::new(HashMap::new())),
             // Initialize dynamic storage
             state_components: Arc::new(StdMutex::new(HashMap::new())),
         }
@@ -388,6 +464,34 @@ impl AppState {
         self.rate_limiters.clone().start_cleanup_task();
     }
 
+    /// Maximum age for a cached PTT screenshot before it is considered stale.
+    const PTT_SCREENSHOT_TTL_SECS: u64 = 10;
+
+    /// Store a screenshot captured concurrently with PTT STT finalization.
+    /// Consumed on the agent's first `computer/screenshot` tool call.
+    pub async fn set_pending_ptt_screenshot(&self, screenshot: crate::commands::core::ScreenshotResult) {
+        let mut guard = self.pending_ptt_screenshot.lock().await;
+        *guard = Some((screenshot, std::time::Instant::now()));
+    }
+
+    /// Take (and clear) the pre-captured PTT screenshot if one exists and is not stale.
+    /// Discards (and returns `None`) if the screenshot is older than `PTT_SCREENSHOT_TTL_SECS`.
+    pub async fn take_pending_ptt_screenshot(&self) -> Option<crate::commands::core::ScreenshotResult> {
+        let mut guard = self.pending_ptt_screenshot.lock().await;
+        match guard.take() {
+            Some((screenshot, captured_at))
+                if captured_at.elapsed().as_secs() < Self::PTT_SCREENSHOT_TTL_SECS =>
+            {
+                Some(screenshot)
+            }
+            Some(_) => {
+                warn!("[PTT] Discarding stale pre-captured screenshot (older than {}s)", Self::PTT_SCREENSHOT_TTL_SECS);
+                None
+            }
+            None => None,
+        }
+    }
+
     // Audio Settings - Getter/Setter methods that operate on actual shared state
     pub fn get_tts_provider(&self) -> Result<String, String> {
         self.audio_settings
@@ -401,6 +505,104 @@ impl AppState {
             .lock()
             .map(|mut settings| settings.tts_provider = provider)
             .map_err(|e| format_error(templates::FAILED_TO_SET, "TTS provider", e))
+    }
+
+    pub fn get_kokoro_voice(&self) -> Result<String, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.kokoro_voice.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Kokoro voice", e))
+    }
+
+    pub fn set_kokoro_voice(&self, voice: String) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.kokoro_voice = voice)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Kokoro voice", e))
+    }
+
+    pub fn get_chatterbox_reference_audio_url(&self) -> Result<Option<String>, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.chatterbox_reference_audio_url.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox reference audio URL", e))
+    }
+
+    pub fn set_chatterbox_reference_audio_url(&self, url: Option<String>) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.chatterbox_reference_audio_url = url)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox reference audio URL", e))
+    }
+
+    pub fn get_chatterbox_exaggeration(&self) -> Result<f32, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.chatterbox_exaggeration)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox exaggeration", e))
+    }
+
+    pub fn set_chatterbox_exaggeration(&self, exaggeration: f32) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.chatterbox_exaggeration = exaggeration)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox exaggeration", e))
+    }
+
+    pub fn get_chatterbox_use_hd(&self) -> Result<bool, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.chatterbox_use_hd)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Chatterbox HD mode", e))
+    }
+
+    pub fn set_chatterbox_use_hd(&self, use_hd: bool) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.chatterbox_use_hd = use_hd)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Chatterbox HD mode", e))
+    }
+
+    pub fn get_supertonic_server_url(&self) -> Result<String, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.supertonic_server_url.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Supertonic server URL", e))
+    }
+
+    pub fn set_supertonic_server_url(&self, url: String) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.supertonic_server_url = url)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Supertonic server URL", e))
+    }
+
+    pub fn get_supertonic_voice(&self) -> Result<String, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.supertonic_voice.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Supertonic voice", e))
+    }
+
+    pub fn set_supertonic_voice(&self, voice: String) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.supertonic_voice = voice)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Supertonic voice", e))
+    }
+
+    pub fn get_supertonic_speed(&self) -> Result<f64, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.supertonic_speed)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Supertonic speed", e))
+    }
+
+    pub fn set_supertonic_speed(&self, speed: f64) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.supertonic_speed = speed)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Supertonic speed", e))
     }
 
     pub fn get_dictation_active(&self) -> Result<bool, String> {
@@ -1678,6 +1880,32 @@ impl AppState {
                 tokio::task::yield_now().await;
             }
         }
+    }
+
+    // ── Multi-agent cursor tracking (Phase 4) ────────────────────────────────
+
+    /// Update or insert the cursor state for a given agent.
+    pub fn update_agent_cursor(&self, cursor: AgentCursorState) {
+        match self.agent_cursors.lock() {
+            Ok(mut map) => { map.insert(cursor.agent_id.clone(), cursor); }
+            Err(e) => warn!("Failed to update agent cursor: {}", e),
+        }
+    }
+
+    /// Remove an agent's cursor (call when the agent finishes or is cancelled).
+    pub fn remove_agent_cursor(&self, agent_id: &str) {
+        match self.agent_cursors.lock() {
+            Ok(mut map) => { map.remove(agent_id); }
+            Err(e) => warn!("Failed to remove agent cursor: {}", e),
+        }
+    }
+
+    /// Snapshot of all active agent cursors (cloned for safe cross-thread use).
+    pub fn get_agent_cursors(&self) -> Vec<AgentCursorState> {
+        self.agent_cursors
+            .lock()
+            .map(|map| map.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     // TTS content is now handled via XML tags during streaming, no separate methods needed

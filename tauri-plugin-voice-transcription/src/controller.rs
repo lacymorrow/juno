@@ -1,23 +1,31 @@
-use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters};
 use std::path::Path;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use hound;
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
 use crate::constants;
-use crate::utils::filter_transcription_text;
+use crate::engine::{TranscriptionEngine, TranscriptionSession};
 
 use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 const SINC_LENGTH: usize = 256;
 const OVERSAMPLING_FACTOR: usize = 256;
+
+/// Calculate RMS volume of an audio chunk (0.0 = silence, higher = louder).
+fn calculate_rms_volume(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
+    (sum_sq / samples.len() as f32).sqrt()
+}
 
 /// Create standard sinc interpolation parameters for audio resampling.
 fn sinc_resampling_params() -> SincInterpolationParameters {
@@ -36,7 +44,7 @@ enum AudioThreadMessage {
 }
 
 pub struct VoiceController {
-    ctx: Option<Arc<WhisperContext>>,
+    engine: Option<Arc<dyn TranscriptionEngine>>,
     pub model_path: String,
     is_dictating: bool,
     audio_thread: Option<(thread::JoinHandle<()>, Sender<AudioThreadMessage>)>,
@@ -47,18 +55,12 @@ pub struct VoiceController {
 }
 
 impl VoiceController {
-    pub fn new(model_path_str: &str) -> Result<Self> {
-        let model_path = Path::new(model_path_str);
-        if !model_path.exists() {
-            return Err(Error::ModelNotFound(model_path_str.to_string()));
-        }
-
-        let context_params = WhisperContextParameters::default();
-        let ctx = WhisperContext::new_with_params(model_path_str, context_params)
-            .map_err(|e| Error::Whisper(format!("Failed to create WhisperContext: {:?}", e)))?;
-
+    /// Create a VoiceController backed by an already-initialized STT engine.
+    /// Preferred constructor — engine is provided by `EngineManager`.
+    pub fn new_with_engine(model_path_str: &str, engine: Arc<dyn TranscriptionEngine>) -> Result<Self> {
+        info!("[VoiceController] Creating controller with '{}' engine", engine.name());
         Ok(Self {
-            ctx: Some(Arc::new(ctx)),
+            engine: Some(engine),
             model_path: model_path_str.to_string(),
             is_dictating: false,
             audio_thread: None,
@@ -69,27 +71,22 @@ impl VoiceController {
         })
     }
 
-    /// Create a VoiceController using a pre-loaded shared WhisperContext
-    /// This eliminates duplicate model loading when multiple controllers need the same model
-    pub fn new_with_shared_context(model_path_str: &str, shared_context: Arc<WhisperContext>) -> Result<Self> {
-        info!("[VoiceController] Creating controller with shared Whisper context (no model reload)");
-
-        Ok(Self {
-            ctx: Some(shared_context),
-            model_path: model_path_str.to_string(),
-            is_dictating: false,
-            audio_thread: None,
-            last_processed_audio_buffer: Arc::new(Mutex::new(None)),
-            actual_recording_sample_rate: Arc::new(Mutex::new(None)),
-            is_initialized: true,
-            initialization_error: None,
-        })
+    /// Backward-compat constructor for callers that still pass a `WhisperContext` directly
+    /// (e.g. the `set_model_path` command). Wraps the context in a `WhisperEngine`.
+    pub fn new_with_shared_context(
+        model_path_str: &str,
+        shared_context: Arc<whisper_rs::WhisperContext>,
+    ) -> Result<Self> {
+        use crate::engine_whisper::WhisperEngine;
+        info!("[VoiceController] Creating controller with shared WhisperContext (legacy path)");
+        let engine: Arc<dyn TranscriptionEngine> = Arc::new(WhisperEngine::new(shared_context));
+        Self::new_with_engine(model_path_str, engine)
     }
 
     /// Create an uninitialized controller that can be managed by Tauri but will return errors for operations
     pub fn new_uninitialized(model_path_str: &str, error_message: String) -> Self {
         Self {
-            ctx: None,
+            engine: None,
             model_path: model_path_str.to_string(),
             is_dictating: false,
             audio_thread: None,
@@ -112,7 +109,7 @@ impl VoiceController {
 
     /// Update the shared Whisper context and model path for this controller
     /// This allows updating the model without recreating the entire controller
-    pub fn update_shared_context(&mut self, model_path: &str, shared_context: Arc<WhisperContext>) -> Result<()> {
+    pub fn update_shared_context(&mut self, model_path: &str, shared_context: Arc<whisper_rs::WhisperContext>) -> Result<()> {
         info!("[VoiceController] Updating shared Whisper context with new model: {}", model_path);
 
         // Stop dictation if it's currently active
@@ -122,9 +119,11 @@ impl VoiceController {
             self.stop_dictation()?;
         }
 
-        // Update the model path and shared context
+        // Update the model path and shared context (wrap legacy WhisperContext in WhisperEngine)
+        use crate::engine_whisper::WhisperEngine;
+        let engine: Arc<dyn TranscriptionEngine> = Arc::new(WhisperEngine::new(shared_context));
         self.model_path = model_path.to_string();
-        self.ctx = Some(shared_context);
+        self.engine = Some(engine);
         self.is_initialized = true;
         self.initialization_error = None;
 
@@ -138,8 +137,24 @@ impl VoiceController {
         Ok(())
     }
 
+    /// Swap the active STT engine without restarting the controller.
+    pub fn update_engine(&mut self, engine: Arc<dyn TranscriptionEngine>) -> Result<()> {
+        info!("[VoiceController] Updating engine to '{}'", engine.name());
+        let was_dictating = self.is_dictating;
+        if was_dictating {
+            self.stop_dictation()?;
+        }
+        self.engine = Some(engine);
+        self.is_initialized = true;
+        self.initialization_error = None;
+        if was_dictating {
+            info!("[VoiceController] Stopped before engine swap - caller should restart if needed");
+        }
+        Ok(())
+    }
+
     /// Helper method to check initialization before performing operations
-    fn ensure_initialized(&self) -> Result<&Arc<WhisperContext>> {
+    fn ensure_initialized(&self) -> Result<&Arc<dyn TranscriptionEngine>> {
         if !self.is_initialized {
             let error_msg = self.initialization_error
                 .as_ref()
@@ -147,24 +162,18 @@ impl VoiceController {
                 .unwrap_or_else(|| "Voice controller not initialized".to_string());
             return Err(Error::InitializationError(error_msg));
         }
-        self.ctx.as_ref().ok_or(Error::NotInitialized)
+        self.engine.as_ref().ok_or(Error::NotInitialized)
     }
 
     pub fn transcribe_audio_file(&self, audio_path_str: &str) -> std::result::Result<String, String> {
-        let ctx = match self.ensure_initialized() {
-            Ok(ctx) => ctx,
-            Err(e) => return Err(e.to_string()),
-        };
+        let engine = self.ensure_initialized().map_err(|e| e.to_string())?;
 
         let audio_path = Path::new(audio_path_str);
         if !audio_path.exists() {
             return Err(format!("Audio file not found: {}", audio_path_str));
         }
 
-        let mut state = ctx.create_state()
-            .map_err(|e| format!("Failed to create WhisperState: {:?}", e))?;
-
-        let params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
+        let mut session = engine.create_session()?;
 
         let mut reader = hound::WavReader::open(audio_path_str)
             .map_err(|e| format!("Failed to open audio file: {}", e))?;
@@ -184,30 +193,33 @@ impl VoiceController {
             }
         }
 
-        let mut audio_f32: Vec<f32> = vec![0.0f32; samples_i16.len()];
-        whisper_rs::convert_integer_to_float_audio(&samples_i16, &mut audio_f32)
-            .map_err(|e| format!("Failed to convert audio to f32: {:?}", e))?;
+        // i16 → f32 normalization ([-32768, 32767] → [-1.0, 1.0])
+        let audio_f32: Vec<f32> = samples_i16.iter()
+            .map(|&s| s as f32 / 32768.0)
+            .collect();
 
-        let mut processed_audio = audio_f32;
-
-        if channels == 2 {
-            processed_audio = whisper_rs::convert_stereo_to_mono_audio(&processed_audio)
-                .map_err(|e| format!("Failed to convert stereo to mono: {:?}", e))?;
-        } else if channels != 1 {
+        let mut processed_audio = if channels == 2 {
+            // Stereo → mono: average left + right channels
+            audio_f32.chunks_exact(2)
+                .map(|pair| (pair[0] + pair[1]) / 2.0)
+                .collect()
+        } else if channels == 1 {
+            audio_f32
+        } else {
             return Err(format!(
                 "Unsupported number of channels: {}. Only mono (1) or stereo (2) is supported.",
                 channels
             ));
-        }
+        };
 
         // Resample if needed
         if sample_rate != WHISPER_SAMPLE_RATE {
-            let params = sinc_resampling_params();
+            let resample_params = sinc_resampling_params();
 
             let mut resampler = SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
                 2.0,
-                params,
+                resample_params,
                 processed_audio.len(),
                 1,
             ).map_err(|e| format!("Failed to create resampler: {:?}", e))?;
@@ -224,19 +236,7 @@ impl VoiceController {
                 .ok_or_else(|| "Resampling failed to produce audio data".to_string())?;
         }
 
-        state.full(params, &processed_audio[..])
-            .map_err(|e| format!("Failed to run full transcription: {:?}", e))?;
-
-        let num_segments = state.full_n_segments()
-            .map_err(|e| format!("Failed to get number of segments: {:?}", e))?;
-
-        let mut full_text = String::new();
-        for i in 0..num_segments {
-            let segment = state.full_get_segment_text(i)
-                .map_err(|e| format!("Failed to get segment text: {:?}", e))?;
-            full_text.push_str(&segment);
-        }
-        Ok(full_text)
+        session.transcribe_final(&processed_audio)
     }
 
     pub fn start_dictation<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
@@ -329,13 +329,13 @@ impl VoiceController {
         let app_handle_for_thread = app_handle.clone();
         let channels_for_thread = channels;
 
-        let shared_context = self.ctx.as_ref()
-            .ok_or_else(|| Error::Whisper("Whisper context not initialized".to_string()))?
+        let engine = self.engine.as_ref()
+            .ok_or_else(|| Error::InitializationError("STT engine not initialized".to_string()))?
             .clone();
 
         let audio_thread_handle = thread::spawn(move || {
             Self::audio_thread_worker(
-                shared_context,
+                engine,
                 last_buffer_arc_for_thread,
                 actual_rate_for_thread,
                 channels_for_thread,
@@ -358,7 +358,7 @@ impl VoiceController {
 
     #[allow(clippy::too_many_arguments)]
     fn audio_thread_worker<R: Runtime + 'static>(
-        shared_whisper_context: Arc<WhisperContext>,
+        engine: Arc<dyn TranscriptionEngine>,
         last_buffer_arc: Arc<Mutex<Option<Vec<f32>>>>,
         actual_rate: u32,
         channels: u16,
@@ -370,12 +370,12 @@ impl VoiceController {
         config: cpal::StreamConfig,
         sample_format: SampleFormat,
     ) {
-        info!("[AudioThread] Thread started. Using shared Whisper context (no model reload needed).");
+        info!("[AudioThread] Thread started. Engine: '{}'", engine.name());
 
-        let mut whisper_state = match shared_whisper_context.create_state() {
-            Ok(state) => state,
+        let mut session = match engine.create_session() {
+            Ok(s) => s,
             Err(e) => {
-                tracing::error!("Failed to create WhisperState from shared context: {:?}", e);
+                tracing::error!("Failed to create transcription session: {}", e);
                 return;
             }
         };
@@ -428,11 +428,10 @@ impl VoiceController {
                             data.to_vec()
                         };
                         
-                        let mut audio_f32: Vec<f32> = vec![0.0f32; mono_data.len()];
-                        if let Err(e) = whisper_rs::convert_integer_to_float_audio(&mono_data, &mut audio_f32) {
-                            tracing::error!("Failed to convert i16 to f32: {:?}", e);
-                            return;
-                        }
+                        // i16 → f32 normalization
+                        let audio_f32: Vec<f32> = mono_data.iter()
+                            .map(|&s| s as f32 / 32768.0)
+                            .collect();
                         if let Err(e) = tx_clone.send(audio_f32) {
                             tracing::error!("Failed to send converted audio data: {:?}", e);
                         }
@@ -491,6 +490,10 @@ impl VoiceController {
               partial_buffer_capacity_samples as f32 / actual_rate as f32,
               actual_rate);
 
+        // Audio level emission: throttled to ~70ms to match Clicky's sampling rate
+        let level_emit_interval = Duration::from_millis(70);
+        let mut last_level_emit = Instant::now() - level_emit_interval;
+
         loop {
             // Check for control messages
             match control_rx.try_recv() {
@@ -503,13 +506,19 @@ impl VoiceController {
 
                     // Process final audio
                     Self::process_final_audio(
-                        &mut whisper_state,
+                        session.as_mut(),
                         &audio_buffer_for_whisper_chunks,
                         &raw_full_session_audio,
                         actual_rate,
                         chunk_resampler.as_mut(),
                         &app_handle,
                         &last_buffer_arc,
+                    );
+
+                    // Reset waveform to baseline when recording ends
+                    let _ = app_handle.emit(
+                        constants::voice_transcription::AUDIO_LEVEL,
+                        serde_json::json!({ "level": 0.0_f32 }),
                     );
 
                     break;
@@ -526,12 +535,24 @@ impl VoiceController {
                 raw_full_session_audio.extend_from_slice(&audio_chunk);
                 audio_buffer_for_whisper_chunks.extend_from_slice(&audio_chunk);
 
+                // Emit audio level at ~70ms intervals for waveform visualization
+                if last_level_emit.elapsed() >= level_emit_interval {
+                    let rms = calculate_rms_volume(&audio_chunk);
+                    // Scale: typical speech RMS 0.02–0.1 maps to ~0.2–1.0 display range
+                    let level = (rms * 10.0_f32).min(1.0_f32);
+                    let _ = app_handle.emit(
+                        constants::voice_transcription::AUDIO_LEVEL,
+                        serde_json::json!({ "level": level }),
+                    );
+                    last_level_emit = Instant::now();
+                }
+
                 // Process partial transcriptions
                 if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
                     info!("[AudioThread] Processing partial transcription. Buffer size: {} samples, threshold: {} samples",
                           audio_buffer_for_whisper_chunks.len(), partial_buffer_capacity_samples);
                     Self::process_partial_transcription(
-                        &mut whisper_state,
+                        session.as_mut(),
                         &audio_buffer_for_whisper_chunks,
                         actual_rate,
                         chunk_resampler.as_mut(),
@@ -544,7 +565,7 @@ impl VoiceController {
     }
 
     fn process_partial_transcription<R: Runtime>(
-        whisper_state: &mut whisper_rs::WhisperState,
+        session: &mut dyn TranscriptionSession,
         audio_buffer: &[f32],
         actual_rate: u32,
         resampler: Option<&mut SincFixedIn<f32>>,
@@ -567,33 +588,18 @@ impl VoiceController {
             return;
         }
 
-        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
-        params.set_n_threads(4);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-
-        match whisper_state.full(params, &audio_to_transcribe[..]) {
-            Ok(_) => {
-                let num_segments = whisper_state.full_n_segments().unwrap_or(0);
-                let mut partial_text = String::new();
-                for i in 0..num_segments {
-                    if let Ok(segment) = whisper_state.full_get_segment_text(i) {
-                        partial_text.push_str(&segment);
-                    }
-                }
-                if !partial_text.is_empty() {
-                    let _ = app_handle.emit(constants::voice_transcription::PARTIAL_RESULT,
-                        serde_json::json!({ "text": partial_text }));
-                }
+        match session.transcribe_partial(&audio_to_transcribe) {
+            Ok(Some(text)) if !text.is_empty() => {
+                let _ = app_handle.emit(constants::voice_transcription::PARTIAL_RESULT,
+                    serde_json::json!({ "text": text }));
             }
-            Err(e) => tracing::error!("[AudioThread] Error transcribing partial chunk: {:?}", e),
+            Ok(_) => {}
+            Err(e) => tracing::error!("[AudioThread] Error transcribing partial chunk: {}", e),
         }
     }
 
     fn process_final_audio<R: Runtime>(
-        whisper_state: &mut whisper_rs::WhisperState,
+        session: &mut dyn TranscriptionSession,
         audio_buffer: &[f32],
         raw_full_session_audio: &[f32],
         actual_rate: u32,
@@ -604,7 +610,7 @@ impl VoiceController {
         // Process any remaining audio in buffer first
         if !audio_buffer.is_empty() {
             Self::process_partial_transcription(
-                whisper_state,
+                session,
                 audio_buffer,
                 actual_rate,
                 resampler,
@@ -669,46 +675,25 @@ impl VoiceController {
                   audio_for_transcription.len(),
                   audio_for_transcription.len() as f32 / WHISPER_SAMPLE_RATE as f32);
 
-            let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
-            params.set_temperature(0.0);
-
-            match whisper_state.full(params, &audio_for_transcription[..]) {
-                Ok(_) => {
-                    let num_segments = whisper_state.full_n_segments().unwrap_or(0);
-                    info!("[AudioThread] Transcription completed. Number of segments: {}", num_segments);
-
-                    let mut transcription_text = String::new();
-                    for i in 0..num_segments {
-                        if let Ok(segment) = whisper_state.full_get_segment_text(i) {
-                            info!("[AudioThread] Segment {}: '{}'", i, segment);
-                            transcription_text.push_str(&segment);
-                        }
-                    }
-
-                    // Clean up Whisper artifacts from transcription
-                    let transcription_text = filter_transcription_text(&transcription_text);
-
+            match session.transcribe_final(&audio_for_transcription) {
+                Ok(transcription_text) => {
                     info!("[AudioThread] Final transcription result: '{}'", transcription_text);
                     let _ = app_handle.emit(constants::voice_transcription::FINAL_RESULT,
                         serde_json::json!({ "text": transcription_text }));
                     let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
-                    // Note: is_dictating flag is cleared by stop_dictation() before thread join
                 }
                 Err(e) => {
-                    tracing::error!("Final transcription failed: {:?}", e);
-                    // Emit transcription error event for backend to handle
+                    tracing::error!("Final transcription failed: {}", e);
                     let _ = app_handle.emit(constants::voice_transcription::ERROR, serde_json::json!({
                         "type": "transcription_failed",
-                        "message": format!("Final transcription failed: {:?}", e)
+                        "message": format!("Final transcription failed: {}", e)
                     }));
                     let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
-                    // Note: is_dictating flag is cleared by stop_dictation() before thread join
                 }
             }
         } else {
             info!("[AudioThread] No audio to transcribe (empty buffer)");
             let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
-            // Note: is_dictating flag is cleared by stop_dictation() before thread join
         }
     }
 

@@ -40,7 +40,8 @@
         "skipTaskbar": true,
         "visible": false,
         "shadow": false,
-        "center": false
+        "center": false,
+        "focus": false
       },
       {
         "label": "floating-bar",
@@ -53,7 +54,8 @@
         "resizable": false,
         "skipTaskbar": true,
         "visible": false,
-        "shadow": false
+        "shadow": false,
+        "focus": false
       },
       {
         "label": "onboarding",
@@ -74,8 +76,10 @@
       {
         "label": "desktop-cursor-overlay",
         "url": "/desktop-cursor-overlay",
-        "width": 1,
-        "height": 1,
+        "width": 2560,
+        "height": 1600,
+        "x": 0,
+        "y": 0,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
@@ -84,7 +88,8 @@
         "visible": false,
         "shadow": false,
         "center": false,
-        "fullscreen": false
+        "fullscreen": false,
+        "focus": false
       },
       {
         "label": "settings",

@@ -1,8 +1,27 @@
 {
   "name": "Juno",
   "private": true,
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
+  "description": "AI that controls your Mac. Describe a task. Watch it happen.",
+  "author": "Lacy Morrow <lacy@lacymorrow.com> (https://lacymorrow.com)",
+  "homepage": "https://junebug.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lacymorrow/juno.git"
+  },
+  "keywords": [
+    "ai",
+    "computer-use",
+    "desktop-automation",
+    "macos",
+    "tauri",
+    "anthropic",
+    "agent",
+    "accessibility",
+    "voice-control",
+    "mcp"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -16,7 +35,7 @@
     "tauri:dev:multi": "node scripts/dev-multi-instance.js",
     "tauri:dev:instance2": "node scripts/dev-multi-instance.js --port=1422",
     "tauri:dev:instance3": "node scripts/dev-multi-instance.js --port=1424",
-    "release": "bun run scripts/release.ts",
+    "release": "shipx",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -93,7 +112,7 @@
     "react-jsx-parser": "^2.4.1",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.2",
-    "react-router-dom": "^7.5.0",
+    "react-router-dom": "^7.15.0",
     "recharts": "^2.15.3",
     "remark-gfm": "^4.0.1",
     "shiki": "^3.22.0",
@@ -109,7 +128,7 @@
     "zod": "^3.25.57"
   },
   "devDependencies": {
-    "@clack/prompts": "^1.1.0",
+    "@lacymorrow/shipx": "^0.1.2",
     "@tauri-apps/cli": "^2.11.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
@@ -117,16 +136,16 @@
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@types/three": "^0.183.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.21",
     "jsdom": "^26.1.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^4.1.3",
     "terser": "^5.43.1",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3",
+    "vite": "^6.4.3",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.1.2"
+    "vitest": "^3.2.7"
   },
   "trustedDependencies": [
     "@tailwindcss/oxide",

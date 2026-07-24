@@ -1,5 +1,3 @@
-use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters};
-use std::path::Path;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use std::sync::mpsc::{channel, Sender, TryRecvError};
@@ -10,6 +8,7 @@ use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationPar
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::{info, warn, error, debug};
 use serde_json;
+use crate::engine::{TranscriptionEngine, TranscriptionSession};
 
 use crate::error::{Error, Result};
 use crate::utils::filter_transcription_text;
@@ -85,7 +84,7 @@ pub enum AlwaysListeningState {
 }
 
 pub struct AlwaysListeningController {
-    shared_whisper_context: Option<Arc<WhisperContext>>,
+    engine: Option<Arc<dyn TranscriptionEngine>>,
     model_path: String,
     is_active: bool,
     state: AlwaysListeningState,
@@ -96,18 +95,11 @@ pub struct AlwaysListeningController {
 }
 
 impl AlwaysListeningController {
-    pub fn new(model_path_str: &str) -> Result<Self> {
-        let model_path = Path::new(model_path_str);
-        if !model_path.exists() {
-            return Err(Error::ModelNotFound(model_path_str.to_string()));
-        }
-
-        // Load the Whisper model once at initialization
-        let whisper_context = WhisperContext::new_with_params(model_path_str, WhisperContextParameters::default())
-            .map_err(|e| Error::Whisper(format!("Failed to create WhisperContext: {:?}", e)))?;
-
+    /// Create an AlwaysListeningController backed by an already-initialized STT engine.
+    pub fn new_with_engine(model_path_str: &str, engine: Arc<dyn TranscriptionEngine>) -> Result<Self> {
+        info!("[AlwaysListeningController] Creating controller with '{}' engine", engine.name());
         Ok(Self {
-            shared_whisper_context: Some(Arc::new(whisper_context)),
+            engine: Some(engine),
             model_path: model_path_str.to_string(),
             is_active: false,
             state: AlwaysListeningState::Monitoring,
@@ -118,27 +110,21 @@ impl AlwaysListeningController {
         })
     }
 
-    /// Create an AlwaysListeningController using a pre-loaded shared WhisperContext
-    /// This eliminates duplicate model loading when multiple controllers need the same model
-    pub fn new_with_shared_context(model_path_str: &str, shared_context: Arc<WhisperContext>) -> Result<Self> {
-        info!("[AlwaysListeningController] Creating controller with shared Whisper context (no model reload)");
-
-        Ok(Self {
-            shared_whisper_context: Some(shared_context),
-            model_path: model_path_str.to_string(),
-            is_active: false,
-            state: AlwaysListeningState::Monitoring,
-            audio_thread: None,
-            sensitivity: DEFAULT_SENSITIVITY,
-            wake_words: DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect(),
-            last_activity: Arc::new(Mutex::new(None)),
-        })
+    /// Backward-compat constructor that wraps a `WhisperContext` in a `WhisperEngine`.
+    pub fn new_with_shared_context(
+        model_path_str: &str,
+        shared_context: Arc<whisper_rs::WhisperContext>,
+    ) -> Result<Self> {
+        use crate::engine_whisper::WhisperEngine;
+        info!("[AlwaysListeningController] Creating controller with shared WhisperContext (legacy path)");
+        let engine: Arc<dyn TranscriptionEngine> = Arc::new(WhisperEngine::new(shared_context));
+        Self::new_with_engine(model_path_str, engine)
     }
 
     /// Create an uninitialized controller that can be managed by Tauri but will return errors for operations
     pub fn new_uninitialized(model_path_str: &str) -> Self {
         Self {
-            shared_whisper_context: None,
+            engine: None,
             model_path: model_path_str.to_string(),
             is_active: false,
             state: AlwaysListeningState::Monitoring,
@@ -176,9 +162,9 @@ impl AlwaysListeningController {
 
         info!("[AlwaysListeningController] Starting always listening mode...");
 
-        // Validate whisper context BEFORE setting is_active to prevent stale state
-        let shared_context = self.shared_whisper_context.as_ref()
-            .ok_or_else(|| Error::Whisper("Shared whisper context not initialized".to_string()))?
+        // Validate engine BEFORE setting is_active to prevent stale state
+        let engine = self.engine.as_ref()
+            .ok_or_else(|| Error::InitializationError("STT engine not initialized".to_string()))?
             .clone();
 
         // Emit always listening started event
@@ -193,7 +179,7 @@ impl AlwaysListeningController {
 
         let audio_thread_handle = thread::spawn(move || {
             Self::always_listening_worker(
-                shared_context,
+                engine,
                 app_handle_for_thread,
                 control_rx,
                 sensitivity,
@@ -212,19 +198,19 @@ impl AlwaysListeningController {
     }
 
     fn always_listening_worker<R: Runtime + 'static>(
-        shared_whisper_context: Arc<WhisperContext>,
+        engine: Arc<dyn TranscriptionEngine>,
         app_handle: AppHandle<R>,
         control_rx: std::sync::mpsc::Receiver<AlwaysListeningMessage>,
         mut sensitivity: f32,
         mut wake_words: Vec<String>,
         last_activity: Arc<Mutex<Option<Instant>>>,
     ) {
-        info!("[AlwaysListening] Worker thread started with shared Whisper context (no model reload needed)");
+        info!("[AlwaysListening] Worker thread started. Engine: '{}'", engine.name());
 
-        let mut whisper_state = match shared_whisper_context.create_state() {
-            Ok(state) => state,
+        let mut session = match engine.create_session() {
+            Ok(s) => s,
             Err(e) => {
-                error!("Failed to create WhisperState from shared context: {:?}", e);
+                error!("Failed to create transcription session: {}", e);
                 return;
             }
         };
@@ -311,11 +297,9 @@ impl AlwaysListeningController {
                         } else {
                             data.to_vec()
                         };
-                        let mut audio_f32: Vec<f32> = vec![0.0f32; mono_data.len()];
-                        if let Err(e) = whisper_rs::convert_integer_to_float_audio(&mono_data, &mut audio_f32) {
-                            error!("Failed to convert i16 to f32: {:?}", e);
-                            return;
-                        }
+                        let audio_f32: Vec<f32> = mono_data.iter()
+                            .map(|&s| s as f32 / 32768.0)
+                            .collect();
                         if let Err(e) = audio_data_tx.send(audio_f32) {
                             error!("Failed to send converted audio data: {:?}", e);
                         }
@@ -443,7 +427,7 @@ impl AlwaysListeningController {
                                                    activity_duration, audio_buffer.len(), buffer_volume);
 
                                             // Check for wake words or speech
-                                            if Self::detect_intent(&mut whisper_state, &audio_buffer, sample_rate, &wake_words, &app_handle) {
+                                            if Self::detect_intent(session.as_mut(), &audio_buffer, sample_rate, &wake_words, &app_handle) {
                                                 current_state = AlwaysListeningState::Activated;
                                                 info!("[AlwaysListening] Intent detected - activating transcription");
 
@@ -549,7 +533,7 @@ impl AlwaysListeningController {
 
                             // Process transcription for activated mode
                             if audio_buffer.len() >= buffer_capacity {
-                                Self::process_active_transcription(&mut whisper_state, &audio_buffer, sample_rate, &app_handle);
+                                Self::process_active_transcription(session.as_mut(), &audio_buffer, sample_rate, &app_handle);
                                 audio_buffer.clear();
                             }
                         }
@@ -589,7 +573,7 @@ impl AlwaysListeningController {
 
                             // Process transcription for waiting mode
                             if audio_buffer.len() >= buffer_capacity {
-                                Self::process_waiting_transcription(&mut whisper_state, &audio_buffer, sample_rate, &app_handle);
+                                Self::process_waiting_transcription(session.as_mut(), &audio_buffer, sample_rate, &app_handle);
                                 audio_buffer.clear();
                             }
                         }
@@ -614,7 +598,7 @@ impl AlwaysListeningController {
     }
 
     fn detect_intent<R: Runtime>(
-        whisper_state: &mut whisper_rs::WhisperState,
+        session: &mut dyn TranscriptionSession,
         audio_buffer: &[f32],
         sample_rate: u32,
         wake_words: &[String],
@@ -702,45 +686,13 @@ impl AlwaysListeningController {
             return false;
         }
 
-        // Quick transcription for wake word detection
-        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
-        params.set_n_threads(4); // Increased from 2 for better performance
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-        params.set_language(Some("en"));
-        params.set_translate(false);
-        params.set_no_context(true); // Improve reliability for short audio
-        params.set_single_segment(false); // Allow multiple segments
-
-        info!("[AlwaysListening] Starting Whisper transcription with {}ms of audio (volume: {:.6})...",
+        info!("[AlwaysListening] Running transcription for wake word detection ({}ms of audio, volume: {:.6})",
                resampled_duration_ms, resampled_volume);
 
-        match whisper_state.full(params, &audio_to_process) {
-            Ok(_) => {
-                let num_segments = whisper_state.full_n_segments().unwrap_or(0);
-                let mut transcribed_text = String::new();
-
-                info!("[AlwaysListening] Whisper processing completed, {} segments found", num_segments);
-
-                for i in 0..num_segments {
-                    if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
-                        let segment_string = segment_text.to_string();
-                        info!("[AlwaysListening] Segment {}: '{}'", i, segment_string);
-                        transcribed_text.push_str(&segment_string);
-                        transcribed_text.push(' ');
-                    }
-                }
-
+        match session.transcribe_partial(&audio_to_process) {
+            Ok(Some(transcribed_text)) => {
                 let text_lower = transcribed_text.trim().to_lowercase();
                 info!("[AlwaysListening] Transcription result: '{}' (length: {})", text_lower, text_lower.len());
-
-                // If we get no transcription, this might indicate a model issue
-                if text_lower.is_empty() {
-                    warn!("[AlwaysListening] Empty transcription result despite audio presence - check model and audio format");
-                    return false;
-                }
 
                 // Check for wake words
                 for wake_word in wake_words {
@@ -753,28 +705,28 @@ impl AlwaysListeningController {
                     }
                 }
 
-                // Check for general speech activity (fallback if no wake words)
-                if wake_words.is_empty() && !text_lower.trim().is_empty() {
+                // No wake words configured — any speech activates
+                if wake_words.is_empty() {
                     info!("[AlwaysListening] Speech activity detected (no wake words configured): '{}'", text_lower);
                     return true;
                 }
 
-                // Log near misses (similar words)
-                if !text_lower.is_empty() {
-                    info!("[AlwaysListening] ❌ No wake words detected in: '{}'", text_lower);
-                }
-
+                info!("[AlwaysListening] ❌ No wake words detected in: '{}'", text_lower);
+                false
+            }
+            Ok(None) => {
+                warn!("[AlwaysListening] Empty transcription despite audio presence — check model and audio format");
                 false
             }
             Err(e) => {
-                error!("[AlwaysListening] Whisper transcription failed: {:?}", e);
+                error!("[AlwaysListening] Transcription failed: {}", e);
                 false
             }
         }
     }
 
     fn process_active_transcription<R: Runtime>(
-        whisper_state: &mut whisper_rs::WhisperState,
+        session: &mut dyn TranscriptionSession,
         audio_buffer: &[f32],
         sample_rate: u32,
         app_handle: &AppHandle<R>,
@@ -784,9 +736,7 @@ impl AlwaysListeningController {
         }
 
         let audio_to_transcribe = if sample_rate != WHISPER_SAMPLE_RATE {
-            // Create a custom resampler for this specific buffer size
             let config = sinc_resampling_params();
-
             match SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
                 2.0,
@@ -806,37 +756,15 @@ impl AlwaysListeningController {
             audio_buffer.to_vec()
         };
 
-        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
-        params.set_n_threads(4);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-
-        match whisper_state.full(params, &audio_to_transcribe) {
-            Ok(_) => {
-                let num_segments = whisper_state.full_n_segments().unwrap_or(0);
-                let mut transcribed_text = String::new();
-
-                for i in 0..num_segments {
-                    if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
-                        let segment_string = segment_text.to_string();
-                        info!("[AlwaysListening] Segment {}: '{}'", i, segment_string);
-                        transcribed_text.push_str(&segment_string);
-                    }
-                }
-
+        match session.transcribe_partial(&audio_to_transcribe) {
+            Ok(Some(transcribed_text)) => {
                 let cleaned_text = filter_transcription_text(transcribed_text.trim());
                 if !cleaned_text.is_empty() {
                     info!("[AlwaysListening] Active transcription result: '{}'", cleaned_text);
 
-                    // Apply intelligent filtering before calling agent
                     if Self::should_process_with_agent(&cleaned_text) {
-                        // Check for stop words
                         if Self::contains_stop_words(&cleaned_text) {
                             info!("[AlwaysListening] Stop word detected: '{}' - stopping always listening", cleaned_text);
-
-                            // Emit stop event to main app
                             if let Err(e) = app_handle.emit("always-listening:stop-requested",
                                 serde_json::json!({ "reason": "stop_word", "text": cleaned_text })) {
                                 error!("[AlwaysListening] Failed to emit stop-requested event: {}", e);
@@ -844,18 +772,12 @@ impl AlwaysListeningController {
                             return;
                         }
 
-                        // Check agent call rate limiting
                         if Self::is_agent_call_allowed() {
-                            // Mark successful agent call
                             Self::record_agent_call();
-
-                            // Emit the transcription result for agent processing
                             if let Err(e) = app_handle.emit("always-listening:transcription",
                                 serde_json::json!({ "text": cleaned_text })) {
                                 error!("[AlwaysListening] Failed to emit transcription event: {}", e);
                             }
-
-                            // Transition to waiting for wake word mode after processing
                             if let Err(e) = app_handle.emit("always-listening:command-processed", ()) {
                                 error!("[AlwaysListening] Failed to emit command-processed event: {}", e);
                             }
@@ -869,8 +791,11 @@ impl AlwaysListeningController {
                     debug!("[AlwaysListening] Empty transcription result, continuing monitoring");
                 }
             }
+            Ok(None) => {
+                debug!("[AlwaysListening] Empty transcription result, continuing monitoring");
+            }
             Err(e) => {
-                debug!("[AlwaysListening] Active transcription failed: {:?}", e);
+                debug!("[AlwaysListening] Active transcription failed: {}", e);
             }
         }
     }
@@ -1004,7 +929,7 @@ impl AlwaysListeningController {
     }
 
     fn process_waiting_transcription<R: Runtime>(
-        whisper_state: &mut whisper_rs::WhisperState,
+        session: &mut dyn TranscriptionSession,
         audio_buffer: &[f32],
         sample_rate: u32,
         app_handle: &AppHandle<R>,
@@ -1014,9 +939,7 @@ impl AlwaysListeningController {
         }
 
         let audio_to_transcribe = if sample_rate != WHISPER_SAMPLE_RATE {
-            // Create a custom resampler for this specific buffer size
             let config = sinc_resampling_params();
-
             match SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
                 2.0,
@@ -1036,33 +959,13 @@ impl AlwaysListeningController {
             audio_buffer.to_vec()
         };
 
-        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
-        params.set_n_threads(4);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-
-        match whisper_state.full(params, &audio_to_transcribe) {
-            Ok(_) => {
-                let num_segments = whisper_state.full_n_segments().unwrap_or(0);
-                let mut transcribed_text = String::new();
-
-                for i in 0..num_segments {
-                    if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
-                        let segment_string = segment_text.to_string();
-                        info!("[AlwaysListening] Segment {}: '{}'", i, segment_string);
-                        transcribed_text.push_str(&segment_string);
-                    }
-                }
-
+        match session.transcribe_partial(&audio_to_transcribe) {
+            Ok(Some(transcribed_text)) => {
                 let cleaned_text = filter_transcription_text(transcribed_text.trim());
                 if !cleaned_text.is_empty() {
                     info!("[AlwaysListening] Waiting transcription result: '{}'", cleaned_text);
 
-                    // Apply the same content filtering as active transcription
                     if Self::should_process_with_agent(&cleaned_text) {
-                        // Check for stop words
                         if Self::contains_stop_words(&cleaned_text) {
                             info!("[AlwaysListening] Stop word detected in waiting mode: '{}' - stopping", cleaned_text);
                             if let Err(e) = app_handle.emit("always-listening:stop-requested",
@@ -1072,7 +975,6 @@ impl AlwaysListeningController {
                             return;
                         }
 
-                        // Check agent call rate limiting
                         if Self::is_agent_call_allowed() {
                             Self::record_agent_call();
                             if let Err(e) = app_handle.emit("always-listening:transcription",
@@ -1087,8 +989,11 @@ impl AlwaysListeningController {
                     }
                 }
             }
+            Ok(None) => {
+                debug!("[AlwaysListening] Empty result in waiting transcription");
+            }
             Err(e) => {
-                debug!("[AlwaysListening] Waiting transcription failed: {:?}", e);
+                debug!("[AlwaysListening] Waiting transcription failed: {}", e);
             }
         }
     }
@@ -1158,30 +1063,42 @@ impl AlwaysListeningController {
         self.wake_words.clone()
     }
 
-    /// Update the shared Whisper context and model path for this controller
-    /// This allows updating the model without recreating the entire controller
-    pub fn update_shared_context(&mut self, model_path: &str, shared_context: Arc<WhisperContext>) -> Result<()> {
+    /// Update the shared Whisper context and model path for this controller.
+    /// Kept for backward-compat with `set_model_path` command — wraps the context in a `WhisperEngine`.
+    pub fn update_shared_context(&mut self, model_path: &str, shared_context: Arc<whisper_rs::WhisperContext>) -> Result<()> {
         info!("[AlwaysListeningController] Updating shared Whisper context with new model: {}", model_path);
 
-        // Stop the controller if it's currently active
         let was_active = self.is_active;
         if was_active {
             info!("[AlwaysListeningController] Stopping controller before model update");
             self.stop_always_listening()?;
         }
 
-        // Update the model path and shared context
+        use crate::engine_whisper::WhisperEngine;
+        let engine: Arc<dyn TranscriptionEngine> = Arc::new(WhisperEngine::new(shared_context));
         self.model_path = model_path.to_string();
-        self.shared_whisper_context = Some(shared_context);
+        self.engine = Some(engine);
 
         info!("[AlwaysListeningController] Successfully updated shared Whisper context (no model reload needed)");
 
-        // If it was active before, we'll let the caller decide whether to restart it
-        // This gives more control over the restart timing
         if was_active {
             info!("[AlwaysListeningController] Controller was active before update - caller should restart if needed");
         }
 
+        Ok(())
+    }
+
+    /// Swap the active STT engine without restarting the controller.
+    pub fn update_engine(&mut self, engine: Arc<dyn TranscriptionEngine>) -> Result<()> {
+        info!("[AlwaysListeningController] Updating engine to '{}'", engine.name());
+        let was_active = self.is_active;
+        if was_active {
+            self.stop_always_listening()?;
+        }
+        self.engine = Some(engine);
+        if was_active {
+            info!("[AlwaysListeningController] Stopped before engine swap - caller should restart if needed");
+        }
         Ok(())
     }
 
@@ -1226,65 +1143,36 @@ impl AlwaysListeningController {
     }
 
     pub fn test_whisper_model(&self) -> Result<serde_json::Value> {
-        info!("[AlwaysListening] Testing shared Whisper model at path: {}", self.model_path);
+        info!("[AlwaysListening] Testing STT engine at path: {}", self.model_path);
 
-        // Use the shared context instead of loading a new one
-        let whisper_context = self.shared_whisper_context.as_ref()
-            .ok_or_else(|| Error::Whisper("Shared Whisper context not available".to_string()))?;
+        let engine = self.engine.as_ref()
+            .ok_or_else(|| Error::Whisper("STT engine not available".to_string()))?;
 
-        let mut whisper_state = whisper_context.create_state()
-            .map_err(|e| Error::Whisper(format!("Failed to create Whisper state: {:?}", e)))?;
-
-        // Create test audio - a simple sine wave that should be detectable
         let sample_rate = WHISPER_SAMPLE_RATE;
-        let duration_samples = sample_rate as usize; // 1 second
-        let frequency = 440.0; // A4 note
+        let duration_samples = sample_rate as usize;
+        let frequency = 440.0_f32;
         let mut test_audio: Vec<f32> = Vec::with_capacity(duration_samples);
-
         for i in 0..duration_samples {
             let t = i as f32 / sample_rate as f32;
-            let sample = (2.0 * std::f32::consts::PI * frequency * t).sin() * 0.1; // Low amplitude sine wave
-            test_audio.push(sample);
+            test_audio.push((2.0 * std::f32::consts::PI * frequency * t).sin() * 0.1);
         }
 
-        // Test volume calculation
         let test_volume = Self::calculate_rms_volume(&test_audio);
 
-        // Test transcription with the test audio
-        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
-        params.set_n_threads(4);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-        params.set_language(Some("en"));
-        params.set_translate(false);
-
-        let transcription_result = match whisper_state.full(params, &test_audio) {
-            Ok(_) => {
-                let num_segments = whisper_state.full_n_segments().unwrap_or(0);
-                let mut transcribed_text = String::new();
-
-                for i in 0..num_segments {
-                    if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
-                        let segment_string = segment_text.to_string();
-                        info!("[AlwaysListening] Segment {}: '{}'", i, segment_string);
-                        transcribed_text.push_str(&segment_string);
-                        transcribed_text.push(' ');
-                    }
-                }
-
-                format!("SUCCESS: {} segments, text: '{}'", num_segments, transcribed_text.trim())
-            }
-            Err(e) => format!("FAILED: {:?}", e)
+        let transcription_result = match engine.create_session() {
+            Ok(mut session) => match session.transcribe_partial(&test_audio) {
+                Ok(Some(text)) => format!("SUCCESS: text: '{}'", text.trim()),
+                Ok(None) => "SUCCESS: (no speech detected in tone)".to_string(),
+                Err(e) => format!("FAILED: {}", e),
+            },
+            Err(e) => format!("FAILED to create session: {}", e),
         };
 
-        // Create test result
         let test_result = serde_json::json!({
             "model_path": self.model_path,
             "model_exists": std::path::Path::new(&self.model_path).exists(),
-            "model_loaded": true,
-            "state_created": true,
+            "engine_name": engine.name(),
+            "engine_initialized": engine.is_initialized(),
             "test_audio_samples": test_audio.len(),
             "test_audio_duration_ms": (test_audio.len() as f32 / sample_rate as f32 * 1000.0) as u32,
             "test_audio_volume": test_volume,
