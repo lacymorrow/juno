@@ -721,10 +721,7 @@ mod tests {
     async fn needs_input_reports_background_session_as_unfocused() {
         let registry = AgentSessionRegistry::new(4, arbiter());
         let focused = registry.create("focused".into()).await.expect("created");
-        let background = registry
-            .create("background".into())
-            .await
-            .expect("created");
+        let background = registry.create("background".into()).await.expect("created");
         focused.set_status(AgentSessionStatus::Running).await;
         background.set_status(AgentSessionStatus::Running).await;
 
