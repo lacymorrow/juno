@@ -430,7 +430,7 @@ impl AppState {
             // Use the rate limiters created above
             rate_limiters,
 
-            // Initialize parallel-agent session registry. The 500ms cooldown
+            // Initialize parallel-agent session registry. DEFAULT_COOLDOWN
             // matches the existing UI-action cooldown used by
             // anthropic_computer_use.rs; the parallel cap of 12 mirrors the
             // orchestrator's max_parallel_tasks so we don't outrun the
@@ -440,7 +440,9 @@ impl AppState {
             // LAC-2830 spec (ColorAllocator wraps mod palette size).
             agent_sessions: Arc::new(AgentSessionRegistry::new(
                 12,
-                Arc::new(InputArbiter::new(Duration::from_millis(500))),
+                Arc::new(InputArbiter::new(
+                    crate::agent::input_arbiter::DEFAULT_COOLDOWN,
+                )),
             )),
 
             // Initialize per-agent cursor tracking
