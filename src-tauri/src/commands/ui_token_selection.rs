@@ -347,12 +347,6 @@ pub async fn get_ui_token_config(
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_initialize_ui_token_selection() {
-        // This test would require a proper AppState setup
-        // For now, we'll test the core logic
-        assert!(true); // Placeholder
-    }
 
     #[tokio::test]
     async fn test_benchmark_summary_calculation() {

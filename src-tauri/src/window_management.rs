@@ -340,10 +340,4 @@ mod tests {
         assert!(!main_config.center); // Main window should not auto-center
     }
 
-    #[test]
-    fn test_window_manager_safety() {
-        // Test that WindowManager operations are safe and don't cause crashes
-        // This is a placeholder test since we can't easily mock AppHandle
-        assert!(true, "WindowManager should handle missing windows gracefully");
-    }
 }

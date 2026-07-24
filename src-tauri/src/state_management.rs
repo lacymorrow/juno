@@ -603,18 +603,7 @@ mod tests {
     #[allow(unused_imports)]
     use super::*;
 
-    #[test]
-    fn test_state_management_module_compilation() {
-        // This test ensures the module compiles correctly
-        assert!(true, "State management module compiled successfully");
-    }
 
-    #[tokio::test]
-    async fn test_state_summary_structure() {
-        // Test that state summary has expected structure
-        // This would need a mock AppHandle in a real test environment
-        assert!(true, "State summary structure test placeholder");
-    }
 
     #[test]
     fn test_state_validation_logic() {
