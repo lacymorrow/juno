@@ -1066,12 +1066,21 @@ impl BrowserController {
             )
         })?;
         let attribute = args["attribute"].as_str(); // Optional
+        let property = args["property"].as_str(); // Optional
         let multiple = args["multiple"].as_bool().unwrap_or(false);
 
+        if attribute.is_some() && property.is_some() {
+            return Err(AgentError::ToolError(
+                "Provide either 'attribute' or 'property' for browser_extract_content, not both"
+                    .to_string(),
+            ));
+        }
+
         log::info!(
-            "Extracting content with selector: {}, attribute: {:?}, multiple: {}",
+            "Extracting content with selector: {}, attribute: {:?}, property: {:?}, multiple: {}",
             selector,
             attribute,
+            property,
             multiple
         );
 
@@ -1082,47 +1091,34 @@ impl BrowserController {
             AgentError::ToolError("Page not available for content extraction".to_string())
         })?;
 
+        // Expression that reads the requested value off an element bound to `el`.
+        // `attribute` reads the static markup attribute; `property` reads the live
+        // DOM property (`.value`, `.checked`, ...), which is the only way to see
+        // state changed after parse (e.g. what `interact`'s `type` action wrote).
+        let accessor = if let Some(attr) = attribute {
+            format!(r#"el.getAttribute("{}")"#, attr.replace(r#"""#, r#"\""#))
+        } else if let Some(prop) = property {
+            format!(r#"el["{}"]"#, prop.replace(r#"""#, r#"\""#))
+        } else {
+            "el.textContent".to_string()
+        };
+        let escaped_selector = selector.replace(r#"""#, r#"\""#);
+
         // JavaScript approach keeps selector semantics consistent across engines
         let js_fn = if multiple {
-            // Multiple elements
-            if let Some(attr) = attribute {
-                format!(
-                    r#"function() {{
-                        const elements = Array.from(document.querySelectorAll("{}"));
-                        return elements.map(el => el.getAttribute("{}"));
-                    }}"#,
-                    selector.replace(r#"""#, r#"\""#), // Escape quotes
-                    attr.replace(r#"""#, r#"\""#)
-                )
-            } else {
-                format!(
-                    r#"function() {{
-                        const elements = Array.from(document.querySelectorAll("{}"));
-                        return elements.map(el => el.textContent);
-                    }}"#,
-                    selector.replace(r#"""#, r#"\""#)
-                )
-            }
+            format!(
+                r#"function() {{
+                    const elements = Array.from(document.querySelectorAll("{escaped_selector}"));
+                    return elements.map(el => {accessor});
+                }}"#
+            )
         } else {
-            // Single element
-            if let Some(attr) = attribute {
-                format!(
-                    r#"function() {{
-                        const element = document.querySelector("{}");
-                        return element ? element.getAttribute("{}") : null;
-                    }}"#,
-                    selector.replace(r#"""#, r#"\""#),
-                    attr.replace(r#"""#, r#"\""#)
-                )
-            } else {
-                format!(
-                    r#"function() {{
-                        const element = document.querySelector("{}");
-                        return element ? element.textContent : null;
-                    }}"#,
-                    selector.replace(r#"""#, r#"\""#)
-                )
-            }
+            format!(
+                r#"function() {{
+                    const el = document.querySelector("{escaped_selector}");
+                    return el ? {accessor} : null;
+                }}"#
+            )
         };
 
         // Execute JavaScript with type parameters that match expected arg & return types
@@ -1135,6 +1131,7 @@ impl BrowserController {
                     output: serde_json::json!({
                         "selector": selector,
                         "attribute": attribute,
+                        "property": property,
                         "content": result,
                         "multiple": multiple
                     }),
