@@ -365,7 +365,7 @@ mod tests {
         };
 
         let complexity = calculate_request_complexity(&simple_request);
-        assert!(complexity >= 1.0 && complexity <= 10.0, "Complexity should be within valid range");
+        assert!((1.0..=10.0).contains(&complexity), "Complexity should be within valid range");
     }
 
     #[test]

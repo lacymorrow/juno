@@ -1302,7 +1302,7 @@ mod tests {
             for msg in messages2.iter().rev() {
                 if matches!(msg.role, Role::Tool) {
                     if let Some(tool_call_id) = &msg.tool_call_id {
-                        if assistant_tool_call_ids2.contains(&tool_call_id) {
+                        if assistant_tool_call_ids2.contains(tool_call_id) {
                             tool_result_count2 += 1;
                         }
                     }
@@ -1326,8 +1326,7 @@ mod tests {
         use serde_json::json;
 
         // Any number of tools should just be executed as provided
-        let tools = vec![
-            ToolCall {
+        let tools = [ToolCall {
                 id: "1".to_string(),
                 name: "computer".to_string(),
                 input: json!({"action": "type", "text": "hello"}),
@@ -1341,8 +1340,7 @@ mod tests {
                 id: "3".to_string(),
                 name: "computer".to_string(),
                 input: json!({"action": "screenshot"}),
-            },
-        ];
+            }];
 
         // The system should just execute these tools without caring about the count
         // No special logic, no hardcoded numbers - trust the agent

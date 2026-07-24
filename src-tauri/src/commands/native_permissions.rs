@@ -471,8 +471,8 @@ mod tests {
         );
 
         assert_eq!(status.permission_type, "test");
-        assert_eq!(status.granted, true);
-        assert_eq!(status.required, false);
+        assert!(status.granted);
+        assert!(!status.required);
         assert_eq!(status.description, "granted desc");
         assert_eq!(status.instructions, "granted instructions");
     }
@@ -485,6 +485,6 @@ mod tests {
 
         let status = result.unwrap();
         assert_eq!(status.permission_type, "microphone");
-        assert_eq!(status.required, false);
+        assert!(!status.required);
     }
 }

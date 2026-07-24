@@ -842,8 +842,8 @@ mod tests {
         };
 
         assert_eq!(status.permission_type, "test");
-        assert_eq!(status.granted, true);
-        assert_eq!(status.required, false);
+        assert!(status.granted);
+        assert!(!status.required);
     }
 
     #[test]
@@ -882,7 +882,7 @@ mod tests {
 
         // Should be true because only required permissions (accessibility, screen_recording) are granted
         let all_granted = accessibility.granted && screen_recording.granted;
-        assert_eq!(all_granted, true);
+        assert!(all_granted);
 
         let permissions_state = PermissionsState {
             accessibility,
@@ -893,7 +893,7 @@ mod tests {
             app_name: "test".to_string(),
         };
 
-        assert_eq!(permissions_state.all_granted, true);
+        assert!(permissions_state.all_granted);
     }
 
     #[test]
@@ -917,7 +917,7 @@ mod tests {
             instructions: "Fix test".to_string(),
         });
 
-        assert_eq!(result.granted, false);
+        assert!(!result.granted);
         assert_eq!(result.description, "Test failed");
     }
 

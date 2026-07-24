@@ -2137,8 +2137,7 @@ mod tests {
 
         // Create a mock permissions state with correct structure
         use crate::commands::permissions::{PermissionStatus, PermissionsState};
-        let mock_permissions = vec![
-            PermissionStatus {
+        let mock_permissions = [PermissionStatus {
                 permission_type: crate::constants::permissions::types::ACCESSIBILITY.to_string(),
                 granted: true,
                 required: true,
@@ -2165,8 +2164,7 @@ mod tests {
                 required: true,
                 description: "Input monitoring permission is granted".to_string(),
                 instructions: "No action needed".to_string(),
-            },
-        ];
+            }];
 
         let permissions_state = PermissionsState {
             accessibility: mock_permissions[0].clone(),
@@ -2186,9 +2184,9 @@ mod tests {
         let retrieved_state = state.get_permissions_state().await;
         assert!(retrieved_state.is_some());
         let retrieved = retrieved_state.unwrap();
-        assert_eq!(retrieved.accessibility.granted, true);
-        assert_eq!(retrieved.screen_recording.granted, false);
-        assert_eq!(retrieved.all_granted, false);
+        assert!(retrieved.accessibility.granted);
+        assert!(!retrieved.screen_recording.granted);
+        assert!(!retrieved.all_granted);
         assert_eq!(retrieved.app_name, "TestApp");
     }
 
