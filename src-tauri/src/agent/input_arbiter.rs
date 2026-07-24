@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex as TokioMutex, OwnedMutexGuard};
@@ -26,25 +26,38 @@ pub const DEFAULT_COOLDOWN: Duration = Duration::from_millis(500);
 
 pub struct InputArbiter {
     inner: Arc<TokioMutex<InputArbiterInner>>,
+    /// Observable holder id, kept OUTSIDE the input mutex so observers can
+    /// ask "who holds the arbiter?" while a guard is held. Storing it inside
+    /// `inner` would deadlock any `held_by()` call made during a hold.
+    holder: Arc<StdMutex<Option<String>>>,
     cooldown: Duration,
 }
 
 #[derive(Default)]
 struct InputArbiterInner {
     last_action_at: Option<Instant>,
-    held_by: Option<String>,
 }
 
 impl InputArbiter {
     pub fn new(cooldown: Duration) -> Self {
         Self {
             inner: Arc::new(TokioMutex::new(InputArbiterInner::default())),
+            holder: Arc::new(StdMutex::new(None)),
             cooldown,
         }
     }
 
     pub fn cooldown(&self) -> Duration {
         self.cooldown
+    }
+
+    fn set_holder(&self, session_id: Option<&str>) -> Option<String> {
+        let held = session_id.map(|s| s.to_string());
+        *self
+            .holder
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = held.clone();
+        held
     }
 
     /// Acquire exclusive access to physical input.
@@ -54,7 +67,7 @@ impl InputArbiter {
     /// The returned guard tracks the caller's session id for observability;
     /// pass `None` for internal/system callers that are not agent-scoped.
     pub async fn acquire(&self, session_id: Option<&str>) -> PhysicalInputGuard {
-        let mut guard = self.inner.clone().lock_owned().await;
+        let guard = self.inner.clone().lock_owned().await;
         if let Some(last) = guard.last_action_at {
             let elapsed = last.elapsed();
             if elapsed < self.cooldown {
@@ -67,9 +80,13 @@ impl InputArbiter {
                 tokio::time::sleep(sleep_for).await;
             }
         }
-        guard.held_by = session_id.map(|s| s.to_string());
+        let held_by = self.set_holder(session_id);
         debug!("InputArbiter acquired by session {:?}", session_id);
-        PhysicalInputGuard { guard }
+        PhysicalInputGuard {
+            guard,
+            holder: self.holder.clone(),
+            held_by,
+        }
     }
 
     /// Try to acquire without blocking. Returns `None` if another session holds it.
@@ -79,17 +96,26 @@ impl InputArbiter {
     /// agent input paths.
     pub async fn try_acquire(&self, session_id: Option<&str>) -> Option<PhysicalInputGuard> {
         match self.inner.clone().try_lock_owned() {
-            Ok(mut guard) => {
-                guard.held_by = session_id.map(|s| s.to_string());
-                Some(PhysicalInputGuard { guard })
+            Ok(guard) => {
+                let held_by = self.set_holder(session_id);
+                Some(PhysicalInputGuard {
+                    guard,
+                    holder: self.holder.clone(),
+                    held_by,
+                })
             }
             Err(_) => None,
         }
     }
 
-    /// Session id currently holding the arbiter, if any. For observability only.
-    pub async fn held_by(&self) -> Option<String> {
-        self.inner.lock().await.held_by.clone()
+    /// Session id currently holding the arbiter, if any. For observability
+    /// only. Safe to call while a guard is held — the holder id lives
+    /// outside the input mutex.
+    pub fn held_by(&self) -> Option<String> {
+        self.holder
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
 
@@ -105,18 +131,23 @@ impl Default for InputArbiter {
 /// caller regardless of exit path (success, error via `?`, panic).
 pub struct PhysicalInputGuard {
     guard: OwnedMutexGuard<InputArbiterInner>,
+    holder: Arc<StdMutex<Option<String>>>,
+    held_by: Option<String>,
 }
 
 impl PhysicalInputGuard {
     pub fn held_by(&self) -> Option<&str> {
-        self.guard.held_by.as_deref()
+        self.held_by.as_deref()
     }
 }
 
 impl Drop for PhysicalInputGuard {
     fn drop(&mut self) {
         self.guard.last_action_at = Some(Instant::now());
-        self.guard.held_by = None;
+        *self
+            .holder
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     }
 }
 
@@ -182,7 +213,9 @@ mod tests {
         let arbiter = Arc::new(InputArbiter::new(Duration::from_millis(0)));
         let _held = arbiter.acquire(Some("holder")).await;
         assert!(arbiter.try_acquire(Some("other")).await.is_none());
-        assert_eq!(arbiter.held_by().await.as_deref(), Some("holder"));
+        // held_by() must not deadlock while the guard is held — the holder
+        // id lives outside the input mutex precisely for this.
+        assert_eq!(arbiter.held_by().as_deref(), Some("holder"));
     }
 
     #[tokio::test]
@@ -190,8 +223,10 @@ mod tests {
         let arbiter = Arc::new(InputArbiter::new(Duration::from_millis(0)));
         {
             let _g = arbiter.acquire(Some("first")).await;
-            assert_eq!(arbiter.held_by().await.as_deref(), Some("first"));
+            assert_eq!(arbiter.held_by().as_deref(), Some("first"));
         }
+        // Holder is cleared once the guard drops.
+        assert_eq!(arbiter.held_by(), None);
         // Second caller wins immediately, and holder is reset.
         let second = arbiter.acquire(Some("second")).await;
         assert_eq!(second.held_by(), Some("second"));
