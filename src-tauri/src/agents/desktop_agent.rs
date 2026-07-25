@@ -42,8 +42,17 @@ impl DesktopAgent {
         })
     }
 
-    /// Execute a desktop-related tool call
-    async fn execute_desktop_tool(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
+    /// Execute a desktop-related tool call.
+    ///
+    /// `session_id` is the parallel-session identity of the run that issued
+    /// this task (LAC-3073). It arrives per-call from the `Task` — this
+    /// instance is shared across concurrent runs, so it must never be stored
+    /// on `self`.
+    async fn execute_desktop_tool(
+        &self,
+        tool_call: &ToolCall,
+        session_id: Option<&str>,
+    ) -> Result<ToolResult, AgentError> {
         let state = self.app_handle.state::<AppState>();
 
         match tool_call.name.as_str() {
@@ -51,17 +60,10 @@ impl DesktopAgent {
             "computer" => {
                 // Delegate to the official Anthropic Computer Use tool implementation
                 // This handles all computer actions: click, type, scroll, screenshot, etc.
-                //
-                // TODO(LAC-3073): session_id is None because the SpecializedAgent
-                // path (AgentFactory → handle_task) is not wired through the
-                // AgentSessionRegistry — no session id exists here yet, and this
-                // instance is shared across runs so it must not store one.
-                // Consequence: roster `current_action` doesn't update during
-                // orchestrated DesktopAgent runs (input arbitration is unaffected).
                 match crate::agent::tools::anthropic_computer_use::execute_computer_tool(
                     &self.app_handle,
                     tool_call.input.clone(),
-                    None,
+                    session_id,
                 )
                 .await
                 {
@@ -378,7 +380,10 @@ impl SpecializedAgent for DesktopAgent {
 
         // Execute all tool calls in the task
         for tool_call in &task.tool_calls {
-            match self.execute_desktop_tool(tool_call).await {
+            match self
+                .execute_desktop_tool(tool_call, task.session_id.as_deref())
+                .await
+            {
                 Ok(result) => results.push(result),
                 Err(e) => {
                     has_error = true;

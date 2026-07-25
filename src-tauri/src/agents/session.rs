@@ -477,6 +477,44 @@ pub async fn broadcast_sessions_updated(app: &AppHandle, registry: &Arc<AgentSes
     }
 }
 
+/// Register a new run in the parallel-session registry and announce it.
+///
+/// Shared entry sequence for every execution path that participates in the
+/// session roster (`execute_agent_internal` and the orchestrated-query path,
+/// LAC-3073): create the session, mark it `Running`, emit the discrete
+/// `started` lifecycle event, and broadcast the roster snapshot. Returns the
+/// RAII [`SessionHandle`] whose drop removes the row on any exit.
+///
+/// Returns `None` when the parallel cap is hit — callers proceed without
+/// session tracking rather than failing the run, matching the pre-LAC-1432
+/// behavior where the roster did not exist.
+pub async fn begin_session_run(
+    registry: &Arc<AgentSessionRegistry>,
+    agent_name: &str,
+    app_handle: &AppHandle,
+) -> Option<SessionHandle> {
+    match registry.create(agent_name.to_string()).await {
+        Ok(session) => {
+            session.set_status(AgentSessionStatus::Running).await;
+            let handle = SessionHandle::new(registry.clone(), session, app_handle.clone());
+            let focused = handle.is_focused();
+            let snapshot = handle.session().snapshot(focused).await;
+            if let Err(e) = app_handle.emit(events::agent_sessions::STARTED, &snapshot) {
+                warn!("Failed to emit agent-session-started: {}", e);
+            }
+            broadcast_sessions_updated(app_handle, registry).await;
+            Some(handle)
+        }
+        Err(e) => {
+            warn!(
+                "Failed to register agent session in parallel registry: {} — proceeding without session tracking",
+                e
+            );
+            None
+        }
+    }
+}
+
 /// RAII guard that removes an agent session from the registry on drop.
 ///
 /// `execute_agent_internal` has ~8 explicit `return Err` paths plus a

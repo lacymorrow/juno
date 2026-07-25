@@ -512,37 +512,9 @@ async fn execute_agent_internal(
     // If the parallel cap is hit we log and continue — the queue guarantees
     // at most one run at a time today, so the cap should never actually bite
     // until LAC-1432 lifts the queue serialization.
-    let session_handle = {
-        let registry = state.agent_sessions();
-        match registry.create("orchestrator".to_string()).await {
-            Ok(session) => {
-                session
-                    .set_status(crate::agents::AgentSessionStatus::Running)
-                    .await;
-                let handle = crate::agents::SessionHandle::new(
-                    registry.clone(),
-                    session,
-                    app_handle.clone(),
-                );
-                let focused = handle.is_focused();
-                let snapshot = handle.session().snapshot(focused).await;
-                if let Err(e) =
-                    app_handle.emit(crate::constants::events::agent_sessions::STARTED, &snapshot)
-                {
-                    warn!("Failed to emit agent-session-started: {}", e);
-                }
-                crate::agents::broadcast_sessions_updated(&app_handle, &registry).await;
-                Some(handle)
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to register agent session in parallel registry: {} — proceeding without session tracking",
-                    e
-                );
-                None
-            }
-        }
-    };
+    let session_handle =
+        crate::agents::begin_session_run(&state.agent_sessions(), "orchestrator", &app_handle)
+            .await;
 
     // Identity context handed to the computer-use tool registration so the
     // overlay cursor is keyed by session id and drawn in the session color.
