@@ -216,11 +216,14 @@ mod tests {
         assert_eq!(task.session_id, None);
     }
 
+    /// Log of (task_id, session_id) pairs observed by handle_task.
+    type SeenLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
     /// Mock agent that mirrors the shared-instance shape of DesktopAgent:
     /// one Arc'd instance handles tasks from many concurrent runs. It records
     /// which session id each handle_task invocation observed.
     struct RecordingAgent {
-        seen: Arc<Mutex<Vec<(String, Option<String>)>>>,
+        seen: SeenLog,
     }
 
     #[async_trait]
