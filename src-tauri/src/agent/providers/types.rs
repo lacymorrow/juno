@@ -592,7 +592,10 @@ mod tests {
     fn test_opus_5_is_default_anthropic_model() {
         // Claude Opus 5 is the current-generation flagship and must be the
         // recommended/default Anthropic model (see LAC-3106).
-        assert_eq!(Provider::Anthropic.default_model(), model_ids::CLAUDE_OPUS_5);
+        assert_eq!(
+            Provider::Anthropic.default_model(),
+            model_ids::CLAUDE_OPUS_5
+        );
     }
 
     #[test]
