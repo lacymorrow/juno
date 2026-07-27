@@ -5,6 +5,7 @@
 pub mod model_ids {
     // Anthropic Claude Models — Current Generation
     pub const CLAUDE_FABLE_5: &str = "claude-fable-5";
+    pub const CLAUDE_OPUS_5: &str = "claude-opus-5";
     pub const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
     pub const CLAUDE_OPUS_4_7: &str = "claude-opus-4-7";
     pub const CLAUDE_SONNET_5: &str = "claude-sonnet-5";
@@ -24,6 +25,7 @@ pub mod model_ids {
     /// These also support high-resolution screenshots up to 2,576px.
     pub const OPUS_4_5_PLUS_MODELS: &[&str] = &[
         CLAUDE_FABLE_5,
+        CLAUDE_OPUS_5,
         CLAUDE_OPUS_4_8,
         CLAUDE_OPUS_4_5,
         CLAUDE_OPUS_4_6,
@@ -190,6 +192,13 @@ impl Provider {
                 &[
                     // Current generation
                     ModelDefinition {
+                        id: model_ids::CLAUDE_OPUS_5,
+                        name: "Claude Opus 5",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: true,
+                    },
+                    ModelDefinition {
                         id: model_ids::CLAUDE_FABLE_5,
                         name: "Claude Fable 5",
                         category: ModelCategory::ComputerUse,
@@ -201,7 +210,7 @@ impl Provider {
                         name: "Claude Opus 4.8",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
-                        is_recommended: true,
+                        is_recommended: false,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_7,
@@ -369,7 +378,7 @@ impl Provider {
             .unwrap_or_else(|| {
                 // Fallback constants if no definitions exist (shouldn't happen)
                 match self {
-                    Provider::Anthropic => model_ids::CLAUDE_OPUS_4_6,
+                    Provider::Anthropic => model_ids::CLAUDE_OPUS_5,
                     Provider::OpenAI => model_ids::OPENAI_CUA,
                     Provider::Rig => model_ids::OPENAI_CUA,
                     Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
@@ -560,6 +569,30 @@ mod tests {
             model_ids::CLAUDE_SONNET_5,
         );
         assert_eq!(editor, "text_editor_20250728");
+    }
+
+    #[test]
+    fn test_resolve_tool_type_opus_5_remaps() {
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_OPUS_5,
+        );
+        assert_eq!(computer, "computer_20251124");
+
+        let editor = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_OPUS_5,
+        );
+        assert_eq!(editor, "text_editor_20250728");
+    }
+
+    #[test]
+    fn test_opus_5_is_default_anthropic_model() {
+        // Claude Opus 5 is the current-generation flagship and must be the
+        // recommended/default Anthropic model (see LAC-3106).
+        assert_eq!(Provider::Anthropic.default_model(), model_ids::CLAUDE_OPUS_5);
     }
 
     #[test]
