@@ -194,16 +194,25 @@ pub async fn submit_orchestrated_query(
         use_mcp_tools: Some(true),
     };
 
-    let result = create_and_execute_task(&orchestrator_guard, task_request).await?;
+    let result = create_and_execute_task(&orchestrator_guard, task_request, &app_handle).await?;
     Ok(format!("Orchestrated task completed: {}", result))
 }
 
-/// Create and execute a task with the orchestrator
+/// Create and execute a task with the orchestrator.
+///
+/// Registers the run in the parallel-session registry (LAC-3073) so the
+/// roster/switcher UI shows it alongside `submit_query` runs, and stamps the
+/// session id onto the `Task` so specialist agents (DesktopAgent) attribute
+/// their computer-use actions to this run. The id travels on the task —
+/// specialist instances are shared across concurrent runs and must never
+/// store it.
 async fn create_and_execute_task(
     orchestrator: &Orchestrator,
     request: TaskCreationRequest,
+    app_handle: &tauri::AppHandle,
 ) -> Result<String, String> {
     use crate::agents::{AgentType, Task};
+    use tauri::Manager;
     use uuid::Uuid;
 
     // Determine agent type intelligently
@@ -233,6 +242,21 @@ async fn create_and_execute_task(
         TaskPriority::Normal
     };
 
+    // Register this run in the parallel-session registry. On cap overflow we
+    // proceed without tracking (same policy as execute_agent_internal). The
+    // RAII handle removes the roster row on every exit path.
+    let agent_name = match agent_type {
+        AgentType::Browser => "browser",
+        AgentType::Desktop => "desktop",
+        AgentType::System => "system",
+        AgentType::Orchestrator => "orchestrator",
+    };
+    let registry = app_handle.state::<AppState>().agent_sessions();
+    let session_handle = crate::agents::begin_session_run(&registry, agent_name, app_handle).await;
+    let session_id = session_handle
+        .as_ref()
+        .map(|handle| handle.session().id().to_string());
+
     // Create task
     let task = Task {
         id: Uuid::new_v4().to_string(),
@@ -247,9 +271,27 @@ async fn create_and_execute_task(
             "context": request.context,
             "use_mcp_tools": request.use_mcp_tools.unwrap_or(false)
         }),
+        // If the task ends up queued (orchestrator at capacity) this id
+        // outlives the session row; execute_computer_tool's registry lookup
+        // then finds nothing and safely skips attribution.
+        session_id,
     };
 
-    match orchestrator.delegate_task(task).await {
+    let result = orchestrator.delegate_task(task).await;
+
+    // Give the roster a final status snapshot before the RAII drop removes
+    // the row. A queued result reports success=true and terminates the
+    // session immediately — matching the command's own early return.
+    if let Some(ref handle) = session_handle {
+        use crate::agents::AgentSessionStatus;
+        let terminal = match &result {
+            Ok(task_result) if task_result.success => AgentSessionStatus::Finished,
+            _ => AgentSessionStatus::Failed,
+        };
+        handle.mark_terminal(terminal).await;
+    }
+
+    match result {
         Ok(result) => {
             if result.success {
                 Ok(result
@@ -357,11 +399,14 @@ pub async fn configure_orchestrator(config: OrchestratorConfigDTO) -> Result<(),
 
 /// Create a new task with enhanced parameters
 #[tauri::command]
-pub async fn create_orchestrator_task(request: TaskCreationRequest) -> Result<String, String> {
+pub async fn create_orchestrator_task(
+    request: TaskCreationRequest,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
     let orchestrator = get_orchestrator().await?;
     let orchestrator_guard = orchestrator.lock().await;
 
-    let result = create_and_execute_task(&orchestrator_guard, request).await?;
+    let result = create_and_execute_task(&orchestrator_guard, request, &app_handle).await?;
     Ok(result)
 }
 
@@ -741,6 +786,7 @@ pub async fn execute_intelligent_parallel_tasks(
                 "context": context,
                 "intelligent_execution": true
             }),
+            session_id: None,
         };
         tasks.push(task);
     }
@@ -782,6 +828,7 @@ pub async fn intelligent_task_splitting(
             "context": context,
             "task_splitting": true
         }),
+        session_id: None,
     };
 
     match orchestrator_guard
@@ -831,6 +878,7 @@ pub async fn execute_optimized_workflow(
             "enable_splitting": enable_task_splitting,
             "context": context
         }),
+        session_id: None,
     };
 
     // Step 1: Intelligent task splitting if enabled
@@ -958,6 +1006,7 @@ pub async fn benchmark_orchestrator_performance(
                 "benchmark": true,
                 "optimizations_enabled": enable_optimizations
             }),
+            session_id: None,
         };
         test_tasks.push(task);
     }

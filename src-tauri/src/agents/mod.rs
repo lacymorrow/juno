@@ -13,7 +13,7 @@ pub use browser_agent::BrowserAgent;
 pub use desktop_agent::DesktopAgent;
 pub use orchestrator::{Orchestrator, OrchestratorConfig};
 pub use session::{
-    broadcast_sessions_updated, color_for_slot, AgentSession, AgentSessionId, AgentSessionInfo,
-    AgentSessionRegistry, AgentSessionStatus, SessionHandle, SESSION_COLOR_SLOTS,
+    begin_session_run, broadcast_sessions_updated, color_for_slot, AgentSession, AgentSessionId,
+    AgentSessionInfo, AgentSessionRegistry, AgentSessionStatus, SessionHandle, SESSION_COLOR_SLOTS,
 };
 pub use system_agent::SystemAgent;
