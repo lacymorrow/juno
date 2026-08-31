@@ -14,11 +14,13 @@ pub mod model_ids {
     pub const CLAUDE_SONNET_4_5: &str = "claude-sonnet-4-5-20250929";
     pub const CLAUDE_HAIKU_4_5: &str = "claude-haiku-4-5-20251001";
 
-    // Anthropic Claude Models — Legacy
+    // Anthropic Claude Models — Legacy (deprecated but still callable)
+    // NOTE: Only models the Anthropic API still serves belong here. Opus 4.1
+    // (retired 2026-08-05), Opus 4, and Sonnet 4 (both retired 2026-06-15) were
+    // removed — requests to retired models return 404. Verify against the live
+    // deprecations page before adding an ID back:
+    // https://platform.claude.com/docs/en/about-claude/model-deprecations
     pub const CLAUDE_OPUS_4_5: &str = "claude-opus-4-5-20251101";
-    pub const CLAUDE_OPUS_4_1: &str = "claude-opus-4-1-20250805";
-    pub const CLAUDE_SONNET_4: &str = "claude-sonnet-4-20250514";
-    pub const CLAUDE_OPUS_4: &str = "claude-opus-4-20250514";
 
     /// Models that require the 2025-11-24 computer-use beta flag AND
     /// new computer type (computer_20251124) + new editor (text_editor_20250728).
@@ -254,31 +256,10 @@ impl Provider {
                         supports_computer_use: true,
                         is_recommended: false,
                     },
-                    // Legacy models
+                    // Legacy models (still served by the Anthropic API)
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_5,
                         name: "Claude Opus 4.5",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_OPUS_4_1,
-                        name: "Claude Opus 4.1",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_SONNET_4,
-                        name: "Claude Sonnet 4",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_OPUS_4,
-                        name: "Claude Opus 4",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
                         is_recommended: false,
@@ -457,17 +438,20 @@ mod tests {
 
     #[test]
     fn test_resolve_tool_type_older_model_passes_through() {
-        let computer = Provider::Anthropic.resolve_tool_type(
-            "computer",
-            "computer_20250124",
-            model_ids::CLAUDE_SONNET_4,
-        );
+        // A pre-4.5 legacy model that is in neither special tier array must fall
+        // through to Tier 3 (passthrough). Uses a literal retired ID because no
+        // active model exercises this branch anymore — it guards the fallthrough
+        // for older/unknown models generally.
+        let legacy_model = "claude-3-5-sonnet-20241022";
+
+        let computer =
+            Provider::Anthropic.resolve_tool_type("computer", "computer_20250124", legacy_model);
         assert_eq!(computer, "computer_20250124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
             "str_replace_based_edit_tool",
             "text_editor_20250429",
-            model_ids::CLAUDE_SONNET_4,
+            legacy_model,
         );
         assert_eq!(editor, "text_editor_20250429");
     }
@@ -481,12 +465,13 @@ mod tests {
         );
         assert_eq!(opus_45, "bash_20250124");
 
-        let sonnet = Provider::Anthropic.resolve_tool_type(
+        // A legacy passthrough model must also leave bash untouched.
+        let legacy = Provider::Anthropic.resolve_tool_type(
             "bash",
             "bash_20250124",
-            model_ids::CLAUDE_SONNET_4,
+            "claude-3-5-sonnet-20241022",
         );
-        assert_eq!(sonnet, "bash_20250124");
+        assert_eq!(legacy, "bash_20250124");
     }
 
     #[test]
