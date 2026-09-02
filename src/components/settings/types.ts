@@ -6,6 +6,11 @@ export interface SettingsCategory {
   name: string;
   icon: React.ReactNode;
   description: string;
+  /**
+   * Progressive-disclosure tier. `essential` categories are always shown;
+   * `advanced` ones stay hidden until the user enables "Advanced settings".
+   */
+  tier: "essential" | "advanced";
 }
 
 export interface ProviderInfo {
