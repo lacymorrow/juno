@@ -10,6 +10,7 @@ use tracing::{error, info, warn};
 
 use crate::agent::tools::timer_tools::TimerTask;
 use crate::events::timer_handlers::TimerEventHandler;
+use crate::window_management::WindowManager;
 use crate::{constants, state};
 
 /// Setup all event listeners for the application
@@ -17,6 +18,36 @@ pub fn setup_event_listeners(app: &AppHandle) {
     setup_voice_transcription_listeners(app);
     setup_dictation_listeners(app);
     setup_timer_event_listeners(app);
+    setup_menu_event_listeners(app);
+}
+
+/// Setup menu-triggered event listeners
+fn setup_menu_event_listeners(app: &AppHandle) {
+    let app_handle = app.clone();
+    app.listen(
+        constants::events::menu::TOGGLE_FLOATING_BAR_REQUESTED,
+        move |_event| {
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                handle_toggle_floating_bar(app_handle).await;
+            });
+        },
+    );
+}
+
+async fn handle_toggle_floating_bar(app_handle: AppHandle) {
+    let label = constants::ui::window_labels::FLOATING_BAR;
+    if WindowManager::is_window_visible(&app_handle, label) {
+        if let Err(e) = WindowManager::hide_window(&app_handle, label).await {
+            error!("[Menu] Failed to hide floating bar: {}", e);
+        }
+    } else if let Some(window) = app_handle.get_webview_window(label) {
+        if let Err(e) = window.show() {
+            error!("[Menu] Failed to show floating bar: {}", e);
+        }
+    } else {
+        warn!("[Menu] Floating bar window not found");
+    }
 }
 
 /// Setup voice transcription event listeners
