@@ -6,11 +6,11 @@
 //!
 //! Used by: Computer Use tools for enhanced performance in unfamiliar environments
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use tracing::{debug, info, warn};
 use tokio::time::{Duration, Instant};
-use chrono::Utc;
+use tracing::{debug, info, warn};
 
 /// Configuration for Exploration-Then-Reasoning system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,11 +105,23 @@ pub struct GUITransition {
 /// Types of actions that can trigger GUI transitions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ActionType {
-    Click { x: f32, y: f32 },
-    KeyPress { key: String },
-    Scroll { direction: ScrollDirection, amount: f32 },
-    Type { text: String },
-    Menu { menu_path: Vec<String> },
+    Click {
+        x: f32,
+        y: f32,
+    },
+    KeyPress {
+        key: String,
+    },
+    Scroll {
+        direction: ScrollDirection,
+        amount: f32,
+    },
+    Type {
+        text: String,
+    },
+    Menu {
+        menu_path: Vec<String>,
+    },
     Unknown,
 }
 
@@ -410,15 +422,21 @@ impl ExplorationEngine {
     ) -> Result<ExplorationResult, ExplorationError> {
         let start_time = Instant::now();
 
-        info!("Starting application exploration for: {}", app_context.app_name);
+        info!(
+            "Starting application exploration for: {}",
+            app_context.app_name
+        );
 
         // Initialize exploration with the initial state
-        let initial_state = self.create_initial_state(initial_screenshot, &app_context).await?;
+        let initial_state = self
+            .create_initial_state(initial_screenshot, &app_context)
+            .await?;
         self.exploration_memory.add_state(initial_state.clone());
         self.gui_transition_graph.add_state(initial_state);
 
         // Generate exploration goals
-        let exploration_goals = self.function_goal_generator
+        let exploration_goals = self
+            .function_goal_generator
             .generate_exploration_goals(&app_context)
             .await?;
 
@@ -440,13 +458,13 @@ impl ExplorationEngine {
             }
 
             // Select next exploration action
-            let exploration_action = self.select_exploration_action(
-                &current_state_id,
-                &exploration_goals
-            ).await?;
+            let exploration_action = self
+                .select_exploration_action(&current_state_id, &exploration_goals)
+                .await?;
 
             // Record planned interaction to prevent duplicates
-            let planned_coords = if let ActionType::Click { x, y } = &exploration_action.action_type {
+            let planned_coords = if let ActionType::Click { x, y } = &exploration_action.action_type
+            {
                 let coords = (*x, *y);
                 self.planned_interactions.push(coords);
                 Some(coords)
@@ -460,7 +478,8 @@ impl ExplorationEngine {
                 Ok((new_state, execution_time_ms)) => {
                     // Remove planned interaction since it completed successfully
                     if let Some(coords) = planned_coords {
-                        self.planned_interactions.retain(|&planned| planned != coords);
+                        self.planned_interactions
+                            .retain(|&planned| planned != coords);
                     }
 
                     // Record transition
@@ -478,19 +497,26 @@ impl ExplorationEngine {
                     self.exploration_memory.add_state(new_state.clone());
                     self.gui_transition_graph.add_state(new_state.clone());
 
-                    debug!("Recorded transition: {} -> {} (total transitions: {})",
-                           current_state_id, new_state.state_id,
-                           self.exploration_memory.transition_history.len());
+                    debug!(
+                        "Recorded transition: {} -> {} (total transitions: {})",
+                        current_state_id,
+                        new_state.state_id,
+                        self.exploration_memory.transition_history.len()
+                    );
 
                     current_state_id = new_state.state_id;
                     states_explored += 1;
 
-                    debug!("Exploration step {}: transitioned to state {}", step, current_state_id);
+                    debug!(
+                        "Exploration step {}: transitioned to state {}",
+                        step, current_state_id
+                    );
                 }
                 Err(e) => {
                     // Remove planned interaction since it failed and should be retryable
                     if let Some(coords) = planned_coords {
-                        self.planned_interactions.retain(|&planned| planned != coords);
+                        self.planned_interactions
+                            .retain(|&planned| planned != coords);
                     }
 
                     warn!("Exploration step {} failed: {}", step, e);
@@ -500,22 +526,27 @@ impl ExplorationEngine {
         }
 
         // Extract knowledge from exploration
-        let interaction_patterns = self.knowledge_extractor
+        let interaction_patterns = self
+            .knowledge_extractor
             .extract_interaction_patterns(&self.gui_transition_graph)
             .await?;
 
-        let app_structure = self.knowledge_extractor
+        let app_structure = self
+            .knowledge_extractor
             .extract_app_structure(&self.gui_transition_graph)
             .await?;
 
         let exploration_time_ms = start_time.elapsed().as_millis() as u64;
-        let completeness_score = self.calculate_completeness_score(states_explored, &exploration_goals);
+        let completeness_score =
+            self.calculate_completeness_score(states_explored, &exploration_goals);
 
         // Clear planned interactions to prevent state leakage between exploration sessions
         self.planned_interactions.clear();
 
-        info!("Exploration completed: {} states explored in {}ms",
-              states_explored, exploration_time_ms);
+        info!(
+            "Exploration completed: {} states explored in {}ms",
+            states_explored, exploration_time_ms
+        );
 
         Ok(ExplorationResult {
             gui_transition_graph: self.gui_transition_graph.clone(),
@@ -576,7 +607,8 @@ impl ExplorationEngine {
         current_state_id: &str,
         _exploration_goals: &[ExplorationGoal],
     ) -> Result<ExplorationAction, ExplorationError> {
-        let current_state = self.exploration_memory
+        let current_state = self
+            .exploration_memory
             .get_state(current_state_id)
             .ok_or_else(|| ExplorationError::InvalidState(current_state_id.to_string()))?;
 
@@ -584,7 +616,10 @@ impl ExplorationEngine {
         for element in &current_state.interactive_elements {
             if !self.has_interacted_with_element(element) {
                 return Ok(ExplorationAction {
-                    action_type: ActionType::Click { x: element.x, y: element.y },
+                    action_type: ActionType::Click {
+                        x: element.x,
+                        y: element.y,
+                    },
                     target_element: Some(element.clone()),
                     execution_time_ms: 0, // Will be set during execution
                 });
@@ -595,7 +630,7 @@ impl ExplorationEngine {
         Ok(ExplorationAction {
             action_type: ActionType::Scroll {
                 direction: ScrollDirection::Down,
-                amount: 3.0
+                amount: 3.0,
             },
             target_element: None,
             execution_time_ms: 0,
@@ -610,7 +645,8 @@ impl ExplorationEngine {
             if let ActionType::Click { x, y } = &transition.trigger_action {
                 // Check if coordinates are close to the element
                 let distance = ((x - element.x).powi(2) + (y - element.y).powi(2)).sqrt();
-                if distance < 10.0 { // 10 pixel tolerance
+                if distance < 10.0 {
+                    // 10 pixel tolerance
                     return true;
                 }
             }
@@ -620,8 +656,10 @@ impl ExplorationEngine {
         // Note: Planned interactions are now cleaned up after each attempt (success or failure)
         // to prevent memory leaks and allow re-attempts of failed interactions
         for (planned_x, planned_y) in &self.planned_interactions {
-            let distance = ((planned_x - element.x).powi(2) + (planned_y - element.y).powi(2)).sqrt();
-            if distance < 10.0 { // 10 pixel tolerance
+            let distance =
+                ((planned_x - element.x).powi(2) + (planned_y - element.y).powi(2)).sqrt();
+            if distance < 10.0 {
+                // 10 pixel tolerance
                 return true;
             }
         }
@@ -691,8 +729,10 @@ impl ExplorationEngine {
             let keep_from = self.planned_interactions.len() - MAX_PLANNED_INTERACTIONS;
             self.planned_interactions.drain(0..keep_from);
 
-            debug!("Cleaned up planned interactions, now have {} entries",
-                   self.planned_interactions.len());
+            debug!(
+                "Cleaned up planned interactions, now have {} entries",
+                self.planned_interactions.len()
+            );
         }
     }
 }
@@ -795,7 +835,8 @@ impl ExplorationMemory {
             }
         }
 
-        self.state_history.insert(state.state_id.clone(), state.clone());
+        self.state_history
+            .insert(state.state_id.clone(), state.clone());
         self.recent_states.push_back(state);
     }
 
@@ -861,7 +902,10 @@ impl PatternRecognizer {
                 // Simple pattern detection - in production would use ML
                 patterns.push(InteractionPattern {
                     name: "Click Pattern".to_string(),
-                    description: format!("Click transition from {} to {}", from_state, transition.to_state),
+                    description: format!(
+                        "Click transition from {} to {}",
+                        from_state, transition.to_state
+                    ),
                     action_sequence: vec![transition.trigger_action.clone()],
                     frequency: 1,
                     confidence: transition.confidence,

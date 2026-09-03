@@ -126,7 +126,7 @@ pub mod patterns {
 
 /// Common words to exclude from keyword extraction
 pub const COMMON_WORDS: &[&str] = &[
-    "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"
+    "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
 ];
 
 /// Default memory configuration
@@ -156,7 +156,7 @@ pub mod defaults {
             DEFAULT_SCREENSHOT_RETENTION_SECONDS,
             false, // immediate_compression - FIXED: Don't compress screenshots immediately!
             DEFAULT_MAX_BASE64_SCREENSHOTS, // Now allows 8 real screenshots
-            true, // fallback_to_generic_description
+            true,  // fallback_to_generic_description
         )
     }
 }

@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use whisper_rs::{FullParams, WhisperContext};
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
 use crate::utils::filter_transcription_text;
+use std::sync::Arc;
+use whisper_rs::{FullParams, WhisperContext};
 
 /// STT engine backed by whisper-rs (ggml). Wraps a shared `Arc<WhisperContext>`
 /// so two controllers share the same loaded model weights without a second allocation.
@@ -34,7 +34,9 @@ impl TranscriptionEngine for WhisperEngine {
     }
 
     fn create_session(&self) -> Result<Box<dyn TranscriptionSession>, String> {
-        Ok(Box::new(WhisperSession { ctx: self.ctx.clone() }))
+        Ok(Box::new(WhisperSession {
+            ctx: self.ctx.clone(),
+        }))
     }
 }
 
@@ -49,7 +51,11 @@ pub struct WhisperSession {
 unsafe impl Send for WhisperSession {}
 
 impl WhisperSession {
-    fn run_params(ctx: &WhisperContext, params: FullParams, audio: &[f32]) -> Result<String, String> {
+    fn run_params(
+        ctx: &WhisperContext,
+        params: FullParams,
+        audio: &[f32],
+    ) -> Result<String, String> {
         let mut state = ctx
             .create_state()
             .map_err(|e| format!("Failed to create WhisperState: {:?}", e))?;
@@ -83,7 +89,11 @@ impl TranscriptionSession for WhisperSession {
         params.set_print_timestamps(false);
 
         let text = Self::run_params(&self.ctx, params, audio)?;
-        if text.is_empty() { Ok(None) } else { Ok(Some(text)) }
+        if text.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(text))
+        }
     }
 
     fn transcribe_final(&mut self, audio: &[f32]) -> Result<String, String> {
@@ -91,8 +101,10 @@ impl TranscriptionSession for WhisperSession {
             return Ok(String::new());
         }
 
-        let mut params =
-            FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
+        let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch {
+            beam_size: 5,
+            patience: 1.0,
+        });
         params.set_temperature(0.0);
         params.set_print_special(false);
         params.set_print_progress(false);

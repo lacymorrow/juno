@@ -19,19 +19,29 @@ lazy_static::lazy_static! {
 pub async fn accessibility_scan() -> Result<Vec<AccessibilityElement>, String> {
     debug!("accessibility_scan command called");
 
-    let tools = ACCESSIBILITY_TOOLS.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let tools = ACCESSIBILITY_TOOLS
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
     let elements = tools.scan_frontmost_application()?;
 
-    info!("accessibility_scan completed: found {} elements", elements.len());
+    info!(
+        "accessibility_scan completed: found {} elements",
+        elements.len()
+    );
     Ok(elements)
 }
 
 /// Click a UI element by its accessibility ID
 #[tauri::command]
 pub async fn accessibility_click(element_id: u32) -> Result<bool, String> {
-    debug!("accessibility_click command called with element_id: {}", element_id);
+    debug!(
+        "accessibility_click command called with element_id: {}",
+        element_id
+    );
 
-    let tools = ACCESSIBILITY_TOOLS.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let tools = ACCESSIBILITY_TOOLS
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
     let success = tools.click_element_by_id(element_id)?;
 
     info!("accessibility_click completed: success = {}", success);
@@ -44,7 +54,9 @@ pub async fn test_accessibility_permissions() -> Result<bool, String> {
     debug!("test_accessibility_permissions command called");
 
     // Try to initialize the accessibility tools to test permissions
-    let tools = ACCESSIBILITY_TOOLS.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let tools = ACCESSIBILITY_TOOLS
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
     match tools.ensure_engine_initialized() {
         Ok(()) => {
             info!("Accessibility permissions are granted");
@@ -68,7 +80,10 @@ pub async fn get_accessibility_tool_definitions() -> Result<Vec<Value>, String> 
 
     let definitions = AccessibilityTools::get_tool_definitions();
 
-    info!("Returning {} accessibility tool definitions", definitions.len());
+    info!(
+        "Returning {} accessibility tool definitions",
+        definitions.len()
+    );
     Ok(definitions)
 }
 
@@ -83,11 +98,15 @@ pub async fn execute_accessibility_tool(
 
     // Clone the tools to avoid holding the lock across await
     let tools = {
-        let tools_guard = ACCESSIBILITY_TOOLS.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let tools_guard = ACCESSIBILITY_TOOLS
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
         tools_guard.clone()
     };
 
-    let result = tools.execute_tool(&tool_name, &parameters, &app_handle).await?;
+    let result = tools
+        .execute_tool(&tool_name, &parameters, &app_handle)
+        .await?;
 
     info!("execute_accessibility_tool completed: {}", tool_name);
     Ok(result)

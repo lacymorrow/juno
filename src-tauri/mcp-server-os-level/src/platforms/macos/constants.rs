@@ -22,17 +22,17 @@ pub(crate) const KEY_ARROW_UP: CGKeyCode = 126;
 pub(crate) const KEY_V: CGKeyCode = 9;
 
 // Punctuation and symbol key codes
-pub(crate) const KEY_COMMA: CGKeyCode = 43;           // ,
-pub(crate) const KEY_PERIOD: CGKeyCode = 47;          // .
-pub(crate) const KEY_SEMICOLON: CGKeyCode = 41;       // ;
-pub(crate) const KEY_QUOTE: CGKeyCode = 39;           // '
-pub(crate) const KEY_SLASH: CGKeyCode = 44;           // /
-pub(crate) const KEY_BACKSLASH: CGKeyCode = 42;       // \
-pub(crate) const KEY_BRACKET_LEFT: CGKeyCode = 33;    // [
-pub(crate) const KEY_BRACKET_RIGHT: CGKeyCode = 30;   // ]
-pub(crate) const KEY_MINUS: CGKeyCode = 27;           // -
-pub(crate) const KEY_EQUAL: CGKeyCode = 24;           // =
-pub(crate) const KEY_BACKQUOTE: CGKeyCode = 50;       // `
+pub(crate) const KEY_COMMA: CGKeyCode = 43; // ,
+pub(crate) const KEY_PERIOD: CGKeyCode = 47; // .
+pub(crate) const KEY_SEMICOLON: CGKeyCode = 41; // ;
+pub(crate) const KEY_QUOTE: CGKeyCode = 39; // '
+pub(crate) const KEY_SLASH: CGKeyCode = 44; // /
+pub(crate) const KEY_BACKSLASH: CGKeyCode = 42; // \
+pub(crate) const KEY_BRACKET_LEFT: CGKeyCode = 33; // [
+pub(crate) const KEY_BRACKET_RIGHT: CGKeyCode = 30; // ]
+pub(crate) const KEY_MINUS: CGKeyCode = 27; // -
+pub(crate) const KEY_EQUAL: CGKeyCode = 24; // =
+pub(crate) const KEY_BACKQUOTE: CGKeyCode = 50; // `
 
 // Add these constants for modifier keys
 pub(crate) const MODIFIER_COMMAND: CGEventFlags = CGEventFlags::CGEventFlagCommand;

@@ -13,10 +13,10 @@ pub mod types;
 // pub use controller::VoiceController;
 
 // Re-export common types
-pub use types::{VoiceControllerConfig, AudioThreadMessage, TranscriptionResult};
+pub use types::{AudioThreadMessage, TranscriptionResult, VoiceControllerConfig};
 
-use std::path::Path;
 use crate::constants::audio;
+use std::path::Path;
 
 // Create a new VoiceController with default configuration
 // pub fn new_voice_controller(model_path: &str) -> Result<VoiceController, String> {

@@ -1,30 +1,42 @@
 // Commands for managing AI providers
 
-use crate::agent::providers::config::{ProviderConfig, AgentMode};
-use crate::agent::providers::factory::{ProviderInfo, BrainFactory};
+use crate::agent::providers::config::{AgentMode, ProviderConfig};
+use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
+use crate::constants::errors::{actions, components, templates};
 use crate::settings::manager::SettingsManager;
 use crate::settings::ProviderConfig as CentralizedProviderConfig;
 use tracing::info;
-use crate::constants::errors::{templates, components, actions};
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 
 /// Get the list of available providers
 #[tauri::command]
-pub(crate) async fn get_providers(app_handle: tauri::AppHandle) -> Result<Vec<ProviderInfo>, String> {
-    Ok(BrainFactory::list_providers_with_app_handle(Some(&app_handle)))
+pub(crate) async fn get_providers(
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<ProviderInfo>, String> {
+    Ok(BrainFactory::list_providers_with_app_handle(Some(
+        &app_handle,
+    )))
 }
 
 /// Get the current active provider
 #[tauri::command]
 pub(crate) async fn get_active_provider(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+    let config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
 
     Ok(config.active_provider)
@@ -34,31 +46,45 @@ pub(crate) async fn get_active_provider(app_handle: tauri::AppHandle) -> Result<
 #[tauri::command]
 pub(crate) async fn set_active_provider(
     app_handle: tauri::AppHandle,
-    provider_id: String
+    provider_id: String,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
 
     // Get the new provider info to validate models
     let providers = BrainFactory::list_providers();
-    let new_provider = providers.iter().find(|p| p.id == provider_id)
+    let new_provider = providers
+        .iter()
+        .find(|p| p.id == provider_id)
         .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
 
     // Check if current model is valid for new provider
     if let Some(provider_settings) = config.get_provider_settings(&provider_id) {
         if let Some(current_model) = &provider_settings.model {
-            let model_valid = new_provider.model_info.iter().any(|m| m.id == *current_model) ||
-                              new_provider.models.contains(current_model);
+            let model_valid = new_provider
+                .model_info
+                .iter()
+                .any(|m| m.id == *current_model)
+                || new_provider.models.contains(current_model);
 
             if !model_valid {
                 // Reset to default model for this provider - use centralized update
                 if let Some(provider) = config.providers.iter_mut().find(|p| p.id == provider_id) {
                     provider.model = Some(new_provider.default_model.clone());
                 }
-                info!("Reset model to default '{}' for provider '{}'", new_provider.default_model, provider_id);
+                info!(
+                    "Reset model to default '{}' for provider '{}'",
+                    new_provider.default_model, provider_id
+                );
             }
         }
     }
@@ -67,7 +93,9 @@ pub(crate) async fn set_active_provider(
     config.active_provider = provider_id.clone();
 
     // Save to centralized settings
-    config.save_to_centralized_settings(&settings_manager).await
+    config
+        .save_to_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_SAVE, actions::PROVIDER_SETTINGS, e))?;
 
     info!("Set active provider to: {}", provider_id);
@@ -76,43 +104,60 @@ pub(crate) async fn set_active_provider(
 
 /// Validate if a model is available for the current provider
 #[tauri::command]
-pub(crate) async fn validate_provider_model(provider_id: String, model_id: String) -> Result<bool, String> {
+pub(crate) async fn validate_provider_model(
+    provider_id: String,
+    model_id: String,
+) -> Result<bool, String> {
     let providers = BrainFactory::list_providers();
-    let provider = providers.iter().find(|p| p.id == provider_id)
+    let provider = providers
+        .iter()
+        .find(|p| p.id == provider_id)
         .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
 
-    let is_valid = provider.model_info.iter().any(|m| m.id == model_id) ||
-                   provider.models.contains(&model_id);
+    let is_valid =
+        provider.model_info.iter().any(|m| m.id == model_id) || provider.models.contains(&model_id);
 
     Ok(is_valid)
 }
 
 /// Get available models for a specific provider
 #[tauri::command]
-pub(crate) async fn get_provider_models(provider_id: String) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) async fn get_provider_models(
+    provider_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
     let providers = BrainFactory::list_providers();
-    let provider = providers.iter().find(|p| p.id == provider_id)
+    let provider = providers
+        .iter()
+        .find(|p| p.id == provider_id)
         .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
 
     // Return enhanced model info if available, otherwise fall back to simple model list
     if !provider.model_info.is_empty() {
-        Ok(provider.model_info.iter().map(|m| {
-            serde_json::json!({
-                "id": m.id,
-                "name": m.name,
-                "supports_computer_use": m.supports_computer_use,
-                "is_recommended": m.is_recommended
+        Ok(provider
+            .model_info
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "id": m.id,
+                    "name": m.name,
+                    "supports_computer_use": m.supports_computer_use,
+                    "is_recommended": m.is_recommended
+                })
             })
-        }).collect())
+            .collect())
     } else {
-        Ok(provider.models.iter().map(|m| {
-            serde_json::json!({
-                "id": m,
-                "name": m,
-                "supports_computer_use": false,
-                "is_recommended": false
+        Ok(provider
+            .models
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "id": m,
+                    "name": m,
+                    "supports_computer_use": false,
+                    "is_recommended": false
+                })
             })
-        }).collect())
+            .collect())
     }
 }
 
@@ -120,12 +165,18 @@ pub(crate) async fn get_provider_models(provider_id: String) -> Result<Vec<serde
 #[tauri::command]
 pub(crate) async fn get_provider_settings(
     app_handle: tauri::AppHandle,
-    provider_id: String
+    provider_id: String,
 ) -> Result<CentralizedProviderConfig, String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+    let config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
 
     match config.get_provider_settings(&provider_id) {
@@ -139,12 +190,18 @@ pub(crate) async fn get_provider_settings(
 pub(crate) async fn update_provider_api_key(
     app_handle: tauri::AppHandle,
     provider_id: String,
-    api_key: String
+    api_key: String,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
 
     // Find the provider and update its API key
@@ -161,7 +218,9 @@ pub(crate) async fn update_provider_api_key(
         return Err(format!("Provider '{}' not found", provider_id));
     }
 
-    config.save_to_centralized_settings(&settings_manager).await
+    config
+        .save_to_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_SAVE, "API key", e))?;
 
     info!("Updated API key for provider: {}", provider_id);
@@ -171,16 +230,20 @@ pub(crate) async fn update_provider_api_key(
 /// Check if any AI provider API key is available (from store or environment variables).
 /// Used by onboarding to skip the API key step when keys are already configured.
 #[tauri::command]
-pub(crate) async fn check_api_keys_available(
-    app_handle: tauri::AppHandle,
-) -> Result<bool, String> {
+pub(crate) async fn check_api_keys_available(app_handle: tauri::AppHandle) -> Result<bool, String> {
     use std::env;
 
     // Check settings store for saved keys
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+    let config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
 
     // Check if any provider has an API key in the store
@@ -192,11 +255,7 @@ pub(crate) async fn check_api_keys_available(
     }
 
     // Fallback: check environment variables (loaded from .env files at startup)
-    let env_keys = [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
-    ];
+    let env_keys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
 
     for key in &env_keys {
         if env::var(key).is_ok_and(|v| !v.is_empty()) {
@@ -214,12 +273,18 @@ pub(crate) async fn check_api_keys_available(
 pub(crate) async fn update_provider_model(
     app_handle: tauri::AppHandle,
     provider_id: String,
-    model: String
+    model: String,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
 
     // Find the provider and update its model
@@ -236,7 +301,9 @@ pub(crate) async fn update_provider_model(
         return Err(format!("Provider '{}' not found", provider_id));
     }
 
-    config.save_to_centralized_settings(&settings_manager).await
+    config
+        .save_to_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_SAVE, "model", e))?;
 
     info!("Updated model for provider: {} to {}", provider_id, model);
@@ -248,12 +315,18 @@ pub(crate) async fn update_provider_model(
 pub(crate) async fn update_provider_max_tokens(
     app_handle: tauri::AppHandle,
     provider_id: String,
-    max_tokens: u32
+    max_tokens: u32,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
 
     // Find the provider and update its max_tokens
@@ -270,7 +343,9 @@ pub(crate) async fn update_provider_max_tokens(
         return Err(format!("Provider '{}' not found", provider_id));
     }
 
-    config.save_to_centralized_settings(&settings_manager).await
+    config
+        .save_to_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_SAVE, "max_tokens", e))?;
 
     info!("Updated max_tokens for provider: {}", provider_id);
@@ -282,12 +357,18 @@ pub(crate) async fn update_provider_max_tokens(
 pub(crate) async fn update_provider_temperature(
     app_handle: tauri::AppHandle,
     provider_id: String,
-    temperature: f32
+    temperature: f32,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
 
     // Find the provider and update its temperature
@@ -304,7 +385,9 @@ pub(crate) async fn update_provider_temperature(
         return Err(format!("Provider '{}' not found", provider_id));
     }
 
-    config.save_to_centralized_settings(&settings_manager).await
+    config
+        .save_to_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_SAVE, "temperature", e))?;
 
     info!("Updated temperature for provider: {}", provider_id);
@@ -316,12 +399,18 @@ pub(crate) async fn update_provider_temperature(
 pub(crate) async fn update_provider_system_prompt(
     app_handle: tauri::AppHandle,
     provider_id: String,
-    system_prompt: String
+    system_prompt: String,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
+    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
 
     // Find the provider and update its system prompt
@@ -338,7 +427,9 @@ pub(crate) async fn update_provider_system_prompt(
         return Err(format!("Provider '{}' not found", provider_id));
     }
 
-    config.save_to_centralized_settings(&settings_manager).await
+    config
+        .save_to_centralized_settings(&settings_manager)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_SAVE, "system prompt", e))?;
 
     info!("Updated system prompt for provider: {}", provider_id);
@@ -348,10 +439,17 @@ pub(crate) async fn update_provider_system_prompt(
 /// Get current agent mode
 #[tauri::command]
 pub(crate) async fn get_agent_mode(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let app_settings = settings_manager.get_all_settings().await
+    let app_settings = settings_manager
+        .get_all_settings()
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::SETTINGS, e))?;
 
     Ok(app_settings.agent.execution_mode)
@@ -361,23 +459,36 @@ pub(crate) async fn get_agent_mode(app_handle: tauri::AppHandle) -> Result<Strin
 #[tauri::command]
 pub(crate) async fn set_agent_mode(
     app_handle: tauri::AppHandle,
-    mode: String
+    mode: String,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format_error(templates::FAILED_TO_INITIALIZE, components::SETTINGS_MANAGER, e))?;
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
 
-    let _agent_mode = AgentMode::from_str(&mode)
-        .ok_or_else(|| format!("Invalid agent mode: '{}'. Must be 'single' or 'multi'", mode))?;
+    let _agent_mode = AgentMode::from_str(&mode).ok_or_else(|| {
+        format!(
+            "Invalid agent mode: '{}'. Must be 'single' or 'multi'",
+            mode
+        )
+    })?;
 
     // Load current agent settings
-    let mut app_settings = settings_manager.get_all_settings().await
+    let mut app_settings = settings_manager
+        .get_all_settings()
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::SETTINGS, e))?;
 
     // Update agent execution mode
     app_settings.agent.execution_mode = mode.clone();
 
     // Save updated settings
-    settings_manager.save_all_settings(&app_settings).await
+    settings_manager
+        .save_all_settings(&app_settings)
+        .await
         .map_err(|e| format_error(templates::FAILED_TO_SAVE, actions::AGENT_SETTINGS, e))?;
 
     info!("Set agent mode to: {}", mode);

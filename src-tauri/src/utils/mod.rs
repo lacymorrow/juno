@@ -2,16 +2,15 @@
 pub mod async_runtime;
 pub mod atomic_state;
 pub mod command_macros;
-pub mod coordinates;
 pub mod coordinate_validation;
+pub mod coordinates;
 pub mod key_parsing;
 pub mod network;
 pub mod string_cache;
 
-
 pub mod log_formatter;
-pub mod resource_manager;
 pub mod rate_limiter;
+pub mod resource_manager;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -610,12 +609,20 @@ async fn fetch_native_location() -> Result<GeoLocation, String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Swift script failed: {}", stderr.chars().take(200).collect::<String>()));
+        return Err(format!(
+            "Swift script failed: {}",
+            stderr.chars().take(200).collect::<String>()
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let json: serde_json::Value = serde_json::from_str(stdout.trim())
-        .map_err(|e| format!("Failed to parse location JSON: {} (output: {})", e, stdout.chars().take(100).collect::<String>()))?;
+    let json: serde_json::Value = serde_json::from_str(stdout.trim()).map_err(|e| {
+        format!(
+            "Failed to parse location JSON: {} (output: {})",
+            e,
+            stdout.chars().take(100).collect::<String>()
+        )
+    })?;
 
     // Check for error response
     if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
@@ -779,8 +786,10 @@ pub struct DisplayDetails {
 async fn get_display_info_safe() -> Option<DisplayInfo> {
     #[cfg(target_os = "macos")]
     {
-        use computer_use_ai_sdk::platforms::macos::display::{get_main_display, get_active_displays};
         use crate::utils::coordinates::get_current_standard_resolution;
+        use computer_use_ai_sdk::platforms::macos::display::{
+            get_active_displays, get_main_display,
+        };
 
         let main_display = match get_main_display() {
             Ok(display) => {
@@ -791,7 +800,10 @@ async fn get_display_info_safe() -> Option<DisplayInfo> {
                         width: display.bounds.size.width as u32,
                         height: display.bounds.size.height as u32,
                     },
-                    resolution: (display.bounds.size.width as u32, display.bounds.size.height as u32),
+                    resolution: (
+                        display.bounds.size.width as u32,
+                        display.bounds.size.height as u32,
+                    ),
                     is_main: true,
                 };
                 Some(main_info)
@@ -815,7 +827,10 @@ async fn get_display_info_safe() -> Option<DisplayInfo> {
                             width: display.bounds.size.width as u32,
                             height: display.bounds.size.height as u32,
                         },
-                        resolution: (display.bounds.size.width as u32, display.bounds.size.height as u32),
+                        resolution: (
+                            display.bounds.size.width as u32,
+                            display.bounds.size.height as u32,
+                        ),
                         is_main: i == 0, // First display is typically the main one
                     })
                     .collect()
@@ -892,7 +907,14 @@ pub async fn gather_system_context(
     );
 
     // --- Slow operations: use cached values if available (10s TTL) ---
-    let (running_applications, installed_applications, user_preferences, hardware_info, voice_audio_state, display_info) = {
+    let (
+        running_applications,
+        installed_applications,
+        user_preferences,
+        hardware_info,
+        voice_audio_state,
+        display_info,
+    ) = {
         let cache_guard = slow_context_cache().lock().await;
 
         // Extract from cache if valid
@@ -962,9 +984,7 @@ pub async fn gather_system_context(
 
 /// Gather the "slow" context fields that are safe to cache.
 /// Runs expensive operations in parallel where possible.
-async fn gather_slow_context(
-    app_state: Option<&crate::state::AppState>,
-) -> CachedSlowContext {
+async fn gather_slow_context(app_state: Option<&crate::state::AppState>) -> CachedSlowContext {
     // Run independent slow operations in parallel
     let (running_applications, hardware_info, voice_audio_state, display_info) = tokio::join!(
         get_running_applications_info(),
@@ -1501,7 +1521,9 @@ async fn get_user_preferences(
                 confidence: 0.9, // High confidence if currently running
             });
             break;
-        } else if installed_apps.iter().any(|app| app.name.contains(browser)) && browser_preference.is_none() {
+        } else if installed_apps.iter().any(|app| app.name.contains(browser))
+            && browser_preference.is_none()
+        {
             browser_preference = Some(browser.to_string());
             preferred_applications.push(PreferredApp {
                 category: "browser".to_string(),
@@ -1533,7 +1555,9 @@ async fn get_user_preferences(
                 confidence: 0.9,
             });
             break;
-        } else if installed_apps.iter().any(|app| app.name.contains(editor)) && editor_preference.is_none() {
+        } else if installed_apps.iter().any(|app| app.name.contains(editor))
+            && editor_preference.is_none()
+        {
             editor_preference = Some(editor.to_string());
             preferred_applications.push(PreferredApp {
                 category: "editor".to_string(),
@@ -1554,7 +1578,9 @@ async fn get_user_preferences(
                 confidence: 0.9,
             });
             break;
-        } else if installed_apps.iter().any(|app| app.name.contains(terminal)) && terminal_preference.is_none() {
+        } else if installed_apps.iter().any(|app| app.name.contains(terminal))
+            && terminal_preference.is_none()
+        {
             terminal_preference = Some(terminal.to_string());
             preferred_applications.push(PreferredApp {
                 category: "terminal".to_string(),
@@ -2129,7 +2155,10 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
         if let Some((width, height)) = display_info.standard_resolution {
             context_parts.push(format!("Screen resolution: {}×{}", width, height));
         } else if let Some(ref main_display) = display_info.main_display {
-            context_parts.push(format!("Screen resolution: {}×{}", main_display.resolution.0, main_display.resolution.1));
+            context_parts.push(format!(
+                "Screen resolution: {}×{}",
+                main_display.resolution.0, main_display.resolution.1
+            ));
         }
 
         // Add center point information - this is key for the agent to know where to click
@@ -2139,7 +2168,10 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
 
         // Add display count for multi-monitor awareness
         if display_info.all_displays.len() > 1 {
-            context_parts.push(format!("Multiple displays detected: {} displays", display_info.all_displays.len()));
+            context_parts.push(format!(
+                "Multiple displays detected: {} displays",
+                display_info.all_displays.len()
+            ));
         }
     } else {
         // Fallback to the old method if display_info is not available
@@ -2147,7 +2179,10 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
             // Get the standard resolution that screenshots are scaled to
             use crate::utils::coordinates::get_current_standard_resolution;
             if let Ok((standard_width, standard_height)) = get_current_standard_resolution() {
-                context_parts.push(format!("Screen resolution: {}×{}", standard_width, standard_height));
+                context_parts.push(format!(
+                    "Screen resolution: {}×{}",
+                    standard_width, standard_height
+                ));
             }
         }
     }
@@ -2177,9 +2212,7 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
             .filter(|app| !app.windows.is_empty())
             .flat_map(|app| {
                 let name = app.name.as_str();
-                app.windows
-                    .iter()
-                    .map(move |w| format!("{} ({})", name, w))
+                app.windows.iter().map(move |w| format!("{} ({})", name, w))
             })
             .collect();
 

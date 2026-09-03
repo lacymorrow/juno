@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # TypeScript typecheck + Vite bundle. Cheap and fast; catches the most common
+  # breakage class in this codebase.
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      # `bun run build` is `tsc && vite build` — gates the typecheck and bundle.
+      - name: Build frontend
+        run: bun run build
+
+  # Rust backend: formatting, lints, and the hermetic test suite.
+  #
+  # This must run on macOS. src-tauri links Apple frameworks through
+  # core-graphics/objc for the Computer Use APIs, so a Linux runner fails at
+  # link time with "link kind `framework` is only supported on Apple targets".
+  #
+  # (This job was impossible until the `playwright` crate was dropped — its
+  # build script downloaded a 2021 driver from a decommissioned Microsoft CDN
+  # and panicked on any clean checkout. See docs/ci-rust-blocker.md.)
+  rust:
+    name: Rust (fmt + clippy + test)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Keyed on Cargo.lock; without it every run pays the full ~20min build.
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      # tauri-build reads `frontendDist` (../dist) at compile time, so the
+      # frontend bundle has to exist before any cargo invocation.
+      - name: Build frontend for tauri-build
+        run: |
+          bun install
+          bun run build
+
+      # Cheapest gate first: fails in seconds without compiling anything.
+      - name: Check formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      # `--all-targets` covers tests and examples, not just the lib — that is
+      # where most of the original findings were.
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      # Excludes the `#[ignore]`d suites that need a live Chrome on :9222
+      # (tests/browser_cdp_live.rs) — those are run by hand during QA.
+      - name: Test
+        run: cargo test --manifest-path src-tauri/Cargo.toml

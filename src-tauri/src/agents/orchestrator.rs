@@ -204,6 +204,7 @@ impl Orchestrator {
                 "created_at": chrono::Utc::now().to_rfc3339(),
                 "user_input": user_input
             }),
+            session_id: None,
         };
 
         match self.delegate_task(task).await {
@@ -248,6 +249,7 @@ impl Orchestrator {
                         "message_index": i,
                         "role": message.role
                     }),
+                    session_id: None,
                 };
                 tasks.push(task);
             }
@@ -1057,8 +1059,7 @@ impl Orchestrator {
             _ => 1.0,
         };
 
-        ((base_batch_size as f32 * load_factor * agent_factor) as usize)
-            .clamp(1, 8)
+        ((base_batch_size as f32 * load_factor * agent_factor) as usize).clamp(1, 8)
     }
 
     /// NEW: Adaptive timeout calculation based on task characteristics
@@ -1333,6 +1334,8 @@ impl Orchestrator {
                             "subtask_index": i,
                             "total_subtasks": split_info.len() + 1
                         }),
+                        // Subtasks run on behalf of the parent's session.
+                        session_id: task.session_id.clone(),
                     };
                     subtasks.push(subtask);
                 }
@@ -1366,6 +1369,8 @@ impl Orchestrator {
                         "subtask_index": split_info.len(),
                         "total_subtasks": split_info.len() + 1
                     }),
+                    // Subtasks run on behalf of the parent's session.
+                    session_id: task.session_id.clone(),
                 };
                 subtasks.push(final_subtask);
             }

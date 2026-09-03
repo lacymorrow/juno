@@ -16,8 +16,8 @@ use uuid::Uuid;
 use super::types::{
     CloudCommand, CloudError, DeviceResponse, DeviceStatus, MessageType, WebSocketMessage,
 };
-use crate::constants::{api, permissions};
 use crate::constants::events;
+use crate::constants::{api, permissions};
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -1155,7 +1155,11 @@ impl ProductionCloudConnector {
             if matches!(*state, ConnectorState::Ready) {
                 drop(state);
 
-                if self.command_tx.send(ConnectorMessage::UpdateStatus).is_err() {
+                if self
+                    .command_tx
+                    .send(ConnectorMessage::UpdateStatus)
+                    .is_err()
+                {
                     warn!("Failed to queue status update");
                 }
             }
@@ -1284,7 +1288,10 @@ impl ProductionCloudConnector {
             ConnectorState::Reconnecting(_) => "reconnecting",
         };
 
-        if let Err(e) = self.app_handle.emit(events::cloud::CONNECTOR_STATE, state_str) {
+        if let Err(e) = self
+            .app_handle
+            .emit(events::cloud::CONNECTOR_STATE, state_str)
+        {
             error!("Failed to emit cloud connector state: {}", e);
         }
 
@@ -1549,11 +1556,10 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             match success_data.get("success") {
                 Some(success_value) => {
                     match success_value.as_bool() {
-                        Some(true) => {
-                            // This is the expected path
-                            assert!(true);
-                        }
-                        _ => panic!("Should have matched true case"),
+                        // Expected path. The other arms panic, so arriving here
+                        // is itself the assertion.
+                        Some(true) => {}
+                        other => panic!("expected success=true, got {:?}", other),
                     }
                 }
                 None => panic!("Should have success field"),
@@ -1607,8 +1613,9 @@ PhysMem: 8192M used (1234M wired), 567M unused.
             match success_data.get("success") {
                 Some(success_value) => {
                     match success_value.as_bool() {
-                        Some(true) => assert!(true), // Expected path
-                        _ => panic!("Should have matched true case"),
+                        // Expected path; the other arm panics.
+                        Some(true) => {}
+                        other => panic!("expected success=true, got {:?}", other),
                     }
                 }
                 None => panic!("Should have success field"),

@@ -1,13 +1,12 @@
-use tauri::State;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tauri::State;
+use tokio::sync::RwLock;
 
 use crate::agent::tools::enhanced_visual_reasoning::{
-    VisualReasoningEngine, VisualReasoningConfig, VisualReasoningResult,
-    ReasoningContext, ReasoningCapabilities, ReasoningStatistics
+    ReasoningCapabilities, ReasoningContext, ReasoningStatistics, VisualReasoningConfig,
+    VisualReasoningEngine, VisualReasoningResult,
 };
-
 
 /// Global state for the Enhanced Visual Reasoning Engine
 pub struct VisualReasoningState {
@@ -62,8 +61,9 @@ pub async fn analyze_gui_scene_with_visual_reasoning(
     tracing::debug!("Analyzing GUI scene with enhanced visual reasoning");
 
     // Decode base64 screenshot
-    use base64::{Engine, engine::general_purpose};
-    let screenshot_data = general_purpose::STANDARD.decode(&request.screenshot_base64)
+    use base64::{engine::general_purpose, Engine};
+    let screenshot_data = general_purpose::STANDARD
+        .decode(&request.screenshot_base64)
         .map_err(|e| format!("Failed to decode screenshot: {}", e))?;
 
     let context = ReasoningContext::from(request.clone());
@@ -85,7 +85,8 @@ pub async fn analyze_gui_scene_with_visual_reasoning(
 
     let engine = state.engine.read().await;
 
-    engine.analyze_gui_scene(&screenshot_data, &context)
+    engine
+        .analyze_gui_scene(&screenshot_data, &context)
         .await
         .map_err(|e| format!("Visual reasoning analysis failed: {}", e))
 }
@@ -117,7 +118,8 @@ pub async fn get_visual_reasoning_statistics(
 pub async fn create_sample_visual_analysis_request() -> Result<VisualAnalysisRequest, String> {
     Ok(VisualAnalysisRequest {
         screenshot_base64: "".to_string(), // Would be populated with actual screenshot
-        task_description: "Analyze this form interface and identify all interactive elements".to_string(),
+        task_description: "Analyze this form interface and identify all interactive elements"
+            .to_string(),
         user_intent: "Fill out and submit a contact form".to_string(),
         interaction_context: "User is on a website contact page".to_string(),
         application_context: "Web browser - contact form page".to_string(),
@@ -142,7 +144,7 @@ pub async fn validate_visual_analysis_request(
     if request.screenshot_base64.is_empty() {
         errors.push("Screenshot data is required".to_string());
     } else {
-        use base64::{Engine, engine::general_purpose};
+        use base64::{engine::general_purpose, Engine};
         if let Err(e) = general_purpose::STANDARD.decode(&request.screenshot_base64) {
             errors.push(format!("Invalid screenshot base64 encoding: {}", e));
         }
@@ -161,12 +163,15 @@ pub async fn validate_visual_analysis_request(
     }
 
     // Validate analysis configuration
-    if !request.enable_multimodal_processing &&
-       !request.enable_spatial_reasoning &&
-       !request.enable_temporal_modeling &&
-       !request.enable_cross_modal_grounding &&
-       !request.enable_hierarchical_analysis {
-        warnings.push("At least one analysis type should be enabled for meaningful results".to_string());
+    if !request.enable_multimodal_processing
+        && !request.enable_spatial_reasoning
+        && !request.enable_temporal_modeling
+        && !request.enable_cross_modal_grounding
+        && !request.enable_hierarchical_analysis
+    {
+        warnings.push(
+            "At least one analysis type should be enabled for meaningful results".to_string(),
+        );
     }
 
     let is_valid = errors.is_empty();
@@ -197,11 +202,21 @@ fn calculate_request_complexity(request: &VisualAnalysisRequest) -> f32 {
     let mut complexity = 1.0;
 
     // Base complexity factors
-    if request.enable_multimodal_processing { complexity += 1.0; }
-    if request.enable_spatial_reasoning { complexity += 0.8; }
-    if request.enable_temporal_modeling { complexity += 1.2; }
-    if request.enable_cross_modal_grounding { complexity += 1.0; }
-    if request.enable_hierarchical_analysis { complexity += 0.6; }
+    if request.enable_multimodal_processing {
+        complexity += 1.0;
+    }
+    if request.enable_spatial_reasoning {
+        complexity += 0.8;
+    }
+    if request.enable_temporal_modeling {
+        complexity += 1.2;
+    }
+    if request.enable_cross_modal_grounding {
+        complexity += 1.0;
+    }
+    if request.enable_hierarchical_analysis {
+        complexity += 0.6;
+    }
 
     // Context complexity factors
     complexity += request.task_description.len() as f32 / 1000.0;
@@ -220,24 +235,28 @@ fn estimate_processing_time(request: &VisualAnalysisRequest) -> u64 {
 fn generate_optimization_recommendations(request: &VisualAnalysisRequest) -> Vec<String> {
     let mut recommendations = Vec::new();
 
-    if request.enable_multimodal_processing &&
-       request.enable_spatial_reasoning &&
-       request.enable_temporal_modeling &&
-       request.enable_cross_modal_grounding &&
-       request.enable_hierarchical_analysis {
+    if request.enable_multimodal_processing
+        && request.enable_spatial_reasoning
+        && request.enable_temporal_modeling
+        && request.enable_cross_modal_grounding
+        && request.enable_hierarchical_analysis
+    {
         recommendations.push("All analysis types are enabled. Consider disabling some for faster processing if not all are needed.".to_string());
     }
 
     if request.task_description.len() > 500 {
-        recommendations.push("Consider shortening the task description for faster processing.".to_string());
+        recommendations
+            .push("Consider shortening the task description for faster processing.".to_string());
     }
 
     if request.interaction_context.is_empty() {
-        recommendations.push("Adding interaction context can improve analysis accuracy.".to_string());
+        recommendations
+            .push("Adding interaction context can improve analysis accuracy.".to_string());
     }
 
     if request.application_context.is_empty() {
-        recommendations.push("Adding application context helps with scene understanding.".to_string());
+        recommendations
+            .push("Adding application context helps with scene understanding.".to_string());
     }
 
     if recommendations.is_empty() {
@@ -255,19 +274,34 @@ pub async fn get_scene_types() -> Result<Vec<SceneTypeInfo>, String> {
             scene_type: "Desktop".to_string(),
             name: "Desktop Environment".to_string(),
             description: "Desktop interface with windows, icons, and system elements".to_string(),
-            typical_elements: vec!["Windows".to_string(), "Icons".to_string(), "Taskbar".to_string(), "Menus".to_string()],
+            typical_elements: vec![
+                "Windows".to_string(),
+                "Icons".to_string(),
+                "Taskbar".to_string(),
+                "Menus".to_string(),
+            ],
         },
         SceneTypeInfo {
             scene_type: "WebPage".to_string(),
             name: "Web Page".to_string(),
             description: "Web browser page with HTML elements and content".to_string(),
-            typical_elements: vec!["Links".to_string(), "Buttons".to_string(), "Forms".to_string(), "Images".to_string()],
+            typical_elements: vec![
+                "Links".to_string(),
+                "Buttons".to_string(),
+                "Forms".to_string(),
+                "Images".to_string(),
+            ],
         },
         SceneTypeInfo {
             scene_type: "Form".to_string(),
             name: "Input Form".to_string(),
             description: "Data entry form with input fields and controls".to_string(),
-            typical_elements: vec!["Text Fields".to_string(), "Checkboxes".to_string(), "Dropdowns".to_string(), "Submit Button".to_string()],
+            typical_elements: vec![
+                "Text Fields".to_string(),
+                "Checkboxes".to_string(),
+                "Dropdowns".to_string(),
+                "Submit Button".to_string(),
+            ],
         },
     ])
 }
@@ -291,12 +325,11 @@ pub async fn test_visual_reasoning_engine(
 
     // Create minimal test screenshot data (1x1 pixel PNG)
     let test_screenshot = vec![
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
-        0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
-        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
 
     let context = ReasoningContext::from(sample_request);
@@ -365,7 +398,10 @@ mod tests {
         };
 
         let complexity = calculate_request_complexity(&simple_request);
-        assert!(complexity >= 1.0 && complexity <= 10.0, "Complexity should be within valid range");
+        assert!(
+            (1.0..=10.0).contains(&complexity),
+            "Complexity should be within valid range"
+        );
     }
 
     #[test]

@@ -18,10 +18,13 @@ use super::types::{
     AuthResponse, CloudCommand, CloudError, ConnectionState, DeviceResponse, DeviceState,
     DeviceStatus, HardwareInfo, MessageType, SystemInfo, WebSocketMessage,
 };
-use crate::constants::permissions;
 use crate::constants::events;
+use crate::constants::permissions;
 
-type WsSender = futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>;
+type WsSender = futures_util::stream::SplitSink<
+    WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    Message,
+>;
 type CloudAuth = DeviceAuth;
 type CommandProcessor = CloudCommandProcessor;
 
@@ -742,7 +745,10 @@ impl CloudClient {
             ConnectionState::Error(_) => "error",
         };
 
-        if let Err(e) = self.app_handle.emit(events::cloud::CONNECTION_STATE, state_str) {
+        if let Err(e) = self
+            .app_handle
+            .emit(events::cloud::CONNECTION_STATE, state_str)
+        {
             error!("Failed to emit cloud connection state: {}", e);
         }
     }
@@ -801,5 +807,3 @@ impl CloudClientTask {
         })
     }
 }
-
-

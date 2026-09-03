@@ -128,9 +128,11 @@ pub struct CGEventSourceGuard {
 impl CGEventSourceGuard {
     pub fn new() -> Result<Self, String> {
         use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-        
+
         match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
-            Ok(source) => Ok(Self { source: Some(source) }),
+            Ok(source) => Ok(Self {
+                source: Some(source),
+            }),
             Err(_) => Err("Failed to create CGEventSource".to_string()),
         }
     }
@@ -149,7 +151,7 @@ impl CGEventSourceGuard {
 /// Instead, we create new instances with proper error handling
 pub fn get_pooled_event_source() -> Result<core_graphics::event_source::CGEventSource, String> {
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-    
+
     CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| "Failed to create CGEventSource".to_string())
 }
@@ -177,10 +179,13 @@ mod tests {
         // Test that we can create event sources
         let source1 = get_pooled_event_source();
         assert!(source1.is_ok(), "Should be able to create event source");
-        
+
         let source2 = get_pooled_event_source();
-        assert!(source2.is_ok(), "Should be able to create another event source");
-        
+        assert!(
+            source2.is_ok(),
+            "Should be able to create another event source"
+        );
+
         // Release (no-op but should not panic)
         if let Ok(s1) = source1 {
             release_event_source(s1);

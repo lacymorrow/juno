@@ -4,8 +4,6 @@
 //! and testing purposes. These commands often wrap production functionality with
 //! additional logging, validation, or debugging features.
 
-
-
 use tracing::{info, warn};
 
 /// Check network connectivity status
@@ -36,9 +34,15 @@ pub async fn check_network_connectivity() -> Result<serde_json::Value, String> {
     });
 
     if is_online {
-        info!("Network connectivity check: ONLINE ({}ms)", duration.as_millis());
+        info!(
+            "Network connectivity check: ONLINE ({}ms)",
+            duration.as_millis()
+        );
     } else {
-        warn!("Network connectivity check: OFFLINE ({}ms)", duration.as_millis());
+        warn!(
+            "Network connectivity check: OFFLINE ({}ms)",
+            duration.as_millis()
+        );
     }
 
     Ok(status)
@@ -49,10 +53,12 @@ pub async fn check_network_connectivity() -> Result<serde_json::Value, String> {
 pub async fn test_network_error_detection(error_message: String) -> Result<bool, String> {
     let is_network_error = crate::utils::network::is_network_error(&error_message);
 
-    info!("Network error detection test: '{}' -> {}", error_message, is_network_error);
+    info!(
+        "Network error detection test: '{}' -> {}",
+        error_message, is_network_error
+    );
 
     Ok(is_network_error)
 }
 
 // Re-export dev command functions for backward compatibility
-

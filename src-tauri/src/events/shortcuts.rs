@@ -9,8 +9,8 @@ use tauri_plugin_global_shortcut::{Shortcut, ShortcutEvent, ShortcutState};
 use tauri_plugin_voice_transcription::controller::VoiceController;
 use tracing::{debug, error, info};
 
+use crate::constants::{errors::templates, events};
 use crate::state;
-use crate::constants::{events, errors::templates};
 
 /// Parse a shortcut string into a Shortcut object
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
@@ -31,7 +31,10 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let current_shortcuts = match app_state.get_keyboard_shortcuts() {
         Ok(shortcuts) => shortcuts,
         Err(e) => {
-            error!("{}", crate::format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e));
+            error!(
+                "{}",
+                crate::format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e)
+            );
             return; // Exit early if we can't get shortcuts
         }
     };
@@ -39,8 +42,7 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     // Parse all shortcuts from configuration (including stop_current_task)
     let stop_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.stop_current_task);
-    let agent_shortcut: Option<Shortcut> =
-        parse_shortcut_string(&current_shortcuts.agent_mode);
+    let agent_shortcut: Option<Shortcut> = parse_shortcut_string(&current_shortcuts.agent_mode);
     let dictation_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.dictation_input);
     let settings_shortcut: Option<Shortcut> =
@@ -48,7 +50,8 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let voice_activation_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.voice_activation);
 
-    debug!("Current shortcuts — stop:{} agent:{} dictation:{} settings:{} voice:{} | incoming:{:?}",
+    debug!(
+        "Current shortcuts — stop:{} agent:{} dictation:{} settings:{} voice:{} | incoming:{:?}",
         current_shortcuts.stop_current_task,
         current_shortcuts.agent_mode,
         current_shortcuts.dictation_input,
@@ -99,10 +102,7 @@ fn handle_settings_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         let app_handle_clone = app.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                error!(
-                    "[Settings Shortcut] Failed to open settings window: {}",
-                    e
-                );
+                error!("[Settings Shortcut] Failed to open settings window: {}", e);
             }
         });
     }
@@ -125,7 +125,10 @@ fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
             "shortcut": "escape_key"
         }),
     ) {
-        error!("[Escape Key] Failed to emit shortcut detection event: {}", e);
+        error!(
+            "[Escape Key] Failed to emit shortcut detection event: {}",
+            e
+        );
     }
 
     if event.state() == ShortcutState::Pressed {
@@ -243,7 +246,11 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         .get_dictation_trigger_mode()
         .unwrap_or(state::DictationTriggerMode::Hold);
 
-    info!("[Dictation Input Shortcut] Trigger mode: {:?}, event state: {:?}", trigger_mode, event.state());
+    info!(
+        "[Dictation Input Shortcut] Trigger mode: {:?}, event state: {:?}",
+        trigger_mode,
+        event.state()
+    );
     match trigger_mode {
         state::DictationTriggerMode::Tap => {
             // Tap mode: Only handle key release (press+release = tap)
@@ -254,15 +261,24 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         }
         state::DictationTriggerMode::Hold => {
             // Hold mode: Handle both press and release, route to dictation_monitor
-            info!("[Dictation Shortcut] Hold mode - spawning async handler for {:?}", event_state);
+            info!(
+                "[Dictation Shortcut] Hold mode - spawning async handler for {:?}",
+                event_state
+            );
             tauri::async_runtime::spawn(async move {
-                info!("[Dictation Shortcut] Async task started for {:?}", event_state);
+                info!(
+                    "[Dictation Shortcut] Async task started for {:?}",
+                    event_state
+                );
                 if event_state == ShortcutState::Pressed {
                     crate::dictation_monitor::on_dictation_input_pressed().await;
                 } else if event_state == ShortcutState::Released {
                     crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
                 }
-                info!("[Dictation Shortcut] Async task completed for {:?}", event_state);
+                info!(
+                    "[Dictation Shortcut] Async task completed for {:?}",
+                    event_state
+                );
             });
         }
     }
@@ -277,7 +293,10 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
     let app_state = app.state::<state::AppState>();
     let is_dictation_active = app_state.is_dictation_active();
 
-    info!("[Dictation Tap Mode] is_dictation_active (from AppState): {}", is_dictation_active);
+    info!(
+        "[Dictation Tap Mode] is_dictation_active (from AppState): {}",
+        is_dictation_active
+    );
 
     if is_dictation_active {
         info!("[Dictation Input Shortcut] Tap mode - stopping active dictation");
@@ -316,7 +335,7 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
                     e
                 );
             }
-            
+
             info!("[Dictation Tap Mode] Emitted dictation start event for handler processing");
         });
     }
@@ -374,7 +393,11 @@ pub async fn trigger_shortcut_test_event(
             "test_mode": true
         }),
     ) {
-        return Err(crate::format_error(templates::FAILED_TO_EMIT, "test event", e));
+        return Err(crate::format_error(
+            templates::FAILED_TO_EMIT,
+            "test event",
+            e,
+        ));
     }
 
     Ok(())

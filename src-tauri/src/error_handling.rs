@@ -4,14 +4,16 @@
 //! including error types, error processing, recovery mechanisms, graceful degradation,
 //! and application-wide error management patterns.
 
+use crate::constants::{errors::templates, events};
+use std::fmt;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, warn};
-use std::fmt;
-use crate::constants::{events, errors::templates};
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 
 /// Application-wide error types for better error categorization
@@ -129,9 +131,12 @@ pub mod utils {
                 "timestamp": chrono::Utc::now().to_rfc3339()
             });
 
-                    if let Err(e) = app_handle.emit(events::system::ERROR_OCCURRED, error_payload) {
-            error!("{}", format_error(templates::FAILED_TO_EMIT, "error event", e));
-        }
+            if let Err(e) = app_handle.emit(events::system::ERROR_OCCURRED, error_payload) {
+                error!(
+                    "{}",
+                    format_error(templates::FAILED_TO_EMIT, "error event", e)
+                );
+            }
         }
     }
 
@@ -140,21 +145,38 @@ pub mod utils {
         log_and_emit_error(app_handle, "VoiceSystem", "transcription", error, true);
 
         // Attempt voice system recovery
-        if let Some(controller_state) = app_handle.try_state::<std::sync::Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+        if let Some(controller_state) = app_handle.try_state::<std::sync::Arc<
+            std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>,
+        >>() {
             let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
                 app_handle.clone(),
-                controller_state
-            ).await;
+                controller_state,
+            )
+            .await;
         }
 
         // Reset dictation state
         let app_state = app_handle.state::<crate::state::AppState>();
         if let Err(e) = app_state.set_dictation_active(false) {
-            error!("{}", format_error(templates::FAILED_TO_UPDATE, "dictation state during error recovery", e));
+            error!(
+                "{}",
+                format_error(
+                    templates::FAILED_TO_UPDATE,
+                    "dictation state during error recovery",
+                    e
+                )
+            );
         }
 
         if let Err(e) = app_handle.emit(crate::constants::events::dictation::ACTIVE, false) {
-            error!("{}", format_error(templates::FAILED_TO_EMIT, "dictation-active event after error recovery", e));
+            error!(
+                "{}",
+                format_error(
+                    templates::FAILED_TO_EMIT,
+                    "dictation-active event after error recovery",
+                    e
+                )
+            );
         }
     }
 
@@ -170,7 +192,14 @@ pub mod utils {
         crate::tts::stop_speech();
 
         if let Err(e) = app_handle.emit(crate::constants::events::agent::ACTIVE, false) {
-            error!("{}", format_error(templates::FAILED_TO_EMIT, "agent-active event after error recovery", e));
+            error!(
+                "{}",
+                format_error(
+                    templates::FAILED_TO_EMIT,
+                    "agent-active event after error recovery",
+                    e
+                )
+            );
         }
     }
 
@@ -179,7 +208,9 @@ pub mod utils {
         log_and_emit_error(app_handle, "WindowSystem", "management", error, false);
 
         // Attempt to restore main window if needed
-        if let Some(main_window) = app_handle.get_webview_window(crate::constants::window_labels::MAIN) {
+        if let Some(main_window) =
+            app_handle.get_webview_window(crate::constants::window_labels::MAIN)
+        {
             let _ = main_window.show();
             let _ = main_window.set_focus();
         }
@@ -202,21 +233,34 @@ pub mod utils {
         });
 
         if let Err(e) = app_handle.emit(events::permissions::GUIDANCE_NEEDED, guidance_payload) {
-            error!("{}", format_error(templates::FAILED_TO_EMIT, "permission guidance event", e));
+            error!(
+                "{}",
+                format_error(templates::FAILED_TO_EMIT, "permission guidance event", e)
+            );
         }
     }
 
     /// Safe lock wrapper that logs errors instead of panicking
-    pub fn safe_lock<'a, T>(mutex: &'a std::sync::Mutex<T>, operation: &str) -> Result<std::sync::MutexGuard<'a, T>, String> {
+    pub fn safe_lock<'a, T>(
+        mutex: &'a std::sync::Mutex<T>,
+        operation: &str,
+    ) -> Result<std::sync::MutexGuard<'a, T>, String> {
         mutex.lock().map_err(|e| {
-            let error_msg = format_error(templates::FAILED_TO_ACCESS, &format!("lock for {}", operation), e);
+            let error_msg = format_error(
+                templates::FAILED_TO_ACCESS,
+                &format!("lock for {}", operation),
+                e,
+            );
             error!("{}", error_msg);
             error_msg
         })
     }
 
     /// Safe async lock wrapper that logs errors instead of panicking
-    pub async fn safe_async_lock<'a, T>(mutex: &'a tokio::sync::Mutex<T>, operation: &str) -> tokio::sync::MutexGuard<'a, T> {
+    pub async fn safe_async_lock<'a, T>(
+        mutex: &'a tokio::sync::Mutex<T>,
+        operation: &str,
+    ) -> tokio::sync::MutexGuard<'a, T> {
         // Tokio mutexes don't poison, so we can always get the lock
         // We just include the operation parameter for logging consistency
         if operation.is_empty() {
@@ -245,7 +289,14 @@ pub mod utils {
         match value.parse() {
             Ok(parsed) => Some(parsed),
             Err(_) => {
-                warn!("{}", format_error(templates::FAILED_TO_PROCESS, &format!("parse {} from value: '{}'", field_name, value), "Invalid format"));
+                warn!(
+                    "{}",
+                    format_error(
+                        templates::FAILED_TO_PROCESS,
+                        &format!("parse {} from value: '{}'", field_name, value),
+                        "Invalid format"
+                    )
+                );
                 None
             }
         }
@@ -279,7 +330,8 @@ pub mod test_utils {
 
     /// Test error message formatting
     pub fn test_error_formatting() {
-        let formatted = utils::format_error_message("TestComponent", "test_operation", "test error");
+        let formatted =
+            utils::format_error_message("TestComponent", "test_operation", "test error");
         assert_eq!(formatted, "[TestComponent] test_operation: test error");
         println!("✅ Error formatting works correctly");
     }

@@ -450,7 +450,10 @@ impl VisualReasoningEngine {
         let analysis_start = Instant::now();
         let analysis_id = Uuid::new_v4().to_string();
 
-        info!("Starting enhanced visual reasoning analysis: {}", analysis_id);
+        info!(
+            "Starting enhanced visual reasoning analysis: {}",
+            analysis_id
+        );
 
         // Phase 1: Multimodal Processing
         let scene_understanding = if self.config.enable_multimodal_processing {
@@ -526,7 +529,8 @@ impl VisualReasoningEngine {
             // Maintain cache size with proper LRU eviction
             if cache.len() > 100 {
                 // Find the least recently used entry
-                let lru_key = cache.iter()
+                let lru_key = cache
+                    .iter()
                     .min_by_key(|(_, entry)| entry.last_accessed)
                     .map(|(key, _)| key.clone());
 
@@ -556,7 +560,10 @@ impl VisualReasoningEngine {
             }
         }
 
-        info!("Enhanced visual reasoning completed in {:?}", processing_time);
+        info!(
+            "Enhanced visual reasoning completed in {:?}",
+            processing_time
+        );
         Ok(result)
     }
 
@@ -603,17 +610,21 @@ impl VisualReasoningEngine {
         let history = self.state_history.read().await;
 
         let average_processing_time = if !cache.is_empty() {
-            cache.values()
+            cache
+                .values()
                 .map(|entry| entry.result.processing_time_ms)
-                .sum::<u64>() / cache.len() as u64
+                .sum::<u64>()
+                / cache.len() as u64
         } else {
             0
         };
 
         let average_confidence = if !cache.is_empty() {
-            cache.values()
+            cache
+                .values()
                 .map(|entry| entry.result.reasoning_confidence)
-                .sum::<f32>() / cache.len() as f32
+                .sum::<f32>()
+                / cache.len() as f32
         } else {
             0.0
         };
@@ -651,17 +662,22 @@ impl VisualReasoningEngine {
 
         // Cross-modal alignment confidence
         if !cross_modal_alignments.is_empty() {
-            let cross_modal_confidence = cross_modal_alignments.iter()
+            let cross_modal_confidence = cross_modal_alignments
+                .iter()
                 .map(|alignment| alignment.confidence)
-                .sum::<f32>() / cross_modal_alignments.len() as f32;
+                .sum::<f32>()
+                / cross_modal_alignments.len() as f32;
             confidence_components.push(cross_modal_confidence);
         }
 
         // Hierarchical structure confidence
         if !hierarchical_structure.levels.is_empty() {
-            let structural_confidence = hierarchical_structure.levels.iter()
+            let structural_confidence = hierarchical_structure
+                .levels
+                .iter()
                 .map(|level| level.semantic_coherence)
-                .sum::<f32>() / hierarchical_structure.levels.len() as f32;
+                .sum::<f32>()
+                / hierarchical_structure.levels.len() as f32;
             confidence_components.push(structural_confidence);
         }
 
@@ -716,44 +732,42 @@ impl MultimodalProcessor {
         debug!("MultimodalProcessor analyzing scene");
 
         // Simulate multimodal scene analysis
-        let primary_elements = vec![
-            UIElement {
-                id: "element_1".to_string(),
-                element_type: ElementType::Button,
-                bounds: ElementBounds {
-                    x: 100.0,
-                    y: 200.0,
-                    width: 120.0,
-                    height: 40.0,
-                    center_x: 160.0,
-                    center_y: 220.0,
-                    area: 4800.0,
-                },
-                visual_features: VisualFeatures {
-                    colors: vec!["#007AFF".to_string()],
-                    textures: vec!["smooth".to_string()],
-                    shapes: vec!["rectangle".to_string()],
-                    typography: TypographyInfo {
-                        font_family: "SF Pro".to_string(),
-                        font_size: 16.0,
-                        font_weight: "medium".to_string(),
-                        text_color: "#FFFFFF".to_string(),
-                        text_content: "Submit".to_string(),
-                    },
-                    visual_prominence: 0.8,
-                    contrast_ratio: 7.2,
-                },
-                semantic_meaning: "Primary action button".to_string(),
-                interaction_state: InteractionState::Default,
-                accessibility_info: AccessibilityInfo {
-                    role: "button".to_string(),
-                    label: "Submit".to_string(),
-                    description: "Submit the form".to_string(),
-                    keyboard_accessible: true,
-                    screen_reader_text: "Submit button".to_string(),
-                },
+        let primary_elements = vec![UIElement {
+            id: "element_1".to_string(),
+            element_type: ElementType::Button,
+            bounds: ElementBounds {
+                x: 100.0,
+                y: 200.0,
+                width: 120.0,
+                height: 40.0,
+                center_x: 160.0,
+                center_y: 220.0,
+                area: 4800.0,
             },
-        ];
+            visual_features: VisualFeatures {
+                colors: vec!["#007AFF".to_string()],
+                textures: vec!["smooth".to_string()],
+                shapes: vec!["rectangle".to_string()],
+                typography: TypographyInfo {
+                    font_family: "SF Pro".to_string(),
+                    font_size: 16.0,
+                    font_weight: "medium".to_string(),
+                    text_color: "#FFFFFF".to_string(),
+                    text_content: "Submit".to_string(),
+                },
+                visual_prominence: 0.8,
+                contrast_ratio: 7.2,
+            },
+            semantic_meaning: "Primary action button".to_string(),
+            interaction_state: InteractionState::Default,
+            accessibility_info: AccessibilityInfo {
+                role: "button".to_string(),
+                label: "Submit".to_string(),
+                description: "Submit the form".to_string(),
+                keyboard_accessible: true,
+                screen_reader_text: "Submit button".to_string(),
+            },
+        }];
 
         Ok(SceneUnderstanding {
             scene_type: SceneType::Form,
@@ -784,7 +798,9 @@ impl SpatialReasoner {
 
         for (i, element1) in elements.iter().enumerate() {
             for (j, element2) in elements.iter().enumerate() {
-                if i >= j { continue; }
+                if i >= j {
+                    continue;
+                }
 
                 let distance = self.calculate_distance(&element1.bounds, &element2.bounds);
                 let direction = self.calculate_direction(&element1.bounds, &element2.bounds);
@@ -868,16 +884,20 @@ impl SpatialReasoner {
         }
     }
 
-    fn calculate_containment(&self, bounds1: &ElementBounds, bounds2: &ElementBounds) -> ContainmentType {
-        let b1_contains_b2 = bounds1.x <= bounds2.x &&
-                            bounds1.y <= bounds2.y &&
-                            bounds1.x + bounds1.width >= bounds2.x + bounds2.width &&
-                            bounds1.y + bounds1.height >= bounds2.y + bounds2.height;
+    fn calculate_containment(
+        &self,
+        bounds1: &ElementBounds,
+        bounds2: &ElementBounds,
+    ) -> ContainmentType {
+        let b1_contains_b2 = bounds1.x <= bounds2.x
+            && bounds1.y <= bounds2.y
+            && bounds1.x + bounds1.width >= bounds2.x + bounds2.width
+            && bounds1.y + bounds1.height >= bounds2.y + bounds2.height;
 
-        let b2_contains_b1 = bounds2.x <= bounds1.x &&
-                            bounds2.y <= bounds1.y &&
-                            bounds2.x + bounds2.width >= bounds1.x + bounds1.width &&
-                            bounds2.y + bounds2.height >= bounds1.y + bounds1.height;
+        let b2_contains_b1 = bounds2.x <= bounds1.x
+            && bounds2.y <= bounds1.y
+            && bounds2.x + bounds2.width >= bounds1.x + bounds1.width
+            && bounds2.y + bounds2.height >= bounds1.y + bounds1.height;
 
         if b1_contains_b2 {
             ContainmentType::Container
@@ -908,14 +928,12 @@ impl TemporalModeler {
         Ok(TemporalContext {
             state_history: vec![],
             transition_patterns: vec![],
-            predicted_states: vec![
-                PredictedState {
-                    state_description: "Form submitted successfully".to_string(),
-                    probability: 0.8,
-                    conditions: vec!["valid_input".to_string()],
-                    timeline_ms: 2000,
-                },
-            ],
+            predicted_states: vec![PredictedState {
+                state_description: "Form submitted successfully".to_string(),
+                probability: 0.8,
+                conditions: vec!["valid_input".to_string()],
+                timeline_ms: 2000,
+            }],
             interaction_timeline: vec![],
             temporal_confidence: 0.7,
         })
@@ -968,21 +986,23 @@ impl HierarchicalAnalyzer {
     ) -> Result<HierarchicalStructure, AgentError> {
         debug!("HierarchicalAnalyzer analyzing structure");
 
-        let levels = vec![
-            StructureLevel {
-                level: 0,
-                elements: scene.primary_elements.iter().map(|e| StructuralElement {
+        let levels = vec![StructureLevel {
+            level: 0,
+            elements: scene
+                .primary_elements
+                .iter()
+                .map(|e| StructuralElement {
                     id: e.id.clone(),
                     parent_id: None,
                     children_ids: vec![],
                     element_type: format!("{:?}", e.element_type),
                     importance_score: 0.8,
                     semantic_role: e.semantic_meaning.clone(),
-                }).collect(),
-                relationships: vec![],
-                semantic_coherence: 0.8,
-            },
-        ];
+                })
+                .collect(),
+            relationships: vec![],
+            semantic_coherence: 0.8,
+        }];
 
         Ok(HierarchicalStructure {
             root_level: levels[0].clone(),
@@ -1068,5 +1088,3 @@ impl Default for HierarchicalStructure {
         }
     }
 }
-
-

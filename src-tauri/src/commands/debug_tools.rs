@@ -18,14 +18,15 @@ pub async fn debug_tool_configuration(state: State<'_, AppState>) -> Result<Valu
     let computer_enabled = config_guard.is_tool_enabled("computer");
 
     // Get category status
-    let anthropic_category_enabled = config_guard.category_enabled
+    let anthropic_category_enabled = config_guard
+        .category_enabled
         .get(&crate::agent::tools::tool_config::ToolCategory::AnthropicComputerUse)
         .copied()
         .unwrap_or(true);
 
     // Get all tools in AnthropicComputerUse category
     let anthropic_tools = config_guard.get_tools_by_category(
-        &crate::agent::tools::tool_config::ToolCategory::AnthropicComputerUse
+        &crate::agent::tools::tool_config::ToolCategory::AnthropicComputerUse,
     );
 
     // Get all enabled tools
@@ -64,12 +65,18 @@ pub async fn debug_tool_configuration(state: State<'_, AppState>) -> Result<Valu
 
     info!("Computer tool exists: {:?}", computer_config.is_some());
     info!("Computer tool enabled: {}", computer_enabled);
-    info!("AnthropicComputerUse category enabled: {}", anthropic_category_enabled);
+    info!(
+        "AnthropicComputerUse category enabled: {}",
+        anthropic_category_enabled
+    );
     info!("Total tools: {}", config_guard.tools.len());
     info!("Enabled tools: {}", enabled_tools.len());
 
     if let Some(ref config) = computer_config {
-        info!("Computer tool config: required={}, enabled={}", config.required, config.enabled);
+        info!(
+            "Computer tool config: required={}, enabled={}",
+            config.required, config.enabled
+        );
     } else {
         warn!("Computer tool configuration not found!");
     }
@@ -96,12 +103,16 @@ pub async fn debug_registered_tools(state: State<'_, AppState>) -> Result<Value,
             // Check for critical tools
             let has_computer = tool_names.iter().any(|name| name == "computer");
             let has_bash = tool_names.iter().any(|name| name == "bash");
-            let has_str_replace = tool_names.iter().any(|name| name == "str_replace_based_edit_tool");
+            let has_str_replace = tool_names
+                .iter()
+                .any(|name| name == "str_replace_based_edit_tool");
 
             // Count tools by API type
             let mut api_type_counts = std::collections::HashMap::new();
             for tool_def in &all_tools_defs {
-                *api_type_counts.entry(tool_def.api_type.clone()).or_insert(0) += 1;
+                *api_type_counts
+                    .entry(tool_def.api_type.clone())
+                    .or_insert(0) += 1;
             }
 
             let debug_info = json!({
@@ -147,7 +158,7 @@ pub async fn debug_registered_tools(state: State<'_, AppState>) -> Result<Value,
 #[command]
 pub async fn debug_reset_tool_config(
     app_handle: tauri::AppHandle,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<Value, String> {
     info!("=== RESETTING TOOL CONFIGURATION ===");
 
@@ -184,8 +195,14 @@ pub async fn debug_reset_tool_config(
     });
 
     info!("Tool configuration reset completed");
-    info!("Computer tool enabled before reset: {}", before_computer_enabled);
-    info!("Computer tool enabled after reset: {}", after_computer_enabled);
+    info!(
+        "Computer tool enabled before reset: {}",
+        before_computer_enabled
+    );
+    info!(
+        "Computer tool enabled after reset: {}",
+        after_computer_enabled
+    );
 
     Ok(reset_info)
 }

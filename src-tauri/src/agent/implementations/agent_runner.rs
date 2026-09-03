@@ -13,8 +13,8 @@ use crate::agent::core::{
 };
 // use crate::agent::tool_logger; // Added for logging
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
-use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing app state
 use crate::constants::events;
+use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing app state
 
 /// Default implementation of the AgentRunnable trait.
 /// Orchestrates the agent's execution flow using the provided components.
@@ -30,6 +30,10 @@ where
     max_steps: u32,
     current_step: u32,
     app_handle: Arc<AppHandle>, // Added AppHandle for logging
+    /// Parallel-session registry row this run belongs to, when session
+    /// tracking is active. Lets the approval wait surface `NeedsInput` in
+    /// the switcher UI and notify for background sessions (LAC-1432).
+    session_id: Option<crate::agents::AgentSessionId>,
 }
 
 impl<M, T> DefaultAgentRunner<M, T>
@@ -56,6 +60,7 @@ where
             max_steps,
             current_step: 0,
             app_handle: Arc::new(app_handle), // Store AppHandle
+            session_id: None,
         }
     }
 
@@ -76,7 +81,16 @@ where
             max_steps,
             current_step: 0,
             app_handle: Arc::new(app_handle), // Store AppHandle
+            session_id: None,
         }
+    }
+
+    /// Associate this runner with a parallel-session registry row so the
+    /// tool-approval wait can flip the session to `NeedsInput` and notify
+    /// the user when the session is running in the background (LAC-1432).
+    pub fn with_session_id(mut self, session_id: Option<crate::agents::AgentSessionId>) -> Self {
+        self.session_id = session_id;
+        self
     }
 
     /// Filter tools based on brain type to prevent access to inappropriate tools
@@ -103,10 +117,9 @@ where
         // {"end_coordinate": [end_x, end_y], "coordinate": [start_x, start_y]} -> use end_coordinate
         if let Some(end_coord_array) = input.get("end_coordinate").and_then(|c| c.as_array()) {
             if end_coord_array.len() == 2 {
-                if let (Some(x), Some(y)) = (
-                    end_coord_array[0].as_f64(),
-                    end_coord_array[1].as_f64()
-                ) {
+                if let (Some(x), Some(y)) =
+                    (end_coord_array[0].as_f64(), end_coord_array[1].as_f64())
+                {
                     return Some((x as i32, y as i32));
                 }
             }
@@ -115,10 +128,7 @@ where
         // Format 2: Anthropic Computer Use API - {"coordinate": [x, y]}
         if let Some(coord_array) = input.get("coordinate").and_then(|c| c.as_array()) {
             if coord_array.len() == 2 {
-                if let (Some(x), Some(y)) = (
-                    coord_array[0].as_f64(),
-                    coord_array[1].as_f64()
-                ) {
+                if let (Some(x), Some(y)) = (coord_array[0].as_f64(), coord_array[1].as_f64()) {
                     return Some((x as i32, y as i32));
                 }
             }
@@ -127,7 +137,7 @@ where
         // Format 3: Separate x/y fields - {"x": 100, "y": 200}
         if let (Some(x), Some(y)) = (
             input.get("x").and_then(|v| v.as_f64()),
-            input.get("y").and_then(|v| v.as_f64())
+            input.get("y").and_then(|v| v.as_f64()),
         ) {
             return Some((x as i32, y as i32));
         }
@@ -136,7 +146,7 @@ where
         if let Some(coord_obj) = input.get("coordinate").and_then(|c| c.as_object()) {
             if let (Some(x), Some(y)) = (
                 coord_obj.get("x").and_then(|v| v.as_f64()),
-                coord_obj.get("y").and_then(|v| v.as_f64())
+                coord_obj.get("y").and_then(|v| v.as_f64()),
             ) {
                 return Some((x as i32, y as i32));
             }
@@ -352,8 +362,10 @@ where
                         let is_error = crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&result.output);
                         let success = !is_error;
 
-                        let screenshot_base64 = if success &&
-                            (tool_call.name == "capture_screenshot" || tool_call.name == "browser_screenshot") {
+                        let screenshot_base64 = if success
+                            && (tool_call.name == "capture_screenshot"
+                                || tool_call.name == "browser_screenshot")
+                        {
                             if let Some(screenshot_data) = result.output.get("base64_image") {
                                 screenshot_data.as_str().map(|s| s.to_string())
                             } else if let Some(screenshot_data) = result.output.get("base64") {
@@ -425,16 +437,10 @@ where
             .iter()
             .map(|t| risk_classifier::classify_risk(&t.name, &t.input))
             .collect();
-        let max_risk = risk_levels
-            .iter()
-            .cloned()
-            .max()
-            .unwrap_or(RiskLevel::Low);
+        let max_risk = risk_levels.iter().cloned().max().unwrap_or(RiskLevel::Low);
 
         // Gate: skip approval unless the global flag is set OR any tool is risky.
-        if !app_state.is_tool_approval_required()
-            && !risk_classifier::needs_approval(&max_risk)
-        {
+        if !app_state.is_tool_approval_required() && !risk_classifier::needs_approval(&max_risk) {
             return Ok(true);
         }
 
@@ -531,6 +537,11 @@ where
             max_risk
         );
 
+        // Surface the wait in the parallel-session registry: the switcher
+        // row flips to "Needs input" and a background (unfocused) session
+        // fires a notification so the user knows to come look (LAC-1432).
+        let marked_needs_input = self.mark_session_needs_input(&batch_description).await;
+
         // Poll for up to timeout_seconds at 50 ms intervals.
         let poll_iterations = (approval_request.timeout_seconds * 1000 / 50) as i64;
         let mut remaining = poll_iterations;
@@ -540,6 +551,11 @@ where
             if *cancel_rx.borrow() {
                 log::info!("Cancellation detected during approval wait");
                 app_state.remove_tool_approval(&batch_id).await;
+                if marked_needs_input {
+                    // Guarded restore: no-ops when the cancel already moved
+                    // the session to Cancelling via the registry.
+                    self.clear_session_needs_input().await;
+                }
                 return Err(AgentError::Terminated);
             }
 
@@ -561,9 +577,16 @@ where
         }
 
         app_state.remove_tool_approval(&batch_id).await;
+        if marked_needs_input {
+            self.clear_session_needs_input().await;
+        }
 
         if !approved {
-            let reason = if remaining <= 0 { "timeout" } else { "user denied" };
+            let reason = if remaining <= 0 {
+                "timeout"
+            } else {
+                "user denied"
+            };
             log::warn!("Tool batch execution denied: {}", reason);
 
             for tool_call in batch {
@@ -582,6 +605,72 @@ where
         Ok(approved)
     }
 
+    /// Flip this runner's session row to `NeedsInput` while a tool-approval
+    /// prompt is pending. Emits the discrete needs-input lifecycle event,
+    /// rebroadcasts the session list for the switcher UI, and — when the
+    /// session is unfocused (running in the background) — sends a
+    /// notification so the user learns an agent is waiting on them
+    /// (LAC-1432 criterion 5b). Returns whether the transition happened;
+    /// the caller must call `clear_session_needs_input` once the wait
+    /// resolves.
+    async fn mark_session_needs_input(&self, description: &str) -> bool {
+        let Some(session_id) = self.session_id.as_ref() else {
+            return false;
+        };
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+        let registry = app_state.agent_sessions();
+        let Some(snapshot) = registry.begin_needs_input(session_id).await else {
+            return false;
+        };
+        let was_focused = snapshot.focused;
+        let agent_name = snapshot.agent_name.clone();
+
+        if let Err(e) = self.app_handle.emit(
+            crate::constants::events::agent_sessions::NEEDS_INPUT,
+            &snapshot,
+        ) {
+            log::error!("Failed to emit agent-session-needs-input: {}", e);
+        }
+        crate::agents::broadcast_sessions_updated(self.app_handle.as_ref(), &registry).await;
+
+        // The focused session's approval dialog is already on screen;
+        // notifying for it would be noise (same gate as terminal-state
+        // notifications in anthropic.rs).
+        if !was_focused && !crate::cli::headless::is_headless_mode() {
+            let data = crate::commands::notifications::NotificationData {
+                title: format!("{} — Needs input", agent_name),
+                message: description.chars().take(140).collect::<String>(),
+                level: "warning".to_string(),
+                important: Some(true),
+                timeout: None,
+            };
+            if let Err(e) = crate::commands::notifications::send_notification(
+                self.app_handle.as_ref().clone(),
+                app_state.clone(),
+                data,
+            )
+            .await
+            {
+                log::warn!("Failed to send needs-input notification: {}", e);
+            }
+        }
+        true
+    }
+
+    /// Restore the session to `Running` after the approval wait resolves.
+    /// The registry guards the transition, so a cancellation that landed
+    /// mid-wait (status `Cancelling`) is never overwritten.
+    async fn clear_session_needs_input(&self) {
+        let Some(session_id) = self.session_id.as_ref() else {
+            return;
+        };
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+        let registry = app_state.agent_sessions();
+        if registry.end_needs_input(session_id).await {
+            crate::agents::broadcast_sessions_updated(self.app_handle.as_ref(), &registry).await;
+        }
+    }
+
     /// Add tool result to memory with proper error handling
     async fn add_tool_result_to_memory(
         &mut self,
@@ -595,9 +684,7 @@ where
                 Ok(result) => {
                     // For computer tool with screenshot data, preserve the full JSON
                     // so the Anthropic provider can extract the base64 image later
-                    if tool_call.name == "computer"
-                        && result.output.get("base64_image").is_some()
-                    {
+                    if tool_call.name == "computer" && result.output.get("base64_image").is_some() {
                         serde_json::to_string(&result.output).unwrap_or_else(|_| {
                             crate::agents::base_agent::format_task_output(&result.output)
                         })
@@ -633,7 +720,8 @@ where
         let max_wait = std::time::Duration::from_millis(200); // Still much less than 350ms
         let tolerance = 3; // pixels tolerance for "close enough"
 
-        for attempt in 0..8 { // Max 8 attempts
+        for attempt in 0..8 {
+            // Max 8 attempts
             // Check timeout at the start of each iteration
             if start_time.elapsed() >= max_wait {
                 break;
@@ -641,10 +729,10 @@ where
 
             // Get current cursor position
             let app_state = self.app_handle.state::<crate::state::AppState>();
-            if let Ok((current_x, current_y)) = crate::commands::mouse::get_cursor_position(
-                (*self.app_handle).clone(),
-                app_state,
-            ).await {
+            if let Ok((current_x, current_y)) =
+                crate::commands::mouse::get_cursor_position((*self.app_handle).clone(), app_state)
+                    .await
+            {
                 // Check if we're close enough to target
                 let distance_x = (current_x - target_x as f64).abs();
                 let distance_y = (current_y - target_y as f64).abs();
@@ -676,7 +764,6 @@ where
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     }
-
 }
 
 #[async_trait]
@@ -921,6 +1008,10 @@ where
                     &tools,
                     Some((*self.app_handle).clone()),
                     Some(message_id),
+                    // Session-aware cancel channel (merged session+global for
+                    // session-tracked runs) so subprocess-based brains can kill
+                    // their child on focused-session cancel (LAC-3697).
+                    Some(cancel_rx.clone()),
                 )
                 .await?
         } else {
@@ -956,7 +1047,7 @@ where
                     mem.add_message(assistant_message.clone()).await?;
                 }
 
-                                // Execute tools with intelligent batching for performance optimization
+                // Execute tools with intelligent batching for performance optimization
                 let execution_result = self
                     .execute_tools_with_batching(tool_calls.clone(), &cancel_rx)
                     .await;
@@ -984,14 +1075,18 @@ where
 
                             // First pass: Find our assistant message and collect its tool call IDs
                             for msg in messages.iter().rev() {
-                                if matches!(msg.role, Role::Assistant) &&
-                                   msg.tool_calls.as_ref().map(|tc| tc.len() == tool_calls.len()).unwrap_or(false) {
+                                if matches!(msg.role, Role::Assistant)
+                                    && msg
+                                        .tool_calls
+                                        .as_ref()
+                                        .map(|tc| tc.len() == tool_calls.len())
+                                        .unwrap_or(false)
+                                {
                                     found_our_assistant_message = true;
                                     // Collect all tool call IDs from this assistant message
                                     if let Some(tool_calls) = &msg.tool_calls {
-                                        assistant_tool_call_ids = tool_calls.iter()
-                                            .map(|tc| tc.id.clone())
-                                            .collect();
+                                        assistant_tool_call_ids =
+                                            tool_calls.iter().map(|tc| tc.id.clone()).collect();
                                     }
                                     break;
                                 }
@@ -1000,10 +1095,13 @@ where
                             // Second pass: Count tool results that match our assistant's tool call IDs
                             if found_our_assistant_message {
                                 for msg in messages.iter().rev() {
-                                    if matches!(msg.role, Role::Tool) &&
-                                       msg.tool_call_id.as_ref()
-                                           .map(|id| assistant_tool_call_ids.contains(id))
-                                           .unwrap_or(false) {
+                                    if matches!(msg.role, Role::Tool)
+                                        && msg
+                                            .tool_call_id
+                                            .as_ref()
+                                            .map(|id| assistant_tool_call_ids.contains(id))
+                                            .unwrap_or(false)
+                                    {
                                         tool_result_count += 1;
                                     }
                                 }
@@ -1020,10 +1118,13 @@ where
                                 let mut messages_vec = messages;
                                 // Remove the assistant message with tool calls
                                 if let Some(last_message) = messages_vec.last() {
-                                    if matches!(last_message.role, Role::Assistant) &&
-                                       last_message.tool_calls.as_ref()
-                                           .map(|tc| tc.len() == tool_calls.len())
-                                           .unwrap_or(false) {
+                                    if matches!(last_message.role, Role::Assistant)
+                                        && last_message
+                                            .tool_calls
+                                            .as_ref()
+                                            .map(|tc| tc.len() == tool_calls.len())
+                                            .unwrap_or(false)
+                                    {
                                         messages_vec.pop();
 
                                         // Clear and rebuild memory without the orphaned message
@@ -1117,6 +1218,7 @@ mod tests {
             _tools: &[ToolDefinition],
             _app_handle: Option<AppHandle>,
             _message_id: Option<String>,
+            _cancel_rx: Option<crate::state::CancelReceiver>,
         ) -> Result<AgentAction, AgentError> {
             Ok(AgentAction::Finish("test response".to_string()))
         }
@@ -1242,15 +1344,16 @@ mod tests {
 
         // First pass: Find assistant message and collect tool call IDs
         for msg in messages.iter().rev() {
-            if matches!(msg.role, Role::Assistant) &&
-               msg.tool_calls.as_ref()
-                   .map(|tc| tc.len() == tool_calls.len())
-                   .unwrap_or(false) {
+            if matches!(msg.role, Role::Assistant)
+                && msg
+                    .tool_calls
+                    .as_ref()
+                    .map(|tc| tc.len() == tool_calls.len())
+                    .unwrap_or(false)
+            {
                 found_our_assistant_message = true;
                 if let Some(tool_calls) = &msg.tool_calls {
-                    assistant_tool_call_ids = tool_calls.iter()
-                        .map(|tc| tc.id.clone())
-                        .collect();
+                    assistant_tool_call_ids = tool_calls.iter().map(|tc| tc.id.clone()).collect();
                 }
                 break;
             }
@@ -1259,18 +1362,28 @@ mod tests {
         // Second pass: Count tool results that match our assistant's tool call IDs
         if found_our_assistant_message {
             for msg in messages.iter().rev() {
-                if matches!(msg.role, Role::Tool) &&
-                   msg.tool_call_id.as_ref()
-                       .map(|id| assistant_tool_call_ids.contains(id))
-                       .unwrap_or(false) {
+                if matches!(msg.role, Role::Tool)
+                    && msg
+                        .tool_call_id
+                        .as_ref()
+                        .map(|id| assistant_tool_call_ids.contains(id))
+                        .unwrap_or(false)
+                {
                     tool_result_count += 1;
                 }
             }
         }
 
         // Verify results
-        assert!(found_our_assistant_message, "Should have found the assistant message");
-        assert_eq!(assistant_tool_call_ids.len(), 2, "Should have found 2 tool call IDs");
+        assert!(
+            found_our_assistant_message,
+            "Should have found the assistant message"
+        );
+        assert_eq!(
+            assistant_tool_call_ids.len(),
+            2,
+            "Should have found 2 tool call IDs"
+        );
         assert_eq!(tool_result_count, 1, "Should have counted 1 tool result");
 
         // Test case 2: No tool results
@@ -1283,15 +1396,16 @@ mod tests {
 
         // First pass
         for msg in messages2.iter().rev() {
-            if matches!(msg.role, Role::Assistant) &&
-               msg.tool_calls.as_ref()
-                   .map(|tc| tc.len() == tool_calls.len())
-                   .unwrap_or(false) {
+            if matches!(msg.role, Role::Assistant)
+                && msg
+                    .tool_calls
+                    .as_ref()
+                    .map(|tc| tc.len() == tool_calls.len())
+                    .unwrap_or(false)
+            {
                 found_our_assistant_message2 = true;
                 if let Some(tool_calls) = &msg.tool_calls {
-                    assistant_tool_call_ids2 = tool_calls.iter()
-                        .map(|tc| tc.id.clone())
-                        .collect();
+                    assistant_tool_call_ids2 = tool_calls.iter().map(|tc| tc.id.clone()).collect();
                 }
                 break;
             }
@@ -1302,7 +1416,7 @@ mod tests {
             for msg in messages2.iter().rev() {
                 if matches!(msg.role, Role::Tool) {
                     if let Some(tool_call_id) = &msg.tool_call_id {
-                        if assistant_tool_call_ids2.contains(&tool_call_id) {
+                        if assistant_tool_call_ids2.contains(tool_call_id) {
                             tool_result_count2 += 1;
                         }
                     }
@@ -1311,8 +1425,15 @@ mod tests {
         }
 
         // Verify results for case 2
-        assert!(found_our_assistant_message2, "Should have found the assistant message");
-        assert_eq!(assistant_tool_call_ids2.len(), 2, "Should have found 2 tool call IDs");
+        assert!(
+            found_our_assistant_message2,
+            "Should have found the assistant message"
+        );
+        assert_eq!(
+            assistant_tool_call_ids2.len(),
+            2,
+            "Should have found 2 tool call IDs"
+        );
         assert_eq!(tool_result_count2, 0, "Should have counted 0 tool results");
     }
 
@@ -1326,7 +1447,7 @@ mod tests {
         use serde_json::json;
 
         // Any number of tools should just be executed as provided
-        let tools = vec![
+        let tools = [
             ToolCall {
                 id: "1".to_string(),
                 name: "computer".to_string(),
@@ -1444,10 +1565,9 @@ mod tests {
             // For drag operations, end_coordinate represents the target destination for movement completion
             if let Some(end_coord_array) = input.get("end_coordinate").and_then(|c| c.as_array()) {
                 if end_coord_array.len() == 2 {
-                    if let (Some(x), Some(y)) = (
-                        end_coord_array[0].as_f64(),
-                        end_coord_array[1].as_f64()
-                    ) {
+                    if let (Some(x), Some(y)) =
+                        (end_coord_array[0].as_f64(), end_coord_array[1].as_f64())
+                    {
                         return Some((x as i32, y as i32));
                     }
                 }
@@ -1456,10 +1576,7 @@ mod tests {
             // Format 2: Anthropic Computer Use API - {"coordinate": [x, y]}
             if let Some(coord_array) = input.get("coordinate").and_then(|c| c.as_array()) {
                 if coord_array.len() == 2 {
-                    if let (Some(x), Some(y)) = (
-                        coord_array[0].as_f64(),
-                        coord_array[1].as_f64()
-                    ) {
+                    if let (Some(x), Some(y)) = (coord_array[0].as_f64(), coord_array[1].as_f64()) {
                         return Some((x as i32, y as i32));
                     }
                 }
@@ -1468,7 +1585,7 @@ mod tests {
             // Format 3: Separate x/y fields - {"x": 100, "y": 200}
             if let (Some(x), Some(y)) = (
                 input.get("x").and_then(|v| v.as_f64()),
-                input.get("y").and_then(|v| v.as_f64())
+                input.get("y").and_then(|v| v.as_f64()),
             ) {
                 return Some((x as i32, y as i32));
             }
@@ -1477,7 +1594,7 @@ mod tests {
             if let Some(coord_obj) = input.get("coordinate").and_then(|c| c.as_object()) {
                 if let (Some(x), Some(y)) = (
                     coord_obj.get("x").and_then(|v| v.as_f64()),
-                    coord_obj.get("y").and_then(|v| v.as_f64())
+                    coord_obj.get("y").and_then(|v| v.as_f64()),
                 ) {
                     return Some((x as i32, y as i32));
                 }

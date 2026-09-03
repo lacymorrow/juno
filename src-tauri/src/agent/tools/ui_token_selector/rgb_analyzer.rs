@@ -3,8 +3,10 @@
 //! Implements the ShowUI paper's approach to treating screenshots as connected graphs
 //! using RGB color space analysis for identifying redundant visual relationships.
 
-use crate::agent::tools::ui_token_selector::{TokenSelectionError, RGBColor, VisualToken, TokenType, DisplayInfo};
 use crate::agent::tools::ui_token_selector::config::TokenSelectionConfig;
+use crate::agent::tools::ui_token_selector::{
+    DisplayInfo, RGBColor, TokenSelectionError, TokenType, VisualToken,
+};
 use image::{DynamicImage, ImageBuffer, Rgba};
 use tracing::{debug, info};
 
@@ -85,7 +87,10 @@ impl RGBConnectedGraphAnalyzer {
     pub async fn analyze_image(&self, image: &DynamicImage) -> Result<RGBConnectedGraph, String> {
         let (width, height) = (image.width(), image.height());
 
-        info!("Analyzing {}x{} image with RGB connected graph approach", width, height);
+        info!(
+            "Analyzing {}x{} image with RGB connected graph approach",
+            width, height
+        );
 
         // Convert to RGB format for analysis
         let rgb_image = image.to_rgb8();
@@ -96,11 +101,15 @@ impl RGBConnectedGraphAnalyzer {
 
         // Step 2: Build connection matrix based on color similarity
         let connections = self.build_connection_matrix(&tokens).await?;
-        debug!("Built connection matrix with {} connections",
-               connections.iter().flatten().filter(|&&x| x).count());
+        debug!(
+            "Built connection matrix with {} connections",
+            connections.iter().flatten().filter(|&&x| x).count()
+        );
 
         // Step 3: Identify redundancy groups
-        let redundancy_groups = self.identify_redundancy_groups(&tokens, &connections).await?;
+        let redundancy_groups = self
+            .identify_redundancy_groups(&tokens, &connections)
+            .await?;
         debug!("Identified {} redundancy groups", redundancy_groups.len());
 
         Ok(RGBConnectedGraph {
@@ -113,7 +122,10 @@ impl RGBConnectedGraphAnalyzer {
     }
 
     /// Extracts visual tokens from an RGB image using patch-based analysis
-    async fn extract_visual_tokens(&self, image: &image::RgbImage) -> Result<Vec<VisualToken>, String> {
+    async fn extract_visual_tokens(
+        &self,
+        image: &image::RgbImage,
+    ) -> Result<Vec<VisualToken>, String> {
         let (width, height) = image.dimensions();
         let mut tokens = Vec::new();
         let mut _token_id = 0;
@@ -127,18 +139,22 @@ impl RGBConnectedGraphAnalyzer {
                 let patch_height = (patch_size).min(height - y);
 
                 // Analyze patch
-                let (dominant_color, color_variance) = self.analyze_patch(image, x, y, patch_width, patch_height)?;
+                let (dominant_color, color_variance) =
+                    self.analyze_patch(image, x, y, patch_width, patch_height)?;
 
                 // Calculate importance score based on color variance and position
                 let importance_score = self.calculate_importance_score(
                     &dominant_color,
                     color_variance,
-                    x, y,
-                    width, height
+                    x,
+                    y,
+                    width,
+                    height,
                 );
 
                 // Classify token type
-                let token_type = self.classify_token_type(&dominant_color, color_variance, importance_score);
+                let token_type =
+                    self.classify_token_type(&dominant_color, color_variance, importance_score);
 
                 let token = VisualToken {
                     x,
@@ -168,7 +184,7 @@ impl RGBConnectedGraphAnalyzer {
         x: u32,
         y: u32,
         width: u32,
-        height: u32
+        height: u32,
     ) -> Result<(RGBColor, f32), String> {
         let mut r_sum = 0u64;
         let mut g_sum = 0u64;
@@ -250,7 +266,12 @@ impl RGBConnectedGraphAnalyzer {
         }
 
         if pixel_count == 0 {
-            return Ok(RGBAColor { r: 0, g: 0, b: 0, a: 255 });
+            return Ok(RGBAColor {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            });
         }
 
         Ok(RGBAColor {
@@ -309,7 +330,8 @@ impl RGBConnectedGraphAnalyzer {
         // Center-weighted importance (UI elements often in center)
         let center_x = image_width as f32 / 2.0;
         let center_y = image_height as f32 / 2.0;
-        let distance_from_center = ((x as f32 - center_x).powi(2) + (y as f32 - center_y).powi(2)).sqrt();
+        let distance_from_center =
+            ((x as f32 - center_x).powi(2) + (y as f32 - center_y).powi(2)).sqrt();
         let max_distance = (center_x.powi(2) + center_y.powi(2)).sqrt();
         let center_factor = 1.0 - (distance_from_center / max_distance);
         score += center_factor * 0.2;
@@ -340,7 +362,10 @@ impl RGBConnectedGraphAnalyzer {
     }
 
     /// Builds connection matrix between tokens based on color similarity
-    async fn build_connection_matrix(&self, tokens: &[VisualToken]) -> Result<Vec<Vec<bool>>, String> {
+    async fn build_connection_matrix(
+        &self,
+        tokens: &[VisualToken],
+    ) -> Result<Vec<Vec<bool>>, String> {
         let token_count = tokens.len();
         let mut connections = vec![vec![false; token_count]; token_count];
 
@@ -348,7 +373,11 @@ impl RGBConnectedGraphAnalyzer {
 
         for i in 0..token_count {
             for j in i + 1..token_count {
-                if self.are_colors_similar(&tokens[i].dominant_color, &tokens[j].dominant_color, similarity_threshold) {
+                if self.are_colors_similar(
+                    &tokens[i].dominant_color,
+                    &tokens[j].dominant_color,
+                    similarity_threshold,
+                ) {
                     connections[i][j] = true;
                     connections[j][i] = true;
                 }
@@ -369,7 +398,11 @@ impl RGBConnectedGraphAnalyzer {
     }
 
     /// Identifies redundancy groups using connected components
-    async fn identify_redundancy_groups(&self, tokens: &[VisualToken], connections: &[Vec<bool>]) -> Result<Vec<Vec<u32>>, String> {
+    async fn identify_redundancy_groups(
+        &self,
+        tokens: &[VisualToken],
+        connections: &[Vec<bool>],
+    ) -> Result<Vec<Vec<u32>>, String> {
         let token_count = tokens.len();
         let mut visited = vec![false; token_count];
         let mut groups = Vec::new();
@@ -390,7 +423,13 @@ impl RGBConnectedGraphAnalyzer {
     }
 
     /// Depth-first search to collect connected tokens into a group
-    fn dfs_collect_group(&self, token_idx: usize, visited: &mut [bool], group: &mut Vec<u32>, connections: &[Vec<bool>]) {
+    fn dfs_collect_group(
+        &self,
+        token_idx: usize,
+        visited: &mut [bool],
+        group: &mut Vec<u32>,
+        connections: &[Vec<bool>],
+    ) {
         visited[token_idx] = true;
         group.push(token_idx as u32);
 
@@ -426,13 +465,17 @@ impl RGBConnectedGraphAnalyzer {
         let patches = self.create_adaptive_patches(image_buffer, adaptive_patch_size.clone())?;
 
         // Perform advanced color similarity analysis
-        let similarity_graph = self.build_advanced_similarity_graph(&patches, display_info).await?;
+        let similarity_graph = self
+            .build_advanced_similarity_graph(&patches, display_info)
+            .await?;
 
         // Find connected components with importance weighting
-        let connected_components = self.find_weighted_connected_components(&similarity_graph, &patches)?;
+        let connected_components =
+            self.find_weighted_connected_components(&similarity_graph, &patches)?;
 
         // Calculate importance scores with UI-specific heuristics
-        let importance_scores = self.calculate_ui_importance_scores(&patches, &connected_components, display_info)?;
+        let importance_scores =
+            self.calculate_ui_importance_scores(&patches, &connected_components, display_info)?;
 
         let processing_time = start_time.elapsed();
         let total_patches = patches.len();
@@ -462,11 +505,11 @@ impl RGBConnectedGraphAnalyzer {
         let display_height = display_info.bounds.height as u32;
 
         let base_size = if display_width >= 3840 || display_height >= 2160 {
-            32  // HighDPI - 4K+ displays
+            32 // HighDPI - 4K+ displays
         } else if display_width >= 1920 || display_height >= 1080 {
-            24  // Standard - 1080p-1440p displays
+            24 // Standard - 1080p-1440p displays
         } else {
-            16  // Low - Sub-1080p displays
+            16 // Low - Sub-1080p displays
         };
 
         // Adaptive sizing based on image complexity
@@ -551,7 +594,9 @@ impl RGBConnectedGraphAnalyzer {
 
         debug!(
             "Image complexity analysis: variations={:.2}%, edges={:.2}%, factor={:.2}",
-            variation_ratio * 100.0, edge_ratio * 100.0, complexity_factor
+            variation_ratio * 100.0,
+            edge_ratio * 100.0,
+            complexity_factor
         );
 
         Ok(complexity_factor.clamp(0.5, 1.5))
@@ -581,11 +626,22 @@ impl RGBConnectedGraphAnalyzer {
                 if patch_width >= 8 && patch_height >= 8 {
                     // Calculate average color for this patch
                     let avg_color = self.calculate_patch_average_color(
-                        image_buffer, x, y, patch_width, patch_height
+                        image_buffer,
+                        x,
+                        y,
+                        patch_width,
+                        patch_height,
                     )?;
 
                     // Determine patch type based on color characteristics
-                    let patch_type = self.classify_patch_type(&avg_color, image_buffer, x, y, patch_width, patch_height)?;
+                    let patch_type = self.classify_patch_type(
+                        &avg_color,
+                        image_buffer,
+                        x,
+                        y,
+                        patch_width,
+                        patch_height,
+                    )?;
 
                     patches.push(ImagePatch {
                         id: patches.len(),
@@ -601,7 +657,12 @@ impl RGBConnectedGraphAnalyzer {
             }
         }
 
-        info!("Created {} adaptive patches with {}x{} base size", patches.len(), patch_size.width, patch_size.height);
+        info!(
+            "Created {} adaptive patches with {}x{} base size",
+            patches.len(),
+            patch_size.width,
+            patch_size.height
+        );
         Ok(patches)
     }
 
@@ -734,10 +795,11 @@ impl RGBConnectedGraphAnalyzer {
                         }
 
                         // Calculate base color similarity
-                        let color_similarity = 1.0 - Self::calculate_color_distance_static(
-                            &patch1.average_color,
-                            &patch2.average_color,
-                        ) / 255.0;
+                        let color_similarity = 1.0
+                            - Self::calculate_color_distance_static(
+                                &patch1.average_color,
+                                &patch2.average_color,
+                            ) / 255.0;
 
                         if color_similarity < config.rgb_analysis.color_similarity_threshold {
                             continue;
@@ -745,12 +807,15 @@ impl RGBConnectedGraphAnalyzer {
 
                         // Apply spatial proximity weighting
                         let spatial_weight = Self::calculate_spatial_weight_static(
-                            patch1, patch2, &display_info_clone
+                            patch1,
+                            patch2,
+                            &display_info_clone,
                         );
 
                         // Apply patch type compatibility
                         let type_weight = Self::calculate_type_compatibility_static(
-                            &patch1.patch_type, &patch2.patch_type
+                            &patch1.patch_type,
+                            &patch2.patch_type,
                         );
 
                         // Combined similarity score
@@ -770,15 +835,22 @@ impl RGBConnectedGraphAnalyzer {
 
         // Collect results from all tasks
         for task in similarity_tasks {
-            let chunk_similarities = task.await
-                .map_err(|e| TokenSelectionError::ProcessingError(format!("Similarity calculation failed: {}", e)))?;
+            let chunk_similarities = task.await.map_err(|e| {
+                TokenSelectionError::ProcessingError(format!(
+                    "Similarity calculation failed: {}",
+                    e
+                ))
+            })?;
 
             for (i, j, similarity) in chunk_similarities {
                 graph.add_edge(i, j, similarity);
             }
         }
 
-        info!("Built advanced similarity graph with {} edges", graph.edge_count());
+        info!(
+            "Built advanced similarity graph with {} edges",
+            graph.edge_count()
+        );
         Ok(graph)
     }
 
@@ -826,7 +898,8 @@ impl RGBConnectedGraphAnalyzer {
             (PatchType::Background, _) | (_, PatchType::Background) => 0.9,
 
             // UI elements can merge with content
-            (PatchType::UIElement, PatchType::Content) | (PatchType::Content, PatchType::UIElement) => 0.6,
+            (PatchType::UIElement, PatchType::Content)
+            | (PatchType::Content, PatchType::UIElement) => 0.6,
 
             // Interactive elements should generally stay separate
             (PatchType::Interactive, _) | (_, PatchType::Interactive) => 0.3,
@@ -865,7 +938,9 @@ impl RGBConnectedGraphAnalyzer {
 
                 // Add connected neighbors
                 for (neighbor_idx, weight) in graph.get_neighbors(current_idx) {
-                    if !visited[*neighbor_idx] && *weight >= self.config.rgb_analysis.color_similarity_threshold {
+                    if !visited[*neighbor_idx]
+                        && *weight >= self.config.rgb_analysis.color_similarity_threshold
+                    {
                         stack.push(*neighbor_idx);
                         total_weight += *weight;
                     }
@@ -902,9 +977,8 @@ impl RGBConnectedGraphAnalyzer {
         let mut importance_scores = vec![0.0; patches.len()];
 
         for component in components {
-            let component_importance = self.calculate_component_importance(
-                component, patches, display_info
-            )?;
+            let component_importance =
+                self.calculate_component_importance(component, patches, display_info)?;
 
             // Distribute importance to all patches in component
             for &patch_idx in &component.patch_indices {
@@ -913,14 +987,19 @@ impl RGBConnectedGraphAnalyzer {
         }
 
         // Normalize scores to 0-1 range
-        let max_score = importance_scores.iter().fold(0.0f32, |acc, &score| acc.max(score));
+        let max_score = importance_scores
+            .iter()
+            .fold(0.0f32, |acc, &score| acc.max(score));
         if max_score > 0.0 {
             for score in &mut importance_scores {
                 *score /= max_score;
             }
         }
 
-        debug!("Calculated UI importance scores for {} patches", patches.len());
+        debug!(
+            "Calculated UI importance scores for {} patches",
+            patches.len()
+        );
         Ok(importance_scores)
     }
 
@@ -954,8 +1033,8 @@ impl RGBConnectedGraphAnalyzer {
             let patch_center_x = patch.x as f32 + patch.width as f32 / 2.0;
             let patch_center_y = patch.y as f32 + patch.height as f32 / 2.0;
 
-            let distance_from_center = ((patch_center_x - center_x).powi(2) +
-                                      (patch_center_y - center_y).powi(2)).sqrt();
+            let distance_from_center =
+                ((patch_center_x - center_x).powi(2) + (patch_center_y - center_y).powi(2)).sqrt();
             let max_distance = ((center_x).powi(2) + (center_y).powi(2)).sqrt();
             let position_importance = 1.0 - (distance_from_center / max_distance).min(1.0);
 
@@ -1009,10 +1088,6 @@ pub enum PatchType {
     Content,
 }
 
-
-
-
-
 #[derive(Debug)]
 pub struct SimilarityGraph {
     adjacency_list: Vec<Vec<(usize, f32)>>,
@@ -1052,7 +1127,7 @@ impl SimilarityGraph {
 mod tests {
     use super::*;
     use crate::agent::tools::ui_token_selector::config::TokenSelectionConfig;
-    use image::{RgbImage, Rgb};
+    use image::{Rgb, RgbImage};
 
     #[test]
     fn test_rgb_analyzer_creation() {
@@ -1066,9 +1141,21 @@ mod tests {
         let config = TokenSelectionConfig::default();
         let analyzer = RGBConnectedGraphAnalyzer::new(&config).unwrap();
 
-        let color1 = RGBColor { r: 100, g: 100, b: 100 };
-        let color2 = RGBColor { r: 105, g: 105, b: 105 };
-        let color3 = RGBColor { r: 200, g: 200, b: 200 };
+        let color1 = RGBColor {
+            r: 100,
+            g: 100,
+            b: 100,
+        };
+        let color2 = RGBColor {
+            r: 105,
+            g: 105,
+            b: 105,
+        };
+        let color3 = RGBColor {
+            r: 200,
+            g: 200,
+            b: 200,
+        };
 
         assert!(analyzer.are_colors_similar(&color1, &color2, 0.2));
         assert!(!analyzer.are_colors_similar(&color1, &color3, 0.2));
@@ -1100,7 +1187,11 @@ mod tests {
         let config = TokenSelectionConfig::default();
         let analyzer = RGBConnectedGraphAnalyzer::new(&config).unwrap();
 
-        let color = RGBColor { r: 255, g: 255, b: 255 }; // Bright white
+        let color = RGBColor {
+            r: 255,
+            g: 255,
+            b: 255,
+        }; // Bright white
         let score = analyzer.calculate_importance_score(&color, 0.5, 50, 50, 100, 100);
 
         assert!(score > 0.0);
@@ -1113,11 +1204,27 @@ mod tests {
         let analyzer = RGBConnectedGraphAnalyzer::new(&config).unwrap();
 
         // High variance, high importance -> Interactive
-        let token_type = analyzer.classify_token_type(&RGBColor { r: 100, g: 100, b: 100 }, 0.5, 0.8);
+        let token_type = analyzer.classify_token_type(
+            &RGBColor {
+                r: 100,
+                g: 100,
+                b: 100,
+            },
+            0.5,
+            0.8,
+        );
         assert!(matches!(token_type, TokenType::Interactive));
 
         // Low variance, low brightness -> Background
-        let token_type = analyzer.classify_token_type(&RGBColor { r: 10, g: 10, b: 10 }, 0.05, 0.3);
+        let token_type = analyzer.classify_token_type(
+            &RGBColor {
+                r: 10,
+                g: 10,
+                b: 10,
+            },
+            0.05,
+            0.3,
+        );
         assert!(matches!(token_type, TokenType::Background));
     }
 }

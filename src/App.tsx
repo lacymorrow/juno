@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/resizable";
 
 import { ChatContainer, ChatInput } from "@/components/chat";
+import { AgentSessionSwitcher } from "@/components/AgentSessionSwitcher";
 import ClickVisualizer from "@/components/ClickVisualizer";
 import CommandOverlay from "@/components/CommandOverlay";
 import KeyPressOverlay from "@/components/KeyPressOverlay";
@@ -29,6 +30,7 @@ import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { useShortcutEvents } from "@/hooks/useShortcutEvents";
 import { useDictationStateEvents } from "@/hooks/useDictationStateEvents";
+import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useUpdater } from "@/hooks/useUpdater";
 
 function App() {
@@ -38,6 +40,7 @@ function App() {
   const { isOnboardingActive } = useOnboardingState();
   const audioPlayback = useAudioPlayback();
   const { playError } = useSound();
+  const agentSessions = useAgentSessions();
 
   const { checkForUpdates, installUpdate } = useUpdater();
 
@@ -450,6 +453,12 @@ function App() {
                       onExamplePromptSelect={handleExamplePromptSelect}
                       onApprovalUpdate={handleApprovalUpdate}
                       onContinuationUpdate={handleContinuationUpdate}
+                    />
+
+                    <AgentSessionSwitcher
+                      sessions={agentSessions.sessions}
+                      onFocus={agentSessions.focusSession}
+                      onCancel={agentSessions.cancelSession}
                     />
 
                     <div className="px-3">

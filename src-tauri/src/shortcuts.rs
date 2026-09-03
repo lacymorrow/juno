@@ -1,4 +1,4 @@
-use tauri_plugin_global_shortcut::{Shortcut, Code, Modifiers as ShortcutModifiers};
+use tauri_plugin_global_shortcut::{Code, Modifiers as ShortcutModifiers, Shortcut};
 use tracing::warn;
 
 /// Parse a shortcut string into a Shortcut object
@@ -154,16 +154,16 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 
         // Additional punctuation and symbols
         "\"" | "doublequote" | "quotation" => Code::Quote, // Map to same as single quote for compatibility
-        ":" | "colon" => Code::Semicolon, // Often on same key as semicolon
-        "<" | "less" | "lessthan" => Code::Comma, // Often on same key as comma
-        ">" | "greater" | "greaterthan" => Code::Period, // Often on same key as period
-        "?" | "question" | "questionmark" => Code::Slash, // Often on same key as slash
+        ":" | "colon" => Code::Semicolon,                  // Often on same key as semicolon
+        "<" | "less" | "lessthan" => Code::Comma,          // Often on same key as comma
+        ">" | "greater" | "greaterthan" => Code::Period,   // Often on same key as period
+        "?" | "question" | "questionmark" => Code::Slash,  // Often on same key as slash
         "{" | "leftbrace" | "openbrace" => Code::BracketLeft, // Often on same key as [
         "}" | "rightbrace" | "closebrace" => Code::BracketRight, // Often on same key as ]
-        "|" | "pipe" | "verticalbar" => Code::Backslash, // Often on same key as \
-        "~" | "tilde" => Code::Backquote, // Often on same key as `
-        "_" | "underscore" => Code::Minus, // Often on same key as -
-        "+" | "plus" => Code::Equal, // Often on same key as =
+        "|" | "pipe" | "verticalbar" => Code::Backslash,   // Often on same key as \
+        "~" | "tilde" => Code::Backquote,                  // Often on same key as `
+        "_" | "underscore" => Code::Minus,                 // Often on same key as -
+        "+" | "plus" => Code::Equal,                       // Often on same key as =
 
         _ => {
             warn!("Unknown key: {}", key_part);
@@ -192,7 +192,11 @@ mod tests {
         for shortcut_str in test_shortcuts {
             // This should never crash, only return None for invalid shortcuts
             let result = parse_shortcut_string(shortcut_str);
-            println!("Shortcut '{}' parsed safely: {:?}", shortcut_str, result.is_some());
+            println!(
+                "Shortcut '{}' parsed safely: {:?}",
+                shortcut_str,
+                result.is_some()
+            );
         }
     }
 

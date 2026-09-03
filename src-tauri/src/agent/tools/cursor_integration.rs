@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
-use crate::agent::core::{ToolCall, ToolResult, ToolDefinition};
-use crate::agent::traits::ToolProvider;
 use crate::agent::core::AgentError;
+use crate::agent::core::{ToolCall, ToolDefinition, ToolResult};
+use crate::agent::traits::ToolProvider;
 use crate::state::AppState;
 
 /// Cursor IDE integration using computer use automation
@@ -20,9 +20,18 @@ impl CursorIntegration {
     }
 
     /// Open a file in Cursor IDE at a specific line
-    pub async fn open_file_in_cursor(&self, file_path: &str, line_number: Option<u64>) -> Result<Value, AgentError> {
-        info!("🔍 [CURSOR] Opening file: {} {}", file_path,
-            line_number.map(|l| format!("at line {}", l)).unwrap_or_default());
+    pub async fn open_file_in_cursor(
+        &self,
+        file_path: &str,
+        line_number: Option<u64>,
+    ) -> Result<Value, AgentError> {
+        info!(
+            "🔍 [CURSOR] Opening file: {} {}",
+            file_path,
+            line_number
+                .map(|l| format!("at line {}", l))
+                .unwrap_or_default()
+        );
 
         // First, try to use the 'cursor' command line tool
         let command = if let Some(line) = line_number {
@@ -45,7 +54,7 @@ impl CursorIntegration {
                     "line_number": line_number,
                     "result": result
                 }))
-            },
+            }
             Err(_) => {
                 // Fallback: Use computer use to interact with Cursor GUI
                 warn!("⚠️ [CURSOR] Command line failed, trying GUI automation");
@@ -55,7 +64,11 @@ impl CursorIntegration {
     }
 
     /// Use computer use automation to open file via Cursor GUI
-    async fn open_file_via_gui(&self, file_path: &str, line_number: Option<u64>) -> Result<Value, AgentError> {
+    async fn open_file_via_gui(
+        &self,
+        file_path: &str,
+        line_number: Option<u64>,
+    ) -> Result<Value, AgentError> {
         // Use keyboard shortcut to open file dialog (Cmd+O on macOS)
         let mut steps = Vec::new();
 
@@ -110,7 +123,11 @@ impl CursorIntegration {
     }
 
     /// Send a suggestion or message to display in Cursor
-    pub async fn show_suggestion_in_cursor(&self, message: &str, file_path: Option<&str>) -> Result<Value, AgentError> {
+    pub async fn show_suggestion_in_cursor(
+        &self,
+        message: &str,
+        file_path: Option<&str>,
+    ) -> Result<Value, AgentError> {
         info!("💡 [CURSOR] Showing suggestion: {}", message);
 
         let mut result = HashMap::new();
@@ -138,8 +155,14 @@ impl CursorIntegration {
     }
 
     /// Navigate to a specific location in Cursor
-    pub async fn navigate_to_location(&self, file_path: &str, line_number: Option<u64>, column: Option<u64>) -> Result<Value, AgentError> {
-        info!("📍 [CURSOR] Navigating to: {} {}:{}",
+    pub async fn navigate_to_location(
+        &self,
+        file_path: &str,
+        line_number: Option<u64>,
+        column: Option<u64>,
+    ) -> Result<Value, AgentError> {
+        info!(
+            "📍 [CURSOR] Navigating to: {} {}:{}",
             file_path,
             line_number.unwrap_or(1),
             column.unwrap_or(1)
@@ -166,7 +189,7 @@ impl CursorIntegration {
                     json!({
                         "action": "key_press",
                         "key": "Return"
-                    })
+                    }),
                 ];
 
                 return Ok(json!({
@@ -220,12 +243,15 @@ impl ToolProvider for CursorIntegration {
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         match tool_call.name.as_str() {
             "cursor_open_file" => {
-                let file_path = tool_call.input.get("file_path")
+                let file_path = tool_call
+                    .input
+                    .get("file_path")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| AgentError::InputError("Missing 'file_path' parameter".to_string()))?;
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing 'file_path' parameter".to_string())
+                    })?;
 
-                let line_number = tool_call.input.get("line_number")
-                    .and_then(|v| v.as_u64());
+                let line_number = tool_call.input.get("line_number").and_then(|v| v.as_u64());
 
                 let result = self.open_file_in_cursor(file_path, line_number).await?;
 
@@ -233,14 +259,17 @@ impl ToolProvider for CursorIntegration {
                     call_id: tool_call.id.clone(),
                     output: result,
                 })
-            },
+            }
             "cursor_show_suggestion" => {
-                let message = tool_call.input.get("message")
+                let message = tool_call
+                    .input
+                    .get("message")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| AgentError::InputError("Missing 'message' parameter".to_string()))?;
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing 'message' parameter".to_string())
+                    })?;
 
-                let file_path = tool_call.input.get("file_path")
-                    .and_then(|v| v.as_str());
+                let file_path = tool_call.input.get("file_path").and_then(|v| v.as_str());
 
                 let result = self.show_suggestion_in_cursor(message, file_path).await?;
 
@@ -248,25 +277,29 @@ impl ToolProvider for CursorIntegration {
                     call_id: tool_call.id.clone(),
                     output: result,
                 })
-            },
+            }
             "cursor_navigate_to" => {
-                let file_path = tool_call.input.get("file_path")
+                let file_path = tool_call
+                    .input
+                    .get("file_path")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| AgentError::InputError("Missing 'file_path' parameter".to_string()))?;
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing 'file_path' parameter".to_string())
+                    })?;
 
-                let line_number = tool_call.input.get("line_number")
-                    .and_then(|v| v.as_u64());
+                let line_number = tool_call.input.get("line_number").and_then(|v| v.as_u64());
 
-                let column = tool_call.input.get("column")
-                    .and_then(|v| v.as_u64());
+                let column = tool_call.input.get("column").and_then(|v| v.as_u64());
 
-                let result = self.navigate_to_location(file_path, line_number, column).await?;
+                let result = self
+                    .navigate_to_location(file_path, line_number, column)
+                    .await?;
 
                 Ok(ToolResult {
                     call_id: tool_call.id.clone(),
                     output: result,
                 })
-            },
+            }
             _ => Err(AgentError::ToolNotFound(tool_call.name.clone())),
         }
     }
@@ -275,7 +308,8 @@ impl ToolProvider for CursorIntegration {
         Ok(vec![
             ToolDefinition {
                 name: "cursor_open_file".to_string(),
-                description: "Open a file in Cursor IDE, optionally at a specific line number".to_string(),
+                description: "Open a file in Cursor IDE, optionally at a specific line number"
+                    .to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -315,7 +349,8 @@ impl ToolProvider for CursorIntegration {
             },
             ToolDefinition {
                 name: "cursor_navigate_to".to_string(),
-                description: "Navigate to a specific location in Cursor IDE (file, line, column)".to_string(),
+                description: "Navigate to a specific location in Cursor IDE (file, line, column)"
+                    .to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {

@@ -2,7 +2,8 @@ import { useSettingsContext } from "@/contexts/SettingsContext";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  Cpu,
+  Brain,
+  CalendarClock,
   Keyboard,
   Mic,
   Network,
@@ -18,6 +19,7 @@ import {
   AIProviderSettings,
   SecuritySettings,
   AdvancedSettings,
+  AutomationsSettings,
   NetworkSettings,
   ShortcutsSettings,
   ToolsSettings,
@@ -25,14 +27,60 @@ import {
 import { SettingsCategory } from "./types";
 
 const settingsCategories: SettingsCategory[] = [
-  { id: "general", name: "General", icon: <Settings className="w-4 h-4" /> },
-  { id: "ai", name: "AI Provider", icon: <Cpu className="w-4 h-4" /> },
-  { id: "voice", name: "Voice & Audio", icon: <Mic className="w-4 h-4" /> },
-  { id: "tools", name: "Tools", icon: <Wrench className="w-4 h-4" /> },
-  { id: "network", name: "Network", icon: <Network className="w-4 h-4" /> },
-  { id: "security", name: "Permissions", icon: <Shield className="w-4 h-4" /> },
-  { id: "shortcuts", name: "Shortcuts", icon: <Keyboard className="w-4 h-4" /> },
-  { id: "advanced", name: "Advanced", icon: <Terminal className="w-4 h-4" /> },
+  {
+    id: "general",
+    name: "General",
+    icon: <Settings className="w-8 h-8" />,
+    description: "Basic app settings and preferences",
+  },
+  {
+    id: "voice",
+    name: "Voice & Audio",
+    icon: <Mic className="w-8 h-8" />,
+    description: "Voice transcription and audio settings",
+  },
+  {
+    id: "ai",
+    name: "AI Provider",
+    icon: <Brain className="w-8 h-8" />,
+    description: "Configure AI models and providers",
+  },
+  {
+    id: "tools",
+    name: "Tools",
+    icon: <Wrench className="w-8 h-8" />,
+    description: "Enable/disable agent tools and categories",
+  },
+  {
+    id: "automations",
+    name: "Automations",
+    icon: <CalendarClock className="w-8 h-8" />,
+    description: "Scheduled agent tasks that run automatically",
+  },
+  {
+    id: "network",
+    name: "Network",
+    icon: <Network className="w-8 h-8" />,
+    description: "MCP servers and network configuration",
+  },
+  {
+    id: "security",
+    name: "Security & Privacy",
+    icon: <Shield className="w-8 h-8" />,
+    description: "Permissions and security settings",
+  },
+  {
+    id: "shortcuts",
+    name: "Keyboard Shortcuts",
+    icon: <Keyboard className="w-8 h-8" />,
+    description: "Customize keyboard shortcuts",
+  },
+  {
+    id: "advanced",
+    name: "Advanced",
+    icon: <Terminal className="w-8 h-8" />,
+    description: "System settings and reset options",
+  },
 ];
 
 export default function ModularSettingsWindow() {
@@ -41,13 +89,18 @@ export default function ModularSettingsWindow() {
   const window = getCurrentWindow();
 
   useEffect(() => {
+    // Set up the window properly for macOS
     const setupWindow = async () => {
       try {
         await window.setTitle("Juno Settings");
+        if (window.label === "settings") {
+          console.log("Modular settings window initialized");
+        }
       } catch (error) {
-        console.error("Failed to setup settings window:", error);
+        console.error("Failed to setup modular settings window:", error);
       }
     };
+
     setupWindow();
   }, [window]);
 
@@ -69,6 +122,8 @@ export default function ModularSettingsWindow() {
         return <AIProviderSettings settings={settings} />;
       case "tools":
         return <ToolsSettings settings={settings} />;
+      case "automations":
+        return <AutomationsSettings />;
       case "network":
         return <NetworkSettings settings={settings} />;
       case "security":
@@ -82,55 +137,73 @@ export default function ModularSettingsWindow() {
     }
   };
 
-  const selectedName =
-    settingsCategories.find((c) => c.id === selectedCategory)?.name ?? "";
-
   return (
-    <div className="flex w-full min-w-0 h-screen bg-background">
-      {/* Sidebar */}
-      <div className="w-48 shrink-0 border-r border-border flex flex-col bg-muted/30">
-        <div className="p-4 pb-2">
-          <h1 className="text-sm font-semibold text-foreground tracking-tight">
-            Settings
-          </h1>
+    <div className="flex w-full min-w-0 h-screen bg-gray-50">
+      {/* Sidebar with categories - macOS style */}
+      <div className="w-64 shrink-0 bg-white border-r border-gray-200 flex flex-col">
+        <div className="p-6 border-b border-gray-200">
+          <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2 pb-2">
-          <div className="space-y-0.5">
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="space-y-1">
             {settingsCategories.map((category) => (
               <button
                 key={category.id}
                 onClick={() => setSelectedCategory(category.id)}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-left transition-colors text-[13px] ${
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-colors ${
                   selectedCategory === category.id
-                    ? "bg-accent text-accent-foreground font-medium"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-gray-700 hover:bg-gray-100"
                 }`}
               >
-                <span className="shrink-0">{category.icon}</span>
-                <span className="truncate">{category.name}</span>
+                <div
+                  className={`${
+                    selectedCategory === category.id
+                      ? "text-blue-600"
+                      : "text-gray-500"
+                  }`}
+                >
+                  {category.icon}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-sm">{category.name}</div>
+                  <div className="text-xs text-gray-500 mt-0.5 leading-tight">
+                    {category.description}
+                  </div>
+                </div>
               </button>
             ))}
           </div>
-        </nav>
+        </div>
 
-        <div className="p-2 border-t border-border">
+        {/* Footer with close button */}
+        <div className="p-4 border-t border-gray-200">
           <button
             onClick={handleCloseWindow}
-            className="w-full px-2.5 py-1.5 rounded-md text-[13px] text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+            className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-colors"
           >
-            Close
+            Close Settings
           </button>
         </div>
       </div>
 
-      {/* Content */}
+      {/* Main content area */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className="px-6 pt-5 pb-2">
-          <h2 className="text-lg font-semibold text-foreground">{selectedName}</h2>
+        {/* Title bar area */}
+        <div className="h-12 flex items-center justify-between px-6 bg-transparent">
+          <div className="flex items-center gap-3">
+            <div className="text-gray-500">
+              {settingsCategories.find((c) => c.id === selectedCategory)?.icon}
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              {settingsCategories.find((c) => c.id === selectedCategory)?.name}
+            </h2>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-6">
+        {/* Settings content */}
+        <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-2xl">{renderCategoryContent()}</div>
         </div>
       </div>

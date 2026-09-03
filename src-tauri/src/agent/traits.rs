@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use super::core::{AgentAction, AgentError, Message, ToolCall, ToolDefinition, ToolResult};
 use crate::state::CancelReceiver;
+use async_trait::async_trait;
 use tauri::AppHandle;
 
 /// Manages the agent's memory (conversation history).
@@ -42,7 +42,9 @@ pub trait MemoryManager: Send + Sync {
     /// Removes orphaned tool calls only from previous executions, not from the current one.
     /// This allows safe cleanup without affecting tools currently in progress.
     /// Default implementation falls back to the regular clean_orphaned_tool_calls method.
-    async fn clean_orphaned_tool_calls_from_previous_executions(&mut self) -> Result<(), AgentError> {
+    async fn clean_orphaned_tool_calls_from_previous_executions(
+        &mut self,
+    ) -> Result<(), AgentError> {
         self.clean_orphaned_tool_calls().await // Default implementation calls the regular method
     }
 
@@ -62,7 +64,10 @@ pub trait ToolProvider: Send + Sync {
 
     /// Executes multiple tool calls as a batch for improved performance.
     /// Default implementation falls back to sequential execution.
-    async fn execute_batch_tools(&self, tool_calls: Vec<ToolCall>) -> Result<Vec<ToolResult>, AgentError> {
+    async fn execute_batch_tools(
+        &self,
+        tool_calls: Vec<ToolCall>,
+    ) -> Result<Vec<ToolResult>, AgentError> {
         let mut results = Vec::new();
         for tool_call in tool_calls {
             results.push(self.execute_tool(tool_call).await?);
@@ -87,12 +92,19 @@ pub trait AgentBrain: Send + Sync {
     }
 
     /// Streaming version of decide_next_action (default implementation delegates to regular method)
+    ///
+    /// `cancel_rx` is the run's cancellation channel — for session-tracked runs
+    /// this is the merged session+global receiver built in `execute_agent_internal`
+    /// (LAC-1432), so brains that spawn long-lived work (e.g. the Claude CLI
+    /// subprocess) can observe a focused-session cancel that never touches the
+    /// global channel (LAC-3697).
     async fn decide_next_action_streaming(
         &self,
         messages: &[Message],
         available_tools: &[ToolDefinition],
         _app_handle: Option<AppHandle>,
         _message_id: Option<String>,
+        _cancel_rx: Option<CancelReceiver>,
     ) -> Result<AgentAction, AgentError> {
         // Default implementation ignores streaming parameters and calls regular method
         self.decide_next_action(messages, available_tools).await
@@ -121,10 +133,7 @@ pub trait AgentRunnable: Send + Sync {
     ) -> Result<String, AgentError>;
 
     /// Executes a single step of the agent loop.
-    async fn step(
-        &mut self,
-        cancel_rx: CancelReceiver,
-    ) -> Result<AgentAction, AgentError>;
+    async fn step(&mut self, cancel_rx: CancelReceiver) -> Result<AgentAction, AgentError>;
 
     // Maybe add methods for pausing, resuming, stopping?
     // async fn pause(&mut self) -> Result<(), AgentError>;

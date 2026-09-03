@@ -4,18 +4,18 @@
 //! including component coordination, plugin setup, specialized event listeners,
 //! and cross-module communication patterns.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use std::collections::HashMap;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_voice_transcription::controller::VoiceController;
 use tracing::{error, info, warn};
 
+use crate::constants::errors::{prefixes, templates};
+use crate::constants::events;
+use crate::format_error;
 use crate::utils::async_runtime::safe_spawn_async_task;
 use crate::{commands, constants, state};
-use crate::constants::events;
-use crate::constants::errors::{templates, prefixes};
-use crate::format_error;
 
 // Global deduplication cache for preventing duplicate agent submissions
 lazy_static::lazy_static! {
@@ -32,18 +32,21 @@ fn is_duplicate_submission(query: &str) -> bool {
         }
     };
     let now = Instant::now();
-    
+
     // Clean up old entries (older than 5 seconds)
     cache.retain(|_, time| now.duration_since(*time).as_secs() < 5);
-    
+
     // Check if this query was recently submitted
     if let Some(last_time) = cache.get(query) {
         if now.duration_since(*last_time).as_millis() < 1000 {
-            warn!("Duplicate query submission detected within 1 second, ignoring: '{}'", query);
+            warn!(
+                "Duplicate query submission detected within 1 second, ignoring: '{}'",
+                query
+            );
             return true;
         }
     }
-    
+
     // Record this submission
     cache.insert(query.to_string(), now);
     false
@@ -78,23 +81,27 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
 fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
     // Listen for voice transcription start events
     let app_handle_for_listener = app_handle.clone();
-    app_handle.listen(constants::events::voice_transcription::DICTATION_STARTED, move |_event| {
-        info!("[Event] Received voice-transcription:started event");
-        let app_handle_clone = app_handle_for_listener.clone();
-        safe_spawn_async_task(move || async move {
-            // Check if Dictation Mode is active
-            let app_state = app_handle_clone.state::<state::AppState>();
-            let is_dictation_mode = app_state.is_dictation_active();
+    app_handle.listen(
+        constants::events::voice_transcription::DICTATION_STARTED,
+        move |_event| {
+            info!("[Event] Received voice-transcription:started event");
+            let app_handle_clone = app_handle_for_listener.clone();
+            safe_spawn_async_task(move || async move {
+                // Check if Dictation Mode is active
+                let app_state = app_handle_clone.state::<state::AppState>();
+                let is_dictation_mode = app_state.is_dictation_active();
 
-            // If it's dictation mode, set the flag in floating bar manager first
-            if is_dictation_mode {
-                commands::ui_commands::handle_dictation_mode_change(&app_handle_clone, true).await;
-            }
+                // If it's dictation mode, set the flag in floating bar manager first
+                if is_dictation_mode {
+                    commands::ui_commands::handle_dictation_mode_change(&app_handle_clone, true)
+                        .await;
+                }
 
-            // Then handle the dictation started event
-            commands::ui_commands::handle_dictation_started(&app_handle_clone).await;
-        });
-    });
+                // Then handle the dictation started event
+                commands::ui_commands::handle_dictation_started(&app_handle_clone).await;
+            });
+        },
+    );
 
     // Listen for app-dictation-finished events to trigger the agent (legacy UI path)
     let app_handle_for_agent_listener = app_handle.clone();
@@ -115,7 +122,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 if is_duplicate_submission(trimmed_query) {
                                     return;
                                 }
-                                
+
                                 info!("[Agent Mode] Submitting query to agent: '{}'", trimmed_query);
 
                                 // Emit user message event for frontend to add to conversation
@@ -248,30 +255,33 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
     // Listen for voice transcription partial results
     let app_handle_for_listener = app_handle.clone();
-    app_handle.listen(constants::events::voice_transcription::PARTIAL_RESULT, move |event| {
-        info!(
-            "[Event] Received voice-transcription:partial-result event: {:?}",
-            event.payload()
-        );
+    app_handle.listen(
+        constants::events::voice_transcription::PARTIAL_RESULT,
+        move |event| {
+            info!(
+                "[Event] Received voice-transcription:partial-result event: {:?}",
+                event.payload()
+            );
 
-        // Extract partial text and update floating bar manager
-        let payload_str = event.payload();
-        if let Ok(payload_json) = serde_json::from_str::<serde_json::Value>(payload_str) {
-            if let Some(text_value) = payload_json.get("text") {
-                if let Some(text) = text_value.as_str() {
-                    let app_handle_clone = app_handle_for_listener.clone();
-                    let partial_text = text.to_string();
-                    safe_spawn_async_task(move || async move {
-                        commands::ui_commands::handle_dictation_partial(
-                            &app_handle_clone,
-                            partial_text,
-                        )
-                        .await;
-                    });
+            // Extract partial text and update floating bar manager
+            let payload_str = event.payload();
+            if let Ok(payload_json) = serde_json::from_str::<serde_json::Value>(payload_str) {
+                if let Some(text_value) = payload_json.get("text") {
+                    if let Some(text) = text_value.as_str() {
+                        let app_handle_clone = app_handle_for_listener.clone();
+                        let partial_text = text.to_string();
+                        safe_spawn_async_task(move || async move {
+                            commands::ui_commands::handle_dictation_partial(
+                                &app_handle_clone,
+                                partial_text,
+                            )
+                            .await;
+                        });
+                    }
                 }
             }
-        }
-    });
+        },
+    );
 
     // Setup force stop and cleanup event listeners
     setup_force_stop_listeners(app_handle);
@@ -281,29 +291,35 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 fn setup_force_stop_listeners(app_handle: &AppHandle) {
     // Listen for force stop events (timeout/stuck transcription)
     let app_handle_for_force_stop = app_handle.clone();
-    app_handle.listen(constants::events::dictation::TRANSCRIPTION_FORCE_STOP, move |_event| {
-        warn!(
+    app_handle.listen(
+        constants::events::dictation::TRANSCRIPTION_FORCE_STOP,
+        move |_event| {
+            warn!(
             "[Event] Received dictation-transcription-force-stop event - force stopping dictation"
         );
 
-        let app_handle_clone = app_handle_for_force_stop.clone();
-        safe_spawn_async_task(move || async move {
-            handle_voice_controller_force_stop(&app_handle_clone).await;
-        });
-    });
+            let app_handle_clone = app_handle_for_force_stop.clone();
+            safe_spawn_async_task(move || async move {
+                handle_voice_controller_force_stop(&app_handle_clone).await;
+            });
+        },
+    );
 
     // Listen for force cleanup events (stuck state recovery)
     let app_handle_for_force_cleanup = app_handle.clone();
-    app_handle.listen(constants::events::dictation::TRANSCRIPTION_FORCE_CLEANUP, move |_event| {
-        warn!(
+    app_handle.listen(
+        constants::events::dictation::TRANSCRIPTION_FORCE_CLEANUP,
+        move |_event| {
+            warn!(
             "[Event] Received dictation-transcription-force-cleanup event - recovering stuck state"
         );
 
-        let app_handle_clone = app_handle_for_force_cleanup.clone();
-        safe_spawn_async_task(move || async move {
-            handle_dictation_state_cleanup(&app_handle_clone).await;
-        });
-    });
+            let app_handle_clone = app_handle_for_force_cleanup.clone();
+            safe_spawn_async_task(move || async move {
+                handle_dictation_state_cleanup(&app_handle_clone).await;
+            });
+        },
+    );
 }
 
 /// Handle voice controller force stop with timeout protection
@@ -410,17 +426,20 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
 
     // Listen for always listening transcription results (after wake word)
     let app_handle_for_always_listening = app_handle.clone();
-    app_handle.listen(constants::events::always_listening::TRANSCRIPTION, move |event| {
-        info!(
-            "[AlwaysListening] Received transcription after wake word: {:?}",
-            event.payload()
-        );
+    app_handle.listen(
+        constants::events::always_listening::TRANSCRIPTION,
+        move |event| {
+            info!(
+                "[AlwaysListening] Received transcription after wake word: {:?}",
+                event.payload()
+            );
 
-        let app_handle_clone = app_handle_for_always_listening.clone();
-        safe_spawn_async_task(move || async move {
-            handle_always_listening_transcription(&app_handle_clone, event.payload()).await;
-        });
-    });
+            let app_handle_clone = app_handle_for_always_listening.clone();
+            safe_spawn_async_task(move || async move {
+                handle_always_listening_transcription(&app_handle_clone, event.payload()).await;
+            });
+        },
+    );
 
     // Setup always listening control listeners
     setup_always_listening_control_listeners(app_handle);
@@ -456,7 +475,9 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
                             trimmed_text.to_string(),
                             app_state,
                             app_handle.clone(),
-                        ).await {
+                        )
+                        .await
+                        {
                             crate::error_handling::utils::log_and_emit_error(
                                 app_handle,
                                 "AlwaysListening",
@@ -488,39 +509,48 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
 fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
     // Listen for always listening stop requests (from stop words)
     let app_handle_for_stop_request = app_handle.clone();
-    app_handle.listen(constants::events::always_listening::STOP_REQUESTED, move |event| {
-        info!(
-            "[AlwaysListening] Received stop request: {:?}",
-            event.payload()
-        );
+    app_handle.listen(
+        constants::events::always_listening::STOP_REQUESTED,
+        move |event| {
+            info!(
+                "[AlwaysListening] Received stop request: {:?}",
+                event.payload()
+            );
 
-        let app_handle_clone = app_handle_for_stop_request.clone();
-        safe_spawn_async_task(move || async move {
-            handle_always_listening_stop_request(&app_handle_clone).await;
-        });
-    });
+            let app_handle_clone = app_handle_for_stop_request.clone();
+            safe_spawn_async_task(move || async move {
+                handle_always_listening_stop_request(&app_handle_clone).await;
+            });
+        },
+    );
 
     // Listen for command processed events (to auto-stop or return to wake word mode)
     let app_handle_for_command_processed = app_handle.clone();
-    app_handle.listen(constants::events::always_listening::COMMAND_PROCESSED, move |_event| {
-        info!("[AlwaysListening] Command processed - considering auto-stop");
+    app_handle.listen(
+        constants::events::always_listening::COMMAND_PROCESSED,
+        move |_event| {
+            info!("[AlwaysListening] Command processed - considering auto-stop");
 
-        let app_handle_clone = app_handle_for_command_processed.clone();
-        safe_spawn_async_task(move || async move {
-            handle_always_listening_command_processed(&app_handle_clone).await;
-        });
-    });
+            let app_handle_clone = app_handle_for_command_processed.clone();
+            safe_spawn_async_task(move || async move {
+                handle_always_listening_command_processed(&app_handle_clone).await;
+            });
+        },
+    );
 
     // Listen for return to wake word mode events
     let app_handle_for_wake_word_return = app_handle.clone();
-    app_handle.listen(constants::events::always_listening::RETURN_TO_WAKE_WORD, move |_event| {
-        info!("[AlwaysListening] Returning to wake word detection mode");
+    app_handle.listen(
+        constants::events::always_listening::RETURN_TO_WAKE_WORD,
+        move |_event| {
+            info!("[AlwaysListening] Returning to wake word detection mode");
 
-        let app_handle_clone = app_handle_for_wake_word_return.clone();
-        safe_spawn_async_task(move || async move {
-            handle_always_listening_return_to_wake_word(&app_handle_clone).await;
-        });
-    });
+            let app_handle_clone = app_handle_for_wake_word_return.clone();
+            safe_spawn_async_task(move || async move {
+                handle_always_listening_return_to_wake_word(&app_handle_clone).await;
+            });
+        },
+    );
 }
 
 /// Handle always listening stop requests
@@ -558,19 +588,19 @@ async fn handle_always_listening_command_processed(app_handle: &AppHandle) {
     info!("[AlwaysListening] Returning to wake word detection mode after command processing");
 
     // Emit event to return to wake word mode
-            if let Err(e) = app_handle.emit(events::always_listening::RETURN_TO_WAKE_WORD, ()) {
-            error!(
-                "{} {}",
-                prefixes::ALWAYS_LISTENING,
-                format_error(templates::FAILED_TO_EMIT, "return-to-wake-word", e)
-            );
-        }
+    if let Err(e) = app_handle.emit(events::always_listening::RETURN_TO_WAKE_WORD, ()) {
+        error!(
+            "{} {}",
+            prefixes::ALWAYS_LISTENING,
+            format_error(templates::FAILED_TO_EMIT, "return-to-wake-word", e)
+        );
+    }
 }
 
 /// Handle return to wake word mode
 async fn handle_always_listening_return_to_wake_word(app_handle: &AppHandle) {
     // Update floating bar to indicate wake word mode
-            commands::ui_commands::handle_always_listening_change(app_handle, false).await;
+    commands::ui_commands::handle_always_listening_change(app_handle, false).await;
 
     // The always listening system will automatically return to monitoring mode
     // after processing the command, so we don't need to do anything else here
@@ -594,14 +624,19 @@ fn setup_agent_mode_integration(app_handle: &AppHandle) {
 fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
     // Listen for agent transcription start events (hold mode)
     let app_handle_for_agent_start = app_handle.clone();
-    app_handle.listen(constants::events::agent::TRANSCRIPTION_START, move |_event| {
-        info!("[Event] Received agent-transcription-start event - starting agent mode via hold");
+    app_handle.listen(
+        constants::events::agent::TRANSCRIPTION_START,
+        move |_event| {
+            info!(
+                "[Event] Received agent-transcription-start event - starting agent mode via hold"
+            );
 
-        let app_handle_clone = app_handle_for_agent_start.clone();
-        safe_spawn_async_task(move || async move {
-            handle_agent_transcription_start(&app_handle_clone).await;
-        });
-    });
+            let app_handle_clone = app_handle_for_agent_start.clone();
+            safe_spawn_async_task(move || async move {
+                handle_agent_transcription_start(&app_handle_clone).await;
+            });
+        },
+    );
 
     // Listen for agent transcription stop events (hold mode - threshold reached)
     let app_handle_for_agent_transcription_stop = app_handle.clone();
@@ -671,7 +706,10 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
     let generation_at_start = crate::agent_monitor::current_agent_generation();
 
     // Verify voice controller is managed before entering retry loop
-    if app_handle.try_state::<Arc<Mutex<VoiceController>>>().is_none() {
+    if app_handle
+        .try_state::<Arc<Mutex<VoiceController>>>()
+        .is_none()
+    {
         warn!("[Agent Mode] Voice controller not available - cannot start agent transcription");
         crate::agent_monitor::force_reset_agent_input_state().await;
         if let Err(e) = utils::synchronize_component_state(
@@ -679,8 +717,13 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
             "agent",
             false,
             Some(constants::events::agent::ACTIVE),
-        ).await {
-            error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
+        )
+        .await
+        {
+            error!(
+                "[Agent Mode] Failed to synchronize agent state change: {}",
+                e
+            );
         }
         return;
     }
@@ -722,13 +765,17 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                         let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
                             app_handle.clone(),
                             cs,
-                        ).await;
+                        )
+                        .await;
                     }
                     return;
                 }
 
                 if attempt > 0 {
-                    info!("[Agent Mode] Started agent transcription on retry {}", attempt);
+                    info!(
+                        "[Agent Mode] Started agent transcription on retry {}",
+                        attempt
+                    );
                 } else {
                     info!("[Agent Mode] Started agent transcription successfully");
                 }
@@ -736,8 +783,12 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                 // Register escape key so the user can cancel during the listening phase.
                 // Without this, escape is not a registered global shortcut and pressing it
                 // does nothing until the query is submitted to the agent.
-                let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                if let Err(e) = coordinator.register_escape_user(app_handle, "agent_transcription").await {
+                let coordinator =
+                    crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                if let Err(e) = coordinator
+                    .register_escape_user(app_handle, "agent_transcription")
+                    .await
+                {
                     warn!("[Agent Mode] Failed to register escape key for agent transcription: {} - continuing anyway", e);
                 }
 
@@ -746,19 +797,27 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                     "agent",
                     true,
                     Some(constants::events::agent::ACTIVE),
-                ).await {
-                    error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
+                )
+                .await
+                {
+                    error!(
+                        "[Agent Mode] Failed to synchronize agent state change: {}",
+                        e
+                    );
                 }
                 return;
             }
             Err(e) => {
                 last_error = format!("{}", e);
                 // Only retry on lock contention errors
-                let is_lock_error = last_error.contains("busy") || last_error.contains("Lock error");
+                let is_lock_error =
+                    last_error.contains("busy") || last_error.contains("Lock error");
                 if is_lock_error && attempt + 1 < MAX_RETRIES {
                     info!(
                         "[Agent Mode] VoiceController busy, retrying in {}ms (attempt {}/{})",
-                        RETRY_DELAY_MS, attempt + 1, MAX_RETRIES
+                        RETRY_DELAY_MS,
+                        attempt + 1,
+                        MAX_RETRIES
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
                     continue;
@@ -780,8 +839,13 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
         "agent",
         false,
         Some(constants::events::agent::ACTIVE),
-    ).await {
-        error!("[Agent Mode] Failed to synchronize agent state change after error: {}", e);
+    )
+    .await
+    {
+        error!(
+            "[Agent Mode] Failed to synchronize agent state change after error: {}",
+            e
+        );
     }
 }
 
@@ -805,7 +869,8 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             let app_for_screenshot = app_handle.clone();
             let screenshot_task = tauri::async_runtime::spawn(async move {
                 let state = app_for_screenshot.state::<state::AppState>();
-                crate::commands::core::capture_screenshot_command(app_for_screenshot.clone(), state).await
+                crate::commands::core::capture_screenshot_command(app_for_screenshot.clone(), state)
+                    .await
             });
 
             // STT finalization: blocks while Whisper runs inference on the recorded audio.
@@ -844,8 +909,11 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
 
                     // Unregister the escape key we registered during transcription start.
                     // The agent query submission path will re-register its own escape user.
-                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                    let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
+                    let coordinator =
+                        crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator
+                        .unregister_escape_user(app_handle, "agent_transcription")
+                        .await;
                 }
                 Err(e) => {
                     error!("[Agent Mode] Failed to stop transcription: {}", e);
@@ -854,8 +922,11 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                     let app_state = app_handle.state::<state::AppState>();
                     app_state.take_pending_ptt_screenshot().await;
 
-                    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-                    let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
+                    let coordinator =
+                        crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    let _ = coordinator
+                        .unregister_escape_user(app_handle, "agent_transcription")
+                        .await;
 
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
@@ -864,7 +935,9 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                         "agent",
                         false,
                         Some(constants::events::agent::ACTIVE),
-                    ).await {
+                    )
+                    .await
+                    {
                         error!("[Agent Mode] Failed to synchronize agent state change after transcription stop failure: {}", e);
                     }
                 }
@@ -874,7 +947,9 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             warn!("[Agent Mode] Voice controller not available - cannot stop transcription");
 
             let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-            let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
+            let _ = coordinator
+                .unregister_escape_user(app_handle, "agent_transcription")
+                .await;
 
             crate::agent_monitor::force_reset_agent_input_state().await;
 
@@ -883,8 +958,13 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                 "agent",
                 false,
                 Some(constants::events::agent::ACTIVE),
-            ).await {
-                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
+            )
+            .await
+            {
+                error!(
+                    "[Agent Mode] Failed to synchronize agent state change: {}",
+                    e
+                );
             }
         }
     }
@@ -894,7 +974,9 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
 async fn handle_agent_cancel(app_handle: &AppHandle) {
     // Unregister escape key registered during transcription start
     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
+    let _ = coordinator
+        .unregister_escape_user(app_handle, "agent_transcription")
+        .await;
 
     // Cancel agent mode using voice transcription
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
@@ -914,8 +996,13 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                         "agent",
                         false,
                         Some(constants::events::agent::ACTIVE),
-                    ).await {
-                        error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
+                    )
+                    .await
+                    {
+                        error!(
+                            "[Agent Mode] Failed to synchronize agent state change: {}",
+                            e
+                        );
                     }
                 }
                 Err(e) => {
@@ -930,7 +1017,9 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                         "agent",
                         false,
                         Some(constants::events::agent::ACTIVE),
-                    ).await {
+                    )
+                    .await
+                    {
                         error!("[Agent Mode] Failed to synchronize agent state change after cancel failure: {}", e);
                     }
                 }
@@ -950,8 +1039,13 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                 "agent",
                 false,
                 Some(constants::events::agent::ACTIVE),
-            ).await {
-                error!("[Agent Mode] Failed to synchronize agent state change: {}", e);
+            )
+            .await
+            {
+                error!(
+                    "[Agent Mode] Failed to synchronize agent state change: {}",
+                    e
+                );
             }
         }
     }
@@ -961,7 +1055,9 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
 async fn handle_agent_force_stop(app_handle: &AppHandle) {
     // Unregister escape key registered during transcription start
     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    let _ = coordinator.unregister_escape_user(app_handle, "agent_transcription").await;
+    let _ = coordinator
+        .unregister_escape_user(app_handle, "agent_transcription")
+        .await;
 
     // Force stop agent mode
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
@@ -987,8 +1083,13 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
         "agent",
         false,
         Some(constants::events::agent::ACTIVE),
-    ).await {
-        error!("[Agent Mode] Failed to synchronize agent state change during force stop: {}", e);
+    )
+    .await
+    {
+        error!(
+            "[Agent Mode] Failed to synchronize agent state change during force stop: {}",
+            e
+        );
     }
 
     info!("[Agent Mode] Force stopped agent mode successfully");
@@ -1062,7 +1163,7 @@ pub mod utils {
                 if new_state {
                     commands::ui_commands::handle_agent_started(app_handle).await;
                 } else {
-                                          commands::ui_commands::handle_agent_stopped(app_handle).await;
+                    commands::ui_commands::handle_agent_stopped(app_handle).await;
                 }
             }
             "always_listening" => {
@@ -1076,8 +1177,11 @@ pub mod utils {
         // Emit event if specified
         if let Some(event_name) = emit_event {
             if let Err(e) = app_handle.emit(event_name, new_state) {
-                            error!("{}", format_error(templates::FAILED_TO_EMIT, event_name, &e));
-            return Err(format_error(templates::FAILED_TO_EMIT, "event", e));
+                error!(
+                    "{}",
+                    format_error(templates::FAILED_TO_EMIT, event_name, &e)
+                );
+                return Err(format_error(templates::FAILED_TO_EMIT, "event", e));
             }
         }
 

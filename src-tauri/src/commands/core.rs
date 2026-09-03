@@ -1,16 +1,16 @@
 // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
 
-use tauri::State;
-use tracing::{info, error};
-use crate::state::AppState;
-use tauri::AppHandle;
-use tracing::warn;
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
-use serde::{Deserialize, Serialize};
-use tauri_plugin_store::StoreExt;
 use crate::settings::{manager::SettingsManager, AgentSettings, AudioSettings};
+use crate::state::AppState;
 use crate::utils::coordinates;
+use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+use tauri::State;
+use tauri_plugin_store::StoreExt;
+use tracing::warn;
+use tracing::{error, info};
 
 #[cfg(not(target_os = "macos"))]
 use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consistency
@@ -45,12 +45,15 @@ fn get_cursor_position_text() -> Option<String> {
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
-pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, AppState>) -> Result<ScreenshotResult, String> {
+pub(crate) async fn capture_screenshot_command(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ScreenshotResult, String> {
+    use base64::Engine;
     use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
     use image::ImageReader;
     use std::io::Cursor;
-    use base64::Engine;
-    
+
     // Rate limiting check for screenshot operations
     if let Err(e) = state.rate_limiters.screenshots.check("default_user").await {
         return Err(e.to_user_message());
@@ -63,133 +66,161 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
             if let Ok(image_data) = engine.decode(&base64_string) {
                 if let Ok(reader) = ImageReader::new(Cursor::new(&image_data))
                     .with_guessed_format()
-                    .map_err(|e| format!("Failed to read image format: {}", e)) {
-                    if let Ok(img) = reader.decode()
-                        .map_err(|e| format!("Failed to decode image: {}", e)) {
+                    .map_err(|e| format!("Failed to read image format: {}", e))
+                {
+                    if let Ok(img) = reader
+                        .decode()
+                        .map_err(|e| format!("Failed to decode image: {}", e))
+                    {
+                        let original_width = img.width();
+                        let original_height = img.height();
 
-                    let original_width = img.width();
-                    let original_height = img.height();
-
-                    // Get display information to calculate proper scaling
-                    match get_display_dimensions() {
-                        Ok((display_width, display_height, origin_x, origin_y, display_id)) => {
-                            // Select the best standard resolution for this display, model-aware.
-                            // This MUST match the resolution used inside update_standard_resolution_scaling_with_display
-                            // so the image Claude receives matches the declared display_width_px/display_height_px.
-                            use crate::constants::ui::standard_resolutions;
-                            let model = coordinates::get_current_model();
-                            let display_aspect = display_width as f64 / display_height as f64;
-                            let (standard_width, standard_height) = if model.is_empty() {
-                                standard_resolutions::select_best_resolution(display_width, display_height)
-                            } else {
-                                standard_resolutions::select_best_resolution_for_model(display_width, display_height, &model)
-                            };
-                            info!(
+                        // Get display information to calculate proper scaling
+                        match get_display_dimensions() {
+                            Ok((display_width, display_height, origin_x, origin_y, display_id)) => {
+                                // Select the best standard resolution for this display, model-aware.
+                                // This MUST match the resolution used inside update_standard_resolution_scaling_with_display
+                                // so the image Claude receives matches the declared display_width_px/display_height_px.
+                                use crate::constants::ui::standard_resolutions;
+                                let model = coordinates::get_current_model();
+                                let display_aspect = display_width as f64 / display_height as f64;
+                                let (standard_width, standard_height) = if model.is_empty() {
+                                    standard_resolutions::select_best_resolution(
+                                        display_width,
+                                        display_height,
+                                    )
+                                } else {
+                                    standard_resolutions::select_best_resolution_for_model(
+                                        display_width,
+                                        display_height,
+                                        &model,
+                                    )
+                                };
+                                info!(
                                 "Resolution selection: display {}x{} (aspect {:.3}) → standard {}x{} (model: {})",
                                 display_width, display_height, display_aspect,
                                 standard_width, standard_height,
                                 if model.is_empty() { "unknown/legacy" } else { &model }
                             );
 
-                            // Determine if we need to scale the screenshot to match standard resolution
-                            let needs_scaling = original_width != standard_width || original_height != standard_height;
+                                // Determine if we need to scale the screenshot to match standard resolution
+                                let needs_scaling = original_width != standard_width
+                                    || original_height != standard_height;
 
-                            let final_base64 = if needs_scaling {
-                                info!("Scaling screenshot from {}x{} to standard resolution {}x{} for Anthropic Computer Use API compliance",
+                                let final_base64 = if needs_scaling {
+                                    info!("Scaling screenshot from {}x{} to standard resolution {}x{} for Anthropic Computer Use API compliance",
                                     original_width, original_height, standard_width, standard_height);
 
-                                // Scale the image to the standard resolution
-                                let scaled_img = img.resize_exact(
-                                    standard_width,
+                                    // Scale the image to the standard resolution
+                                    let scaled_img = img.resize_exact(
+                                        standard_width,
+                                        standard_height,
+                                        image::imageops::FilterType::Lanczos3,
+                                    );
+
+                                    // Encode the scaled image as JPEG (quality 85) — ~60% smaller than PNG
+                                    let mut scaled_buffer = Cursor::new(Vec::new());
+                                    let jpeg_encoder =
+                                        image::codecs::jpeg::JpegEncoder::new_with_quality(
+                                            &mut scaled_buffer,
+                                            85,
+                                        );
+                                    scaled_img.write_with_encoder(jpeg_encoder).map_err(|e| {
+                                        format!("Failed to encode scaled image as JPEG: {}", e)
+                                    })?;
+
+                                    engine.encode(scaled_buffer.into_inner())
+                                } else {
+                                    info!("Screenshot already at standard resolution {}x{}, re-encoding as JPEG",
+                                    original_width, original_height);
+                                    // Re-encode as JPEG even when no scaling needed (saves ~60% vs PNG)
+                                    let mut jpeg_buffer = Cursor::new(Vec::new());
+                                    let jpeg_encoder =
+                                        image::codecs::jpeg::JpegEncoder::new_with_quality(
+                                            &mut jpeg_buffer,
+                                            85,
+                                        );
+                                    img.write_with_encoder(jpeg_encoder).map_err(|e| {
+                                        format!("Failed to encode image as JPEG: {}", e)
+                                    })?;
+                                    engine.encode(jpeg_buffer.into_inner())
+                                };
+
+                                // Update scaling information with standard resolution data AND display origin
+                                coordinates::update_standard_resolution_scaling_with_display(
+                                    display_width,
+                                    display_height,
+                                    standard_width, // The screenshot is now at standard resolution
                                     standard_height,
-                                    image::imageops::FilterType::Lanczos3,
+                                    origin_x,
+                                    origin_y,
+                                    Some(display_id),
                                 );
 
-                                // Encode the scaled image as JPEG (quality 85) — ~60% smaller than PNG
-                                let mut scaled_buffer = Cursor::new(Vec::new());
-                                let jpeg_encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut scaled_buffer, 85);
-                                scaled_img.write_with_encoder(jpeg_encoder)
-                                    .map_err(|e| format!("Failed to encode scaled image as JPEG: {}", e))?;
-
-                                engine.encode(scaled_buffer.into_inner())
-                            } else {
-                                info!("Screenshot already at standard resolution {}x{}, re-encoding as JPEG",
-                                    original_width, original_height);
-                                // Re-encode as JPEG even when no scaling needed (saves ~60% vs PNG)
-                                let mut jpeg_buffer = Cursor::new(Vec::new());
-                                let jpeg_encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_buffer, 85);
-                                img.write_with_encoder(jpeg_encoder)
-                                    .map_err(|e| format!("Failed to encode image as JPEG: {}", e))?;
-                                engine.encode(jpeg_buffer.into_inner())
-                            };
-
-                            // Update scaling information with standard resolution data AND display origin
-                            coordinates::update_standard_resolution_scaling_with_display(
-                                display_width,
-                                display_height,
-                                standard_width,  // The screenshot is now at standard resolution
-                                standard_height,
-                                origin_x,
-                                origin_y,
-                                Some(display_id),
-                            );
-
-                            info!("Screenshot scaling updated: display {}x{} at origin ({}, {}) → standard resolution {}x{} (Anthropic Computer Use API compliant)",
+                                info!("Screenshot scaling updated: display {}x{} at origin ({}, {}) → standard resolution {}x{} (Anthropic Computer Use API compliant)",
                                 display_width, display_height, origin_x, origin_y, standard_width, standard_height);
 
-                            // Send notification on success
-                            send_dev_tool_notification(&app, "Screenshot", &format!(
+                                // Send notification on success
+                                send_dev_tool_notification(&app, "Screenshot", &format!(
                                 "Screenshot captured at standard resolution {}x{} (scaled from display {}x{} at origin ({}, {}))",
                                 standard_width, standard_height, display_width, display_height, origin_x, origin_y
                             ))?;
 
-                            Ok(ScreenshotResult {
-                                base64_image: final_base64,
-                                original_width: display_width,
-                                original_height: display_height,
-                                resized_width: standard_width,
-                                resized_height: standard_height,
-                                output: get_cursor_position_text(),
-                            })
+                                Ok(ScreenshotResult {
+                                    base64_image: final_base64,
+                                    original_width: display_width,
+                                    original_height: display_height,
+                                    resized_width: standard_width,
+                                    resized_height: standard_height,
+                                    output: get_cursor_position_text(),
+                                })
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to get display dimensions for standard resolution scaling: {}", e);
+
+                                // Fallback: assume the screenshot is already properly sized
+                                // This maintains some level of functionality even if display detection fails
+                                let (_fallback_standard_width, _fallback_standard_height) =
+                                    crate::constants::ui::standard_resolutions::XGA; // Default to XGA
+
+                                coordinates::update_standard_resolution_scaling(
+                                    original_width, // Use screenshot dimensions as display dimensions
+                                    original_height,
+                                    original_width, // Assume screenshot is at correct size
+                                    original_height,
+                                );
+
+                                tracing::warn!(
+                                    "Using fallback scaling with screenshot dimensions {}x{}",
+                                    original_width,
+                                    original_height
+                                );
+
+                                send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (display detection failed, using fallback scaling)")?;
+                                Ok(ScreenshotResult {
+                                    base64_image: base64_string,
+                                    original_width,
+                                    original_height,
+                                    resized_width: original_width, // Fallback: no resize
+                                    resized_height: original_height,
+                                    output: get_cursor_position_text(),
+                                })
+                            }
                         }
-                        Err(e) => {
-                            tracing::warn!("Failed to get display dimensions for standard resolution scaling: {}", e);
-
-                            // Fallback: assume the screenshot is already properly sized
-                            // This maintains some level of functionality even if display detection fails
-                            let (_fallback_standard_width, _fallback_standard_height) =
-                                crate::constants::ui::standard_resolutions::XGA; // Default to XGA
-
-                            coordinates::update_standard_resolution_scaling(
-                                original_width,  // Use screenshot dimensions as display dimensions
-                                original_height,
-                                original_width,  // Assume screenshot is at correct size
-                                original_height,
-                            );
-
-                            tracing::warn!("Using fallback scaling with screenshot dimensions {}x{}",
-                                original_width, original_height);
-
-                            send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (display detection failed, using fallback scaling)")?;
-                            Ok(ScreenshotResult {
-                                base64_image: base64_string,
-                                original_width,
-                                original_height,
-                                resized_width: original_width, // Fallback: no resize
-                                resized_height: original_height,
-                                output: get_cursor_position_text(),
-                            })
-                        }
-                    }
                     } else {
-                        let error_msg = "Failed to decode screenshot image for standard resolution scaling";
+                        let error_msg =
+                            "Failed to decode screenshot image for standard resolution scaling";
                         tracing::warn!("{}", error_msg);
 
                         // Still return the screenshot but without proper scaling
-                        send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (scaling unavailable)")?;
+                        send_dev_tool_notification(
+                            &app,
+                            "Screenshot",
+                            "Screenshot captured (scaling unavailable)",
+                        )?;
                         Ok(ScreenshotResult {
                             base64_image: base64_string,
-                            original_width: 0, // Unknown
+                            original_width: 0,  // Unknown
                             original_height: 0, // Unknown
                             resized_width: 0,
                             resized_height: 0,
@@ -201,10 +232,14 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                     tracing::warn!("{}", error_msg);
 
                     // Still return the screenshot but without proper scaling
-                    send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (format reading unavailable)")?;
+                    send_dev_tool_notification(
+                        &app,
+                        "Screenshot",
+                        "Screenshot captured (format reading unavailable)",
+                    )?;
                     Ok(ScreenshotResult {
                         base64_image: base64_string,
-                        original_width: 0, // Unknown
+                        original_width: 0,  // Unknown
                         original_height: 0, // Unknown
                         resized_width: 0,
                         resized_height: 0,
@@ -212,14 +247,19 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
                     })
                 }
             } else {
-                let error_msg = "Failed to decode base64 screenshot for standard resolution scaling";
+                let error_msg =
+                    "Failed to decode base64 screenshot for standard resolution scaling";
                 tracing::warn!("{}", error_msg);
 
                 // Still return the screenshot but without proper scaling
-                send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (scaling unavailable)")?;
+                send_dev_tool_notification(
+                    &app,
+                    "Screenshot",
+                    "Screenshot captured (scaling unavailable)",
+                )?;
                 Ok(ScreenshotResult {
                     base64_image: base64_string,
-                    original_width: 0, // Unknown
+                    original_width: 0,  // Unknown
                     original_height: 0, // Unknown
                     resized_width: 0,
                     resized_height: 0,
@@ -235,7 +275,9 @@ pub(crate) async fn capture_screenshot_command(app: AppHandle, state: State<'_, 
 /// NEW: Now detects cursor position and returns info for the display containing the cursor
 #[cfg(target_os = "macos")]
 fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
-    use computer_use_ai_sdk::platforms::macos::display::{get_main_display, find_display_containing_point};
+    use computer_use_ai_sdk::platforms::macos::display::{
+        find_display_containing_point, get_main_display,
+    };
     use core_graphics::event::CGEvent;
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
@@ -261,13 +303,22 @@ fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
                 return Err("Invalid display dimensions".to_string());
             }
 
-            tracing::info!("Using display containing cursor: {}x{} at origin ({}, {}), ID: {}",
-                width, height, origin_x, origin_y, display_id);
+            tracing::info!(
+                "Using display containing cursor: {}x{} at origin ({}, {}), ID: {}",
+                width,
+                height,
+                origin_x,
+                origin_y,
+                display_id
+            );
 
             Ok((width, height, origin_x, origin_y, display_id))
         }
         Err(e) => {
-            tracing::warn!("Failed to find display for cursor position, falling back to main display: {}", e);
+            tracing::warn!(
+                "Failed to find display for cursor position, falling back to main display: {}",
+                e
+            );
 
             // Fallback to main display
             match get_main_display() {
@@ -284,7 +335,7 @@ fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
 
                     Ok((width, height, origin_x, origin_y, display_id))
                 }
-                Err(e) => Err(format!("Failed to get main display info: {}", e))
+                Err(e) => Err(format!("Failed to get main display info: {}", e)),
             }
         }
     }
@@ -292,7 +343,10 @@ fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-pub(crate) async fn capture_screenshot_command(_app: DummyAppHandle) -> Result<ScreenshotResult, String> { // Use alias
+pub(crate) async fn capture_screenshot_command(
+    _app: DummyAppHandle,
+) -> Result<ScreenshotResult, String> {
+    // Use alias
     Err("Screenshot capture is only supported on macOS currently.".to_string())
 }
 
@@ -304,19 +358,18 @@ pub(crate) async fn capture_window_screenshot_command(
     state: State<'_, AppState>,
     window_id: String,
 ) -> Result<String, String> {
-
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
     use computer_use_ai_sdk::platforms::macos::utils::capture_element_screenshot;
 
     // Find the window by ID
     let desktop = state.get_desktop()?;
-    let windows = desktop.list_windows().map_err(|e| format!("Failed to list windows: {}", e))?;
+    let windows = desktop
+        .list_windows()
+        .map_err(|e| format!("Failed to list windows: {}", e))?;
 
     let target_window = windows
         .into_iter()
-        .find(|window| {
-            window.id().is_some_and(|id| id == window_id)
-        })
+        .find(|window| window.id().is_some_and(|id| id == window_id))
         .ok_or_else(|| format!("Window with ID '{}' not found", window_id))?;
 
     // Downcast to MacOSUIElement
@@ -328,7 +381,11 @@ pub(crate) async fn capture_window_screenshot_command(
     // Capture the window screenshot
     match capture_element_screenshot(macos_element) {
         Ok(base64_string) => {
-            send_dev_tool_notification(&app, "Window Screenshot", &format!("Window '{}' screenshot captured successfully.", window_id))?;
+            send_dev_tool_notification(
+                &app,
+                "Window Screenshot",
+                &format!("Window '{}' screenshot captured successfully.", window_id),
+            )?;
             Ok(base64_string)
         }
         Err(e) => Err(format!("Failed to capture window screenshot: {}", e)),
@@ -359,7 +416,8 @@ pub(crate) async fn capture_focused_window_screenshot_command(
     let desktop = state.get_desktop()?;
 
     // Get the focused element first
-    let focused_element = desktop.focused_element()
+    let focused_element = desktop
+        .focused_element()
         .map_err(|e| format!("Failed to get focused element: {}", e))?;
 
     // Check if the focused element is a window, if not try to get its window
@@ -401,10 +459,17 @@ pub(crate) async fn capture_focused_window_screenshot_command(
     // Capture the window screenshot
     match capture_element_screenshot(macos_element) {
         Ok(base64_string) => {
-            send_dev_tool_notification(&app, "Focused Window Screenshot", "Focused window screenshot captured successfully.")?;
+            send_dev_tool_notification(
+                &app,
+                "Focused Window Screenshot",
+                "Focused window screenshot captured successfully.",
+            )?;
             Ok(base64_string)
         }
-        Err(e) => Err(format!("Failed to capture focused window screenshot: {}", e)),
+        Err(e) => Err(format!(
+            "Failed to capture focused window screenshot: {}",
+            e
+        )),
     }
 }
 
@@ -451,8 +516,6 @@ pub(crate) fn check_server_status(state: State<'_, AppState>) -> ServerStatus {
     }
 }
 
-
-
 /// Get a list of available AI providers
 #[tauri::command]
 pub async fn list_ai_providers() -> Result<Vec<ProviderInfo>, String> {
@@ -463,10 +526,13 @@ pub async fn list_ai_providers() -> Result<Vec<ProviderInfo>, String> {
 #[tauri::command]
 pub async fn set_ai_provider(provider_id: String, app_handle: AppHandle) -> Result<(), String> {
     // Persist via Tauri store instead of unsafe std::env::set_var
-    let store = app_handle.store("settings.json")
+    let store = app_handle
+        .store("settings.json")
         .map_err(|e| format!("Failed to open settings store: {}", e))?;
     store.set("ai_provider", serde_json::json!(provider_id.clone()));
-    store.save().map_err(|e| format!("Failed to save settings: {}", e))?;
+    store
+        .save()
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
 
     tracing::info!("Set AI provider to: {}", provider_id);
     Ok(())
@@ -477,19 +543,23 @@ pub async fn set_ai_provider(provider_id: String, app_handle: AppHandle) -> Resu
 pub async fn set_performance_monitoring(
     app_handle: AppHandle,
     enabled: bool,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     info!("Setting performance monitoring to: {}", enabled);
 
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    let mut audio_settings = settings_manager.get_audio_settings().await
+    let mut audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to load audio settings: {}", e))?;
 
     audio_settings.performance_monitoring_enabled = enabled;
 
-    settings_manager.set_audio_settings(&audio_settings).await
+    settings_manager
+        .set_audio_settings(&audio_settings)
+        .await
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update state for backward compatibility
@@ -503,12 +573,14 @@ pub async fn set_performance_monitoring(
 #[tauri::command]
 pub async fn get_performance_monitoring(
     app_handle: AppHandle,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<bool, String> {
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    let audio_settings = settings_manager.get_audio_settings().await
+    let audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to load audio settings: {}", e))?;
 
     // Sync with state for backward compatibility
@@ -530,7 +602,9 @@ pub struct AgentExecutionProgress {
 
 /// Get current agent execution progress
 #[tauri::command]
-pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<AgentExecutionProgress, String> {
+pub async fn get_agent_execution_progress(
+    state: State<'_, AppState>,
+) -> Result<AgentExecutionProgress, String> {
     let is_executing = state.is_agent_executing();
     let execution_id = state.get_current_agent_execution_id();
 
@@ -557,8 +631,6 @@ pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<
     })
 }
 
-
-
 /// Set debug mode enabled/disabled
 #[tauri::command]
 pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
@@ -580,8 +652,10 @@ pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> 
 
     let result = debug_mode || cfg_debug || has_debug_log;
 
-    info!("Debug mode check: state={}, cfg={}, rust_log_debug={}, result={}",
-          debug_mode, cfg_debug, has_debug_log, result);
+    info!(
+        "Debug mode check: state={}, cfg={}, rust_log_debug={}, result={}",
+        debug_mode, cfg_debug, has_debug_log, result
+    );
 
     Ok(result)
 }
@@ -611,33 +685,41 @@ pub async fn get_system_context() -> Result<serde_json::Value, String> {
 #[tauri::command]
 pub async fn get_agent_trigger_mode(
     app: AppHandle,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
     match settings_manager.get_agent_settings().await {
         Ok(agent_settings) => {
-            info!("Loaded agent trigger mode from centralized settings: {}", agent_settings.trigger_mode);
+            info!(
+                "Loaded agent trigger mode from centralized settings: {}",
+                agent_settings.trigger_mode
+            );
 
             // Sync with state for backward compatibility
             let trigger_mode = match agent_settings.trigger_mode.as_str() {
                 "tap" => crate::state::AgentTriggerMode::Tap,
                 "hold" => crate::state::AgentTriggerMode::Hold,
                 _ => {
-                    warn!("Invalid agent trigger mode: {}. Using default (tap)", agent_settings.trigger_mode);
+                    warn!(
+                        "Invalid agent trigger mode: {}. Using default (tap)",
+                        agent_settings.trigger_mode
+                    );
                     crate::state::AgentTriggerMode::Tap
                 }
             };
 
-            state.set_agent_trigger_mode(trigger_mode)
+            state
+                .set_agent_trigger_mode(trigger_mode)
                 .map_err(|e| format!("Failed to set agent trigger mode: {}", e))?;
 
             Ok(agent_settings.trigger_mode)
         }
-        Err(e) => {
-            Err(format!("Failed to load agent trigger mode from centralized settings: {}", e))
-        }
+        Err(e) => Err(format!(
+            "Failed to load agent trigger mode from centralized settings: {}",
+            e
+        )),
     }
 }
 
@@ -652,25 +734,38 @@ pub async fn set_agent_trigger_mode(
     let trigger_mode = match mode.as_str() {
         "tap" => crate::state::AgentTriggerMode::Tap,
         "hold" => crate::state::AgentTriggerMode::Hold,
-        _ => return Err(format!("Invalid agent trigger mode: {}. Must be 'tap' or 'hold'", mode)),
+        _ => {
+            return Err(format!(
+                "Invalid agent trigger mode: {}. Must be 'tap' or 'hold'",
+                mode
+            ))
+        }
     };
 
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
     // Get current settings or create default — use struct update so new fields inherit defaults
-    let mut agent_settings = settings_manager.get_agent_settings().await
-        .unwrap_or_else(|_| AgentSettings { trigger_mode: mode.clone(), ..AgentSettings::default() });
+    let mut agent_settings = settings_manager
+        .get_agent_settings()
+        .await
+        .unwrap_or_else(|_| AgentSettings {
+            trigger_mode: mode.clone(),
+            ..AgentSettings::default()
+        });
 
     // Update trigger mode
     agent_settings.trigger_mode = mode.clone();
 
     // Save to centralized settings
-    settings_manager.set_agent_settings(&agent_settings).await
+    settings_manager
+        .set_agent_settings(&agent_settings)
+        .await
         .map_err(|e| format!("Failed to save agent settings: {}", e))?;
 
     // Update the state for backward compatibility
-    state.set_agent_trigger_mode(trigger_mode)
+    state
+        .set_agent_trigger_mode(trigger_mode)
         .map_err(|e| format!("Failed to set agent trigger mode: {}", e))?;
 
     info!("Updated agent trigger mode to: {}", mode);
@@ -678,28 +773,40 @@ pub async fn set_agent_trigger_mode(
 }
 
 /// Load agent trigger mode from centralized settings
-pub async fn load_agent_trigger_mode_from_store(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub async fn load_agent_trigger_mode_from_store(
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
     // Get agent settings or use defaults
-    let agent_settings = settings_manager.get_agent_settings().await
+    let agent_settings = settings_manager
+        .get_agent_settings()
+        .await
         .unwrap_or_else(|_| AgentSettings::default());
 
     let trigger_mode = match agent_settings.trigger_mode.as_str() {
         "tap" => crate::state::AgentTriggerMode::Tap,
         "hold" => crate::state::AgentTriggerMode::Hold,
         _ => {
-            warn!("Invalid agent trigger mode in centralized settings: {}. Using default (tap)", agent_settings.trigger_mode);
+            warn!(
+                "Invalid agent trigger mode in centralized settings: {}. Using default (tap)",
+                agent_settings.trigger_mode
+            );
             crate::state::AgentTriggerMode::Tap
         }
     };
 
     // Update state
-    state.set_agent_trigger_mode(trigger_mode)
+    state
+        .set_agent_trigger_mode(trigger_mode)
         .map_err(|e| format!("Failed to set agent trigger mode: {}", e))?;
 
-    info!("Loaded agent trigger mode from centralized settings: {}", agent_settings.trigger_mode);
+    info!(
+        "Loaded agent trigger mode from centralized settings: {}",
+        agent_settings.trigger_mode
+    );
     Ok(())
 }
 
@@ -708,9 +815,10 @@ pub async fn load_agent_trigger_mode_from_store(app: &AppHandle, state: &AppStat
 pub async fn set_agent_execution_progress(
     current_step: Option<u32>,
     max_steps: Option<u32>,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    info!("Setting agent execution progress: step {}/{}",
+    info!(
+        "Setting agent execution progress: step {}/{}",
         current_step.map_or("None".to_string(), |s| s.to_string()),
         max_steps.map_or("None".to_string(), |s| s.to_string())
     );
@@ -734,11 +842,9 @@ pub async fn get_screenshot_scaling_info() -> Result<serde_json::Value, String> 
     use crate::utils::coordinates;
 
     match coordinates::get_scaling_info() {
-        Ok(scaling_info) => {
-            serde_json::to_value(scaling_info)
-                .map_err(|e| format!("Failed to serialize scaling info: {}", e))
-        }
-        Err(e) => Err(format!("Failed to get scaling info: {}", e))
+        Ok(scaling_info) => serde_json::to_value(scaling_info)
+            .map_err(|e| format!("Failed to serialize scaling info: {}", e)),
+        Err(e) => Err(format!("Failed to get scaling info: {}", e)),
     }
 }
 
@@ -760,8 +866,10 @@ pub async fn test_coordinate_transformation(
 ) -> Result<serde_json::Value, String> {
     use crate::utils::coordinates;
 
-    let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
-    let (back_to_screenshot_x, back_to_screenshot_y) = coordinates::transform_to_scaled_coordinates(screen_x, screen_y);
+    let (screen_x, screen_y) =
+        coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+    let (back_to_screenshot_x, back_to_screenshot_y) =
+        coordinates::transform_to_scaled_coordinates(screen_x, screen_y);
 
     let roundtrip_error_x = (screenshot_x - back_to_screenshot_x).abs();
     let roundtrip_error_y = (screenshot_y - back_to_screenshot_y).abs();
@@ -781,11 +889,21 @@ pub async fn test_coordinate_transformation(
 // --- PRODUCTION CORE FUNCTIONS WITH DEBUG CAPABILITIES ---
 
 #[tauri::command]
-pub(crate) async fn wait(duration_sec: f64, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+pub(crate) async fn wait(
+    duration_sec: f64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
@@ -794,8 +912,15 @@ pub(crate) async fn wait(duration_sec: f64, app: AppHandle, state: State<'_, App
 
     let duration_ms = (duration_sec * 1000.0).max(0.0) as u64; // Convert seconds to ms, ensure non-negative
 
-    log_debug_operation("wait", &format!("Waiting for {} seconds ({} ms)", duration_sec, duration_ms), &debug_config);
-    info!("Executing wait for {} seconds ({} ms)", duration_sec, duration_ms);
+    log_debug_operation(
+        "wait",
+        &format!("Waiting for {} seconds ({} ms)", duration_sec, duration_ms),
+        &debug_config,
+    );
+    info!(
+        "Executing wait for {} seconds ({} ms)",
+        duration_sec, duration_ms
+    );
 
     let desktop = state.get_desktop()?;
     match desktop.wait(duration_ms) {
@@ -804,7 +929,11 @@ pub(crate) async fn wait(duration_sec: f64, app: AppHandle, state: State<'_, App
 
             // Send debug notification if enabled
             if debug_config.send_notifications {
-                let _ = send_debug_notification(&app, "Wait", &format!("Waited for {} seconds", duration_sec));
+                let _ = send_debug_notification(
+                    &app,
+                    "Wait",
+                    &format!("Waited for {} seconds", duration_sec),
+                );
             }
 
             Ok(())
@@ -818,11 +947,20 @@ pub(crate) async fn wait(duration_sec: f64, app: AppHandle, state: State<'_, App
 }
 
 #[tauri::command]
-pub(crate) async fn get_clipboard(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification};
+pub(crate) async fn get_clipboard(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     log_debug_operation("get_clipboard", "Getting clipboard content", &debug_config);
     info!("Executing get_clipboard");
@@ -830,7 +968,10 @@ pub(crate) async fn get_clipboard(app: AppHandle, state: State<'_, AppState>) ->
     let desktop = state.get_desktop()?;
     match desktop.get_clipboard_content() {
         Ok(content) => {
-            info!("Successfully retrieved clipboard content (length: {})", content.len());
+            info!(
+                "Successfully retrieved clipboard content (length: {})",
+                content.len()
+            );
 
             // Send debug notification if enabled
             if debug_config.send_notifications {
@@ -839,7 +980,11 @@ pub(crate) async fn get_clipboard(app: AppHandle, state: State<'_, AppState>) ->
                 } else {
                     content.clone()
                 };
-                let _ = send_debug_notification(&app, "Get Clipboard", &format!("Retrieved: {}", preview));
+                let _ = send_debug_notification(
+                    &app,
+                    "Get Clipboard",
+                    &format!("Retrieved: {}", preview),
+                );
             }
 
             Ok(content)
@@ -853,19 +998,36 @@ pub(crate) async fn get_clipboard(app: AppHandle, state: State<'_, AppState>) ->
 }
 
 #[tauri::command]
-pub(crate) async fn set_clipboard(content: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+pub(crate) async fn set_clipboard(
+    content: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
         validators::non_empty_text(&content)?;
     }
 
-    log_debug_operation("set_clipboard", &format!("Setting clipboard content (length: {})", content.len()), &debug_config);
-    info!("Executing set_clipboard with content length: {}", content.len());
+    log_debug_operation(
+        "set_clipboard",
+        &format!("Setting clipboard content (length: {})", content.len()),
+        &debug_config,
+    );
+    info!(
+        "Executing set_clipboard with content length: {}",
+        content.len()
+    );
 
     let desktop = state.get_desktop()?;
     match desktop.set_clipboard_content(&content) {
@@ -879,7 +1041,8 @@ pub(crate) async fn set_clipboard(content: String, app: AppHandle, state: State<
                 } else {
                     content.clone()
                 };
-                let _ = send_debug_notification(&app, "Set Clipboard", &format!("Set: {}", preview));
+                let _ =
+                    send_debug_notification(&app, "Set Clipboard", &format!("Set: {}", preview));
             }
 
             Ok(())
@@ -896,33 +1059,41 @@ pub(crate) async fn set_clipboard(content: String, app: AppHandle, state: State<
 #[tauri::command]
 pub async fn get_dictation_trigger_mode(
     app: AppHandle,
-    state: State<'_, AppState>
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
     match settings_manager.get_audio_settings().await {
         Ok(audio_settings) => {
-            info!("Loaded dictation trigger mode from centralized settings: {}", audio_settings.dictation_trigger_mode);
+            info!(
+                "Loaded dictation trigger mode from centralized settings: {}",
+                audio_settings.dictation_trigger_mode
+            );
 
             // Sync with state for backward compatibility
             let trigger_mode = match audio_settings.dictation_trigger_mode.as_str() {
                 "tap" => crate::state::DictationTriggerMode::Tap,
                 "hold" => crate::state::DictationTriggerMode::Hold,
                 _ => {
-                    warn!("Invalid dictation trigger mode: {}. Using default (hold)", audio_settings.dictation_trigger_mode);
+                    warn!(
+                        "Invalid dictation trigger mode: {}. Using default (hold)",
+                        audio_settings.dictation_trigger_mode
+                    );
                     crate::state::DictationTriggerMode::Hold
                 }
             };
 
-            state.set_dictation_trigger_mode(trigger_mode)
+            state
+                .set_dictation_trigger_mode(trigger_mode)
                 .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))?;
 
             Ok(audio_settings.dictation_trigger_mode)
         }
-        Err(e) => {
-            Err(format!("Failed to load dictation trigger mode from centralized settings: {}", e))
-        }
+        Err(e) => Err(format!(
+            "Failed to load dictation trigger mode from centralized settings: {}",
+            e
+        )),
     }
 }
 
@@ -937,25 +1108,35 @@ pub async fn set_dictation_trigger_mode(
     let trigger_mode = match mode.as_str() {
         "tap" => crate::state::DictationTriggerMode::Tap,
         "hold" => crate::state::DictationTriggerMode::Hold,
-        _ => return Err(format!("Invalid dictation trigger mode: {}. Must be 'tap' or 'hold'", mode)),
+        _ => {
+            return Err(format!(
+                "Invalid dictation trigger mode: {}. Must be 'tap' or 'hold'",
+                mode
+            ))
+        }
     };
 
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
     // Get current audio settings
-    let mut audio_settings = settings_manager.get_audio_settings().await
+    let mut audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .map_err(|e| format!("Failed to load audio settings: {}", e))?;
 
     // Update dictation trigger mode
     audio_settings.dictation_trigger_mode = mode.clone();
 
     // Save to centralized settings
-    settings_manager.set_audio_settings(&audio_settings).await
+    settings_manager
+        .set_audio_settings(&audio_settings)
+        .await
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
     // Update the state for backward compatibility
-    state.set_dictation_trigger_mode(trigger_mode)
+    state
+        .set_dictation_trigger_mode(trigger_mode)
         .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))?;
 
     info!("Updated dictation trigger mode to: {}", mode);
@@ -963,27 +1144,39 @@ pub async fn set_dictation_trigger_mode(
 }
 
 /// Load dictation trigger mode from centralized settings
-pub async fn load_dictation_trigger_mode_from_store(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub async fn load_dictation_trigger_mode_from_store(
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
     // Get audio settings or use defaults
-    let audio_settings = settings_manager.get_audio_settings().await
+    let audio_settings = settings_manager
+        .get_audio_settings()
+        .await
         .unwrap_or_else(|_| AudioSettings::default());
 
     let trigger_mode = match audio_settings.dictation_trigger_mode.as_str() {
         "tap" => crate::state::DictationTriggerMode::Tap,
         "hold" => crate::state::DictationTriggerMode::Hold,
         _ => {
-            warn!("Invalid dictation trigger mode in centralized settings: {}. Using default (hold)", audio_settings.dictation_trigger_mode);
+            warn!(
+                "Invalid dictation trigger mode in centralized settings: {}. Using default (hold)",
+                audio_settings.dictation_trigger_mode
+            );
             crate::state::DictationTriggerMode::Hold
         }
     };
 
     // Update state
-    state.set_dictation_trigger_mode(trigger_mode)
+    state
+        .set_dictation_trigger_mode(trigger_mode)
         .map_err(|e| format!("Failed to set dictation trigger mode: {}", e))?;
 
-    info!("Loaded dictation trigger mode from centralized settings: {}", audio_settings.dictation_trigger_mode);
+    info!(
+        "Loaded dictation trigger mode from centralized settings: {}",
+        audio_settings.dictation_trigger_mode
+    );
     Ok(())
 }

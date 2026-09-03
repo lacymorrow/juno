@@ -140,12 +140,20 @@ impl PersistentMemoryStore {
 
         if entries.len() > MAX_ENTRIES {
             // Sort descending by priority so truncate keeps the most valuable entries
-            entries.sort_by(|a, b| b.priority().partial_cmp(&a.priority()).unwrap_or(std::cmp::Ordering::Equal));
+            entries.sort_by(|a, b| {
+                b.priority()
+                    .partial_cmp(&a.priority())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             entries.truncate(MAX_ENTRIES);
         }
 
         self.save_entries(&entries)?;
-        tracing::info!("Persistent memory: added entry '{}' ({})", entry.id, entry.category.as_str());
+        tracing::info!(
+            "Persistent memory: added entry '{}' ({})",
+            entry.id,
+            entry.category.as_str()
+        );
         Ok(entry)
     }
 
@@ -220,7 +228,11 @@ impl PersistentMemoryStore {
         }
 
         // Sort descending by priority
-        entries.sort_by(|a, b| b.priority().partial_cmp(&a.priority()).unwrap_or(std::cmp::Ordering::Equal));
+        entries.sort_by(|a, b| {
+            b.priority()
+                .partial_cmp(&a.priority())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         entries.truncate(MAX_INJECTION_ENTRIES);
 
         let ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();

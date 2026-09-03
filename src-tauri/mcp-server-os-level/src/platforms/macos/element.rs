@@ -1,31 +1,31 @@
-use accessibility::{AXAttribute, AXUIElement, Error as AXError};
-use accessibility_sys::kAXErrorNoValue;
 use super::constants::*;
 use super::engine::MacOSEngine;
 use super::ffi::AXValueGetValue;
 use super::interaction;
 use super::utils::macos_role_to_generic_role;
 use super::wrappers::ThreadSafeAXUIElement;
+use crate::element::ElementTreeNode;
 use crate::platforms::macos::attributes::parse_ax_attribute_value;
 use crate::platforms::tree_search::ElementsCollectorWithWindows;
 use crate::UIElementAttributes;
 use crate::{element::UIElementImpl, AutomationError, ClickResult, Locator, Selector, UIElement};
-use accessibility::{AXUIElementAttributes as AXAttrsTrait};
+use accessibility::AXUIElementAttributes as AXAttrsTrait;
+use accessibility::{AXAttribute, AXUIElement, Error as AXError};
+use accessibility_sys::kAXErrorNoValue;
 use anyhow::Result;
 use core_foundation::base::TCFType;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::event::{CGEvent, CGEventTapLocation};
+use core_graphics::event::{CGEventType, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::{CGPoint, CGSize};
 use objc::{class, msg_send, sel, sel_impl};
+use serde_json;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use tracing::{debug, warn};
-use core_graphics::event::{CGEventType, CGMouseButton};
-use crate::element::ElementTreeNode;
-use serde_json;
 
 #[derive(Debug)]
 pub struct MacOSUIElement {
@@ -227,9 +227,9 @@ pub fn get_focused_element_ns_workspace(
     activate_app: bool,
 ) -> Result<UIElement, AutomationError> {
     use crate::platforms::macos::memory_safety::with_autorelease_pool;
-    
+
     debug!("Attempting to get focused element via NSWorkspace");
-    
+
     with_autorelease_pool(|| unsafe {
         // 1. Get NSWorkspace shared instance
         let workspace_class = class!(NSWorkspace);
@@ -242,7 +242,8 @@ pub fn get_focused_element_ns_workspace(
         }
 
         // 2. Get the frontmost application
-        let frontmost_app: *mut objc::runtime::Object = msg_send![shared_workspace, frontmostApplication];
+        let frontmost_app: *mut objc::runtime::Object =
+            msg_send![shared_workspace, frontmostApplication];
         if frontmost_app.is_null() {
             debug!("NSWorkspace reported no frontmost application.");
             return Err(AutomationError::NoFocusedElement(
@@ -268,7 +269,7 @@ pub fn get_focused_element_ns_workspace(
         let focused_element_attr = AXAttribute::new(&focused_element_attr_name);
         match app_element_ref.attribute(&focused_element_attr) {
             Ok(focused_element_cf) => {
-                 if let Some(focused_element) = focused_element_cf.downcast::<AXUIElement>() {
+                if let Some(focused_element) = focused_element_cf.downcast::<AXUIElement>() {
                     debug!("Successfully found focused element via NSWorkspace->App->Focus");
                     Ok(UIElement::new(Box::new(MacOSUIElement {
                         element: ThreadSafeAXUIElement::new(focused_element),
@@ -279,13 +280,16 @@ pub fn get_focused_element_ns_workspace(
                         cached_description: None,
                         cached_value: None,
                     })))
-                 } else {
-                     debug!("AXFocusedUIElement attribute was not an AXUIElement for PID {}", pid);
-                     Err(AutomationError::NoFocusedElement(format!(
+                } else {
+                    debug!(
+                        "AXFocusedUIElement attribute was not an AXUIElement for PID {}",
+                        pid
+                    );
+                    Err(AutomationError::NoFocusedElement(format!(
                         "Application PID {} is frontmost, but has no focused UI element (or attribute type mismatch)",
                         pid
                     )))
-                 }
+                }
             }
             Err(e) => {
                 // Check if the error is kAXErrorNoValue (-25212)
@@ -307,8 +311,11 @@ pub fn get_focused_element_ns_workspace(
                     }
                 }
                 // For any other error, report it as before
-                let error_msg = format!("Failed to get AXFocusedUIElement attribute for PID {}: {:?}", pid, e);
-                 warn!("{}", error_msg);
+                let error_msg = format!(
+                    "Failed to get AXFocusedUIElement attribute for PID {}: {:?}",
+                    pid, e
+                );
+                warn!("{}", error_msg);
                 Err(AutomationError::NoFocusedElement(error_msg))
             }
         }
@@ -320,7 +327,7 @@ impl UIElementImpl for MacOSUIElement {
         let stable_id = self.generate_stable_id();
         let mut hasher = DefaultHasher::new();
         stable_id.hash(&mut hasher);
-        
+
         hasher.finish() as usize
     }
 
@@ -522,7 +529,9 @@ impl UIElementImpl for MacOSUIElement {
                 let point = CGPoint::new(center_x, center_y);
                 let source =
                     CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-                        AutomationError::PlatformError("Failed to create event source for right-click".to_string())
+                        AutomationError::PlatformError(
+                            "Failed to create event source for right-click".to_string(),
+                        )
                     })?;
 
                 // Optional: Move mouse first
@@ -533,7 +542,9 @@ impl UIElementImpl for MacOSUIElement {
                     CGMouseButton::Right, // Button doesn't matter for move
                 )
                 .map_err(|_| {
-                    AutomationError::PlatformError("Failed to create mouse move event for right-click".to_string())
+                    AutomationError::PlatformError(
+                        "Failed to create mouse move event for right-click".to_string(),
+                    )
                 })?;
                 mouse_move.post(CGEventTapLocation::HID);
                 std::thread::sleep(std::time::Duration::from_millis(50)); // Small delay
@@ -547,7 +558,9 @@ impl UIElementImpl for MacOSUIElement {
                     CGMouseButton::Right,
                 )
                 .map_err(|_| {
-                    AutomationError::PlatformError("Failed to create right mouse down event".to_string())
+                    AutomationError::PlatformError(
+                        "Failed to create right mouse down event".to_string(),
+                    )
                 })?;
                 mouse_down.post(CGEventTapLocation::HID);
                 std::thread::sleep(std::time::Duration::from_millis(50)); // Small delay
@@ -561,7 +574,9 @@ impl UIElementImpl for MacOSUIElement {
                     CGMouseButton::Right,
                 )
                 .map_err(|_| {
-                    AutomationError::PlatformError("Failed to create right mouse up event".to_string())
+                    AutomationError::PlatformError(
+                        "Failed to create right mouse up event".to_string(),
+                    )
                 })?;
                 mouse_up.post(CGEventTapLocation::HID);
 
@@ -587,7 +602,9 @@ impl UIElementImpl for MacOSUIElement {
                 let point = CGPoint::new(center_x, center_y);
                 let source =
                     CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-                        AutomationError::PlatformError("Failed to create event source for hover".to_string())
+                        AutomationError::PlatformError(
+                            "Failed to create event source for hover".to_string(),
+                        )
                     })?;
 
                 // Mouse Move
@@ -598,16 +615,18 @@ impl UIElementImpl for MacOSUIElement {
                     CGMouseButton::Left, // Button doesn't matter for move
                 )
                 .map_err(|_| {
-                    AutomationError::PlatformError("Failed to create mouse move event for hover".to_string())
+                    AutomationError::PlatformError(
+                        "Failed to create mouse move event for hover".to_string(),
+                    )
                 })?;
                 mouse_move.post(CGEventTapLocation::HID);
-                 // Maybe a small delay is good practice even for hover
+                // Maybe a small delay is good practice even for hover
                 std::thread::sleep(std::time::Duration::from_millis(20));
 
                 debug!("Performed simulated hover at ({}, {})", center_x, center_y);
                 Ok(())
             }
-             Err(e) => Err(AutomationError::PlatformError(format!(
+            Err(e) => Err(AutomationError::PlatformError(format!(
                 "Failed to determine element bounds for hover: {}",
                 e
             ))),
@@ -661,11 +680,19 @@ impl UIElementImpl for MacOSUIElement {
     fn is_enabled(&self) -> Result<bool, AutomationError> {
         let enabled_attr = AXAttribute::new(&CFString::new("AXEnabled"));
         match self.element.0.attribute(&enabled_attr) {
-            Ok(value) => value.downcast_into::<core_foundation::boolean::CFBoolean>()
-                              .map(|b| b == core_foundation::boolean::CFBoolean::true_value())
-                              .ok_or_else(|| AutomationError::PlatformError("AXEnabled attribute was not a boolean".to_string())),
+            Ok(value) => value
+                .downcast_into::<core_foundation::boolean::CFBoolean>()
+                .map(|b| b == core_foundation::boolean::CFBoolean::true_value())
+                .ok_or_else(|| {
+                    AutomationError::PlatformError(
+                        "AXEnabled attribute was not a boolean".to_string(),
+                    )
+                }),
             Err(e) => {
-                debug!("Failed to get AXEnabled attribute: {:?}, assuming disabled", e);
+                debug!(
+                    "Failed to get AXEnabled attribute: {:?}, assuming disabled",
+                    e
+                );
                 Ok(false) // Often safer to assume disabled if attribute is missing/errors
             }
         }
@@ -680,12 +707,20 @@ impl UIElementImpl for MacOSUIElement {
 
     fn is_focused(&self) -> Result<bool, AutomationError> {
         let focused_attr = AXAttribute::new(&CFString::new("AXFocused"));
-         match self.element.0.attribute(&focused_attr) {
-            Ok(value) => value.downcast_into::<core_foundation::boolean::CFBoolean>()
-                              .map(|b| b == core_foundation::boolean::CFBoolean::true_value())
-                              .ok_or_else(|| AutomationError::PlatformError("AXFocused attribute was not a boolean".to_string())),
+        match self.element.0.attribute(&focused_attr) {
+            Ok(value) => value
+                .downcast_into::<core_foundation::boolean::CFBoolean>()
+                .map(|b| b == core_foundation::boolean::CFBoolean::true_value())
+                .ok_or_else(|| {
+                    AutomationError::PlatformError(
+                        "AXFocused attribute was not a boolean".to_string(),
+                    )
+                }),
             Err(e) => {
-                debug!("Failed to get AXFocused attribute: {:?}, assuming not focused", e);
+                debug!(
+                    "Failed to get AXFocused attribute: {:?}, assuming not focused",
+                    e
+                );
                 Ok(false)
             }
         }
@@ -706,12 +741,7 @@ impl UIElementImpl for MacOSUIElement {
 
     fn create_locator(&self, selector: Selector) -> Result<Locator, AutomationError> {
         let engine = MacOSEngine::new(self.use_background_apps, self.activate_app)?;
-        if self
-            .element
-            .0
-            .role()
-            .is_ok_and(|r| r == "AXApplication")
-        {
+        if self.element.0.role().is_ok_and(|r| r == "AXApplication") {
             if let Some(app_name) = self.attributes().label {
                 engine.refresh_accessibility_tree(Some(&app_name))?;
             }
@@ -748,19 +778,37 @@ impl UIElementImpl for MacOSUIElement {
 
         // Explicitly fetch key attributes and add to properties
         if let Ok(enabled) = self.is_enabled() {
-            attrs.properties.insert("enabled".to_string(), Some(serde_json::Value::Bool(enabled)));
+            attrs.properties.insert(
+                "enabled".to_string(),
+                Some(serde_json::Value::Bool(enabled)),
+            );
         }
         if let Ok(focused) = self.is_focused() {
-             attrs.properties.insert("focused".to_string(), Some(serde_json::Value::Bool(focused)));
+            attrs.properties.insert(
+                "focused".to_string(),
+                Some(serde_json::Value::Bool(focused)),
+            );
         }
         if let Ok((x, y, w, h)) = self.bounds() {
-            attrs.properties.insert("bounds_x".to_string(), Some(serde_json::json!(x)));
-            attrs.properties.insert("bounds_y".to_string(), Some(serde_json::json!(y)));
-            attrs.properties.insert("bounds_width".to_string(), Some(serde_json::json!(w)));
-            attrs.properties.insert("bounds_height".to_string(), Some(serde_json::json!(h)));
+            attrs
+                .properties
+                .insert("bounds_x".to_string(), Some(serde_json::json!(x)));
+            attrs
+                .properties
+                .insert("bounds_y".to_string(), Some(serde_json::json!(y)));
+            attrs
+                .properties
+                .insert("bounds_width".to_string(), Some(serde_json::json!(w)));
+            attrs
+                .properties
+                .insert("bounds_height".to_string(), Some(serde_json::json!(h)));
         }
-        if let Some(id) = self.id() { // Use the existing id() method which checks AXIdentifier
-             attrs.properties.insert("identifier".to_string(), Some(serde_json::Value::String(id)));
+        if let Some(id) = self.id() {
+            // Use the existing id() method which checks AXIdentifier
+            attrs.properties.insert(
+                "identifier".to_string(),
+                Some(serde_json::Value::String(id)),
+            );
         }
 
         // Helper function to fetch and parse specific attributes
@@ -769,7 +817,8 @@ impl UIElementImpl for MacOSUIElement {
             match self.element.0.attribute(&attr) {
                 Ok(value) => {
                     let parsed = parse_ax_attribute_value(ax_attr_name, value);
-                     if parsed.is_some() { // Only insert if parsing was successful
+                    if parsed.is_some() {
+                        // Only insert if parsing was successful
                         attrs.properties.insert(key.to_string(), parsed);
                     }
                 }
@@ -783,7 +832,6 @@ impl UIElementImpl for MacOSUIElement {
         // but we can try fetching it directly too.
         fetch_and_insert("checked", "AXChecked");
 
-
         // Fetch remaining attributes dynamically (optional, keep if desired)
         match self.element.0.attribute_names() {
             Ok(attr_names_cf) => {
@@ -791,16 +839,28 @@ impl UIElementImpl for MacOSUIElement {
                 debug!(element_role = %attrs.role, label = ?attrs.label, "Dynamically fetching {} other attributes", attr_names.len());
 
                 let explicitly_handled = [
-                    "AXRole", "AXTitle", "AXLabel", "AXDescription", "AXValue", // Basic handled by self.attributes()
-                    "AXPosition", "AXSize", // Handled by self.bounds()
-                    "AXEnabled", "AXFocused", "AXIdentifier", // Explicitly handled above
-                    "AXPlaceholderValue", "AXSelected", "AXChecked" // Explicitly handled above
+                    "AXRole",
+                    "AXTitle",
+                    "AXLabel",
+                    "AXDescription",
+                    "AXValue", // Basic handled by self.attributes()
+                    "AXPosition",
+                    "AXSize", // Handled by self.bounds()
+                    "AXEnabled",
+                    "AXFocused",
+                    "AXIdentifier", // Explicitly handled above
+                    "AXPlaceholderValue",
+                    "AXSelected",
+                    "AXChecked", // Explicitly handled above
                 ];
 
                 for name_str in attr_names {
                     // Skip attributes already handled explicitly or by basic fetch
-                    let key_to_insert = name_str.strip_prefix("AX").unwrap_or(&name_str).to_string(); // Use cleaner key
-                    if !explicitly_handled.contains(&name_str.as_str()) && !attrs.properties.contains_key(&key_to_insert) {
+                    let key_to_insert =
+                        name_str.strip_prefix("AX").unwrap_or(&name_str).to_string(); // Use cleaner key
+                    if !explicitly_handled.contains(&name_str.as_str())
+                        && !attrs.properties.contains_key(&key_to_insert)
+                    {
                         let attr = AXAttribute::new(&CFString::new(&name_str));
                         match self.element.0.attribute(&attr) {
                             Ok(value) => {
@@ -815,7 +875,10 @@ impl UIElementImpl for MacOSUIElement {
                                         | accessibility::Error::Ax(-25205) // no value
                                         | accessibility::Error::Ax(-25204) // getting attribute failed
                                 ) {
-                                    debug!("Error getting dynamic property attribute '{}': {:?}", name_str, e);
+                                    debug!(
+                                        "Error getting dynamic property attribute '{}': {:?}",
+                                        name_str, e
+                                    );
                                 }
                             }
                         }
@@ -823,7 +886,10 @@ impl UIElementImpl for MacOSUIElement {
                 }
             }
             Err(e) => {
-                warn!("Failed to retrieve attribute names for dynamic fetch: {:?}", e);
+                warn!(
+                    "Failed to retrieve attribute names for dynamic fetch: {:?}",
+                    e
+                );
             }
         }
 

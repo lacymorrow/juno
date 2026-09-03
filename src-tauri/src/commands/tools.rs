@@ -1,9 +1,9 @@
-use tauri::{AppHandle, State};
 use serde_json::{json, Value};
+use tauri::{AppHandle, State};
 use tracing::info;
 
+use crate::agent::tools::{tool_config::ToolConfigManager, ToolCategory};
 use crate::state::AppState;
-use crate::agent::tools::{ToolCategory, tool_config::ToolConfigManager};
 
 /// Get all tool configurations organized by category
 #[tauri::command]
@@ -21,7 +21,10 @@ pub async fn get_tool_configurations(
     // Organize tools by category
     for category in ToolCategory::all_categories() {
         let tools_in_category = config_guard.get_tools_by_category(&category);
-        let category_enabled = config_guard.category_enabled.get(&category).unwrap_or(&true);
+        let category_enabled = config_guard
+            .category_enabled
+            .get(&category)
+            .unwrap_or(&true);
 
         let mut category_tools = Vec::new();
         for tool_config in tools_in_category {
@@ -36,13 +39,16 @@ pub async fn get_tool_configurations(
         }
 
         let category_info = json!({
-            "name": category.display_name(),
-            "description": category.description(),
-            "enabled": category_enabled,
-            "tools": category_tools
-    });
+                "name": category.display_name(),
+                "description": category.description(),
+                "enabled": category_enabled,
+                "tools": category_tools
+        });
 
-        result.insert(ToolConfigManager::format_tool_category(&category), category_info);
+        result.insert(
+            ToolConfigManager::format_tool_category(&category),
+            category_info,
+        );
     }
 
     Ok(Value::Object(result))
@@ -60,7 +66,7 @@ pub async fn get_tool_config(
     let config_guard = config_manager.lock().await;
 
     if let Some(tool_config) = config_guard.get_tool_config(&tool_name) {
-    Ok(json!({
+        Ok(json!({
             "name": tool_config.name,
             "category": format!("{:?}", tool_config.category),
             "enabled": tool_config.enabled,
@@ -123,9 +129,7 @@ pub async fn set_tool_category_enabled(
 
 /// Get list of enabled tools
 #[tauri::command]
-pub async fn get_enabled_tools(
-    state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+pub async fn get_enabled_tools(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     info!("Getting enabled tools");
 
     let config_manager = state.get_tool_config_manager().await;
@@ -170,9 +174,7 @@ pub async fn reset_tool_configuration(
 
 /// Get a summary of tool configuration
 #[tauri::command]
-pub async fn get_tool_configuration_summary(
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
+pub async fn get_tool_configuration_summary(state: State<'_, AppState>) -> Result<Value, String> {
     info!("Getting tool configuration summary");
 
     let config_manager = state.get_tool_config_manager().await;
@@ -182,8 +184,16 @@ pub async fn get_tool_configuration_summary(
     let total_tools = config_guard.tools.len();
     let enabled_tool_count = enabled_tools.len();
     let total_categories = config_guard.category_enabled.len();
-    let enabled_categories = config_guard.category_enabled.values().filter(|&&enabled| enabled).count();
-    let required_tools = config_guard.tools.values().filter(|tool| tool.required).count();
+    let enabled_categories = config_guard
+        .category_enabled
+        .values()
+        .filter(|&&enabled| enabled)
+        .count();
+    let required_tools = config_guard
+        .tools
+        .values()
+        .filter(|tool| tool.required)
+        .count();
 
     Ok(json!({
         "total_tools": total_tools,
@@ -198,9 +208,7 @@ pub async fn get_tool_configuration_summary(
 
 /// Simple test command to verify tool config system works
 #[tauri::command]
-pub async fn test_tool_config(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn test_tool_config(state: State<'_, AppState>) -> Result<String, String> {
     info!("Testing tool configuration system");
 
     let config_manager = state.get_tool_config_manager().await;
@@ -210,7 +218,10 @@ pub async fn test_tool_config(
     let category_count = config_guard.category_enabled.len();
     let enabled_count = config_guard.get_enabled_tools().len();
 
-    Ok(format!("Tool config system working! {} tools ({} enabled), {} categories", tool_count, enabled_count, category_count))
+    Ok(format!(
+        "Tool config system working! {} tools ({} enabled), {} categories",
+        tool_count, enabled_count, category_count
+    ))
 }
 
 /// Set tool approval required setting
@@ -226,9 +237,7 @@ pub async fn set_tool_approval_required(
 
 /// Get tool approval required setting
 #[tauri::command]
-pub async fn get_tool_approval_required(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn get_tool_approval_required(state: State<'_, AppState>) -> Result<bool, String> {
     let required = state.is_tool_approval_required();
     info!("Current tool approval required setting: {}", required);
     Ok(required)
@@ -268,9 +277,7 @@ pub async fn deny_tool_execution(
 
 /// Get all pending tool approval requests
 #[tauri::command]
-pub async fn get_pending_tool_approvals(
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
+pub async fn get_pending_tool_approvals(state: State<'_, AppState>) -> Result<Value, String> {
     info!("Getting pending tool approval requests");
     let pending_approvals = state.get_pending_tool_approvals().await;
     Ok(json!(pending_approvals))
@@ -278,9 +285,7 @@ pub async fn get_pending_tool_approvals(
 
 /// Clear all pending tool approval requests
 #[tauri::command]
-pub async fn clear_pending_tool_approvals(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn clear_pending_tool_approvals(state: State<'_, AppState>) -> Result<(), String> {
     info!("Clearing all pending tool approval requests");
     state.clear_pending_tool_approvals().await;
     Ok(())
@@ -295,9 +300,7 @@ pub async fn test_tool_config_command() -> Result<String, String> {
 /// Get all currently registered tools from the tool provider
 /// This provides dynamic discovery of tools without relying on static configurations
 #[tauri::command]
-pub async fn get_registered_tools(
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
+pub async fn get_registered_tools(state: State<'_, AppState>) -> Result<Value, String> {
     info!("Getting all registered tools dynamically");
 
     // Get the current tool provider instance

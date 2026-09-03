@@ -98,14 +98,18 @@ impl OpenAIBrain {
 
         // Use centralized defaults from provider configuration
         let model = model.unwrap_or_else(|| Provider::OpenAI.default_model().to_string());
-        let max_tokens = max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_STANDARD);
-        let temperature = temperature.unwrap_or(crate::constants::agent::config::DEFAULT_TEMPERATURE);
+        let max_tokens =
+            max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_STANDARD);
+        let temperature =
+            temperature.unwrap_or(crate::constants::agent::config::DEFAULT_TEMPERATURE);
 
         Ok(OpenAIBrain {
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()
-                .map_err(|e| AgentError::ConfigurationError(format!("Failed to create HTTP client: {}", e)))?,
+                .map_err(|e| {
+                    AgentError::ConfigurationError(format!("Failed to create HTTP client: {}", e))
+                })?,
             api_key,
             model,
             max_tokens,
@@ -117,12 +121,22 @@ impl OpenAIBrain {
     /// Creates a new OpenAIBrain from a CentralizedProviderConfig struct.
     /// Falls back to the OPENAI_API_KEY env var if the config has no api_key.
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
-        let api_key = config.api_key.clone()
+        let api_key = config
+            .api_key
+            .clone()
             .or_else(|| env::var("OPENAI_API_KEY").ok())
-            .ok_or_else(|| AgentError::ConfigurationError(
-                "OpenAI API key not found in settings or OPENAI_API_KEY env var".into()
-            ))?;
-        Self::new(api_key, config.model.clone(), config.max_tokens, config.temperature, config.system_prompt.clone())
+            .ok_or_else(|| {
+                AgentError::ConfigurationError(
+                    "OpenAI API key not found in settings or OPENAI_API_KEY env var".into(),
+                )
+            })?;
+        Self::new(
+            api_key,
+            config.model.clone(),
+            config.max_tokens,
+            config.temperature,
+            config.system_prompt.clone(),
+        )
     }
 
     /// Sanitize log content by removing or truncating base64 data to prevent console spam
