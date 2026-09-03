@@ -59,7 +59,11 @@ fn sort_and_dedup(results: &mut Vec<SkillInfo>) {
             1
         }
     }
-    results.sort_by(|a, b| a.name.cmp(&b.name).then(source_rank(a).cmp(&source_rank(b))));
+    results.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then(source_rank(a).cmp(&source_rank(b)))
+    });
     results.dedup_by(|a, b| a.name == b.name);
 }
 
