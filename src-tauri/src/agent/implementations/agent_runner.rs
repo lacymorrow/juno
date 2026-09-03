@@ -1008,6 +1008,10 @@ where
                     &tools,
                     Some((*self.app_handle).clone()),
                     Some(message_id),
+                    // Session-aware cancel channel (merged session+global for
+                    // session-tracked runs) so subprocess-based brains can kill
+                    // their child on focused-session cancel (LAC-3697).
+                    Some(cancel_rx.clone()),
                 )
                 .await?
         } else {
@@ -1214,6 +1218,7 @@ mod tests {
             _tools: &[ToolDefinition],
             _app_handle: Option<AppHandle>,
             _message_id: Option<String>,
+            _cancel_rx: Option<crate::state::CancelReceiver>,
         ) -> Result<AgentAction, AgentError> {
             Ok(AgentAction::Finish("test response".to_string()))
         }

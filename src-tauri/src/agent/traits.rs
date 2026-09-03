@@ -92,12 +92,19 @@ pub trait AgentBrain: Send + Sync {
     }
 
     /// Streaming version of decide_next_action (default implementation delegates to regular method)
+    ///
+    /// `cancel_rx` is the run's cancellation channel — for session-tracked runs
+    /// this is the merged session+global receiver built in `execute_agent_internal`
+    /// (LAC-1432), so brains that spawn long-lived work (e.g. the Claude CLI
+    /// subprocess) can observe a focused-session cancel that never touches the
+    /// global channel (LAC-3697).
     async fn decide_next_action_streaming(
         &self,
         messages: &[Message],
         available_tools: &[ToolDefinition],
         _app_handle: Option<AppHandle>,
         _message_id: Option<String>,
+        _cancel_rx: Option<CancelReceiver>,
     ) -> Result<AgentAction, AgentError> {
         // Default implementation ignores streaming parameters and calls regular method
         self.decide_next_action(messages, available_tools).await

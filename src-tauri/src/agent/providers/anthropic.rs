@@ -1267,7 +1267,7 @@ impl AgentBrain for AnthropicBrain {
         available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
         // Delegate to streaming version without streaming parameters
-        self.decide_next_action_streaming(messages, available_tools, None, None)
+        self.decide_next_action_streaming(messages, available_tools, None, None, None)
             .await
     }
 
@@ -1281,6 +1281,9 @@ impl AgentBrain for AnthropicBrain {
         available_tools: &[ToolDefinition],
         app_handle: Option<tauri::AppHandle>,
         message_id: Option<String>,
+        // Cancellation is enforced by AgentRunner between steps for the HTTP
+        // provider; only subprocess-based brains (Claude CLI) consume this.
+        _cancel_rx: Option<crate::state::CancelReceiver>,
     ) -> Result<AgentAction, AgentError> {
         // --- 1. Prepare API Request ---
         let mut api_messages = Vec::new();
