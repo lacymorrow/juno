@@ -769,7 +769,8 @@ mod tests {
     /// response is never rendered or spoken.
     #[tokio::test]
     async fn test_run_streaming_session_cancel_kills_subprocess() {
-        let script = write_fake_cli_script("sleep 30\necho '{\"type\":\"result\",\"result\":\"too late\"}'");
+        let script =
+            write_fake_cli_script("sleep 30\necho '{\"type\":\"result\",\"result\":\"too late\"}'");
         let brain = test_brain(script.clone());
 
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
