@@ -14,18 +14,11 @@ import { toast } from "sonner";
 import { SettingsSectionProps } from "../types";
 import { COMMANDS } from "@/lib/constants.generated";
 
-interface AdvancedSettingsProps extends SettingsSectionProps {
-  onNavigateToPermissions?: () => void;
-}
-
 export default function AdvancedSettings({
   settings,
-  onNavigateToPermissions,
-}: AdvancedSettingsProps) {
+}: SettingsSectionProps) {
   const [debugMode, setDebugMode] = useState(false);
-
-  // Suppress unused parameter warning for onNavigateToPermissions
-  void onNavigateToPermissions;
+  const [confirmReset, setConfirmReset] = useState(false);
 
   // Load debug mode status on mount
   useEffect(() => {
@@ -97,29 +90,50 @@ export default function AdvancedSettings({
             Reset all settings to their default values
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Button
-            variant="destructive"
-            onClick={async () => {
-              if (
-                confirm(
-                  "Are you sure you want to reset all settings? This action cannot be undone."
-                )
-              ) {
-                try {
-                  await invoke(COMMANDS.SETTINGS_RESET_SETTINGS);
-                  await settings.loadAllSettings();
-                  toast.success("All settings have been reset to defaults");
-                } catch (error) {
-                  toast.error("Failed to reset settings");
-                }
-              }
-            }}
-            className="w-full"
-          >
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Reset All Settings
-          </Button>
+        <CardContent className="space-y-3">
+          {confirmReset ? (
+            <div className="space-y-3">
+              <p className="text-sm text-destructive">
+                This will reset all settings to their defaults. This cannot be undone.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="destructive"
+                  onClick={async () => {
+                    try {
+                      await invoke(COMMANDS.SETTINGS_RESET_SETTINGS);
+                      await settings.loadAllSettings();
+                      toast.success("All settings have been reset to defaults");
+                    } catch (error) {
+                      toast.error("Failed to reset settings");
+                    } finally {
+                      setConfirmReset(false);
+                    }
+                  }}
+                  className="flex-1"
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Confirm Reset
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setConfirmReset(false)}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              variant="destructive"
+              onClick={() => setConfirmReset(true)}
+              className="w-full"
+            >
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Reset All Settings
+            </Button>
+          )}
         </CardContent>
       </Card>
     </div>

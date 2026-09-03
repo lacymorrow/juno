@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { Eye, RefreshCw, RotateCcw, Shield } from "lucide-react";
+import { Eye, MousePointer2, RefreshCw, RotateCcw, Shield } from "lucide-react";
 import { useState, useEffect } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -201,10 +201,6 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Tools</h3>
-
-        {/* Tool Approval Settings */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -253,21 +249,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="lucide lucide-mouse-pointer-2"
-              >
-                <path d="m4 4 7.07 17 2.51-7.39L17 11.07 4 4z" />
-                <path d="m13 13 6 6" />
-              </svg>
+              <MousePointer2 size={20} />
               Smooth Mouse Movement
             </CardTitle>
             <CardDescription>
@@ -431,7 +413,6 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
             </div>
           </CardContent>
         </Card>
-      </div>
     </div>
   );
 }

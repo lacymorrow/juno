@@ -142,27 +142,12 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
             </Button>
           </div>
 
-          {/* Usage Tips */}
-          <div className="bg-muted/50 p-4 rounded-lg">
-            <h5 className="text-sm font-medium mb-2">
-              💡 Keyboard Shortcut Tips
-            </h5>
-            <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
-              <li>
-                Click on the capture area and press your desired key combination
-              </li>
-              <li>
-                Use modifier keys like Alt, Cmd, Ctrl, Shift combined with
-                letters
-              </li>
-              <li>
-                Function keys (F1-F12) and special keys are also supported
-              </li>
-              <li>
-                Real-time validation prevents conflicts with system shortcuts
-              </li>
-              <li>Changes are applied immediately and saved automatically</li>
-            </ul>
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Click the capture area and press your desired key combination.
+              Modifier keys (Alt, Cmd, Ctrl, Shift), function keys, and special keys are supported.
+              Changes apply immediately.
+            </p>
           </div>
         </CardContent>
       </Card>
