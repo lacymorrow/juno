@@ -1,12 +1,4 @@
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -18,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
+import { SettingsGroup, SettingsRow } from "../SettingsPrimitives";
 import { Slider } from "@/components/ui/slider";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -183,100 +176,35 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   };
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Startup Behavior</CardTitle>
-          <CardDescription>
-            Configure how Juno behaves when starting up
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label htmlFor="auto-launch" className="text-sm font-medium">
-                Launch at Login
-              </Label>
-              <p className="text-xs text-gray-500">
-                Automatically start Juno when you log in to your computer
-              </p>
-            </div>
+    <>
+      <SettingsGroup title="Startup">
+        <SettingsRow
+          htmlFor="auto-launch"
+          label="Launch at login"
+          description="Automatically start Juno when you log in to your computer"
+          control={
             <Switch
               id="auto-launch"
               checked={autoLaunchEnabled}
               onCheckedChange={handleAutoLaunchChange}
               disabled={autoLaunchLoading}
             />
-          </div>
-        </CardContent>
-      </Card>
+          }
+        />
+      </SettingsGroup>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Onboarding</CardTitle>
-          <CardDescription>
-            Restart the onboarding flow to learn about Juno's features
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-sm font-medium">
-                Restart Onboarding Flow
-              </Label>
-              <p className="text-xs text-gray-500">
-                Go through the welcome guide and setup process again
-                {onboardingInfo?.is_development_mode && (
-                  <span className="block text-blue-600 mt-1">
-                    Development mode: Onboarding always shows on restart
-                  </span>
-                )}
-              </p>
-              {onboardingInfo?.completed_at && (
-                <p className="text-xs text-gray-400 mt-1">
-                  Last completed:{" "}
-                  {new Date(onboardingInfo.completed_at).toLocaleDateString()}
-                </p>
-              )}
-            </div>
-            <Button
-              onClick={handleRestartOnboarding}
-              disabled={restartOnboardingLoading}
-              variant="outline"
-              size="sm"
-            >
-              {restartOnboardingLoading ? (
-                <>
-                  <RotateCcw className="w-4 h-4 mr-2 animate-spin" />
-                  Restarting...
-                </>
-              ) : (
-                <>
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Restart Onboarding
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Bar Appearance</CardTitle>
-          <CardDescription>
-            Choose which bar UI style to use in bar windows
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="bar-appearance">Appearance</Label>
+      <SettingsGroup title="Appearance">
+        <SettingsRow
+          htmlFor="bar-appearance"
+          label="Bar style"
+          description="Bar windows switch styles immediately when changed"
+          control={
             <Select
               value={barAppearance}
               onValueChange={handleBarAppearanceChange}
               disabled={barAppearanceLoading}
             >
-              <SelectTrigger>
+              <SelectTrigger id="bar-appearance" className="w-44">
                 <SelectValue placeholder="Select bar appearance" />
               </SelectTrigger>
               <SelectContent>
@@ -290,62 +218,40 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 <SelectItem value={UI.BAR_APPEARANCES_DYNAMIC}>
                   Dynamic
                 </SelectItem>
-                <SelectItem value={UI.BAR_APPEARANCES_ORB}>
-                  Orb (3D)
-                </SelectItem>
+                <SelectItem value={UI.BAR_APPEARANCES_ORB}>Orb (3D)</SelectItem>
                 <SelectItem value={UI.BAR_APPEARANCES_PERSONA}>
                   Persona (AI Avatar)
                 </SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-gray-500">
-              Bar windows will switch styles immediately when changed.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Sound Effects</CardTitle>
-          <CardDescription>
-            Configure audio feedback and notifications
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label htmlFor="sound-enabled" className="text-sm font-medium">
-                Enable Sound Effects
-              </Label>
-              <p className="text-xs text-gray-500">
-                Play sounds for notifications and feedback
-              </p>
-            </div>
+          }
+        />
+        <SettingsRow
+          htmlFor="sound-enabled"
+          label="Sound effects"
+          description="Play sounds for notifications and feedback"
+          control={
             <Switch
               id="sound-enabled"
               checked={settings.soundEnabled}
               onCheckedChange={settings.handleSoundEnabledChange}
             />
-          </div>
-        </CardContent>
-      </Card>
+          }
+        />
+      </SettingsGroup>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Agent Mode</CardTitle>
-          <CardDescription>
-            Choose how Juno handles tasks and AI interactions
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="agent-mode">Agent Mode</Label>
+      <SettingsGroup title="Agent" advanced>
+        <SettingsRow
+          advanced
+          htmlFor="agent-mode"
+          label="Agent mode"
+          description="Multi-agent uses specialized agents per task; single agent uses one agent for everything"
+          control={
             <Select
               value={settings.agentMode}
               onValueChange={settings.handleAgentModeChange}
             >
-              <SelectTrigger>
+              <SelectTrigger id="agent-mode" className="w-44">
                 <SelectValue placeholder="Select agent mode" />
               </SelectTrigger>
               <SelectContent>
@@ -353,29 +259,19 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 <SelectItem value="single">Single Agent</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-gray-500">
-              Multi-agent mode uses specialized agents for different tasks,
-              while single agent mode uses one agent for everything.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Agent Trigger Mode</CardTitle>
-          <CardDescription>
-            Choose how to activate the AI agent with the shortcut key
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="agent-trigger-mode">Trigger Mode</Label>
+          }
+        />
+        <SettingsRow
+          advanced
+          htmlFor="agent-trigger-mode"
+          label="Trigger mode"
+          description="Tap to toggle agent mode on/off, or hold the key to activate and release to stop"
+          control={
             <Select
               value={settings.agentTriggerMode}
               onValueChange={settings.handleAgentTriggerModeChange}
             >
-              <SelectTrigger>
+              <SelectTrigger id="agent-trigger-mode" className="w-44">
                 <SelectValue placeholder="Select trigger mode" />
               </SelectTrigger>
               <SelectContent>
@@ -383,29 +279,27 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 <SelectItem value="hold">Hold to Activate</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-gray-500">
-              <strong>Tap to Toggle:</strong> Press and release to toggle agent
-              mode on/off.
-              <br />
-              <strong>Hold to Activate:</strong> Hold key to activate agent,
-              release to stop (like dictation mode).
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+          }
+        />
+      </SettingsGroup>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Big Cursor</CardTitle>
-          <CardDescription>
-            Make the mouse cursor larger while the agent is controlling
-            your computer
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <SettingsGroup title="Cursor" advanced>
+        <SettingsRow
+          htmlFor="big-cursor-enabled"
+          label="Big cursor"
+          description="Enlarges the system cursor during agent execution so you can track what the agent is doing"
+          control={
+            <Switch
+              id="big-cursor-enabled"
+              checked={bigCursorEnabled}
+              onCheckedChange={handleBigCursorEnabledChange}
+              disabled={bigCursorLoading}
+            />
+          }
+        >
           {systemCursorSize > 1.0 && (
-            <div className="flex items-center justify-between rounded-md border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950">
-              <p className="text-sm text-yellow-800 dark:text-yellow-200">
+            <div className="mb-3 flex items-center justify-between rounded-md border border-border bg-muted/50 p-3">
+              <p className="text-sm text-muted-foreground">
                 Cursor is currently enlarged ({systemCursorSize.toFixed(1)}x)
               </p>
               <Button
@@ -414,7 +308,9 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 onClick={async () => {
                   try {
                     await invoke("test_cursor_restore");
-                    const sysSize = await invoke<number>("get_system_cursor_size");
+                    const sysSize = await invoke<number>(
+                      "get_system_cursor_size"
+                    );
                     setSystemCursorSize(sysSize);
                     toast.success("Cursor restored to normal");
                   } catch (e) {
@@ -426,30 +322,11 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
               </Button>
             </div>
           )}
-          <div className="flex items-center justify-between">
-            <div>
-              <Label htmlFor="big-cursor-enabled" className="text-sm font-medium">
-                Enable Big Cursor
-              </Label>
-              <p className="text-xs text-gray-500">
-                Enlarges the system cursor during agent execution so you can
-                easily track what the agent is doing
-              </p>
-            </div>
-            <Switch
-              id="big-cursor-enabled"
-              checked={bigCursorEnabled}
-              onCheckedChange={handleBigCursorEnabledChange}
-              disabled={bigCursorLoading}
-            />
-          </div>
           {bigCursorEnabled && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-sm font-medium">
-                  Cursor Scale
-                </Label>
-                <span className="text-sm text-gray-500 tabular-nums">
+                <span className="text-sm font-medium">Cursor scale</span>
+                <span className="tabular-nums text-sm text-muted-foreground">
                   {bigCursorScale.toFixed(1)}x
                 </span>
               </div>
@@ -461,7 +338,7 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 max={10}
                 step={0.5}
               />
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-muted-foreground">
                 How much larger to make the cursor (1.5x – 10x)
               </p>
               <div className="flex gap-2 pt-1">
@@ -470,10 +347,16 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                   size="sm"
                   onClick={async () => {
                     try {
-                      await invoke("test_cursor_scale", { scale: bigCursorScale });
-                      const sysSize = await invoke<number>("get_system_cursor_size");
+                      await invoke("test_cursor_scale", {
+                        scale: bigCursorScale,
+                      });
+                      const sysSize = await invoke<number>(
+                        "get_system_cursor_size"
+                      );
                       setSystemCursorSize(sysSize);
-                      toast.success(`Cursor scaled to ${bigCursorScale.toFixed(1)}x`);
+                      toast.success(
+                        `Cursor scaled to ${bigCursorScale.toFixed(1)}x`
+                      );
                     } catch (e) {
                       toast.error("Failed to test cursor scale");
                     }
@@ -487,7 +370,9 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                   onClick={async () => {
                     try {
                       await invoke("test_cursor_restore");
-                      const sysSize = await invoke<number>("get_system_cursor_size");
+                      const sysSize = await invoke<number>(
+                        "get_system_cursor_size"
+                      );
                       setSystemCursorSize(sysSize);
                       toast.success("Cursor restored to normal");
                     } catch (e) {
@@ -500,8 +385,45 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
-    </div>
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Onboarding" advanced>
+        <SettingsRow
+          label="Restart onboarding"
+          description={
+            <>
+              Go through the welcome guide and setup process again
+              {onboardingInfo?.is_development_mode && (
+                <span className="mt-1 block text-muted-foreground">
+                  Development mode: Onboarding always shows on restart
+                </span>
+              )}
+              {onboardingInfo?.completed_at && (
+                <span className="mt-1 block text-muted-foreground/70">
+                  Last completed:{" "}
+                  {new Date(onboardingInfo.completed_at).toLocaleDateString()}
+                </span>
+              )}
+            </>
+          }
+          control={
+            <Button
+              onClick={handleRestartOnboarding}
+              disabled={restartOnboardingLoading}
+              variant="outline"
+              size="sm"
+            >
+              <RotateCcw
+                className={`mr-2 h-4 w-4 ${
+                  restartOnboardingLoading ? "animate-spin" : ""
+                }`}
+              />
+              {restartOnboardingLoading ? "Restarting..." : "Restart"}
+            </Button>
+          }
+        />
+      </SettingsGroup>
+    </>
   );
 }
