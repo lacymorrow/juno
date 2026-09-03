@@ -103,20 +103,22 @@ export default function ModularSettingsWindow() {
   // hidden until the user opts in — no persistence needed, keeps it basic.
   const [showAdvanced, setShowAdvanced] = useState(false);
   const settings = useSettingsContext();
-  const window = getCurrentWindow();
 
   useEffect(() => {
-    // Set up the window properly for macOS
+    // Set up the window properly for macOS. getCurrentWindow() returns a fresh
+    // proxy each call, so we call it inside the effect with an empty dep array
+    // to guarantee this runs exactly once on mount (not on every render).
     const setupWindow = async () => {
       try {
-        await window.setTitle("Juno Settings");
+        const win = getCurrentWindow();
+        await win.setTitle("Juno Settings");
       } catch (error) {
         console.error("Failed to setup modular settings window:", error);
       }
     };
 
     setupWindow();
-  }, [window]);
+  }, []);
 
   // If advanced is turned off while viewing an advanced category, fall back to
   // General so the content pane is never left blank.
