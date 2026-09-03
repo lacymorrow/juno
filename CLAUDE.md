@@ -166,14 +166,16 @@ Alternative to direct API keys — uses the locally installed `claude` binary (C
 
 **Key flags**:
 - `-p` — Print mode (non-interactive, pipe-friendly)
-- `--strict-mcp-config` — Disables all MCP servers (no `--mcp-config` provided)
-- `--dangerously-skip-permissions` — Required because stdin is null; CLI can't prompt for tool permissions
+- `--strict-mcp-config` — Only MCP servers from `--mcp-config` load; user-level servers never do
+- `--mcp-config <path>` — Added when `juno-cua` is detected: wires Juno's computer-use tools (screenshot, click, mouse_move, type, scroll) in via the `juno-cua serve-mcp` stdio server (LAC-3696)
+- `--append-system-prompt` — Added alongside `--mcp-config`: steers the model toward the MCP tools instead of `cliclick`/`screencapture` via Bash
+- `--dangerously-skip-permissions` — Required because stdin is null; CLI can't prompt for tool permissions (MCP tools also run without prompting)
 
 **Auth**: Checked once per session via `claude auth status --json`, cached with `AtomicBool`. Uses OAuth/keychain (not API key).
 
 **Models**: `opus`, `sonnet`, `haiku` (CLI aliases — resolves to latest versions automatically)
 
-**Limitations**: Juno's computer use tools (screenshots, clicking) are not wired through the CLI — the CLI uses its own built-in tools (Bash, Read, Edit, etc.). User cannot cancel a running CLI query via Juno's escape key.
+**Limitations**: Computer-use tools require the `juno-cua` binary (same cargo `target/` dir in dev, or installed via npm/Homebrew) — without it the CLI falls back to its built-in tools (Bash, Read, Edit, etc.). Because `juno-cua` drives the desktop directly via the CUA SDK, app-integrated niceties don't apply on this provider: no agent cursor overlay session, no AX click verification, no screenshot limiting/caching. `juno-cua` needs its own macOS Accessibility grant in whatever context the CLI spawns it.
 
 ## Critical Development Rules
 
