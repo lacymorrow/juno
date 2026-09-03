@@ -1,15 +1,17 @@
+use crate::constants::errors::prefixes::COMMAND;
+use crate::constants::errors::templates::FAILED_TO_EMIT;
+use crate::constants::events;
 use crate::settings::manager::SettingsManager;
 use crate::state::AppState;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{error, info, warn};
-use crate::constants::events;
-use crate::constants::errors::templates::FAILED_TO_EMIT;
-use crate::constants::errors::prefixes::COMMAND;
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
-    template.replacen("{}", context, 1).replacen("{}", &error.to_string(), 1)
+    template
+        .replacen("{}", context, 1)
+        .replacen("{}", &error.to_string(), 1)
 }
 
 /// Start always listening mode
@@ -258,7 +260,10 @@ pub async fn set_always_listening_sensitivity(
         error!("[Command] {}", err_msg);
         return Err(err_msg);
     }
-    info!("[Command] Successfully updated app state: always_listening_sensitivity = {}", sensitivity);
+    info!(
+        "[Command] Successfully updated app state: always_listening_sensitivity = {}",
+        sensitivity
+    );
 
     // Call the plugin command if controller is available
     match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
@@ -339,7 +344,10 @@ pub async fn set_always_listening_wake_words(
         error!("[Command] {}", err_msg);
         return Err(err_msg);
     }
-    info!("[Command] Successfully updated app state: always_listening_wake_words = {:?}", wake_words);
+    info!(
+        "[Command] Successfully updated app state: always_listening_wake_words = {:?}",
+        wake_words
+    );
 
     // Call the plugin command if controller is available
     match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {

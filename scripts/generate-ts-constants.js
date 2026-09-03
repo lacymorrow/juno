@@ -103,7 +103,9 @@ function parseEventConstants(rustCode) {
 
     // Parse nested modules like agent::EVENT
     const moduleRegex = /pub mod (\w+) \{([^}]+)\}/g;
-    const constRegex = /pub const (\w+): &str = "([^"]+)"/g;
+    // `\s*` around `:` and `=` (not literal spaces) so a rustfmt line-wrap of a
+    // long event definition is still parsed — same fix as parseSimpleConstants.
+    const constRegex = /pub const (\w+):\s*&str\s*=\s*"([^"]+)"/g;
 
     let moduleMatch;
     while ((moduleMatch = moduleRegex.exec(rustCode)) !== null) {
@@ -123,8 +125,14 @@ function parseSimpleConstants(rustCode) {
     const constants = {};
 
     // Parse simple constants: pub const NAME: type = value;
-    // Updated regex to handle underscores in numeric literals (e.g., 30_000) and escaped quotes
-    const constRegex = /pub const (\w+): (?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\]) = (?:"((?:[^"\\]|\\.)*)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
+    // Whitespace around `:` and `=` is `\s*` (not literal spaces) so the parser
+    // survives rustfmt wrapping a long definition across two lines, e.g.
+    //     pub const REQUEST_SCREEN_RECORDING_PERMISSION: &str =
+    //         "request_screen_recording_permission_native";
+    // The old `= ` (equals + single space) silently dropped any such constant,
+    // which broke the frontend the moment `cargo fmt` reflowed it.
+    // Handles underscores in numeric literals (e.g., 30_000) and escaped quotes.
+    const constRegex = /pub const (\w+):\s*(?:&str|u\d+|i\d+|f\d+|usize|bool|&\[&str\])\s*=\s*(?:"((?:[^"\\]|\\.)*)"|(\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?)|(\w+)|&\[(.*?)\])/g;
 
     let match;
     while ((match = constRegex.exec(rustCode)) !== null) {

@@ -195,8 +195,7 @@ impl SystemAgent {
                         )
                     })?;
 
-                let result =
-                    commands::text_editor::text_editor_view(file_path.to_string()).await;
+                let result = commands::text_editor::text_editor_view(file_path.to_string()).await;
 
                 match result {
                     Ok(content) => Ok(ToolResult {
@@ -319,21 +318,14 @@ impl SpecializedAgent for SystemAgent {
             AgentCapability {
                 name: "File Operations".to_string(),
                 description: "Read, write, create, and manage files and directories".to_string(),
-                tool_patterns: vec![
-                    "file".to_string(),
-                    "read".to_string(),
-                    "write".to_string(),
-                ],
+                tool_patterns: vec!["file".to_string(), "read".to_string(), "write".to_string()],
                 confidence: 0.90,
             },
             AgentCapability {
                 name: "Directory Management".to_string(),
                 description: "List directories, navigate file systems, manage folder structures"
                     .to_string(),
-                tool_patterns: vec![
-                    "list".to_string(),
-                    "directory".to_string(),
-                ],
+                tool_patterns: vec!["list".to_string(), "directory".to_string()],
                 confidence: 0.85,
             },
             AgentCapability {
@@ -351,10 +343,7 @@ impl SpecializedAgent for SystemAgent {
             AgentCapability {
                 name: "Text Editor Operations".to_string(),
                 description: "Create, edit, and modify text files programmatically".to_string(),
-                tool_patterns: vec![
-                    "editor".to_string(),
-                    "text".to_string(),
-                ],
+                tool_patterns: vec!["editor".to_string(), "text".to_string()],
                 confidence: 0.85,
             },
         ]

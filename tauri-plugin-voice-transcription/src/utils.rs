@@ -1,7 +1,7 @@
-use tauri::{Runtime, Manager};
-use std::path::PathBuf;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::path::PathBuf;
+use tauri::{Manager, Runtime};
 
 /// Compiled regex for all Whisper audio marker artifacts.
 /// Matches bracket, paren, and asterisk-wrapped forms, case-insensitively.
@@ -46,10 +46,16 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
     tracing::debug!("Strategy 1: Checking bundled resources...");
 
     // First try the direct resource resolution
-    if let Ok(resource_path) = app.path().resolve(model_path, tauri::path::BaseDirectory::Resource) {
+    if let Ok(resource_path) = app
+        .path()
+        .resolve(model_path, tauri::path::BaseDirectory::Resource)
+    {
         tracing::debug!("  Resource path resolved to: {}", resource_path.display());
         if resource_path.exists() {
-            tracing::debug!("Found model in bundled resources: {}", resource_path.display());
+            tracing::debug!(
+                "Found model in bundled resources: {}",
+                resource_path.display()
+            );
             return resource_path.to_string_lossy().to_string();
         } else {
             tracing::debug!("  Resource path does not exist");
@@ -68,8 +74,15 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
             resource_dir.join("_up_").join("models").join(model_path),
             resource_dir.join("_up_").join(model_path),
             // Actual bundled path from our resources configuration
-            resource_dir.join("_up_").join("tauri-plugin-voice-transcription").join("models").join("ggml-tiny.en.bin"),
-            resource_dir.join("_up_").join("tauri-plugin-voice-transcription").join(model_path),
+            resource_dir
+                .join("_up_")
+                .join("tauri-plugin-voice-transcription")
+                .join("models")
+                .join("ggml-tiny.en.bin"),
+            resource_dir
+                .join("_up_")
+                .join("tauri-plugin-voice-transcription")
+                .join(model_path),
             // Standard resource paths
             resource_dir.join("models").join(model_path),
             resource_dir.join(model_path),
@@ -104,7 +117,10 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
     if let Ok(local_dir) = app.path().app_local_data_dir() {
         let local_model_path = local_dir.join(model_path);
         if local_model_path.exists() {
-            tracing::debug!("Found model in app local data dir: {}", local_model_path.display());
+            tracing::debug!(
+                "Found model in app local data dir: {}",
+                local_model_path.display()
+            );
             return local_model_path.to_string_lossy().to_string();
         }
     }
@@ -117,7 +133,8 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
             tracing::debug!("  Current working directory: {}", cwd.display());
             // Look for tauri-plugin-voice-transcription/models and other common dev locations
             let dev_model_paths = [
-                cwd.join("tauri-plugin-voice-transcription").join(model_path),
+                cwd.join("tauri-plugin-voice-transcription")
+                    .join(model_path),
                 cwd.join(model_path),
             ];
 
@@ -125,7 +142,8 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
                 tracing::debug!("  Checking development path: {}", dev_path.display());
                 if dev_path.exists() {
                     tracing::debug!("Found model in development path: {}", dev_path.display());
-                    return dev_path.canonicalize()
+                    return dev_path
+                        .canonicalize()
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_else(|_| dev_path.to_string_lossy().to_string());
                 } else {
@@ -149,7 +167,10 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
             if let Some(macos_dir) = exe_path.parent() {
                 if let Some(contents_dir) = macos_dir.parent() {
                     let resources_dir = contents_dir.join("Resources");
-                    tracing::debug!("  Checking Resources directory: {}", resources_dir.display());
+                    tracing::debug!(
+                        "  Checking Resources directory: {}",
+                        resources_dir.display()
+                    );
 
                     let bundle_paths = vec![
                         resources_dir.join(model_path),
@@ -157,14 +178,24 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
                         resources_dir.join("_up_").join(model_path),
                         resources_dir.join("_up_").join("models").join(model_path),
                         // Add the actual bundled path we found
-                        resources_dir.join("_up_").join("tauri-plugin-voice-transcription").join(model_path),
-                        resources_dir.join("_up_").join("tauri-plugin-voice-transcription").join("models").join("ggml-tiny.en.bin"),
+                        resources_dir
+                            .join("_up_")
+                            .join("tauri-plugin-voice-transcription")
+                            .join(model_path),
+                        resources_dir
+                            .join("_up_")
+                            .join("tauri-plugin-voice-transcription")
+                            .join("models")
+                            .join("ggml-tiny.en.bin"),
                     ];
 
                     for bundle_path in bundle_paths {
                         tracing::debug!("  Checking bundle path: {}", bundle_path.display());
                         if bundle_path.exists() {
-                            tracing::debug!("Found model in macOS bundle: {}", bundle_path.display());
+                            tracing::debug!(
+                                "Found model in macOS bundle: {}",
+                                bundle_path.display()
+                            );
                             return bundle_path.to_string_lossy().to_string();
                         }
                     }
@@ -176,23 +207,37 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
     // Strategy 6: Look relative to current working directory
     let cwd_model_path = PathBuf::from(model_path);
     if cwd_model_path.exists() {
-        tracing::debug!("Found model in current working directory: {}", cwd_model_path.display());
-        return cwd_model_path.canonicalize()
+        tracing::debug!(
+            "Found model in current working directory: {}",
+            cwd_model_path.display()
+        );
+        return cwd_model_path
+            .canonicalize()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| model_path.to_string());
     }
 
     // Strategy 7: Final fallback - return original path (will likely fail, but preserves error handling)
-    tracing::warn!("Model file '{}' not found in any standard location. Locations checked:", model_path);
+    tracing::warn!(
+        "Model file '{}' not found in any standard location. Locations checked:",
+        model_path
+    );
     tracing::warn!("  - Bundled resources: {}", model_path);
     tracing::warn!("  - Bundled resources (_up_ pattern): _up_/{}", model_path);
     tracing::warn!("  - App data directory: [app_data]/{}", model_path);
     tracing::warn!("  - App local data directory: [local_data]/{}", model_path);
     if cfg!(debug_assertions) {
-        tracing::warn!("  - Development paths: ./tauri-plugin-voice-transcription/{} and ./{}", model_path, model_path);
+        tracing::warn!(
+            "  - Development paths: ./tauri-plugin-voice-transcription/{} and ./{}",
+            model_path,
+            model_path
+        );
     }
     tracing::warn!("  - Current working directory: ./{}", model_path);
 
-    tracing::error!("Returning original model path '{}' as fallback (will likely fail)", model_path);
+    tracing::error!(
+        "Returning original model path '{}' as fallback (will likely fail)",
+        model_path
+    );
     model_path.to_string()
 }

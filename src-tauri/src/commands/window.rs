@@ -2,11 +2,10 @@
 
 use crate::state::AppState;
 use computer_use_ai_sdk::{AutomationError, UIElement};
-use tauri::{AppHandle, State};
 use serde::Serialize;
 use serde_json;
-use tracing::{info, error};
-
+use tauri::{AppHandle, State};
+use tracing::{error, info};
 
 #[derive(Serialize)]
 struct WindowInfo {
@@ -18,7 +17,10 @@ struct WindowInfo {
 }
 
 // Helper function moved here as it's only used by window commands
-fn find_window_by_id(state: &State<'_, AppState>, window_id: &str) -> Result<Option<UIElement>, String> {
+fn find_window_by_id(
+    state: &State<'_, AppState>,
+    window_id: &str,
+) -> Result<Option<UIElement>, String> {
     let desktop = &state.desktop;
     match desktop.list_windows() {
         Ok(windows) => {
@@ -44,8 +46,6 @@ fn find_window_by_id(state: &State<'_, AppState>, window_id: &str) -> Result<Opt
     }
 }
 
-
-
 // --- PRODUCTION WINDOW FUNCTIONS WITH DEBUG CAPABILITIES ---
 
 #[tauri::command]
@@ -57,10 +57,16 @@ pub(crate) async fn scroll_window(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
@@ -82,8 +88,14 @@ pub(crate) async fn scroll_window(
     }
 
     let operation_desc = match (x, y) {
-        (Some(px), Some(py)) => format!("scroll {} by {} units at ({}, {})", direction, scroll_amount, px, py),
-        _ => format!("scroll {} by {} units at current position", direction, scroll_amount),
+        (Some(px), Some(py)) => format!(
+            "scroll {} by {} units at ({}, {})",
+            direction, scroll_amount, px, py
+        ),
+        _ => format!(
+            "scroll {} by {} units at current position",
+            direction, scroll_amount
+        ),
     };
 
     log_debug_operation("scroll_window", &operation_desc, &debug_config);
@@ -97,20 +109,32 @@ pub(crate) async fn scroll_window(
         match (x, y) {
             (Some(px), Some(py)) => {
                 let desktop = &state.desktop;
-                result = desktop.scroll_at_position(px, py, &direction, scroll_amount).map_err(AutomationError::Internal);
-                action_desc = format!("Scrolled {} by {} at ({}, {})", direction, scroll_amount, px, py);
+                result = desktop
+                    .scroll_at_position(px, py, &direction, scroll_amount)
+                    .map_err(AutomationError::Internal);
+                action_desc = format!(
+                    "Scrolled {} by {} at ({}, {})",
+                    direction, scroll_amount, px, py
+                );
             }
             _ => {
                 let desktop = &state.desktop;
-                result = desktop.scroll_at_current_position(&direction, scroll_amount).map_err(AutomationError::Internal);
-                action_desc = format!("Scrolled {} by {} at current position", direction, scroll_amount);
+                result = desktop
+                    .scroll_at_current_position(&direction, scroll_amount)
+                    .map_err(AutomationError::Internal);
+                action_desc = format!(
+                    "Scrolled {} by {} at current position",
+                    direction, scroll_amount
+                );
             }
         }
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        result = Err(AutomationError::UnsupportedPlatform("macOS specific functionality not available on this platform".to_string()));
+        result = Err(AutomationError::UnsupportedPlatform(
+            "macOS specific functionality not available on this platform".to_string(),
+        ));
         action_desc = "Scroll (Unsupported Platform)".to_string();
     }
 
@@ -134,19 +158,35 @@ pub(crate) async fn scroll_window(
 }
 
 #[tauri::command]
-pub(crate) async fn get_window_list(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification};
+pub(crate) async fn get_window_list(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
-    log_debug_operation("get_window_list", "Getting list of all windows", &debug_config);
+    log_debug_operation(
+        "get_window_list",
+        "Getting list of all windows",
+        &debug_config,
+    );
     info!("Executing get_window_list");
 
     let desktop = &state.desktop;
     match desktop.list_windows() {
         Ok(windows) => {
-            info!("Successfully retrieved window list. Found {} windows.", windows.len());
+            info!(
+                "Successfully retrieved window list. Found {} windows.",
+                windows.len()
+            );
 
             let mut window_infos: Vec<WindowInfo> = Vec::new();
             for win in windows {
@@ -158,7 +198,10 @@ pub(crate) async fn get_window_list(app: AppHandle, state: State<'_, AppState>) 
                         window_infos.push(WindowInfo { id, title });
                     }
                     None => {
-                        window_infos.push(WindowInfo { id: "<no_id>".to_string(), title });
+                        window_infos.push(WindowInfo {
+                            id: "<no_id>".to_string(),
+                            title,
+                        });
                     }
                 }
             }
@@ -167,7 +210,11 @@ pub(crate) async fn get_window_list(app: AppHandle, state: State<'_, AppState>) 
                 Ok(json_string) => {
                     // Send debug notification if enabled
                     if debug_config.send_notifications {
-                        let _ = send_debug_notification(&app, "Window List", &format!("Retrieved {} windows", window_infos.len()));
+                        let _ = send_debug_notification(
+                            &app,
+                            "Window List",
+                            &format!("Retrieved {} windows", window_infos.len()),
+                        );
                     }
 
                     Ok(json_string)
@@ -188,18 +235,32 @@ pub(crate) async fn get_window_list(app: AppHandle, state: State<'_, AppState>) 
 }
 
 #[tauri::command]
-pub(crate) async fn get_window_info(window_id: String, app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+pub(crate) async fn get_window_info(
+    window_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
         validators::non_empty_text(&window_id)?;
     }
 
-    log_debug_operation("get_window_info", &format!("Getting info for window ID/index: {}", window_id), &debug_config);
+    log_debug_operation(
+        "get_window_info",
+        &format!("Getting info for window ID/index: {}", window_id),
+        &debug_config,
+    );
     info!("Executing get_window_info for window: {}", window_id);
 
     match find_window_by_id(&state, &window_id) {
@@ -209,14 +270,18 @@ pub(crate) async fn get_window_info(window_id: String, app: AppHandle, state: St
             let attrs_result = window.get_all_attributes();
             let attrs_to_serialize = match attrs_result {
                 Ok(all_attrs) => all_attrs,
-                Err(_) => window.attributes()
+                Err(_) => window.attributes(),
             };
 
             match serde_json::to_string_pretty(&attrs_to_serialize) {
                 Ok(json_string) => {
                     // Send debug notification if enabled
                     if debug_config.send_notifications {
-                        let _ = send_debug_notification(&app, "Window Info", &format!("Retrieved info for window: {}", window_id));
+                        let _ = send_debug_notification(
+                            &app,
+                            "Window Info",
+                            &format!("Retrieved info for window: {}", window_id),
+                        );
                     }
 
                     Ok(json_string)
@@ -241,18 +306,32 @@ pub(crate) async fn get_window_info(window_id: String, app: AppHandle, state: St
 }
 
 #[tauri::command]
-pub(crate) async fn focus_window(window_id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+pub(crate) async fn focus_window(
+    window_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
         validators::non_empty_text(&window_id)?;
     }
 
-    log_debug_operation("focus_window", &format!("Focusing window ID: {}", window_id), &debug_config);
+    log_debug_operation(
+        "focus_window",
+        &format!("Focusing window ID: {}", window_id),
+        &debug_config,
+    );
     info!("Executing focus_window for window: {}", window_id);
 
     match find_window_by_id(&state, &window_id) {
@@ -263,7 +342,11 @@ pub(crate) async fn focus_window(window_id: String, app: AppHandle, state: State
 
                     // Send debug notification if enabled
                     if debug_config.send_notifications {
-                        let _ = send_debug_notification(&app, "Focus Window", &format!("Focused window: {}", window_id));
+                        let _ = send_debug_notification(
+                            &app,
+                            "Focus Window",
+                            &format!("Focused window: {}", window_id),
+                        );
                     }
 
                     Ok(())
@@ -295,10 +378,16 @@ pub(crate) async fn resize_window(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
@@ -311,15 +400,25 @@ pub(crate) async fn resize_window(
         }
     }
 
-    log_debug_operation("resize_window", &format!("Resizing window ID: {} to {}x{}", window_id, width, height), &debug_config);
-    info!("Executing resize_window for window: {} to size {}x{}", window_id, width, height);
+    log_debug_operation(
+        "resize_window",
+        &format!("Resizing window ID: {} to {}x{}", window_id, width, height),
+        &debug_config,
+    );
+    info!(
+        "Executing resize_window for window: {} to size {}x{}",
+        window_id, width, height
+    );
 
     match find_window_by_id(&state, &window_id) {
         Ok(Some(window)) => {
             // Check if this is a window element
             let role = window.attributes().role;
             if role != "window" && role != "AXWindow" {
-                let error_msg = format!("Element with ID '{}' is not a window (role: {})", window_id, role);
+                let error_msg = format!(
+                    "Element with ID '{}' is not a window (role: {})",
+                    window_id, role
+                );
                 error!("{}", error_msg);
                 return Err(error_msg);
             }
@@ -333,31 +432,48 @@ pub(crate) async fn resize_window(
                         info!("Successfully focused window '{}'", window_id);
 
                         // Small delay to ensure focus has taken effect - use async sleep
-                        tokio::time::sleep(tokio::time::Duration::from_millis(crate::constants::mouse::delays::WINDOW_FOCUS_DELAY_MS)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            crate::constants::mouse::delays::WINDOW_FOCUS_DELAY_MS,
+                        ))
+                        .await;
 
                         // Now resize the focused window using the desktop's engine
                         let desktop = state.get_desktop()?;
 
                         match desktop.engine().resize_window(width as f64, height as f64) {
                             Ok(_) => {
-                                info!("Successfully resized window '{}' to size {}x{}", window_id, width, height);
+                                info!(
+                                    "Successfully resized window '{}' to size {}x{}",
+                                    window_id, width, height
+                                );
 
                                 // Send debug notification if enabled
                                 if debug_config.send_notifications {
-                                    let _ = send_debug_notification(&app, "Resize Window", &format!("Resized window '{}' to {}x{}", window_id, width, height));
+                                    let _ = send_debug_notification(
+                                        &app,
+                                        "Resize Window",
+                                        &format!(
+                                            "Resized window '{}' to {}x{}",
+                                            window_id, width, height
+                                        ),
+                                    );
                                 }
 
                                 Ok(())
                             }
                             Err(e) => {
-                                let error_msg = format!("Failed to resize window '{}': {}", window_id, e);
+                                let error_msg =
+                                    format!("Failed to resize window '{}': {}", window_id, e);
                                 error!("{}", error_msg);
                                 Err(error_msg)
                             }
                         }
                     }
                     Err(e) => {
-                        let error_msg = format!("Failed to focus window '{}' before resizing: {}", window_id, e);
+                        let error_msg = format!(
+                            "Failed to focus window '{}' before resizing: {}",
+                            window_id, e
+                        );
                         error!("{}", error_msg);
                         Err(error_msg)
                     }
@@ -391,25 +507,41 @@ pub(crate) async fn move_window(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
         validators::non_empty_text(&window_id)?;
     }
 
-    log_debug_operation("move_window", &format!("Moving window ID: {} to ({}, {})", window_id, x, y), &debug_config);
-    info!("Executing move_window for window: {} to position ({}, {})", window_id, x, y);
+    log_debug_operation(
+        "move_window",
+        &format!("Moving window ID: {} to ({}, {})", window_id, x, y),
+        &debug_config,
+    );
+    info!(
+        "Executing move_window for window: {} to position ({}, {})",
+        window_id, x, y
+    );
 
     match find_window_by_id(&state, &window_id) {
         Ok(Some(window)) => {
             // Check if this is a window element
             let role = window.attributes().role;
             if role != "window" && role != "AXWindow" {
-                let error_msg = format!("Element with ID '{}' is not a window (role: {})", window_id, role);
+                let error_msg = format!(
+                    "Element with ID '{}' is not a window (role: {})",
+                    window_id, role
+                );
                 error!("{}", error_msg);
                 return Err(error_msg);
             }
@@ -423,31 +555,45 @@ pub(crate) async fn move_window(
                         info!("Successfully focused window '{}'", window_id);
 
                         // Small delay to ensure focus has taken effect - use async sleep
-                        tokio::time::sleep(tokio::time::Duration::from_millis(crate::constants::mouse::delays::WINDOW_FOCUS_DELAY_MS)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            crate::constants::mouse::delays::WINDOW_FOCUS_DELAY_MS,
+                        ))
+                        .await;
 
                         // Now move the focused window using the desktop's engine
                         let desktop = state.get_desktop()?;
 
                         match desktop.engine().move_window(x as f64, y as f64) {
                             Ok(_) => {
-                                info!("Successfully moved window '{}' to position ({}, {})", window_id, x, y);
+                                info!(
+                                    "Successfully moved window '{}' to position ({}, {})",
+                                    window_id, x, y
+                                );
 
                                 // Send debug notification if enabled
                                 if debug_config.send_notifications {
-                                    let _ = send_debug_notification(&app, "Move Window", &format!("Moved window '{}' to ({}, {})", window_id, x, y));
+                                    let _ = send_debug_notification(
+                                        &app,
+                                        "Move Window",
+                                        &format!("Moved window '{}' to ({}, {})", window_id, x, y),
+                                    );
                                 }
 
                                 Ok(())
                             }
                             Err(e) => {
-                                let error_msg = format!("Failed to move window '{}': {}", window_id, e);
+                                let error_msg =
+                                    format!("Failed to move window '{}': {}", window_id, e);
                                 error!("{}", error_msg);
                                 Err(error_msg)
                             }
                         }
                     }
                     Err(e) => {
-                        let error_msg = format!("Failed to focus window '{}' before moving: {}", window_id, e);
+                        let error_msg = format!(
+                            "Failed to focus window '{}' before moving: {}",
+                            window_id, e
+                        );
                         error!("{}", error_msg);
                         Err(error_msg)
                     }
@@ -479,17 +625,27 @@ pub(crate) async fn close_window(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    use crate::commands::debug_utils::{DebugConfig, should_enable_debug, log_debug_operation, send_debug_notification, validators};
+    use crate::commands::debug_utils::{
+        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    };
 
     let debug_enabled = should_enable_debug(false, &state);
-    let debug_config = if debug_enabled { DebugConfig::development_mode() } else { DebugConfig::production_mode() };
+    let debug_config = if debug_enabled {
+        DebugConfig::development_mode()
+    } else {
+        DebugConfig::production_mode()
+    };
 
     // Debug validation
     if debug_config.validate_inputs {
         validators::non_empty_text(&window_id)?;
     }
 
-    log_debug_operation("close_window", &format!("Closing window ID: {}", window_id), &debug_config);
+    log_debug_operation(
+        "close_window",
+        &format!("Closing window ID: {}", window_id),
+        &debug_config,
+    );
     info!("Executing close_window for window: {}", window_id);
 
     match find_window_by_id(&state, &window_id) {
@@ -497,7 +653,10 @@ pub(crate) async fn close_window(
             // Check if this is a window element
             let role = window.attributes().role;
             if role != "window" && role != "AXWindow" {
-                let error_msg = format!("Element with ID '{}' is not a window (role: {})", window_id, role);
+                let error_msg = format!(
+                    "Element with ID '{}' is not a window (role: {})",
+                    window_id, role
+                );
                 error!("{}", error_msg);
                 return Err(error_msg);
             }
@@ -511,7 +670,10 @@ pub(crate) async fn close_window(
                         info!("Successfully focused window '{}'", window_id);
 
                         // Small delay to ensure focus has taken effect - use async sleep
-                        tokio::time::sleep(tokio::time::Duration::from_millis(crate::constants::mouse::delays::WINDOW_FOCUS_DELAY_MS)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            crate::constants::mouse::delays::WINDOW_FOCUS_DELAY_MS,
+                        ))
+                        .await;
 
                         // Now close the focused window using the desktop's engine
                         let desktop = state.get_desktop()?;
@@ -522,20 +684,28 @@ pub(crate) async fn close_window(
 
                                 // Send debug notification if enabled
                                 if debug_config.send_notifications {
-                                    let _ = send_debug_notification(&app, "Close Window", &format!("Closed window '{}'", window_id));
+                                    let _ = send_debug_notification(
+                                        &app,
+                                        "Close Window",
+                                        &format!("Closed window '{}'", window_id),
+                                    );
                                 }
 
                                 Ok(())
                             }
                             Err(e) => {
-                                let error_msg = format!("Failed to close window '{}': {}", window_id, e);
+                                let error_msg =
+                                    format!("Failed to close window '{}': {}", window_id, e);
                                 error!("{}", error_msg);
                                 Err(error_msg)
                             }
                         }
                     }
                     Err(e) => {
-                        let error_msg = format!("Failed to focus window '{}' before closing: {}", window_id, e);
+                        let error_msg = format!(
+                            "Failed to focus window '{}' before closing: {}",
+                            window_id, e
+                        );
                         error!("{}", error_msg);
                         Err(error_msg)
                     }

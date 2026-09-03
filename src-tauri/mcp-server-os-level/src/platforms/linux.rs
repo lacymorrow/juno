@@ -1,7 +1,7 @@
 use crate::element::UIElementImpl;
 use crate::platforms::AccessibilityEngine;
 use crate::ClickResult;
-use crate::{AutomationError, Locator, Selector, UIElement, UIElementAttributes, ElementTreeNode};
+use crate::{AutomationError, ElementTreeNode, Locator, Selector, UIElement, UIElementAttributes};
 use std::fmt::Debug;
 
 pub struct LinuxEngine;
@@ -74,13 +74,23 @@ impl AccessibilityEngine for LinuxEngine {
         self
     }
 
-    fn scroll_at_position(&self, _x: f64, _y: f64, _direction: &str, _amount: f64) -> Result<(), AutomationError> {
+    fn scroll_at_position(
+        &self,
+        _x: f64,
+        _y: f64,
+        _direction: &str,
+        _amount: f64,
+    ) -> Result<(), AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
     }
 
-    fn scroll_at_current_position(&self, _direction: &str, _amount: f64) -> Result<(), AutomationError> {
+    fn scroll_at_current_position(
+        &self,
+        _direction: &str,
+        _amount: f64,
+    ) -> Result<(), AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
@@ -128,7 +138,10 @@ impl AccessibilityEngine for LinuxEngine {
         ))
     }
 
-    fn get_ui_tree(&self, _application_name: Option<&str>) -> Result<serde_json::Value, AutomationError> {
+    fn get_ui_tree(
+        &self,
+        _application_name: Option<&str>,
+    ) -> Result<serde_json::Value, AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
@@ -158,37 +171,68 @@ impl AccessibilityEngine for LinuxEngine {
         ))
     }
 
-    fn left_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
+    fn left_click(
+        &self,
+        _x: f64,
+        _y: f64,
+        _modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
     }
 
-    fn right_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
+    fn right_click(
+        &self,
+        _x: f64,
+        _y: f64,
+        _modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
     }
 
-    fn middle_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
+    fn middle_click(
+        &self,
+        _x: f64,
+        _y: f64,
+        _modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
     }
 
-    fn double_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
+    fn double_click(
+        &self,
+        _x: f64,
+        _y: f64,
+        _modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
     }
 
-    fn triple_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
+    fn triple_click(
+        &self,
+        _x: f64,
+        _y: f64,
+        _modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
     }
 
-    fn left_click_drag(&self, _start_x: f64, _start_y: f64, _end_x: f64, _end_y: f64) -> Result<(), AutomationError> {
+    fn left_click_drag(
+        &self,
+        _start_x: f64,
+        _start_y: f64,
+        _end_x: f64,
+        _end_y: f64,
+    ) -> Result<(), AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))

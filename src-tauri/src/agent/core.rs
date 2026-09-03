@@ -101,8 +101,8 @@ pub struct ToolCall {
 pub struct ToolResult {
     pub call_id: String, // Reference back to the ToolCall id
     pub output: Value,   // The result from the tool (JSON value)
-                           // Consider adding success/failure status
-                           // pub success: bool,
+                         // Consider adding success/failure status
+                         // pub success: bool,
 }
 
 // Basic definition for a tool known by the agent
@@ -122,13 +122,13 @@ pub struct ToolDefinition {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentState {
-    Idle,       // Waiting to start
-    Thinking,   // Processing, deciding next step (e.g., calling LLM)
-    Executing,  // Running a tool
-    Responding, // Preparing final response
-    Finished,   // Completed successfully
+    Idle,           // Waiting to start
+    Thinking,       // Processing, deciding next step (e.g., calling LLM)
+    Executing,      // Running a tool
+    Responding,     // Preparing final response
+    Finished,       // Completed successfully
     Failed(String), // Encountered an error
-    Paused,     // Temporarily stopped, can be resumed
+    Paused,         // Temporarily stopped, can be resumed
 }
 
 // Represents the action the agent decided to take next

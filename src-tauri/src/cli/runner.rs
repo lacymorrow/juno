@@ -26,8 +26,6 @@ pub(crate) fn handle_cli_commands(
     // Prefix unused desktop_instance with _
     let _command_handled = false;
 
-
-
     // --- TTS Test Handling ---
     if let Some(provider) = &cli.tts_provider {
         let text = cli

@@ -1,10 +1,10 @@
-use tauri::{State, AppHandle};
 use serde::{Deserialize, Serialize};
-use tracing::{info, error, debug, warn};
+use tauri::{AppHandle, State};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::state::AppState;
 use crate::cloud::types::ConnectionState;
+use crate::state::AppState;
 
 /// Cloud configuration response for frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,7 +112,7 @@ pub async fn get_cloud_status(
         "message": "Not connected to cloud"
     });
     let mut device_id = None;
-            let last_error = None; // Note: Error tracking not implemented yet
+    let last_error = None; // Note: Error tracking not implemented yet
 
     // Get connection state if cloud client exists
     if enabled {
@@ -124,46 +124,46 @@ pub async fn get_cloud_status(
                         "status": "disconnected",
                         "message": "Not connected to cloud"
                     });
-                },
+                }
                 ConnectionState::Connecting => {
                     connection_state = serde_json::json!({
                         "status": "connecting",
                         "message": "Connecting to cloud..."
                     });
-                },
+                }
                 ConnectionState::Connected => {
                     connected = true;
                     connection_state = serde_json::json!({
                         "status": "connected",
                         "message": "Connected to cloud"
                     });
-                },
+                }
                 ConnectionState::Authenticated => {
                     connected = true;
                     connection_state = serde_json::json!({
                         "status": "authenticated",
                         "message": "Authenticated with cloud"
                     });
-                },
+                }
                 ConnectionState::Reconnecting => {
                     connection_state = serde_json::json!({
                         "status": "reconnecting",
                         "message": "Reconnecting to cloud..."
                     });
-                },
+                }
                 ConnectionState::Failed(ref err) => {
                     connection_state = serde_json::json!({
                         "status": "failed",
                         "message": format!("Connection failed: {}", err)
                     });
-                },
+                }
                 ConnectionState::Error(ref err) => {
                     error!("Cloud connection error: {}", err);
                     connection_state = serde_json::json!({
                         "status": "error",
                         "message": format!("Error: {}", err)
                     });
-                },
+                }
             }
         }
 
@@ -193,7 +193,8 @@ pub async fn enable_cloud(
     config.enabled = true;
 
     // Validate configuration before enabling
-    config.validate()
+    config
+        .validate()
         .map_err(|e| format!("Configuration validation failed: {}", e))?;
 
     app_state.update_cloud_config(config, &app_handle).await?;
@@ -221,9 +222,7 @@ pub async fn disable_cloud(
 
 /// Test cloud connection
 #[tauri::command]
-pub async fn test_cloud_connection(
-    app_state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn test_cloud_connection(app_state: State<'_, AppState>) -> Result<bool, String> {
     info!("Testing cloud connection");
 
     if !app_state.is_cloud_enabled() {
@@ -237,31 +236,31 @@ pub async fn test_cloud_connection(
             ConnectionState::Authenticated => {
                 info!("Cloud connection test: Connected and authenticated");
                 Ok(true)
-            },
+            }
             ConnectionState::Connected => {
                 info!("Cloud connection test: Connected but not authenticated");
                 Ok(false)
-            },
+            }
             ConnectionState::Connecting => {
                 info!("Cloud connection test: Currently connecting");
                 Ok(false)
-            },
+            }
             ConnectionState::Disconnected => {
                 info!("Cloud connection test: Disconnected");
                 Ok(false)
-            },
+            }
             ConnectionState::Reconnecting => {
                 info!("Cloud connection test: Reconnecting");
                 Ok(false)
-            },
+            }
             ConnectionState::Failed(ref err) => {
                 error!("Cloud connection test: Failed - {}", err);
                 Err(format!("Connection failed: {}", err))
-            },
+            }
             ConnectionState::Error(ref err) => {
                 error!("Cloud connection test: Error - {}", err);
                 Err(format!("Connection error: {}", err))
-            },
+            }
         }
     } else {
         info!("Cloud connection test: No client available");
@@ -326,7 +325,10 @@ pub async fn handle_cloud_message(
     message: String,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    info!("Received cloud message from connection {}: {}", connection_id, message);
+    info!(
+        "Received cloud message from connection {}: {}",
+        connection_id, message
+    );
 
     // Parse the WebSocket message
     let ws_message: crate::cloud::types::WebSocketMessage = serde_json::from_str(&message)
@@ -335,8 +337,9 @@ pub async fn handle_cloud_message(
     // Handle different message types
     match ws_message.message_type {
         crate::cloud::types::MessageType::Command => {
-            let command: crate::cloud::types::CloudCommand = serde_json::from_value(ws_message.data)
-                .map_err(|e| format!("Failed to parse cloud command: {}", e))?;
+            let command: crate::cloud::types::CloudCommand =
+                serde_json::from_value(ws_message.data)
+                    .map_err(|e| format!("Failed to parse cloud command: {}", e))?;
 
             // Get the production connector from app state
             if let Some(connector) = app_state.get_production_cloud_connector() {
@@ -346,7 +349,7 @@ pub async fn handle_cloud_message(
                         if let Err(e) = send_cloud_response(response).await {
                             error!("Failed to send cloud response: {}", e);
                         }
-                    },
+                    }
                     Err(e) => {
                         error!("Failed to execute remote command: {}", e);
                         return Err(format!("Command execution failed: {}", e));
@@ -355,23 +358,28 @@ pub async fn handle_cloud_message(
             } else {
                 return Err("Production cloud connector not available".to_string());
             }
-        },
+        }
         crate::cloud::types::MessageType::Auth => {
             info!("Received authentication message from cloud");
             // Authentication is handled by the connector itself
-        },
+        }
         crate::cloud::types::MessageType::Heartbeat => {
             debug!("Received heartbeat from cloud");
             // Heartbeat is handled automatically
-        },
+        }
         crate::cloud::types::MessageType::Error => {
-            let error_msg = ws_message.data.get("message")
+            let error_msg = ws_message
+                .data
+                .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("Unknown cloud error");
             error!("Received error from cloud: {}", error_msg);
-        },
+        }
         _ => {
-            warn!("Unhandled cloud message type: {:?}", ws_message.message_type);
+            warn!(
+                "Unhandled cloud message type: {:?}",
+                ws_message.message_type
+            );
         }
     }
 
@@ -401,13 +409,13 @@ pub async fn start_production_cloud_connector(
                     app_state.set_production_cloud_connector(connector).await;
                     info!("Production cloud connector started successfully");
                     Ok(())
-                },
+                }
                 Err(e) => {
                     error!("Failed to start production cloud connector: {}", e);
                     Err(format!("Failed to start connector: {}", e))
                 }
             }
-        },
+        }
         Err(e) => {
             error!("Failed to create production cloud connector: {}", e);
             Err(format!("Failed to create connector: {}", e))
@@ -427,7 +435,7 @@ pub async fn stop_production_cloud_connector(
                 app_state.clear_production_cloud_connector().await;
                 info!("Production cloud connector stopped successfully");
                 Ok(())
-            },
+            }
             Err(e) => {
                 error!("Failed to stop production cloud connector: {}", e);
                 Err(format!("Failed to stop connector: {}", e))
@@ -489,7 +497,7 @@ pub async fn test_websocket_connection(
                     .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                     .as_secs()
             }))
-        },
+        }
         Err(e) => {
             let duration = start_time.elapsed();
             Ok(serde_json::json!({
@@ -522,19 +530,35 @@ pub async fn send_test_cloud_command(
         id: Uuid::new_v4().to_string(),
         command_type: parse_command_type(&command_type)?,
         payload: crate::cloud::types::CloudCommandPayload {
-            query: payload.get("query").and_then(|q| q.as_str()).map(|s| s.to_string()),
-            audio_base64: payload.get("audio_base64").and_then(|a| a.as_str()).map(|s| s.to_string()),
-            mode: payload.get("mode").and_then(|m| m.as_str()).and_then(|s| {
-                match s {
+            query: payload
+                .get("query")
+                .and_then(|q| q.as_str())
+                .map(|s| s.to_string()),
+            audio_base64: payload
+                .get("audio_base64")
+                .and_then(|a| a.as_str())
+                .map(|s| s.to_string()),
+            mode: payload
+                .get("mode")
+                .and_then(|m| m.as_str())
+                .and_then(|s| match s {
                     "agent" => Some(crate::cloud::types::AgentMode::Agent),
                     "dictation" => Some(crate::cloud::types::AgentMode::Dictation),
                     "system" => Some(crate::cloud::types::AgentMode::System),
                     _ => None,
-                }
-            }),
-            parameters: payload.get("parameters").and_then(|p| p.as_object())
-                .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect()),
-            config: payload.get("config").and_then(|c| c.as_object()).cloned()
+                }),
+            parameters: payload
+                .get("parameters")
+                .and_then(|p| p.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                        .collect()
+                }),
+            config: payload
+                .get("config")
+                .and_then(|c| c.as_object())
+                .cloned()
                 .map(|obj| obj.into_iter().collect()),
         },
         timestamp: std::time::SystemTime::now()
@@ -561,7 +585,7 @@ pub async fn send_test_cloud_command(
                             .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                             .as_secs()
                     }));
-                },
+                }
                 Err(e) => {
                     let duration = start_time.elapsed();
                     return Ok(serde_json::json!({
@@ -635,7 +659,7 @@ pub async fn simulate_cloud_command(
                         .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                         .as_secs()
                 }))
-            },
+            }
             Err(e) => {
                 error!("Simulated command failed: {}", e);
                 Ok(serde_json::json!({
@@ -721,7 +745,10 @@ pub async fn run_websocket_test_suite(
     test_results.push(run_error_handling_test().await);
 
     let overall_success = test_results.iter().all(|result| {
-        result.get("success").and_then(|s| s.as_bool()).unwrap_or(false)
+        result
+            .get("success")
+            .and_then(|s| s.as_bool())
+            .unwrap_or(false)
     });
 
     Ok(serde_json::json!({
@@ -739,9 +766,11 @@ pub async fn run_websocket_test_suite(
 // INTERNAL TESTING FUNCTIONS
 // =================================
 
-async fn test_websocket_connection_internal(url: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    use tokio_tungstenite::{connect_async, tungstenite::Message};
+async fn test_websocket_connection_internal(
+    url: String,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::{connect_async, tungstenite::Message};
 
     let (ws_stream, _) = connect_async(&url).await?;
     let (mut write, mut read) = ws_stream.split();
@@ -767,7 +796,7 @@ fn parse_command_type(command_type: &str) -> Result<crate::cloud::types::CloudCo
         "status_request" => Ok(crate::cloud::types::CloudCommandType::StatusRequest),
         "screenshot" => Ok(crate::cloud::types::CloudCommandType::Screenshot),
         "config_update" => Ok(crate::cloud::types::CloudCommandType::ConfigUpdate),
-        _ => Err(format!("Unknown command type: {}", command_type))
+        _ => Err(format!("Unknown command type: {}", command_type)),
     }
 }
 
@@ -788,7 +817,7 @@ async fn run_basic_connection_test() -> serde_json::Value {
             "success": false,
             "error": e.to_string(),
             "duration_ms": 0
-        })
+        }),
     }
 }
 
@@ -810,7 +839,7 @@ async fn run_authentication_test(app_state: &AppState) -> serde_json::Value {
             "test": "authentication",
             "success": false,
             "error": e.to_string()
-        })
+        }),
     }
 }
 
@@ -876,7 +905,10 @@ pub async fn execute_remote_command(
     payload: serde_json::Value,
     app_state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    info!("Executing remote command: {} with payload: {:?}", command_type, payload);
+    info!(
+        "Executing remote command: {} with payload: {:?}",
+        command_type, payload
+    );
 
     // Check if production cloud connector exists and is available
     let connector = {
@@ -897,16 +929,30 @@ pub async fn execute_remote_command(
         id: uuid::Uuid::new_v4().to_string(),
         command_type: parsed_command_type,
         payload: crate::cloud::types::CloudCommandPayload {
-            query: payload.get("query").and_then(|v| v.as_str()).map(String::from),
-            audio_base64: payload.get("audio_base64").and_then(|v| v.as_str()).map(String::from),
-            mode: payload.get("mode").and_then(|v| v.as_str())
+            query: payload
+                .get("query")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            audio_base64: payload
+                .get("audio_base64")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            mode: payload
+                .get("mode")
+                .and_then(|v| v.as_str())
                 .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok()),
-            config: payload.get("config").and_then(|v| v.as_object()).map(|obj| {
-                obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-            }),
-            parameters: payload.get("parameters").and_then(|v| v.as_object()).map(|obj| {
-                obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()
-            }),
+            config: payload
+                .get("config")
+                .and_then(|v| v.as_object())
+                .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+            parameters: payload
+                .get("parameters")
+                .and_then(|v| v.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                }),
         },
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -925,7 +971,7 @@ pub async fn execute_remote_command(
                 "data": response,
                 "timestamp": chrono::Utc::now().to_rfc3339()
             }))
-        },
+        }
         Err(e) => {
             error!("Failed to execute remote command: {}", e);
             Err(format!("Remote command execution failed: {}", e))
@@ -956,8 +1002,16 @@ pub async fn get_cloud_connection_diagnostics(
         diagnostics["connection_state"] = serde_json::json!(format!("{:?}", connection_state));
         diagnostics["connection_stats"] = serde_json::json!(connection_stats);
         diagnostics["capabilities"] = serde_json::json!([
-            "screenshot", "click", "type", "key", "execute", "status",
-            "text_query", "voice_query", "system_command", "config_update"
+            "screenshot",
+            "click",
+            "type",
+            "key",
+            "execute",
+            "status",
+            "text_query",
+            "voice_query",
+            "system_command",
+            "config_update"
         ]);
     }
 

@@ -1,13 +1,13 @@
+use crate::constants::{events, timeouts, ui};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, Listener};
+use tauri::{AppHandle, Emitter, Listener, Manager};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
-use tracing::{debug, error, warn, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
-use crate::constants::{timeouts, events, ui};
 
 use crate::settings::{manager::SettingsManager, FloatingBarSettings};
 use crate::utils::async_runtime::safe_spawn_async_task;
@@ -151,7 +151,7 @@ pub struct UIManager {
     pub agent_state: Option<String>,
     pub current_transition_id: Option<String>,
     pub bar_config: FloatingBarConfig,
-    
+
     // Deduplication fields
     pub last_submission_time: Option<Instant>,
     pub last_submission_query: Option<String>,
@@ -222,7 +222,9 @@ impl UIManager {
             bar_appearance: self.bar_config.bar_appearance.clone(),
         };
 
-        settings_manager.set_floating_bar_settings(&settings).await
+        settings_manager
+            .set_floating_bar_settings(&settings)
+            .await
             .map_err(|e| format!("Failed to save floating bar settings: {}", e))?;
 
         Ok(())
@@ -252,16 +254,19 @@ impl UIManager {
     }
 
     async fn set_bar_state(&mut self, new_state: BarState) {
-        debug!("UI Manager: Bar state changing from {:?} to {:?}", self.bar_state, new_state);
+        debug!(
+            "UI Manager: Bar state changing from {:?} to {:?}",
+            self.bar_state, new_state
+        );
         self.bar_state = new_state;
         self.emit_bar_state_update().await;
     }
-    
+
     /// Navigate the bar window to the appropriate route based on bar appearance
     async fn navigate_bar_window(&self) -> Result<(), String> {
         // Always use the floating-bar window (the only one that exists)
         let window_label = ui::window_labels::FLOATING_BAR;
-        
+
         // Determine the route based on bar appearance
         let route = match self.bar_config.bar_appearance.as_str() {
             ui::bar_appearances::APP => "/app-bar",
@@ -271,32 +276,46 @@ impl UIManager {
             ui::bar_appearances::PERSONA => "/persona-bar",
             _ => "/floating-bar",
         };
-        
+
         // Navigate the window to the appropriate route
         if let Some(window) = self.app_handle.get_webview_window(window_label) {
-            let current_url = window.url().map_err(|e| format!("Failed to get current URL: {}", e))?;
-            
+            let current_url = window
+                .url()
+                .map_err(|e| format!("Failed to get current URL: {}", e))?;
+
             // Build the new URL by taking the base and appending the route
-            let base_url = current_url.as_str().split('#').next().unwrap_or(current_url.as_str());
+            let base_url = current_url
+                .as_str()
+                .split('#')
+                .next()
+                .unwrap_or(current_url.as_str());
             let base_url = base_url.split('/').take(3).collect::<Vec<_>>().join("/");
             let new_url = format!("{}{}", base_url, route);
-            
+
             // Only navigate if we're not already on the right route
             if !current_url.as_str().ends_with(route) {
-                window.navigate(new_url.parse().map_err(|e| format!("Failed to parse URL: {}", e))?)
+                window
+                    .navigate(
+                        new_url
+                            .parse()
+                            .map_err(|e| format!("Failed to parse URL: {}", e))?,
+                    )
                     .map_err(|e| format!("Failed to navigate window: {}", e))?;
-                
+
                 debug!("Navigated bar window to route: {}", route);
             }
         } else {
             debug!("Bar window not found for navigation");
         }
-        
+
         Ok(())
     }
 
     pub async fn handle_bar_click(&mut self) -> Result<(), String> {
-        debug!("UI Manager: Handling bar click, current state: {:?}", self.bar_state);
+        debug!(
+            "UI Manager: Handling bar click, current state: {:?}",
+            self.bar_state
+        );
 
         if self.bar_state != BarState::Default || self.is_agent_working {
             return Ok(());
@@ -316,7 +335,10 @@ impl UIManager {
     }
 
     pub async fn handle_bar_focus_change(&mut self, is_focused: bool) -> Result<(), String> {
-        debug!("UI Manager: Handling focus change, focused: {}, current state: {:?}", is_focused, self.bar_state);
+        debug!(
+            "UI Manager: Handling focus change, focused: {}, current state: {:?}",
+            is_focused, self.bar_state
+        );
 
         if self.should_remain_expanded_for_status() {
             debug!("UI Manager: Agent is working, preserving state");
@@ -350,9 +372,15 @@ impl UIManager {
     }
 
     pub async fn handle_bar_input_blur(&mut self) -> Result<(), String> {
-        debug!("UI Manager: Handling input blur, current state: {:?}", self.bar_state);
+        debug!(
+            "UI Manager: Handling input blur, current state: {:?}",
+            self.bar_state
+        );
 
-        if self.bar_state == BarState::Input && self.input_value.trim().is_empty() && !self.should_remain_expanded_for_status() {
+        if self.bar_state == BarState::Input
+            && self.input_value.trim().is_empty()
+            && !self.should_remain_expanded_for_status()
+        {
             self.set_bar_state(BarState::Shrinking).await;
 
             let transition_id = Uuid::new_v4().to_string();
@@ -390,9 +418,14 @@ impl UIManager {
 
         // Check for duplicate submission within 1 second
         let now = Instant::now();
-        if let (Some(last_time), Some(last_query)) = (&self.last_submission_time, &self.last_submission_query) {
+        if let (Some(last_time), Some(last_query)) =
+            (&self.last_submission_time, &self.last_submission_query)
+        {
             if last_query == &query && now.duration_since(*last_time).as_millis() < 1000 {
-                warn!("Duplicate submission detected within 1 second, ignoring: '{}'", query);
+                warn!(
+                    "Duplicate submission detected within 1 second, ignoring: '{}'",
+                    query
+                );
                 return Ok(());
             }
         }
@@ -423,8 +456,15 @@ impl UIManager {
         Ok(())
     }
 
-    pub async fn handle_backend_response(&mut self, response_text: Option<String>, agent_state: String) -> Result<(), String> {
-        debug!("UI Manager: Handling backend response, agent_state: {}", agent_state);
+    pub async fn handle_backend_response(
+        &mut self,
+        response_text: Option<String>,
+        agent_state: String,
+    ) -> Result<(), String> {
+        debug!(
+            "UI Manager: Handling backend response, agent_state: {}",
+            agent_state
+        );
 
         let transition_id = Uuid::new_v4().to_string();
         self.current_transition_id = Some(transition_id.clone());
@@ -442,15 +482,13 @@ impl UIManager {
                 });
             }
             ui::agent_status::FAILED | ui::agent_status::CANCELLED | ui::agent_status::OFFLINE => {
-                self.current_error = Some(
-                    if agent_state == ui::agent_status::CANCELLED {
-                        "Agent execution was cancelled".to_string()
-                    } else if agent_state == ui::agent_status::OFFLINE {
-                        "Connection unavailable".to_string()
-                    } else {
-                        format!("Agent failed: {}", response_text.unwrap_or_default())
-                    }
-                );
+                self.current_error = Some(if agent_state == ui::agent_status::CANCELLED {
+                    "Agent execution was cancelled".to_string()
+                } else if agent_state == ui::agent_status::OFFLINE {
+                    "Connection unavailable".to_string()
+                } else {
+                    format!("Agent failed: {}", response_text.unwrap_or_default())
+                });
                 self.set_bar_state(BarState::Error).await;
 
                 let app_handle = self.app_handle.clone();
@@ -471,7 +509,10 @@ impl UIManager {
 
     /// Visual-only submit handler to provide immediate UI feedback without emitting agent events
     pub async fn handle_submit_visual_only(&mut self, query: String) -> Result<(), String> {
-        debug!("UI Manager: Handling visual-only submit with query: '{}'", query);
+        debug!(
+            "UI Manager: Handling visual-only submit with query: '{}'",
+            query
+        );
 
         if query.trim().is_empty() {
             return Ok(());
@@ -493,7 +534,7 @@ impl UIManager {
 
     pub async fn handle_dictation_mode_change(&mut self, is_active: bool) -> Result<(), String> {
         debug!("UI Manager: Handling dictation mode change: {}", is_active);
-        
+
         let previous_state = self.voice_mode.clone();
         self.is_dictation_mode = is_active;
 
@@ -515,11 +556,18 @@ impl UIManager {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                 .as_millis() as u64,
-            reason: if is_active { "shortcut_triggered".to_string() } else { "stopped".to_string() },
+            reason: if is_active {
+                "shortcut_triggered".to_string()
+            } else {
+                "stopped".to_string()
+            },
             component: "backend".to_string(),
         };
 
-        if let Err(e) = self.app_handle.emit(events::dictation::STATE_CHANGED, &event) {
+        if let Err(e) = self
+            .app_handle
+            .emit(events::dictation::STATE_CHANGED, &event)
+        {
             error!("Failed to emit dictation-state-changed event: {}", e);
         }
 
@@ -527,7 +575,10 @@ impl UIManager {
     }
 
     pub async fn handle_always_listening_change(&mut self, is_active: bool) -> Result<(), String> {
-        debug!("UI Manager: Handling always listening change: {}", is_active);
+        debug!(
+            "UI Manager: Handling always listening change: {}",
+            is_active
+        );
         self.is_always_listening = is_active;
 
         if is_active {
@@ -555,7 +606,14 @@ impl UIManager {
         debug!("UI Manager: Handling agent stopped");
         self.is_agent_working = false;
         self.voice_mode = ui::voice_modes::IDLE.to_string();
-        if matches!(self.bar_state, BarState::Submitting | BarState::Loading | BarState::AgentResponding | BarState::Listening | BarState::Transcribing) {
+        if matches!(
+            self.bar_state,
+            BarState::Submitting
+                | BarState::Loading
+                | BarState::AgentResponding
+                | BarState::Listening
+                | BarState::Transcribing
+        ) {
             self.set_bar_state(BarState::Default).await;
         }
         Ok(())
@@ -612,7 +670,10 @@ impl UIManager {
     }
 
     pub async fn handle_dictation_finished(&mut self, query: Option<String>) -> Result<(), String> {
-        debug!("UI Manager: Handling dictation finished with query: {:?}", query);
+        debug!(
+            "UI Manager: Handling dictation finished with query: {:?}",
+            query
+        );
 
         if let Some(query_text) = query {
             if !query_text.trim().is_empty() {
@@ -646,11 +707,14 @@ impl UIManager {
 
         #[cfg(target_os = "macos")]
         {
-            use cocoa::{base::{id as cocoa_id, BOOL, YES, NO}};
-            use objc::{msg_send, sel, sel_impl};
+            use cocoa::base::{id as cocoa_id, BOOL, NO, YES};
             use dispatch::Queue;
+            use objc::{msg_send, sel, sel_impl};
 
-            if let Some(window) = self.app_handle.get_webview_window(crate::constants::window_labels::FLOATING_PANEL) {
+            if let Some(window) = self
+                .app_handle
+                .get_webview_window(crate::constants::window_labels::FLOATING_PANEL)
+            {
                 match window.ns_window() {
                     Ok(ns_window_ptr) => {
                         let ns_window = ns_window_ptr as cocoa_id;
@@ -659,17 +723,18 @@ impl UIManager {
                             let ignore_events: BOOL = if enabled { YES } else { NO };
 
                             let result = std::panic::catch_unwind(|| {
-                                Queue::main().exec_sync(|| {
-                                    unsafe {
-                                        let ns_window = ns_window_addr as cocoa_id;
-                                        let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: ignore_events];
-                                    }
+                                Queue::main().exec_sync(|| unsafe {
+                                    let ns_window = ns_window_addr as cocoa_id;
+                                    let _: BOOL =
+                                        msg_send![ns_window, setIgnoresMouseEvents: ignore_events];
                                 });
                             });
 
                             match result {
                                 Ok(_) => info!("UI Manager: Panel click-through set successfully"),
-                                Err(_) => return Err("Failed to set panel click-through".to_string()),
+                                Err(_) => {
+                                    return Err("Failed to set panel click-through".to_string())
+                                }
                             }
                         }
                     }
@@ -693,27 +758,33 @@ impl UIManager {
 
         #[cfg(target_os = "macos")]
         {
-            use cocoa::base::{id as cocoa_id};
-            use objc::{msg_send, sel, sel_impl};
+            use cocoa::base::id as cocoa_id;
             use dispatch::Queue;
+            use objc::{msg_send, sel, sel_impl};
 
-            if let Some(window) = self.app_handle.get_webview_window(crate::constants::window_labels::FLOATING_PANEL) {
+            if let Some(window) = self
+                .app_handle
+                .get_webview_window(crate::constants::window_labels::FLOATING_PANEL)
+            {
                 match window.ns_window() {
                     Ok(ns_window_ptr) => {
                         let ns_window = ns_window_ptr as cocoa_id;
                         if !ns_window.is_null() {
                             let ns_window_addr = ns_window as usize;
                             let safe_level = match level {
-                                0 => 0, 1 => 1, 3 => 3, 5 => 5, 8 => 8, 24 => 24,
+                                0 => 0,
+                                1 => 1,
+                                3 => 3,
+                                5 => 5,
+                                8 => 8,
+                                24 => 24,
                                 _ => 3, // Default to floating level
                             };
 
                             let result = std::panic::catch_unwind(|| {
-                                Queue::main().exec_sync(|| {
-                                    unsafe {
-                                        let ns_window = ns_window_addr as cocoa_id;
-                                        let _: () = msg_send![ns_window, setLevel: safe_level];
-                                    }
+                                Queue::main().exec_sync(|| unsafe {
+                                    let ns_window = ns_window_addr as cocoa_id;
+                                    let _: () = msg_send![ns_window, setLevel: safe_level];
                                 });
                             });
 
@@ -741,17 +812,30 @@ impl UIManager {
     // === UTILITY FUNCTIONS ===
 
     fn should_remain_expanded_for_status(&self) -> bool {
-        matches!(self.bar_state,
-            BarState::Submitting | BarState::Loading | BarState::Finishing | BarState::Success |
-            BarState::Speaking | BarState::Listening | BarState::Transcribing |
-            BarState::Dictating | BarState::AlwaysListening | BarState::Error |
-            BarState::AgentResponding | BarState::DictationReady
+        matches!(
+            self.bar_state,
+            BarState::Submitting
+                | BarState::Loading
+                | BarState::Finishing
+                | BarState::Success
+                | BarState::Speaking
+                | BarState::Listening
+                | BarState::Transcribing
+                | BarState::Dictating
+                | BarState::AlwaysListening
+                | BarState::Error
+                | BarState::AgentResponding
+                | BarState::DictationReady
         ) || self.is_agent_working
     }
 
     // === ELEMENT MANAGEMENT ===
 
-    pub async fn create_element(&mut self, element_id: String, config: UIElementConfig) -> Result<(), String> {
+    pub async fn create_element(
+        &mut self,
+        element_id: String,
+        config: UIElementConfig,
+    ) -> Result<(), String> {
         debug!("UI Manager: Creating element: {}", element_id);
         self.elements.insert(element_id.clone(), config);
 
@@ -764,14 +848,21 @@ impl UIManager {
                 .as_millis() as u64,
         };
 
-        if let Err(e) = self.app_handle.emit(events::ui::ELEMENT_CREATED, &state_update) {
+        if let Err(e) = self
+            .app_handle
+            .emit(events::ui::ELEMENT_CREATED, &state_update)
+        {
             error!("Failed to emit element created event: {}", e);
         }
 
         Ok(())
     }
 
-    pub async fn update_element(&mut self, element_id: String, config: UIElementConfig) -> Result<(), String> {
+    pub async fn update_element(
+        &mut self,
+        element_id: String,
+        config: UIElementConfig,
+    ) -> Result<(), String> {
         debug!("UI Manager: Updating element: {}", element_id);
         self.elements.insert(element_id.clone(), config);
 
@@ -784,7 +875,10 @@ impl UIManager {
                 .as_millis() as u64,
         };
 
-        if let Err(e) = self.app_handle.emit(events::ui::ELEMENT_UPDATED, &state_update) {
+        if let Err(e) = self
+            .app_handle
+            .emit(events::ui::ELEMENT_UPDATED, &state_update)
+        {
             error!("Failed to emit element updated event: {}", e);
         }
 
@@ -795,7 +889,10 @@ impl UIManager {
         debug!("UI Manager: Deleting element: {}", element_id);
         self.elements.remove(&element_id);
 
-        if let Err(e) = self.app_handle.emit(events::ui::ELEMENT_DELETED, &element_id) {
+        if let Err(e) = self
+            .app_handle
+            .emit(events::ui::ELEMENT_DELETED, &element_id)
+        {
             error!("Failed to emit element deleted event: {}", e);
         }
 
@@ -807,31 +904,82 @@ impl UIManager {
 
         // Special handling for floating-bar
         if element_id == ui::element_ids::FLOATING_BAR {
-            state.insert("barState".to_string(), serde_json::Value::String(self.bar_state.as_str().to_string()));
-            state.insert("inputValue".to_string(), serde_json::Value::String(self.input_value.clone()));
-            state.insert("lastSubmittedValue".to_string(), serde_json::Value::String(self.last_submitted_value.clone()));
-            state.insert("currentError".to_string(), serde_json::to_value(&self.current_error).unwrap_or(serde_json::Value::Null));
-            state.insert("transcriptionText".to_string(), serde_json::Value::String(self.transcription_text.clone()));
-            state.insert("spokenText".to_string(), serde_json::Value::String(self.spoken_text.clone()));
-            state.insert("isAgentWorking".to_string(), serde_json::Value::Bool(self.is_agent_working));
-            state.insert("isDictationMode".to_string(), serde_json::Value::Bool(self.is_dictation_mode));
-            state.insert("isAlwaysListening".to_string(), serde_json::Value::Bool(self.is_always_listening));
-            state.insert("audioLevel".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(self.audio_level).unwrap_or(serde_json::Number::from(0))));
-            state.insert("voiceMode".to_string(), serde_json::Value::String(self.voice_mode.clone()));
-            state.insert("agentState".to_string(), serde_json::to_value(&self.agent_state).unwrap_or(serde_json::Value::Null));
+            state.insert(
+                "barState".to_string(),
+                serde_json::Value::String(self.bar_state.as_str().to_string()),
+            );
+            state.insert(
+                "inputValue".to_string(),
+                serde_json::Value::String(self.input_value.clone()),
+            );
+            state.insert(
+                "lastSubmittedValue".to_string(),
+                serde_json::Value::String(self.last_submitted_value.clone()),
+            );
+            state.insert(
+                "currentError".to_string(),
+                serde_json::to_value(&self.current_error).unwrap_or(serde_json::Value::Null),
+            );
+            state.insert(
+                "transcriptionText".to_string(),
+                serde_json::Value::String(self.transcription_text.clone()),
+            );
+            state.insert(
+                "spokenText".to_string(),
+                serde_json::Value::String(self.spoken_text.clone()),
+            );
+            state.insert(
+                "isAgentWorking".to_string(),
+                serde_json::Value::Bool(self.is_agent_working),
+            );
+            state.insert(
+                "isDictationMode".to_string(),
+                serde_json::Value::Bool(self.is_dictation_mode),
+            );
+            state.insert(
+                "isAlwaysListening".to_string(),
+                serde_json::Value::Bool(self.is_always_listening),
+            );
+            state.insert(
+                "audioLevel".to_string(),
+                serde_json::Value::Number(
+                    serde_json::Number::from_f64(self.audio_level)
+                        .unwrap_or(serde_json::Number::from(0)),
+                ),
+            );
+            state.insert(
+                "voiceMode".to_string(),
+                serde_json::Value::String(self.voice_mode.clone()),
+            );
+            state.insert(
+                "agentState".to_string(),
+                serde_json::to_value(&self.agent_state).unwrap_or(serde_json::Value::Null),
+            );
         }
 
         // Add element-specific state from configuration
         if let Some(element_config) = self.elements.get(element_id) {
-            state.insert("visible".to_string(), serde_json::Value::Bool(element_config.visible));
-            state.insert("element_type".to_string(), serde_json::Value::String(element_config.element_type.clone()));
+            state.insert(
+                "visible".to_string(),
+                serde_json::Value::Bool(element_config.visible),
+            );
+            state.insert(
+                "element_type".to_string(),
+                serde_json::Value::String(element_config.element_type.clone()),
+            );
 
             if let Some(position) = &element_config.position {
-                state.insert("position".to_string(), serde_json::to_value(position).unwrap_or(serde_json::Value::Null));
+                state.insert(
+                    "position".to_string(),
+                    serde_json::to_value(position).unwrap_or(serde_json::Value::Null),
+                );
             }
 
             if let Some(size) = &element_config.size {
-                state.insert("size".to_string(), serde_json::to_value(size).unwrap_or(serde_json::Value::Null));
+                state.insert(
+                    "size".to_string(),
+                    serde_json::to_value(size).unwrap_or(serde_json::Value::Null),
+                );
             }
 
             // Add custom properties
@@ -861,7 +1009,9 @@ pub async fn initialize_ui_manager(app_handle: AppHandle) -> Result<(), String> 
     let manager_arc = Arc::new(TokioMutex::new(manager));
 
     // Store globally
-    UI_MANAGER.set(manager_arc.clone()).map_err(|_| "Failed to set UI manager")?;
+    UI_MANAGER
+        .set(manager_arc.clone())
+        .map_err(|_| "Failed to set UI manager")?;
 
     // Set up event listeners
     setup_ui_event_listeners(app_handle, manager_arc).await;
@@ -881,22 +1031,25 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
 
     // Complete transition events
     let manager_clone = manager.clone();
-        app_handle.listen(crate::constants::events::bar::COMPLETE_TRANSITION, move |event| {
-        let manager = manager_clone.clone();
-        safe_spawn_async_task(move || async move {
-            let mut manager = manager.lock().await;
-            let transition_id = serde_json::from_str::<String>(event.payload()).ok();
+    app_handle.listen(
+        crate::constants::events::bar::COMPLETE_TRANSITION,
+        move |event| {
+            let manager = manager_clone.clone();
+            safe_spawn_async_task(move || async move {
+                let mut manager = manager.lock().await;
+                let transition_id = serde_json::from_str::<String>(event.payload()).ok();
 
-            if manager.current_transition_id.as_ref() == transition_id.as_ref() {
-                manager.set_bar_state(BarState::Default).await;
-                manager.current_transition_id = None;
-            }
-        });
-    });
+                if manager.current_transition_id.as_ref() == transition_id.as_ref() {
+                    manager.set_bar_state(BarState::Default).await;
+                    manager.current_transition_id = None;
+                }
+            });
+        },
+    );
 
     // Clear error events
     let manager_clone = manager.clone();
-        app_handle.listen(crate::constants::events::bar::CLEAR_ERROR, move |event| {
+    app_handle.listen(crate::constants::events::bar::CLEAR_ERROR, move |event| {
         let manager = manager_clone.clone();
         safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
@@ -912,15 +1065,18 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
 
     // Agent stream start events
     let manager_clone = manager.clone();
-        app_handle.listen(crate::constants::events::streaming::STREAM_START, move |_event| {
-        let manager = manager_clone.clone();
-        safe_spawn_async_task(move || async move {
-            let mut manager = manager.lock().await;
-            if manager.is_agent_working {
-                manager.set_bar_state(BarState::AgentResponding).await;
-            }
-        });
-    });
+    app_handle.listen(
+        crate::constants::events::streaming::STREAM_START,
+        move |_event| {
+            let manager = manager_clone.clone();
+            safe_spawn_async_task(move || async move {
+                let mut manager = manager.lock().await;
+                if manager.is_agent_working {
+                    manager.set_bar_state(BarState::AgentResponding).await;
+                }
+            });
+        },
+    );
 
     debug!("UI Manager: Event listeners set up successfully");
 }
@@ -928,11 +1084,11 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
 // === TAURI COMMANDS ===
 
 #[tauri::command]
-pub async fn ui_create_element(
-    element_id: String,
-    config: UIElementConfig,
-) -> Result<(), String> {
-    debug!("Creating UI element: {} (type: {})", element_id, config.element_type);
+pub async fn ui_create_element(element_id: String, config: UIElementConfig) -> Result<(), String> {
+    debug!(
+        "Creating UI element: {} (type: {})",
+        element_id, config.element_type
+    );
 
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
@@ -943,11 +1099,11 @@ pub async fn ui_create_element(
 }
 
 #[tauri::command]
-pub async fn ui_update_element(
-    element_id: String,
-    config: UIElementConfig,
-) -> Result<(), String> {
-    debug!("Updating UI element: {} (type: {})", element_id, config.element_type);
+pub async fn ui_update_element(element_id: String, config: UIElementConfig) -> Result<(), String> {
+    debug!(
+        "Updating UI element: {} (type: {})",
+        element_id, config.element_type
+    );
 
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
@@ -970,7 +1126,9 @@ pub async fn ui_delete_element(element_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn ui_get_element_state(element_id: String) -> Result<HashMap<String, serde_json::Value>, String> {
+pub async fn ui_get_element_state(
+    element_id: String,
+) -> Result<HashMap<String, serde_json::Value>, String> {
     debug!("Getting UI element state: {}", element_id);
 
     if let Some(manager) = get_ui_manager().await {
@@ -986,13 +1144,20 @@ pub async fn ui_handle_interaction(
     element_id: String,
     interaction: UIInteractionEvent,
 ) -> Result<(), String> {
-    debug!("Handling interaction for UI element: {} (type: {})", element_id, interaction.interaction_type);
+    debug!(
+        "Handling interaction for UI element: {} (type: {})",
+        element_id, interaction.interaction_type
+    );
 
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
 
         // Check if this is a bar component (floating-bar, app-bar, voice-ai-bar, dynamic-bar)
-        if element_id == ui::element_ids::FLOATING_BAR || element_id == ui::element_ids::APP_BAR || element_id == ui::element_ids::VOICE_AI_BAR || element_id == ui::element_ids::DYNAMIC_BAR {
+        if element_id == ui::element_ids::FLOATING_BAR
+            || element_id == ui::element_ids::APP_BAR
+            || element_id == ui::element_ids::VOICE_AI_BAR
+            || element_id == ui::element_ids::DYNAMIC_BAR
+        {
             match interaction.interaction_type.as_str() {
                 ui::interaction_types::CLICK => manager.handle_bar_click().await,
                 ui::interaction_types::SUBMIT => {
@@ -1005,7 +1170,7 @@ pub async fn ui_handle_interaction(
                     } else {
                         Err("Submit interaction missing data".to_string())
                     }
-                },
+                }
                 ui::interaction_types::INPUT_CHANGE => {
                     if let Some(data) = &interaction.data {
                         if let Some(value) = data.get("value").and_then(|v| v.as_str()) {
@@ -1016,7 +1181,7 @@ pub async fn ui_handle_interaction(
                     } else {
                         Err("Input change interaction missing data".to_string())
                     }
-                },
+                }
                 ui::interaction_types::FOCUS => {
                     if let Some(data) = &interaction.data {
                         if let Some(is_focused) = data.get("isFocused").and_then(|v| v.as_bool()) {
@@ -1027,19 +1192,23 @@ pub async fn ui_handle_interaction(
                     } else {
                         manager.handle_bar_focus_change(true).await
                     }
-                },
+                }
                 ui::interaction_types::BLUR => manager.handle_bar_input_blur().await,
                 ui::interaction_types::INITIALIZE => {
                     // Handle initialization specially - just acknowledge receipt
                     debug!("Initialized bar component: {}", element_id);
                     Ok(())
-                },
+                }
                 ui::interaction_types::ESCAPE => {
                     // Handle escape key - delegate to stop coordinator for proper cancellation
                     debug!("Escape key pressed on bar component: {}", element_id);
                     let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
-                    coordinator.stop_all_operations(&manager.app_handle, "Escape key pressed via UI").await.map_err(|e| e.to_string()).map(|_| ())
-                },
+                    coordinator
+                        .stop_all_operations(&manager.app_handle, "Escape key pressed via UI")
+                        .await
+                        .map_err(|e| e.to_string())
+                        .map(|_| ())
+                }
                 ui::interaction_types::ENTER => {
                     // Handle enter key - submit current input if any
                     debug!("Enter key pressed on bar component: {}", element_id);
@@ -1049,9 +1218,12 @@ pub async fn ui_handle_interaction(
                         let input_value = manager.input_value.clone();
                         manager.handle_bar_submit(input_value).await
                     }
-                },
+                }
                 _ => {
-                    warn!("Unknown interaction type for bar component: {}", interaction.interaction_type);
+                    warn!(
+                        "Unknown interaction type for bar component: {}",
+                        interaction.interaction_type
+                    );
                     Ok(())
                 }
             }
@@ -1067,7 +1239,7 @@ pub async fn ui_handle_interaction(
                     } else {
                         Err("Set click through interaction missing data".to_string())
                     }
-                },
+                }
                 ui::interaction_types::SET_LEVEL => {
                     if let Some(data) = &interaction.data {
                         if let Some(level) = data.get("level").and_then(|v| v.as_i64()) {
@@ -1078,14 +1250,20 @@ pub async fn ui_handle_interaction(
                     } else {
                         Err("Set level interaction missing data".to_string())
                     }
-                },
+                }
                 _ => {
-                    warn!("Unknown interaction type for floating panel: {}", interaction.interaction_type);
+                    warn!(
+                        "Unknown interaction type for floating panel: {}",
+                        interaction.interaction_type
+                    );
                     Ok(())
                 }
             }
         } else {
-            warn!("Interaction handling not implemented for element: {}", element_id);
+            warn!(
+                "Interaction handling not implemented for element: {}",
+                element_id
+            );
             Ok(())
         }
     } else {
@@ -1114,7 +1292,7 @@ pub async fn ui_set_bar_config(config: FloatingBarConfig) -> Result<(), String> 
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
         let appearance_changed = manager.bar_config.bar_appearance != config.bar_appearance;
-        
+
         manager.bar_config = config.clone();
         manager.save_bar_config().await?;
 
@@ -1126,7 +1304,10 @@ pub async fn ui_set_bar_config(config: FloatingBarConfig) -> Result<(), String> 
         }
 
         // Emit event to notify frontend
-        if let Err(e) = manager.app_handle.emit(events::bar::CONFIG_CHANGED, &config) {
+        if let Err(e) = manager
+            .app_handle
+            .emit(events::bar::CONFIG_CHANGED, &config)
+        {
             warn!("Failed to emit config change event: {}", e);
         }
 
@@ -1202,10 +1383,17 @@ pub async fn set_stopping_state() {
     }
 }
 
-pub async fn handle_backend_response(_app_handle: &AppHandle, response_text: Option<String>, agent_state: String) {
+pub async fn handle_backend_response(
+    _app_handle: &AppHandle,
+    response_text: Option<String>,
+    agent_state: String,
+) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
-        if let Err(e) = manager.handle_backend_response(response_text, agent_state).await {
+        if let Err(e) = manager
+            .handle_backend_response(response_text, agent_state)
+            .await
+        {
             error!("Failed to handle backend response: {}", e);
         }
     }

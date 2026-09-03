@@ -3,17 +3,17 @@
 //! This module provides a cross-platform API for automating desktop applications
 //! through accessibility APIs, inspired by Playwright's web automation model.
 
+use crate::platforms::AccessibilityEngine;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_json::{self, from_value, json};
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::str::FromStr;
-use tracing::{error, info};
-use serde_json::{self, json, from_value};
 use std::fs;
 use std::process::Command;
-use crate::platforms::AccessibilityEngine;
+use std::str::FromStr;
+use std::sync::Arc;
+use tracing::{error, info};
 
 // Make element module public
 pub mod element;
@@ -106,8 +106,16 @@ impl Desktop {
 
     /// Initializes the Desktop environment with auto-redirect permission handling.
     /// When permissions are denied, automatically opens System Settings for the user.
-    pub fn new_with_auto_redirect(use_background_apps: bool, activate_app: bool, auto_open_settings: bool) -> Result<Self, AutomationError> {
-        let engine_result = platforms::create_engine_with_auto_redirect(use_background_apps, activate_app, auto_open_settings);
+    pub fn new_with_auto_redirect(
+        use_background_apps: bool,
+        activate_app: bool,
+        auto_open_settings: bool,
+    ) -> Result<Self, AutomationError> {
+        let engine_result = platforms::create_engine_with_auto_redirect(
+            use_background_apps,
+            activate_app,
+            auto_open_settings,
+        );
 
         match engine_result {
             Ok(engine) => {
@@ -119,7 +127,10 @@ impl Desktop {
                 })
             }
             Err(e) => {
-                error!("Failed to initialize desktop engine with auto-redirect: {}", e);
+                error!(
+                    "Failed to initialize desktop engine with auto-redirect: {}",
+                    e
+                );
                 Err(e)
             }
         }
@@ -222,13 +233,23 @@ impl Desktop {
     }
 
     /// Simulate a standard left click (down + up) at specified coordinates.
-    pub fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+    pub fn left_click(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         self.engine.left_click(x, y, modifiers)
     }
 
     /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
     /// Returns the name of the method that succeeded.
-    pub fn left_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+    pub fn left_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<&'static str, AutomationError> {
         self.engine.left_click_no_warp(x, y, modifiers)
     }
 
@@ -238,37 +259,74 @@ impl Desktop {
     }
 
     /// Double-click without warping the cursor.
-    pub fn double_click_no_warp(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<&'static str, AutomationError> {
+    pub fn double_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<&'static str, AutomationError> {
         self.engine.double_click_no_warp(x, y, modifiers)
     }
 
     /// Post a mouse event directly to a specific process by PID without moving the cursor.
-    pub fn post_mouse_event_to_pid(&self, pid: i32, event_type_str: &str, x: f64, y: f64) -> Result<(), AutomationError> {
-        self.engine.post_mouse_event_to_pid(pid, event_type_str, x, y)
+    pub fn post_mouse_event_to_pid(
+        &self,
+        pid: i32,
+        event_type_str: &str,
+        x: f64,
+        y: f64,
+    ) -> Result<(), AutomationError> {
+        self.engine
+            .post_mouse_event_to_pid(pid, event_type_str, x, y)
     }
 
     /// Post a key event directly to a specific process by PID without changing focus.
-    pub fn post_key_event_to_pid(&self, pid: i32, keycode: u16, key_down: bool) -> Result<(), AutomationError> {
+    pub fn post_key_event_to_pid(
+        &self,
+        pid: i32,
+        keycode: u16,
+        key_down: bool,
+    ) -> Result<(), AutomationError> {
         self.engine.post_key_event_to_pid(pid, keycode, key_down)
     }
 
     /// Simulate a right click (down + up) at specified coordinates.
-    pub fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+    pub fn right_click(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         self.engine.right_click(x, y, modifiers)
     }
 
     /// Simulate a middle click (down + up) at specified coordinates.
-    pub fn middle_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+    pub fn middle_click(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         self.engine.middle_click(x, y, modifiers)
     }
 
     /// Simulate a double left click at the specified coordinates.
-    pub fn double_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+    pub fn double_click(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         self.engine.double_click(x, y, modifiers)
     }
 
     /// Simulate a triple left click at the specified coordinates.
-    pub fn triple_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+    pub fn triple_click(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
         self.engine.triple_click(x, y, modifiers)
     }
 
@@ -284,12 +342,22 @@ impl Desktop {
     }
 
     /// Scroll at a specific position on screen
-    pub fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), AutomationError> {
+    pub fn scroll_at_position(
+        &self,
+        x: f64,
+        y: f64,
+        direction: &str,
+        amount: f64,
+    ) -> Result<(), AutomationError> {
         self.engine.scroll_at_position(x, y, direction, amount)
     }
 
     /// Scroll at the current mouse position
-    pub fn scroll_at_current_position(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
+    pub fn scroll_at_current_position(
+        &self,
+        direction: &str,
+        amount: f64,
+    ) -> Result<(), AutomationError> {
         self.engine.scroll_at_current_position(direction, amount)
     }
 
@@ -735,7 +803,9 @@ impl Desktop {
             }
             "typeText" => {
                 let text = args["text"].as_str().ok_or_else(|| {
-                    AutomationError::InvalidArgument("Missing or invalid 'text' argument".to_string())
+                    AutomationError::InvalidArgument(
+                        "Missing or invalid 'text' argument".to_string(),
+                    )
                 })?;
                 self.type_text(text)?;
                 Ok(Value::Null)
@@ -906,8 +976,14 @@ impl Desktop {
                 struct GetUiTreeArgs {
                     application_name: Option<String>,
                 }
-                let parsed_args: GetUiTreeArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse getUiTree args: {}", e)))?;
-                self.engine.get_ui_tree(parsed_args.application_name.as_deref())
+                let parsed_args: GetUiTreeArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Failed to parse getUiTree args: {}",
+                        e
+                    ))
+                })?;
+                self.engine
+                    .get_ui_tree(parsed_args.application_name.as_deref())
             }
             "findElementsBySelector" => {
                 #[derive(Deserialize)]
@@ -915,11 +991,17 @@ impl Desktop {
                     selector: String,
                     // root_element_id: Option<String>, // TODO: Add support for root element ID
                 }
-                let parsed_args: FindArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse findElementsBySelector args: {}", e)))?;
+                let parsed_args: FindArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Failed to parse findElementsBySelector args: {}",
+                        e
+                    ))
+                })?;
                 let selector = Selector::from_str(&parsed_args.selector)?;
                 // TODO: Implement finding root element by ID if provided
                 let elements = self.engine.find_elements(&selector, None)?;
-                let element_attributes: Vec<_> = elements.iter().map(|el| el.attributes()).collect();
+                let element_attributes: Vec<_> =
+                    elements.iter().map(|el| el.attributes()).collect();
                 Ok(json!(element_attributes))
             }
             "getElementAttributes" => {
@@ -928,7 +1010,12 @@ impl Desktop {
                     selector: String,
                     // root_element_id: Option<String>, // TODO: Add support for root element ID
                 }
-                let parsed_args: GetAttributesArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse getElementAttributes args: {}", e)))?;
+                let parsed_args: GetAttributesArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Failed to parse getElementAttributes args: {}",
+                        e
+                    ))
+                })?;
                 let selector = Selector::from_str(&parsed_args.selector)?;
                 // TODO: Implement finding root element by ID if provided
                 let element = self.engine.find_element(&selector, None)?;
@@ -936,7 +1023,8 @@ impl Desktop {
             }
             "captureScreenshot" => {
                 // No arguments expected for captureScreenshot
-                self.capture_screenshot_base64().map(|base64_str| json!({ "screenshot_base64": base64_str }))
+                self.capture_screenshot_base64()
+                    .map(|base64_str| json!({ "screenshot_base64": base64_str }))
             }
             "getClipboard" => {
                 let content = self.get_clipboard_content()?;
@@ -947,7 +1035,12 @@ impl Desktop {
                 struct SetClipboardArgs {
                     content: String,
                 }
-                let parsed_args: SetClipboardArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse setClipboard args: {}", e)))?;
+                let parsed_args: SetClipboardArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Failed to parse setClipboard args: {}",
+                        e
+                    ))
+                })?;
                 self.set_clipboard_content(&parsed_args.content)?;
                 Ok(json!({ "status": "success" }))
             }
@@ -957,7 +1050,12 @@ impl Desktop {
                     key: String,
                     modifier: Option<String>,
                 }
-                let parsed_args: PressKeyArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse pressKey args: {}", e)))?;
+                let parsed_args: PressKeyArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Failed to parse pressKey args: {}",
+                        e
+                    ))
+                })?;
                 self.press_key(&parsed_args.key, parsed_args.modifier.as_deref())?;
                 Ok(json!({
                     "status": "success",
@@ -966,7 +1064,9 @@ impl Desktop {
             }
             "holdKey" => {
                 let key = args["key"].as_str().ok_or_else(|| {
-                    AutomationError::InvalidArgument("Missing or invalid 'key' argument for holdKey".to_string())
+                    AutomationError::InvalidArgument(
+                        "Missing or invalid 'key' argument for holdKey".to_string(),
+                    )
                 })?;
                 let duration_ms = args.get("duration_ms").and_then(|v| v.as_u64());
                 self.hold_key(key, duration_ms)?;
@@ -974,17 +1074,24 @@ impl Desktop {
             }
             "releaseKey" => {
                 let key = args["key"].as_str().ok_or_else(|| {
-                    AutomationError::InvalidArgument("Missing or invalid 'key' argument for releaseKey".to_string())
+                    AutomationError::InvalidArgument(
+                        "Missing or invalid 'key' argument for releaseKey".to_string(),
+                    )
                 })?;
                 self.release_key(key)?;
-                Ok(Value::String(format!("Key '{}' released successfully.", key)))
+                Ok(Value::String(format!(
+                    "Key '{}' released successfully.",
+                    key
+                )))
             }
             "wait" => {
                 #[derive(Deserialize)]
                 struct WaitArgs {
                     duration_ms: u64,
                 }
-                let args: WaitArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing wait args: {}", e)))?;
+                let args: WaitArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!("Error parsing wait args: {}", e))
+                })?;
                 self.wait(args.duration_ms)?;
                 Ok(json!(null))
             }
@@ -994,57 +1101,115 @@ impl Desktop {
             }
             "mouseMove" => {
                 #[derive(Deserialize)]
-                struct MouseMoveArgs { x: f64, y: f64 }
-                let args: MouseMoveArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing mouseMove args: {}", e)))?;
+                struct MouseMoveArgs {
+                    x: f64,
+                    y: f64,
+                }
+                let args: MouseMoveArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!("Error parsing mouseMove args: {}", e))
+                })?;
                 self.mouse_move(args.x, args.y)?;
                 Ok(json!(null))
             }
             "leftMouseDown" => {
                 #[derive(Deserialize)]
-                struct MouseDownArgs { x: f64, y: f64 }
-                let args: MouseDownArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing leftMouseDown args: {}", e)))?;
+                struct MouseDownArgs {
+                    x: f64,
+                    y: f64,
+                }
+                let args: MouseDownArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing leftMouseDown args: {}",
+                        e
+                    ))
+                })?;
                 self.left_mouse_down(args.x, args.y)?;
                 Ok(json!(null))
             }
             "leftMouseUp" => {
                 #[derive(Deserialize)]
-                struct MouseUpArgs { x: f64, y: f64 }
-                let args: MouseUpArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing leftMouseUp args: {}", e)))?;
+                struct MouseUpArgs {
+                    x: f64,
+                    y: f64,
+                }
+                let args: MouseUpArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing leftMouseUp args: {}",
+                        e
+                    ))
+                })?;
                 self.left_mouse_up(args.x, args.y)?;
                 Ok(json!(null))
             }
             "leftClick" => {
                 #[derive(Deserialize)]
-                struct ClickArgs { x: f64, y: f64 }
-                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing leftClick args: {}", e)))?;
+                struct ClickArgs {
+                    x: f64,
+                    y: f64,
+                }
+                let args: ClickArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!("Error parsing leftClick args: {}", e))
+                })?;
                 self.left_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
             "rightClick" => {
                 #[derive(Deserialize)]
-                struct ClickArgs { x: f64, y: f64 }
-                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing rightClick args: {}", e)))?;
+                struct ClickArgs {
+                    x: f64,
+                    y: f64,
+                }
+                let args: ClickArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing rightClick args: {}",
+                        e
+                    ))
+                })?;
                 self.right_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
             "middleClick" => {
                 #[derive(Deserialize)]
-                struct ClickArgs { x: f64, y: f64 }
-                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing middleClick args: {}", e)))?;
+                struct ClickArgs {
+                    x: f64,
+                    y: f64,
+                }
+                let args: ClickArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing middleClick args: {}",
+                        e
+                    ))
+                })?;
                 self.middle_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
             "doubleClick" => {
                 #[derive(Deserialize)]
-                struct ClickArgs { x: f64, y: f64 }
-                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing doubleClick args: {}", e)))?;
+                struct ClickArgs {
+                    x: f64,
+                    y: f64,
+                }
+                let args: ClickArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing doubleClick args: {}",
+                        e
+                    ))
+                })?;
                 self.double_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
             "tripleClick" => {
                 #[derive(Deserialize)]
-                struct ClickArgs { x: f64, y: f64 }
-                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing tripleClick args: {}", e)))?;
+                struct ClickArgs {
+                    x: f64,
+                    y: f64,
+                }
+                let args: ClickArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing tripleClick args: {}",
+                        e
+                    ))
+                })?;
                 self.triple_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
@@ -1052,55 +1217,119 @@ impl Desktop {
             // --- Text Editor Handlers ---
             "text_editor_view" => {
                 #[derive(Deserialize)]
-                struct TextViewArgs { file_path: String }
-                let parsed_args: TextViewArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing text_editor_view args: {}", e)))?;
+                struct TextViewArgs {
+                    file_path: String,
+                }
+                let parsed_args: TextViewArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing text_editor_view args: {}",
+                        e
+                    ))
+                })?;
                 match fs::read_to_string(&parsed_args.file_path) {
                     Ok(content) => Ok(json!({ "content": content })),
-                    Err(e) => Err(AutomationError::Internal(format!("Failed to read file '{}': {}", parsed_args.file_path, e))),
+                    Err(e) => Err(AutomationError::Internal(format!(
+                        "Failed to read file '{}': {}",
+                        parsed_args.file_path, e
+                    ))),
                 }
             }
             "text_editor_create" => {
                 #[derive(Deserialize)]
-                struct TextCreateArgs { file_path: String, content: Option<String> }
-                let parsed_args: TextCreateArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing text_editor_create args: {}", e)))?;
-                match fs::OpenOptions::new().write(true).create_new(true).open(&parsed_args.file_path) {
+                struct TextCreateArgs {
+                    file_path: String,
+                    content: Option<String>,
+                }
+                let parsed_args: TextCreateArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing text_editor_create args: {}",
+                        e
+                    ))
+                })?;
+                match fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&parsed_args.file_path)
+                {
                     Ok(mut file) => {
                         use std::io::Write; // Import Write trait here
                         let content_to_write = parsed_args.content.unwrap_or_default();
                         match file.write_all(content_to_write.as_bytes()) {
-                            Ok(_) => Ok(json!({ "status": format!("File '{}' created successfully.", parsed_args.file_path) })),
-                            Err(e) => Err(AutomationError::Internal(format!("Failed to write initial content to file '{}': {}", parsed_args.file_path, e))),
+                            Ok(_) => Ok(
+                                json!({ "status": format!("File '{}' created successfully.", parsed_args.file_path) }),
+                            ),
+                            Err(e) => Err(AutomationError::Internal(format!(
+                                "Failed to write initial content to file '{}': {}",
+                                parsed_args.file_path, e
+                            ))),
                         }
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                        Err(AutomationError::Internal(format!("File '{}' already exists. Cannot create.", parsed_args.file_path)))
+                        Err(AutomationError::Internal(format!(
+                            "File '{}' already exists. Cannot create.",
+                            parsed_args.file_path
+                        )))
                     }
-                    Err(e) => {
-                        Err(AutomationError::Internal(format!("Failed to create file '{}': {}", parsed_args.file_path, e)))
-                    }
+                    Err(e) => Err(AutomationError::Internal(format!(
+                        "Failed to create file '{}': {}",
+                        parsed_args.file_path, e
+                    ))),
                 }
             }
             "text_editor_str_replace" => {
                 #[derive(Deserialize)]
-                struct TextReplaceArgs { file_path: String, find: String, replace: String }
-                let parsed_args: TextReplaceArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing text_editor_str_replace args: {}", e)))?;
+                struct TextReplaceArgs {
+                    file_path: String,
+                    find: String,
+                    replace: String,
+                }
+                let parsed_args: TextReplaceArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing text_editor_str_replace args: {}",
+                        e
+                    ))
+                })?;
                 let content = match fs::read_to_string(&parsed_args.file_path) {
                     Ok(c) => c,
-                    Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for replacement: {}", parsed_args.file_path, e))),
+                    Err(e) => {
+                        return Err(AutomationError::Internal(format!(
+                            "Failed to read file '{}' for replacement: {}",
+                            parsed_args.file_path, e
+                        )))
+                    }
                 };
                 let new_content = content.replace(&parsed_args.find, &parsed_args.replace);
                 match fs::write(&parsed_args.file_path, new_content) {
-                    Ok(_) => Ok(json!({ "status": format!("File '{}' updated successfully with replacements.", parsed_args.file_path) })),
-                    Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.file_path, e))),
+                    Ok(_) => Ok(
+                        json!({ "status": format!("File '{}' updated successfully with replacements.", parsed_args.file_path) }),
+                    ),
+                    Err(e) => Err(AutomationError::Internal(format!(
+                        "Failed to write updated content to file '{}': {}",
+                        parsed_args.file_path, e
+                    ))),
                 }
             }
             "text_editor_insert" => {
                 #[derive(Deserialize)]
-                struct TextInsertArgs { file_path: String, text: String, line: Option<usize> }
-                let parsed_args: TextInsertArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing text_editor_insert args: {}", e)))?;
+                struct TextInsertArgs {
+                    file_path: String,
+                    text: String,
+                    line: Option<usize>,
+                }
+                let parsed_args: TextInsertArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing text_editor_insert args: {}",
+                        e
+                    ))
+                })?;
                 let content = match fs::read_to_string(&parsed_args.file_path) {
                     Ok(c) => c,
-                    Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for insertion: {}", parsed_args.file_path, e))),
+                    Err(e) => {
+                        return Err(AutomationError::Internal(format!(
+                            "Failed to read file '{}' for insertion: {}",
+                            parsed_args.file_path, e
+                        )))
+                    }
                 };
 
                 let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
@@ -1122,8 +1351,13 @@ impl Desktop {
                 };
 
                 match fs::write(&parsed_args.file_path, final_content) {
-                    Ok(_) => Ok(json!({ "status": format!("Text inserted successfully into file '{}' at line {}.", parsed_args.file_path, insertion_point + 1) })),
-                    Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.file_path, e))),
+                    Ok(_) => Ok(
+                        json!({ "status": format!("Text inserted successfully into file '{}' at line {}.", parsed_args.file_path, insertion_point + 1) }),
+                    ),
+                    Err(e) => Err(AutomationError::Internal(format!(
+                        "Failed to write updated content to file '{}': {}",
+                        parsed_args.file_path, e
+                    ))),
                 }
             }
             // --- End Text Editor Handlers ---
@@ -1131,8 +1365,13 @@ impl Desktop {
             // --- Bash Handler ---
             "bash" => {
                 #[derive(Deserialize)]
-                struct BashArgs { command: String, timeout: Option<u64> } // Timeout in seconds
-                let parsed_args: BashArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing bash args: {}", e)))?;
+                struct BashArgs {
+                    command: String,
+                    timeout: Option<u64>,
+                } // Timeout in seconds
+                let parsed_args: BashArgs = from_value(args).map_err(|e| {
+                    AutomationError::InvalidArgument(format!("Error parsing bash args: {}", e))
+                })?;
 
                 // Basic implementation without timeout handling for now
                 if parsed_args.timeout.is_some() {
@@ -1159,9 +1398,11 @@ impl Desktop {
                             "success": output.status.success()
                         }))
                     }
-                    Err(e) => {
-                        Err(AutomationError::Internal(format!("Failed to execute bash command '{}': {}", shell_cmd.1.join(" "), e)))
-                    }
+                    Err(e) => Err(AutomationError::Internal(format!(
+                        "Failed to execute bash command '{}': {}",
+                        shell_cmd.1.join(" "),
+                        e
+                    ))),
                 }
             }
             // --- End Bash Handler ---
@@ -1190,50 +1431,70 @@ impl Desktop {
                     }
                     "left_click" => {
                         let coords = parsed_args.coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("coordinate required for left_click action".to_string())
+                            AutomationError::InvalidArgument(
+                                "coordinate required for left_click action".to_string(),
+                            )
                         })?;
                         if coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            return Err(AutomationError::InvalidArgument(
+                                "coordinate must be [x, y] array".to_string(),
+                            ));
                         }
                         self.left_click(coords[0], coords[1], None)?;
                         Ok(json!({"status": "success"}))
                     }
                     "right_click" => {
                         let coords = parsed_args.coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("coordinate required for right_click action".to_string())
+                            AutomationError::InvalidArgument(
+                                "coordinate required for right_click action".to_string(),
+                            )
                         })?;
                         if coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            return Err(AutomationError::InvalidArgument(
+                                "coordinate must be [x, y] array".to_string(),
+                            ));
                         }
                         self.right_click(coords[0], coords[1], None)?;
                         Ok(json!({"status": "success"}))
                     }
                     "middle_click" => {
                         let coords = parsed_args.coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("coordinate required for middle_click action".to_string())
+                            AutomationError::InvalidArgument(
+                                "coordinate required for middle_click action".to_string(),
+                            )
                         })?;
                         if coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            return Err(AutomationError::InvalidArgument(
+                                "coordinate must be [x, y] array".to_string(),
+                            ));
                         }
                         self.middle_click(coords[0], coords[1], None)?;
                         Ok(json!({"status": "success"}))
                     }
                     "double_click" => {
                         let coords = parsed_args.coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("coordinate required for double_click action".to_string())
+                            AutomationError::InvalidArgument(
+                                "coordinate required for double_click action".to_string(),
+                            )
                         })?;
                         if coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            return Err(AutomationError::InvalidArgument(
+                                "coordinate must be [x, y] array".to_string(),
+                            ));
                         }
                         self.double_click(coords[0], coords[1], None)?;
                         Ok(json!({"status": "success"}))
                     }
                     "triple_click" => {
                         let coords = parsed_args.coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("coordinate required for triple_click action".to_string())
+                            AutomationError::InvalidArgument(
+                                "coordinate required for triple_click action".to_string(),
+                            )
                         })?;
                         if coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            return Err(AutomationError::InvalidArgument(
+                                "coordinate must be [x, y] array".to_string(),
+                            ));
                         }
                         self.triple_click(coords[0], coords[1], None)?;
                         Ok(json!({"status": "success"}))
@@ -1244,11 +1505,15 @@ impl Desktop {
 
                         // Get end coordinates from coordinate parameter
                         let end_coords = parsed_args.coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("coordinate required for left_click_drag action".to_string())
+                            AutomationError::InvalidArgument(
+                                "coordinate required for left_click_drag action".to_string(),
+                            )
                         })?;
 
                         if end_coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            return Err(AutomationError::InvalidArgument(
+                                "coordinate must be [x, y] array".to_string(),
+                            ));
                         }
 
                         // Perform drag operation from current cursor position to specified coordinate
@@ -1261,63 +1526,85 @@ impl Desktop {
                     }
                     "mouse_move" => {
                         let coords = parsed_args.coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("coordinate required for mouse_move action".to_string())
+                            AutomationError::InvalidArgument(
+                                "coordinate required for mouse_move action".to_string(),
+                            )
                         })?;
                         if coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            return Err(AutomationError::InvalidArgument(
+                                "coordinate must be [x, y] array".to_string(),
+                            ));
                         }
                         self.mouse_move(coords[0], coords[1])?;
                         Ok(json!({"status": "success"}))
                     }
                     "left_mouse_down" => {
                         let coords = parsed_args.coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("coordinate required for left_mouse_down action".to_string())
+                            AutomationError::InvalidArgument(
+                                "coordinate required for left_mouse_down action".to_string(),
+                            )
                         })?;
                         if coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            return Err(AutomationError::InvalidArgument(
+                                "coordinate must be [x, y] array".to_string(),
+                            ));
                         }
                         self.left_mouse_down(coords[0], coords[1])?;
                         Ok(json!({"status": "success"}))
                     }
                     "left_mouse_up" => {
                         let coords = parsed_args.coordinate.ok_or_else(|| {
-                            AutomationError::InvalidArgument("coordinate required for left_mouse_up action".to_string())
+                            AutomationError::InvalidArgument(
+                                "coordinate required for left_mouse_up action".to_string(),
+                            )
                         })?;
                         if coords.len() != 2 {
-                            return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                            return Err(AutomationError::InvalidArgument(
+                                "coordinate must be [x, y] array".to_string(),
+                            ));
                         }
                         self.left_mouse_up(coords[0], coords[1])?;
                         Ok(json!({"status": "success"}))
                     }
                     "type" => {
                         let text = parsed_args.text.ok_or_else(|| {
-                            AutomationError::InvalidArgument("text required for type action".to_string())
+                            AutomationError::InvalidArgument(
+                                "text required for type action".to_string(),
+                            )
                         })?;
                         self.type_text(&text)?;
                         Ok(json!({"status": "success"}))
                     }
                     "key" => {
                         let key = parsed_args.text.ok_or_else(|| {
-                            AutomationError::InvalidArgument("text (key combination) required for key action".to_string())
+                            AutomationError::InvalidArgument(
+                                "text (key combination) required for key action".to_string(),
+                            )
                         })?;
                         self.press_key(&key, None)?;
                         Ok(json!({"status": "success"}))
                     }
                     "hold_key" => {
                         let key = parsed_args.text.ok_or_else(|| {
-                            AutomationError::InvalidArgument("text (key name) required for hold_key action".to_string())
+                            AutomationError::InvalidArgument(
+                                "text (key name) required for hold_key action".to_string(),
+                            )
                         })?;
                         self.hold_key(&key, parsed_args.duration)?;
                         Ok(json!({"status": "success"}))
                     }
                     "scroll" => {
                         let direction = parsed_args.scroll_direction.ok_or_else(|| {
-                            AutomationError::InvalidArgument("scroll_direction required for scroll action".to_string())
+                            AutomationError::InvalidArgument(
+                                "scroll_direction required for scroll action".to_string(),
+                            )
                         })?;
                         let amount = parsed_args.scroll_amount.unwrap_or(3.0);
                         if let Some(coords) = parsed_args.coordinate {
                             if coords.len() != 2 {
-                                return Err(AutomationError::InvalidArgument("coordinate must be [x, y] array".to_string()));
+                                return Err(AutomationError::InvalidArgument(
+                                    "coordinate must be [x, y] array".to_string(),
+                                ));
                             }
                             self.scroll_at_position(coords[0], coords[1], &direction, amount)?;
                         } else {
@@ -1327,7 +1614,9 @@ impl Desktop {
                     }
                     "wait" => {
                         let duration = parsed_args.duration.ok_or_else(|| {
-                            AutomationError::InvalidArgument("duration required for wait action".to_string())
+                            AutomationError::InvalidArgument(
+                                "duration required for wait action".to_string(),
+                            )
                         })?;
                         self.wait(duration)?;
                         Ok(json!({"status": "success"}))
@@ -1336,9 +1625,10 @@ impl Desktop {
                         let (x, y) = self.cursor_position()?;
                         Ok(json!({"x": x, "y": y}))
                     }
-                    _ => {
-                        Err(AutomationError::InvalidArgument(format!("Unknown computer action: {}", parsed_args.action)))
-                    }
+                    _ => Err(AutomationError::InvalidArgument(format!(
+                        "Unknown computer action: {}",
+                        parsed_args.action
+                    ))),
                 }
             }
             // --- End Computer Tool Handler ---
@@ -1355,52 +1645,81 @@ impl Desktop {
                     insert_line: Option<usize>,
                 }
                 let parsed_args: EditToolArgs = from_value(args).map_err(|e| {
-                    AutomationError::InvalidArgument(format!("Error parsing str_replace_based_edit_tool args: {}", e))
+                    AutomationError::InvalidArgument(format!(
+                        "Error parsing str_replace_based_edit_tool args: {}",
+                        e
+                    ))
                 })?;
 
                 match parsed_args.command.as_str() {
-                    "view" => {
-                        match fs::read_to_string(&parsed_args.path) {
-                            Ok(content) => Ok(json!({ "content": content })),
-                            Err(e) => Err(AutomationError::Internal(format!("Failed to read file '{}': {}", parsed_args.path, e))),
-                        }
-                    }
+                    "view" => match fs::read_to_string(&parsed_args.path) {
+                        Ok(content) => Ok(json!({ "content": content })),
+                        Err(e) => Err(AutomationError::Internal(format!(
+                            "Failed to read file '{}': {}",
+                            parsed_args.path, e
+                        ))),
+                    },
                     "create" => {
                         let content = parsed_args.file_text.ok_or_else(|| {
-                            AutomationError::InvalidArgument("file_text required for create command".to_string())
+                            AutomationError::InvalidArgument(
+                                "file_text required for create command".to_string(),
+                            )
                         })?;
-                        match fs::OpenOptions::new().write(true).create_new(true).open(&parsed_args.path) {
+                        match fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(&parsed_args.path)
+                        {
                             Ok(mut file) => {
                                 use std::io::Write;
                                 match file.write_all(content.as_bytes()) {
-                                    Ok(_) => Ok(json!({ "status": format!("File '{}' created successfully.", parsed_args.path) })),
-                                    Err(e) => Err(AutomationError::Internal(format!("Failed to write content to file '{}': {}", parsed_args.path, e))),
+                                    Ok(_) => Ok(
+                                        json!({ "status": format!("File '{}' created successfully.", parsed_args.path) }),
+                                    ),
+                                    Err(e) => Err(AutomationError::Internal(format!(
+                                        "Failed to write content to file '{}': {}",
+                                        parsed_args.path, e
+                                    ))),
                                 }
                             }
                             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                                Err(AutomationError::Internal(format!("File '{}' already exists. Cannot create.", parsed_args.path)))
+                                Err(AutomationError::Internal(format!(
+                                    "File '{}' already exists. Cannot create.",
+                                    parsed_args.path
+                                )))
                             }
-                            Err(e) => {
-                                Err(AutomationError::Internal(format!("Failed to create file '{}': {}", parsed_args.path, e)))
-                            }
+                            Err(e) => Err(AutomationError::Internal(format!(
+                                "Failed to create file '{}': {}",
+                                parsed_args.path, e
+                            ))),
                         }
                     }
                     "str_replace" => {
                         let old_str = parsed_args.old_str.ok_or_else(|| {
-                            AutomationError::InvalidArgument("old_str required for str_replace command".to_string())
+                            AutomationError::InvalidArgument(
+                                "old_str required for str_replace command".to_string(),
+                            )
                         })?;
                         // new_str defaults to empty string if not provided (enables deletion)
                         let new_str = parsed_args.new_str.unwrap_or_default();
                         let content = match fs::read_to_string(&parsed_args.path) {
                             Ok(c) => c,
-                            Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for replacement: {}", parsed_args.path, e))),
+                            Err(e) => {
+                                return Err(AutomationError::Internal(format!(
+                                    "Failed to read file '{}' for replacement: {}",
+                                    parsed_args.path, e
+                                )))
+                            }
                         };
 
                         // Count matches before replacement to provide feedback
                         let match_count = content.matches(&old_str).count();
 
                         if match_count == 0 {
-                            return Err(AutomationError::Internal(format!("No matches found for '{}' in file '{}'", old_str, parsed_args.path)));
+                            return Err(AutomationError::Internal(format!(
+                                "No matches found for '{}' in file '{}'",
+                                old_str, parsed_args.path
+                            )));
                         }
 
                         let new_content = content.replace(&old_str, &new_str);
@@ -1410,22 +1729,35 @@ impl Desktop {
                                     parsed_args.path, match_count, old_str, new_str),
                                 "matches_replaced": match_count
                             })),
-                            Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.path, e))),
+                            Err(e) => Err(AutomationError::Internal(format!(
+                                "Failed to write updated content to file '{}': {}",
+                                parsed_args.path, e
+                            ))),
                         }
                     }
                     "insert" => {
                         let new_str = parsed_args.new_str.ok_or_else(|| {
-                            AutomationError::InvalidArgument("new_str required for insert command".to_string())
+                            AutomationError::InvalidArgument(
+                                "new_str required for insert command".to_string(),
+                            )
                         })?;
                         let insert_line = parsed_args.insert_line.ok_or_else(|| {
-                            AutomationError::InvalidArgument("insert_line required for insert command".to_string())
+                            AutomationError::InvalidArgument(
+                                "insert_line required for insert command".to_string(),
+                            )
                         })?;
                         let content = match fs::read_to_string(&parsed_args.path) {
                             Ok(c) => c,
-                            Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for insertion: {}", parsed_args.path, e))),
+                            Err(e) => {
+                                return Err(AutomationError::Internal(format!(
+                                    "Failed to read file '{}' for insertion: {}",
+                                    parsed_args.path, e
+                                )))
+                            }
                         };
 
-                        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                        let mut lines: Vec<String> =
+                            content.lines().map(|s| s.to_string()).collect();
 
                         // Fix: insert_line should mean "insert after line N" for consistency with text editor expectations
                         // insert_line=1 means insert after line 1 (at index 1)
@@ -1446,17 +1778,22 @@ impl Desktop {
                         };
 
                         match fs::write(&parsed_args.path, final_content) {
-                            Ok(_) => Ok(json!({ "status": format!("Text inserted successfully into file '{}' after line {}.", parsed_args.path, if insert_line == 0 { "beginning".to_string() } else { insert_line.to_string() }) })),
-                            Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.path, e))),
+                            Ok(_) => Ok(
+                                json!({ "status": format!("Text inserted successfully into file '{}' after line {}.", parsed_args.path, if insert_line == 0 { "beginning".to_string() } else { insert_line.to_string() }) }),
+                            ),
+                            Err(e) => Err(AutomationError::Internal(format!(
+                                "Failed to write updated content to file '{}': {}",
+                                parsed_args.path, e
+                            ))),
                         }
                     }
-                    _ => {
-                        Err(AutomationError::InvalidArgument(format!("Unknown str_replace_based_edit_tool command: {}", parsed_args.command)))
-                    }
+                    _ => Err(AutomationError::InvalidArgument(format!(
+                        "Unknown str_replace_based_edit_tool command: {}",
+                        parsed_args.command
+                    ))),
                 }
             }
             // --- End str_replace_based_edit_tool Handler ---
-
             _ => {
                 error!("Unknown tool called: {}", name);
                 Err(AutomationError::ToolNotFound(name.to_string()))
@@ -1481,4 +1818,3 @@ impl Desktop {
 
     // --- End New Methods ---
 }
-

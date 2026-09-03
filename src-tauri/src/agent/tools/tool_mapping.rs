@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use super::tool_config::ToolCategory;
-use crate::constants::agent::{tool_names, intent_keywords, tool_prefixes, confidence_scores};
+use crate::constants::agent::{confidence_scores, intent_keywords, tool_names, tool_prefixes};
 
 /// Maps tool names to their proper categories
 /// This replaces all the brittle string matching throughout the codebase
@@ -16,12 +16,21 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert(tool_names::TYPE, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::KEY, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::SCROLL, ToolCategory::AnthropicComputerUse);
-    map.insert(tool_names::LEFT_CLICK_DRAG, ToolCategory::AnthropicComputerUse);
+    map.insert(
+        tool_names::LEFT_CLICK_DRAG,
+        ToolCategory::AnthropicComputerUse,
+    );
     map.insert(tool_names::MOUSE_MOVE, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::COMPUTER, ToolCategory::AnthropicComputerUse);
     map.insert(tool_names::BASH, ToolCategory::AnthropicComputerUse);
-    map.insert(tool_names::STR_REPLACE_BASED_EDIT_TOOL, ToolCategory::AnthropicComputerUse);
-    map.insert(tool_names::ACCESSIBILITY_INTERFACE, ToolCategory::AnthropicComputerUse);
+    map.insert(
+        tool_names::STR_REPLACE_BASED_EDIT_TOOL,
+        ToolCategory::AnthropicComputerUse,
+    );
+    map.insert(
+        tool_names::ACCESSIBILITY_INTERFACE,
+        ToolCategory::AnthropicComputerUse,
+    );
 
     // Browser tools
     map.insert(tool_names::BROWSER_NAVIGATE, ToolCategory::Browser);
@@ -41,7 +50,10 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert(tool_names::SAFARI_TYPE_TEXT, ToolCategory::Browser);
     map.insert(tool_names::SAFARI_GET_URL, ToolCategory::Browser);
     map.insert(tool_names::SAFARI_NAVIGATE, ToolCategory::Browser);
-    map.insert(tool_names::SAFARI_LIST_CLICKABLE_ELEMENTS, ToolCategory::Browser);
+    map.insert(
+        tool_names::SAFARI_LIST_CLICKABLE_ELEMENTS,
+        ToolCategory::Browser,
+    );
     map.insert(tool_names::SAFARI_EXECUTE_JAVASCRIPT, ToolCategory::Browser);
     map.insert(tool_names::SAFARI_CLEAR_CACHE, ToolCategory::Browser);
 
@@ -53,9 +65,9 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     // dev_double_click, double_click → computer tool with computer_actions::DOUBLE_CLICK
     // dev_triple_click, triple_click → computer tool with computer_actions::TRIPLE_CLICK
     // dev_left_click_drag, left_click_drag → computer tool with computer_actions::LEFT_CLICK_DRAG
-// dev_left_mouse_down, left_mouse_down → computer tool with computer_actions::LEFT_MOUSE_DOWN
-// dev_left_mouse_up, left_mouse_up → computer tool with computer_actions::LEFT_MOUSE_UP
-// mouse_move → computer tool with computer_actions::MOUSE_MOVE
+    // dev_left_mouse_down, left_mouse_down → computer tool with computer_actions::LEFT_MOUSE_DOWN
+    // dev_left_mouse_up, left_mouse_up → computer tool with computer_actions::LEFT_MOUSE_UP
+    // mouse_move → computer tool with computer_actions::MOUSE_MOVE
     // REMOVED: 4 redundant keyboard tools - Use computer tool instead
     // dev_type_text, desktop_type → computer tool with computer_actions::TYPE
     // dev_global_type_text → computer tool with computer_actions::TYPE
@@ -66,11 +78,17 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert(tool_names::OPEN_URL, ToolCategory::Desktop);
     map.insert(tool_names::DEV_FOCUS_WINDOW, ToolCategory::Desktop);
     map.insert(tool_names::DEV_SCROLL_WINDOW, ToolCategory::Desktop);
-    map.insert(tool_names::CAPTURE_SCREENSHOT_COMMAND, ToolCategory::Desktop);
+    map.insert(
+        tool_names::CAPTURE_SCREENSHOT_COMMAND,
+        ToolCategory::Desktop,
+    );
     map.insert(tool_names::DEV_GET_CLIPBOARD, ToolCategory::Desktop);
     map.insert(tool_names::DEV_SET_CLIPBOARD, ToolCategory::Desktop);
     map.insert(tool_names::DEV_GET_WINDOW_LIST, ToolCategory::Desktop);
-    map.insert(tool_names::DEV_FIND_ELEMENT_BY_SELECTOR, ToolCategory::Desktop);
+    map.insert(
+        tool_names::DEV_FIND_ELEMENT_BY_SELECTOR,
+        ToolCategory::Desktop,
+    );
     map.insert(tool_names::DESKTOP_OPEN_APP, ToolCategory::Desktop);
     map.insert(tool_names::DESKTOP_FOCUS_WINDOW, ToolCategory::Desktop);
     map.insert(tool_names::DESKTOP_SCROLL, ToolCategory::Desktop);
@@ -190,10 +208,19 @@ static INTENT_KEYWORDS: Lazy<HashMap<&'static str, AgentType>> = Lazy::new(|| {
 
     // Browser expert keywords
     let browser_keywords = [
-        intent_keywords::BROWSE, intent_keywords::WEBSITE, intent_keywords::URL,
-        intent_keywords::NAVIGATE, intent_keywords::WEB, intent_keywords::PAGE,
-        intent_keywords::FORM, intent_keywords::SEARCH_ONLINE, intent_keywords::INTERNET,
-        intent_keywords::BROWSER, intent_keywords::LINK, intent_keywords::DOMAIN, intent_keywords::HTTP
+        intent_keywords::BROWSE,
+        intent_keywords::WEBSITE,
+        intent_keywords::URL,
+        intent_keywords::NAVIGATE,
+        intent_keywords::WEB,
+        intent_keywords::PAGE,
+        intent_keywords::FORM,
+        intent_keywords::SEARCH_ONLINE,
+        intent_keywords::INTERNET,
+        intent_keywords::BROWSER,
+        intent_keywords::LINK,
+        intent_keywords::DOMAIN,
+        intent_keywords::HTTP,
     ];
     for keyword in &browser_keywords {
         map.insert(*keyword, AgentType::BrowserExpert);
@@ -201,12 +228,24 @@ static INTENT_KEYWORDS: Lazy<HashMap<&'static str, AgentType>> = Lazy::new(|| {
 
     // Coding expert keywords
     let coding_keywords = [
-        intent_keywords::CODE, intent_keywords::FILE, intent_keywords::PROGRAM,
-        intent_keywords::SCRIPT, intent_keywords::TERMINAL, intent_keywords::COMMAND,
-        intent_keywords::DEBUG, intent_keywords::COMPILE, intent_keywords::GIT,
-        intent_keywords::REPOSITORY, intent_keywords::FUNCTION, intent_keywords::VARIABLE,
-        intent_keywords::EDIT, intent_keywords::CREATE_FILE, intent_keywords::READ_FILE,
-        intent_keywords::WRITE_FILE, intent_keywords::BASH, intent_keywords::SHELL
+        intent_keywords::CODE,
+        intent_keywords::FILE,
+        intent_keywords::PROGRAM,
+        intent_keywords::SCRIPT,
+        intent_keywords::TERMINAL,
+        intent_keywords::COMMAND,
+        intent_keywords::DEBUG,
+        intent_keywords::COMPILE,
+        intent_keywords::GIT,
+        intent_keywords::REPOSITORY,
+        intent_keywords::FUNCTION,
+        intent_keywords::VARIABLE,
+        intent_keywords::EDIT,
+        intent_keywords::CREATE_FILE,
+        intent_keywords::READ_FILE,
+        intent_keywords::WRITE_FILE,
+        intent_keywords::BASH,
+        intent_keywords::SHELL,
     ];
     for keyword in &coding_keywords {
         map.insert(*keyword, AgentType::CodingExpert);
@@ -214,10 +253,17 @@ static INTENT_KEYWORDS: Lazy<HashMap<&'static str, AgentType>> = Lazy::new(|| {
 
     // Desktop expert keywords
     let desktop_keywords = [
-        intent_keywords::OPEN_APP, intent_keywords::APPLICATION, intent_keywords::DESKTOP,
-        intent_keywords::WINDOW, intent_keywords::SCREENSHOT, intent_keywords::CLICK_ON,
-        intent_keywords::TYPE_IN, intent_keywords::SHORTCUT, intent_keywords::MOUSE,
-        intent_keywords::KEYBOARD, intent_keywords::CLIPBOARD
+        intent_keywords::OPEN_APP,
+        intent_keywords::APPLICATION,
+        intent_keywords::DESKTOP,
+        intent_keywords::WINDOW,
+        intent_keywords::SCREENSHOT,
+        intent_keywords::CLICK_ON,
+        intent_keywords::TYPE_IN,
+        intent_keywords::SHORTCUT,
+        intent_keywords::MOUSE,
+        intent_keywords::KEYBOARD,
+        intent_keywords::CLIPBOARD,
     ];
     for keyword in &desktop_keywords {
         map.insert(*keyword, AgentType::DesktopExpert);
@@ -240,10 +286,14 @@ impl ToolMappingService {
         }
 
         // Fallback to prefix matching for dynamically named tools
-        if tool_name.starts_with(tool_prefixes::BROWSER) || tool_name.starts_with(tool_prefixes::SAFARI) {
+        if tool_name.starts_with(tool_prefixes::BROWSER)
+            || tool_name.starts_with(tool_prefixes::SAFARI)
+        {
             return Some(ToolCategory::Browser);
         }
-        if tool_name.starts_with(tool_prefixes::DEV) || tool_name.starts_with(tool_prefixes::DESKTOP) {
+        if tool_name.starts_with(tool_prefixes::DEV)
+            || tool_name.starts_with(tool_prefixes::DESKTOP)
+        {
             return Some(ToolCategory::Desktop);
         }
         if tool_name.starts_with(tool_prefixes::SYSTEM) {
@@ -282,7 +332,8 @@ impl ToolMappingService {
         }
 
         // Return the agent with the highest score, defaulting to GeneralExpert
-        agent_scores.into_iter()
+        agent_scores
+            .into_iter()
             .max_by_key(|(_, score)| *score)
             .map(|(agent, _)| agent)
             .unwrap_or(AgentType::GeneralExpert)
@@ -307,7 +358,8 @@ impl ToolMappingService {
     /// Get all tools for a specific agent type
     /// This replaces the filter_tools_for_expert() logic
     pub fn get_tools_for_agent(tool_names: &[String], agent_type: &AgentType) -> Vec<String> {
-        tool_names.iter()
+        tool_names
+            .iter()
             .filter(|tool_name| Self::can_agent_handle_tool(tool_name, agent_type))
             .cloned()
             .collect()
@@ -331,10 +383,16 @@ impl ToolMappingService {
             if let Some(tool_category) = Self::get_tool_category(tool_name) {
                 match (tool_category, agent_type) {
                     // Some tools could be handled by multiple agents with lower confidence
-                    (ToolCategory::AnthropicComputerUse, AgentType::BrowserExpert) => confidence_scores::PARTIAL_BROWSER_COMPUTER_USE, // Screenshots, clicks can help browser work
-                    (ToolCategory::Basic, AgentType::DesktopExpert) => confidence_scores::PARTIAL_DESKTOP_BASIC, // Some file ops relate to desktop
-                    (ToolCategory::Desktop, AgentType::CodingExpert) => confidence_scores::PARTIAL_CODING_DESKTOP, // Very limited overlap
-                    _ => confidence_scores::NO_CONFIDENCE
+                    (ToolCategory::AnthropicComputerUse, AgentType::BrowserExpert) => {
+                        confidence_scores::PARTIAL_BROWSER_COMPUTER_USE
+                    } // Screenshots, clicks can help browser work
+                    (ToolCategory::Basic, AgentType::DesktopExpert) => {
+                        confidence_scores::PARTIAL_DESKTOP_BASIC
+                    } // Some file ops relate to desktop
+                    (ToolCategory::Desktop, AgentType::CodingExpert) => {
+                        confidence_scores::PARTIAL_CODING_DESKTOP
+                    } // Very limited overlap
+                    _ => confidence_scores::NO_CONFIDENCE,
                 }
             } else {
                 confidence_scores::NO_CONFIDENCE
@@ -347,7 +405,11 @@ impl ToolMappingService {
     pub fn register_dynamic_tool(tool_name: String, category: ToolCategory) {
         // For now, we'll use static mappings, but this could be extended
         // to support dynamic registration for MCP tools and plugins
-        tracing::info!("Dynamic tool registration not yet implemented: {} -> {:?}", tool_name, category);
+        tracing::info!(
+            "Dynamic tool registration not yet implemented: {} -> {:?}",
+            tool_name,
+            category
+        );
     }
 }
 
@@ -358,47 +420,121 @@ mod tests {
 
     #[test]
     fn test_tool_categorization() {
-        assert_eq!(ToolMappingService::get_tool_category(tool_names::BROWSER_NAVIGATE), Some(ToolCategory::Browser));
-        assert_eq!(ToolMappingService::get_tool_category(tool_names::COMPUTER), Some(ToolCategory::AnthropicComputerUse)); // Test production tool instead of dev_left_click
-        assert_eq!(ToolMappingService::get_tool_category(tool_names::BASH_COMMAND), Some(ToolCategory::Basic));
-        assert_eq!(ToolMappingService::get_tool_category(tool_names::TIMER_CREATE), Some(ToolCategory::Timer));
-        assert_eq!(ToolMappingService::get_tool_category(tool_names::SCREENSHOT), Some(ToolCategory::AnthropicComputerUse));
+        assert_eq!(
+            ToolMappingService::get_tool_category(tool_names::BROWSER_NAVIGATE),
+            Some(ToolCategory::Browser)
+        );
+        assert_eq!(
+            ToolMappingService::get_tool_category(tool_names::COMPUTER),
+            Some(ToolCategory::AnthropicComputerUse)
+        ); // Test production tool instead of dev_left_click
+        assert_eq!(
+            ToolMappingService::get_tool_category(tool_names::BASH_COMMAND),
+            Some(ToolCategory::Basic)
+        );
+        assert_eq!(
+            ToolMappingService::get_tool_category(tool_names::TIMER_CREATE),
+            Some(ToolCategory::Timer)
+        );
+        assert_eq!(
+            ToolMappingService::get_tool_category(tool_names::SCREENSHOT),
+            Some(ToolCategory::AnthropicComputerUse)
+        );
     }
 
     #[test]
     fn test_agent_routing() {
-        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::BROWSER_NAVIGATE), Some(AgentType::BrowserExpert));
-        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::COMPUTER), Some(AgentType::DesktopExpert)); // Test production tool instead of dev_left_click
-        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::BASH_COMMAND), Some(AgentType::CodingExpert));
-        assert_eq!(ToolMappingService::get_agent_for_tool(tool_names::TIMER_CREATE), Some(AgentType::GeneralExpert));
+        assert_eq!(
+            ToolMappingService::get_agent_for_tool(tool_names::BROWSER_NAVIGATE),
+            Some(AgentType::BrowserExpert)
+        );
+        assert_eq!(
+            ToolMappingService::get_agent_for_tool(tool_names::COMPUTER),
+            Some(AgentType::DesktopExpert)
+        ); // Test production tool instead of dev_left_click
+        assert_eq!(
+            ToolMappingService::get_agent_for_tool(tool_names::BASH_COMMAND),
+            Some(AgentType::CodingExpert)
+        );
+        assert_eq!(
+            ToolMappingService::get_agent_for_tool(tool_names::TIMER_CREATE),
+            Some(AgentType::GeneralExpert)
+        );
     }
 
     #[test]
     fn test_user_intent_analysis() {
-        assert_eq!(ToolMappingService::analyze_user_intent(test_strings::NAVIGATE_TO_WEBSITE), AgentType::BrowserExpert);
-        assert_eq!(ToolMappingService::analyze_user_intent(test_strings::EDIT_FILE), AgentType::CodingExpert);
-        assert_eq!(ToolMappingService::analyze_user_intent(test_strings::TAKE_SCREENSHOT), AgentType::DesktopExpert);
-        assert_eq!(ToolMappingService::analyze_user_intent(test_strings::WEATHER_QUERY), AgentType::GeneralExpert);
+        assert_eq!(
+            ToolMappingService::analyze_user_intent(test_strings::NAVIGATE_TO_WEBSITE),
+            AgentType::BrowserExpert
+        );
+        assert_eq!(
+            ToolMappingService::analyze_user_intent(test_strings::EDIT_FILE),
+            AgentType::CodingExpert
+        );
+        assert_eq!(
+            ToolMappingService::analyze_user_intent(test_strings::TAKE_SCREENSHOT),
+            AgentType::DesktopExpert
+        );
+        assert_eq!(
+            ToolMappingService::analyze_user_intent(test_strings::WEATHER_QUERY),
+            AgentType::GeneralExpert
+        );
     }
 
     #[test]
     fn test_category_matching() {
-        assert!(ToolMappingService::is_tool_in_category(tool_names::BROWSER_NAVIGATE, &ToolCategory::Browser));
-        assert!(!ToolMappingService::is_tool_in_category(tool_names::BROWSER_NAVIGATE, &ToolCategory::Desktop));
-        assert!(ToolMappingService::is_tool_in_category(tool_names::COMPUTER, &ToolCategory::AnthropicComputerUse)); // Test production tool instead of dev_left_click
+        assert!(ToolMappingService::is_tool_in_category(
+            tool_names::BROWSER_NAVIGATE,
+            &ToolCategory::Browser
+        ));
+        assert!(!ToolMappingService::is_tool_in_category(
+            tool_names::BROWSER_NAVIGATE,
+            &ToolCategory::Desktop
+        ));
+        assert!(ToolMappingService::is_tool_in_category(
+            tool_names::COMPUTER,
+            &ToolCategory::AnthropicComputerUse
+        )); // Test production tool instead of dev_left_click
     }
 
     #[test]
     fn test_agent_capability() {
-        assert!(ToolMappingService::can_agent_handle_tool(tool_names::BROWSER_NAVIGATE, &AgentType::BrowserExpert));
-        assert!(!ToolMappingService::can_agent_handle_tool(tool_names::BROWSER_NAVIGATE, &AgentType::DesktopExpert));
-        assert!(ToolMappingService::can_agent_handle_tool(tool_names::COMPUTER, &AgentType::DesktopExpert)); // Test production tool instead of dev_left_click
+        assert!(ToolMappingService::can_agent_handle_tool(
+            tool_names::BROWSER_NAVIGATE,
+            &AgentType::BrowserExpert
+        ));
+        assert!(!ToolMappingService::can_agent_handle_tool(
+            tool_names::BROWSER_NAVIGATE,
+            &AgentType::DesktopExpert
+        ));
+        assert!(ToolMappingService::can_agent_handle_tool(
+            tool_names::COMPUTER,
+            &AgentType::DesktopExpert
+        )); // Test production tool instead of dev_left_click
     }
 
     #[test]
     fn test_confidence_scoring() {
-        assert_eq!(ToolMappingService::get_agent_confidence_for_tool(tool_names::BROWSER_NAVIGATE, &AgentType::BrowserExpert), confidence_scores::HIGH_CONFIDENCE);
-        assert_eq!(ToolMappingService::get_agent_confidence_for_tool(tool_names::BROWSER_NAVIGATE, &AgentType::DesktopExpert), confidence_scores::NO_CONFIDENCE);
-        assert!(ToolMappingService::get_agent_confidence_for_tool(tool_names::SCREENSHOT, &AgentType::BrowserExpert) > confidence_scores::NO_CONFIDENCE);
+        assert_eq!(
+            ToolMappingService::get_agent_confidence_for_tool(
+                tool_names::BROWSER_NAVIGATE,
+                &AgentType::BrowserExpert
+            ),
+            confidence_scores::HIGH_CONFIDENCE
+        );
+        assert_eq!(
+            ToolMappingService::get_agent_confidence_for_tool(
+                tool_names::BROWSER_NAVIGATE,
+                &AgentType::DesktopExpert
+            ),
+            confidence_scores::NO_CONFIDENCE
+        );
+        assert!(
+            ToolMappingService::get_agent_confidence_for_tool(
+                tool_names::SCREENSHOT,
+                &AgentType::BrowserExpert
+            ) > confidence_scores::NO_CONFIDENCE
+        );
     }
 }

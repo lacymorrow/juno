@@ -115,6 +115,11 @@ pub mod tool_names {
     pub const SET_FILE_MONITOR: &str = "set_file_monitor";
     pub const CHECK_EXPIRED_TIMERS: &str = "check_expired_timers";
 
+    // Scheduled automation tools (user-facing cron schedules)
+    pub const CREATE_SCHEDULED_AUTOMATION: &str = "create_scheduled_automation";
+    pub const LIST_SCHEDULED_AUTOMATIONS: &str = "list_scheduled_automations";
+    pub const DELETE_SCHEDULED_AUTOMATION: &str = "delete_scheduled_automation";
+
     // Timer tools
     pub const TIMER_CREATE: &str = "timer_create";
     pub const TIMER_START: &str = "timer_start";

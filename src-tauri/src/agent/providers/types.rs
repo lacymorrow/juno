@@ -5,6 +5,7 @@
 pub mod model_ids {
     // Anthropic Claude Models — Current Generation
     pub const CLAUDE_FABLE_5: &str = "claude-fable-5";
+    pub const CLAUDE_OPUS_5: &str = "claude-opus-5";
     pub const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
     pub const CLAUDE_OPUS_4_7: &str = "claude-opus-4-7";
     pub const CLAUDE_SONNET_5: &str = "claude-sonnet-5";
@@ -13,17 +14,20 @@ pub mod model_ids {
     pub const CLAUDE_SONNET_4_5: &str = "claude-sonnet-4-5-20250929";
     pub const CLAUDE_HAIKU_4_5: &str = "claude-haiku-4-5-20251001";
 
-    // Anthropic Claude Models — Legacy
+    // Anthropic Claude Models — Legacy (deprecated but still callable)
+    // NOTE: Only models the Anthropic API still serves belong here. Opus 4.1
+    // (retired 2026-08-05), Opus 4, and Sonnet 4 (both retired 2026-06-15) were
+    // removed — requests to retired models return 404. Verify against the live
+    // deprecations page before adding an ID back:
+    // https://platform.claude.com/docs/en/about-claude/model-deprecations
     pub const CLAUDE_OPUS_4_5: &str = "claude-opus-4-5-20251101";
-    pub const CLAUDE_OPUS_4_1: &str = "claude-opus-4-1-20250805";
-    pub const CLAUDE_SONNET_4: &str = "claude-sonnet-4-20250514";
-    pub const CLAUDE_OPUS_4: &str = "claude-opus-4-20250514";
 
     /// Models that require the 2025-11-24 computer-use beta flag AND
     /// new computer type (computer_20251124) + new editor (text_editor_20250728).
     /// These also support high-resolution screenshots up to 2,576px.
     pub const OPUS_4_5_PLUS_MODELS: &[&str] = &[
         CLAUDE_FABLE_5,
+        CLAUDE_OPUS_5,
         CLAUDE_OPUS_4_8,
         CLAUDE_OPUS_4_5,
         CLAUDE_OPUS_4_6,
@@ -164,9 +168,7 @@ impl Provider {
                 if model_ids::OPUS_4_5_PLUS_MODELS.contains(&model) {
                     // Tier 1: Opus 4.5+ — both computer and editor are new versions
                     match tool_name {
-                        "computer" => {
-                            return computer_use_api_types::COMPUTER_20251124.to_string()
-                        }
+                        "computer" => return computer_use_api_types::COMPUTER_20251124.to_string(),
                         "str_replace_based_edit_tool" => {
                             return computer_use_api_types::EDIT_TOOL_20250728.to_string()
                         }
@@ -192,6 +194,13 @@ impl Provider {
                 &[
                     // Current generation
                     ModelDefinition {
+                        id: model_ids::CLAUDE_OPUS_5,
+                        name: "Claude Opus 5",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: true,
+                    },
+                    ModelDefinition {
                         id: model_ids::CLAUDE_FABLE_5,
                         name: "Claude Fable 5",
                         category: ModelCategory::ComputerUse,
@@ -203,7 +212,7 @@ impl Provider {
                         name: "Claude Opus 4.8",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
-                        is_recommended: true,
+                        is_recommended: false,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_7,
@@ -247,31 +256,10 @@ impl Provider {
                         supports_computer_use: true,
                         is_recommended: false,
                     },
-                    // Legacy models
+                    // Legacy models (still served by the Anthropic API)
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_5,
                         name: "Claude Opus 4.5",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_OPUS_4_1,
-                        name: "Claude Opus 4.1",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_SONNET_4,
-                        name: "Claude Sonnet 4",
-                        category: ModelCategory::ComputerUse,
-                        supports_computer_use: true,
-                        is_recommended: false,
-                    },
-                    ModelDefinition {
-                        id: model_ids::CLAUDE_OPUS_4,
-                        name: "Claude Opus 4",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
                         is_recommended: false,
@@ -294,24 +282,20 @@ impl Provider {
                     is_recommended: false,
                 },
             ],
-            Provider::Rig => &[
-                ModelDefinition {
-                    id: model_ids::OPENAI_CUA,
-                    name: "Computer-Using Agent (CUA) via Rig",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-            ],
-            Provider::Gemini => &[
-                ModelDefinition {
-                    id: model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
-                    name: "Gemini 2.5 Computer Use (Preview)",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-            ],
+            Provider::Rig => &[ModelDefinition {
+                id: model_ids::OPENAI_CUA,
+                name: "Computer-Using Agent (CUA) via Rig",
+                category: ModelCategory::ComputerUse,
+                supports_computer_use: true,
+                is_recommended: true,
+            }],
+            Provider::Gemini => &[ModelDefinition {
+                id: model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
+                name: "Gemini 2.5 Computer Use (Preview)",
+                category: ModelCategory::ComputerUse,
+                supports_computer_use: true,
+                is_recommended: true,
+            }],
             Provider::ClaudeCli => &[
                 ModelDefinition {
                     id: "sonnet",
@@ -375,7 +359,7 @@ impl Provider {
             .unwrap_or_else(|| {
                 // Fallback constants if no definitions exist (shouldn't happen)
                 match self {
-                    Provider::Anthropic => model_ids::CLAUDE_OPUS_4_6,
+                    Provider::Anthropic => model_ids::CLAUDE_OPUS_5,
                     Provider::OpenAI => model_ids::OPENAI_CUA,
                     Provider::Rig => model_ids::OPENAI_CUA,
                     Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
@@ -454,17 +438,20 @@ mod tests {
 
     #[test]
     fn test_resolve_tool_type_older_model_passes_through() {
-        let computer = Provider::Anthropic.resolve_tool_type(
-            "computer",
-            "computer_20250124",
-            model_ids::CLAUDE_SONNET_4,
-        );
+        // A pre-4.5 legacy model that is in neither special tier array must fall
+        // through to Tier 3 (passthrough). Uses a literal retired ID because no
+        // active model exercises this branch anymore — it guards the fallthrough
+        // for older/unknown models generally.
+        let legacy_model = "claude-3-5-sonnet-20241022";
+
+        let computer =
+            Provider::Anthropic.resolve_tool_type("computer", "computer_20250124", legacy_model);
         assert_eq!(computer, "computer_20250124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
             "str_replace_based_edit_tool",
             "text_editor_20250429",
-            model_ids::CLAUDE_SONNET_4,
+            legacy_model,
         );
         assert_eq!(editor, "text_editor_20250429");
     }
@@ -478,12 +465,13 @@ mod tests {
         );
         assert_eq!(opus_45, "bash_20250124");
 
-        let sonnet = Provider::Anthropic.resolve_tool_type(
+        // A legacy passthrough model must also leave bash untouched.
+        let legacy = Provider::Anthropic.resolve_tool_type(
             "bash",
             "bash_20250124",
-            model_ids::CLAUDE_SONNET_4,
+            "claude-3-5-sonnet-20241022",
         );
-        assert_eq!(sonnet, "bash_20250124");
+        assert_eq!(legacy, "bash_20250124");
     }
 
     #[test]
@@ -494,14 +482,20 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_SONNET_4_5,
         );
-        assert_eq!(computer, "computer_20250124", "Sonnet 4.5 should keep old computer type");
+        assert_eq!(
+            computer, "computer_20250124",
+            "Sonnet 4.5 should keep old computer type"
+        );
 
         let editor = Provider::Anthropic.resolve_tool_type(
             "str_replace_based_edit_tool",
             "text_editor_20250429",
             model_ids::CLAUDE_SONNET_4_5,
         );
-        assert_eq!(editor, "text_editor_20250728", "Sonnet 4.5 should use new editor type");
+        assert_eq!(
+            editor, "text_editor_20250728",
+            "Sonnet 4.5 should use new editor type"
+        );
     }
 
     #[test]
@@ -512,14 +506,20 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_HAIKU_4_5,
         );
-        assert_eq!(computer, "computer_20250124", "Haiku 4.5 should keep old computer type");
+        assert_eq!(
+            computer, "computer_20250124",
+            "Haiku 4.5 should keep old computer type"
+        );
 
         let editor = Provider::Anthropic.resolve_tool_type(
             "str_replace_based_edit_tool",
             "text_editor_20250429",
             model_ids::CLAUDE_HAIKU_4_5,
         );
-        assert_eq!(editor, "text_editor_20250728", "Haiku 4.5 should use new editor type");
+        assert_eq!(
+            editor, "text_editor_20250728",
+            "Haiku 4.5 should use new editor type"
+        );
     }
 
     #[test]
@@ -557,6 +557,33 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_tool_type_opus_5_remaps() {
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_OPUS_5,
+        );
+        assert_eq!(computer, "computer_20251124");
+
+        let editor = Provider::Anthropic.resolve_tool_type(
+            "str_replace_based_edit_tool",
+            "text_editor_20250429",
+            model_ids::CLAUDE_OPUS_5,
+        );
+        assert_eq!(editor, "text_editor_20250728");
+    }
+
+    #[test]
+    fn test_opus_5_is_default_anthropic_model() {
+        // Claude Opus 5 is the current-generation flagship and must be the
+        // recommended/default Anthropic model (see LAC-3106).
+        assert_eq!(
+            Provider::Anthropic.default_model(),
+            model_ids::CLAUDE_OPUS_5
+        );
+    }
+
+    #[test]
     fn test_resolve_tool_type_fable_5_remaps() {
         let computer = Provider::Anthropic.resolve_tool_type(
             "computer",
@@ -575,11 +602,8 @@ mod tests {
 
     #[test]
     fn test_resolve_tool_type_non_anthropic_passes_through() {
-        let result = Provider::OpenAI.resolve_tool_type(
-            "computer",
-            "computer_20250124",
-            "some-model",
-        );
+        let result =
+            Provider::OpenAI.resolve_tool_type("computer", "computer_20250124", "some-model");
         assert_eq!(result, "computer_20250124");
     }
 }

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDragWindow } from "@/hooks/useDragWindow";
+import { useAgentSessions } from "@/hooks/useAgentSessions";
+import { AgentSessionRows } from "@/components/AgentSessionRows";
 import { UI } from "@/lib/constants.generated";
 import { ChevronUp, ChevronDown, X } from "lucide-react";
 
@@ -29,6 +31,8 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
   const [isHovered, setIsHovered] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const onDragMouseDown = useDragWindow();
+  // Parallel agent sessions (LAC-1432) — summary rows in expanded mode
+  const { sessions: agentSessions, focusSession } = useAgentSessions();
 
   // Handle panel visibility
   useEffect(() => {
@@ -43,7 +47,17 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
       case "compact":
         return { width: 300, height: 100 };
       case "expanded":
-        return { width: 350, height: 250 };
+        // Grow with the agent list: 32px per row + header/footer, capped
+        // so the list scrolls instead of pushing the panel off screen
+        // (LAC-2830 §4).
+        return {
+          width: 350,
+          height:
+            250 +
+            (agentSessions.length > 0
+              ? Math.min(agentSessions.length * 32 + 60, 160)
+              : 0),
+        };
       case "chat":
         return { width: 280, height: 180 };
       case "settings":
@@ -166,6 +180,8 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
             <div className="text-sm text-gray-700">
               {message || "Agent is ready"}
             </div>
+
+            <AgentSessionRows sessions={agentSessions} onFocus={focusSession} />
 
             <div className="flex items-center gap-2">
               <label className="text-xs text-gray-600">Opacity:</label>

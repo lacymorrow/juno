@@ -1,12 +1,14 @@
-use super::types::{PromptConfig, PromptContext, PromptTemplate, PromptType};
 use super::templates::DefaultPrompts;
+use super::types::{PromptConfig, PromptContext, PromptTemplate, PromptType};
 use crate::agent::core::AgentError;
 use std::collections::HashMap;
 
 use tracing::{info, warn};
 
 // Add centralized settings support
-use crate::settings::{PromptSettings as CentralizedPromptSettings, PromptTemplate as CentralizedPromptTemplate};
+use crate::settings::{
+    PromptSettings as CentralizedPromptSettings, PromptTemplate as CentralizedPromptTemplate,
+};
 
 /// Manages prompt templates, configuration, and generation
 pub struct PromptManager {
@@ -26,9 +28,12 @@ impl PromptManager {
     /// Load configuration from centralized settings manager.
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Agent initialization and prompt management.
-    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, AgentError> {
-        let prompt_settings = settings_manager.get_prompt_settings().await
-            .map_err(|e| AgentError::ConfigurationError(format!("Failed to load prompt settings: {}", e)))?;
+    pub async fn load_from_centralized_settings(
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<Self, AgentError> {
+        let prompt_settings = settings_manager.get_prompt_settings().await.map_err(|e| {
+            AgentError::ConfigurationError(format!("Failed to load prompt settings: {}", e))
+        })?;
 
         let config = Self::from_centralized_settings(&prompt_settings)?;
         let mut manager = Self {
@@ -50,17 +55,26 @@ impl PromptManager {
     /// Save configuration to centralized settings manager.
     /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Settings UI and prompt configuration updates.
-    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), AgentError> {
+    pub async fn save_to_centralized_settings(
+        &self,
+        settings_manager: &crate::settings::manager::SettingsManager,
+    ) -> Result<(), AgentError> {
         let prompt_settings = self.to_centralized_settings()?;
-        settings_manager.set_prompt_settings(&prompt_settings).await
-            .map_err(|e| AgentError::ConfigurationError(format!("Failed to save prompt settings: {}", e)))?;
+        settings_manager
+            .set_prompt_settings(&prompt_settings)
+            .await
+            .map_err(|e| {
+                AgentError::ConfigurationError(format!("Failed to save prompt settings: {}", e))
+            })?;
         info!("Saved prompt configuration to centralized settings");
         Ok(())
     }
 
     /// Convert from centralized PromptSettings to PromptConfig.
     /// Handles schema differences between the two formats.
-    fn from_centralized_settings(settings: &CentralizedPromptSettings) -> Result<PromptConfig, AgentError> {
+    fn from_centralized_settings(
+        settings: &CentralizedPromptSettings,
+    ) -> Result<PromptConfig, AgentError> {
         let mut custom_prompts = HashMap::new();
 
         // Convert centralized prompt templates to internal format
@@ -114,12 +128,15 @@ impl PromptManager {
         })
     }
 
-
-
     /// Get a prompt for a specific type with context substitution
-    pub fn get_prompt(&self, prompt_type: PromptType, context: Option<PromptContext>) -> Result<String, AgentError> {
-        let template = self.templates.get(&prompt_type)
-            .ok_or_else(|| AgentError::ConfigurationError(format!("Prompt template not found: {:?}", prompt_type)))?;
+    pub fn get_prompt(
+        &self,
+        prompt_type: PromptType,
+        context: Option<PromptContext>,
+    ) -> Result<String, AgentError> {
+        let template = self.templates.get(&prompt_type).ok_or_else(|| {
+            AgentError::ConfigurationError(format!("Prompt template not found: {:?}", prompt_type))
+        })?;
 
         let mut content = template.content.clone();
 
@@ -161,18 +178,19 @@ impl PromptManager {
             "desktop" => PromptType::DesktopExpert,
             "file" => PromptType::FileExpert,
             _ => {
-                warn!("Unknown specialist agent type: {}. Using file expert.", agent_type);
+                warn!(
+                    "Unknown specialist agent type: {}. Using file expert.",
+                    agent_type
+                );
                 PromptType::FileExpert
             }
         };
 
         self.get_prompt(prompt_type, None)
-            .unwrap_or_else(|_| {
-                match agent_type {
-                    "browser" => DefaultPrompts::browser_expert().content,
-                    "desktop" => DefaultPrompts::desktop_expert().content,
-                    _ => DefaultPrompts::file_expert().content,
-                }
+            .unwrap_or_else(|_| match agent_type {
+                "browser" => DefaultPrompts::browser_expert().content,
+                "desktop" => DefaultPrompts::desktop_expert().content,
+                _ => DefaultPrompts::file_expert().content,
             })
     }
 
@@ -186,7 +204,10 @@ impl PromptManager {
             "general_expert" => PromptType::GeneralExpert,
             "file_expert" => PromptType::FileExpert,
             _ => {
-                warn!("Unknown expert agent type: {}. Using general expert.", agent_type);
+                warn!(
+                    "Unknown expert agent type: {}. Using general expert.",
+                    agent_type
+                );
                 PromptType::GeneralExpert
             }
         };
@@ -202,35 +223,34 @@ impl PromptManager {
         &mut self,
         prompt_type: PromptType,
         content: String,
-        settings_manager: &crate::settings::manager::SettingsManager
+        settings_manager: &crate::settings::manager::SettingsManager,
     ) -> Result<(), AgentError> {
         if let Some(template) = self.templates.get_mut(&prompt_type) {
             if template.customizable {
                 template.content = content.clone();
 
                 // Also update in custom prompts config
-                self.config.custom_prompts.insert(
-                    prompt_type.as_str().to_string(),
-                    template.clone()
-                );
+                self.config
+                    .custom_prompts
+                    .insert(prompt_type.as_str().to_string(), template.clone());
 
                 self.save_to_centralized_settings(settings_manager).await?;
                 info!("Updated prompt template: {:?}", prompt_type);
             } else {
-                return Err(AgentError::ConfigurationError(
-                    format!("Prompt type {:?} is not customizable", prompt_type)
-                ));
+                return Err(AgentError::ConfigurationError(format!(
+                    "Prompt type {:?} is not customizable",
+                    prompt_type
+                )));
             }
         } else {
-            return Err(AgentError::ConfigurationError(
-                format!("Prompt template not found: {:?}", prompt_type)
-            ));
+            return Err(AgentError::ConfigurationError(format!(
+                "Prompt template not found: {:?}",
+                prompt_type
+            )));
         }
 
         Ok(())
     }
-
-
 
     /// Get all available prompt templates
     pub fn get_templates(&self) -> &HashMap<PromptType, PromptTemplate> {
@@ -252,22 +272,22 @@ impl PromptManager {
     pub async fn reset_prompt_with_centralized_settings(
         &mut self,
         prompt_type: PromptType,
-        settings_manager: &crate::settings::manager::SettingsManager
+        settings_manager: &crate::settings::manager::SettingsManager,
     ) -> Result<(), AgentError> {
         if let Some(default_template) = DefaultPrompts::get_all().get(&prompt_type) {
-            self.templates.insert(prompt_type.clone(), default_template.clone());
+            self.templates
+                .insert(prompt_type.clone(), default_template.clone());
             self.config.custom_prompts.remove(prompt_type.as_str());
             self.save_to_centralized_settings(settings_manager).await?;
             info!("Reset prompt template to default: {:?}", prompt_type);
             Ok(())
         } else {
-            Err(AgentError::ConfigurationError(
-                format!("Default template not found for: {:?}", prompt_type)
-            ))
+            Err(AgentError::ConfigurationError(format!(
+                "Default template not found for: {:?}",
+                prompt_type
+            )))
         }
     }
-
-
 
     /// Set global variables using centralized settings.
     /// NEW: Uses centralized settings instead of direct JSON store access.
@@ -275,14 +295,12 @@ impl PromptManager {
     pub async fn set_global_variables_with_centralized_settings(
         &mut self,
         variables: HashMap<String, String>,
-        settings_manager: &crate::settings::manager::SettingsManager
+        settings_manager: &crate::settings::manager::SettingsManager,
     ) -> Result<(), AgentError> {
         self.config.global_variables = variables;
         self.save_to_centralized_settings(settings_manager).await?;
         Ok(())
     }
-
-
 
     /// Get global variables
     pub fn get_global_variables(&self) -> &HashMap<String, String> {
@@ -344,8 +362,6 @@ impl PromptManager {
 
         Ok(result)
     }
-
-
 }
 
 impl Default for PromptManager {
@@ -362,9 +378,11 @@ impl Default for PromptManager {
 ///
 /// # Returns
 /// `Result<PromptConfig, String>` - Loaded configuration or error message
-pub async fn load_prompt_config_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<PromptConfig, String> {
+pub async fn load_prompt_config_from_centralized_settings(
+    settings_manager: &crate::settings::manager::SettingsManager,
+) -> Result<PromptConfig, String> {
     let prompt_settings = settings_manager.get_prompt_settings().await?;
-                crate::agent::prompts::PromptManager::from_centralized_settings(&prompt_settings)
+    crate::agent::prompts::PromptManager::from_centralized_settings(&prompt_settings)
         .map_err(|e| format!("Failed to convert centralized prompt settings: {}", e))
 }
 
@@ -377,7 +395,10 @@ pub async fn load_prompt_config_from_centralized_settings(settings_manager: &cra
 ///
 /// # Returns
 /// `Result<(), String>` - Success or error message
-pub async fn save_prompt_config_to_centralized_settings(config: &PromptConfig, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), String> {
+pub async fn save_prompt_config_to_centralized_settings(
+    config: &PromptConfig,
+    settings_manager: &crate::settings::manager::SettingsManager,
+) -> Result<(), String> {
     let mut custom_prompts = std::collections::HashMap::new();
 
     // Convert internal prompt templates to centralized format

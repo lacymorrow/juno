@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock, Semaphore};
 use tokio::time::{sleep, Duration};
-use std::collections::HashSet;
 
 /// Test for concurrent queue operations
 #[tokio::test]
@@ -15,20 +15,20 @@ async fn test_agent_queue_race_conditions() {
 
     // Spawn multiple tasks trying to queue and execute
     let mut handles = vec![];
-    
+
     for i in 0..10 {
         let sem_clone = execution_semaphore.clone();
         let queries_clone = pending_queries.clone();
         let current_clone = current_execution.clone();
         let counter_clone = execution_counter.clone();
-        
+
         let handle = tokio::spawn(async move {
             // Try to queue
             {
                 let mut queries = queries_clone.lock().await;
                 queries.push(format!("Query {}", i));
             }
-            
+
             // Try to execute
             if let Ok(_permit) = sem_clone.try_acquire() {
                 // Simulate execution
@@ -36,20 +36,20 @@ async fn test_agent_queue_race_conditions() {
                     let mut queries = queries_clone.lock().await;
                     queries.pop()
                 };
-                
+
                 if let Some(q) = query {
                     // Set current execution
                     {
                         let mut current = current_clone.write().await;
                         *current = Some(q.clone());
                     }
-                    
+
                     // Increment counter
                     counter_clone.fetch_add(1, Ordering::SeqCst);
-                    
+
                     // Simulate work
                     sleep(Duration::from_millis(10)).await;
-                    
+
                     // Clear current execution
                     {
                         let mut current = current_clone.write().await;
@@ -58,7 +58,7 @@ async fn test_agent_queue_race_conditions() {
                 }
             }
         });
-        
+
         handles.push(handle);
     }
 
@@ -86,41 +86,41 @@ async fn test_memory_manager_concurrent_operations() {
     for i in 0..20 {
         let messages_clone = messages.clone();
         let pending_clone = pending_tool_calls.clone();
-        
+
         let handle = tokio::spawn(async move {
             // Add message
             {
                 let mut msgs = messages_clone.write().await;
                 msgs.push(format!("Message {}", i));
-                
+
                 // Simulate pruning
                 if msgs.len() > max_messages {
                     let excess = msgs.len() - max_messages;
                     msgs.drain(0..excess);
                 }
             }
-            
+
             // Add tool call
             if i % 3 == 0 {
                 let mut pending = pending_clone.lock().await;
                 pending.insert(format!("tool_{}", i));
             }
         });
-        
+
         handles.push(handle);
     }
 
     // Concurrent reads
     for _ in 0..5 {
         let messages_clone = messages.clone();
-        
+
         let handle = tokio::spawn(async move {
             let msgs = messages_clone.read().await;
             let _count = msgs.len();
             // Simulate processing
             sleep(Duration::from_millis(5)).await;
         });
-        
+
         handles.push(handle);
     }
 
@@ -131,7 +131,11 @@ async fn test_memory_manager_concurrent_operations() {
 
     // Verify constraints
     let final_messages = messages.read().await;
-    assert!(final_messages.len() <= max_messages, "Too many messages: {}", final_messages.len());
+    assert!(
+        final_messages.len() <= max_messages,
+        "Too many messages: {}",
+        final_messages.len()
+    );
 }
 
 /// Test for state update atomicity
@@ -154,7 +158,7 @@ async fn test_state_update_atomicity() {
     for i in 0..10 {
         let state_clone = state.clone();
         let counter_clone = update_counter.clone();
-        
+
         let handle = tokio::spawn(async move {
             // Non-atomic update (BAD)
             // This simulates the race condition
@@ -162,12 +166,13 @@ async fn test_state_update_atomicity() {
                 let s = state_clone.lock().await;
                 !s.execution_active
             };
-            
+
             if should_update {
                 sleep(Duration::from_micros(100)).await; // Simulate race window
-                
+
                 let mut s = state_clone.lock().await;
-                if !s.execution_active { // Double check
+                if !s.execution_active {
+                    // Double check
                     s.execution_active = true;
                     s.execution_id = Some(format!("exec_{}", i));
                     s.max_steps = Some(10);
@@ -176,7 +181,7 @@ async fn test_state_update_atomicity() {
                 }
             }
         });
-        
+
         handles.push(handle);
     }
 
@@ -186,7 +191,7 @@ async fn test_state_update_atomicity() {
 
     let updates = update_counter.load(Ordering::SeqCst);
     println!("Total updates: {}", updates);
-    
+
     // In a race condition scenario, multiple updates might occur
     // With proper atomic operations, only one should succeed
 }
@@ -195,7 +200,7 @@ async fn test_state_update_atomicity() {
 #[tokio::test]
 async fn test_cancellation_token_races() {
     use tokio_util::sync::CancellationToken;
-    
+
     let token = CancellationToken::new();
     let current_execution = Arc::new(RwLock::new(Some("test_exec".to_string())));
     let completed = Arc::new(AtomicU32::new(0));
@@ -204,7 +209,7 @@ async fn test_cancellation_token_races() {
     let exec_token = token.clone();
     let exec_current = current_execution.clone();
     let exec_completed = completed.clone();
-    
+
     let exec_handle = tokio::spawn(async move {
         tokio::select! {
             _ = async {
@@ -213,7 +218,7 @@ async fn test_cancellation_token_races() {
                         break;
                     }
                     sleep(Duration::from_millis(10)).await;
-                    
+
                     // Check if we're still the current execution
                     let current = exec_current.read().await;
                     if current.as_ref() != Some(&"test_exec".to_string()) {
@@ -231,10 +236,10 @@ async fn test_cancellation_token_races() {
     // Start cancellation task
     let cancel_token = token.clone();
     let cancel_current = current_execution.clone();
-    
+
     let cancel_handle = tokio::spawn(async move {
         sleep(Duration::from_millis(50)).await;
-        
+
         // Cancel current execution
         {
             let mut current = cancel_current.write().await;
@@ -263,7 +268,7 @@ async fn test_resource_pool_concurrent_access() {
 
     let pool = Arc::new(Mutex::new(Vec::new()));
     let available = Arc::new(Semaphore::new(0));
-    
+
     // Initialize pool
     for i in 0..3 {
         let resource = Resource {
@@ -280,7 +285,7 @@ async fn test_resource_pool_concurrent_access() {
     for worker_id in 0..10 {
         let pool_clone = pool.clone();
         let available_clone = available.clone();
-        
+
         let handle = tokio::spawn(async move {
             // Try to acquire resource
             if let Ok(_permit) = available_clone.acquire().await {
@@ -288,28 +293,28 @@ async fn test_resource_pool_concurrent_access() {
                     let mut p = pool_clone.lock().await;
                     p.pop()
                 };
-                
+
                 if let Some(res) = resource {
                     // Mark as in use
                     let was_in_use = res.in_use.fetch_add(1, Ordering::SeqCst);
                     assert_eq!(was_in_use, 0, "Resource {} already in use!", res.id);
-                    
+
                     // Use resource
                     sleep(Duration::from_millis(10)).await;
-                    
+
                     // Mark as not in use
                     res.in_use.fetch_sub(1, Ordering::SeqCst);
-                    
+
                     // Return to pool
                     let mut p = pool_clone.lock().await;
                     p.push(res);
                     available_clone.add_permits(1);
                 }
             }
-            
+
             worker_id
         });
-        
+
         handles.push(handle);
     }
 
@@ -336,7 +341,7 @@ async fn test_no_deadlocks() {
     let a1 = lock_a.clone();
     let b1 = lock_b.clone();
     let c1 = completed.clone();
-    
+
     handles.push(tokio::spawn(async move {
         for _ in 0..10 {
             let _a = a1.lock().await;
@@ -350,7 +355,7 @@ async fn test_no_deadlocks() {
     let a2 = lock_a.clone();
     let b2 = lock_b.clone();
     let c2 = completed.clone();
-    
+
     handles.push(tokio::spawn(async move {
         for _ in 0..10 {
             let _a = a2.lock().await;
@@ -368,7 +373,7 @@ async fn test_no_deadlocks() {
     });
 
     assert!(timeout.await.is_ok(), "Deadlock detected!");
-    
+
     let total = completed.load(Ordering::SeqCst);
     assert_eq!(total, 20, "Not all operations completed");
 }
@@ -404,7 +409,7 @@ async fn test_agent_execution_integration() {
     let exec_memory = memory_manager.clone();
     let exec_token = cancellation_token.clone();
     let exec_count = execution_count.clone();
-    
+
     let executor = tokio::spawn(async move {
         loop {
             // Check for queries
@@ -428,10 +433,10 @@ async fn test_agent_execution_integration() {
                             let mut mem = exec_memory.write().await;
                             mem.push(format!("Executing: {}", query));
                         }
-                        
+
                         // Simulate work
                         sleep(Duration::from_millis(50)).await;
-                        
+
                         // Complete
                         exec_count.fetch_add(1, Ordering::SeqCst);
                     } => {}

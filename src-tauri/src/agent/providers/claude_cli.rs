@@ -151,8 +151,12 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
 /// execution (Bash, Read, Edit, etc.) so Juno doesn't need to provide tools.
 ///
 /// The subprocess is cancellable via Juno's escape key: the `run_streaming` method
-/// races the streaming loop against the AppState `cancel_rx` signal and kills the
-/// child process immediately when cancellation is detected.
+/// races the streaming loop against the run's cancellation channel and kills the
+/// child process immediately when cancellation is detected. Session-tracked runs
+/// pass a merged session+global receiver through `decide_next_action_streaming`
+/// (escape cancels only the FOCUSED session since LAC-1432, so the global AppState
+/// channel alone would never fire — LAC-3697); the global channel remains the
+/// fallback for legacy/headless callers that don't thread one through.
 pub struct ClaudeCliBrain {
     binary_path: PathBuf,
     model: String,
@@ -230,6 +234,7 @@ impl ClaudeCliBrain {
         query: &str,
         app_handle: Option<tauri::AppHandle>,
         message_id: Option<String>,
+        cancel_rx: Option<crate::state::CancelReceiver>,
     ) -> Result<String, AgentError> {
         // Validate auth before spawning the query subprocess
         check_auth_status(&self.binary_path).await?;
@@ -239,11 +244,7 @@ impl ClaudeCliBrain {
         info!(
             "Spawning Claude CLI: {} {}",
             self.binary_path.display(),
-            args.iter()
-                .take(6)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(" ")
+            args.iter().take(6).cloned().collect::<Vec<_>>().join(" ")
         );
 
         let mut child = tokio::process::Command::new(&self.binary_path)
@@ -253,9 +254,7 @@ impl ClaudeCliBrain {
             .stdin(Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|e| {
-                AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e))
-            })?;
+            .map_err(|e| AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e)))?;
 
         let stdout = child.stdout.take().ok_or_else(|| {
             AgentError::LlmError("Failed to capture Claude CLI stdout".to_string())
@@ -281,13 +280,23 @@ impl ClaudeCliBrain {
             crate::agent::tool_logger::emit_stream_start(handle, msg_id.clone());
         }
 
-        // Get cancel receiver from AppState so we can abort on Escape key
-        let cancel_rx = app_handle.as_ref().and_then(|handle| {
-            use tauri::Manager;
-            handle
-                .try_state::<crate::state::AppState>()
-                .map(|state| state.cancel_rx.clone())
+        // Prefer the run's cancellation channel (for session-tracked runs this
+        // is the merged session+global receiver — escape cancels only the
+        // focused session's token, which the global channel never sees;
+        // LAC-3697). Fall back to the legacy global AppState channel for
+        // callers that don't thread a receiver through.
+        let cancel_rx = cancel_rx.or_else(|| {
+            app_handle.as_ref().and_then(|handle| {
+                use tauri::Manager;
+                handle
+                    .try_state::<crate::state::AppState>()
+                    .map(|state| state.cancel_rx.clone())
+            })
         });
+
+        // Keep a copy for the post-stream check below — a cancel can land in
+        // the instant between the stream finishing and the race resolving.
+        let post_cancel_rx = cancel_rx.clone();
 
         // Run the streaming loop with a timeout, cancellable via escape key.
         // tokio::select! races the stream against the cancellation signal —
@@ -379,10 +388,23 @@ impl ClaudeCliBrain {
             }
         };
 
+        // If cancellation landed after the stream completed but before the
+        // race resolved, discard the response — the user asked to stop, so
+        // nothing should be rendered or spoken (LAC-3697).
+        if post_cancel_rx.map(|rx| *rx.borrow()).unwrap_or(false) {
+            info!("Claude CLI cancelled after stream completion, discarding response");
+            let _ = child.kill().await;
+            if let Some(ref handle) = app_handle {
+                crate::agent::tool_logger::emit_stream_end(handle, msg_id, "Cancelled".to_string());
+            }
+            return Err(AgentError::Terminated);
+        }
+
         // Wait for subprocess to finish
-        let status = child.wait().await.map_err(|e| {
-            AgentError::LlmError(format!("Claude CLI process error: {}", e))
-        })?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| AgentError::LlmError(format!("Claude CLI process error: {}", e)))?;
 
         // Collect stderr output — log on both success and failure for debuggability
         if let Some(handle) = stderr_handle {
@@ -460,10 +482,7 @@ impl ClaudeCliBrain {
                         }
                     };
 
-                    let event_type = parsed
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let event_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
                     match event_type {
                         "assistant" => {
@@ -494,8 +513,7 @@ impl ClaudeCliBrain {
                         }
                         "result" => {
                             // Final result — extract the result text
-                            if let Some(result_text) =
-                                parsed.get("result").and_then(|v| v.as_str())
+                            if let Some(result_text) = parsed.get("result").and_then(|v| v.as_str())
                             {
                                 final_result = Some(result_text.to_string());
                             }
@@ -544,7 +562,7 @@ impl AgentBrain for ClaudeCliBrain {
         _available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
         let query = Self::extract_query(messages);
-        let result = self.run_streaming(&query, None, None).await?;
+        let result = self.run_streaming(&query, None, None, None).await?;
         Ok(AgentAction::Finish(result))
     }
 
@@ -558,10 +576,11 @@ impl AgentBrain for ClaudeCliBrain {
         _available_tools: &[ToolDefinition],
         app_handle: Option<tauri::AppHandle>,
         message_id: Option<String>,
+        cancel_rx: Option<crate::state::CancelReceiver>,
     ) -> Result<AgentAction, AgentError> {
         let query = Self::extract_query(messages);
         let result = self
-            .run_streaming(&query, app_handle, message_id)
+            .run_streaming(&query, app_handle, message_id, cancel_rx)
             .await?;
         Ok(AgentAction::Finish(result))
     }
@@ -709,6 +728,120 @@ mod tests {
         let args = brain.build_args("test query");
         assert!(args.contains(&"--system-prompt".to_string()));
         assert!(args.contains(&"You are helpful.".to_string()));
+    }
+
+    /// Write an executable shell script that stands in for the `claude` binary.
+    /// Answers the `auth status` pre-check with a logged-in response, then runs
+    /// `body` for the actual query invocation.
+    fn write_fake_cli_script(body: &str) -> PathBuf {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!(
+            "juno-fake-claude-{}-{}.sh",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let mut file = std::fs::File::create(&path).expect("create fake CLI script");
+        writeln!(
+            file,
+            "#!/bin/sh\nif [ \"$1\" = \"auth\" ]; then echo '{{\"loggedIn\": true}}'; exit 0; fi\n{}",
+            body
+        )
+        .expect("write fake CLI script");
+        let mut perms = file.metadata().expect("stat fake CLI script").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).expect("chmod fake CLI script");
+        path
+    }
+
+    fn test_brain(binary_path: PathBuf) -> ClaudeCliBrain {
+        ClaudeCliBrain {
+            binary_path,
+            model: "sonnet".to_string(),
+            system_prompt: None,
+        }
+    }
+
+    /// Regression test for LAC-3697: a session-scoped cancel arrives via the
+    /// `cancel_rx` parameter (the merged session+global receiver), NOT the
+    /// global AppState channel. `run_streaming` must observe it, kill the
+    /// subprocess promptly, and surface `AgentError::Terminated` so the
+    /// response is never rendered or spoken.
+    #[tokio::test]
+    async fn test_run_streaming_session_cancel_kills_subprocess() {
+        let script =
+            write_fake_cli_script("sleep 30\necho '{\"type\":\"result\",\"result\":\"too late\"}'");
+        let brain = test_brain(script.clone());
+
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let start = std::time::Instant::now();
+
+        // Simulate the focused-session escape landing shortly after spawn.
+        let canceller = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let _ = cancel_tx.send(true);
+        });
+
+        let result = brain
+            .run_streaming("test query", None, None, Some(cancel_rx))
+            .await;
+        let _ = canceller.await;
+
+        assert!(
+            matches!(result, Err(AgentError::Terminated)),
+            "expected Terminated after session cancel, got {:?}",
+            result
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "cancel must kill the subprocess promptly (took {:?}, script sleeps 30s)",
+            start.elapsed()
+        );
+        let _ = std::fs::remove_file(&script);
+    }
+
+    /// A cancel that is already signalled before the query starts must
+    /// short-circuit without waiting on the subprocess.
+    #[tokio::test]
+    async fn test_run_streaming_pre_cancelled_returns_terminated() {
+        let script = write_fake_cli_script("sleep 30");
+        let brain = test_brain(script.clone());
+
+        let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(true);
+        let start = std::time::Instant::now();
+
+        let result = brain
+            .run_streaming("test query", None, None, Some(cancel_rx))
+            .await;
+
+        assert!(
+            matches!(result, Err(AgentError::Terminated)),
+            "expected Terminated for pre-cancelled run, got {:?}",
+            result
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "pre-cancelled run must return promptly (took {:?})",
+            start.elapsed()
+        );
+        let _ = std::fs::remove_file(&script);
+    }
+
+    /// Sanity check: an uncancelled run with a live session receiver streams
+    /// to completion and returns the CLI's result text.
+    #[tokio::test]
+    async fn test_run_streaming_completes_when_not_cancelled() {
+        let script =
+            write_fake_cli_script("echo '{\"type\":\"result\",\"result\":\"hello from cli\"}'");
+        let brain = test_brain(script.clone());
+
+        let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let result = brain
+            .run_streaming("test query", None, None, Some(cancel_rx))
+            .await;
+
+        assert_eq!(result.expect("run should succeed"), "hello from cli");
+        let _ = std::fs::remove_file(&script);
     }
 
     #[test]

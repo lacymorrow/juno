@@ -2,6 +2,7 @@ use std::env;
 use tauri::Manager;
 use tracing::{info, warn};
 
+use crate::agent::core::AgentError;
 use crate::agent::implementations::agent_runner::DefaultAgentRunner;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::multi_agent::MultiAgentOrchestrator;
@@ -11,13 +12,12 @@ use crate::agent::providers::config::{load_provider_config, AgentMode, ProviderC
 use crate::agent::providers::gemini::GeminiBrain;
 use crate::agent::providers::openai::OpenAIBrain;
 use crate::agent::providers::rig::RigBrain;
-use crate::agent::core::AgentError;
-use crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools;
 use crate::agent::tools::accessibility_tools::AccessibilityTools;
+use crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools;
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
 use crate::state::AppState;
 
-use super::types::{Provider, ModelInfo};
+use super::types::{ModelInfo, Provider};
 
 /// Unified agent runtime - can be either single or multi-agent
 #[allow(clippy::large_enum_variant)]
@@ -153,7 +153,10 @@ impl BrainFactory {
                                             warn!("Invalid agent execution mode in settings: '{}'. Using default.", mode_str);
                                             AgentMode::Multi
                                         });
-                                    info!("Loaded agent mode from centralized settings: {:?}", mode);
+                                    info!(
+                                        "Loaded agent mode from centralized settings: {:?}",
+                                        mode
+                                    );
                                     return mode;
                                 } else {
                                     warn!("Agent execution mode is not a string in settings. Using default.");
@@ -162,7 +165,9 @@ impl BrainFactory {
                                 info!("Agent execution mode not found in agent settings object. Using default.");
                             }
                         } else {
-                            warn!("Agent settings is not an object in settings store. Using default.");
+                            warn!(
+                                "Agent settings is not an object in settings store. Using default."
+                            );
                         }
                     }
                     None => {
@@ -197,9 +202,8 @@ impl BrainFactory {
 
     /// Get the current provider from configuration or environment
     pub fn get_current_provider() -> Provider {
-        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
-            super::config::DEFAULT_PROVIDER.id().to_string()
-        });
+        let provider_str = env::var("AI_PROVIDER")
+            .unwrap_or_else(|_| super::config::DEFAULT_PROVIDER.id().to_string());
         Provider::from_str(&provider_str).unwrap_or(Provider::Anthropic)
     }
 
@@ -210,7 +214,9 @@ impl BrainFactory {
 
     /// List providers with optional app handle to read store-saved API keys.
     /// Without an app handle, only env vars are checked for availability.
-    pub fn list_providers_with_app_handle(app_handle: Option<&tauri::AppHandle>) -> Vec<ProviderInfo> {
+    pub fn list_providers_with_app_handle(
+        app_handle: Option<&tauri::AppHandle>,
+    ) -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
         let providers = vec![
             Provider::Anthropic,
@@ -297,18 +303,19 @@ impl BrainFactory {
         let config = load_provider_config(app_handle);
 
         // Determine active provider: AI_PROVIDER env var overrides stored config
-        let provider_id_str = env::var("AI_PROVIDER")
-            .unwrap_or_else(|_| config.active_provider.clone());
-        let provider = Provider::from_str(&provider_id_str)
-            .ok_or_else(|| AgentError::ConfigurationError(
-                format!("Unknown provider: '{}'", provider_id_str)
-            ))?;
+        let provider_id_str =
+            env::var("AI_PROVIDER").unwrap_or_else(|_| config.active_provider.clone());
+        let provider = Provider::from_str(&provider_id_str).ok_or_else(|| {
+            AgentError::ConfigurationError(format!("Unknown provider: '{}'", provider_id_str))
+        })?;
         info!("Attempting to use AI provider: {}", provider.id());
 
-        let mut provider_config = config.resolve_provider(provider.clone())
-            .ok_or_else(|| AgentError::ConfigurationError(
-                format!("Provider '{}' not found in config", provider.id())
-            ))?;
+        let mut provider_config = config.resolve_provider(provider.clone()).ok_or_else(|| {
+            AgentError::ConfigurationError(format!(
+                "Provider '{}' not found in config",
+                provider.id()
+            ))
+        })?;
 
         // Load system prompt from prompt manager if app_handle is available
         let system_prompt = if let Some(handle) = app_handle {
@@ -321,7 +328,10 @@ impl BrainFactory {
                     Some(prompt_manager.get_default_system_prompt())
                 }
                 Err(e) => {
-                    warn!("Failed to create settings manager: {}. Using default prompt.", e);
+                    warn!(
+                        "Failed to create settings manager: {}. Using default prompt.",
+                        e
+                    );
                     let prompt_manager = crate::agent::prompts::PromptManager::new();
                     Some(prompt_manager.get_default_system_prompt())
                 }
@@ -382,21 +392,22 @@ impl BrainFactory {
     ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
         let config = load_provider_config(app_handle);
 
-        let provider_id_str = env::var("AI_PROVIDER")
-            .unwrap_or_else(|_| config.active_provider.clone());
-        let provider = Provider::from_str(&provider_id_str)
-            .ok_or_else(|| AgentError::ConfigurationError(
-                format!("Unknown provider: '{}'", provider_id_str)
-            ))?;
+        let provider_id_str =
+            env::var("AI_PROVIDER").unwrap_or_else(|_| config.active_provider.clone());
+        let provider = Provider::from_str(&provider_id_str).ok_or_else(|| {
+            AgentError::ConfigurationError(format!("Unknown provider: '{}'", provider_id_str))
+        })?;
         info!(
             "Attempting to use AI provider: {} with custom system prompt",
             provider.id()
         );
 
-        let mut provider_config = config.resolve_provider(provider.clone())
-            .ok_or_else(|| AgentError::ConfigurationError(
-                format!("Provider '{}' not found in config", provider.id())
-            ))?;
+        let mut provider_config = config.resolve_provider(provider.clone()).ok_or_else(|| {
+            AgentError::ConfigurationError(format!(
+                "Provider '{}' not found in config",
+                provider.id()
+            ))
+        })?;
 
         // Override with custom system prompt
         provider_config.system_prompt = Some(system_prompt);
@@ -441,6 +452,18 @@ impl BrainFactory {
         provider: &mut LocalToolProvider,
         app_handle: tauri::AppHandle,
     ) -> Result<(), String> {
+        Self::register_computer_use_tools_for_session(provider, app_handle, None).await
+    }
+
+    /// Register computer use tools bound to a parallel agent session
+    /// (LAC-1432). The session id keys the desktop overlay cursor and
+    /// attributes physical input in the input arbiter; `None` preserves
+    /// the legacy process-unique cursor identity.
+    pub async fn register_computer_use_tools_for_session(
+        provider: &mut LocalToolProvider,
+        app_handle: tauri::AppHandle,
+        session: Option<crate::agent::tools::anthropic_computer_use::SessionToolContext>,
+    ) -> Result<(), String> {
         info!("🔧 Registering Computer Use tools (race-condition safe)...");
 
         // Use a global mutex to ensure that only one thread can register tools at a time
@@ -465,7 +488,17 @@ impl BrainFactory {
         provider.set_mcp_manager(mcp_manager);
 
         // Register the official Anthropic Computer Use tools (per-provider instance)
-        register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
+        match session {
+            Some(ctx) => {
+                crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools_for_session(
+                    provider,
+                    app_handle.clone(),
+                    ctx,
+                )
+                .await?
+            }
+            None => register_anthropic_computer_use_tools(provider, app_handle.clone()).await?,
+        }
 
         // Register additional desktop automation tools (per-provider instance)
         crate::agent::tools::desktop_tools::register_desktop_tools(
@@ -492,6 +525,10 @@ impl BrainFactory {
         // Register timer tools for agent task scheduling and resumption (per-provider instance)
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 
+        // Register scheduled automation tools for user-facing recurring tasks (per-provider instance)
+        crate::agent::tools::schedule_tools::register_schedule_tools(provider, app_handle.clone())
+            .await;
+
         // Register self-awareness and introspection tools (per-provider instance, development mode only)
         crate::agent::tools::register_self_awareness_tools(provider).await;
 
@@ -500,8 +537,6 @@ impl BrainFactory {
 
         // Register Safari tools for fast Safari DOM automation
         Self::register_safari_tools(provider, app_handle.clone()).await?;
-
-
 
         // MCP tools are handled separately and loaded only when needed:
         // 1. At app startup (state_management.rs)
@@ -560,13 +595,13 @@ impl BrainFactory {
                 let app = app_handle_clone.clone();
                 let name = tool_name_clone.clone();
 
-                async move {
-                    tools.execute_tool(&name, &input, &app).await
-                }
+                async move { tools.execute_tool(&name, &input, &app).await }
             };
 
             // Register the tool
-            provider.register_async_tool(tool_definition, executor).await;
+            provider
+                .register_async_tool(tool_definition, executor)
+                .await;
         }
 
         info!("🔧 Native accessibility tools registered successfully");
@@ -586,7 +621,7 @@ impl BrainFactory {
 
         for tool_def in tool_definitions {
             let tool_name = tool_def.name.clone();
-            
+
             info!("🔧 Registering Safari tool: {}", tool_name);
 
             // Create tool executor

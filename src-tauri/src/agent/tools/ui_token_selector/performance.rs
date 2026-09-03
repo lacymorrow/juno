@@ -3,10 +3,10 @@
 //! Provides comprehensive performance metrics, benchmarking capabilities, and
 //! validation of the 33% computational cost reduction target from ShowUI research.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 /// Comprehensive performance metrics collector
@@ -52,9 +52,9 @@ pub struct DisplayMetrics {
 /// Performance category classification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PerformanceCategory {
-    HighDPI,    // 4K+ displays
-    Standard,   // 1080p-1440p displays
-    LowRes,     // Sub-1080p displays
+    HighDPI,  // 4K+ displays
+    Standard, // 1080p-1440p displays
+    LowRes,   // Sub-1080p displays
 }
 
 /// Benchmark result for performance validation
@@ -111,7 +111,10 @@ impl PerformanceTracker {
 
         // Update main metrics
         {
-            let mut metrics = self.metrics.lock().map_err(|e| format!("Mutex lock failed: {}", e))?;
+            let mut metrics = self
+                .metrics
+                .lock()
+                .map_err(|e| format!("Mutex lock failed: {}", e))?;
             metrics.update_operation(
                 original_tokens,
                 reduced_tokens,
@@ -124,13 +127,20 @@ impl PerformanceTracker {
 
         // Update cost reduction tracking
         {
-            let mut tracker = self.cost_reduction_tracker.lock().map_err(|e| format!("Mutex lock failed: {}", e))?;
+            let mut tracker = self
+                .cost_reduction_tracker
+                .lock()
+                .map_err(|e| format!("Mutex lock failed: {}", e))?;
             tracker.update_cost_measurement(original_tokens, reduced_tokens);
         }
 
         info!(
             "Performance recorded: {}ms, {:.1}% reduction ({}/{}), {:.1}MB memory",
-            processing_time_ms, reduction_percentage, reduced_tokens, original_tokens, memory_usage_mb
+            processing_time_ms,
+            reduction_percentage,
+            reduced_tokens,
+            original_tokens,
+            memory_usage_mb
         );
 
         Ok(())
@@ -151,12 +161,18 @@ impl PerformanceTracker {
         let mut benchmark_results = Vec::new();
 
         for (test_name, resolution, expected_reduction) in test_scenarios {
-            info!("Running benchmark: {} at {}x{}", test_name, resolution.0, resolution.1);
+            info!(
+                "Running benchmark: {} at {}x{}",
+                test_name, resolution.0, resolution.1
+            );
 
             // Run multiple iterations for accuracy
             let mut iteration_results = Vec::new();
             for i in 0..5 {
-                match self.run_single_benchmark_iteration(test_name, resolution, i).await {
+                match self
+                    .run_single_benchmark_iteration(test_name, resolution, i)
+                    .await
+                {
                     Ok(result) => iteration_results.push(result),
                     Err(e) => warn!("Benchmark iteration {} failed: {}", i, e),
                 }
@@ -164,14 +180,21 @@ impl PerformanceTracker {
 
             if !iteration_results.is_empty() {
                 // Calculate average results
-                let avg_result = self.calculate_average_benchmark(test_name, &iteration_results, expected_reduction)?;
+                let avg_result = self.calculate_average_benchmark(
+                    test_name,
+                    &iteration_results,
+                    expected_reduction,
+                )?;
                 benchmark_results.push(avg_result);
             }
         }
 
         // Store benchmark results
         {
-            let mut benchmarks = self.benchmarks.lock().map_err(|e| format!("Mutex lock failed: {}", e))?;
+            let mut benchmarks = self
+                .benchmarks
+                .lock()
+                .map_err(|e| format!("Mutex lock failed: {}", e))?;
             benchmarks.extend(benchmark_results.clone());
         }
 
@@ -186,7 +209,10 @@ impl PerformanceTracker {
 
     /// Validates if the 33% computational cost reduction target is achieved
     pub fn validate_cost_reduction_target(&self) -> Result<bool, String> {
-        let tracker = self.cost_reduction_tracker.lock().map_err(|e| format!("Mutex lock failed: {}", e))?;
+        let tracker = self
+            .cost_reduction_tracker
+            .lock()
+            .map_err(|e| format!("Mutex lock failed: {}", e))?;
 
         if tracker.measurements_count == 0 {
             return Ok(false);
@@ -197,7 +223,11 @@ impl PerformanceTracker {
         info!(
             "Cost reduction validation: {:.1}% achieved (target: 33.0%) - {}",
             tracker.cost_reduction_percentage,
-            if achieved { "TARGET MET" } else { "TARGET NOT MET" }
+            if achieved {
+                "TARGET MET"
+            } else {
+                "TARGET NOT MET"
+            }
         );
 
         Ok(achieved)
@@ -205,19 +235,28 @@ impl PerformanceTracker {
 
     /// Gets current performance metrics
     pub fn get_metrics(&self) -> Result<PerformanceMetrics, String> {
-        let metrics = self.metrics.lock().map_err(|e| format!("Mutex lock failed: {}", e))?;
+        let metrics = self
+            .metrics
+            .lock()
+            .map_err(|e| format!("Mutex lock failed: {}", e))?;
         Ok(metrics.clone())
     }
 
     /// Gets all benchmark results
     pub fn get_benchmark_results(&self) -> Result<Vec<BenchmarkResult>, String> {
-        let benchmarks = self.benchmarks.lock().map_err(|e| format!("Mutex lock failed: {}", e))?;
+        let benchmarks = self
+            .benchmarks
+            .lock()
+            .map_err(|e| format!("Mutex lock failed: {}", e))?;
         Ok(benchmarks.clone())
     }
 
     /// Gets cost reduction tracking data
     pub fn get_cost_reduction_data(&self) -> Result<CostReductionTracker, String> {
-        let tracker = self.cost_reduction_tracker.lock().map_err(|e| format!("Mutex lock failed: {}", e))?;
+        let tracker = self
+            .cost_reduction_tracker
+            .lock()
+            .map_err(|e| format!("Mutex lock failed: {}", e))?;
         Ok(tracker.clone())
     }
 
@@ -232,9 +271,11 @@ impl PerformanceTracker {
 
         // Simulate token processing based on resolution
         let original_tokens = self.calculate_expected_tokens(resolution);
-        let (reduced_tokens, processing_time) = self.simulate_token_processing(original_tokens).await?;
+        let (reduced_tokens, processing_time) =
+            self.simulate_token_processing(original_tokens).await?;
 
-        let reduction_percentage = ((original_tokens - reduced_tokens) as f64 / original_tokens as f64) * 100.0;
+        let reduction_percentage =
+            ((original_tokens - reduced_tokens) as f64 / original_tokens as f64) * 100.0;
         let meets_target = reduction_percentage >= 65.0; // Base target for any scenario
 
         // Simulate memory usage based on processing complexity
@@ -264,7 +305,10 @@ impl PerformanceTracker {
     }
 
     /// Simulates token processing with realistic timing
-    async fn simulate_token_processing(&self, original_tokens: u32) -> Result<(u32, Duration), String> {
+    async fn simulate_token_processing(
+        &self,
+        original_tokens: u32,
+    ) -> Result<(u32, Duration), String> {
         let start = Instant::now();
 
         // Simulate RGB analysis time (based on token count)
@@ -273,10 +317,10 @@ impl PerformanceTracker {
 
         // Calculate reduction based on ShowUI algorithms
         let reduction_factor = match original_tokens {
-            0..=500 => 0.65,      // 65% reduction for smaller screens
-            501..=1500 => 0.70,   // 70% reduction for standard screens
-            1501..=3000 => 0.75,  // 75% reduction for large screens
-            _ => 0.80,            // 80% reduction for very large/multi-monitor
+            0..=500 => 0.65,     // 65% reduction for smaller screens
+            501..=1500 => 0.70,  // 70% reduction for standard screens
+            1501..=3000 => 0.75, // 75% reduction for large screens
+            _ => 0.80,           // 80% reduction for very large/multi-monitor
         };
 
         let reduced_tokens = (original_tokens as f64 * (1.0 - reduction_factor)) as u32;
@@ -297,10 +341,19 @@ impl PerformanceTracker {
         }
 
         let count = results.len() as f64;
-        let avg_original = (results.iter().map(|r| r.original_tokens as f64).sum::<f64>() / count) as u32;
-        let avg_reduced = (results.iter().map(|r| r.reduced_tokens as f64).sum::<f64>() / count) as u32;
+        let avg_original = (results
+            .iter()
+            .map(|r| r.original_tokens as f64)
+            .sum::<f64>()
+            / count) as u32;
+        let avg_reduced =
+            (results.iter().map(|r| r.reduced_tokens as f64).sum::<f64>() / count) as u32;
         let avg_reduction = results.iter().map(|r| r.reduction_percentage).sum::<f64>() / count;
-        let avg_processing_time = (results.iter().map(|r| r.processing_time_ms as f64).sum::<f64>() / count) as u64;
+        let avg_processing_time = (results
+            .iter()
+            .map(|r| r.processing_time_ms as f64)
+            .sum::<f64>()
+            / count) as u64;
         let avg_memory = results.iter().map(|r| r.memory_usage_mb).sum::<f64>() / count;
 
         let meets_target = avg_reduction >= expected_reduction;
@@ -347,26 +400,33 @@ impl PerformanceMetrics {
     ) {
         self.total_processed_screenshots += 1;
         self.total_processing_time_ms += processing_time_ms;
-        self.average_processing_time_ms = self.total_processing_time_ms as f64 / self.total_processed_screenshots as f64;
+        self.average_processing_time_ms =
+            self.total_processing_time_ms as f64 / self.total_processed_screenshots as f64;
         self.memory_usage_mb = memory_usage_mb;
 
         // Update token reduction stats
-        self.token_reduction_stats.update_tokens(original_tokens, reduced_tokens);
+        self.token_reduction_stats
+            .update_tokens(original_tokens, reduced_tokens);
 
         // Update display-specific metrics
         let category = self.categorize_performance(display_resolution);
-        let display_metric = self.display_specific_metrics
-            .entry(display_id)
-            .or_insert(DisplayMetrics::new(display_id, display_resolution, category));
+        let display_metric =
+            self.display_specific_metrics
+                .entry(display_id)
+                .or_insert(DisplayMetrics::new(
+                    display_id,
+                    display_resolution,
+                    category,
+                ));
         display_metric.update_operation(original_tokens, reduced_tokens, processing_time_ms);
     }
 
     fn categorize_performance(&self, resolution: (u32, u32)) -> PerformanceCategory {
         let pixel_count = resolution.0 * resolution.1;
         match pixel_count {
-            0..=2073600 => PerformanceCategory::LowRes,     // <= 1920x1080
+            0..=2073600 => PerformanceCategory::LowRes, // <= 1920x1080
             2073601..=8294400 => PerformanceCategory::Standard, // <= 3840x2160
-            _ => PerformanceCategory::HighDPI,              // > 4K
+            _ => PerformanceCategory::HighDPI,          // > 4K
         }
     }
 }
@@ -389,7 +449,9 @@ impl TokenReductionMetrics {
 
         if self.total_original_tokens > 0 {
             self.average_reduction_percentage =
-                ((self.total_original_tokens - self.total_reduced_tokens) as f64 / self.total_original_tokens as f64) * 100.0;
+                ((self.total_original_tokens - self.total_reduced_tokens) as f64
+                    / self.total_original_tokens as f64)
+                    * 100.0;
 
             // Computational cost reduction approximation (token reduction translates to computational savings)
             self.computational_cost_reduction = self.average_reduction_percentage * 0.47; // Based on ShowUI research
@@ -410,7 +472,12 @@ impl DisplayMetrics {
         }
     }
 
-    pub fn update_operation(&mut self, original_tokens: u32, reduced_tokens: u32, processing_time_ms: u64) {
+    pub fn update_operation(
+        &mut self,
+        original_tokens: u32,
+        reduced_tokens: u32,
+        processing_time_ms: u64,
+    ) {
         self.processed_count += 1;
 
         let reduction_percentage = if original_tokens > 0 {
@@ -425,8 +492,8 @@ impl DisplayMetrics {
 
         self.average_reduction_percentage =
             (self.average_reduction_percentage * old_weight) + (reduction_percentage * new_weight);
-        self.average_processing_time_ms =
-            (self.average_processing_time_ms * old_weight) + (processing_time_ms as f64 * new_weight);
+        self.average_processing_time_ms = (self.average_processing_time_ms * old_weight)
+            + (processing_time_ms as f64 * new_weight);
     }
 }
 
@@ -452,9 +519,10 @@ impl CostReductionTracker {
         self.measurements_count += 1;
 
         if self.total_computational_cost_original > 0.0 {
-            self.cost_reduction_percentage =
-                ((self.total_computational_cost_original - self.total_computational_cost_reduced)
-                 / self.total_computational_cost_original) * 100.0;
+            self.cost_reduction_percentage = ((self.total_computational_cost_original
+                - self.total_computational_cost_reduced)
+                / self.total_computational_cost_original)
+                * 100.0;
 
             self.target_33_percent_achieved = self.cost_reduction_percentage >= 33.0;
         }
@@ -478,7 +546,8 @@ mod tests {
     fn test_record_operation() {
         let tracker = PerformanceTracker::new();
 
-        let result = tracker.record_operation(1296, 291, Duration::from_millis(100), 0, (0, 0), 0.0);
+        let result =
+            tracker.record_operation(1296, 291, Duration::from_millis(100), 0, (0, 0), 0.0);
         assert!(result.is_ok());
 
         let metrics = tracker.get_metrics().unwrap();
@@ -492,8 +561,12 @@ mod tests {
         let tracker = PerformanceTracker::new();
 
         // Record multiple operations
-                 tracker.record_operation(1000, 300, Duration::from_millis(50), 0, (1920, 1080), 0.0).unwrap();
-         tracker.record_operation(2000, 500, Duration::from_millis(150), 1, (3840, 2160), 0.0).unwrap();
+        tracker
+            .record_operation(1000, 300, Duration::from_millis(50), 0, (1920, 1080), 0.0)
+            .unwrap();
+        tracker
+            .record_operation(2000, 500, Duration::from_millis(150), 1, (3840, 2160), 0.0)
+            .unwrap();
 
         let metrics = tracker.get_metrics().unwrap();
         assert_eq!(metrics.total_processed_screenshots, 2);
@@ -506,8 +579,13 @@ mod tests {
     fn test_performance_reset() {
         let tracker = PerformanceTracker::new();
 
-                 tracker.record_operation(1000, 300, Duration::from_millis(100), 0, (1920, 1080), 0.0).unwrap();
-         assert_eq!(tracker.get_metrics().unwrap().total_processed_screenshots, 1);
+        tracker
+            .record_operation(1000, 300, Duration::from_millis(100), 0, (1920, 1080), 0.0)
+            .unwrap();
+        assert_eq!(
+            tracker.get_metrics().unwrap().total_processed_screenshots,
+            1
+        );
     }
 
     #[tokio::test]
@@ -529,7 +607,9 @@ mod tests {
         assert!(result.is_ok());
         assert!(!result.unwrap());
 
-        tracker.record_operation(1000, 300, Duration::from_millis(100), 0, (1920, 1080), 0.0).unwrap();
+        tracker
+            .record_operation(1000, 300, Duration::from_millis(100), 0, (1920, 1080), 0.0)
+            .unwrap();
         let result = tracker.validate_cost_reduction_target();
         assert!(result.is_ok());
         assert!(result.unwrap());

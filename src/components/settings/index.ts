@@ -7,6 +7,7 @@ export { default as AdvancedSettings } from './sections/AdvancedSettings';
 export { default as NetworkSettings } from './sections/NetworkSettings';
 export { default as ShortcutsSettings } from './sections/ShortcutsSettings';
 export { default as ToolsSettings } from './sections/ToolsSettings';
+export { default as AutomationsSettings } from './sections/AutomationsSettings';
 
 // Export shared components
 export { default as ShortcutInput } from './ShortcutInput';

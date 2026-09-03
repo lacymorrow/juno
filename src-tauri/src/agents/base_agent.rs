@@ -1,7 +1,7 @@
+use crate::agent::core::{AgentError, ToolCall};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use crate::agent::core::{AgentError, ToolCall};
 
 /// Enum defining the different types of specialized agents
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -32,6 +32,12 @@ pub struct Task {
     pub dependencies: Vec<String>,
     pub timeout: Option<Duration>,
     pub metadata: serde_json::Value,
+    /// Parallel-session id for roster attribution (LAC-3073). Travels on the
+    /// task — never on the long-lived shared agent instance — so concurrent
+    /// orchestrated runs cannot leak identity into each other. `None` for
+    /// callers outside the session registry (queued/benchmark/legacy paths).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Result of task execution by an agent
@@ -80,7 +86,7 @@ pub fn format_task_output(value: &serde_json::Value) -> String {
                     // For single-key objects, try to extract meaningful content
                     match val {
                         serde_json::Value::String(s) => s.clone(),
-                        _ => format!("{}: {}", key, format_task_output(val))
+                        _ => format!("{}: {}", key, format_task_output(val)),
                     }
                 } else {
                     "Result available".to_string()
@@ -88,7 +94,7 @@ pub fn format_task_output(value: &serde_json::Value) -> String {
             } else {
                 format!("Result with {} fields", obj.len())
             }
-        },
+        }
 
         // For arrays, provide a summary rather than raw JSON
         serde_json::Value::Array(arr) => {
@@ -110,7 +116,7 @@ pub struct AgentCapability {
     pub name: String,
     pub description: String,
     pub tool_patterns: Vec<String>, // Tool name patterns this capability handles
-    pub confidence: f32, // 0.0 to 1.0, how confident this agent is with this capability
+    pub confidence: f32,            // 0.0 to 1.0, how confident this agent is with this capability
 }
 
 /// Status information about an agent
@@ -169,5 +175,135 @@ pub trait SpecializedAgent: Send + Sync {
     /// Check if the agent is currently available to take on new tasks
     async fn is_available(&self) -> bool {
         true // Default implementation - can be overridden
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    fn task_with_session(id: &str, session_id: Option<&str>) -> Task {
+        Task {
+            id: id.to_string(),
+            description: "test task".to_string(),
+            tool_calls: vec![],
+            agent_type: AgentType::Desktop,
+            priority: TaskPriority::Normal,
+            dependencies: vec![],
+            timeout: None,
+            metadata: serde_json::Value::Null,
+            session_id: session_id.map(|s| s.to_string()),
+        }
+    }
+
+    /// Tasks serialized before LAC-3073 (or built by the frontend without a
+    /// session) must still deserialize — `session_id` defaults to `None`.
+    #[test]
+    fn task_without_session_id_deserializes_to_none() {
+        let json = serde_json::json!({
+            "id": "t1",
+            "description": "legacy task",
+            "tool_calls": [],
+            "agent_type": "Desktop",
+            "priority": "Normal",
+            "dependencies": [],
+            "timeout": null,
+            "metadata": {}
+        });
+        let task: Task = serde_json::from_value(json).expect("legacy task deserializes");
+        assert_eq!(task.session_id, None);
+    }
+
+    /// Log of (task_id, session_id) pairs observed by handle_task.
+    type SeenLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
+    /// Mock agent that mirrors the shared-instance shape of DesktopAgent:
+    /// one Arc'd instance handles tasks from many concurrent runs. It records
+    /// which session id each handle_task invocation observed.
+    struct RecordingAgent {
+        seen: SeenLog,
+    }
+
+    #[async_trait]
+    impl SpecializedAgent for RecordingAgent {
+        fn agent_type(&self) -> AgentType {
+            AgentType::Desktop
+        }
+
+        fn get_capabilities(&self) -> Vec<AgentCapability> {
+            vec![]
+        }
+
+        async fn can_handle_task(&self, _task: &Task) -> bool {
+            true
+        }
+
+        async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError> {
+            // Yield so concurrent invocations interleave — a session id
+            // stored on the shared instance (the LAC-3073 anti-pattern)
+            // would be observed by the wrong task here.
+            tokio::task::yield_now().await;
+            self.seen
+                .lock()
+                .await
+                .push((task.id.clone(), task.session_id.clone()));
+            Ok(TaskResult {
+                task_id: task.id,
+                success: true,
+                output: serde_json::Value::Null,
+                error: None,
+                execution_time: Duration::from_millis(0),
+                agent_type: AgentType::Desktop,
+                metadata: serde_json::Value::Null,
+            })
+        }
+
+        async fn get_status(&self) -> AgentStatus {
+            AgentStatus {
+                agent_type: AgentType::Desktop,
+                is_available: true,
+                current_tasks: 0,
+                total_completed: 0,
+                success_rate: 1.0,
+                average_execution_time: Duration::from_millis(0),
+                capabilities: vec![],
+            }
+        }
+    }
+
+    /// Regression test for LAC-3073 per-task attribution: concurrent tasks
+    /// routed through ONE shared agent instance must each carry their own
+    /// session id — identity travels on the `Task`, not the agent.
+    #[tokio::test]
+    async fn concurrent_tasks_keep_their_own_session_ids() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let agent: Arc<dyn SpecializedAgent> = Arc::new(RecordingAgent { seen: seen.clone() });
+
+        let mut handles = Vec::new();
+        for i in 0..8 {
+            let agent = agent.clone();
+            let task = task_with_session(&format!("task-{i}"), Some(&format!("session-{i}")));
+            handles.push(tokio::spawn(async move { agent.handle_task(task).await }));
+        }
+        for handle in handles {
+            let result = handle.await.expect("join ok").expect("task ok");
+            assert!(result.success);
+        }
+
+        let seen = seen.lock().await;
+        assert_eq!(seen.len(), 8);
+        for (task_id, session_id) in seen.iter() {
+            let index = task_id
+                .strip_prefix("task-")
+                .expect("task id shape")
+                .to_string();
+            assert_eq!(
+                session_id.as_deref(),
+                Some(format!("session-{index}").as_str()),
+                "task {task_id} observed a session id from another run"
+            );
+        }
     }
 }
