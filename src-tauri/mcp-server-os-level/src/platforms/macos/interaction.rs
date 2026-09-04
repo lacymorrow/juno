@@ -903,10 +903,41 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
 ///
 /// This function simulates key presses for Cmd+V after setting the clipboard.
 /// It does not require focusing a specific UI element beforehand.
+/// How long after Cmd+V the pasted text stays on the clipboard before the previous
+/// contents are restored. Electron and JVM apps read the pasteboard well after the key
+/// event, so an immediate restore pastes the *old* clipboard into them.
+const PASTE_CLIPBOARD_RESTORE_DELAY_MS: u64 = 600;
+/// Pasteboard write-to-visible settle time.
+const PASTE_CLIPBOARD_SETTLE_MS: u64 = 20;
+/// Cmd+V key down/up spacing.
+const PASTE_KEY_GAP_MS: u64 = 8;
+
+/// Restore `original` after a delay, but only if the clipboard still holds `pasted`
+/// (i.e. nothing else has claimed it since).
+fn restore_clipboard_later(original: Option<String>, pasted: String) {
+    let Some(original) = original else { return };
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(PASTE_CLIPBOARD_RESTORE_DELAY_MS));
+        let current = NativeClipboard::new().and_then(|c| c.read()).ok();
+        if current.as_deref() != Some(pasted.as_str()) {
+            debug!("Clipboard changed since paste; leaving it alone");
+            return;
+        }
+        match NativeClipboard::new() {
+            Ok(mut clipboard) => {
+                if let Err(e) = clipboard.write(original) {
+                    warn!("Failed to restore clipboard after paste: {:?}", e);
+                }
+            }
+            Err(e) => warn!("Failed to access clipboard for restore: {:?}", e),
+        }
+    });
+}
+
 pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
     debug!("Typing text globally via clipboard paste: {}", text);
 
-    let _guard = ClipboardGuard::new()?; // Restore clipboard automatically
+    let original = NativeClipboard::new().and_then(|c| c.read()).ok();
 
     // Set clipboard
     match NativeClipboard::new() {
@@ -927,8 +958,8 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
         }
     }
 
-    // Give clipboard time to process
-    thread::sleep(Duration::from_millis(100));
+    // Give the pasteboard server a moment to publish the new contents
+    thread::sleep(Duration::from_millis(PASTE_CLIPBOARD_SETTLE_MS));
 
     // Simulate Cmd+V
     let source = get_pooled_event_source().map_err(|e| {
@@ -949,7 +980,7 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
     })?;
     key_down.set_flags(cmd_flag);
     key_down.post(CGEventTapLocation::HID);
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(Duration::from_millis(PASTE_KEY_GAP_MS));
 
     // Release Cmd+V
     let key_up = CGEvent::new_keyboard_event(source, key_code_v, false).map_err(|_| {
@@ -957,11 +988,11 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
     })?;
     key_up.set_flags(cmd_flag);
     key_up.post(CGEventTapLocation::HID);
-    thread::sleep(Duration::from_millis(50));
 
     debug!("Successfully simulated global Cmd+V paste.");
 
-    // Clipboard restored by ClipboardGuard automatically
+    // Restore the previous clipboard on a timer, off the hot path.
+    restore_clipboard_later(original, text.to_string());
     Ok(())
 }
 

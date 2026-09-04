@@ -50,6 +50,30 @@ pub struct WhisperSession {
 // WhisperContext is Send+Sync (immutable model weights behind a C pointer).
 unsafe impl Send for WhisperSession {}
 
+/// Decoder threads: whisper.cpp defaults to 4 regardless of the machine.
+fn decode_threads() -> i32 {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(2, 8) as i32
+}
+
+/// Settings shared by partial and final decodes.
+fn apply_common_params(params: &mut FullParams) {
+    params.set_n_threads(decode_threads());
+    params.set_temperature(0.0);
+    params.set_suppress_blank(true);
+    params.set_print_special(false);
+    params.set_print_progress(false);
+    params.set_print_realtime(false);
+    params.set_print_timestamps(false);
+    // Fallback-decode triggers. whisper.cpp's defaults (2.4 / -1.0) re-decode at higher
+    // temperatures on ordinary dictation; these looser values (field-tested by OpenWhispr
+    // across thousands of dictations) keep the retry for genuine garbage only.
+    params.set_entropy_thold(2.8);
+    params.set_logprob_thold(-1.25);
+}
+
 impl WhisperSession {
     fn run_params(
         ctx: &WhisperContext,
@@ -81,12 +105,11 @@ impl TranscriptionSession for WhisperSession {
             return Ok(None);
         }
 
-        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
-        params.set_n_threads(4);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
+        // Partials are short isolated chunks shown live in the UI; keep them cheap.
+        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
+        apply_common_params(&mut params);
+        params.set_single_segment(true);
+        params.set_no_context(true);
 
         let text = Self::run_params(&self.ctx, params, audio)?;
         if text.is_empty() {
@@ -101,15 +124,14 @@ impl TranscriptionSession for WhisperSession {
             return Ok(String::new());
         }
 
+        // The final pass decodes the whole utterance once the key is released, so it sits
+        // directly on the hotkey-to-text latency. Beam 2 keeps most of the accuracy of
+        // beam 5 at a fraction of the decoder cost.
         let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch {
-            beam_size: 5,
+            beam_size: 2,
             patience: 1.0,
         });
-        params.set_temperature(0.0);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
+        apply_common_params(&mut params);
 
         let text = Self::run_params(&self.ctx, params, audio)?;
         Ok(filter_transcription_text(&text))
