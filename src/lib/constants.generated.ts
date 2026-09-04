@@ -481,6 +481,7 @@ export const COMMANDS = {
   CORE_SET_AGENT_EXECUTION_PROGRESS: 'set_agent_execution_progress',
   CORE_GET_SYSTEM_CONTEXT: 'get_system_context',
   AGENT_SUBMIT_QUERY: 'submit_query',
+  AGENT_DISPATCH_QUERY: 'dispatch_query',
   AGENT_GET_AGENT_MODE: 'get_agent_mode',
   AGENT_SET_AGENT_MODE: 'set_agent_mode',
   AGENT_GET_AGENT_TRIGGER_MODE: 'get_agent_trigger_mode',

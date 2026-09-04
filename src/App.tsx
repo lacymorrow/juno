@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
+import { COMMANDS } from "@/lib/constants.generated";
 
 import { AppHeader } from "@/components/AppHeader";
 import DevToolsPanel from "@/components/DevToolsPanel";
@@ -57,41 +58,30 @@ function App() {
   // Use voice sounds hook
   useVoiceSounds();
 
-  // Enhanced submit handler — receives text directly from PromptInput
+  // The single submission path for every query this window originates
+  // (typed input and example prompts). The backend owns everything after
+  // the invoke: it emits `user-message-submitted` (which appends the message
+  // and switches this window to processing), drives the floating bar, and
+  // runs the agent. Voice, the bar, and agent-rendered components enter the
+  // same pipeline, so every source behaves identically.
   const handleSubmit = useCallback(
     async (text: string) => {
-      if (!appState.canSubmit || !text) return;
+      const query = text.trim();
+      if (!appState.canSubmit || !query) return;
 
-      console.log("🚀 Submitting query:", text);
-
-      // IMMEDIATE FEEDBACK: Notify floating bar immediately
-      try {
-        await invoke("notify_query_submitted", { query: text });
-      } catch (error) {
-        console.warn(
-          "Failed to notify floating bar of query submission:",
-          error,
-        );
-      }
-
-      appState.setIsProcessing(true);
-      conversation.addUserMessage(text);
+      console.log("🚀 Submitting query:", query);
       conversation.setQuery("");
 
       try {
-        await invoke("submit_query", { query: text });
-        console.log("✅ Query submitted successfully");
+        await invoke(COMMANDS.AGENT_DISPATCH_QUERY, { query });
       } catch (error) {
         console.error("❌ Failed to submit query:", error);
         conversation.addSystemMessage(`Failed to submit query: ${error}`);
-        appState.setIsProcessing(false);
         playError();
       }
     },
     [
       appState.canSubmit,
-      appState.setIsProcessing,
-      conversation.addUserMessage,
       conversation.setQuery,
       conversation.addSystemMessage,
       playError,
@@ -320,54 +310,23 @@ function App() {
   // This design prevents the original bug where frontend state checks could fail,
   // while providing reliable universal cancellation behavior.
 
-  // Example prompt selection handler - automatically submits the prompt
+  // Example prompt selection — shows the prompt in the input for a beat,
+  // then submits it through the same path as typed input.
   const handleExamplePromptSelect = useCallback(
-    async (prompt: string) => {
-      if (!appState.canSubmit || !prompt.trim()) return;
-
+    (prompt: string) => {
       const trimmedPrompt = prompt.trim();
-      console.log("🚀 Auto-submitting example prompt:", trimmedPrompt);
+      if (!appState.canSubmit || !trimmedPrompt) return;
 
-      // Set the query briefly for UI feedback, then submit
+      console.log("🚀 Auto-submitting example prompt:", trimmedPrompt);
       conversation.setQuery(trimmedPrompt);
 
-      // Auto-submit after a brief delay to show the query in the input
       pendingTimers.current.push(
-        setTimeout(async () => {
-          // IMMEDIATE FEEDBACK: Notify floating bar immediately
-          try {
-            await invoke("notify_query_submitted", { query: trimmedPrompt });
-          } catch (error) {
-            console.warn(
-              "Failed to notify floating bar of query submission:",
-              error,
-            );
-          }
-
-          appState.setIsProcessing(true);
-          conversation.addUserMessage(trimmedPrompt);
-          conversation.setQuery("");
-
-          try {
-            await invoke("submit_query", { query: trimmedPrompt });
-            console.log("✅ Example prompt submitted successfully");
-          } catch (error) {
-            console.error("❌ Failed to submit example prompt:", error);
-            conversation.addSystemMessage(`Failed to submit prompt: ${error}`);
-            appState.setIsProcessing(false);
-            playError();
-          }
+        setTimeout(() => {
+          void handleSubmit(trimmedPrompt);
         }, 100),
-      ); // Brief delay to show the prompt in the input field
+      );
     },
-    [
-      appState.canSubmit,
-      appState.setIsProcessing,
-      conversation.setQuery,
-      conversation.addUserMessage,
-      conversation.addSystemMessage,
-      playError,
-    ],
+    [appState.canSubmit, conversation.setQuery, handleSubmit],
   );
 
   // Copy response handler

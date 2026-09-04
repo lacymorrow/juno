@@ -355,7 +355,11 @@ pub async fn submit_query(
         .await
     {
         warn!("Rate limit exceeded for AI operations");
-        return Err(e.to_user_message());
+        let message = e.to_user_message();
+        if !crate::cli::headless::is_headless_mode() {
+            report_submission_failure(&app_handle, query.trim(), &message).await;
+        }
+        return Err(message);
     }
 
     // --- Validate query text ---
@@ -383,16 +387,34 @@ pub async fn submit_query(
     //     // Don't fail the entire request for logging issues
     // }
 
+    // --- Announce the submission to every UI surface ---
+    // This is the single place a query becomes visible to the user, no matter
+    // where it came from (typed, voice, bar, rendered component, cloud, or a
+    // scheduled automation): chat windows append the user message and enter
+    // their processing state, and the floating bar shows "submitting".
+    if !crate::cli::headless::is_headless_mode() {
+        announce_query_submission(&app_handle, trimmed_query).await;
+    }
+
     // CRITICAL FIX: Execute agent directly instead of relying on incomplete event system
     // The event-driven refactor was incomplete and caused tool calls to not execute
     info!("Executing agent directly for query: {}", trimmed_query);
 
     // Use the queue system to ensure only one agent runs at a time
     let queue = get_agent_execution_queue();
-    let _query_id = queue
+    let _query_id = match queue
         .queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone())
         .await
-        .map_err(|e| format!("Failed to queue query: {}", e))?;
+    {
+        Ok(id) => id,
+        Err(e) => {
+            let message = format!("Failed to queue query: {}", e);
+            if !crate::cli::headless::is_headless_mode() {
+                report_submission_failure(&app_handle, trimmed_query, &message).await;
+            }
+            return Err(message);
+        }
+    };
 
     // Execute the next queued query (will be the one we just queued)
     if queue.execute_next_query(state.clone()).await.is_none() {
@@ -400,6 +422,45 @@ pub async fn submit_query(
     }
 
     Ok(())
+}
+
+/// Broadcast that a query has been accepted for execution.
+///
+/// Emits `user-message-submitted` so every chat surface appends the message and
+/// enters its processing state, and moves the floating bar into `Submitting`.
+/// Only `submit_query` calls this, so every query source shares one announcement.
+async fn announce_query_submission(app_handle: &tauri::AppHandle, query: &str) {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let payload = serde_json::json!({ "content": query, "timestamp": timestamp });
+    if let Err(e) = app_handle.emit(events::messages::USER_MESSAGE_SUBMITTED, payload) {
+        warn!("Failed to emit user-message-submitted event: {}", e);
+    }
+    crate::commands::ui_commands::handle_query_accepted(app_handle, query.to_string()).await;
+}
+
+/// Surface a submission that failed before the agent could run.
+///
+/// Emits `agent-error` so chat surfaces show the failure and clear their
+/// processing state, and returns the floating bar to a non-working state.
+async fn report_submission_failure(app_handle: &tauri::AppHandle, query: &str, message: &str) {
+    let payload = serde_json::json!({
+        "agent_state": "Failed",
+        "error_message": message,
+        "original_query": query,
+    });
+    if let Err(e) = app_handle.emit(events::agent::ERROR, payload) {
+        warn!("Failed to emit agent-error event: {}", e);
+    }
+    crate::commands::ui_commands::handle_agent_stopped(app_handle).await;
+    crate::commands::ui_commands::handle_backend_response(
+        app_handle,
+        Some(message.to_string()),
+        "Failed".to_string(),
+    )
+    .await;
 }
 
 /// Emit a session's discrete terminal lifecycle event and, when the session

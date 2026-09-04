@@ -598,7 +598,10 @@ export function useBackendEvents({
 		}
 	);
 
-	// Listen for user message submitted events (from voice input)
+	// The backend announces every accepted query here, whatever its source
+	// (typed, voice, bar, rendered component, cloud, scheduled). This is the
+	// only place a user message enters the conversation and the only place
+	// processing switches on, so every source looks identical to the user.
 	useEventListener<{ content: string; timestamp: number }>(
 		EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED,
 		(payload) => {
@@ -613,7 +616,17 @@ export function useBackendEvents({
 					timestamp,
 				}
 			]);
+			setIsProcessing(true);
 		}
 	);
+
+	// Backend clears agent activity on every failure path that never reaches
+	// a stream end or backend response (e.g. a submission rejected before the
+	// agent runs), so processing can never get stuck on.
+	useEventListener<boolean>(EVENTS.AGENT_ACTIVE, (active) => {
+		if (!active) {
+			setIsProcessing(false);
+		}
+	});
 }
 

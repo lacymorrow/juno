@@ -47,6 +47,7 @@ pub mod core {
 /// Agent-related command names
 pub mod agent {
     pub const SUBMIT_QUERY: &str = "submit_query";
+    pub const DISPATCH_QUERY: &str = "dispatch_query";
     pub const GET_AGENT_MODE: &str = "get_agent_mode";
     pub const SET_AGENT_MODE: &str = "set_agent_mode";
     pub const GET_AGENT_TRIGGER_MODE: &str = "get_agent_trigger_mode";
