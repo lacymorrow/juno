@@ -13,7 +13,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
-import { useState, useCallback } from "react";
+import { COMMANDS } from "@/lib/constants.generated";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   ExternalLink,
   Play,
@@ -34,6 +35,7 @@ const ALLOWED_COMMANDS = new Set([
   "open_application",
   "capture_screenshot_command",
   "submit_query",
+  COMMANDS.AGENT_DISPATCH_QUERY,
   "get_system_stats",
   "get_clipboard",
   "set_clipboard",
@@ -41,6 +43,40 @@ const ALLOWED_COMMANDS = new Set([
 
 function isCommandAllowed(command: string): boolean {
   return ALLOWED_COMMANDS.has(command);
+}
+
+/**
+ * Dispatch a query on behalf of an agent-rendered component.
+ *
+ * Uses the same unified submission pipeline as the chat input and the bar,
+ * so the chat window receives the user message, the floating bar shows its
+ * submitting state, and the promise resolves once the query is accepted
+ * rather than after the entire agent run.
+ */
+async function dispatchQuery(query: string): Promise<void> {
+  await invoke(COMMANDS.AGENT_DISPATCH_QUERY, { query });
+}
+
+/**
+ * Keep a single pending reset timer per button and clear it on unmount so a
+ * late `setStatus` never fires against an unmounted component.
+ */
+function useStatusResetTimer(reset: () => void) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  return useCallback(
+    (delayMs: number) => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(reset, delayMs);
+    },
+    [reset],
+  );
 }
 
 // ============================================================
@@ -96,7 +132,7 @@ export function ActionButton({
         const query = args && Object.keys(args).length > 0
           ? `${command} ${JSON.stringify(args)}`
           : command.replace(/_/g, " ");
-        await invoke("submit_query", { query });
+        await dispatchQuery(query);
       }
       setStatus("success");
       setTimeout(() => setStatus("idle"), 2000);
@@ -178,18 +214,22 @@ export function QueryButton({
   size = "sm",
   className,
 }: QueryButtonProps) {
-  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "loading" | "sent" | "error">("idle");
+  const resetToIdle = useCallback(() => setStatus("idle"), []);
+  const scheduleReset = useStatusResetTimer(resetToIdle);
 
   const handleClick = useCallback(async () => {
     setStatus("loading");
     try {
-      await invoke("submit_query", { query });
+      await dispatchQuery(query);
+      setStatus("sent");
+      scheduleReset(1500);
     } catch (err) {
       console.error("QueryButton: Failed to submit query:", err);
       setStatus("error");
-      setTimeout(() => setStatus("idle"), 3000);
+      scheduleReset(3000);
     }
-  }, [query]);
+  }, [query, scheduleReset]);
 
   const variantClasses = {
     default: "bg-primary text-primary-foreground hover:bg-primary/90",
@@ -218,6 +258,8 @@ export function QueryButton({
     >
       {status === "loading" ? (
         <Loader2 className="h-3 w-3 animate-spin" />
+      ) : status === "sent" ? (
+        <Check className="h-3 w-3 text-green-500" />
       ) : (
         <MessageSquare className="h-3 w-3" />
       )}
