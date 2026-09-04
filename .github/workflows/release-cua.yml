@@ -110,7 +110,8 @@ jobs:
           cd /tmp/tap
 
           sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Formula/juno-cua.rb
-          sed -i '' "s|releases/download/v[^/]*/|releases/download/v${VERSION}/|g" Formula/juno-cua.rb
+          # CLI assets live on the cua-v* release (see tag_name above), not the app's v* release.
+          sed -i '' "s|releases/download/[^/]*/|releases/download/cua-v${VERSION}/|g" Formula/juno-cua.rb
 
           # Update SHA256 for arm64 (first occurrence) and x64 (second occurrence)
           python3 -c "

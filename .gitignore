@@ -3,7 +3,7 @@
 # Tauri + Vite + TypeScript + Rust + Bun project
 # =============================================================================
 
-.paperclip/worktrees
+.paperclip/
 
 # Audio files (project-specific)
 debug_live_audio.wav
