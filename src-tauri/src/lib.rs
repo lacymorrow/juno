@@ -585,7 +585,7 @@ pub fn run() {
             ui_set_bar_config,
             ui_set_panel_click_through,
             ui_set_panel_level,
-            notify_query_submitted,
+            dispatch_query,
             // Keyboard Shortcuts Commands
             get_keyboard_shortcuts,
             set_keyboard_shortcut,

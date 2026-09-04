@@ -145,7 +145,8 @@ return () => { unlisten.then((fn) => fn()); };
 
 ### Common Tauri Commands
 
-- `submit_query` - Submit chat message to AI agent
+- `dispatch_query` - Submit a user query from any UI surface (chat input, example prompt, agent-rendered `QueryButton`). Fire-and-forget: the backend emits `user-message-submitted` (append the message, set processing) and runs the agent. Never call `submit_query` from the frontend.
+- `submit_query` - Backend entry point that runs the agent; used by the `agent-query-ready` listener, CLI, cloud, and scheduler
 - `get_settings` / `update_settings` - Settings management
 - `start_dictation` / `stop_dictation` - Voice control
 - `capture_screenshot` - Screenshot functionality

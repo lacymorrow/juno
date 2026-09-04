@@ -507,7 +507,12 @@ impl UIManager {
         Ok(())
     }
 
-    /// Visual-only submit handler to provide immediate UI feedback without emitting agent events
+    /// Mirror an accepted query in the bar without emitting agent events.
+    ///
+    /// Called for every query `submit_query` accepts, whatever its source, so
+    /// the bar reacts identically to typed, voice, component, cloud, and
+    /// scheduled submissions. Idempotent: a query the bar itself just submitted
+    /// (`handle_bar_submit`) is already in this state and is left untouched.
     pub async fn handle_submit_visual_only(&mut self, query: String) -> Result<(), String> {
         debug!(
             "UI Manager: Handling visual-only submit with query: '{}'",
@@ -515,6 +520,10 @@ impl UIManager {
         );
 
         if query.trim().is_empty() {
+            return Ok(());
+        }
+
+        if self.bar_state == BarState::Submitting && self.last_submitted_value == query {
             return Ok(());
         }
 
@@ -597,6 +606,8 @@ impl UIManager {
     pub async fn handle_agent_started(&mut self) -> Result<(), String> {
         debug!("UI Manager: Handling agent started");
         self.is_agent_working = true;
+        // Clear the previous run's outcome so the label reads "working", not "Finished"
+        self.agent_state = None;
         self.voice_mode = ui::voice_modes::AGENT.to_string();
         self.set_bar_state(BarState::Loading).await;
         Ok(())
@@ -1444,16 +1455,40 @@ pub async fn handle_tts_finished(_app_handle: &AppHandle) {
     }
 }
 
-#[tauri::command]
-pub async fn notify_query_submitted(
-    query: String,
-    _app_handle: tauri::AppHandle,
-) -> Result<(), String> {
+/// Mirror a query that `submit_query` has accepted in the floating bar.
+pub async fn handle_query_accepted(_app_handle: &AppHandle, query: String) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
-        manager.handle_submit_visual_only(query).await
+        if let Err(e) = manager.handle_submit_visual_only(query).await {
+            error!("Failed to mirror accepted query in bar: {}", e);
+        }
+    }
+}
+
+/// Dispatch a user query from any UI surface (chat input, example prompt,
+/// agent-rendered component) through the unified submission pipeline.
+///
+/// The bar enters `Submitting` immediately, then the `agent-query-ready`
+/// listener runs `submit_query`, which announces the user message to every
+/// window and executes the agent. Resolves as soon as the query is accepted,
+/// not when the run finishes. Without a UI manager the event is emitted
+/// directly so the query is never dropped.
+#[tauri::command]
+pub async fn dispatch_query(query: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+    if query.trim().is_empty() {
+        return Ok(());
+    }
+
+    if let Some(manager) = get_ui_manager().await {
+        let mut manager = manager.lock().await;
+        manager.handle_bar_submit(query).await
     } else {
-        Err("UI Manager not initialized".to_string())
+        app_handle
+            .emit(
+                events::agent::QUERY_READY,
+                serde_json::json!({ "query": query }),
+            )
+            .map_err(|e| format!("Failed to dispatch query: {}", e))
     }
 }
 
