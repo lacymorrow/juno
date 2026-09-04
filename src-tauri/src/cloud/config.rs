@@ -118,7 +118,9 @@ pub enum SecurityLevel {
 impl Default for CloudConfig {
     fn default() -> Self {
         Self {
-            enabled: true, // Enable by default since backend is deployed and healthy
+            // Off by default: the hosted backend (juno-cloud-backend.fly.dev) is not running,
+            // and an enabled connector reconnects in a loop at every launch. See LAC-3729.
+            enabled: false,
             server_url: PRODUCTION_WS_URL.to_string(),
             device_id: None,
             device_name: format!("Juno-{}", gethostname::gethostname().to_string_lossy()),
