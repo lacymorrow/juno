@@ -174,63 +174,47 @@ pub struct SubmitQueryResult {
 
 // --- Helper Functions ---
 
-/// Optimized JSX content detection using pattern matching
+/// Does this text contain a component-style tag the frontend should render?
+///
+/// There is deliberately no list of known component names here. Any
+/// well-formed `<Name ...>` whose name starts with a capital letter counts, so
+/// a newly registered component works the moment the agent uses it and nothing
+/// that could render is stripped up front. `<TTS>` is the spoken channel and is
+/// excluded. `className=` is kept as a hint for bare HTML fragments.
 pub fn is_jsx_content(content: &str) -> bool {
-    // Early exit for content that's too short to be JSX
-    if content.len() < 3 {
+    if content.len() < 3 || !content.contains('<') || !content.contains('>') {
         return false;
     }
-
-    // Quick check for basic JSX syntax
-    if !content.contains('<') || !content.contains('>') {
-        return false;
+    if content.contains("className=") {
+        return true;
     }
+    has_component_tag(content)
+}
 
-    // Use static array for better performance than contains() calls
-    const JSX_INDICATORS: &[&str] = &[
-        "Card",
-        "Alert",
-        "Button",
-        "Badge",
-        "Circle",
-        "Rectangle",
-        "Triangle",
-        "StatusCard",
-        "ColorShowcase",
-        "VisualDemo",
-        "className=",
-        "jsx",
-        "React",
-        "WeatherCard",
-        "FileListCard",
-        "SystemStatusCard",
-        "ComparisonCard",
-        "TimerCard",
-        "LinkCard",
-        "TaskSummaryCard",
-        "NowPlayingCard",
-        "ProgressBar",
-        "ActionButton",
-        "QueryButton",
-        "OpenButton",
-        "CopyButton",
-        "AnimatedCard",
-        "AnimatedList",
-        "AnimatedProgress",
-        "GlowBadge",
-        "ShimmerText",
-        "Confetti",
-        "PulseRing",
-        "AnimatedDivider",
-        "Stat",
-        "MiniChart",
-        "AnimatedNumber",
-    ];
-
-    // Check for JSX patterns efficiently
-    JSX_INDICATORS
-        .iter()
-        .any(|&pattern| content.contains(pattern))
+/// Scan for `<` + uppercase letter + alphanumerics + (whitespace | `>` | `/`),
+/// skipping `<TTS`.
+fn has_component_tag(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'<' && bytes[i + 1].is_ascii_uppercase() {
+            let name_start = i + 1;
+            let mut j = name_start;
+            while j < bytes.len() && bytes[j].is_ascii_alphanumeric() {
+                j += 1;
+            }
+            let name = &content[name_start..j];
+            let terminated =
+                j < bytes.len() && matches!(bytes[j], b' ' | b'\t' | b'\n' | b'\r' | b'>' | b'/');
+            if terminated && name != "TTS" {
+                return true;
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 /// Optimized determination of substantial user communication
@@ -2058,6 +2042,27 @@ pub async fn clear_conversation_history(state: State<'_, AppState>) -> Result<()
 
 #[cfg(test)]
 mod tests {
+    use super::is_jsx_content;
+
+    #[test]
+    fn jsx_detection_accepts_any_capitalized_component_tag() {
+        assert!(is_jsx_content("<NowPlayingCard app=\"Spotify\" />"));
+        assert!(is_jsx_content(
+            "text before\n<BrandNewThing>hi</BrandNewThing>"
+        ));
+        assert!(is_jsx_content("<Confetti/>"));
+        assert!(is_jsx_content("<div className=\"flex\">x</div>"));
+    }
+
+    #[test]
+    fn jsx_detection_ignores_tts_and_prose() {
+        assert!(!is_jsx_content("<TTS>Paused.</TTS>"));
+        assert!(!is_jsx_content("plain text with no tags"));
+        assert!(!is_jsx_content("a < b and c > d"));
+        assert!(!is_jsx_content("<html><body>lowercase html</body></html>"));
+        assert!(!is_jsx_content("<"));
+    }
+
     use super::*;
 
     #[test]
