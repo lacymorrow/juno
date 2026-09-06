@@ -179,7 +179,7 @@ Alternative to direct API keys — uses the locally installed `claude` binary (C
 
 **Models**: `opus`, `sonnet`, `haiku` (CLI aliases — resolves to latest versions automatically)
 
-**Limitations**: Juno's computer use tools (screenshots, clicking) are not wired through the CLI — the CLI uses its own built-in tools (Bash, Read, Edit, etc.). User cannot cancel a running CLI query via Juno's escape key.
+**Limitations**: Juno's computer use tools (screenshots, clicking) are not wired through the CLI — the CLI uses its own built-in tools (Bash, Read, Edit, etc.). Escape cancels a running CLI query by killing the subprocess (LAC-3697).
 
 ## Critical Development Rules
 
@@ -236,7 +236,7 @@ format!("{}...", content.chars().take(50).collect::<String>());
 ```
 
 ### Rust: Escape Key Management
-Register escape key ONLY during agent execution (`submit_query`/`submit_orchestrated_query`). Always unregister on **every** exit path — including early returns, errors, and cancellation.
+Register escape key ONLY during agent execution (`submit_query`/`submit_orchestrated_query`). Always unregister on **every** exit path — including early returns, errors, and cancellation. The stop key is *observed* with a passive NSEvent monitor (`platform/stop_key_monitor.rs`) that never consumes the key — never register a bare Escape as an exclusive global hotkey (LAC-3746).
 
 ### Rust: Deadlock Prevention
 Never hold an async mutex while calling a function that acquires another (or the same) mutex. Use check-init-recheck for lazy initialization:
