@@ -1,18 +1,24 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { 
-  AlertTriangle, 
-  CheckCircle, 
+import {
+  AlertTriangle,
+  CheckCircle,
   Edit3,
+  Info,
   Keyboard,
-  Save 
+  Save,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { KEYBOARD_SHORTCUTS } from "@/lib/constants.generated";
 
@@ -24,6 +30,46 @@ interface ShortcutInputProps {
   isSystemManaged?: boolean;
   onSave: (shortcutName: string, value: string) => Promise<void>;
   isLoading: boolean;
+}
+
+/**
+ * Progressive disclosure for a shortcut's description: an info icon that opens
+ * a popover. The description is not in the DOM until the icon is activated, so
+ * long copy can never fight the shortcut chip for row width.
+ */
+export function ShortcutInfo({
+  label,
+  description,
+}: {
+  label: string;
+  description: string;
+}) {
+  if (!description) return null;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`About ${label}`}
+          className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <Info className="size-3.5" aria-hidden="true" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 p-3 text-xs leading-relaxed">
+        {description}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** One-line shortcut chip that never wraps or shrinks below its own text. */
+function ShortcutChip({ value }: { value: string }) {
+  return (
+    <kbd className="shrink-0 whitespace-nowrap rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px] leading-4 text-foreground">
+      {value || "Not set"}
+    </kbd>
+  );
 }
 
 const ShortcutInput: React.FC<ShortcutInputProps> = ({
@@ -298,36 +344,54 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
     return isMac ? "Cmd+K" : "Ctrl+K";
   };
 
+  // Row layout (shared by system-managed and editable rows):
+  //   [label (truncates)] [info icon]  ........  [chip] [Edit | System]
+  // The label is the only flexible item (min-w-0 + truncate); the chip and the
+  // trailing control are shrink-0, so nothing can overlap at the settings
+  // window's 700px width (~350px of card content once the sidebar and card
+  // padding are taken out).
+  const rowLabel = (
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      <span
+        id={`shortcut-${shortcutName}-label`}
+        className="truncate text-xs font-medium"
+      >
+        {label}
+      </span>
+      <ShortcutInfo label={label} description={description} />
+    </div>
+  );
+
   if (isSystemManaged) {
     return (
-      <div className="space-y-2">
-        <Label>{label}</Label>
-        <div className="flex items-center justify-between p-2 rounded border">
-          <div className="flex items-center gap-3">
-            <kbd className="px-2 py-1 bg-muted rounded text-sm min-w-[80px] text-center">
-              {value}
-            </kbd>
-            <span className="text-sm text-muted-foreground">{description}</span>
-          </div>
-          <Badge variant="secondary" className="text-xs">System</Badge>
-        </div>
+      <div
+        className="flex items-center gap-2 rounded-md border px-2 py-1.5"
+        aria-labelledby={`shortcut-${shortcutName}-label`}
+      >
+        {rowLabel}
+        <ShortcutChip value={value} />
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          System
+        </Badge>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
-      <Label htmlFor={`shortcut-${shortcutName}`}>{label}</Label>
-      <div className="space-y-2">
+    <div>
         {isEditing ? (
-          <div className="space-y-3 p-3 border rounded-lg bg-muted/30">
+          <div className="space-y-2 p-2.5 border rounded-lg bg-muted/30">
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-medium">{label}</span>
+              <ShortcutInfo label={label} description={description} />
+            </div>
             {/* Key capture area with enhanced feedback */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <Label className="text-sm font-medium">Shortcut combination:</Label>
+                <Label className="text-xs font-medium">Shortcut combination:</Label>
                 {isCapturing && (
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs animate-pulse bg-blue-50 border-blue-200">
+                    <Badge variant="outline" className="text-[10px] animate-pulse bg-blue-50 border-blue-200">
                       🎯 Listening...
                     </Badge>
                     <button
@@ -341,7 +405,7 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
               </div>
               <div
                 className={cn(
-                  "min-h-[50px] p-3 border-2 border-dashed rounded-lg flex items-center gap-2 cursor-pointer transition-all duration-200",
+                  "min-h-[40px] p-2 border-2 border-dashed rounded-lg flex items-center gap-2 cursor-pointer transition-all duration-200",
                   isCapturing
                     ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 shadow-sm"
                     : "border-muted-foreground/30 hover:border-muted-foreground/50 hover:bg-muted/50"
@@ -356,7 +420,7 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                   <div className="flex items-center gap-1 flex-wrap">
                     {pressedKeys.map((key, index) => (
                       <span key={index} className="flex items-center gap-1">
-                        <kbd className="px-2 py-1 bg-background border rounded text-sm font-mono shadow-sm">
+                        <kbd className="px-1.5 py-0.5 bg-background border rounded text-xs font-mono shadow-sm">
                           {key}
                         </kbd>
                         {index < pressedKeys.length - 1 && (
@@ -366,13 +430,13 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                     ))}
                   </div>
                 ) : currentValue ? (
-                  <kbd className="px-2 py-1 bg-background border rounded text-sm font-mono shadow-sm">
+                  <kbd className="px-1.5 py-0.5 bg-background border rounded text-xs font-mono shadow-sm">
                     {currentValue}
                   </kbd>
                 ) : (
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Keyboard className="h-4 w-4" />
-                    <span className="text-sm">
+                    <span className="text-xs">
                       {isCapturing
                         ? "Press the keys you want to use..."
                         : `Click here to capture shortcut (e.g., ${getExampleShortcut()})`
@@ -384,13 +448,13 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
             </div>
 
             {/* Manual input option with better guidance */}
-            <div className="space-y-2">
-              <Label className="text-sm">Or type manually:</Label>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Or type manually:</Label>
               <Input
                 value={currentValue}
                 onChange={(e) => setCurrentValue(e.target.value)}
                 placeholder={`e.g., ${getExampleShortcut()}, Ctrl+Shift+F1`}
-                className="font-mono text-sm"
+                className="h-8 font-mono text-xs"
                 disabled={isCapturing}
               />
               <div className="text-xs text-muted-foreground">
@@ -401,7 +465,7 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
             {/* Enhanced validation feedback */}
             {(validationMessage || validationError) && (
               <div className={cn(
-                "flex items-start gap-2 text-sm p-3 rounded-md border",
+                "flex items-start gap-2 text-xs p-2 rounded-md border",
                 validationError
                   ? "text-red-700 bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800 dark:text-red-400"
                   : "text-green-700 bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800 dark:text-green-400"
@@ -427,16 +491,16 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
             {/* Action buttons */}
             <div className="flex items-center gap-2 pt-2 border-t">
               <Button
-                size="sm"
+                size="xs"
                 onClick={handleSave}
                 disabled={isLoading || !!validationError || !currentValue.trim() || isCapturing}
                 className="flex items-center gap-2"
               >
-                <Save className="h-4 w-4" />
+                <Save className="size-3.5" />
                 Save
               </Button>
               <Button
-                size="sm"
+                size="xs"
                 variant="outline"
                 onClick={handleCancel}
                 disabled={isLoading}
@@ -444,38 +508,36 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                 Cancel
               </Button>
               <Button
-                size="sm"
+                size="xs"
                 variant="outline"
                 onClick={isCapturing ? handleStopCapture : handleStartCapture}
                 disabled={isLoading}
                 className="ml-auto"
               >
-                <Keyboard className="h-4 w-4 mr-1" />
+                <Keyboard className="size-3.5" />
                 {isCapturing ? "Stop Capture" : "Capture Keys"}
               </Button>
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-between p-2 rounded border hover:bg-muted/50 transition-colors">
-            <div className="flex items-center gap-3">
-              <kbd className="px-2 py-1 bg-muted rounded text-sm min-w-[80px] text-center font-mono">
-                {value || "Not set"}
-              </kbd>
-              <span className="text-sm text-muted-foreground">{description}</span>
-            </div>
+          <div
+            className="flex items-center gap-2 rounded-md border px-2 py-1.5 hover:bg-muted/50 transition-colors"
+            aria-labelledby={`shortcut-${shortcutName}-label`}
+          >
+            {rowLabel}
+            <ShortcutChip value={value} />
             <Button
-              size="sm"
+              size="xs"
               variant="outline"
               onClick={() => setIsEditing(true)}
               disabled={isLoading}
-              className="flex items-center gap-1"
+              aria-label={`Edit ${label} shortcut`}
             >
-              <Edit3 className="h-4 w-4" />
+              <Edit3 className="size-3" />
               Edit
             </Button>
           </div>
         )}
-      </div>
     </div>
   );
 };
