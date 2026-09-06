@@ -18,6 +18,7 @@ pub mod store_keys {
     pub const PROMPTS: &str = "prompts";
     pub const ONBOARDING: &str = "onboarding";
     pub const AUTOSTART_ENABLED: &str = "autostart_enabled";
+    pub const ADVANCED_SETTINGS_ENABLED: &str = "advanced_settings_enabled";
     pub const CLI: &str = "cli";
     pub const VOICE_TRANSCRIPTION: &str = "voice_transcription";
 }
@@ -135,10 +136,15 @@ pub mod defaults {
     pub const CLOUD_ENABLED: bool = false;
     pub const AUTO_CONNECT: bool = false;
     pub const AUTOSTART_ENABLED: bool = false;
+    /// The settings window shows the trimmed "basic" set until the user opts in.
+    pub const ADVANCED_SETTINGS_ENABLED: bool = false;
     pub const ONBOARDING_COMPLETED: bool = false;
     pub const BIG_CURSOR_ENABLED: bool = true;
     pub const BIG_CURSOR_SCALE: f32 = 3.0;
 
+    pub fn advanced_settings_enabled() -> bool {
+        ADVANCED_SETTINGS_ENABLED
+    }
     pub fn big_cursor_enabled() -> bool {
         BIG_CURSOR_ENABLED
     }

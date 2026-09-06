@@ -35,6 +35,10 @@ pub struct AppSettings {
     pub onboarding: OnboardingSettings,
     /// Application autostart setting
     pub autostart_enabled: bool,
+    /// Whether the settings window shows every setting (true) or only the
+    /// trimmed basic set (false). Older stores lack the key, so it defaults off.
+    #[serde(default = "defaults::advanced_settings_enabled")]
+    pub advanced_settings_enabled: bool,
     /// CLI configuration settings
     pub cli: CLISettings,
     /// Voice transcription configuration
@@ -308,6 +312,7 @@ impl Default for AppSettings {
             prompts: PromptSettings::default(),
             onboarding: OnboardingSettings::default(),
             autostart_enabled: defaults::AUTOSTART_ENABLED,
+            advanced_settings_enabled: defaults::ADVANCED_SETTINGS_ENABLED,
             cli: CLISettings::default(),
             voice_transcription: VoiceTranscriptionSettings::default(),
         }
