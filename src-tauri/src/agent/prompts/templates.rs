@@ -844,7 +844,7 @@ Response:
 - `<TaskSummaryCard title="Cleanup Results" tasks={[{label: "Deleted temp files", done: true}, {label: "Compress images", done: false}]} />` — checklist with animated progress bar
 
 **LIVE COMPONENTS** (bound to real state, self-updating — the ONLY way to show live state):
-- `<NowPlayingCard app="Spotify" />` — live playback card for Spotify or `app="Music"`: real track/artist/artwork/position, working play/pause/prev/next. Use for ANY music or playback request. It is a pre-built widget: emit exactly that one tag, never wrap it in a Card or add your own transport buttons. Bare playback commands ("pause Spotify", "what's playing?") are answered by Juno itself before they reach you; when a playback request does reach you (a playlist, a search, an app that isn't open), do the work and finish with only `<TTS>` + `<NowPlayingCard>`.
+- `<NowPlayingCard app="Spotify" />` — live playback card for Spotify, or `<NowPlayingCard app="Music" />` for Apple Music (the app is named "Music" in the tag; call it "Apple Music" when you speak): real track/artist/artwork/position, working play/pause/prev/next. Use for ANY music or playback request. It is a pre-built widget: emit exactly that one tag, never wrap it in a Card or add your own transport buttons. Bare playback commands ("pause Spotify", "what's playing?") are answered by Juno itself before they reach you; when a playback request does reach you (a playlist, a search, an app that isn't open), do the work and finish with only `<TTS>` + `<NowPlayingCard>`.
 
 **INTERACTIVE BUTTONS** (let the user take action from your response):
 - `<OpenButton url="https://example.com" label="Open Website" />` — opens URL in default browser
@@ -1011,7 +1011,7 @@ A control that *implies* live state — a play/pause toggle, a progress bar, an 
 
 - `<QueryButton>` is a **one-shot request**. It starts a new agent run that takes seconds and it never learns the outcome. Label it as an imperative action ("Pause Spotify", "Skip this track") and never as a toggle (⏯), a status ("Paused"), or something that looks like it will update.
 - Use a **live component** whenever one exists for the thing you are showing. Live components read their state from the real source and their buttons act instantly:
-  - `<NowPlayingCard app="Spotify" />` — Spotify or `app="Music"`. Polls the player every second; shows real track, artist, artwork, position; play/pause/previous/next act immediately and the card reflects the real player state (including when the app is not running). **Always use this for playback control** instead of composing your own transport buttons.
+  - `<NowPlayingCard app="Spotify" />` — Spotify, or `app="Music"` for Apple Music. Polls the player every second; shows real track, artist, artwork, position; play/pause/previous/next act immediately and the card reflects the real player state (including when the app is not running). **Always use this for playback control** instead of composing your own transport buttons.
 - If no live component exists for the state you want to show, **do not build a fake one**. Show a static snapshot as text or a badge that describes a moment ("Paused at 1:42"), optionally with clearly-labeled one-shot buttons, or skip the component entirely.
 - `<TimerCard>`, `<AnimatedProgress>`, `<Stat>` are static snapshots — they do not update after render. Use them for values that were true when you answered, never as a "running" indicator.
 
