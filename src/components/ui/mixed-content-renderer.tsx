@@ -11,66 +11,20 @@ type ContentSegment =
   | { type: "jsx"; content: string };
 
 /**
- * Top-level JSX component names that the agent can use.
- * Used to detect JSX boundaries in mixed content.
- * Must match the keys in `availableComponents` from jsx-message-renderer.tsx.
+ * Opening tag of any component-style element: `<Name`, where Name starts with
+ * a capital letter. There is deliberately NO allowlist here. The agent may use
+ * any component the renderer knows about, and a tag the renderer does not know
+ * is still handed to it rather than silently stripped as text, so new
+ * components work the moment they are registered and nothing that could render
+ * is thrown away up front.
+ *
+ * `<TTS>` is the one exclusion: it is the spoken channel, not a component.
+ *
+ * Prose that merely looks like a tag (`Vec<String>`, `<T>`) is protected by the
+ * block finder: a tag with no matching close and no self-close falls back to
+ * text once streaming has finished.
  */
-const JSX_COMPONENT_NAMES = [
-  "Card",
-  "Alert",
-  "Badge",
-  "Button",
-  "StatusCard",
-  "ProgressBar",
-  "ColorShowcase",
-  "VisualDemo",
-  "Circle",
-  "Rectangle",
-  "Triangle",
-  "Dialog",
-  "Tabs",
-  "Separator",
-  "Skeleton",
-  // Domain-specific agent response cards
-  "WeatherCard",
-  "FileListCard",
-  "SystemStatusCard",
-  "ComparisonCard",
-  "TimerCard",
-  "LinkCard",
-  "TaskSummaryCard",
-  // Interactive action components
-  "ActionButton",
-  "QueryButton",
-  "OpenButton",
-  "CopyButton",
-  // Onboarding inline components
-  "OnboardingActionButton",
-  "OnboardingActions",
-  "PermissionStatusCard",
-  "PermissionStatusGrid",
-  "ProviderSelector",
-  // Animated components
-  "AnimatedCard",
-  "AnimatedList",
-  "AnimatedProgress",
-  "GlowBadge",
-  "ShimmerText",
-  "Confetti",
-  "PulseRing",
-  "AnimatedDivider",
-  "Stat",
-  "MiniChart",
-  "AnimatedNumber",
-] as const;
-
-/**
- * Build a regex that matches the opening tag of any known JSX component.
- * Matches: `<Card>`, `<Card className="...">`, `<StatusCard status="success" message="Done" />`
- */
-const JSX_OPEN_TAG_PATTERN = new RegExp(
-  `<(${JSX_COMPONENT_NAMES.join("|")})(\\s|>|\\/)`,
-);
+const JSX_OPEN_TAG_PATTERN = /<(?!TTS\b)([A-Z][A-Za-z0-9]*)(\s|>|\/)/;
 
 /**
  * Split mixed content (markdown + JSX) into alternating segments.
