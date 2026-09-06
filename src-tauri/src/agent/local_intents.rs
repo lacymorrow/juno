@@ -18,7 +18,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use tauri::AppHandle;
 
-use crate::commands::media::{media_control, media_get_state, MediaState};
+use crate::commands::media::{self, display_name, MediaState};
 
 /// Transport action the user asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,6 +267,7 @@ fn describe_track(state: &MediaState) -> Option<String> {
 
 /// Spoken confirmation for a completed action, from the player's real state.
 fn spoken_result(intent: &MediaIntent, app: &str, state: &MediaState) -> String {
+    let app = display_name(app);
     if !state.running {
         return format!("{} isn't running.", app);
     }
@@ -329,7 +330,7 @@ pub async fn try_handle_media_intent(app_handle: &AppHandle, query: &str) -> boo
                     ..
                 }
             ) {
-                match media_get_state(app.to_string()).await {
+                match media::get_state(app_handle, app).await {
                     Ok(state) if state.running => {}
                     _ => return false,
                 }
@@ -339,7 +340,7 @@ pub async fn try_handle_media_intent(app_handle: &AppHandle, query: &str) -> boo
         None => {
             let mut states = Vec::new();
             for candidate in crate::commands::media::SUPPORTED_APPS {
-                if let Ok(state) = media_get_state(candidate.to_string()).await {
+                if let Ok(state) = media::get_state(app_handle, candidate).await {
                     states.push(state);
                 }
             }
@@ -355,16 +356,16 @@ pub async fn try_handle_media_intent(app_handle: &AppHandle, query: &str) -> boo
 
     let result = match &intent {
         MediaIntent::Control { action, .. } => {
-            media_control(app.to_string(), action.as_command().to_string()).await
+            media::control(app_handle, app, action.as_command()).await
         }
-        MediaIntent::Status { .. } => media_get_state(app.to_string()).await,
+        MediaIntent::Status { .. } => media::get_state(app_handle, app).await,
     };
 
     let (spoken, agent_state) = match result {
         Ok(state) => (spoken_result(&intent, app, &state), "Finished"),
         Err(e) => {
             log::warn!("Local media intent failed: {}", e);
-            (format!("I couldn't reach {}.", app), "Failed")
+            (format!("I couldn't reach {}.", display_name(app)), "Failed")
         }
     };
 
@@ -440,6 +441,22 @@ mod tests {
         assert_eq!(
             parse_media_intent("pause apple music"),
             Some(control(Some("Music"), MediaAction::Pause, false))
+        );
+        assert_eq!(
+            parse_media_intent("play apple music"),
+            Some(control(Some("Music"), MediaAction::Play, false))
+        );
+        assert_eq!(
+            parse_media_intent("pause music"),
+            Some(control(None, MediaAction::Pause, true)),
+            "bare 'pause music' resolves against whichever player is playing"
+        );
+        assert_eq!(
+            parse_media_intent("what's playing on apple music?"),
+            Some(MediaIntent::Status {
+                app: Some("Music"),
+                names_music: true
+            })
         );
         assert_eq!(
             parse_media_intent("skip this song in iTunes"),
@@ -648,6 +665,40 @@ mod tests {
         assert_eq!(
             spoken_result(&status, "Spotify", &state("Spotify", true, "stopped")),
             "Nothing is playing in Spotify."
+        );
+    }
+
+    #[test]
+    fn spoken_replies_call_music_apple_music() {
+        let playing = state("Music", true, "playing");
+        let gone = state("Music", false, "not_running");
+        let stopped = state("Music", true, "stopped");
+
+        let pause = control(Some("Music"), MediaAction::Pause, false);
+        assert_eq!(
+            spoken_result(&pause, "Music", &gone),
+            "Apple Music isn't running."
+        );
+        assert_eq!(
+            spoken_result(&pause, "Music", &playing),
+            "Apple Music didn't pause."
+        );
+        let play = control(Some("Music"), MediaAction::Play, false);
+        assert_eq!(
+            spoken_result(&play, "Music", &state("Music", true, "paused")),
+            "Apple Music didn't resume Houdini by Foster The People."
+        );
+        let status = MediaIntent::Status {
+            app: Some("Music"),
+            names_music: true,
+        };
+        assert_eq!(
+            spoken_result(&status, "Music", &stopped),
+            "Nothing is playing in Apple Music."
+        );
+        assert_eq!(
+            spoken_result(&status, "Music", &playing),
+            "Houdini by Foster The People."
         );
     }
 }
