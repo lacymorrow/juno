@@ -208,6 +208,7 @@ pub fn is_jsx_content(content: &str) -> bool {
         "TimerCard",
         "LinkCard",
         "TaskSummaryCard",
+        "NowPlayingCard",
         "ProgressBar",
         "ActionButton",
         "QueryButton",

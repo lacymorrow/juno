@@ -32,6 +32,7 @@ import {
   TimerCard,
   LinkCard,
   TaskSummaryCard,
+  NowPlayingCard,
 } from "@/components/ui/agent-cards";
 import { cn } from "@/lib/utils";
 import {
@@ -442,6 +443,8 @@ const availableComponents = {
   TimerCard,
   LinkCard,
   TaskSummaryCard,
+  // Live components — bound to real player state, never fake
+  NowPlayingCard,
 
   // Animated components
   AnimatedCard,

@@ -803,6 +803,7 @@ Response:
 | Simple Q&A ("what time is it?") | brief | ✅ | ✅ `<Stat>` or `<AnimatedCard>` |
 | Informational ("what's the weather?") | brief | ✅ | ✅ `<WeatherCard>` with animated effects |
 | Quick action ("open Spotify") | ✅ brief | ✅ or skip | ❌ |
+| Playback ("pause", "what's playing?") | skip | ✅ | ✅ `<NowPlayingCard>` — never hand-rolled buttons |
 | Complex task ("organize Downloads") | ✅ progress | ✅ start + end | ✅ `<TaskSummaryCard>` + `<Confetti>` |
 | Research/comparison | ✅ details | ✅ overview | ✅ `<ComparisonCard>` + `<MiniChart>` |
 | Success confirmation | skip or brief | ✅ | ✅ `<StatusCard>` + `<Confetti>` |
@@ -837,20 +838,23 @@ Response:
 - `<FileListCard title="Downloads" path="~/Downloads" totalCount={127} files={[{name: "Images", type: "folder", count: 23}, ...]} />` — file listing with staggered entry
 - `<SystemStatusCard hostname="MacBook Pro" uptime="3d 12h" metrics={[{label: "CPU", value: 45}, {label: "Memory", value: 82}]} />` — metrics with animated fill bars
 - `<ComparisonCard title="React vs Vue" options={[{name: "React", pros: ["Large ecosystem"], cons: ["Steep curve"], rating: 4, recommended: true}, ...]} />` — animated side-by-side
-- `<TimerCard label="Pomodoro" duration="25:00" status="running" />` — timer with pulse ring
+- `<TimerCard label="Pomodoro" duration="25:00" status="running" />` — static snapshot of a timer (does NOT count down; see LIVE STATE rule)
 - `<LinkCard url="https://..." title="Page Title" description="..." />` — link preview with hover lift
 - `<TaskSummaryCard title="Cleanup Results" tasks={[{label: "Deleted temp files", done: true}, {label: "Compress images", done: false}]} />` — checklist with animated progress bar
+
+**LIVE COMPONENTS** (bound to real state, self-updating — the ONLY way to show live state):
+- `<NowPlayingCard app="Spotify" />` — live playback card for Spotify or `app="Music"`: real track/artist/artwork/position, working play/pause/prev/next. Use for ANY music or playback request.
 
 **INTERACTIVE BUTTONS** (let the user take action from your response):
 - `<OpenButton url="https://example.com" label="Open Website" />` — opens URL in default browser
 - `<OpenButton path="~/Downloads" label="Open Downloads" />` — opens file/folder in Finder
-- `<QueryButton query="Show me more details about X" label="More Details" />` — triggers a new query to you (you'll execute the action using your tools)
+- `<QueryButton query="Show me more details about X" label="More Details" />` — one-shot: triggers a new query to you (you'll execute the action using your tools). Never a toggle or a status indicator.
 - `<CopyButton text="npm install something" label="Copy Command" />` — copies text to clipboard
 - `<ActionButton command="capture_screenshot_command" label="Take Screenshot" />` — invokes a built-in system command
 
 **IMPORTANT — ActionButton vs QueryButton**:
-- `<ActionButton>` invokes a built-in system command directly. Only use these commands: `capture_screenshot_command`, `open_url`, `open_application`, `get_system_stats`, `get_clipboard`, `set_clipboard`. Using any other command will be routed through QueryButton automatically.
-- `<QueryButton>` sends a request back to you (the agent). Use this for anything that requires your tools — media control, app automation, file operations, web searches, complex actions. This is the RIGHT choice for most interactive buttons.
+- `<ActionButton>` invokes a built-in system command directly. Only use these commands: `capture_screenshot_command`, `open_url`, `open_application`, `get_system_stats`, `get_clipboard`, `set_clipboard`, `media_control` (args={{app: "Spotify", action: "next"}}). Using any other command will be routed through QueryButton automatically.
+- `<QueryButton>` sends a request back to you (the agent). Use this for one-shot actions that need your tools — app automation, file operations, web searches, complex actions. It is NOT for playback control (use `<NowPlayingCard>`) and never for anything that should reflect state.
 
 Use interactive buttons when your response naturally leads to a next action. For example, after organizing files, include an `<OpenButton>` to the folder. After explaining a command, include a `<CopyButton>` with the command. For actions that need you to DO something (control apps, run scripts, automate workflows), use `<QueryButton>`.
 
@@ -1000,20 +1004,28 @@ Your JSX output streams to the user in real-time. Components render progressivel
 - ⚠️ `<WeatherCard ... />` with many props + forecast array — prefer composed version
 - ⚠️ `<SystemStatusCard metrics={[...]} />` with large arrays — prefer composed version
 
-**INTERACTIVE STREAMING** — for responses about music, media, or ongoing processes, compose controls that wire to real actions via QueryButton (which sends the action back to you for execution with your tools):
+**🔴 LIVE STATE — NEVER FAKE IT** (this is a hard rule, not a style preference):
+
+A control that *implies* live state — a play/pause toggle, a progress bar, an on/off switch, a running timer, a "Now Playing" label — must be fed by live state. If it is not, it is broken UI: the button stays in a loading state, the bar never moves, and the label lies as soon as the world changes. That experience is worse than plain text.
+
+- `<QueryButton>` is a **one-shot request**. It starts a new agent run that takes seconds and it never learns the outcome. Label it as an imperative action ("Pause Spotify", "Skip this track") and never as a toggle (⏯), a status ("Paused"), or something that looks like it will update.
+- Use a **live component** whenever one exists for the thing you are showing. Live components read their state from the real source and their buttons act instantly:
+  - `<NowPlayingCard app="Spotify" />` — Spotify or `app="Music"`. Polls the player every second; shows real track, artist, artwork, position; play/pause/previous/next act immediately and the card reflects the real player state (including when the app is not running). **Always use this for playback control** instead of composing your own transport buttons.
+- If no live component exists for the state you want to show, **do not build a fake one**. Show a static snapshot as text or a badge that describes a moment ("Paused at 1:42"), optionally with clearly-labeled one-shot buttons, or skip the component entirely.
+- `<TimerCard>`, `<AnimatedProgress>`, `<Stat>` are static snapshots — they do not update after render. Use them for values that were true when you answered, never as a "running" indicator.
+
+**Playback example** (correct — live card, honest text):
 ```xml
-<AnimatedCard animation="scale">
-  <div className="space-y-3">
-    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Now Playing</div>
-    <div className="font-medium">Song Title — Artist</div>
-    <AnimatedProgress value={35} color="purple" label="1:42 / 4:15" />
-    <div className="flex gap-2">
-      <QueryButton query="Go to previous track" label="⏮" />
-      <QueryButton query="Play or pause the current track" label="⏯" />
-      <QueryButton query="Skip to next track" label="⏭" />
-    </div>
-  </div>
-</AnimatedCard>
+<TTS>Paused.</TTS>
+
+<NowPlayingCard app="Spotify" />
+```
+
+**Playback anti-pattern** (wrong — hand-rolled buttons and a bar nothing updates):
+```xml
+<!-- ❌ never do this -->
+<AnimatedProgress value={35} label="1:42 / 4:15" />
+<QueryButton query="Play or pause the current track" label="⏯" />
 ```
 
 **RULES**:
@@ -1028,7 +1040,8 @@ Your JSX output streams to the user in real-time. Components render progressivel
 9. Don't wrap the entire response in JSX — mix text and components naturally
 10. Use interactive buttons when the response naturally leads to a follow-up action
 11. Use `<Confetti />` after successfully completing a task for delight
-12. Combine animated components creatively — e.g., `<AnimatedCard>` wrapping `<MiniChart>` + `<Stat>` elements"#
+12. Combine animated components creatively — e.g., `<AnimatedCard>` wrapping `<MiniChart>` + `<Stat>` elements
+13. **NO FAKE STATE**: never render a control or indicator that implies live state unless it is a live component (`<NowPlayingCard>`). `<QueryButton>` is a one-shot action, not a toggle"#
     }
 
     /// 👁️ **COMPANION/OBSERVE-ONLY MODE** - Vision-only, no computer actions
