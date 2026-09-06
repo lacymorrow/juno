@@ -140,6 +140,19 @@ describe("NowPlayingCard", () => {
     await waitFor(() => expect(nextButton).not.toBeDisabled());
   });
 
+  it("falls back to the music icon when the artwork fails to load", async () => {
+    mockBackend(playing);
+    const { container } = render(<NowPlayingCard app="Spotify" />);
+    const img = await waitFor(() => {
+      const el = container.querySelector("img");
+      if (!el) throw new Error("no img yet");
+      return el;
+    });
+    fireEvent.error(img);
+    await waitFor(() => expect(container.querySelector("img")).toBeNull());
+    expect(screen.getByText("Houdini")).toBeInTheDocument();
+  });
+
   it("stops polling on unmount", async () => {
     mockBackend(playing);
     const { unmount } = render(<NowPlayingCard app="Spotify" pollMs={200} />);
