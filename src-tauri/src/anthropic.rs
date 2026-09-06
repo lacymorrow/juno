@@ -379,6 +379,17 @@ pub async fn submit_query(
     // their processing state, and the floating bar shows "submitting".
     if !crate::cli::headless::is_headless_mode() {
         announce_query_submission(&app_handle, trimmed_query).await;
+
+        // --- Local intents: deterministic requests answered in-process ---
+        // Bare playback commands ("pause Spotify", "what's playing?") resolve to
+        // one AppleScript call plus the pre-built live `<NowPlayingCard>`. The
+        // agent would spend seconds of model time arriving at that same card,
+        // so serve it here and only fall through when the request needs
+        // interpretation.
+        if crate::agent::local_intents::try_handle_media_intent(&app_handle, trimmed_query).await {
+            info!("Query handled locally as a media intent: {}", trimmed_query);
+            return Ok(());
+        }
     }
 
     // CRITICAL FIX: Execute agent directly instead of relying on incomplete event system

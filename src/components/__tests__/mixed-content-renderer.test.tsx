@@ -43,3 +43,43 @@ The card above is live-bound to the player.`;
     expect(splitMixedContent(fenced).every((s) => s.type === "text")).toBe(true);
   });
 });
+
+describe("method rationale segments", () => {
+  it("lifts <Why>…</Why> out as a collapsed rationale segment, never JSX", () => {
+    const content = `<TTS>Playing.</TTS>
+
+<NowPlayingCard app="Spotify" />
+
+<Why>
+Spotify was running, so \`osascript -e 'tell application "Spotify" to play'\` hit it directly — {no braces trouble} and a > sign are fine here.
+</Why>`;
+    const segments = splitMixedContent(content);
+    expect(segments.map((s) => s.type)).toEqual(["text", "jsx", "why"]);
+    expect(segments[2].content).toContain("{no braces trouble}");
+    expect(segments[2].content).not.toContain("<Why>");
+  });
+
+  it("keeps a half-arrived <Why> collapsed while streaming and after the stream ends", () => {
+    const partial = "Done.\n\n<Why>\nBecause the app was already";
+    expect(splitMixedContent(partial, true).map((s) => s.type)).toEqual(["text", "why"]);
+    expect(splitMixedContent(partial, false).map((s) => s.type)).toEqual(["text", "why"]);
+  });
+
+  it("recognises the bold 'Why … instead of …:' paragraph as rationale", () => {
+    const content = `<NowPlayingCard app="Spotify" />
+
+**Why AppleScript instead of clicking:** Spotify was already running.
+
+The card above is live-bound.`;
+    const segments = splitMixedContent(content);
+    expect(segments.map((s) => s.type)).toEqual(["jsx", "why", "text"]);
+    expect(segments[1].content.startsWith("**Why AppleScript")).toBe(true);
+    expect(hasMixedContent("**Why AppleScript here:** it is fastest.")).toBe(true);
+  });
+
+  it("leaves an answer to the user's own 'why' question visible", () => {
+    const content = "**Why it failed:** the folder is read-only.\n\nFix the permissions first.";
+    expect(splitMixedContent(content).map((s) => s.type)).toEqual(["text"]);
+    expect(hasMixedContent(content)).toBe(false);
+  });
+});
