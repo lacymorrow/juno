@@ -1,3 +1,8 @@
+---
+name: juno
+description: Drive macOS from the command line with `juno-cua` — screenshots, clicks, typing, scrolling, accessibility-tree reads and app control, all with JSON output. Use when a task needs to see or operate the desktop rather than the filesystem or a browser.
+---
+
 # juno-cua — Desktop Automation for AI Agents
 
 You have access to `juno-cua`, a CLI tool for macOS desktop automation. It lets you take screenshots, click, type, scroll, read accessibility trees, and control applications — all from the command line with JSON output.
