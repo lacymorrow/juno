@@ -71,6 +71,8 @@ export function NowPlayingCard({
   const [state, setState] = useState<MediaState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<MediaAction | null>(null);
+  // Artwork URL that failed to load; never show a blank square for it.
+  const [brokenArtwork, setBrokenArtwork] = useState<string | null>(null);
   const mounted = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -245,8 +247,13 @@ export function NowPlayingCard({
       ) : (
         <div className="flex items-center gap-3">
           <div className="h-12 w-12 shrink-0 rounded-md bg-muted overflow-hidden flex items-center justify-center">
-            {state.artwork_url ? (
-              <img src={state.artwork_url} alt="" className="h-full w-full object-cover" />
+            {state.artwork_url && state.artwork_url !== brokenArtwork ? (
+              <img
+                src={state.artwork_url}
+                alt=""
+                className="h-full w-full object-cover"
+                onError={() => setBrokenArtwork(state.artwork_url)}
+              />
             ) : (
               <Music2 className="h-5 w-5 text-muted-foreground" />
             )}
