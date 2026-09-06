@@ -299,16 +299,16 @@ function App() {
     };
   }, [appState.setIsDictationActive, appState.setDictationState]);
 
-  // Note: Keyboard shortcuts are handled entirely by the Rust backend via Tauri's global shortcut system
-  // Frontend no longer needs to handle keyboard events for business logic - keeps UI truly "dumb"
+  // Note: Keyboard shortcuts are handled entirely by the Rust backend.
+  // Frontend never handles keyboard events for business logic - keeps UI truly "dumb"
   //
-  // The backend escape key system works correctly:
+  // Escape (the stop key) is observed by a passive NSEvent monitor in Rust
+  // (src-tauri/src/platform/stop_key_monitor.rs) that is installed only while
+  // there is something to stop. It never consumes the key, so this webview and
+  // every other app still receive Escape as usual.
   // 1. Escape pressed → Backend stop coordinator stops all operations
   // 2. Backend emits events → Frontend receives and stops audio/UI
   // 3. No frontend state checks needed - escape universally stops everything
-  //
-  // This design prevents the original bug where frontend state checks could fail,
-  // while providing reliable universal cancellation behavior.
 
   // Example prompt selection — shows the prompt in the input for a beat,
   // then submits it through the same path as typed input.
