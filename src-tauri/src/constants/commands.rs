@@ -155,6 +155,13 @@ pub mod cloud {
 }
 
 /// Skill discovery command names for slash-command autocomplete
+pub mod media {
+    /// Read a media player's live state (`<NowPlayingCard>`).
+    pub const GET_STATE: &str = "media_get_state";
+    /// Send play/pause/next/previous to a running player.
+    pub const CONTROL: &str = "media_control";
+}
+
 pub mod skills {
     pub const LIST_AVAILABLE_SKILLS: &str = "list_available_skills";
 }

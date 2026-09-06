@@ -710,3 +710,7 @@ export function TaskSummaryCard({
     </div>
   );
 }
+
+// Live components (bound to real state) live in their own files.
+export { NowPlayingCard } from "./now-playing-card";
+export type { NowPlayingCardProps, MediaState } from "./now-playing-card";

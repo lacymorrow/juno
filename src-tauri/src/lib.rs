@@ -68,8 +68,8 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 use commands::{
     accessibility_click, accessibility_scan, always_listening::*, app_url::*, autostart::*,
     computer, core::*, dictation::*, element::*, error_recovery::*, execute_accessibility_tool,
-    execute_safari_tool, filesystem::*, get_accessibility_tool_definitions, keyboard::*, memory::*,
-    mouse::*, orchestrator::*, permissions::*, persistent_memory::*, providers::*,
+    execute_safari_tool, filesystem::*, get_accessibility_tool_definitions, keyboard::*, media::*,
+    memory::*, mouse::*, orchestrator::*, permissions::*, persistent_memory::*, providers::*,
     safari_clear_cache, safari_click_element, safari_execute_javascript, safari_extract_dom,
     safari_get_url, safari_is_active, safari_list_clickable_elements, safari_navigate,
     safari_type_text, shell::*, sound::*, test_accessibility_permissions, text_editor::*,
@@ -406,6 +406,9 @@ pub fn run() {
             // Production app functions with debug capabilities
             open_application,
             open_url,
+            // Live media state for agent-rendered <NowPlayingCard>
+            media_get_state,
+            media_control,
             // Production window functions with debug capabilities
             scroll_window,
             get_window_list,

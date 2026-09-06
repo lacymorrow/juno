@@ -39,6 +39,8 @@ const ALLOWED_COMMANDS = new Set([
   "get_system_stats",
   "get_clipboard",
   "set_clipboard",
+  COMMANDS.MEDIA_CONTROL,
+  COMMANDS.MEDIA_GET_STATE,
 ]);
 
 function isCommandAllowed(command: string): boolean {
