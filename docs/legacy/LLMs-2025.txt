@@ -1,0 +1,1267 @@
+# Juno AI Computer Use Agent - LLM Instructions
+
+## Project Overview
+Juno is a **production-ready Tauri v2 desktop app** implementing Anthropic's Computer Use Bot for macOS. It provides AI-powered automation with voice control, multi-agent orchestration, comprehensive system integration, and enterprise-grade security.
+
+**🔒 SECURITY STATUS**: ✅ **ENTERPRISE HARDENED** - Complete security framework with production-grade protections against file system attacks, command injection, and stability issues.
+
+**Latest Enhancement**: Completed systematic improvement process (Steps 1-7) delivering advanced orchestration, tool configuration, memory management systems, plus security enhancements and hardware monitoring.
+
+**Recent Fix**: ✅ **ModelSelector Synchronization Issue Resolved** - Fixed critical frontend state synchronization problems where ModelSelector component was not properly syncing with provider changes, showing incorrect models, and experiencing race conditions between multiple state sources.
+
+## Architecture Overview
+
+### Core Components
+- **Frontend**: React/TypeScript with Tauri v2 integration
+- **Backend**: Rust-based Tauri application with async/await patterns
+- **AI Integration**: Anthropic Claude with Computer Use API
+- **Voice System**: Custom Whisper-based transcription plugin
+- **Automation**: macOS accessibility APIs with Computer Use SDK
+- **Security Framework**: Production-grade validation and monitoring system
+- **Hardware Monitoring**: Real-time system metrics and performance analytics
+
+### Agent Architecture (Hierarchical)
+```
+Orchestrator (src-tauri/src/anthropic.rs)
+├── Desktop Agent (screen interaction, accessibility)
+├── Browser Agent (web automation)
+├── File Agent (filesystem operations with security controls)
+├── Tools (shared providers with enhanced security validation)
+└── Prompts (centralized prompt management system)
+```
+
+**Memory Management**:
+- Orchestrator: Persistent AppState with Arc-based cloning
+- Specialists: Fresh SimpleMemoryManager instances (isolated)
+- All agents use safe Arc-based memory manager cloning
+
+**Security Integration**:
+- All tools implement comprehensive security validation
+- Production vs development mode security controls
+- Comprehensive audit logging and performance tracking
+
+**Prompt Management**:
+- Centralized system in `src-tauri/src/agent/prompts/`
+- File persistence to `~/.juno/prompts.json`
+- Variable substitution with `{{variable_name}}` syntax
+- Template versioning and customization controls
+- Backwards compatibility with existing configurations
+
+## Development Requirements
+
+### Mandatory Compilation Check
+**CRITICAL**: After every Rust change, run:
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+Project MUST compile with exit code 0. No exceptions.
+
+### 🔒 Security Development Standards (MANDATORY)
+- **Input Validation**: All user inputs MUST be validated against whitelists before processing
+- **Path Operations**: Use security validation functions with workspace boundary enforcement
+- **Command Execution**: All commands MUST pass whitelist validation and injection prevention
+- **Error Handling**: NEVER use `.unwrap()` in production code - implement graceful degradation
+- **Resource Limits**: Implement size limits and DoS prevention for all operations
+
+### Key Development Patterns
+- Use `AgentError` enum for errors, NEVER `std::process::exit()`
+- Dynamic escape key registration ONLY during agent execution
+- All persistent state in `AppState`, access via getters
+- Follow async/await patterns consistently throughout
+- **NEW**: Safe mutex handling with lock poisoning protection
+- **CRITICAL**: Use `tauri::async_runtime::spawn()` in event listeners, NEVER `tokio::spawn()`
+
+### 🚫 Error Handling Rules (MANDATORY) 🚫
+**CRITICAL**: No string-based error detection patterns allowed!
+
+**Anti-Pattern Detection**: Run `./scripts/detect-string-error-patterns.sh` before commits.
+
+**Forbidden Patterns**:
+```rust
+❌ error_msg.to_lowercase().contains("network")
+❌ if error_string.contains("timeout")
+❌ match error_message { ... } // String matching
+```
+
+**Required Patterns**:
+```rust
+✅ impl From<reqwest::Error> for NetworkError
+✅ impl ErrorClassifiable for MyError
+✅ match error.downcast_ref::<IoError>()
+✅ Use structured error types with enums
+```
+
+**Why String-Based Error Detection is Forbidden**:
+1. **Fragile**: Error messages change across library versions
+2. **Localization**: Messages may be in different languages
+3. **Incomplete**: New error types won't be caught
+4. **Brittle**: Formatting changes break detection
+5. **Unmaintainable**: Hard to test and update
+6. **Performance**: String operations are slower than type matching
+
+**Required Migration**: See `docs/rules/ERROR_HANDLING_BEST_PRACTICES.md` for complete structured error handling guide.
+
+### 🎯 Tauri Event Listener Async Patterns (CRITICAL) 🎯
+**NEVER** use `tokio::spawn()` in Tauri event listeners - it will panic with "no reactor running"!
+
+**Anti-Pattern (CAUSES RUNTIME PANIC)**:
+```rust
+❌ app_handle.listen("some-event", move |event| {
+    tokio::spawn(async move {  // PANIC: no reactor running
+        // async work
+    });
+});
+```
+
+**Required Pattern**:
+```rust
+✅ app_handle.listen("some-event", move |event| {
+    tauri::async_runtime::spawn(async move {  // WORKS: uses Tauri's runtime
+        // async work
+    });
+});
+```
+
+**Why This Happens**:
+- Tauri event listeners don't run within a Tokio runtime context
+- `tokio::spawn()` requires an active Tokio reactor
+- `tauri::async_runtime::spawn()` uses Tauri's own async runtime
+- This pattern is used consistently in `src-tauri/src/integration.rs`
+
+**Common Locations to Watch**:
+- Event listeners in `src-tauri/src/commands/floating_bar.rs`
+- Integration event handlers in `src-tauri/src/integration.rs`
+- Any `app_handle.listen()` callback with async operations
+
+**Recent Fix**: This exact issue caused dictation crashes in December 2024 - all `tokio::spawn()` calls in floating bar event listeners were replaced with `tauri::async_runtime::spawn()`.
+
+### 📂 Tauri Store Pattern - MANDATORY for All Persistence (NEW) 📂
+**CRITICAL**: ALL configuration files MUST use the established Tauri store pattern. NO direct file I/O!
+
+**Why Tauri Store Pattern is Required**:
+- **Platform Consistency**: Handles platform-specific storage locations automatically
+- **Atomic Operations**: Store operations are atomic, preventing corruption from partial writes
+- **Error Handling**: Better error handling through the Tauri plugin system
+- **Reliability**: Official Tauri plugin with comprehensive testing
+- **Thread Safety**: Built-in synchronization for concurrent access
+- **Cross-Platform**: Works consistently across macOS, Windows, Linux
+
+**Required Pattern for ALL Configuration**:
+```rust
+use tauri_plugin_store::StoreExt;
+
+// ✅ CORRECT - Use Tauri store pattern
+pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, String> {
+    let store = app_handle.store("config_name.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+
+    // Try to load configuration from store
+    if let Some(config_value) = store.get("config_key") {
+        match serde_json::from_value::<Self>(config_value) {
+            Ok(config) => return Ok(config),
+            Err(e) => {
+                info!("Failed to parse stored config ({}), creating default", e);
+            }
+        }
+    }
+
+    // No valid configuration found, create and save default
+    let default_config = Self::default();
+    default_config.save_to_store(app_handle)?;
+    Ok(default_config)
+}
+
+pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), String> {
+    let store = app_handle.store("config_name.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+
+    let config_value = serde_json::to_value(self)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    store.set("config_key", config_value);
+    store.save()
+        .map_err(|e| format!("Failed to save store: {}", e))?;
+
+    info!("Saved configuration to store");
+    Ok(())
+}
+```
+
+**❌ FORBIDDEN - Direct file I/O patterns**:
+```rust
+❌ use std::fs;
+❌ fs::read_to_string(&config_path)
+❌ fs::write(&config_path, contents)
+❌ tokio::fs::write(&config_path, data)
+❌ File::create(&config_path)
+❌ OpenOptions::new().write(true).create(true)
+```
+
+**✅ REQUIRED - Tauri store integration in AppState**:
+```rust
+// Load configuration during app startup
+impl AppState {
+    pub async fn load_config(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let loaded_config = ConfigManager::load_from_store(app_handle)?;
+        let mut config_guard = self.config_manager.lock().await;
+        *config_guard = loaded_config;
+        Ok(())
+    }
+
+    pub async fn save_config(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let config_guard = self.config_manager.lock().await;
+        config_guard.save_to_store(app_handle)
+    }
+}
+```
+
+**Files Currently Using This Pattern** (Examples to Follow):
+- ✅ `src-tauri/src/agent/tools/tool_config.rs` - Tool configuration management
+- ✅ `src-tauri/src/commands/shortcuts.rs` - Keyboard shortcuts persistence
+- ✅ `src-tauri/src/commands/core.rs` - Agent trigger mode settings
+- ✅ `src-tauri/src/commands/onboarding.rs` - Onboarding state tracking
+
+**Files That Need Migration** (Identified Issues):
+- ❌ `src-tauri/src/commands/floating_bar.rs` - Still uses `tokio::fs`
+- ❌ `src-tauri/src/cloud/config.rs` - Still uses `std::fs`
+- ❌ `src-tauri/src/agent/providers/config.rs` - Still uses `std::fs`
+- ❌ `src-tauri/src/agent/prompts/manager.rs` - Still uses `std::fs`
+
+**Migration Benefits Demonstrated**:
+The recent tool configuration migration from direct file I/O to Tauri store resulted in:
+- **Consistency**: Now matches all other settings patterns
+- **Reliability**: Better error handling and atomic operations
+- **Maintainability**: Easier to test and debug
+- **Thread Safety**: Built-in synchronization
+- **Platform Support**: Cross-platform storage locations
+
+**MANDATORY**: All new configuration files MUST use this pattern. All existing files using direct file I/O must be migrated.
+
+### ☁️ Cloud/WebSocket Patterns (CRITICAL) ☁️
+
+**Strict Architecture Rule**:
+- **Allowed**: Native Rust WebSocket in backend (`tokio-tungstenite`)
+- **FORBIDDEN**: Importing `@tauri-apps/plugin-websocket` in frontend code (Causes build failure)
+
+**Correct Data Flow**:
+1. **Backend**: Rust maintains `tokio-tungstenite` connection to `wss://juno-cloud-backend.fly.dev/ws`
+2. **Events**: Backend emits `cloud-command-received` to Frontend via `app_handle.emit_all`
+3. **Frontend**: Listens for events; NEVER connects directly
+
+**Authentication**:
+- Use HMAC signatures for all messages
+- Default `server_url` must be production URL, not localhost
+- Stored config in `~/Library/Application Support/com.juno.app/cloud-config.toml` takes precedence
+
+## Enhanced Security Framework 🔒 NEW
+
+### Production-Grade Security System
+**Location**: `src-tauri/src/agent/tools/basic_tools.rs`
+
+**Security Modes**:
+- **Development Mode** (`cfg!(debug_assertions)`): Relaxed security for development workflow
+- **Production Mode**: Strict security controls with comprehensive validation
+
+### File Access Security
+**Path Validation and Sandboxing**:
+- Path traversal prevention (`../`, `~/` attacks blocked)
+- Directory access control (workspace-only access)
+- File extension validation (safe text files only)
+- File size limits (10MB production, 50MB development)
+- Canonical path validation and normalization
+
+**Allowed File Extensions** (Production):
+```rust
+txt, md, rs, js, ts, tsx, jsx, json, yaml, yml, toml, css, html, xml, py, log
+```
+
+**Allowed Directories** (Production):
+```rust
+src, src-tauri, public, scripts, docs, examples, tests, tasks
+```
+
+### Command Execution Security
+**Command Whitelisting and Monitoring**:
+- Command whitelist enforcement (safe development tools only)
+- Dangerous pattern detection and blocking
+- Execution timeouts (30s production, 120s development)
+- Resource usage monitoring and limits
+- Comprehensive audit logging
+
+**Allowed Commands** (Production):
+```rust
+cargo, npm, bun, git, ls, cat, grep, find, wc, head, tail, echo, pwd, which
+```
+
+**Dangerous Patterns Blocked**:
+```rust
+rm -rf, sudo, su, chmod 777, wget, curl, nc, netcat, telnet, /dev/, mkfifo, nohup
+```
+
+### Security Configuration
+```rust
+// Production configuration
+SecurityConfig::default() {
+    max_file_size: 10 * 1024 * 1024, // 10MB
+    command_timeout: Duration::from_secs(30),
+    debug_mode: false,
+    // ... whitelists and validation rules
+}
+
+// Development configuration
+SecurityConfig::development_mode() {
+    max_file_size: 50 * 1024 * 1024, // 50MB
+    command_timeout: Duration::from_secs(120),
+    debug_mode: true,
+    // ... expanded permissions for development
+}
+```
+
+**Security Audit Logging**:
+- All file access attempts logged with validation results
+- Command execution tracked with performance metrics
+- Security violations logged with detailed context
+- Production vs development mode operations distinguished
+
+### Rate Limiting Protection 🛡️
+**Location**: `src-tauri/src/utils/rate_limiter.rs`
+
+**Strict Enforcement**:
+- **AI Operations**: 20/minute (Cost control)
+- **Shell Commands**: 10/second (Security)
+- **Filesystem Ops**: 100/second (Stability)
+- **Screenshots**: 1/second (Resource usage)
+- **Browser Ops**: 30/minute (Anti-scraping)
+
+## Real-Time Hardware Monitoring 📊 NEW
+
+### Comprehensive System Monitoring
+**Location**: `src-tauri/src/cloud/connector.rs`
+
+**Hardware Metrics Collection**:
+- **CPU Usage**: Real-time percentage via macOS `top` command
+- **Memory Usage**: Memory percentage calculation via `vm_stat`
+- **Disk Usage**: Root filesystem usage via `df` command
+- **Screen Resolution**: Display information via `system_profiler`
+
+**Implementation**:
+```rust
+struct HardwareMonitor;
+
+impl HardwareMonitor {
+    async fn get_comprehensive_hardware_info() -> HardwareInfo {
+        let (cpu_usage, memory_usage, disk_usage, screen_resolution) = tokio::join!(
+            Self::get_cpu_usage(),
+            Self::get_memory_usage(),
+            Self::get_disk_usage(),
+            Self::get_screen_resolution()
+        );
+        // ... parallel async collection
+    }
+}
+```
+
+### Performance Analytics
+**Connection and Command Tracking**:
+- Command execution timing and success rates
+- Connection statistics with latency measurement
+- System health reporting in heartbeats
+- Hardware data collection optimization
+
+**Enhanced Cloud Connector Features**:
+- Real-time connection statistics tracking
+- Command performance analytics
+- Hardware metrics integration in status updates
+- Optimized parallel hardware data collection
+
+**Monitoring Integration**:
+```rust
+// Enhanced heartbeat with system health
+let heartbeat = WebSocketMessage {
+    message_type: MessageType::Heartbeat,
+    data: json!({
+        "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+        "device_id": self.auth.get_credentials().map(|c| c.device_id.clone()).unwrap_or_default(),
+        "connection_stats": self.get_connection_stats().await,
+        "system_health": {
+            "uptime": self.connection_start_time.lock().await
+                .as_ref()
+                .map(|start| start.elapsed().as_secs())
+                .unwrap_or(0),
+            "performance": "optimal"
+        }
+    }),
+    timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+};
+```
+
+## Complete Frontend Functionality 🎨 NEW
+
+### Enhanced Modal System
+**Location**: `src/App.tsx`
+
+**Complete User Interface Features**:
+- **Help Modal**: Comprehensive documentation and user guides
+- **Feedback System**: GitHub issue integration with priority levels
+- **Chat Import/Export**: JSON-based conversation backup and restore
+- **Window Management**: Full window control (minimize, maximize, fullscreen)
+- **Update System**: Application update checking and installation
+
+### Modal Implementations
+
+#### Help Modal
+```typescript
+// Comprehensive documentation modal
+case "help":
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto">
+      {/* Voice Controls, Chat Features, Tools & Automation, Settings & Permissions */}
+    </div>
+  );
+```
+
+#### Feedback System
+```typescript
+// GitHub integration with priority levels
+interface FeedbackData {
+  type: "issue" | "feature" | "general";
+  title: string;
+  description: string;
+  email?: string;
+  priority: "low" | "medium" | "high";
+}
+```
+
+#### Chat Import/Export
+```typescript
+// JSON-based conversation management
+interface ChatExport {
+  version: string;
+  exported_at: string;
+  conversation: ChatMessage[];
+  metadata: {
+    total_messages: number;
+    export_type: "full" | "filtered";
+  };
+}
+```
+
+### User Experience Enhancements
+**Accessibility and Error Handling**:
+- Accessible modal design with keyboard navigation
+- Comprehensive error handling and user feedback
+- Loading states and progress indicators
+- Data validation and format checking
+- Backend integration via secure Tauri commands
+
+**Window Management**:
+```typescript
+// Complete window control implementation
+const window = getCurrentWindow();
+await window.minimize();
+await window.maximize();
+await window.setFullscreen(!isFullscreen);
+```
+
+### Frontend Component State Management Patterns 🔄 NEW
+
+#### ModelSelector Synchronization (RESOLVED)
+**Issue**: The ModelSelector component in the app header was experiencing critical state synchronization problems:
+- Not syncing with selected model when changing providers
+- Sometimes updated but was never consistently in sync
+- When changing providers (e.g., to OpenAI), still showed previous provider's models
+- Multiple competing state sources causing race conditions
+
+**Root Cause Analysis**:
+1. **Multiple competing state sources**: ModelSelector had its own `currentModel` state competing with `settings.formData.model` and `settings.providerSettings?.model`
+2. **Race conditions**: Multiple useEffect hooks conflicted with each other
+3. **Event listener mismatch**: useSettings hook was listening for `provider_settings_changed` events but incorrectly handling payload structure
+4. **Backend event structure**: Backend emits full `ProviderSettings` object but frontend was treating it as single provider settings
+
+**✅ Solution Implemented**:
+
+**ModelSelector.tsx Rewrite**:
+```typescript
+// ✅ CORRECT - Single source of truth pattern
+const ModelSelector = ({ variant = "default" }: ModelSelectorProps) => {
+  const settings = useSettings();
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  // NO local currentModel state - eliminated competing state sources
+
+  // Use settings.formData.model as single source of truth
+  const currentModelId = settings.formData.model || settings.providerSettings?.model || "";
+
+  // Proper event listener for provider changes
+  useEffect(() => {
+    const unlisten = listen<ProviderSettings>("provider_settings_changed", (event) => {
+      // Reload models when provider changes
+      loadModels();
+    });
+    return () => unlisten?.();
+  }, []);
+};
+```
+
+**useSettings.ts Event Listener Fix**:
+```typescript
+// ✅ CORRECT - Handle full ProviderSettings payload structure
+useEffect(() => {
+  const setupProviderListener = async () => {
+    unlisten = await listen<{
+      active_provider: string;
+      providers: Array<{
+        id: string;
+        api_key?: string;
+        model?: string;
+        max_tokens?: number;
+        temperature?: number;
+        system_prompt?: string;
+      }>;
+    }>("provider_settings_changed", (event) => {
+      const fullProviderSettings = event.payload;
+
+      // Extract current provider settings from providers array
+      const currentProviderSettings = fullProviderSettings.providers.find(
+        p => p.id === fullProviderSettings.active_provider
+      );
+
+      if (currentProviderSettings) {
+        setProviderSettings(currentProviderSettings);
+        setFormData({
+          model: currentProviderSettings.model || "",
+          // ... other fields
+        });
+      }
+    });
+  };
+}, [activeProvider]);
+```
+
+**Backend Event Structure**:
+```rust
+// Backend correctly emits full ProviderSettings structure
+let settings = ProviderSettings {
+    active_provider: "openai".to_string(),
+    providers: vec![
+        ProviderConfig { id: "openai", model: Some("gpt-4"), ... },
+        ProviderConfig { id: "anthropic", model: Some("claude-3-5-sonnet"), ... },
+    ]
+};
+app_handle.emit(events::PROVIDER_SETTINGS_CHANGED, settings);
+```
+
+**Key Patterns for Frontend Components**:
+1. **Single Source of Truth**: Always use one authoritative state source, avoid competing local state
+2. **Event Payload Structure**: Understand backend event structure - don't assume payload format
+3. **Provider Change Detection**: Listen for `provider_settings_changed` events and reload dependent data
+4. **State Synchronization**: Update all related state atomically when provider changes
+5. **Error Prevention**: Handle missing provider settings gracefully
+
+**Expected Behavior After Fix**:
+- ✅ ModelSelector properly syncs with provider changes
+- ✅ Shows provider-specific models immediately
+- ✅ Maintains consistent state across application
+- ✅ Eliminates race conditions and state conflicts
+
+## Voice System - Three-Mode Architecture 🎙️
+
+### Complete Voice Mode System
+Juno implements a comprehensive three-mode voice interaction system:
+
+| Mode | Trigger | Purpose | State | Implementation |
+|------|---------|---------|-------|----------------|
+| **Dictation Mode** | Hold configured key | Voice-to-text typing | Orange mic | `tauri-plugin-voice-transcription` |
+| **Agent Mode** | Option+D toggle | AI conversations | Blue mic + chat | Orchestrator integration |
+| **Always Listening** | Background continuous | Intent detection | Background active | Wake word detection |
+
+### Always Listening Mode ✨
+**Location**: `tauri-plugin-voice-transcription/src/always_listening.rs`
+
+**Features**:
+- Continuous background monitoring for user intent
+- Wake word detection using Whisper transcription
+- Volume threshold-based activation
+- Configurable sensitivity (0.1-2.0) and custom wake words
+- Two-state system: Monitoring → Activated
+- Integration with existing voice infrastructure
+
+**Configuration**:
+- Default wake words: `["hey juno", "computer"]`
+- Sensitivity: 0.5 (balanced detection)
+- Silence timeout: 3 seconds
+- Audio sample rate: 16kHz for Whisper compatibility
+
+**Commands**: Available in `src-tauri/src/commands/always_listening.rs`
+- Start/stop/toggle always listening mode
+- Configure sensitivity and wake words
+- Debug status and audio level monitoring
+
+## JSX Visual Response System 🎨
+
+### Rich Visual Agent Responses
+**Location**: `src/components/ui/jsx-message-renderer.tsx`, UI integration in `src/App.tsx`
+
+**Capabilities**:
+- Agent responds with rich, interactive React components instead of plain text
+- Real-time JSX rendering with automatic incomplete tag completion
+- Extensive component library for visual communication
+- Automatic JSX detection and parsing during streaming
+
+**Available Visual Components**:
+
+#### Layout & Structure
+- `<Card>`, `<CardHeader>`, `<CardTitle>`, `<CardContent>`, `<CardFooter>` - Organized content containers
+- `<Alert>`, `<AlertTitle>`, `<AlertDescription>` - Important messages and notifications
+- `<div>`, `<span>`, `<p>`, `<h1>`-`<h6>` - Basic HTML elements with styling
+- `<Separator>` - Visual content dividers
+
+#### Interactive Elements
+- `<Button>` - Interactive elements (display only)
+- `<Badge>` - Tags, labels, and status indicators
+- `<Input>`, `<Label>`, `<Textarea>` - Form elements
+- `<Tabs>`, `<TabsContent>`, `<TabsList>`, `<TabsTrigger>` - Tabbed content
+
+#### Visual Feedback
+- `<StatusCard status="success|warning|error|info" message="..." icon={<CheckCircle />} />` - Status messages
+- `<ProgressBar progress={75} label="Progress" />` - Progress indicators
+- `<ColorShowcase color="bg-blue-500" name="Blue" />` - Color demonstrations
+
+#### Shape Components 🎯 SOLVES RAW SVG PROBLEM
+- `<Circle size={100} color="blue" borderColor="black" borderWidth={2} />` - Visual circles
+- `<Rectangle width={100} height={60} color="green" borderColor="darkgreen" />` - Rectangles
+- `<Triangle size={100} color="red" direction="up|down|left|right" />` - Triangles
+
+**Critical Feature**: When users request visual shapes (circles, squares, triangles), the agent now responds with actual rendered components instead of typing raw SVG/HTML code.
+
+#### Icon Library
+Extensive Lucide React icon set: `CheckCircle`, `XCircle`, `AlertCircle`, `AlertTriangle`, `Info`, `Star`, `Heart`, `ThumbsUp`, `ThumbsDown`, `Lightbulb`, `Zap`, `Sparkles`, `Palette`, `Rainbow`, and more.
+
+### Agent Prompt Integration
+**System Prompts Updated**: Both default and development system prompts now include comprehensive JSX capabilities documentation with explicit instructions to use visual components instead of raw code.
+
+**Key Agent Instructions**:
+- Use JSX components for status updates, visual demonstrations, and structured information
+- **NEVER type raw SVG or HTML code** - always use the provided shape components
+- Automatically engage visual mode for color/design tasks, progress indicators, and shape requests
+- Enhance responses with appropriate icons and visual hierarchy
+
+### Technical Implementation
+**JSX Detection**: Automatic detection of JSX content in agent responses via regex pattern matching
+**Streaming Support**: Incomplete JSX tags automatically completed during streaming responses
+**Component Safety**: Type-safe component library with proper TypeScript integration
+**Error Handling**: Graceful fallback to text rendering if JSX parsing fails
+
+## High-Performance Safari Tools 🚀 NEW
+
+### Specialized Architecture (Phase 2 Complete)
+**Location**: `src-tauri/src/agent/tools/safari_tools.rs`
+
+**Performance**: **3-5x Faster** than generic browser automation via direct AppleScript/JS injection.
+
+**Available Tools**:
+- `safari_get_url`: Instant URL retrieval
+- `safari_navigate`: Direct navigation
+- `safari_click_element`: JS-injected click (bypasses WebDriver)
+- `safari_get_text`: Direct DOM text extraction
+- `safari_fill_form`: Native form interaction
+- `safari_execute_script`: Custom JS execution
+
+**Implementation**:
+1. **AppleScript Layer**: Direct application communication
+2. **JavaScript Layer**: DOM manipulation/injection
+3. **Element Caching**: Optimized re-access
+4. **Error Recovery**: Fallback to standard automation
+
+**Usage**: Prefer these tools (`safari_*`) for all Safari-specific tasks.
+
+## AI Response Streaming 🌊
+
+### Real-Time Streaming Implementation
+**Location**: Backend in `src-tauri/src/agent/providers/anthropic.rs`, Frontend in `src/App.tsx`
+
+**Architecture**:
+- Server-Sent Events (SSE) parsing from Anthropic API
+- Progressive text chunks emitted via Tauri events
+- Real-time UI updates as AI generates responses
+- Duplicate prevention with time-based detection
+
+**Event System**:
+```rust
+// Backend events
+pub const AGENT_STREAM_START: &str = "agent-stream-start";
+pub const AGENT_TEXT_STREAM: &str = "agent-text-stream";
+pub const AGENT_STREAM_END: &str = "agent-stream-end";
+```
+
+**Features**:
+- Automatic streaming detection for compatible providers
+- Fallback to standard responses for non-streaming providers
+- Integration with TTS system
+- Visual typing indicator with auto-scroll
+
+## MCP Integration System 🔌
+
+### External Tool Server Support
+**Location**: `src-tauri/src/agent/tools/mcp_integration.rs`
+
+**Capabilities**:
+- Add/remove external MCP servers dynamically
+- Automatic tool discovery and registration
+- Seamless execution alongside built-in tools
+- Persistent configuration storage
+
+**Server Management**:
+```rust
+struct MCPServerConfig {
+    name: String,
+    command: String,
+    args: Vec<String>,
+    environment_variables: HashMap<String, String>,
+    enabled: bool,
+    auto_start: bool,
+    timeout_seconds: u64,
+}
+```
+
+**Features**:
+- JSON-RPC 2.0 communication over STDIO
+- Process isolation with automatic cleanup
+- Tool namespacing to prevent conflicts
+- Configuration UI in settings panel
+
+## Production Cloud Connector ☁️
+
+### Enterprise Remote Control
+**Location**: `src-tauri/src/cloud/connector.rs`
+
+**Enhanced Features**:
+- Official Tauri WebSocket plugin integration
+- HMAC-signed authentication with device-specific API keys
+- Command validation with configurable security levels
+- Rate limiting and audit logging
+- Exponential backoff reconnection with health monitoring
+- **NEW**: Real-time hardware monitoring integration
+- **NEW**: Enhanced connection statistics and performance analytics
+
+**Supported Remote Commands**:
+- Text and voice queries to AI agent
+- Screenshot capture and retrieval
+- System status and configuration updates
+- Real-time connection monitoring
+- **NEW**: Hardware metrics reporting
+
+**Security**:
+- TLS/WebSocket Secure (WSS) encryption
+- Multi-layer security (Low/Medium/High levels)
+- Comprehensive audit trail
+- Enterprise-grade authentication
+
+## Auto-Launch System 🚀
+
+### Seamless Startup Integration
+**Location**: `src-tauri/src/commands/autostart.rs`
+
+**Complete Implementation**:
+- ✅ Backend Rust commands with error handling and persistence
+- ✅ Frontend React UI in General Settings section
+- ✅ macOS LaunchAgent integration for native startup behavior
+- ✅ Persistent JSON-based configuration storage
+- ✅ System and app settings synchronization
+
+**Core Commands**:
+```rust
+// Auto-launch management commands
+enable_autostart()     // Enable auto-launch on login
+disable_autostart()    // Disable auto-launch functionality
+is_autostart_enabled() // Check current auto-launch status
+toggle_autostart()     // Toggle current state
+init_autostart()       // Sync settings on app startup
+```
+
+**Features**:
+- **System Integration**: Uses `MacosLauncher::LaunchAgent` for native macOS integration
+- **Local Persistence**: JSON-based settings storage with timestamps in `{app_config_dir}/autostart.json`
+- **Error Recovery**: Fallback to saved settings if system check fails
+- **Startup Sync**: Ensures system and app settings remain synchronized on app startup
+- **User Control**: Accessible toggle in Settings → General → Startup Behavior
+
+**Frontend Integration**: Complete UI implementation in `src/components/settings/sections/GeneralSettings.tsx`
+- Toggle switch with loading states and error handling
+- Automatic state reversion on operation failures
+- Real-time status display and user feedback
+
+**Dependencies**:
+- Backend: `tauri-plugin-autostart = "2.3.0"`
+- Frontend: `@tauri-apps/plugin-autostart = "^2.3.0"`
+- Permissions: `autostart:allow-enable`, `autostart:allow-disable`, `autostart:allow-is-enabled`
+
+**Storage Format**:
+```json
+{
+  "enabled": true,
+  "last_updated": "2024-01-15T10:30:45.123Z"
+}
+```
+
+**Cross-Platform Ready**: Foundation for Windows (Registry) and Linux (XDG autostart) support via tauri-plugin-autostart.
+
+## macOS Permission System 🔧
+
+### Critical Requirement
+**ALWAYS test built apps**, not just development builds for permission issues. Built and dev apps have different bundle identifiers and permission contexts.
+
+### Required Files for Built Apps
+1. **`src-tauri/juno.entitlements`** - macOS security permissions
+   - `com.apple.security.automation.apple-events`
+   - `com.apple.security.cs.allow-unsigned-executable-memory`
+   - `com.apple.security.cs.disable-library-validation`
+   - `com.apple.security.cs.allow-dyld-environment-variables`
+
+2. **`src-tauri/Info.plist`** - Usage descriptions for permission dialogs
+   - `NSAccessibilityUsageDescription`
+   - `NSAppleEventsUsageDescription`
+   - `NSMicrophoneUsageDescription`
+   - `NSCameraUsageDescription`
+
+3. **`src-tauri/tauri.conf.json`** - Bundle configuration
+   ```json
+   {
+     "bundle": {
+       "resources": ["Info.plist"],
+       "macOS": {
+         "entitlements": "juno.entitlements",
+         "files": {"Info.plist": "Info.plist"}
+       }
+     }
+   }
+   ```
+
+### Permission Check Architecture ✅ FIXED
+Located in: `src-tauri/src/commands/permissions.rs`
+
+**Major Fixes Since Rollback**:
+- Fixed fake permission checks that always returned `true`
+- Implemented real permission testing using actual system capabilities
+
+## Self-Awareness System 🤖
+
+### Development Mode Only Features
+**Activation**: `RUST_LOG=debug bun run tauri dev`
+
+The agent gains self-awareness capabilities in debug mode:
+- **Source Code Location**: Knows it's located at `~/repo/juno`
+- **Creator Recognition**: Acknowledges Lacy as "magnanimous benefactor working toward utopia"
+- **Self-Building**: Can compile itself using Cargo (`build_self` tool)
+- **System Understanding**: Knows its architecture and prompt system
+- **Mission Awareness**: Understands goal of uniting AI and humanity
+
+### Implementation Files
+```
+src-tauri/src/agent/
+├── tools/self_awareness_tools.rs    # Core self-awareness tools
+├── prompts/manager.rs              # Debug mode prompt selection
+├── prompts/templates.rs            # Development vs production prompts
+└── tools/mod.rs                    # Tool registration with conditional compilation
+```
+
+## Implementation Status ✅
+
+### Systematic Improvements ✅ COMPLETED (Steps 1-7)
+
+#### **Step 1: Frontend Functionality** ✅ COMPLETED
+- Complete help modal with voice controls, chat features, and tools reference
+- Functional feedback modal with type selection, priority levels, and email integration
+- Working export/import chat functionality using JSON format
+- Full window management (minimize, maximize, fullscreen support)
+- Update checking and notification system
+- All 14 frontend TODO items completed
+
+#### **Step 2: Tool Configuration System** ✅ COMPLETED
+- **Location**: `src-tauri/src/commands/tools.rs`
+- Advanced ToolConfigManager with persistent storage
+- Real tool implementations replacing all placeholder functions
+- Support for all tool categories (Anthropic Computer Use, Desktop, Browser, Timer, Basic, MCP)
+- Individual tool and category-level enablement/disablement
+- MCP server integration for external tool management
+- Validation and error handling for configuration operations
+- **Commands**: 8 new tool configuration commands
+
+#### **Step 3: Error Handling Enhancement** ✅ ANALYSIS COMPLETED
+- Comprehensive AgentError enum with specific error types (LlmError, ToolError, MemoryError, ConfigurationError)
+- Error handling implemented across multiple components (browser_agent, anthropic provider, agent_runner)
+- Structured error propagation and logging systems
+- Recovery mechanisms and graceful degradation patterns
+
+#### **Step 6: Orchestrator Command System** ✅ COMPLETED
+- **Location**: `src-tauri/src/commands/orchestrator.rs`
+- **Advanced Task Management**: Sophisticated task creation, queuing, and execution
+- **Priority System**: Task prioritization (Low, Normal, High, Critical)
+- **Workflow Templates**: Reusable patterns for web research, file processing, desktop automation
+- **MCP Integration**: Global MCP manager with external tool access and orchestrator coordination
+- **Enhanced Commands**: 5 new orchestrator commands (create_orchestrator_task, cancel_task, execute_mcp_task, workflow management)
+- **Production Features**: Global state management, comprehensive error handling, task dependency support
+
+#### **Step 7: Memory Management Enhancement** ✅ COMPLETED
+- **Location**: `src-tauri/src/commands/memory.rs`
+- **Advanced Memory Architecture**: Enhanced memory managers with token-aware management
+- **Memory Commands**: Real-time status monitoring, cleanup, and optimization commands
+- **Tool Provider Enhancements**: Simplified execution paths with future error recovery preparation
+- **Performance Optimization**: Memory-efficient operations for large conversation histories
+- **Configuration Integration**: Extensible memory management parameters
+- **Commands**: 5 new memory commands (get_memory_status, clear_conversation_memory, clean_orphaned_tool_calls, get_conversation_messages, get_last_n_messages)
+
+### Recently Completed Major Improvements
+- ✅ **Enhanced Security Framework** - Production-grade file and command security with comprehensive validation
+- ✅ **Real-Time Hardware Monitoring** - CPU, memory, disk, connection metrics with performance analytics
+- ✅ **Complete Frontend Functionality** - All TODO items implemented including help, feedback, import/export, window management, updates
+- ✅ **Always Listening Mode** with wake word detection
+- ✅ **Streaming AI Responses** with real-time text updates
+- ✅ **JSX Visual Response System** with rich React component rendering
+- ✅ **MCP Integration** for external tool servers
+- ✅ **Production Cloud Connector** with enterprise security and hardware monitoring
+- ✅ **Accessibility Permission Fixes** with real permission testing
+- ✅ **Tech Debt Cleanup** (37% warning reduction, compilation fixes)
+- ✅ **Enhanced Voice Transcription** with improved state management
+- ✅ **Multi-instance Development** support for concurrent testing
+- ✅ **Settings Window** with comprehensive configuration options
+- ✅ **Keyboard Shortcut Management** with customizable bindings
+
+### Previously Completed Features
+- ✅ All 17 Computer Use actions (click, type, screenshot, etc.)
+- ✅ Timer system with context resumption
+- ✅ Voice integration (Agent/Dictation modes)
+- ✅ Multi-agent orchestration with memory isolation
+- ✅ Browser automation with Selenium WebDriver
+- ✅ Cloud control system and authentication
+- ✅ macOS accessibility permission fixes for built apps
+- ✅ Modular prompt configuration system with file persistence
+
+### Voice System
+**Plugin**: `tauri-plugin-voice-transcription/`
+- Whisper-based local transcription
+- Three modes: Always Listening, Dictation (text input), Agent (AI commands)
+- Keyboard shortcuts: Option+D (agent), Option+Space (dictation)
+- Enhanced with always listening controller and wake word detection
+- Models: `models/ggml-tiny.en.bin` (bundled or local)
+
+### Prompt Management System
+**Centralized Configuration**: `src-tauri/src/agent/prompts/`
+- **Templates** (`templates.rs`): Default prompts for all agent types
+- **Manager** (`manager.rs`): Load/save, variable substitution, customization
+- **Types** (`types.rs`): Core data structures (PromptType, PromptTemplate, etc.)
+- **Persistence**: Configuration saved to `~/.juno/prompts.json`
+- **Features**:
+  - Variable substitution: `{{variable_name}}` placeholders
+  - Template versioning for prompt evolution
+  - Custom prompt overrides with inheritance
+  - Backwards compatibility with existing systems
+  - Integration with all agent types (Orchestrator, Browser, Desktop, Coding, General)
+
+## File Structure & Entry Points
+
+### Key Entry Points
+- **Main Agent**: `src-tauri/src/anthropic.rs::submit_query()`
+- **Command Registry**: `src-tauri/src/commands/registry.rs` (50+ categorized commands)
+- **Tool Configuration**: `src-tauri/src/commands/tools.rs`
+- **Orchestrator System**: `src-tauri/src/commands/orchestrator.rs`
+- **Memory Management**: `src-tauri/src/commands/memory.rs`
+- **Security Framework**: `src-tauri/src/agent/tools/basic_tools.rs`
+- **Hardware Monitoring**: `src-tauri/src/cloud/connector.rs`
+- **Frontend Features**: `src/App.tsx`
+- **Permission System**: `src-tauri/src/commands/permissions.rs`
+- **Agent Tools**: `src-tauri/src/agent/tools/`
+- **Prompt System**: `src-tauri/src/agent/prompts/`
+- **Always Listening**: `tauri-plugin-voice-transcription/src/always_listening.rs`
+- **MCP Integration**: `src-tauri/src/agent/tools/mcp_integration.rs`
+- **Cloud Connector**: `src-tauri/src/cloud/connector.rs`
+- **macOS Integration**: `src-tauri/mcp-server-os-level/src/platforms/macos/`
+- **Voice System**: `tauri-plugin-voice-transcription/`
+
+### Enhanced Command System 🎯 NEW
+**Location**: `src-tauri/src/commands/registry.rs`
+
+**Command Categories** (50+ total commands):
+- **Core**: 25 commands - basic app functionality, window management, shortcuts
+- **Agent**: 9 commands - orchestrator, task management, agent capabilities
+- **Tool Configuration**: 8 commands - tool management, configuration, enabled states
+- **MCP**: 11 commands - external tool servers, server management
+- **Memory**: 5 commands - memory status, cleanup, optimization
+- **Workflow**: 3 commands - workflow templates, task execution
+- **Mouse**: 7 commands - mouse automation and interaction
+- **Keyboard**: 4 commands - keyboard input and shortcuts
+- **Window**: 8 commands - window management and interaction
+- **QA Test**: 5 commands - testing and validation
+
+### State Management
+- **AppState**: `src-tauri/src/state.rs` - Central application state
+- **Enhanced Fields**: Always listening state, cloud configuration, MCP manager, hardware monitoring
+- **Agent Memory**: Arc-based managers for safe cloning
+- **Configuration**: Tauri store for persistent settings
+
+### Frontend Integration
+- **Floating Bar**: `src/components/FloatingBar.tsx`
+- **Settings Window**: Native settings with comprehensive configuration
+- **Agent Communication**: Event-based system with `bar-state-update` events
+- **Streaming Integration**: Real-time text updates in `src/App.tsx`
+- **Window Management**: Multiple windows (main, floating-bar, settings)
+- **Modal System**: Complete UI functionality with help, feedback, import/export
+
+## Build & Testing
+
+### Development
+```bash
+bun run dev          # Frontend development
+cargo check         # Verify Rust compilation (MANDATORY after changes)
+```
+
+### Security Testing
+```bash
+# Test both security modes
+RUST_LOG=debug bun run tauri dev  # Development mode (relaxed security)
+bun tauri build                   # Production mode (strict security)
+```
+
+### Testing Infrastructure
+
+#### Core Testing Requirements
+**Rust Backend** (`cargo test`):
+- Unit tests for agents, tools, and core functionality
+- Integration tests for multi-agent coordination
+- Mock implementations for external dependencies
+- Error condition testing with comprehensive coverage
+
+**TypeScript Frontend** (`bun test`):
+- Component testing with React Testing Library
+- Integration tests for voice system
+- UI interaction testing for modals and controls
+- State management testing with mock backends
+
+#### Architecture Testing
+**Patterns to Test**:
+- **Memory isolation**: Agent memory managers remain separate
+- **Error propagation**: AgentError enum handling throughout stack
+- **Async coordination**: Multi-agent task delegation and coordination
+- **Configuration persistence**: Settings and preferences survival across restarts
+- **Permission handling**: Real accessibility and microphone permission detection
+- **Data Structures**: Serialization, validation, error propagation
+- **Platform Integration**: macOS APIs, permissions, accessibility
+- **Security Framework**: Path validation, command filtering, audit logging
+
+**Testing Patterns:**
+1. **Mock external dependencies** (LLM APIs, system commands, file operations)
+2. **Test error conditions** comprehensively
+3. **Validate async operations** with proper timeout handling
+
+#### Security Testing Requirements
+1. **Test both security modes** (development and production)
+2. **Validate path restrictions** and command filtering
+3. **Test file size limits** and extension validation
+4. **Verify audit logging** functionality
+
+#### Testing Anti-patterns to Avoid
+- Don't test implementation details of external crates
+- Don't hardcode system-specific paths or commands in tests
+- Don't test UI components in isolation without proper mocking
+- Don't skip error condition testing
+- Don't test with real LLM API calls (too slow/expensive)
+
+### Production Readiness Checklist
+- [ ] All TypeScript tests pass (`bun test`)
+- [ ] All Rust tests pass (`cargo test`)
+- [ ] No new compilation warnings
+- [ ] Security validation working in both modes
+- [ ] Hardware monitoring operational
+- [ ] Frontend modals and features functional
+
+## 🚀 NEW: MCP Request Batching System
+
+### **Revolutionary Performance Enhancement**
+- **Intelligent Batching**: Automatically detects and groups obvious sequential operations
+- **Pattern Recognition**: Identifies common patterns like "type → enter → screenshot"
+- **MCP Integration**: Full JSON-RPC 2.0 batch support for external tool servers
+- **33% Performance Gain**: Significant reduction in computational costs and network overhead
+
+### **Implementation Status**: ✅ ACTIVE
+- **Location**: `src-tauri/src/agent/implementations/agent_runner.rs`
+- **Integration**: Fully integrated into main execution loop
+- **Fallback**: Maintains sequential execution when batching inappropriate
+- **Error Recovery**: Comprehensive error handling and cancellation support
+
+### **Batch Detection Patterns**
+1. **Desktop Automation**: `type_text → key_press → screenshot`
+2. **Navigation Flows**: `click → screenshot`
+3. **Form Interactions**: `type_text → type_text → click → screenshot`
+4. **MCP Tool Chains**: External server tools batched via JSON-RPC 2.0
+5. **Smart Filtering**: Time-dependent operations execute individually
+
+## Core Architecture
+
+### **Tauri v2 Foundation**
+- Modern Rust backend with TypeScript frontend
+- Native macOS integration with accessibility permissions
+- Advanced security framework (development vs production modes)
+- Real-time hardware monitoring and cloud connectivity
+
+### **Hierarchical Agent System**
+- **Orchestrator**: `src-tauri/src/anthropic.rs` - Central coordination with advanced workflow management
+- **Specialists**: Domain-specific agents (browser, desktop, file) with isolated memory
+- **Tools**: 50+ categorized commands with lazy initialization and security validation
+- **Memory**: Token-aware management with conversation summarization
+- **MCP Integration**: External tool servers via `src-tauri/src/agent/tools/mcp_integration.rs`
+
+### **17 Computer Use Actions** (Full Anthropic API Implementation)
+✅ screenshot, click, right_click, middle_click, double_click, drag, scroll, key, type, cursor_position, left_click_drag, right_click_drag, middle_click_drag, key_combo, mouse_move, wait, get_screen_info
+
+## Advanced Features
+
+### **🔒 Production-Grade Security**
+- **Development Mode**: Relaxed security for workflow optimization (`RUST_LOG=debug`)
+- **Production Mode**: Strict validation with comprehensive audit logging
+- **File Access Control**: Path traversal prevention, extension validation, size limits
+- **Command Execution**: Whitelist enforcement, dangerous pattern detection, timeouts
+
+### **📊 Real-Time Monitoring**
+- CPU, memory, disk usage via native macOS commands
+- Connection statistics with latency measurement
+- Hardware data collection optimization
+- Performance analytics and health reporting
+
+### **🤖 Self-Awareness System** (Debug Mode Only)
+- Source code awareness at `~/repo/juno`
+- Creator recognition and self-building capabilities
+- System understanding and purpose awareness
+- Activated automatically in debug builds
+
+### **🎯 Dynamic System Tray**
+- State-aware tray icons with automatic updates
+- 6 icon states: Default, Agent Active, Dictation, Always Listening, Processing, Error
+- Comprehensive menu system with real-time state detection
+- Event-driven updates through application monitoring
+
+## Tool Systems
+
+### **Enhanced Tool Configuration**
+- **Real Management**: Category-based configuration with persistent storage
+- **MCP Integration**: Seamless external tool server coordination
+- **8 Configuration Commands**: Comprehensive tool management interface
+- **Security Validation**: All operations use production-grade security
+
+### **Memory Management Enhancement**
+- **Token-Aware**: Intelligent memory optimization with automatic pruning
+- **Conversation Summarization**: Advanced memory management strategies
+- **5 Memory Commands**: Real-time monitoring and control
+- **Arc-Based**: Safe memory manager cloning with enhanced tracking
+
+### **Orchestrator Command System**
+- **Task Prioritization**: Sophisticated workflow templates and management
+- **5 Orchestrator Commands**: Advanced task coordination
+- **Workflow Templates**: Web research, file processing, desktop automation patterns
+- **MCP Tool Execution**: Integrated external tool orchestration
+
+## Voice & Input Systems
+
+### **Advanced Voice Integration**
+- **Agent Mode**: Direct voice commands with real-time processing
+- **Dictation Mode**: High-accuracy text transcription
+- **Always Listening**: Background voice activation with wake word detection
+- **Multiple Models**: Whisper integration with model selection
+
+### **Input Coordination**
+- **Escape Key Management**: Dynamic registration during agent execution only
+- **Global Shortcuts**: Customizable hotkey system
+- **Voice State Management**: Sophisticated state transitions and coordination
+
+## macOS Integration
+
+### **Accessibility Permission System**
+- **Built App Testing**: Critical - always test built apps, not just dev builds
+- **Multiple Detection**: Primary computer_use_ai_sdk + fallback accessibility tests
+- **Required Files**: `juno.entitlements`, `Info.plist`, `tauri.conf.json`
+- **Robust Validation**: Multiple mechanisms ensure reliable permission detection
+
+### **Native System Integration**
+- **System Tray**: Dynamic state management with comprehensive menu system
+- **Notifications**: Native macOS notification system integration
+- **File System**: Secure file operations with comprehensive validation
+- **Hardware Monitoring**: Native command integration for system metrics
+
+## Development Guidelines
+
+### **Mandatory Practices**
+- **Compilation Check**: `cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1`
+- **Breaking Changes Allowed**: New build - focus on functionality over legacy compatibility
+- **AgentError Only**: Never use `std::process::exit()` - always use proper error handling
+- **Async/Await Patterns**: Consistent asynchronous programming with parallel tool execution
+
+### **Modern Architecture Patterns**
+- **Store-Based Configuration**: All configuration uses Tauri store, no file-based legacy
+- **Clean Codebase**: All deprecated methods eliminated, modern APIs only
+- **Parallel Tool Execution**: Batch-aware execution for performance optimization
+- **Security-First**: All tool operations must use security validation and audit logging
+
+## Recent Enhancements
+
+### **✅ Completed Features**
+- **MCP Request Batching**: 33% performance improvement through intelligent tool grouping
+- **ModelSelector Fix**: Resolved critical frontend synchronization issues
+- **Memory Optimization**: Token-aware management with intelligent pruning
+- **Security Framework**: Production-grade file and command security
+- **System Tray Integration**: Dynamic state-aware icons with automatic updates
+- **Tool Configuration**: Real implementations with comprehensive management
+- **Deprecated Code Elimination**: Complete modernization of codebase
+
+### **Key Files & Locations**
+- **Entry Point**: `src-tauri/src/anthropic.rs::submit_query()`
+- **Batching System**: `src-tauri/src/agent/implementations/agent_runner.rs::execute_tools_with_batching()`
+- **MCP Integration**: `src-tauri/src/agent/tools/mcp_integration.rs`
+- **Tool Configuration**: `src-tauri/src/commands/tools.rs`
+- **Memory Management**: `src-tauri/src/commands/memory.rs`
+- **System Tray**: `src-tauri/src/menu/tray_menu.rs`
+- **Security Framework**: `src-tauri/src/agent/tools/basic_tools.rs`
+
+## Testing & Validation
+
+### **MCP Batching Test Scenarios**
+1. **Sequential Patterns**: type → enter → screenshot batching
+2. **Performance Validation**: 33% latency reduction measurement
+3. **Error Recovery**: Graceful batch failure handling
+4. **Cancellation Support**: Mid-batch operation termination
+5. **Mixed Tool Types**: Appropriate batching vs. individual execution
+
+### **Quality Assurance**
+- **Comprehensive Test Suite**: Full validation of batching functionality
+- **Performance Monitoring**: Real-time metrics and improvement tracking
+- **Error Condition Testing**: Robust failure scenario validation
+- **Integration Testing**: Voice, timer, and always listening mode compatibility
+
+## Usage Patterns
+
+### **Optimal Commands for Batching**
+- "Type [text], press enter, take screenshot"
+- "Click [element], take screenshot"
+- "Fill form: name, email, submit, screenshot"
+- "Navigate to folder, list files, create directory"
+
+### **Commands Requiring Individual Execution**
+- "Take screenshot, analyze content, click relevant button"
+- "Check status, wait if busy, then proceed"
+- "Conditional operations based on screen content"
+
+**For AI Agents**: Juno represents the cutting edge of AI-computer interaction, with sophisticated batching algorithms that optimize performance while maintaining the flexibility and safety required for autonomous computer use. The MCP request batching system exemplifies how AI agents can be enhanced through intelligent operation grouping without sacrificing the reasoning capabilities that make them effective.
+
+## Active Research & Future Roadmap 🔬
+
+### UI-Guided Visual Token Selection (Priority 2 Planning)
+**Goal**: 33% computational cost reduction using "ShowUI" paper methodology (arXiv:2411.17465).
+
+**Core Concept**:
+- **RGB Connected Graphs**: Analyze UI density to identify sparse regions
+- **Token Reduction**: Reduce tokens in sparse areas by 77% (1296 -> 291)
+- **Multi-Monitor**: Display-aware processing for complex setups
+
+**Status**: In ACTIVE PLANNING phase. Agent should be aware of:
+- `UIGuidedTokenSelector` architecture
+- `RGBConnectedGraphAnalyzer` logic
+- Multi-monitor coordinate translation requirements
+
+**Target**: Efficiency optimization without accuracy loss for screenshot analysis.

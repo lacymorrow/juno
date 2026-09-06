@@ -64,7 +64,32 @@ impl EngineManager {
         *guard = Some(engine.clone());
 
         info!("[EngineManager] Engine switched to '{}'", engine.name());
+        Self::warm_up(engine.clone());
         Ok(engine)
+    }
+
+    /// Run one throwaway decode on a second of silence so first-use costs (Metal shader
+    /// compile, ONNX graph init, memory mapping the weights) land now instead of on the
+    /// user's first dictation.
+    fn warm_up(engine: Arc<dyn TranscriptionEngine>) {
+        std::thread::Builder::new()
+            .name("stt-warm-up".into())
+            .spawn(move || {
+                let started = std::time::Instant::now();
+                match engine.create_session() {
+                    Ok(mut session) => {
+                        let silence = vec![0.0f32; 16_000];
+                        let _ = session.transcribe_partial(&silence);
+                        info!(
+                            "[EngineManager] '{}' warm-up finished in {:?}",
+                            engine.name(),
+                            started.elapsed()
+                        );
+                    }
+                    Err(e) => warn!("[EngineManager] warm-up skipped: {}", e),
+                }
+            })
+            .ok();
     }
 
     /// Return the currently active engine. Returns an error if none has been initialized.

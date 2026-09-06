@@ -4,6 +4,7 @@
 // Model ID Constants - Single source of truth
 pub mod model_ids {
     // Anthropic Claude Models — Current Generation
+    pub const CLAUDE_FABLE_5_1: &str = "claude-fable-5-1";
     pub const CLAUDE_FABLE_5: &str = "claude-fable-5";
     pub const CLAUDE_OPUS_5: &str = "claude-opus-5";
     pub const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
@@ -26,6 +27,7 @@ pub mod model_ids {
     /// new computer type (computer_20251124) + new editor (text_editor_20250728).
     /// These also support high-resolution screenshots up to 2,576px.
     pub const OPUS_4_5_PLUS_MODELS: &[&str] = &[
+        CLAUDE_FABLE_5_1,
         CLAUDE_FABLE_5,
         CLAUDE_OPUS_5,
         CLAUDE_OPUS_4_8,
@@ -39,6 +41,26 @@ pub mod model_ids {
     /// Models that use the old computer type (computer_20250124) but require
     /// the new editor (text_editor_20250728). These sit between Opus 4.5+ and legacy.
     pub const MODELS_NEEDING_NEW_EDITOR: &[&str] = &[CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5];
+
+    /// Models that accept `thinking: {type: "adaptive"}` (the 4.6+ generation).
+    /// Older models still require `budget_tokens` and reject `adaptive` with a 400,
+    /// so the provider omits the parameter for anything not listed here.
+    pub const ADAPTIVE_THINKING_MODELS: &[&str] = &[
+        CLAUDE_FABLE_5_1,
+        CLAUDE_FABLE_5,
+        CLAUDE_OPUS_5,
+        CLAUDE_OPUS_4_8,
+        CLAUDE_OPUS_4_7,
+        CLAUDE_OPUS_4_6,
+        CLAUDE_SONNET_5,
+        CLAUDE_SONNET_4_6,
+    ];
+
+    /// Models that run safety classifiers and accept the server-side `fallbacks`
+    /// parameter (beta `server-side-fallback-2026-07-01`) so a refusal is retried on
+    /// a fallback model in the same round trip.
+    pub const SERVER_SIDE_FALLBACK_MODELS: &[&str] =
+        &[CLAUDE_FABLE_5_1, CLAUDE_FABLE_5, CLAUDE_OPUS_5];
 
     // OpenAI Models
     pub const OPENAI_CUA: &str = "computer-use-preview";
@@ -194,11 +216,18 @@ impl Provider {
                 &[
                     // Current generation
                     ModelDefinition {
+                        id: model_ids::CLAUDE_FABLE_5_1,
+                        name: "Claude Fable 5.1",
+                        category: ModelCategory::ComputerUse,
+                        supports_computer_use: true,
+                        is_recommended: true,
+                    },
+                    ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_5,
                         name: "Claude Opus 5",
                         category: ModelCategory::ComputerUse,
                         supports_computer_use: true,
-                        is_recommended: true,
+                        is_recommended: false,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_FABLE_5,
@@ -359,7 +388,7 @@ impl Provider {
             .unwrap_or_else(|| {
                 // Fallback constants if no definitions exist (shouldn't happen)
                 match self {
-                    Provider::Anthropic => model_ids::CLAUDE_OPUS_5,
+                    Provider::Anthropic => model_ids::CLAUDE_FABLE_5_1,
                     Provider::OpenAI => model_ids::OPENAI_CUA,
                     Provider::Rig => model_ids::OPENAI_CUA,
                     Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
@@ -388,6 +417,17 @@ impl Provider {
     }
 
     /// Check if provider supports computer use capabilities
+    /// Whether `model` accepts `thinking: {type: "adaptive"}` on this provider.
+    pub fn supports_adaptive_thinking(&self, model: &str) -> bool {
+        matches!(self, Provider::Anthropic) && model_ids::ADAPTIVE_THINKING_MODELS.contains(&model)
+    }
+
+    /// Whether `model` accepts the server-side `fallbacks` parameter on this provider.
+    pub fn supports_server_side_fallbacks(&self, model: &str) -> bool {
+        matches!(self, Provider::Anthropic)
+            && model_ids::SERVER_SIDE_FALLBACK_MODELS.contains(&model)
+    }
+
     pub fn supports_computer_use(&self) -> bool {
         self.model_definitions()
             .iter()
@@ -574,13 +614,38 @@ mod tests {
     }
 
     #[test]
-    fn test_opus_5_is_default_anthropic_model() {
-        // Claude Opus 5 is the current-generation flagship and must be the
-        // recommended/default Anthropic model (see LAC-3106).
+    fn test_fable_5_1_is_default_anthropic_model() {
+        // Claude Fable 5.1 is Anthropic's most capable model and the one Juno is
+        // built around; it must be the recommended/default Anthropic model.
         assert_eq!(
             Provider::Anthropic.default_model(),
-            model_ids::CLAUDE_OPUS_5
+            model_ids::CLAUDE_FABLE_5_1
         );
+    }
+
+    #[test]
+    fn test_resolve_tool_type_fable_5_1_remaps() {
+        let computer = Provider::Anthropic.resolve_tool_type(
+            "computer",
+            "computer_20250124",
+            model_ids::CLAUDE_FABLE_5_1,
+        );
+        assert_eq!(computer, "computer_20251124");
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_FABLE_5_1),
+            crate::constants::api::beta_flags::COMPUTER_USE_2025_11_24
+        );
+    }
+
+    #[test]
+    fn test_adaptive_thinking_and_fallback_capabilities() {
+        assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_FABLE_5_1));
+        assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_OPUS_5));
+        assert!(!Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_HAIKU_4_5));
+        assert!(!Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_OPUS_4_5));
+        assert!(Provider::Anthropic.supports_server_side_fallbacks(model_ids::CLAUDE_FABLE_5_1));
+        assert!(!Provider::Anthropic.supports_server_side_fallbacks(model_ids::CLAUDE_OPUS_4_8));
+        assert!(!Provider::OpenAI.supports_adaptive_thinking(model_ids::CLAUDE_FABLE_5_1));
     }
 
     #[test]

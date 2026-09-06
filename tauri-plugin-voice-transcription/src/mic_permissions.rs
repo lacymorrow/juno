@@ -235,29 +235,11 @@ pub fn initialize_audio_session() -> Result<(), String> {
 
 /// Check if microphone hardware is available
 pub fn is_microphone_available() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        // Quick hardware check using system_profiler
-        if let Ok(output) = std::process::Command::new("system_profiler")
-            .args(["SPAudioDataType", "-detailLevel", "mini"])
-            .output()
-        {
-            if output.status.success() {
-                let result = String::from_utf8_lossy(&output.stdout);
-                return result.contains("Input")
-                    || result.contains("Microphone")
-                    || result.contains("Built-in Microphone");
-            }
-        }
-
-        // Fallback: assume microphone is available on modern Macs
-        true
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
+    // Ask CoreAudio for the default input device. This runs on every dictation
+    // keypress, so it must be cheap: the previous `system_profiler` subprocess
+    // cost ~400 ms per press.
+    use cpal::traits::HostTrait;
+    cpal::default_host().default_input_device().is_some()
 }
 
 /// Combined permission and hardware check

@@ -86,6 +86,12 @@ The frontend may ONLY:
 
 ---
 
+## Model Policy
+
+- **Default model: `claude-fable-5-1`** (Anthropic provider). Juno is built around Anthropic's most capable model; do not downgrade the default for cost.
+- The Anthropic provider (`src-tauri/src/agent/providers/anthropic.rs`) sends `thinking: {type: "adaptive", display: "summarized"}` on 4.6+ models, `fallbacks: "default"` on Fable/Opus 5 tier (server-side retry on a safety refusal), and replays the previous turn's thinking blocks on tool-use turns (the API rejects tool-use turns whose thinking blocks were dropped).
+- Model IDs and capability lists live in `src-tauri/src/agent/providers/types.rs` (`model_ids`, `OPUS_4_5_PLUS_MODELS`, `ADAPTIVE_THINKING_MODELS`, `SERVER_SIDE_FALLBACK_MODELS`). Verify new IDs against the live Anthropic docs, never from memory (LAC-3106).
+
 ## Architecture
 
 ### Workspace Structure
@@ -298,7 +304,7 @@ Test files: `src/components/__tests__/`, `src/test/setup.ts`. Rust tests use inl
 
 ## Additional References
 
-- `LLMs.txt` — Comprehensive AI agent instructions (1200+ lines)
+- `LLMs.txt` — Short pointer for AI agents (this file is canonical; the old 1,200-line version is in `docs/legacy/`)
 - `src-tauri/CLAUDE.md` — Backend-specific guidance
 - `src/CLAUDE.md` — Frontend-specific guidance
 - `docs/rules/` — Development rules (13 files)

@@ -70,7 +70,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             id: Provider::Anthropic.id().to_string(),
             api_key: None,
             model: Some(Provider::Anthropic.default_model().to_string()),
-            max_tokens: Some(4096),
+            max_tokens: Some(crate::constants::agent::config::DEFAULT_MAX_TOKENS_ANTHROPIC),
             temperature: Some(0.7),
             system_prompt: None,
         },

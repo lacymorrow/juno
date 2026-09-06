@@ -109,7 +109,7 @@ You (voice or text)
   → Task complete
 ```
 
-Juno uses Anthropic's Computer Use API to give Claude vision and control of your screen. The orchestrator breaks complex tasks into subtasks and delegates to specialist agents that run in parallel. All processing happens locally — your screen data stays on your machine.
+Juno uses Anthropic's Computer Use API to give Claude vision and control of your screen. The orchestrator breaks complex tasks into subtasks and delegates to specialist agents that run in parallel. Voice transcription runs locally. Screenshots are sent to your chosen model provider only while an agent task is running, and never stored anywhere else.
 
 ## Architecture
 
@@ -158,7 +158,7 @@ juno/
 │   │   ├── anthropic.rs    # Main orchestrator
 │   │   ├── agent/          # Multi-agent system (tools, providers, prompts)
 │   │   ├── commands/       # 50+ Tauri command handlers
-│   │   └── cloud/          # Cloud sync & device management
+│   │   └── cloud/          # Remote-command connector (inactive; no hosted backend today)
 │   └── mcp-server-os-level/  # macOS platform library
 ├── tauri-plugin-voice-transcription/  # Custom Whisper plugin
 └── packages/juno-cua/      # CLI & MCP server for AI agents
@@ -174,7 +174,7 @@ Juno includes enterprise-grade security controls:
 - Tool approval system for sensitive operations
 - Full audit logging
 
-See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for details.
+See [docs/audits/security-audit-2026-02-08.md](docs/audits/security-audit-2026-02-08.md) for the open findings.
 
 ## License
 
