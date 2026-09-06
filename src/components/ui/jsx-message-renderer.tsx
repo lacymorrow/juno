@@ -34,6 +34,7 @@ import {
   TaskSummaryCard,
   NowPlayingCard,
 } from "@/components/ui/agent-cards";
+import { WhyBlock } from "@/components/ui/why-block";
 import { cn } from "@/lib/utils";
 import {
   AlertCircle,
@@ -445,6 +446,9 @@ const availableComponents = {
   TaskSummaryCard,
   // Live components — bound to real player state, never fake
   NowPlayingCard,
+  // Method rationale, collapsed by default (top-level <Why> is lifted out
+  // before parsing; this covers a <Why> nested inside another component)
+  Why: WhyBlock,
 
   // Animated components
   AnimatedCard,
