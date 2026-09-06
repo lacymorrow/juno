@@ -245,6 +245,9 @@ pub mod config {
 
     // Token limits
     pub const DEFAULT_MAX_TOKENS_STANDARD: u32 = 4096;
+    /// Anthropic default. Current models stream and support 128K output; 4096 truncated
+    /// component-rich (JSX) responses mid-card. Streaming is on, so timeouts are not a concern.
+    pub const DEFAULT_MAX_TOKENS_ANTHROPIC: u32 = 16384;
     pub const DEFAULT_MAX_TOKENS_COMPACT: i32 = 1024;
 
     // Temperature settings

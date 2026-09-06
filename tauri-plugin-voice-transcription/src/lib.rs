@@ -147,6 +147,8 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             let parakeet_dir_bg = parakeet_model_dir.clone();
             let app_handle_bg = app.clone();
 
+            configure_metal_shader_path(app);
+
             tracing::info!("Spawning background task to initialize '{}' engine...", provider);
             tauri::async_runtime::spawn(async move {
                 let model_path_bl = model_path_bg.clone();
@@ -207,4 +209,34 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             Ok(())
         })
         .build()
+}
+
+/// whisper.cpp (1.5.x) loads its Metal kernels at runtime from `ggml-metal.metal`, looked up
+/// in `GGML_METAL_PATH_RESOURCES`, then the main bundle, then the cwd. The build script only
+/// sets that variable for the compiler, so a packaged app would silently fall back to CPU.
+/// Point it at the copy we ship in the app's resource directory before the model loads.
+fn configure_metal_shader_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager;
+
+    if std::env::var_os("GGML_METAL_PATH_RESOURCES").is_some() {
+        return;
+    }
+    let Ok(resource_dir) = app.path().resource_dir() else {
+        tracing::warn!("[VoicePlugin] No resource dir; Metal shader path not configured");
+        return;
+    };
+    for candidate in [resource_dir.join("resources"), resource_dir.clone()] {
+        if candidate.join("ggml-metal.metal").is_file() {
+            std::env::set_var("GGML_METAL_PATH_RESOURCES", &candidate);
+            tracing::info!(
+                "[VoicePlugin] GGML_METAL_PATH_RESOURCES = {}",
+                candidate.display()
+            );
+            return;
+        }
+    }
+    tracing::warn!(
+        "[VoicePlugin] ggml-metal.metal not found under {}; whisper will run on CPU",
+        resource_dir.display()
+    );
 }

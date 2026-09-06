@@ -65,6 +65,10 @@ pub mod beta_flags {
 
     /// Beta flag for prompt caching
     pub const PROMPT_CACHING: &str = "prompt-caching-2024-07-31";
+
+    /// Beta flag for the server-side `fallbacks: "default"` refusal retry
+    /// (Fable / Opus 5 tier). The `"default"` scalar form requires exactly this date.
+    pub const SERVER_SIDE_FALLBACK: &str = "server-side-fallback-2026-07-01";
 }
 
 // Tool Version Groups (Mapping API versions to tool sets)

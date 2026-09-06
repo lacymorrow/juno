@@ -51,6 +51,16 @@ struct AnthropicRequest {
     stream: Option<bool>, // Add streaming support
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<ToolChoice>, // Add tool choice support
+    /// Extended-thinking configuration. Sent as `{type: "adaptive", display: "summarized"}`
+    /// on models that support adaptive thinking so the UI's reasoning panel gets a readable
+    /// summary; omitted entirely on older models (which would reject it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<Value>,
+    /// Server-side refusal fallbacks (`"default"`): when a safety classifier declines a
+    /// request on Fable/Opus-5-tier models the API retries on a fallback model in the
+    /// same round trip instead of returning an empty `refusal` turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fallbacks: Option<Value>,
 }
 
 /// System content block with optional cache_control for Anthropic prompt caching.
@@ -129,6 +139,31 @@ struct ApiContentBlock {
     tool_use_id: Option<String>, // For tool result blocks
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<ApiToolResultContent>, // For tool_result content (text or image blocks)
+    // --- Extended thinking blocks (replayed verbatim on tool-use turns) ---
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<String>, // `thinking` block text (may be empty when display is omitted)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<String>, // `thinking` block signature
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<String>, // `redacted_thinking` block payload
+}
+
+impl ApiContentBlock {
+    /// An empty block with every optional field unset; callers set only what they need.
+    fn empty(block_type: &str) -> Self {
+        ApiContentBlock {
+            block_type: block_type.to_string(),
+            text: None,
+            id: None,
+            name: None,
+            input: None,
+            tool_use_id: None,
+            content: None,
+            thinking: None,
+            signature: None,
+            data: None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -200,7 +235,21 @@ pub struct AnthropicBrain {
     streaming_enabled: bool,       // New field for streaming support
     #[allow(dead_code)]
     default_tool_choice: Option<ToolChoice>, // Default tool choice behavior
+    /// Thinking blocks captured from tool-use turns, keyed by the first tool_use id of that
+    /// turn. The API requires the thinking blocks of the previous assistant turn to be
+    /// replayed unchanged whenever that turn contained tool calls; our `Message` history only
+    /// stores tool calls, so the provider keeps the blocks here and re-attaches them when the
+    /// history is converted back into API messages. Bounded to `THINKING_CACHE_LIMIT` turns.
+    thinking_cache:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<ApiContentBlock>>>>,
 }
+
+/// Maximum number of tool-use turns whose thinking blocks are retained for replay.
+const THINKING_CACHE_LIMIT: usize = 64;
+
+/// Shown when the API declines a request with `stop_reason: "refusal"`.
+const REFUSAL_MESSAGE: &str =
+    "I can't help with that request. If it was a mistake, try rephrasing or narrowing it down.";
 
 impl AnthropicBrain {
     /// Creates a new AnthropicBrain with the provided API key and optional configuration.
@@ -215,7 +264,7 @@ impl AnthropicBrain {
         // Use centralized defaults from provider configuration
         let model = model.unwrap_or_else(|| Provider::Anthropic.default_model().to_string());
         let max_tokens =
-            max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_STANDARD);
+            max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_ANTHROPIC);
 
         // Create HTTP client with proper timeout configuration to prevent hanging
         let client = Client::builder()
@@ -236,6 +285,9 @@ impl AnthropicBrain {
             system_prompt,
             streaming_enabled: true, // Default to streaming for real-time user experience
             default_tool_choice: None, // Default tool choice behavior
+            thinking_cache: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         })
     }
 
@@ -312,6 +364,70 @@ impl AnthropicBrain {
     /// Determine the correct computer-use beta header for the selected model
     fn resolve_computer_use_beta_header(&self) -> &'static str {
         Provider::Anthropic.computer_use_beta_flag(&self.model)
+    }
+
+    /// Full `anthropic-beta` header value for the selected model.
+    fn beta_header_value(&self) -> String {
+        let mut flags = vec![
+            self.resolve_computer_use_beta_header(),
+            crate::constants::api::beta_flags::PROMPT_CACHING,
+        ];
+        if Provider::Anthropic.supports_server_side_fallbacks(&self.model) {
+            flags.push(crate::constants::api::beta_flags::SERVER_SIDE_FALLBACK);
+        }
+        flags.join(",")
+    }
+
+    /// `thinking` request parameter for the selected model, or `None` when the model does
+    /// not accept adaptive thinking (older models would return 400).
+    fn thinking_param(&self) -> Option<Value> {
+        if Provider::Anthropic.supports_adaptive_thinking(&self.model) {
+            Some(serde_json::json!({ "type": "adaptive", "display": "summarized" }))
+        } else {
+            None
+        }
+    }
+
+    /// `fallbacks` request parameter for the selected model.
+    fn fallbacks_param(&self) -> Option<Value> {
+        if Provider::Anthropic.supports_server_side_fallbacks(&self.model) {
+            Some(Value::String("default".to_string()))
+        } else {
+            None
+        }
+    }
+
+    /// Remember the thinking blocks that preceded a set of tool calls so they can be replayed
+    /// with that assistant turn on the next request.
+    fn remember_thinking(&self, tool_calls: &[ToolCall], thinking_blocks: Vec<ApiContentBlock>) {
+        let Some(first) = tool_calls.first() else {
+            return;
+        };
+        if thinking_blocks.is_empty() {
+            return;
+        }
+        let mut cache = match self.thinking_cache.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if cache.len() >= THINKING_CACHE_LIMIT {
+            // Cheap bound: drop everything rather than track insertion order. Older turns'
+            // thinking blocks are only needed for the immediately preceding tool-use turn.
+            cache.clear();
+        }
+        cache.insert(first.id.clone(), thinking_blocks);
+    }
+
+    /// Thinking blocks previously captured for the assistant turn that issued `tool_calls`.
+    fn recall_thinking(&self, tool_calls: &[ToolCall]) -> Vec<ApiContentBlock> {
+        let Some(first) = tool_calls.first() else {
+            return Vec::new();
+        };
+        let cache = match self.thinking_cache.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        cache.get(&first.id).cloned().unwrap_or_default()
     }
 
     /// Resolve the correct tool API type for the selected model.
@@ -436,14 +552,14 @@ impl AnthropicBrain {
     }
 
     /// Handle streaming response from Anthropic API with XML-based TTS extraction
-    /// Returns: (accumulated_text, tool_calls, stop_reason, stream_was_started)
+    /// Returns: (accumulated_text, tool_calls, stop_reason, stream_was_started, thinking_blocks)
     async fn handle_streaming_response<F>(
         &self,
         response: reqwest::Response,
         app_handle: Option<&tauri::AppHandle>,
         message_id: Option<String>,
         mut on_text_chunk: F,
-    ) -> Result<(String, Vec<ToolCall>, String, bool), AgentError>
+    ) -> Result<(String, Vec<ToolCall>, String, bool, Vec<ApiContentBlock>), AgentError>
     where
         F: FnMut(String, Vec<String>) + Send, // Updated to accept multiple TTS extractions
     {
@@ -471,7 +587,11 @@ impl AnthropicBrain {
 
         // Track thinking content blocks (for extended thinking models via API)
         let mut current_thinking_content: Option<String> = None;
+        let mut current_thinking_signature: Option<String> = None;
         let mut api_thinking_message_id: Option<String> = None; // For extended thinking API
+
+        // Completed thinking / redacted_thinking blocks, in order, for replay on tool-use turns
+        let mut thinking_blocks: Vec<ApiContentBlock> = Vec::new();
 
         // Get the response body as a stream
         let stream = response.bytes_stream();
@@ -551,6 +671,17 @@ impl AnthropicBrain {
                                             // Start tracking a thinking block (extended thinking models)
                                             log::debug!("Stream: started thinking block");
                                             current_thinking_content = Some(String::new());
+                                            current_thinking_signature = None;
+                                        }
+                                        "redacted_thinking" => {
+                                            // Opaque block: arrives complete, replayed verbatim
+                                            let mut block =
+                                                ApiContentBlock::empty("redacted_thinking");
+                                            block.data = content_block
+                                                .get("data")
+                                                .and_then(|d| d.as_str())
+                                                .map(|d| d.to_string());
+                                            thinking_blocks.push(block);
                                         }
                                         _ => {
                                             log::debug!(
@@ -682,6 +813,14 @@ impl AnthropicBrain {
                                                 }
                                             }
                                         }
+                                        "signature_delta" => {
+                                            if let Some(signature) =
+                                                delta.get("signature").and_then(|t| t.as_str())
+                                            {
+                                                current_thinking_signature =
+                                                    Some(signature.to_string());
+                                            }
+                                        }
                                         "input_json_delta" => {
                                             if let Some(partial_json) =
                                                 delta.get("partial_json").and_then(|t| t.as_str())
@@ -741,6 +880,13 @@ impl AnthropicBrain {
 
                             // Emit thinking_end for API thinking blocks
                             if let Some(thinking_text) = current_thinking_content.take() {
+                                // Keep the block (even when its text is empty, which is the
+                                // default display mode) so it can be replayed unchanged.
+                                let mut block = ApiContentBlock::empty("thinking");
+                                block.thinking = Some(thinking_text.clone());
+                                block.signature = current_thinking_signature.take();
+                                thinking_blocks.push(block);
+
                                 if !thinking_text.trim().is_empty() {
                                     log::debug!(
                                         "Stream: completed API thinking block with {} chars",
@@ -856,6 +1002,7 @@ impl AnthropicBrain {
             tool_calls,
             stop_reason,
             response_stream_started,
+            thinking_blocks,
         ))
     }
 
@@ -1167,7 +1314,7 @@ impl AnthropicBrain {
     }
 
     // Helper function to convert our internal Message format to Anthropic's API format
-    fn convert_message_to_api(message: &Message) -> Result<ApiMessage, AgentError> {
+    fn convert_message_to_api(&self, message: &Message) -> Result<ApiMessage, AgentError> {
         let role_str = match message.role {
             Role::User => "user".to_string(),
             Role::Assistant => "assistant".to_string(),
@@ -1176,6 +1323,14 @@ impl AnthropicBrain {
         };
 
         let mut content_blocks = Vec::new();
+
+        // Replay the thinking blocks that preceded this turn's tool calls. The API rejects a
+        // tool-use assistant turn whose thinking blocks were dropped or edited.
+        if message.role == Role::Assistant {
+            if let Some(tool_calls) = &message.tool_calls {
+                content_blocks.extend(self.recall_thinking(tool_calls));
+            }
+        }
 
         // Add text content if present
         if !message.content.is_empty() {
@@ -1187,6 +1342,9 @@ impl AnthropicBrain {
                 input: None,
                 tool_use_id: None,
                 content: None,
+                thinking: None,
+                signature: None,
+                data: None,
             });
         }
 
@@ -1206,6 +1364,9 @@ impl AnthropicBrain {
                     text: None,
                     tool_use_id: None,
                     content: None,
+                    thinking: None,
+                    signature: None,
+                    data: None,
                 });
             }
         }
@@ -1341,7 +1502,7 @@ impl AgentBrain for AnthropicBrain {
             match message.role {
                 Role::Assistant => {
                     // Convert assistant message normally
-                    match Self::convert_message_to_api(message) {
+                    match self.convert_message_to_api(message) {
                         Ok(api_msg) => {
                             api_messages.push(api_msg);
 
@@ -1480,12 +1641,15 @@ impl AgentBrain for AnthropicBrain {
                             name: None,
                             input: None,
                             content: Some(result_content),
+                            thinking: None,
+                            signature: None,
+                            data: None,
                         }]),
                     });
                 }
                 Role::User => {
                     // Convert user message normally
-                    match Self::convert_message_to_api(message) {
+                    match self.convert_message_to_api(message) {
                         Ok(api_msg) => api_messages.push(api_msg),
                         Err(e) => {
                             log::warn!("Skipping user message conversion due to error: {}", e)
@@ -1625,6 +1789,8 @@ impl AgentBrain for AnthropicBrain {
             max_tokens: self.max_tokens,
             stream: None,      // Will be set based on streaming mode
             tool_choice: None, // Add tool choice support
+            thinking: self.thinking_param(),
+            fallbacks: self.fallbacks_param(),
         };
 
         // Enable streaming if configured and we have an app handle
@@ -1657,17 +1823,10 @@ impl AgentBrain for AnthropicBrain {
             .post(ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01") // Current stable API version
-            // Combine computer use beta + prompt caching beta in a single header (comma-separated).
-            // Prompt caching reduces input token costs by ~90% and latency by ~50-80% for
-            // system prompt and tool definitions that remain stable across agent loop turns.
-            .header(
-                "anthropic-beta",
-                format!(
-                    "{},{}",
-                    self.resolve_computer_use_beta_header(),
-                    crate::constants::api::beta_flags::PROMPT_CACHING
-                ),
-            )
+            // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
+            // comma-separated in a single header. Prompt caching reduces input token costs by
+            // ~90% and latency by ~50-80% for the stable system prompt and tool definitions.
+            .header("anthropic-beta", self.beta_header_value())
             .header("content-type", "application/json")
             .json(&request_payload)
             .send()
@@ -1701,8 +1860,8 @@ impl AgentBrain for AnthropicBrain {
             // when we have actual non-thinking text to display. This ensures thinking
             // messages appear BEFORE the response message in the chat.
 
-            let (accumulated_text, tool_calls, stop_reason, stream_was_started) = self
-                .handle_streaming_response(
+            let (accumulated_text, tool_calls, stop_reason, stream_was_started, thinking_blocks) =
+                self.handle_streaming_response(
                     response,
                     Some(&app_handle),
                     Some(message_id.clone()),
@@ -1776,6 +1935,7 @@ impl AgentBrain for AnthropicBrain {
                                 final_display_text
                             );
                         }
+                        self.remember_thinking(&tool_calls, thinking_blocks);
                         Ok(AgentAction::ExecuteTool(tool_calls))
                     }
                 }
@@ -1787,6 +1947,12 @@ impl AgentBrain for AnthropicBrain {
                     // CRITICAL FIX: Return final display text (either clean content or TTS fallback)
                     // TTS content was already extracted and processed during streaming
                     Ok(AgentAction::Finish(final_display_text))
+                }
+                "refusal" => {
+                    // Safety classifiers declined the request (HTTP 200). Any partial output
+                    // is not a complete answer, so present a clear message instead.
+                    log::warn!("Anthropic returned stop_reason=refusal; discarding partial output");
+                    Ok(AgentAction::Finish(REFUSAL_MESSAGE.to_string()))
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",
@@ -1807,6 +1973,7 @@ impl AgentBrain for AnthropicBrain {
             // --- 4. Determine AgentAction ---
             let mut tool_calls_to_execute = Vec::new();
             let mut response_text = String::new();
+            let mut thinking_blocks: Vec<ApiContentBlock> = Vec::new();
 
             // Extract and parse tool calls and text from the response
             for block in response_body.content.iter() {
@@ -1835,6 +2002,10 @@ impl AgentBrain for AnthropicBrain {
                         // Add to the list of tool calls to execute
                         tool_calls_to_execute.push(ToolCall { id, name, input });
                     }
+                    "thinking" | "redacted_thinking" => {
+                        // Kept verbatim for replay on the next request
+                        thinking_blocks.push(block.clone());
+                    }
                     _ => {
                         log::warn!("Unknown content block type: {}", block.block_type);
                     }
@@ -1855,6 +2026,7 @@ impl AgentBrain for AnthropicBrain {
                                 response_text
                             );
                         }
+                        self.remember_thinking(&tool_calls_to_execute, thinking_blocks);
                         Ok(AgentAction::ExecuteTool(tool_calls_to_execute))
                     }
                 }
@@ -1866,6 +2038,10 @@ impl AgentBrain for AnthropicBrain {
                     // Non-streaming mode: return the response text as-is
                     // TTS XML processing only works in streaming mode
                     Ok(AgentAction::Finish(response_text))
+                }
+                "refusal" => {
+                    log::warn!("Anthropic returned stop_reason=refusal; discarding partial output");
+                    Ok(AgentAction::Finish(REFUSAL_MESSAGE.to_string()))
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",
