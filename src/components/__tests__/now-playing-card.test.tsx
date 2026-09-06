@@ -153,6 +153,40 @@ describe("NowPlayingCard", () => {
     expect(screen.getByText("Houdini")).toBeInTheDocument();
   });
 
+  it("names Apple Music in the UI but addresses the app as Music", async () => {
+    mockBackend({ ...notRunning, app: "Music" });
+    render(<NowPlayingCard app="Music" />);
+
+    await screen.findByText("Apple Music isn't running.");
+    expect(screen.getByText(/now playing · apple music/i)).toBeInTheDocument();
+    expect(mockedInvoke).toHaveBeenCalledWith("media_get_state", { app: "Music" });
+
+    fireEvent.click(screen.getByRole("button", { name: /open apple music/i }));
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("open_application", { appName: "Music" });
+    });
+  });
+
+  it("renders exported Apple Music artwork from the asset protocol URL", async () => {
+    const assetUrl =
+      "asset://localhost/%2FUsers%2Fme%2FLibrary%2FCaches%2Fai.junebug%2Fmedia-artwork%2F0123abcd.jpg";
+    mockBackend({
+      ...playing,
+      app: "Music",
+      track: "All I Really Want",
+      artist: "Alanis Morissette",
+      album: "Jagged Little Pill",
+      artwork_url: assetUrl,
+    });
+    const { container } = render(<NowPlayingCard app="Music" />);
+
+    await screen.findByText("All I Really Want");
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe(assetUrl);
+    expect(screen.getByText(/now playing · apple music/i)).toBeInTheDocument();
+  });
+
   it("stops polling on unmount", async () => {
     mockBackend(playing);
     const { unmount } = render(<NowPlayingCard app="Spotify" pollMs={200} />);

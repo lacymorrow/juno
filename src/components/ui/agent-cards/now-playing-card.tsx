@@ -8,9 +8,11 @@
  * it is never an acceptable play/pause button.
  *
  * This card polls `media_get_state` while mounted and sends transport
- * actions through `media_control`, which talks to Spotify / Music over
+ * actions through `media_control`, which talks to Spotify / Apple Music over
  * AppleScript and returns the state after the action. The UI updates
- * optimistically and is reconciled by the next poll.
+ * optimistically and is reconciled by the next poll. Artwork is whatever URL
+ * the backend hands back: Spotify's CDN, or an `asset://` URL for artwork the
+ * backend exported from Music.app.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -19,7 +21,18 @@ import { COMMANDS } from "@/lib/constants.generated";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Music2, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 
+/** AppleScript application names — `Music` is Apple Music. */
 export type MediaApp = "Spotify" | "Music";
+
+/** What the user sees; the backend addresses the app by its script name. */
+const APP_LABELS: Record<MediaApp, string> = {
+  Spotify: "Spotify",
+  Music: "Apple Music",
+};
+
+export function mediaAppLabel(app: MediaApp): string {
+  return APP_LABELS[app] ?? app;
+}
 export type MediaAction = "play" | "pause" | "playpause" | "next" | "previous";
 
 export interface MediaState {
@@ -74,6 +87,7 @@ export function NowPlayingCard({
   // Artwork URL that failed to load; never show a blank square for it.
   const [brokenArtwork, setBrokenArtwork] = useState<string | null>(null);
   const mounted = useRef(true);
+  const appLabel = mediaAppLabel(app);
 
   const refresh = useCallback(async () => {
     try {
@@ -205,7 +219,7 @@ export function NowPlayingCard({
     >
       <div className="flex items-center justify-between mb-3">
         <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          {title} · {app}
+          {title} · {appLabel}
         </div>
         {state && (
           <span
@@ -231,17 +245,17 @@ export function NowPlayingCard({
 
       {state == null && !error ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Reading {app}…
+          <Loader2 className="h-4 w-4 animate-spin" /> Reading {appLabel}…
         </div>
       ) : !state?.running ? (
         <div className="flex items-center justify-between gap-3">
-          <div className="text-sm text-muted-foreground">{app} isn&apos;t running.</div>
+          <div className="text-sm text-muted-foreground">{appLabel} isn&apos;t running.</div>
           <button
             type="button"
             onClick={() => void openApp()}
             className="h-7 px-2.5 text-xs rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground"
           >
-            Open {app}
+            Open {appLabel}
           </button>
         </div>
       ) : (
