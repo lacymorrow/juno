@@ -15,7 +15,7 @@ type ContentSegment =
  * Used to detect JSX boundaries in mixed content.
  * Must match the keys in `availableComponents` from jsx-message-renderer.tsx.
  */
-const JSX_COMPONENT_NAMES = [
+export const JSX_COMPONENT_NAMES = [
   "Card",
   "Alert",
   "Badge",
@@ -39,6 +39,8 @@ const JSX_COMPONENT_NAMES = [
   "TimerCard",
   "LinkCard",
   "TaskSummaryCard",
+  // Live components (bound to real state)
+  "NowPlayingCard",
   // Interactive action components
   "ActionButton",
   "QueryButton",
