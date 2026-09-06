@@ -941,6 +941,9 @@ pub fn run() {
             });
 
             // --- Initialize Escape Key Stale Registration Cleanup ---
+            // Safety net for a registration whose owner forgot to unregister.
+            // The sweep only runs while the app is idle (no agent/TTS/dictation/
+            // onboarding) so a long run never loses its stop key.
             let escape_cleanup_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 let max_age = std::time::Duration::from_secs(300); // 5 minutes

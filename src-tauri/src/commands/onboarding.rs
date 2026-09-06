@@ -369,13 +369,13 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
     Ok(agent_shortcut_valid && dictation_shortcut_valid)
 }
 
-/// Set onboarding as active and start a listen-only escape key monitor.
+/// Set onboarding as active and hold the stop-key observer while it runs.
 /// Controls whether shortcut handlers suppress their normal actions (agent mode,
 /// dictation, stop) and only emit visual feedback.
 ///
-/// Uses a `CGEventTap` with `kCGEventTapOptionListenOnly` instead of a global
-/// shortcut. This lets the Rust backend detect escape while the key still passes
-/// through to HTML dropdowns, dialogs, and other applications.
+/// Onboarding registers as a user of the escape-key coordinator, which installs
+/// the passive NSEvent monitor. The key is observed, never consumed, so it still
+/// reaches HTML dropdowns, dialogs, and other applications.
 ///
 /// Called by `initialize_onboarding_system` before the window opens (sets active=true)
 /// and by `complete_onboarding`/`skip_onboarding` when the flow ends (sets active=false).
@@ -389,13 +389,16 @@ pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), S
     // Update the flag — shortcut handlers check this to suppress actions during onboarding
     app_state.set_onboarding_active(active);
 
-    // Start/stop the listen-only escape key monitor on state transitions
+    // Hold/release the stop-key observer on state transitions
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
     if active && !was_active {
-        if let Err(e) = crate::platform::escape_key_monitor::start(&app) {
+        if let Err(e) = coordinator.register_escape_user(&app, "onboarding").await {
             error!("[Onboarding] Failed to start escape key monitor: {}", e);
         }
     } else if !active && was_active {
-        crate::platform::escape_key_monitor::stop();
+        if let Err(e) = coordinator.unregister_escape_user(&app, "onboarding").await {
+            error!("[Onboarding] Failed to stop escape key monitor: {}", e);
+        }
     }
 
     info!(

@@ -108,14 +108,23 @@ fn handle_settings_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     }
 }
 
-/// Handle escape key shortcut - universal "cancel anything" button
-/// Uses the new escape key coordinator to prevent race conditions.
-/// Always emits a visual feedback event; only triggers stop when not in onboarding.
+/// Handle the stop shortcut when it arrives through the global-shortcut
+/// plugin (only used when `stop_current_task` is a modified chord).
 fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
-    let shortcut_state = match event.state() {
-        ShortcutState::Pressed => "pressed",
-        ShortcutState::Released => "released",
-    };
+    handle_stop_key_event(app, event.state() == ShortcutState::Pressed);
+}
+
+/// Universal "cancel anything" handler for the stop key.
+///
+/// Reached from two observers that must behave identically:
+/// * the passive NSEvent monitor (`platform::stop_key_monitor`) for a bare
+///   Escape/function key — the key is never consumed, other apps still see it;
+/// * the global-shortcut plugin for a modified chord.
+///
+/// Always emits the visual-feedback event; only triggers the coordinated stop
+/// on a press outside onboarding.
+pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
+    let shortcut_state = if pressed { "pressed" } else { "released" };
 
     // Always emit visual feedback event (for onboarding UI)
     if let Err(e) = app.emit(
@@ -131,40 +140,41 @@ fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         );
     }
 
-    if event.state() == ShortcutState::Pressed {
-        // During onboarding, only provide visual feedback — don't trigger stop.
-        // The visual feedback event was already emitted above (line 121).
-        let app_state = app.state::<state::AppState>();
-        if app_state.is_onboarding_active() {
-            info!("[Escape Key] Pressed during onboarding - visual feedback only");
-            return;
-        }
-
-        info!("[Escape Key] Pressed - initiating coordinated stop");
-        let app_handle_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            // Immediate visual feedback — set bar to Stopping state before cleanup begins
-            crate::commands::ui_commands::set_stopping_state().await;
-
-            // Play a subtle system sound for audio confirmation
-            tokio::task::spawn_blocking(|| {
-                let _ = std::process::Command::new("afplay")
-                    .arg("/System/Library/Sounds/Tink.aiff")
-                    .output();
-            });
-
-            let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
-            if let Err(e) = coordinator
-                .stop_all_operations(&app_handle_clone, "Escape key pressed")
-                .await
-            {
-                error!(
-                    "[Escape Key] Failed to stop operations via coordinator: {}",
-                    e
-                );
-            }
-        });
+    if !pressed {
+        return;
     }
+
+    // During onboarding, only provide visual feedback — don't trigger stop.
+    let app_state = app.state::<state::AppState>();
+    if app_state.is_onboarding_active() {
+        info!("[Escape Key] Pressed during onboarding - visual feedback only");
+        return;
+    }
+
+    info!("[Escape Key] Pressed - initiating coordinated stop");
+    let app_handle_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // Immediate visual feedback — set bar to Stopping state before cleanup begins
+        crate::commands::ui_commands::set_stopping_state().await;
+
+        // Play a subtle system sound for audio confirmation
+        tokio::task::spawn_blocking(|| {
+            let _ = std::process::Command::new("afplay")
+                .arg("/System/Library/Sounds/Tink.aiff")
+                .output();
+        });
+
+        let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
+        if let Err(e) = coordinator
+            .stop_all_operations(&app_handle_clone, "Escape key pressed")
+            .await
+        {
+            error!(
+                "[Escape Key] Failed to stop operations via coordinator: {}",
+                e
+            );
+        }
+    });
 }
 
 /// Handle agent mode shortcut (Option+D by default)
