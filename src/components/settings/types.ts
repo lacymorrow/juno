@@ -6,6 +6,8 @@ export interface SettingsCategory {
   name: string;
   icon: React.ReactNode;
   description: string;
+  /** Hidden from the sidebar unless the advanced-settings toggle is on. */
+  advanced?: boolean;
 }
 
 export interface ProviderInfo {

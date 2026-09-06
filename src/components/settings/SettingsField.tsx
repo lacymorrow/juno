@@ -1,6 +1,7 @@
 import React from 'react';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { useAdvancedSettings } from './AdvancedSettingsContext';
 
 interface SettingsFieldProps {
   label: string;
@@ -9,6 +10,8 @@ interface SettingsFieldProps {
   htmlFor?: string;
   className?: string;
   required?: boolean;
+  /** Only render while the advanced-settings toggle is on. */
+  advanced?: boolean;
 }
 
 export function SettingsField({
@@ -18,7 +21,11 @@ export function SettingsField({
   htmlFor,
   className,
   required = false,
+  advanced = false,
 }: SettingsFieldProps) {
+  const { advanced: showAdvanced } = useAdvancedSettings();
+  if (advanced && !showAdvanced) return null;
+
   return (
     <div className={cn('space-y-2', className)}>
       <div className="space-y-1">

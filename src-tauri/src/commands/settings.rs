@@ -376,6 +376,54 @@ pub async fn set_autostart_enabled(app_handle: AppHandle, enabled: bool) -> Resu
         .map_err(|e| format_error(templates::FAILED_TO_SET, actions::AUTOSTART_SETTING, e))
 }
 
+/// Whether the settings window shows every setting or only the basic set.
+#[command]
+pub async fn get_advanced_settings_enabled(app_handle: AppHandle) -> Result<bool, String> {
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
+
+    settings_manager
+        .get_advanced_settings_enabled()
+        .await
+        .map_err(|e| {
+            format_error(
+                templates::FAILED_TO_RETRIEVE,
+                actions::ADVANCED_SETTINGS_TOGGLE,
+                e,
+            )
+        })
+}
+
+#[command]
+pub async fn set_advanced_settings_enabled(
+    app_handle: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
+
+    settings_manager
+        .set_advanced_settings_enabled(enabled)
+        .await
+        .map_err(|e| {
+            format_error(
+                templates::FAILED_TO_SET,
+                actions::ADVANCED_SETTINGS_TOGGLE,
+                e,
+            )
+        })
+}
+
 /// Reset all settings to defaults
 #[command]
 pub async fn reset_centralized_settings(app_handle: AppHandle) -> Result<(), String> {

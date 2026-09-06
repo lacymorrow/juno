@@ -7,7 +7,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_store::StoreExt;
 
-use crate::constants::settings::{events, store_keys, validation, SETTINGS_STORE_FILE};
+use crate::constants::settings::{defaults, events, store_keys, validation, SETTINGS_STORE_FILE};
 use crate::settings::{
     AgentSettings, AppSettings, AudioSettings, CLISettings, CloudSettings, FloatingBarSettings,
     KeyboardShortcuts, OnboardingSettings, PromptSettings, ProviderSettings, ToolSettings,
@@ -82,6 +82,10 @@ impl SettingsManager {
                 .get(store_keys::AUTOSTART_ENABLED)
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            advanced_settings_enabled: store
+                .get(store_keys::ADVANCED_SETTINGS_ENABLED)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults::ADVANCED_SETTINGS_ENABLED),
             cli: self.get_cli_settings_from_store(&store)?,
             voice_transcription: self.get_voice_transcription_settings_from_store(&store)?,
         };
@@ -145,6 +149,10 @@ impl SettingsManager {
         store.set(
             store_keys::AUTOSTART_ENABLED,
             Value::Bool(settings.autostart_enabled),
+        );
+        store.set(
+            store_keys::ADVANCED_SETTINGS_ENABLED,
+            Value::Bool(settings.advanced_settings_enabled),
         );
         store.set(
             store_keys::CLI,
@@ -249,6 +257,18 @@ impl SettingsManager {
             .get(store_keys::AUTOSTART_ENABLED)
             .and_then(|v| v.as_bool())
             .unwrap_or(false))
+    }
+
+    /// Whether the settings window shows the full (advanced) set of settings.
+    pub async fn get_advanced_settings_enabled(&self) -> Result<bool, String> {
+        let store = self
+            .app_handle
+            .store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        Ok(store
+            .get(store_keys::ADVANCED_SETTINGS_ENABLED)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults::ADVANCED_SETTINGS_ENABLED))
     }
 
     pub async fn get_cli_settings(&self) -> Result<CLISettings, String> {
@@ -485,6 +505,20 @@ impl SettingsManager {
             .store(SETTINGS_STORE_FILE)
             .map_err(|e| format!("Failed to access settings store: {}", e))?;
         store.set(store_keys::AUTOSTART_ENABLED, Value::Bool(enabled));
+        store
+            .save()
+            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+
+        self.emit_settings_changed().await;
+        Ok(())
+    }
+
+    pub async fn set_advanced_settings_enabled(&self, enabled: bool) -> Result<(), String> {
+        let store = self
+            .app_handle
+            .store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        store.set(store_keys::ADVANCED_SETTINGS_ENABLED, Value::Bool(enabled));
         store
             .save()
             .map_err(|e| format!("Failed to save settings store: {}", e))?;

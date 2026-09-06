@@ -30,6 +30,8 @@ pub mod settings {
     pub const GET_ONBOARDING_SETTINGS: &str = "get_onboarding_settings";
     pub const SET_ONBOARDING_SETTINGS: &str = "set_onboarding_settings";
     pub const SET_AUTOSTART_ENABLED: &str = "set_autostart_enabled";
+    pub const GET_ADVANCED_SETTINGS_ENABLED: &str = "get_advanced_settings_enabled";
+    pub const SET_ADVANCED_SETTINGS_ENABLED: &str = "set_advanced_settings_enabled";
 }
 
 /// Core system command names

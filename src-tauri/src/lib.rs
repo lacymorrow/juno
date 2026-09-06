@@ -743,6 +743,8 @@ pub fn run() {
             commands::settings::get_onboarding_settings,
             commands::settings::set_onboarding_settings,
             commands::settings::set_autostart_enabled,
+            commands::settings::get_advanced_settings_enabled,
+            commands::settings::set_advanced_settings_enabled,
             // Notification Commands
             // Scheduled automation commands (user-facing cron schedules)
             commands::skills::list_available_skills,

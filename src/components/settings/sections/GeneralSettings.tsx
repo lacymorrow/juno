@@ -18,6 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
+import { AdvancedOnly } from "../AdvancedSettingsContext";
 import { Slider } from "@/components/ui/slider";
 import { Eye, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -232,103 +233,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-blue-500" />
-            Onboarding
-          </CardTitle>
-          <CardDescription>
-            Restart the onboarding flow to learn about Juno's features
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-sm font-medium">
-                Restart Onboarding Flow
-              </Label>
-              <p className="text-xs text-gray-500">
-                Go through the welcome guide and setup process again
-                {onboardingInfo?.is_development_mode && (
-                  <span className="block text-blue-600 mt-1">
-                    Development mode: Onboarding always shows on restart
-                  </span>
-                )}
-              </p>
-              {onboardingInfo?.completed_at && (
-                <p className="text-xs text-gray-400 mt-1">
-                  Last completed:{" "}
-                  {new Date(onboardingInfo.completed_at).toLocaleDateString()}
-                </p>
-              )}
-            </div>
-            <Button
-              onClick={handleRestartOnboarding}
-              disabled={restartOnboardingLoading}
-              variant="outline"
-              size="sm"
-            >
-              {restartOnboardingLoading ? (
-                <>
-                  <RotateCcw className="w-4 h-4 mr-2 animate-spin" />
-                  Restarting...
-                </>
-              ) : (
-                <>
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Restart Onboarding
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Bar Appearance</CardTitle>
-          <CardDescription>
-            Choose which bar UI style to use in bar windows
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="bar-appearance">Appearance</Label>
-            <Select
-              value={barAppearance}
-              onValueChange={handleBarAppearanceChange}
-              disabled={barAppearanceLoading}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select bar appearance" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={UI.BAR_APPEARANCES_FLOATING}>
-                  Floating (Standard)
-                </SelectItem>
-                <SelectItem value={UI.BAR_APPEARANCES_APP}>App Bar</SelectItem>
-                <SelectItem value={UI.BAR_APPEARANCES_VOICE_AI}>
-                  Voice AI
-                </SelectItem>
-                <SelectItem value={UI.BAR_APPEARANCES_DYNAMIC}>
-                  Dynamic
-                </SelectItem>
-                <SelectItem value={UI.BAR_APPEARANCES_ORB}>
-                  Orb (3D)
-                </SelectItem>
-                <SelectItem value={UI.BAR_APPEARANCES_PERSONA}>
-                  Persona (AI Avatar)
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-gray-500">
-              Bar windows will switch styles immediately when changed.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <CardTitle>Sound Effects</CardTitle>
           <CardDescription>
             Configure audio feedback and notifications
@@ -353,192 +257,217 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Agent Mode</CardTitle>
-          <CardDescription>
-            Choose how Juno handles tasks and AI interactions
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="agent-mode">Agent Mode</Label>
-            <Select
-              value={settings.agentMode}
-              onValueChange={settings.handleAgentModeChange}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select agent mode" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="multi">Multi-Agent (Recommended)</SelectItem>
-                <SelectItem value="single">Single Agent</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-gray-500">
-              Multi-agent mode uses specialized agents for different tasks,
-              while single agent mode uses one agent for everything.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Agent Trigger Mode</CardTitle>
-          <CardDescription>
-            Choose how to activate the AI agent with the shortcut key
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="agent-trigger-mode">Trigger Mode</Label>
-            <Select
-              value={settings.agentTriggerMode}
-              onValueChange={settings.handleAgentTriggerModeChange}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select trigger mode" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="tap">Tap to Toggle (Default)</SelectItem>
-                <SelectItem value="hold">Hold to Activate</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-gray-500">
-              <strong>Tap to Toggle:</strong> Press and release to toggle agent
-              mode on/off.
-              <br />
-              <strong>Hold to Activate:</strong> Hold key to activate agent,
-              release to stop (like dictation mode).
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Eye className="w-5 h-5 text-purple-500" />
-            Companion Mode
-          </CardTitle>
-          <CardDescription>
-            Observe-only mode: Juno watches your screen and advises without
-            clicking, typing, or taking any actions
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label
-                htmlFor="companion-mode"
-                className="text-sm font-medium"
-              >
-                Enable Companion Mode
-              </Label>
-              <p className="text-xs text-gray-500">
-                Ask questions like "What does this error mean?" or "Walk me
-                through this UI" — Juno describes and advises but never
-                acts
-              </p>
-            </div>
-            <Switch
-              id="companion-mode"
-              checked={companionMode}
-              onCheckedChange={handleCompanionModeChange}
-              disabled={companionModeLoading}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Big Cursor</CardTitle>
-          <CardDescription>
-            Make the mouse cursor larger while the agent is controlling
-            your computer
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {systemCursorSize > 1.0 && (
-            <div className="flex items-center justify-between rounded-md border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950">
-              <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                Cursor is currently enlarged ({systemCursorSize.toFixed(1)}x)
-              </p>
+      <AdvancedOnly>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-blue-500" />
+              Onboarding
+            </CardTitle>
+            <CardDescription>
+              Restart the onboarding flow to learn about Juno's features
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm font-medium">
+                  Restart Onboarding Flow
+                </Label>
+                <p className="text-xs text-gray-500">
+                  Go through the welcome guide and setup process again
+                  {onboardingInfo?.is_development_mode && (
+                    <span className="block text-blue-600 mt-1">
+                      Development mode: Onboarding always shows on restart
+                    </span>
+                  )}
+                </p>
+                {onboardingInfo?.completed_at && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Last completed:{" "}
+                    {new Date(onboardingInfo.completed_at).toLocaleDateString()}
+                  </p>
+                )}
+              </div>
               <Button
+                onClick={handleRestartOnboarding}
+                disabled={restartOnboardingLoading}
                 variant="outline"
                 size="sm"
-                onClick={async () => {
-                  try {
-                    await invoke("test_cursor_restore");
-                    const sysSize = await invoke<number>("get_system_cursor_size");
-                    setSystemCursorSize(sysSize);
-                    toast.success("Cursor restored to normal");
-                  } catch (e) {
-                    toast.error("Failed to restore cursor");
-                  }
-                }}
               >
-                Reset to Normal
+                {restartOnboardingLoading ? (
+                  <>
+                    <RotateCcw className="w-4 h-4 mr-2 animate-spin" />
+                    Restarting...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Restart Onboarding
+                  </>
+                )}
               </Button>
             </div>
-          )}
-          <div className="flex items-center justify-between">
-            <div>
-              <Label htmlFor="big-cursor-enabled" className="text-sm font-medium">
-                Enable Big Cursor
-              </Label>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Bar Appearance</CardTitle>
+            <CardDescription>
+              Choose which bar UI style to use in bar windows
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <Label htmlFor="bar-appearance">Appearance</Label>
+              <Select
+                value={barAppearance}
+                onValueChange={handleBarAppearanceChange}
+                disabled={barAppearanceLoading}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select bar appearance" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UI.BAR_APPEARANCES_FLOATING}>
+                    Floating (Standard)
+                  </SelectItem>
+                  <SelectItem value={UI.BAR_APPEARANCES_APP}>App Bar</SelectItem>
+                  <SelectItem value={UI.BAR_APPEARANCES_VOICE_AI}>
+                    Voice AI
+                  </SelectItem>
+                  <SelectItem value={UI.BAR_APPEARANCES_DYNAMIC}>
+                    Dynamic
+                  </SelectItem>
+                  <SelectItem value={UI.BAR_APPEARANCES_ORB}>
+                    Orb (3D)
+                  </SelectItem>
+                  <SelectItem value={UI.BAR_APPEARANCES_PERSONA}>
+                    Persona (AI Avatar)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
               <p className="text-xs text-gray-500">
-                Enlarges the system cursor during agent execution so you can
-                easily track what the agent is doing
+                Bar windows will switch styles immediately when changed.
               </p>
             </div>
-            <Switch
-              id="big-cursor-enabled"
-              checked={bigCursorEnabled}
-              onCheckedChange={handleBigCursorEnabledChange}
-              disabled={bigCursorLoading}
-            />
-          </div>
-          {bigCursorEnabled && (
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Agent Mode</CardTitle>
+            <CardDescription>
+              Choose how Juno handles tasks and AI interactions
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm font-medium">
-                  Cursor Scale
-                </Label>
-                <span className="text-sm text-gray-500 tabular-nums">
-                  {bigCursorScale.toFixed(1)}x
-                </span>
-              </div>
-              <Slider
-                value={[bigCursorScale]}
-                onValueChange={handleBigCursorScaleChange}
-                onValueCommit={handleBigCursorScaleCommit}
-                min={1.5}
-                max={10}
-                step={0.5}
-              />
+              <Label htmlFor="agent-mode">Agent Mode</Label>
+              <Select
+                value={settings.agentMode}
+                onValueChange={settings.handleAgentModeChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select agent mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="multi">Multi-Agent (Recommended)</SelectItem>
+                  <SelectItem value="single">Single Agent</SelectItem>
+                </SelectContent>
+              </Select>
               <p className="text-xs text-gray-500">
-                How much larger to make the cursor (1.5x – 10x)
+                Multi-agent mode uses specialized agents for different tasks,
+                while single agent mode uses one agent for everything.
               </p>
-              <div className="flex gap-2 pt-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    try {
-                      await invoke("test_cursor_scale", { scale: bigCursorScale });
-                      const sysSize = await invoke<number>("get_system_cursor_size");
-                      setSystemCursorSize(sysSize);
-                      toast.success(`Cursor scaled to ${bigCursorScale.toFixed(1)}x`);
-                    } catch (e) {
-                      toast.error("Failed to test cursor scale");
-                    }
-                  }}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Agent Trigger Mode</CardTitle>
+            <CardDescription>
+              Choose how to activate the AI agent with the shortcut key
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <Label htmlFor="agent-trigger-mode">Trigger Mode</Label>
+              <Select
+                value={settings.agentTriggerMode}
+                onValueChange={settings.handleAgentTriggerModeChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select trigger mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tap">Tap to Toggle (Default)</SelectItem>
+                  <SelectItem value="hold">Hold to Activate</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">
+                <strong>Tap to Toggle:</strong> Press and release to toggle agent
+                mode on/off.
+                <br />
+                <strong>Hold to Activate:</strong> Hold key to activate agent,
+                release to stop (like dictation mode).
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Eye className="w-5 h-5 text-purple-500" />
+              Companion Mode
+            </CardTitle>
+            <CardDescription>
+              Observe-only mode: Juno watches your screen and advises without
+              clicking, typing, or taking any actions
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label
+                  htmlFor="companion-mode"
+                  className="text-sm font-medium"
                 >
-                  Test Scale
-                </Button>
+                  Enable Companion Mode
+                </Label>
+                <p className="text-xs text-gray-500">
+                  Ask questions like "What does this error mean?" or "Walk me
+                  through this UI" — Juno describes and advises but never
+                  acts
+                </p>
+              </div>
+              <Switch
+                id="companion-mode"
+                checked={companionMode}
+                onCheckedChange={handleCompanionModeChange}
+                disabled={companionModeLoading}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Big Cursor</CardTitle>
+            <CardDescription>
+              Make the mouse cursor larger while the agent is controlling
+              your computer
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {systemCursorSize > 1.0 && (
+              <div className="flex items-center justify-between rounded-md border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950">
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                  Cursor is currently enlarged ({systemCursorSize.toFixed(1)}x)
+                </p>
                 <Button
                   variant="outline"
                   size="sm"
@@ -553,13 +482,87 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                     }
                   }}
                 >
-                  Restore
+                  Reset to Normal
                 </Button>
               </div>
+            )}
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="big-cursor-enabled" className="text-sm font-medium">
+                  Enable Big Cursor
+                </Label>
+                <p className="text-xs text-gray-500">
+                  Enlarges the system cursor during agent execution so you can
+                  easily track what the agent is doing
+                </p>
+              </div>
+              <Switch
+                id="big-cursor-enabled"
+                checked={bigCursorEnabled}
+                onCheckedChange={handleBigCursorEnabledChange}
+                disabled={bigCursorLoading}
+              />
             </div>
-          )}
-        </CardContent>
-      </Card>
+            {bigCursorEnabled && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">
+                    Cursor Scale
+                  </Label>
+                  <span className="text-sm text-gray-500 tabular-nums">
+                    {bigCursorScale.toFixed(1)}x
+                  </span>
+                </div>
+                <Slider
+                  value={[bigCursorScale]}
+                  onValueChange={handleBigCursorScaleChange}
+                  onValueCommit={handleBigCursorScaleCommit}
+                  min={1.5}
+                  max={10}
+                  step={0.5}
+                />
+                <p className="text-xs text-gray-500">
+                  How much larger to make the cursor (1.5x – 10x)
+                </p>
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        await invoke("test_cursor_scale", { scale: bigCursorScale });
+                        const sysSize = await invoke<number>("get_system_cursor_size");
+                        setSystemCursorSize(sysSize);
+                        toast.success(`Cursor scaled to ${bigCursorScale.toFixed(1)}x`);
+                      } catch (e) {
+                        toast.error("Failed to test cursor scale");
+                      }
+                    }}
+                  >
+                    Test Scale
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        await invoke("test_cursor_restore");
+                        const sysSize = await invoke<number>("get_system_cursor_size");
+                        setSystemCursorSize(sysSize);
+                        toast.success("Cursor restored to normal");
+                      } catch (e) {
+                        toast.error("Failed to restore cursor");
+                      }
+                    }}
+                  >
+                    Restore
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </AdvancedOnly>
     </div>
   );
 }
