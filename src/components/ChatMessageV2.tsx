@@ -513,7 +513,9 @@ export function ChatMessageComponent({
         {/* Main content rendering */}
         {msg.role === "assistant" &&
         (!msg.content || msg.content.trim() === "") ? (
-          <AgentStatusBadge agentState={msg.agent_state} />
+          // A stream that has not produced text yet is not "Done": only the
+          // shimmer below shows until the first chunk or the end of the stream.
+          msg.isStreaming ? null : <AgentStatusBadge agentState={msg.agent_state} />
         ) : msg.role === "assistant" && msg.content && msg.isJsx ? (
           <MixedContentRenderer content={msg.content} isStreaming={msg.isStreaming} />
         ) : msg.role === "assistant" && msg.content ? (

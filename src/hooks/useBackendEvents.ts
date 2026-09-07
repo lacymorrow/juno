@@ -93,6 +93,10 @@ interface UseBackendEventsProps {
 	// State management
 	setIsProcessing: (processing: boolean) => void;
 	setServerStatus: (status: "connected" | "error" | "connecting") => void;
+
+	// A secondary window (the floating bar) mirrors the conversation but must
+	// not announce "Connected…" or probe the backend: the main window owns that.
+	skipServerCheck?: boolean;
 }
 
 // Simple debounce function
@@ -114,6 +118,7 @@ export function useBackendEvents({
 	stopCurrentAudio,
 	setIsProcessing,
 	setServerStatus,
+	skipServerCheck = false,
 }: UseBackendEventsProps) {
 	const hasCheckedServer = useRef(false);
 	// Single-slot buffer: ax-grounding-audit fires before tool_call_result, so we
@@ -177,6 +182,7 @@ export function useBackendEvents({
 
 	// Server status check (with duplicate prevention for React Strict Mode)
 	useEffect(() => {
+		if (skipServerCheck) return;
 		const checkServer = async () => {
 			if (hasCheckedServer.current) return;
 			hasCheckedServer.current = true;
@@ -200,7 +206,7 @@ export function useBackendEvents({
 			}
 		};
 		checkServer();
-	}, [setServerStatus, addSystemMessage]);
+	}, [setServerStatus, addSystemMessage, skipServerCheck]);
 
 	// Listen for responses broadcast from the backend
 	useEventListener<BackendResponsePayload>(

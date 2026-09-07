@@ -8,6 +8,7 @@ import {
 import { ChatMessageComponent } from "@/components/ChatMessageV2";
 import type { ChatMessage } from "@/types/chat";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
+import { cn } from "@/lib/utils";
 
 // Helper function to determine if timestamp should be shown (similar to Slack/Apple Messages)
 function shouldShowTimestamp(
@@ -67,6 +68,10 @@ interface ChatContainerProps {
   onExamplePromptSelect: (prompt: string) => void;
   onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
   onContinuationUpdate?: (requestId: string, state: "stopped" | "continued") => void;
+  /** Extra classes for the scroll container (e.g. a tighter pane in the bar). */
+  className?: string;
+  /** Extra classes for the message list; the bar uses this for denser padding. */
+  contentClassName?: string;
 }
 
 export const ChatContainerV2 = React.memo(function ChatContainerV2({
@@ -78,6 +83,8 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   onExamplePromptSelect,
   onApprovalUpdate,
   onContinuationUpdate,
+  className,
+  contentClassName,
 }: ChatContainerProps) {
   // Memoize message list to prevent unnecessary re-renders
   const messageList = React.useMemo(
@@ -125,7 +132,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   );
 
   return (
-    <Conversation className="flex-1 min-h-0">
+    <Conversation className={cn("flex-1 min-h-0", className)}>
       {conversation.length === 0 ? (
         <ConversationEmptyState>
           <div className="flex flex-col items-center justify-center space-y-6 py-12">
@@ -142,7 +149,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
           </div>
         </ConversationEmptyState>
       ) : (
-        <ConversationContent className="gap-6 px-6 py-4">
+        <ConversationContent className={cn("gap-6 px-6 py-4", contentClassName)}>
           {messageList}
         </ConversationContent>
       )}
