@@ -208,11 +208,13 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     // A spoken query started from the bar mic is open: this shortcut ends it
     // (processing the result) instead of trying to open a second session.
     if crate::agent_monitor::bar_voice_active() {
-        // Consume BOTH edges of this key press and emit the stop once, on
-        // press. The flag stays set until handle_agent_transcription_stop
-        // clears it after STT finalizes, so the matching release is swallowed
-        // here instead of falling through and starting a fresh session.
-        if event.state() == ShortcutState::Pressed {
+        // End the bar's spoken query. Emit on RELEASE, not press: the stop
+        // handler clears bar_voice_active within a fraction of a millisecond,
+        // so a press-time emit would let this same key's release race through
+        // and start dictation on the busy controller. Both edges return here,
+        // and the flag is still set at release because nothing has cleared it
+        // yet, so exactly one stop is sent and nothing else starts.
+        if event.state() == ShortcutState::Released {
             info!("[Agent Mode Shortcut] Ending bar-initiated voice session");
             let _ = app.emit(events::agent::TRANSCRIPTION_STOP, ());
         }
@@ -268,9 +270,10 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     // The bar mic starts a spoken agent query; let this shortcut end it too,
     // so the same key the user reaches for stops what the mic started.
     if crate::agent_monitor::bar_voice_active() {
-        // Consume BOTH edges (see the agent-mode handler) so the release does
-        // not start dictation on top of the session we are ending.
-        if event.state() == ShortcutState::Pressed {
+        // Emit on RELEASE and consume both edges (see the agent-mode handler),
+        // so the release cannot fall through and start dictation on top of the
+        // session we are ending.
+        if event.state() == ShortcutState::Released {
             info!("[Dictation Input Shortcut] Ending bar-initiated voice session");
             let _ = app.emit(events::agent::TRANSCRIPTION_STOP, ());
         }
