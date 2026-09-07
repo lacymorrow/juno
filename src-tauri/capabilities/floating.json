@@ -28,6 +28,7 @@
     "core:window:allow-hide",
     "core:window:allow-set-focus",
     "core:webview:allow-set-webview-focus",
+    "core:window:allow-cursor-position",
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-minimize",

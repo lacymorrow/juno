@@ -93,6 +93,10 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
                     // non-activating behavior: Juno overlays must persist across app switches
                     ns_window.setHidesOnDeactivate_(NO);
 
+                    // Receive mouseMoved: so hover works while Juno is inactive.
+                    #[allow(unexpected_cfgs)]
+                    let _: () = msg_send![ns_window, setAcceptsMouseMovedEvents: YES];
+
                     info!("macOS standard styling applied to floating-bar.");
                 }
             }
@@ -307,8 +311,24 @@ pub mod mouse_tracking {
 
     // Constants for NSTrackingAreaOptions
     const NS_TRACKING_MOUSE_ENTERED_AND_EXITED: u64 = 0x01;
+    // Deliver mouseMoved: to the owner (the delegate) even while another app
+    // is active. This is how the floating bar gets hover feedback on its
+    // buttons without being the frontmost app: WKWebView never sees these
+    // moves, so we forward the cursor position to the page ourselves.
+    const NS_TRACKING_MOUSE_MOVED: u64 = 0x02;
     const NS_TRACKING_ACTIVE_ALWAYS: u64 = 0x80;
-    const TRACKING_OPTIONS: u64 = NS_TRACKING_MOUSE_ENTERED_AND_EXITED | NS_TRACKING_ACTIVE_ALWAYS;
+    // Track the view's *current* visible rect, not the bounds captured at
+    // setup: the floating bar resizes itself (compact → hover → chat pane),
+    // and a fixed rect would stop firing entered/exited at the new edges.
+    const NS_TRACKING_IN_VISIBLE_RECT: u64 = 0x200;
+    const TRACKING_OPTIONS: u64 = NS_TRACKING_MOUSE_ENTERED_AND_EXITED
+        | NS_TRACKING_MOUSE_MOVED
+        | NS_TRACKING_ACTIVE_ALWAYS
+        | NS_TRACKING_IN_VISIBLE_RECT;
+
+    // Throttle forwarded mouse-moved events to ~60/s per window.
+    static MOVE_THROTTLE: LazyLock<Mutex<HashMap<u64, std::time::Instant>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
 
     // Static storage for the AppHandle, wrapped for thread safety
     static APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);
@@ -364,6 +384,68 @@ pub mod mouse_tracking {
                     delegate_ptr
                 );
             }
+        }
+    }
+
+    /// Mouse moved handler — forwards the cursor position (in CSS pixels,
+    /// top-left origin) to the window's page so it can show hover states
+    /// while Juno is not the active app.
+    extern "C" fn mouse_moved(this: &Object, _cmd: Sel, event: cocoa_id) {
+        let delegate_ptr = this as *const Object as u64;
+
+        // Throttle to ~60/s per window.
+        match MOVE_THROTTLE.lock() {
+            Ok(mut last) => {
+                let now = std::time::Instant::now();
+                if let Some(prev) = last.get(&delegate_ptr) {
+                    if now.duration_since(*prev).as_millis() < 16 {
+                        return;
+                    }
+                }
+                last.insert(delegate_ptr, now);
+            }
+            Err(_) => return,
+        }
+
+        let app_handle = match APP_HANDLE.lock() {
+            Ok(handle) => handle.as_ref().cloned(),
+            Err(_) => return,
+        };
+        let Some(handle) = app_handle else { return };
+        let window_label = match TRACKED_WINDOWS.lock() {
+            Ok(tracked) => tracked.get(&delegate_ptr).cloned(),
+            Err(_) => return,
+        };
+        let Some(window_label) = window_label else {
+            return;
+        };
+        let Some(window) = handle.get_webview_window(&window_label) else {
+            return;
+        };
+        let ns_window_ptr = match window.ns_window() {
+            Ok(ptr) => ptr as cocoa_id,
+            Err(_) => return,
+        };
+
+        unsafe {
+            let view = ns_window_ptr.contentView();
+            if view == nil {
+                return;
+            }
+            #[allow(unexpected_cfgs)]
+            let location: cocoa::foundation::NSPoint = msg_send![event, locationInWindow];
+            #[allow(unexpected_cfgs)]
+            let view_point: cocoa::foundation::NSPoint =
+                msg_send![view, convertPoint: location fromView: nil];
+            #[allow(unexpected_cfgs)]
+            let bounds: NSRect = msg_send![view, bounds];
+            // AppKit is bottom-left origin; the web page is top-left origin.
+            let x = view_point.x;
+            let y = bounds.size.height - view_point.y;
+            let _ = window.emit(
+                events::system::MOUSE_MOVED_WINDOW,
+                serde_json::json!({ "x": x, "y": y }),
+            );
         }
     }
 
@@ -498,6 +580,13 @@ pub mod mouse_tracking {
                 decl.add_method(
                     sel!(mouseExited:),
                     mouse_exited as extern "C" fn(&Object, Sel, cocoa_id),
+                );
+
+                // Add mouseMoved: method (hover feedback while app is inactive)
+                #[allow(unexpected_cfgs)] // Allow cfg from sel! macro
+                decl.add_method(
+                    sel!(mouseMoved:),
+                    mouse_moved as extern "C" fn(&Object, Sel, cocoa_id),
                 );
 
                 delegate_class = Some(decl.register());

@@ -1,6 +1,6 @@
 use crate::constants::{events, monitor_sessions};
 use crate::state::{AgentTriggerMode, AppState};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info, warn};
@@ -9,6 +9,22 @@ use tracing::{debug, error, info, warn};
 /// Incremented when an agent session starts and when it's cancelled, so that
 /// async handlers can detect if their session was invalidated mid-flight.
 static AGENT_SESSION_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// True while a spoken query started from the floating bar's mic is open.
+/// The bar mic bypasses the hold/tap monitor, so this flag lets the agent
+/// and dictation shortcuts (and the bar's Stop control) end that session
+/// instead of trying to start a second one on top of it.
+static BAR_VOICE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Is a bar-initiated spoken query currently open?
+pub fn bar_voice_active() -> bool {
+    BAR_VOICE_ACTIVE.load(Ordering::SeqCst)
+}
+
+/// Mark a bar-initiated spoken query as open or closed.
+pub fn set_bar_voice_active(active: bool) {
+    BAR_VOICE_ACTIVE.store(active, Ordering::SeqCst);
+}
 
 /// Returns the current agent session generation.
 pub fn current_agent_generation() -> u64 {
@@ -264,6 +280,22 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
             duration.as_millis()
         );
     }
+}
+
+/// The floating bar's mic button. Drives the same event pipeline the agent
+/// hotkey does (`agent-transcription-start` / `-stop`), so a spoken query from
+/// the bar is transcribed and handed to the agent exactly like a hotkey one.
+/// `start` opens the microphone; `stop` closes it and processes what was said.
+#[tauri::command]
+pub async fn agent_voice(app: AppHandle, action: String) -> Result<(), String> {
+    let event = match action.as_str() {
+        "start" => events::agent::TRANSCRIPTION_START,
+        "stop" => events::agent::TRANSCRIPTION_STOP,
+        other => return Err(format!("unknown agent_voice action: {other}")),
+    };
+    info!("[AgentMonitor] agent_voice({action}) from the bar");
+    set_bar_voice_active(action == "start");
+    app.emit(event, ()).map_err(|e| e.to_string())
 }
 
 // Public function to force reset the agent input state
