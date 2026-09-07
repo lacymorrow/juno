@@ -389,6 +389,7 @@ pub fn run() {
             tts::set_supertonic_settings_command, // Supertonic TTS settings
             tts::stop_tts,                 // Added for stopping TTS via escape key
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
+            agent_monitor::agent_voice, // Floating bar mic button
             capture_screenshot_command,
             capture_element_screenshot_command,
             // Computer Use API - Official Anthropic Computer Use implementation

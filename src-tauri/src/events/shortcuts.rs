@@ -205,6 +205,22 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         return;
     }
 
+    // A spoken query started from the bar mic is open: this shortcut ends it
+    // (processing the result) instead of trying to open a second session.
+    if crate::agent_monitor::bar_voice_active() {
+        // End the bar's spoken query. Emit on RELEASE, not press: the stop
+        // handler clears bar_voice_active within a fraction of a millisecond,
+        // so a press-time emit would let this same key's release race through
+        // and start dictation on the busy controller. Both edges return here,
+        // and the flag is still set at release because nothing has cleared it
+        // yet, so exactly one stop is sent and nothing else starts.
+        if event.state() == ShortcutState::Released {
+            info!("[Agent Mode Shortcut] Ending bar-initiated voice session");
+            let _ = app.emit(events::agent::TRANSCRIPTION_STOP, ());
+        }
+        return;
+    }
+
     // Unified behavior: forward both press and release to agent_monitor.
     // AgentMonitor will branch based on AgentTriggerMode (tap vs hold).
     let app_clone = app.clone();
@@ -248,6 +264,19 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     let app_state = app.state::<state::AppState>();
     if app_state.is_onboarding_active() {
         info!("[Dictation Input Shortcut] Pressed during onboarding - visual feedback only");
+        return;
+    }
+
+    // The bar mic starts a spoken agent query; let this shortcut end it too,
+    // so the same key the user reaches for stops what the mic started.
+    if crate::agent_monitor::bar_voice_active() {
+        // Emit on RELEASE and consume both edges (see the agent-mode handler),
+        // so the release cannot fall through and start dictation on top of the
+        // session we are ending.
+        if event.state() == ShortcutState::Released {
+            info!("[Dictation Input Shortcut] Ending bar-initiated voice session");
+            let _ = app.emit(events::agent::TRANSCRIPTION_STOP, ());
+        }
         return;
     }
 
