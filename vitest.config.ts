@@ -13,5 +13,8 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Agent and Paperclip worktrees live inside the repo; their copies of the
+    // suite must not run against this tree's React.
+    exclude: ['**/node_modules/**', '**/.claude/**', '**/.paperclip/**', '**/target/**'],
   },
 });

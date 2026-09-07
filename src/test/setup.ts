@@ -35,3 +35,13 @@ Object.defineProperty(navigator, 'onLine', {
 	writable: true,
 	value: true,
 });
+
+// jsdom has no ResizeObserver; use-stick-to-bottom (the chat Conversation
+// container) requires one. A no-op stub is enough for layout-free tests.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+	globalThis.ResizeObserver = class {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+	} as unknown as typeof ResizeObserver;
+}

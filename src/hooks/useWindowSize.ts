@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { LogicalSize, PhysicalPosition, Window } from '@tauri-apps/api/window';
+import { LogicalSize, PhysicalPosition, Window, currentMonitor } from "@tauri-apps/api/window";
 
 interface WindowSizeConfig {
   width: number;
@@ -22,19 +22,41 @@ const lastSizeByLabel: Map<string, { width: number; height: number }> = new Map(
 async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
   const scaleFactor = await appWindow.scaleFactor();
   const physNextW = Math.round(next.width * scaleFactor);
+  const physNextH = Math.round(next.height * scaleFactor);
 
   const pos = await appWindow.outerPosition();   // PhysicalPosition
   const size = await appWindow.outerSize();       // PhysicalSize
 
   const dx = physNextW - size.width;
-  if (dx !== 0) {
-    const newX = Math.round(pos.x - dx / 2);
+  const newX = dx !== 0 ? Math.round(pos.x - dx / 2) : pos.x;
+  const newY = await clampedTop(pos.y, physNextH);
+
+  if (newX !== pos.x || newY !== pos.y) {
     await Promise.all([
-      appWindow.setPosition(new PhysicalPosition(newX, pos.y)),
+      appWindow.setPosition(new PhysicalPosition(newX, newY)),
       appWindow.setSize(new LogicalSize(next.width, next.height)),
     ]);
   } else {
     await appWindow.setSize(new LogicalSize(next.width, next.height));
+  }
+}
+
+/**
+ * A window that grows downward (the bar opening its chat pane) must not run
+ * off the bottom of the screen. Returns the top edge to use: unchanged when
+ * the new height fits, otherwise moved up just enough to fit, never above the
+ * monitor's top. Falls back to the current position when monitor info is
+ * unavailable (tests, headless).
+ */
+async function clampedTop(currentY: number, physNextH: number): Promise<number> {
+  try {
+    const monitor = await currentMonitor();
+    if (!monitor) return currentY;
+    const bottom = monitor.position.y + monitor.size.height;
+    if (currentY + physNextH <= bottom) return currentY;
+    return Math.max(monitor.position.y, bottom - physNextH);
+  } catch {
+    return currentY;
   }
 }
 

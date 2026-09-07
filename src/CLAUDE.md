@@ -73,7 +73,7 @@ src/
 ### Key Components
 
 - **App.tsx**: Main window with modal system (help, feedback, import/export)
-- **FloatingBar.tsx**: Primary floating interface for user interaction
+- **FloatingBar.tsx**: Primary floating interface — the default bar appearance. A compact dark pill until a query occurs; then `bar/BarChatPane.tsx` opens beneath it inside the same always-on-top window and the response streams in. The pane is the main window's `ChatContainerV2` under a scoped `.dark` class, fed by `hooks/useBarConversation.ts` (`useConversation` + `useBackendEvents` with `skipServerCheck` and no audio — the main window owns TTS playback). Follow-ups go through the pill input; Escape closes the pane only when idle (a running task's Escape belongs to the Rust stop-key monitor). Window width is fixed at 419 + shadow padding and only the height changes; `useWindowSize` keeps the window on screen when it grows downward.
 - **Settings.tsx**: Comprehensive settings management
 - **VoiceStatusIndicator.tsx**: Real-time voice mode status display
 - **ui/**: Complete shadcn/ui component library integration
