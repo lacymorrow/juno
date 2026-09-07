@@ -250,6 +250,7 @@ pub mod system {
     pub const MCP_STATE_UPDATED: &str = "mcp_state_updated";
     pub const MOUSE_ENTERED_WINDOW: &str = "mouse-entered-window";
     pub const MOUSE_LEFT_WINDOW: &str = "mouse-left-window";
+    pub const MOUSE_MOVED_WINDOW: &str = "mouse-moved-window";
     pub const BACKEND_RESPONSE: &str = "backend-response";
     pub const PROVIDER_SETTINGS_CHANGED: &str = "provider_settings_changed";
 

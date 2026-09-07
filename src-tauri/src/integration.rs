@@ -837,6 +837,12 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
 async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
     let ptt_release_time = std::time::Instant::now();
 
+    // Any way this session ends (bar Stop, the agent or dictation shortcut,
+    // a hotkey release) lands here — clear the bar-voice flag and show a
+    // processing state immediately while STT finalizes and the agent starts.
+    crate::agent_monitor::set_bar_voice_active(false);
+    crate::commands::ui_commands::handle_dictation_partial(app_handle, String::new()).await;
+
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
         Some(controller_state) => {
             // Spawn screenshot capture concurrently with STT finalization.
@@ -948,6 +954,7 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
 
 /// Handle agent cancel (cancelled before threshold)
 async fn handle_agent_cancel(app_handle: &AppHandle) {
+    crate::agent_monitor::set_bar_voice_active(false);
     // Unregister escape key registered during transcription start
     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
     let _ = coordinator

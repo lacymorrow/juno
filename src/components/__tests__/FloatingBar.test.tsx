@@ -7,6 +7,7 @@ import {
   SHRINK_DELAY_MS,
   floatingBarWindowSize,
   pickLayout,
+  pointInRect,
 } from "../FloatingBar";
 
 // ── Tauri + hook mocks ───────────────────────────────────────────────
@@ -123,6 +124,16 @@ const hover = async (inside: boolean) => {
   if (!inside) await settle(LEAVE_VERIFY_MS);
 };
 
+/** The native tracking area forwarding the cursor position, then a rAF flush. */
+const move = async (x: number, y: number) => {
+  act(() => {
+    listenHandlers.get("mouse-moved-window")?.({ payload: { x, y } });
+  });
+  await act(async () => {
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+  });
+};
+
 /** Let a timer of `ms` fire, under real or fake timers. */
 const settle = async (ms: number) => {
   if (vi.isFakeTimers()) {
@@ -206,6 +217,17 @@ describe("floatingBarWindowSize", () => {
       .toEqual({ width: 467, height: 460, anchorY: 46 });
     expect(floatingBarWindowSize({ layout: "full", paneOpen: true, rosterVisible: true }))
       .toEqual({ width: 467, height: 494, anchorY: 46 });
+  });
+});
+
+describe("pointInRect", () => {
+  const r = { left: 10, top: 20, right: 50, bottom: 40 };
+  it("is inclusive of the edges and rejects points outside", () => {
+    expect(pointInRect(30, 30, r)).toBe(true);
+    expect(pointInRect(10, 20, r)).toBe(true);
+    expect(pointInRect(50, 40, r)).toBe(true);
+    expect(pointInRect(9, 30, r)).toBe(false);
+    expect(pointInRect(30, 41, r)).toBe(false);
   });
 });
 
@@ -307,6 +329,53 @@ describe("FloatingBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop listening" }));
     await act(async () => {});
     expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "stop" });
+  });
+
+  it("shows a processing state, not the listening look, once the mic closes", async () => {
+    await renderBar();
+
+    setBarState({ barState: "listening", audioLevel: 0.6 });
+    expect(bar()).toHaveAttribute("data-layout", "voice");
+
+    // The backend sets transcribing the instant the mic stops.
+    setBarState({ barState: "transcribing" });
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("transcribing");
+    // A processing state has a Stop control, and no live audio bars.
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop listening" })).not.toBeInTheDocument();
+  });
+
+  it("lights the pill button under the forwarded cursor, even with Juno inactive", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const label = this.getAttribute?.("aria-label");
+      const box =
+        label === "Talk to Juno"
+          ? { left: 100, top: 20, right: 140, bottom: 48 }
+          : label === "Type to Juno"
+            ? { left: 150, top: 20, right: 190, bottom: 48 }
+            : { left: 0, top: 0, right: 0, bottom: 0 };
+      return { ...box, width: box.right - box.left, height: box.bottom - box.top, x: box.left, y: box.top, toJSON() {} } as DOMRect;
+    });
+
+    await renderBar();
+    await hover(true);
+    const mic = screen.getByRole("button", { name: "Talk to Juno" });
+    const type = screen.getByRole("button", { name: "Type to Juno" });
+
+    await move(120, 30); // over the mic
+    expect(mic).toHaveAttribute("data-phover");
+    expect(type).not.toHaveAttribute("data-phover");
+
+    await move(170, 30); // over the type button
+    expect(type).toHaveAttribute("data-phover");
+    expect(mic).not.toHaveAttribute("data-phover");
+
+    await move(300, 300); // over neither
+    expect(mic).not.toHaveAttribute("data-phover");
+    expect(type).not.toHaveAttribute("data-phover");
   });
 
   it("has no stop control for always-listening, which is not a turn", async () => {

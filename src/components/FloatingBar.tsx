@@ -160,18 +160,30 @@ const INPUT_STATES: readonly string[] = [
 
 const VOICE_STATES: readonly string[] = [
   UI.BAR_STATES_LISTENING,
-  UI.BAR_STATES_TRANSCRIBING,
   UI.BAR_STATES_DICTATING,
   UI.BAR_STATES_ALWAYS_LISTENING,
 ];
 
+// Transcribing sits here on purpose: once the mic closes, the bar shows a
+// processing state (STT is finalizing, the agent is about to start) rather
+// than the listening look, straight through to the agent's own working state.
 const WORKING_STATES: readonly string[] = [
+  UI.BAR_STATES_TRANSCRIBING,
   UI.BAR_STATES_SUBMITTING,
   UI.BAR_STATES_LOADING,
   UI.BAR_STATES_AGENT_RESPONDING,
   UI.BAR_STATES_FINISHING,
   UI.BAR_STATES_STOPPING,
 ];
+
+/** Is a point within a rect? Exported for the hover hit-test tests. */
+export function pointInRect(
+  x: number,
+  y: number,
+  rect: { left: number; top: number; right: number; bottom: number },
+): boolean {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
 
 /** Which layout a combination of backend state and local UI state gets. */
 export function pickLayout({
@@ -436,6 +448,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const [hovered, setHovered] = useState(false);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Which pill button the forwarded cursor is over. macOS does not route
+  // mouse-moved into an inactive window's webview, so CSS :hover never fires
+  // while another app is active; the native tracking area forwards the
+  // cursor position and we light the button under it ourselves.
+  const [hoveredButton, setHoveredButton] = useState<"mic" | "type" | null>(null);
+  const micRef = useRef<HTMLButtonElement>(null);
+  const typeRef = useRef<HTMLButtonElement>(null);
+  const moveFrameRef = useRef<number | null>(null);
+
   const onMouseEnterWindow = useCallback(() => {
     if (leaveTimerRef.current) {
       clearTimeout(leaveTimerRef.current);
@@ -457,8 +478,31 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       } catch (error) {
         console.debug("FloatingBar: cursor check failed:", error);
       }
-      if (!inside) setHovered(false);
+      if (!inside) {
+        setHovered(false);
+        setHoveredButton(null);
+      }
     }, LEAVE_VERIFY_MS);
+  }, []);
+
+  // The forwarded cursor position, rAF-throttled, hit-tested against the two
+  // buttons. Works whether or not Juno is the active app.
+  const onMouseMovedWindow = useCallback((payload: unknown) => {
+    const p = payload as { x?: number; y?: number } | null;
+    if (!p || typeof p.x !== "number" || typeof p.y !== "number") return;
+    const { x, y } = p;
+    if (moveFrameRef.current !== null) return;
+    moveFrameRef.current = requestAnimationFrame(() => {
+      moveFrameRef.current = null;
+      const hit = (ref: React.RefObject<HTMLButtonElement>) => {
+        const el = ref.current;
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return false;
+        return pointInRect(x, y, r);
+      };
+      setHoveredButton(hit(micRef) ? "mic" : hit(typeRef) ? "type" : null);
+    });
   }, []);
 
   useEffect(() => () => {
@@ -472,10 +516,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       try {
         const enter = await listen(EVENTS.SYSTEM_MOUSE_ENTERED_WINDOW, onMouseEnterWindow);
         const leave = await listen(EVENTS.SYSTEM_MOUSE_LEFT_WINDOW, onMouseLeaveWindow);
-        if (mounted) unlisteners.push(enter, leave);
+        const moved = await listen<{ x: number; y: number }>(
+          EVENTS.SYSTEM_MOUSE_MOVED_WINDOW,
+          (event) => onMouseMovedWindow(event.payload),
+        );
+        if (mounted) unlisteners.push(enter, leave, moved);
         else {
           enter();
           leave();
+          moved();
         }
       } catch (error) {
         console.error("❌ FloatingBar: Failed to setup hover listeners:", error);
@@ -484,9 +533,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     setup();
     return () => {
       mounted = false;
+      if (moveFrameRef.current !== null) cancelAnimationFrame(moveFrameRef.current);
       unlisteners.forEach((fn) => fn());
     };
-  }, [onMouseEnterWindow, onMouseLeaveWindow]);
+  }, [onMouseEnterWindow, onMouseLeaveWindow, onMouseMovedWindow]);
 
   // === CONVERSATION (same pipeline as the main window) ===
 
@@ -687,6 +737,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     rosterVisible: showRosterStrip,
   });
 
+  useEffect(() => {
+    if (layout !== "hover") setHoveredButton(null);
+  }, [layout]);
+
   // The input shows when the user opened it, while the backend is in its
   // input states, and between turns with the pane open so a follow-up is one
   // click away. Voice and working states show status instead.
@@ -841,20 +895,24 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             style={{ animation: "fbar-reveal 0.18s ease-out both" }}
           >
             <button
+              ref={micRef}
               type="button"
               onClick={startTalking}
               aria-label="Talk to Juno"
               title="Talk to Juno"
-              className={pillButton}
+              data-phover={hoveredButton === "mic" ? "" : undefined}
+              className={cn(pillButton, hoveredButton === "mic" && "bg-white/[0.12] text-white")}
             >
               <Mic className="size-3.5" />
             </button>
             <button
+              ref={typeRef}
               type="button"
               onClick={openInput}
               aria-label="Type to Juno"
               title="Type to Juno"
-              className={pillButton}
+              data-phover={hoveredButton === "type" ? "" : undefined}
+              className={cn(pillButton, hoveredButton === "type" && "bg-white/[0.12] text-white")}
             >
               <Type className="size-3.5" />
             </button>
