@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  BLUR_SETTLE_MS,
   FloatingBar,
+  LEAVE_VERIFY_MS,
   SHRINK_DELAY_MS,
   floatingBarWindowSize,
   pickLayout,
@@ -45,6 +47,8 @@ const windowFocus = vi.hoisted(() => ({
 }));
 const windowSetFocus = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const startDragging = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+// Where the OS says the cursor is; the window sits at 100,100 sized 164x66.
+const cursor = vi.hoisted(() => ({ x: 0, y: 0 }));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     label: "floating-bar",
@@ -54,7 +58,10 @@ vi.mock("@tauri-apps/api/window", () => ({
     }),
     setFocus: windowSetFocus,
     startDragging,
+    outerPosition: async () => ({ x: 100, y: 100 }),
+    outerSize: async () => ({ width: 164, height: 66 }),
   }),
+  cursorPosition: async () => ({ x: cursor.x, y: cursor.y }),
 }));
 
 const webviewSetFocus = vi.hoisted(() => vi.fn(() => Promise.resolve()));
@@ -100,13 +107,34 @@ const fire = (event: string, payload: unknown) =>
     eventHandlers.get(event)?.(payload);
   });
 
-/** The native tracking area reporting the mouse crossing the window's edge. */
-const hover = (inside: boolean) =>
+/**
+ * The native tracking area reporting the mouse crossing the window's edge.
+ * A leave is only believed once the cursor is confirmed outside the window,
+ * so leaving also parks the cursor outside and lets that check run.
+ */
+const hover = async (inside: boolean) => {
+  cursor.x = inside ? 150 : 0;
+  cursor.y = inside ? 130 : 0;
   act(() => {
     listenHandlers.get(inside ? "mouse-entered-window" : "mouse-left-window")?.({
       payload: null,
     });
   });
+  if (!inside) await settle(LEAVE_VERIFY_MS);
+};
+
+/** Let a timer of `ms` fire, under real or fake timers. */
+const settle = async (ms: number) => {
+  if (vi.isFakeTimers()) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms + 1);
+    });
+  } else {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, ms + 10));
+    });
+  }
+};
 
 const submitUserMessage = (content: string) =>
   fire("user-message-submitted", { content, timestamp: 1_700_000_000_000 });
@@ -130,7 +158,7 @@ const lastResize = () =>
 
 /** Hover the pill and open the text input via its button. */
 async function openInput() {
-  hover(true);
+  await hover(true);
   fireEvent.click(screen.getByRole("button", { name: "Type to Juno" }));
   await act(async () => {});
   return screen.getByPlaceholderText("Ask Juno");
@@ -145,6 +173,9 @@ const interaction = (type: string, data?: unknown) =>
   });
 
 beforeEach(() => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  cursor.x = 0;
+  cursor.y = 0;
   invoke.mockClear();
   resizeWindowIfChanged.mockClear();
   windowSetFocus.mockClear();
@@ -156,6 +187,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -210,14 +242,14 @@ describe("FloatingBar", () => {
     vi.useFakeTimers();
     await renderBar();
 
-    hover(true);
+    await hover(true);
     expect(bar()).toHaveAttribute("data-layout", "hover");
     expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Type to Juno" })).toBeInTheDocument();
     // Growing: the window makes room straight away.
     expect(lastResize()).toEqual({ width: 164, height: 66, anchorY: 33 });
 
-    hover(false);
+    await hover(false);
     expect(bar()).toHaveAttribute("data-layout", "compact");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     // Shrinking: the window waits for the pill to animate down first.
@@ -234,12 +266,27 @@ describe("FloatingBar", () => {
     fireEvent.mouseEnter(bar().parentElement!);
     expect(bar()).toHaveAttribute("data-layout", "hover");
     fireEvent.mouseLeave(bar().parentElement!);
+    await settle(LEAVE_VERIFY_MS);
     expect(bar()).toHaveAttribute("data-layout", "compact");
+  });
+
+  it("ignores a leave while the cursor is still over the window (resizing under a resting cursor reports one)", async () => {
+    await renderBar();
+
+    await hover(true);
+    // The window just grew under the cursor; the OS says "left" but the
+    // cursor is inside the new, larger window.
+    act(() => {
+      listenHandlers.get("mouse-left-window")?.({ payload: null });
+    });
+    await settle(LEAVE_VERIFY_MS);
+
+    expect(bar()).toHaveAttribute("data-layout", "hover");
   });
 
   it("starts a spoken query to the agent on a mic click, without activating the window", async () => {
     await renderBar();
-    hover(true);
+    await hover(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Talk to Juno" }));
     await act(async () => {});
@@ -303,7 +350,7 @@ describe("FloatingBar", () => {
   it("folds the input away on Escape and on an empty blur, telling the backend", async () => {
     await renderBar();
     await openInput();
-    hover(false);
+    await hover(false);
 
     fireEvent.keyDown(document, { key: "Escape" });
     await act(async () => {});
@@ -315,9 +362,34 @@ describe("FloatingBar", () => {
     );
 
     const input = await openInput();
-    fireEvent.blur(input);
-    await act(async () => {});
+    act(() => input.blur());
+    await settle(BLUR_SETTLE_MS);
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("keeps the input through a blur that is immediately followed by a refocus", async () => {
+    await renderBar();
+    const input = await openInput();
+
+    act(() => input.blur());
+    act(() => input.focus());
+    await settle(BLUR_SETTLE_MS);
+
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+  });
+
+  it("folds an empty input up when the whole window loses focus", async () => {
+    await renderBar();
+    await openInput();
+
+    act(() => windowFocus.handler?.({ payload: false }));
+    await act(async () => {});
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledWith(
+      "ui_handle_interaction",
+      interaction("blur", { isFocused: false }),
+    );
   });
 
   it("keeps the input when it blurs with text in it", async () => {
@@ -325,8 +397,8 @@ describe("FloatingBar", () => {
     const input = await openInput();
 
     fireEvent.change(input, { target: { value: "half a thought" } });
-    fireEvent.blur(input);
-    await act(async () => {});
+    act(() => input.blur());
+    await settle(BLUR_SETTLE_MS);
 
     expect(screen.getByRole("textbox")).toHaveValue("half a thought");
   });
@@ -343,7 +415,7 @@ describe("FloatingBar", () => {
 
   it("drags the window from anywhere once the mouse moves, and swallows the click that follows", async () => {
     await renderBar();
-    hover(true);
+    await hover(true);
     const mic = screen.getByRole("button", { name: "Talk to Juno" });
 
     fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
@@ -360,7 +432,7 @@ describe("FloatingBar", () => {
 
   it("treats a press and release without movement as the click it is", async () => {
     await renderBar();
-    hover(true);
+    await hover(true);
     const mic = screen.getByRole("button", { name: "Talk to Juno" });
 
     fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });

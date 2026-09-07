@@ -15,7 +15,7 @@
 import { useEffect, useState, useCallback, useRef, FormEvent, MouseEvent as ReactMouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Mic, Square, Type } from "lucide-react";
 
@@ -101,6 +101,21 @@ export const FLOATING_BAR_DIMENSIONS = {
 export const DRAG_THRESHOLD_PX = 4;
 /** A shrinking window waits for the pill's size animation before it snaps. */
 export const SHRINK_DELAY_MS = 220;
+/**
+ * A mouse-leave is only believed after this long, once the cursor has been
+ * checked against the window: resizing the window under a resting cursor
+ * makes AppKit/WebKit report a leave that never happened.
+ */
+export const LEAVE_VERIFY_MS = 120;
+/** An input blur is only acted on after this long, once focus has settled. */
+export const BLUR_SETTLE_MS = 80;
+
+/** Is the cursor over this window right now? Used to verify a mouse-leave. */
+async function cursorInsideWindow(): Promise<boolean> {
+  const w = getCurrentWindow();
+  const [c, p, s] = await Promise.all([cursorPosition(), w.outerPosition(), w.outerSize()]);
+  return c.x >= p.x && c.x < p.x + s.width && c.y >= p.y && c.y < p.y + s.height;
+}
 
 /**
  * Window size for a layout. `anchorY` is the pill's vertical centre, which
@@ -419,14 +434,44 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // mostly looked at. DOM mouseenter/leave cover the active-app case too.
 
   const [hovered, setHovered] = useState(false);
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const onMouseEnterWindow = useCallback(() => {
+    if (leaveTimerRef.current) {
+      clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
+    }
+    setHovered(true);
+  }, []);
+
+  // A leave is verified against the cursor before it is believed: growing the
+  // window under a resting cursor produces a leave with no re-enter, which
+  // would collapse the pill the moment it opened.
+  const onMouseLeaveWindow = useCallback(() => {
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+    leaveTimerRef.current = setTimeout(async () => {
+      leaveTimerRef.current = null;
+      let inside = false;
+      try {
+        inside = await cursorInsideWindow();
+      } catch (error) {
+        console.debug("FloatingBar: cursor check failed:", error);
+      }
+      if (!inside) setHovered(false);
+    }, LEAVE_VERIFY_MS);
+  }, []);
+
+  useEffect(() => () => {
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
     const unlisteners: Array<() => void> = [];
     const setup = async () => {
       try {
-        const enter = await listen(EVENTS.SYSTEM_MOUSE_ENTERED_WINDOW, () => setHovered(true));
-        const leave = await listen(EVENTS.SYSTEM_MOUSE_LEFT_WINDOW, () => setHovered(false));
+        const enter = await listen(EVENTS.SYSTEM_MOUSE_ENTERED_WINDOW, onMouseEnterWindow);
+        const leave = await listen(EVENTS.SYSTEM_MOUSE_LEFT_WINDOW, onMouseLeaveWindow);
         if (mounted) unlisteners.push(enter, leave);
         else {
           enter();
@@ -441,7 +486,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       mounted = false;
       unlisteners.forEach((fn) => fn());
     };
-  }, []);
+  }, [onMouseEnterWindow, onMouseLeaveWindow]);
 
   // === CONVERSATION (same pipeline as the main window) ===
 
@@ -505,6 +550,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // The text input is local until submit — no per-keystroke IPC.
   const [inputOpen, setInputOpen] = useState(false);
   const [localInputValue, setLocalInputValue] = useState("");
+  const localInputValueRef = useRef("");
+  localInputValueRef.current = localInputValue;
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -561,11 +608,20 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     await sendInteraction(createInteraction(UI.INTERACTION_TYPES_BLUR, { isFocused: false }));
   }, [sendInteraction, createInteraction]);
 
-  /** Input blur: tell the backend, and fold the pill back up if nothing was typed. */
+  /**
+   * Input blur, acted on once focus has settled: the window becoming key
+   * (webview first responder, caret restored) blurs and refocuses the input
+   * within a frame, and that must not fold the pill up. A blur because the
+   * whole window lost focus is handled by the window focus listener below.
+   */
   const handleInputBlur = useCallback(() => {
-    if (!localInputValue.trim()) closeInput();
-    void handleBlur();
-  }, [localInputValue, closeInput, handleBlur]);
+    setTimeout(() => {
+      if (document.activeElement === inputRef.current) return;
+      if (!document.hasFocus()) return;
+      if (!localInputValueRef.current.trim()) closeInput();
+      void handleBlur();
+    }, BLUR_SETTLE_MS);
+  }, [closeInput, handleBlur]);
 
   /**
    * OS-level focus changes (Cmd+Tab, clicking another window). When the
@@ -590,6 +646,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               .catch((error) => console.debug("FloatingBar: webview focus failed:", error));
             inputRef.current?.focus();
           } else {
+            // Left for another app with nothing typed: fold the pill up.
+            if (!localInputValueRef.current.trim()) closeInput();
             handleBlur();
           }
         });
@@ -606,7 +664,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       mounted = false;
       unlisten?.();
     };
-  }, [handleBlur]);
+  }, [handleBlur, closeInput]);
 
   // === DERIVED UI STATE ===
 
