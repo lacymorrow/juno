@@ -438,9 +438,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
    *
    * The bar accepts the first mouse click (`acceptFirstMouse`), which is what
    * lets an unfocused bar be dragged or clicked in one go, the way native
-   * floating panels do. The flip side is that such a click no longer
-   * activates the app, so anything that expects typing afterwards asks for
-   * activation explicitly. Dragging the pill background never does.
+   * floating panels do. A first-mouse click does not reliably activate the
+   * app or make the webview first responder, so anything that expects typing
+   * afterwards asks for activation explicitly. The drag path doesn't ask;
+   * it leaves activation to AppKit (a drag usually activates Juno on its own).
    */
   const activateWindow = useCallback(() => {
     getCurrentWindow()

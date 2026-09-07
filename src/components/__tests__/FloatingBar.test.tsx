@@ -286,7 +286,7 @@ describe("FloatingBar", () => {
     );
   });
 
-  it("starts a window drag on the first mousedown on the pill background, without activating the app", async () => {
+  it("starts a window drag on the first mousedown on the pill background, without asking for activation", async () => {
     await renderBar();
 
     fireEvent.mouseDown(screen.getByTestId("floating-bar"), { button: 0 });
