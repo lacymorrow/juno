@@ -36,6 +36,8 @@ vi.mock("@/hooks/useEventListener", () => ({
 const windowFocus = vi.hoisted(() => ({
   handler: undefined as undefined | ((event: { payload: boolean }) => void),
 }));
+const windowSetFocus = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const startDragging = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     label: "floating-bar",
@@ -43,7 +45,8 @@ vi.mock("@tauri-apps/api/window", () => ({
       windowFocus.handler = handler;
       return () => {};
     }),
-    startDragging: vi.fn(async () => {}),
+    setFocus: windowSetFocus,
+    startDragging,
   }),
 }));
 
@@ -112,6 +115,9 @@ const lastResize = () =>
 beforeEach(() => {
   invoke.mockClear();
   resizeWindowIfChanged.mockClear();
+  windowSetFocus.mockClear();
+  webviewSetFocus.mockClear();
+  startDragging.mockClear();
   listenHandlers.clear();
   eventHandlers.clear();
 });
@@ -278,6 +284,37 @@ describe("FloatingBar", () => {
         }),
       }),
     );
+  });
+
+  it("starts a window drag on the first mousedown on the pill background, without activating the app", async () => {
+    await renderBar();
+
+    fireEvent.mouseDown(screen.getByTestId("floating-bar"), { button: 0 });
+    await act(async () => {});
+
+    expect(startDragging).toHaveBeenCalledTimes(1);
+    expect(windowSetFocus).not.toHaveBeenCalled();
+  });
+
+  it("activates the app when the input is clicked, so keystrokes land here", async () => {
+    await renderBar();
+
+    fireEvent.mouseDown(screen.getByPlaceholderText("Ask Juno"), { button: 0 });
+    await act(async () => {});
+
+    expect(windowSetFocus).toHaveBeenCalledTimes(1);
+    // A click in the input is a click, not a drag.
+    expect(startDragging).not.toHaveBeenCalled();
+  });
+
+  it("activates the app when the idle pill is clicked to wake the assistant", async () => {
+    await renderBar();
+    setBarState({ barState: "dictation_ready" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Activate assistant" }));
+    await act(async () => {});
+
+    expect(windowSetFocus).toHaveBeenCalledTimes(1);
   });
 
   it("focuses the input the moment the window becomes key, so one click is enough", async () => {
