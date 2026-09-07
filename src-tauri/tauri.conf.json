@@ -55,7 +55,8 @@
         "skipTaskbar": true,
         "visible": false,
         "shadow": false,
-        "focus": false
+        "focus": false,
+        "acceptFirstMouse": true
       },
       {
         "label": "onboarding",
