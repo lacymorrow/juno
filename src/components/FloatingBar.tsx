@@ -433,9 +433,26 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
   }, []);
 
+  /**
+   * Bring Juno forward so keystrokes reach this window.
+   *
+   * The bar accepts the first mouse click (`acceptFirstMouse`), which is what
+   * lets an unfocused bar be dragged or clicked in one go, the way native
+   * floating panels do. A first-mouse click does not reliably activate the
+   * app or make the webview first responder, so anything that expects typing
+   * afterwards asks for activation explicitly. The drag path doesn't ask;
+   * it leaves activation to AppKit (a drag usually activates Juno on its own).
+   */
+  const activateWindow = useCallback(() => {
+    getCurrentWindow()
+      .setFocus()
+      .catch((error) => console.debug("FloatingBar: window activation failed:", error));
+  }, []);
+
   const handleClick = useCallback(async () => {
+    activateWindow();
     await sendInteraction(createInteraction(UI.INTERACTION_TYPES_CLICK));
-  }, [sendInteraction, createInteraction]);
+  }, [activateWindow, sendInteraction, createInteraction]);
 
   // Input is local until submit — no per-keystroke IPC.
   const [localInputValue, setLocalInputValue] = useState("");
@@ -470,13 +487,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
    * OS-level focus changes (Cmd+Tab, clicking another window). The input's
    * own onFocus/onBlur only fire for focus moves inside the webview.
    *
-   * The first click on this window while another app is active only makes
-   * the window key; the webview never sees it, so the input would need a
-   * second click. When the window becomes key, make the webview the window's
-   * first responder (keystrokes otherwise never reach the page, even with a
-   * visible caret) and focus the input, so one click is enough.
-   * (`acceptFirstMouse` is not the answer: it delivers the click to the page
-   * but stops it from activating the app, so typing goes to the previous app.)
+   * When the window becomes key (a click in the input calls `activateWindow`,
+   * or the user Cmd+Tabs here), make the webview the window's first responder
+   * (keystrokes otherwise never reach the page, even with a visible caret)
+   * and focus the input, so one click is enough.
    */
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -586,6 +600,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               type="text"
               value={localInputValue}
               onChange={(e) => setLocalInputValue(e.target.value)}
+              onMouseDown={activateWindow}
               onFocus={handleFocus}
               onBlur={handleBlur}
               placeholder={paneOpen ? "Follow up…" : "Ask Juno"}
