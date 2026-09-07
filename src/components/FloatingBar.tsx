@@ -1,29 +1,25 @@
 /**
- * FloatingBar.tsx — the default bar appearance, and the reference
- * implementation of the standardized UI API:
+ * FloatingBar — the default bar appearance.
  *
- * 1. Event-driven state via BAR_STATE_UPDATE (backend is the source of truth)
- * 2. User interactions via ui_handle_interaction
- * 3. Type-safe inline types aligned with the backend
- * 4. Window resizing owned by the component, top-anchored
+ * Wispr-Flow-shaped: a very small dark pill while idle, which grows on
+ * hover to reveal a mic and a type button. A drag anywhere on the pill
+ * (buttons included) moves the window; a click without movement acts on
+ * what was clicked. The mic starts a spoken query to the agent, the type
+ * button opens the text input focused. Once a query is in flight the pill
+ * takes its full width and the conversation pane opens underneath.
  *
- * Shape: a compact dark pill until a query occurs. The moment the backend
- * announces a user message (`user-message-submitted` — typed here, spoken,
- * sent from the main window or a rendered component), the same chat pane the
- * main window renders opens underneath the pill inside this window, dark
- * themed, and the response streams into it. Follow-ups go through the pill's
- * input; the pane stays until dismissed (close, Escape while idle, New chat).
+ * State comes from the backend UIManager (`bar-state-update`); the only
+ * local state is hover, whether the input is open, and the conversation.
  */
 
-import { useEffect, useState, useCallback, useRef, FormEvent } from "react";
+import { useEffect, useState, useCallback, useRef, FormEvent, MouseEvent as ReactMouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { Square } from "lucide-react";
+import { Mic, Square, Type } from "lucide-react";
 
 import { useWindowSize } from "@/hooks/useWindowSize";
-import { useDragWindow } from "@/hooks/useDragWindow";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { cn } from "@/lib/utils";
@@ -31,8 +27,6 @@ import { EVENTS, UI } from "@/lib/constants.generated";
 import { AgentRosterStrip } from "./AgentRosterStrip";
 import { BarChatPane } from "./bar/BarChatPane";
 import type { BarAppearance } from "@/components/bar/barAppearance";
-
-// === STANDARDIZED UI API TYPES ===
 
 /**
  * UI State enumeration — values emitted by the backend UIManager in
@@ -81,21 +75,59 @@ interface UIInteractionEvent {
   timestamp: number;
 }
 
-// === COMPONENT CONSTANTS ===
+// === LAYOUT ===
+
+export type BarLayout = "compact" | "hover" | "voice" | "full";
 
 /**
- * Fixed width: the pill never changes width, so nothing jumps horizontally.
- * Height is the only thing that varies, and the window is top-anchored, so
- * growth happens below the pill (see useWindowSize.centerStableResize).
+ * Pill size per layout plus the transparent padding around it (room for the
+ * shadow). The window is exactly pill + padding, so the invisible part of
+ * the window that catches clicks meant for what's behind it stays small.
  */
+export const BAR_LAYOUTS: Record<BarLayout, { width: number; height: number; pad: number }> = {
+  compact: { width: 56, height: 16, pad: 16 },
+  hover: { width: 132, height: 34, pad: 16 },
+  voice: { width: 220, height: 34, pad: 16 },
+  full: { width: 419, height: 44, pad: 24 },
+};
+
 export const FLOATING_BAR_DIMENSIONS = {
-  WIDTH: 419,
-  BAR_HEIGHT: 44,
-  SHADOW_PADDING: 48, // 24px per side, room for the pill/pane shadows
   ROSTER_STRIP_HEIGHT: 34, // 22px strip + 6px gap + breathing room (LAC-2830 §3)
   PANE_GAP: 8,
   PANE_HEIGHT: 360,
 };
+
+/** Drag starts once the mouse has moved this far from where it went down. */
+export const DRAG_THRESHOLD_PX = 4;
+/** A shrinking window waits for the pill's size animation before it snaps. */
+export const SHRINK_DELAY_MS = 220;
+
+/**
+ * Window size for a layout. `anchorY` is the pill's vertical centre, which
+ * `useWindowSize` keeps at the same screen position across resizes, so the
+ * pill grows around itself and the pane grows downward from it.
+ */
+export function floatingBarWindowSize({
+  layout,
+  paneOpen,
+  rosterVisible,
+}: {
+  layout: BarLayout;
+  paneOpen: boolean;
+  rosterVisible: boolean;
+}) {
+  const l = BAR_LAYOUTS[layout];
+  const d = FLOATING_BAR_DIMENSIONS;
+  return {
+    width: l.width + 2 * l.pad,
+    height:
+      l.height +
+      2 * l.pad +
+      (rosterVisible ? d.ROSTER_STRIP_HEIGHT : 0) +
+      (paneOpen ? d.PANE_GAP + d.PANE_HEIGHT : 0),
+    anchorY: l.pad + l.height / 2,
+  };
+}
 
 /** Component name for backend interactions — MUST match backend element ids */
 const COMPONENT_ID = "floating-bar";
@@ -126,26 +158,25 @@ const WORKING_STATES: readonly string[] = [
   UI.BAR_STATES_STOPPING,
 ];
 
-/**
- * Window height for a given layout. Exported so tests and other bars can
- * assert the exact figures instead of re-deriving them.
- */
-export function floatingBarWindowSize({
+/** Which layout a combination of backend state and local UI state gets. */
+export function pickLayout({
+  state,
+  hovered,
+  inputOpen,
   paneOpen,
   rosterVisible,
 }: {
+  state: string;
+  hovered: boolean;
+  inputOpen: boolean;
   paneOpen: boolean;
   rosterVisible: boolean;
-}) {
-  const d = FLOATING_BAR_DIMENSIONS;
-  return {
-    width: d.WIDTH + d.SHADOW_PADDING,
-    height:
-      d.BAR_HEIGHT +
-      d.SHADOW_PADDING +
-      (rosterVisible ? d.ROSTER_STRIP_HEIGHT : 0) +
-      (paneOpen ? d.PANE_GAP + d.PANE_HEIGHT : 0),
-  };
+}): BarLayout {
+  if (paneOpen || rosterVisible || inputOpen || INPUT_STATES.includes(state)) return "full";
+  if (VOICE_STATES.includes(state)) return "voice";
+  if (IDLE_STATES.includes(state)) return hovered ? "hover" : "compact";
+  // Working, error, success, speaking: room for a label and a control.
+  return "full";
 }
 
 // Purpose-built motions for the status dot; injected once into <head>.
@@ -179,6 +210,10 @@ const BAR_KEYFRAMES = `
 @keyframes fbar-content-in {
   0%   { opacity: 0; transform: translateY(-4px); }
   100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes fbar-reveal {
+  0%   { opacity: 0; transform: scale(0.85); }
+  100% { opacity: 1; transform: scale(1); }
 }
 `;
 
@@ -300,6 +335,9 @@ function statusLabel(state: UIState, data: BarStateData): string | null {
   }
 }
 
+const pillButton =
+  "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/[0.12] hover:text-white";
+
 // === MAIN COMPONENT ===
 
 export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
@@ -374,6 +412,37 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     };
   }, []);
 
+  // === HOVER ===
+  //
+  // The native tracking area on this window reports enter/leave even while
+  // another app is active (NSTrackingActiveAlways), which is when the bar is
+  // mostly looked at. DOM mouseenter/leave cover the active-app case too.
+
+  const [hovered, setHovered] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const unlisteners: Array<() => void> = [];
+    const setup = async () => {
+      try {
+        const enter = await listen(EVENTS.SYSTEM_MOUSE_ENTERED_WINDOW, () => setHovered(true));
+        const leave = await listen(EVENTS.SYSTEM_MOUSE_LEFT_WINDOW, () => setHovered(false));
+        if (mounted) unlisteners.push(enter, leave);
+        else {
+          enter();
+          leave();
+        }
+      } catch (error) {
+        console.error("❌ FloatingBar: Failed to setup hover listeners:", error);
+      }
+    };
+    setup();
+    return () => {
+      mounted = false;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, []);
+
   // === CONVERSATION (same pipeline as the main window) ===
 
   const chat = useBarConversation();
@@ -397,21 +466,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     chat.startNewChat();
     setPaneDismissed(false);
   }, [chat.startNewChat]);
-
-  // === WINDOW RESIZING ===
-
-  const { resizeWindowIfChanged } = useWindowSize(windowLabel);
-
-  // Parallel agent sessions (LAC-1432): the roster strip appears below the
-  // bar when 2+ agents run, so the window grows to make room for it.
-  const { sessions: agentSessions, focusSession } = useAgentSessions();
-  const showRosterStrip = agentSessions.length >= 2;
-
-  useEffect(() => {
-    resizeWindowIfChanged(
-      floatingBarWindowSize({ paneOpen, rosterVisible: showRosterStrip }),
-    ).catch((error) => console.error("❌ FloatingBar: Failed to resize window:", error));
-  }, [paneOpen, showRosterStrip, resizeWindowIfChanged]);
 
   // === INTERACTIONS ===
 
@@ -440,8 +494,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
    * lets an unfocused bar be dragged or clicked in one go, the way native
    * floating panels do. A first-mouse click does not reliably activate the
    * app or make the webview first responder, so anything that expects typing
-   * afterwards asks for activation explicitly. The drag path doesn't ask;
-   * it leaves activation to AppKit (a drag usually activates Juno on its own).
+   * afterwards asks for activation explicitly.
    */
   const activateWindow = useCallback(() => {
     getCurrentWindow()
@@ -449,18 +502,43 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       .catch((error) => console.debug("FloatingBar: window activation failed:", error));
   }, []);
 
-  const handleClick = useCallback(async () => {
-    activateWindow();
-    await sendInteraction(createInteraction(UI.INTERACTION_TYPES_CLICK));
-  }, [activateWindow, sendInteraction, createInteraction]);
-
-  // Input is local until submit — no per-keystroke IPC.
+  // The text input is local until submit — no per-keystroke IPC.
+  const [inputOpen, setInputOpen] = useState(false);
   const [localInputValue, setLocalInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLocalInputValue(barState.inputValue);
   }, [barState.inputValue]);
+
+  /** The type button: open the input and make sure typing lands in it. */
+  const openInput = useCallback(() => {
+    activateWindow();
+    setInputOpen(true);
+  }, [activateWindow]);
+
+  /** Escape / empty blur: back to the pill. */
+  const closeInput = useCallback(() => {
+    setInputOpen(false);
+    setLocalInputValue("");
+  }, []);
+
+  /** The mic button: a spoken query to the agent (same path as the hotkey). */
+  const startTalking = useCallback(async () => {
+    try {
+      await invoke("agent_voice", { action: "start" });
+    } catch (error) {
+      console.error("❌ FloatingBar: failed to start listening:", error);
+    }
+  }, []);
+
+  const stopTalking = useCallback(async () => {
+    try {
+      await invoke("agent_voice", { action: "stop" });
+    } catch (error) {
+      console.error("❌ FloatingBar: failed to stop listening:", error);
+    }
+  }, []);
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -483,14 +561,20 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     await sendInteraction(createInteraction(UI.INTERACTION_TYPES_BLUR, { isFocused: false }));
   }, [sendInteraction, createInteraction]);
 
+  /** Input blur: tell the backend, and fold the pill back up if nothing was typed. */
+  const handleInputBlur = useCallback(() => {
+    if (!localInputValue.trim()) closeInput();
+    void handleBlur();
+  }, [localInputValue, closeInput, handleBlur]);
+
   /**
-   * OS-level focus changes (Cmd+Tab, clicking another window). The input's
-   * own onFocus/onBlur only fire for focus moves inside the webview.
-   *
-   * When the window becomes key (a click in the input calls `activateWindow`,
-   * or the user Cmd+Tabs here), make the webview the window's first responder
+   * OS-level focus changes (Cmd+Tab, clicking another window). When the
+   * window becomes key, make the webview the window's first responder
    * (keystrokes otherwise never reach the page, even with a visible caret)
-   * and focus the input, so one click is enough.
+   * and put the caret in the input if one is showing. The backend is told
+   * about focus by the input itself, never by the window, so that a click
+   * on the mic — which may activate the window — can't turn into the
+   * expand-to-input transition.
    */
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -501,7 +585,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         const fn = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
           if (!mounted) return;
           if (focused) {
-            handleFocus();
             getCurrentWebview()
               .setFocus()
               .catch((error) => console.debug("FloatingBar: webview focus failed:", error));
@@ -523,7 +606,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       mounted = false;
       unlisten?.();
     };
-  }, [handleFocus, handleBlur]);
+  }, [handleBlur]);
 
   // === DERIVED UI STATE ===
 
@@ -533,68 +616,197 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const isVoice = VOICE_STATES.includes(currentUiState);
   const isWorking = WORKING_STATES.includes(currentUiState) || chat.isProcessing;
 
-  // The pill is an input whenever nothing is running: idle, the backend's
-  // input states, and between turns with the pane open, so a query or a
-  // follow-up is one click away (focusing it tells the backend to expand).
-  // Voice and working states show status instead. Dictation-ready keeps its
-  // label unless the pane is up, since the next thing that happens is speech.
+  // Parallel agent sessions (LAC-1432): the roster strip appears below the
+  // bar when 2+ agents run, so the window grows to make room for it.
+  const { sessions: agentSessions, focusSession } = useAgentSessions();
+  const showRosterStrip = agentSessions.length >= 2;
+
+  const layout = pickLayout({
+    state: currentUiState,
+    hovered,
+    inputOpen,
+    paneOpen,
+    rosterVisible: showRosterStrip,
+  });
+
+  // The input shows when the user opened it, while the backend is in its
+  // input states, and between turns with the pane open so a follow-up is one
+  // click away. Voice and working states show status instead.
   const showInput =
-    !isWorking &&
-    (isInputState ||
-      currentUiState === UI.BAR_STATES_DEFAULT ||
-      currentUiState === UI.BAR_STATES_SHRINKING ||
-      (paneOpen && isIdle));
+    !isWorking && !isVoice && (inputOpen || isInputState || (paneOpen && isIdle));
   const label = statusLabel(currentUiState, barState);
 
-  // Refocus the input when a turn ends while this window is still the one
-  // the user is in, so the follow-up can be typed straight away. Never steal
-  // focus from another app: element focus in a non-key window is inert.
+  // Once the input is up, put the caret in it. After a turn ends with the
+  // pane open, refocus only if this window is still the one the user is in:
+  // element focus in a non-key window is inert and must not steal focus.
   useEffect(() => {
-    if (!showInput || !document.hasFocus()) return;
+    if (!showInput) return;
+    if (inputOpen) {
+      inputRef.current?.focus();
+      return;
+    }
+    if (!document.hasFocus()) return;
     const t = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(t);
-  }, [showInput]);
+  }, [showInput, inputOpen]);
+
+  // A voice or working state that starts while the input is open (hotkey,
+  // wake word) takes over; the input is not waiting underneath.
+  useEffect(() => {
+    if ((isVoice || isWorking) && inputOpen) closeInput();
+  }, [isVoice, isWorking, inputOpen, closeInput]);
 
   /**
-   * Escape while idle closes the pane. Escape while work is in progress is
-   * deliberately NOT handled here: the passive stop-key monitor in Rust
-   * (platform/stop_key_monitor.rs) sees it and stops everything.
+   * Escape while idle closes the input, then the pane. Escape while work is
+   * in progress is deliberately NOT handled here: the passive stop-key
+   * monitor in Rust (platform/stop_key_monitor.rs) sees it and stops
+   * everything.
    */
   useEffect(() => {
-    if (!paneOpen || isWorking) return;
+    if (isWorking || (!inputOpen && !paneOpen)) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") dismissPane();
+      if (e.key !== "Escape") return;
+      if (inputOpen) {
+        closeInput();
+        void handleBlur();
+      } else {
+        dismissPane();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [paneOpen, isWorking, dismissPane]);
+  }, [inputOpen, paneOpen, isWorking, closeInput, handleBlur, dismissPane]);
 
-  const onDragMouseDown = useDragWindow();
+  // === WINDOW RESIZING ===
+
+  const { resizeWindowIfChanged } = useWindowSize(windowLabel);
+  const lastWindowRef = useRef<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    const next = floatingBarWindowSize({ layout, paneOpen, rosterVisible: showRosterStrip });
+    const prev = lastWindowRef.current;
+    lastWindowRef.current = { width: next.width, height: next.height };
+    const apply = () =>
+      resizeWindowIfChanged(next).catch((error) =>
+        console.error("❌ FloatingBar: Failed to resize window:", error),
+      );
+    // Growing: make room first, then the pill animates into it. Shrinking:
+    // let the pill animate down before the window snaps around it.
+    const shrinking = prev !== null && next.width <= prev.width && next.height <= prev.height;
+    if (!shrinking) {
+      apply();
+      return;
+    }
+    const t = setTimeout(apply, SHRINK_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [layout, paneOpen, showRosterStrip, resizeWindowIfChanged]);
+
+  // === DRAG ANYWHERE, CLICK WHERE YOU CLICKED ===
+  //
+  // A mousedown anywhere except the text input and the chat body arms a
+  // drag; moving past the threshold hands the gesture to the OS window drag
+  // and swallows the click that would otherwise fire on release. A press
+  // and release without movement is an ordinary click on the button.
+
+  const dragArmRef = useRef<{ x: number; y: number } | null>(null);
+  const draggedRef = useRef(false);
+
+  const onRootMouseDown = useCallback((e: ReactMouseEvent) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    draggedRef.current = false;
+    if (target.closest("input, textarea, [data-no-drag]")) return;
+    dragArmRef.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const onRootMouseMove = useCallback((e: ReactMouseEvent) => {
+    const start = dragArmRef.current;
+    if (!start) return;
+    if (
+      Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) <
+      DRAG_THRESHOLD_PX
+    )
+      return;
+    dragArmRef.current = null;
+    draggedRef.current = true;
+    e.preventDefault();
+    getCurrentWindow()
+      .startDragging()
+      .catch((error) => console.debug("FloatingBar: startDragging failed:", error));
+  }, []);
+
+  const onRootMouseUp = useCallback(() => {
+    dragArmRef.current = null;
+  }, []);
+
+  const onRootClickCapture = useCallback((e: ReactMouseEvent) => {
+    if (!draggedRef.current) return;
+    draggedRef.current = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, []);
 
   // === RENDER ===
 
+  const pill = BAR_LAYOUTS[layout];
+  const pad = BAR_LAYOUTS[layout].pad;
+
   return (
     <div
-      className="relative flex h-screen w-screen cursor-grab flex-col items-center overflow-hidden p-6 active:cursor-grabbing"
-      onMouseDown={onDragMouseDown}
+      className="relative flex h-screen w-screen cursor-grab select-none flex-col items-center overflow-hidden active:cursor-grabbing"
+      style={{ padding: pad }}
+      onMouseDownCapture={onRootMouseDown}
+      onMouseMove={onRootMouseMove}
+      onMouseUp={onRootMouseUp}
+      onClickCapture={onRootClickCapture}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <div
         data-testid="floating-bar"
         data-state={currentUiState}
+        data-layout={layout}
         className={cn(
-          "relative flex h-11 w-[419px] shrink-0 items-center gap-3 rounded-full px-4",
-          "border border-white/10 bg-neutral-950/90 text-white shadow-2xl backdrop-blur-xl",
-          "transition-colors duration-300 ease-in-out",
-          isIdle && !showInput && "cursor-pointer",
+          "relative flex shrink-0 items-center rounded-full",
+          "border border-white/10 bg-neutral-950/90 text-white backdrop-blur-xl",
+          "transition-[width,height,padding] duration-200 ease-out",
+          layout === "compact" ? "justify-center shadow-lg" : "gap-2 shadow-2xl",
+          layout === "full" ? "px-4" : layout === "compact" ? "px-0" : "px-2",
         )}
-        onClick={isIdle && !showInput ? handleClick : undefined}
-        role={isIdle && !showInput ? "button" : undefined}
-        aria-label={isIdle && !showInput ? "Activate assistant" : undefined}
+        style={{ width: pill.width, height: pill.height }}
       >
         <StatusDot state={currentUiState} audioLevel={barState.audioLevel} />
 
-        {showInput ? (
-          <form onSubmit={handleSubmit} className="flex min-w-0 flex-1 items-center gap-3">
+        {layout === "compact" ? null : layout === "hover" ? (
+          <div
+            className="flex items-center gap-1"
+            style={{ animation: "fbar-reveal 0.18s ease-out both" }}
+          >
+            <button
+              type="button"
+              onClick={startTalking}
+              aria-label="Talk to Juno"
+              title="Talk to Juno"
+              className={pillButton}
+            >
+              <Mic className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={openInput}
+              aria-label="Type to Juno"
+              title="Type to Juno"
+              className={pillButton}
+            >
+              <Type className="size-3.5" />
+            </button>
+          </div>
+        ) : showInput ? (
+          <form
+            onSubmit={handleSubmit}
+            className="flex min-w-0 flex-1 items-center gap-3"
+            style={{ animation: "fbar-content-in 0.2s ease-out both" }}
+          >
             <input
               ref={inputRef}
               type="text"
@@ -602,11 +814,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               onChange={(e) => setLocalInputValue(e.target.value)}
               onMouseDown={activateWindow}
               onFocus={handleFocus}
-              onBlur={handleBlur}
+              onBlur={handleInputBlur}
               placeholder={paneOpen ? "Follow up…" : "Ask Juno"}
               aria-label="Ask Juno"
               className={cn(
-                "min-w-0 flex-1 border-none bg-transparent outline-none",
+                "min-w-0 flex-1 cursor-text border-none bg-transparent outline-none",
                 "text-[13px] tracking-[-0.01em] text-white/90 placeholder:text-white/30",
               )}
             />
@@ -620,10 +832,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               return
             </span>
           </form>
-        ) : isIdle ? (
-          <span className="min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em] text-white/35">
-            {label ?? "Ask Juno"}
-          </span>
         ) : (
           <>
             <span
@@ -633,19 +841,27 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               )}
               data-testid="floating-bar-status"
             >
-              {label}
+              {label ?? "Ask Juno"}
             </span>
             {isVoice && <AudioLevelBars audioLevel={barState.audioLevel} />}
+            {isVoice && currentUiState !== UI.BAR_STATES_ALWAYS_LISTENING && (
+              <button
+                type="button"
+                onClick={stopTalking}
+                aria-label="Stop listening"
+                title="Stop listening"
+                className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/[0.08] text-white/60 transition-colors hover:bg-white/[0.16] hover:text-white"
+              >
+                <Square className="size-2.5 fill-current" />
+              </button>
+            )}
             {isWorking && (
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void chat.stop();
-                }}
+                onClick={() => void chat.stop()}
                 aria-label="Stop"
                 title="Stop (Esc)"
-                className="flex size-6 shrink-0 items-center justify-center rounded-full bg-white/[0.08] text-white/60 transition-colors hover:bg-white/[0.16] hover:text-white"
+                className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/[0.08] text-white/60 transition-colors hover:bg-white/[0.16] hover:text-white"
               >
                 <Square className="size-2.5 fill-current" />
               </button>

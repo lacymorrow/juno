@@ -308,7 +308,13 @@ pub mod mouse_tracking {
     // Constants for NSTrackingAreaOptions
     const NS_TRACKING_MOUSE_ENTERED_AND_EXITED: u64 = 0x01;
     const NS_TRACKING_ACTIVE_ALWAYS: u64 = 0x80;
-    const TRACKING_OPTIONS: u64 = NS_TRACKING_MOUSE_ENTERED_AND_EXITED | NS_TRACKING_ACTIVE_ALWAYS;
+    // Track the view's *current* visible rect, not the bounds captured at
+    // setup: the floating bar resizes itself (compact → hover → chat pane),
+    // and a fixed rect would stop firing entered/exited at the new edges.
+    const NS_TRACKING_IN_VISIBLE_RECT: u64 = 0x200;
+    const TRACKING_OPTIONS: u64 = NS_TRACKING_MOUSE_ENTERED_AND_EXITED
+        | NS_TRACKING_ACTIVE_ALWAYS
+        | NS_TRACKING_IN_VISIBLE_RECT;
 
     // Static storage for the AppHandle, wrapped for thread safety
     static APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);

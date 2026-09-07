@@ -1,18 +1,25 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { FloatingBar, floatingBarWindowSize } from "../FloatingBar";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  FloatingBar,
+  SHRINK_DELAY_MS,
+  floatingBarWindowSize,
+  pickLayout,
+} from "../FloatingBar";
 
 // ── Tauri + hook mocks ───────────────────────────────────────────────
 
 const { invoke, listenHandlers, eventHandlers, resizeWindowIfChanged } = vi.hoisted(() => ({
   invoke: vi.fn((..._args: unknown[]) => Promise.resolve()),
-  // Bar-state events arrive through `listen` directly; conversation events
-  // arrive through useEventListener. Both are captured by event name so a
-  // test can play the backend. Hoisted: module-level services call listen()
-  // at import time, before this file's own consts would initialise.
+  // Bar-state and hover events arrive through `listen` directly; conversation
+  // events arrive through useEventListener. Both are captured by event name
+  // so a test can play the backend. Hoisted: module-level services call
+  // listen() at import time, before this file's own consts would initialise.
   listenHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   eventHandlers: new Map<string, (payload: unknown) => void>(),
-  resizeWindowIfChanged: vi.fn((_size: { width: number; height: number }) => Promise.resolve()),
+  resizeWindowIfChanged: vi.fn(
+    (_size: { width: number; height: number; anchorY?: number }) => Promise.resolve(),
+  ),
 }));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
@@ -93,6 +100,14 @@ const fire = (event: string, payload: unknown) =>
     eventHandlers.get(event)?.(payload);
   });
 
+/** The native tracking area reporting the mouse crossing the window's edge. */
+const hover = (inside: boolean) =>
+  act(() => {
+    listenHandlers.get(inside ? "mouse-entered-window" : "mouse-left-window")?.({
+      payload: null,
+    });
+  });
+
 const submitUserMessage = (content: string) =>
   fire("user-message-submitted", { content, timestamp: 1_700_000_000_000 });
 
@@ -109,8 +124,25 @@ async function renderBar() {
   return utils;
 }
 
+const bar = () => screen.getByTestId("floating-bar");
 const lastResize = () =>
   resizeWindowIfChanged.mock.calls[resizeWindowIfChanged.mock.calls.length - 1]?.[0];
+
+/** Hover the pill and open the text input via its button. */
+async function openInput() {
+  hover(true);
+  fireEvent.click(screen.getByRole("button", { name: "Type to Juno" }));
+  await act(async () => {});
+  return screen.getByPlaceholderText("Ask Juno");
+}
+
+const interaction = (type: string, data?: unknown) =>
+  expect.objectContaining({
+    elementId: "floating-bar",
+    interaction: expect.objectContaining(
+      data === undefined ? { interaction_type: type } : { interaction_type: type, data },
+    ),
+  });
 
 beforeEach(() => {
   invoke.mockClear();
@@ -122,34 +154,259 @@ beforeEach(() => {
   eventHandlers.clear();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 // ── Tests ────────────────────────────────────────────────────────────
 
 describe("floatingBarWindowSize", () => {
-  it("is a fixed-width window that only grows downward", () => {
-    expect(floatingBarWindowSize({ paneOpen: false, rosterVisible: false })).toEqual({
-      width: 467,
-      height: 92,
-    });
-    expect(floatingBarWindowSize({ paneOpen: true, rosterVisible: false })).toEqual({
-      width: 467,
-      height: 460,
-    });
-    expect(floatingBarWindowSize({ paneOpen: true, rosterVisible: true })).toEqual({
-      width: 467,
-      height: 494,
-    });
+  it("is exactly the pill plus shadow padding, anchored on the pill's centre", () => {
+    expect(floatingBarWindowSize({ layout: "compact", paneOpen: false, rosterVisible: false }))
+      .toEqual({ width: 88, height: 48, anchorY: 24 });
+    expect(floatingBarWindowSize({ layout: "hover", paneOpen: false, rosterVisible: false }))
+      .toEqual({ width: 164, height: 66, anchorY: 33 });
+    expect(floatingBarWindowSize({ layout: "voice", paneOpen: false, rosterVisible: false }))
+      .toEqual({ width: 252, height: 66, anchorY: 33 });
+    expect(floatingBarWindowSize({ layout: "full", paneOpen: false, rosterVisible: false }))
+      .toEqual({ width: 467, height: 92, anchorY: 46 });
+    expect(floatingBarWindowSize({ layout: "full", paneOpen: true, rosterVisible: false }))
+      .toEqual({ width: 467, height: 460, anchorY: 46 });
+    expect(floatingBarWindowSize({ layout: "full", paneOpen: true, rosterVisible: true }))
+      .toEqual({ width: 467, height: 494, anchorY: 46 });
+  });
+});
+
+describe("pickLayout", () => {
+  const base = { hovered: false, inputOpen: false, paneOpen: false, rosterVisible: false };
+  it("is compact while idle, grows on hover, and goes full for anything with text", () => {
+    expect(pickLayout({ ...base, state: "default" })).toBe("compact");
+    expect(pickLayout({ ...base, state: "dictation_ready" })).toBe("compact");
+    expect(pickLayout({ ...base, state: "default", hovered: true })).toBe("hover");
+    expect(pickLayout({ ...base, state: "listening", hovered: true })).toBe("voice");
+    expect(pickLayout({ ...base, state: "always_listening" })).toBe("voice");
+    expect(pickLayout({ ...base, state: "default", inputOpen: true })).toBe("full");
+    expect(pickLayout({ ...base, state: "expanding" })).toBe("full");
+    expect(pickLayout({ ...base, state: "loading" })).toBe("full");
+    expect(pickLayout({ ...base, state: "error" })).toBe("full");
+    expect(pickLayout({ ...base, state: "default", paneOpen: true })).toBe("full");
+    expect(pickLayout({ ...base, state: "default", rosterVisible: true })).toBe("full");
   });
 });
 
 describe("FloatingBar", () => {
-  it("starts as a compact pill with no conversation pane", async () => {
+  it("starts as a tiny pill: no input, no buttons, no pane", async () => {
     await renderBar();
 
-    expect(screen.getByTestId("floating-bar")).toHaveAttribute("data-state", "default");
-    // One click away: the idle pill already is the input.
-    expect(screen.getByPlaceholderText("Ask Juno")).toBeInTheDocument();
+    expect(bar()).toHaveAttribute("data-state", "default");
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
-    expect(lastResize()).toEqual({ width: 467, height: 92 });
+    expect(lastResize()).toEqual({ width: 88, height: 48, anchorY: 24 });
+  });
+
+  it("grows on hover to reveal the mic and type buttons, and shrinks back after the animation", async () => {
+    vi.useFakeTimers();
+    await renderBar();
+
+    hover(true);
+    expect(bar()).toHaveAttribute("data-layout", "hover");
+    expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Type to Juno" })).toBeInTheDocument();
+    // Growing: the window makes room straight away.
+    expect(lastResize()).toEqual({ width: 164, height: 66, anchorY: 33 });
+
+    hover(false);
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    // Shrinking: the window waits for the pill to animate down first.
+    expect(lastResize()).toEqual({ width: 164, height: 66, anchorY: 33 });
+    act(() => {
+      vi.advanceTimersByTime(SHRINK_DELAY_MS);
+    });
+    expect(lastResize()).toEqual({ width: 88, height: 48, anchorY: 24 });
+  });
+
+  it("also treats DOM hover as hover, for when Juno is the active app", async () => {
+    await renderBar();
+
+    fireEvent.mouseEnter(bar().parentElement!);
+    expect(bar()).toHaveAttribute("data-layout", "hover");
+    fireEvent.mouseLeave(bar().parentElement!);
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+  });
+
+  it("starts a spoken query to the agent on a mic click, without activating the window", async () => {
+    await renderBar();
+    hover(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Talk to Juno" }));
+    await act(async () => {});
+
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "start" });
+    expect(windowSetFocus).not.toHaveBeenCalled();
+  });
+
+  it("shows listening status with a stop control while the mic is open", async () => {
+    await renderBar();
+
+    setBarState({ barState: "listening", audioLevel: 0.6 });
+
+    expect(bar()).toHaveAttribute("data-layout", "voice");
+    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("listening");
+    expect(lastResize()).toEqual({ width: 252, height: 66, anchorY: 33 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop listening" }));
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "stop" });
+  });
+
+  it("has no stop control for always-listening, which is not a turn", async () => {
+    await renderBar();
+    setBarState({ barState: "always_listening", isAlwaysListening: true });
+
+    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("always listening");
+    expect(screen.queryByRole("button", { name: "Stop listening" })).not.toBeInTheDocument();
+  });
+
+  it("opens the input focused on a type click, activating the window and telling the backend", async () => {
+    await renderBar();
+
+    const input = await openInput();
+
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    expect(input).toHaveFocus();
+    expect(windowSetFocus).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith(
+      "ui_handle_interaction",
+      interaction("focus", { isFocused: true }),
+    );
+    expect(lastResize()).toEqual({ width: 467, height: 92, anchorY: 46 });
+  });
+
+  it("submits typed input through the standard bar interaction and clears it", async () => {
+    await renderBar();
+    const input = await openInput();
+
+    fireEvent.change(input, { target: { value: "  open my calendar " } });
+    fireEvent.submit(input.closest("form")!);
+    await act(async () => {});
+
+    expect(invoke).toHaveBeenCalledWith(
+      "ui_handle_interaction",
+      interaction("submit", { value: "open my calendar" }),
+    );
+    expect(input).toHaveValue("");
+  });
+
+  it("folds the input away on Escape and on an empty blur, telling the backend", async () => {
+    await renderBar();
+    await openInput();
+    hover(false);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await act(async () => {});
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+    expect(invoke).toHaveBeenCalledWith(
+      "ui_handle_interaction",
+      interaction("blur", { isFocused: false }),
+    );
+
+    const input = await openInput();
+    fireEvent.blur(input);
+    await act(async () => {});
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("keeps the input when it blurs with text in it", async () => {
+    await renderBar();
+    const input = await openInput();
+
+    fireEvent.change(input, { target: { value: "half a thought" } });
+    fireEvent.blur(input);
+    await act(async () => {});
+
+    expect(screen.getByRole("textbox")).toHaveValue("half a thought");
+  });
+
+  it("shows the input while the backend is in its input states even if it was not opened here", async () => {
+    await renderBar();
+
+    setBarState({ barState: "expanding" });
+    const input = screen.getByPlaceholderText("Ask Juno");
+    expect(input).toBeEnabled();
+    fireEvent.change(input, { target: { value: "hel" } });
+    expect(input).toHaveValue("hel");
+  });
+
+  it("drags the window from anywhere once the mouse moves, and swallows the click that follows", async () => {
+    await renderBar();
+    hover(true);
+    const mic = screen.getByRole("button", { name: "Talk to Juno" });
+
+    fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(mic, { clientX: 12, clientY: 11 }); // under the threshold
+    expect(startDragging).not.toHaveBeenCalled();
+    fireEvent.mouseMove(mic, { clientX: 30, clientY: 20 });
+    expect(startDragging).toHaveBeenCalledTimes(1);
+
+    fireEvent.mouseUp(mic);
+    fireEvent.click(mic);
+    await act(async () => {});
+    expect(invoke).not.toHaveBeenCalledWith("agent_voice", expect.anything());
+  });
+
+  it("treats a press and release without movement as the click it is", async () => {
+    await renderBar();
+    hover(true);
+    const mic = screen.getByRole("button", { name: "Talk to Juno" });
+
+    fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(mic, { clientX: 11, clientY: 10 });
+    fireEvent.mouseUp(mic);
+    fireEvent.click(mic);
+    await act(async () => {});
+
+    expect(startDragging).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "start" });
+  });
+
+  it("never drags from the text input, so text can be selected", async () => {
+    await renderBar();
+    const input = await openInput();
+
+    fireEvent.mouseDown(input, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(input, { clientX: 60, clientY: 10 });
+
+    expect(startDragging).not.toHaveBeenCalled();
+  });
+
+  it("puts the caret back in an open input when the window becomes key", async () => {
+    await renderBar();
+    const input = await openInput();
+    fireEvent.change(input, { target: { value: "half a thought" } });
+    invoke.mockClear();
+    act(() => input.blur());
+    expect(input).not.toHaveFocus();
+
+    act(() => windowFocus.handler?.({ payload: true }));
+    await act(async () => {});
+
+    expect(input).toHaveFocus();
+    // Keystrokes only reach the page once the webview is first responder.
+    expect(webviewSetFocus).toHaveBeenCalled();
+  });
+
+  it("does not expand into the input just because the window became key", async () => {
+    await renderBar();
+
+    act(() => windowFocus.handler?.({ payload: true }));
+    await act(async () => {});
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("ui_handle_interaction", interaction("focus"));
   });
 
   it("opens the chat pane with the user's message when the backend announces a query", async () => {
@@ -162,7 +419,8 @@ describe("FloatingBar", () => {
     expect(pane).toHaveClass("dark");
     expect(screen.getByText("Play my liked songs on Spotify")).toBeInTheDocument();
     expect(screen.getByTestId("bar-chat-pane-status")).toHaveTextContent("working");
-    expect(lastResize()).toEqual({ width: 467, height: 460 });
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    expect(lastResize()).toEqual({ width: 467, height: 460, anchorY: 46 });
   });
 
   it("streams the assistant response into the pane and settles when the agent goes idle", async () => {
@@ -201,6 +459,7 @@ describe("FloatingBar", () => {
   });
 
   it("dismisses the pane on Escape only when nothing is running", async () => {
+    vi.useFakeTimers();
     await renderBar();
 
     submitUserMessage("Hello");
@@ -213,7 +472,10 @@ describe("FloatingBar", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
-    expect(lastResize()).toEqual({ width: 467, height: 92 });
+    act(() => {
+      vi.advanceTimersByTime(SHRINK_DELAY_MS);
+    });
+    expect(lastResize()).toEqual({ width: 88, height: 48, anchorY: 24 });
   });
 
   it("reopens a dismissed pane when the next query arrives", async () => {
@@ -247,120 +509,13 @@ describe("FloatingBar", () => {
     expect(screen.getByText("Again")).toBeInTheDocument();
   });
 
-  it("submits typed input through the standard bar interaction and clears it", async () => {
+  it("hands an open input over to a voice turn that starts from the hotkey", async () => {
     await renderBar();
+    await openInput();
 
-    setBarState({ barState: "input" });
-    const input = screen.getByPlaceholderText("Ask Juno");
-    fireEvent.change(input, { target: { value: "  open my calendar " } });
-    fireEvent.submit(input.closest("form")!);
-    await act(async () => {});
+    setBarState({ barState: "listening" });
 
-    expect(invoke).toHaveBeenCalledWith(
-      "ui_handle_interaction",
-      expect.objectContaining({
-        elementId: "floating-bar",
-        interaction: expect.objectContaining({
-          interaction_type: "submit",
-          data: { value: "open my calendar" },
-        }),
-      }),
-    );
-    expect(input).toHaveValue("");
-  });
-
-  it("tells the backend to expand when the idle input gains focus", async () => {
-    await renderBar();
-
-    fireEvent.focus(screen.getByPlaceholderText("Ask Juno"));
-    await act(async () => {});
-
-    expect(invoke).toHaveBeenCalledWith(
-      "ui_handle_interaction",
-      expect.objectContaining({
-        interaction: expect.objectContaining({
-          interaction_type: "focus",
-          data: { isFocused: true },
-        }),
-      }),
-    );
-  });
-
-  it("starts a window drag on the first mousedown on the pill background, without asking for activation", async () => {
-    await renderBar();
-
-    fireEvent.mouseDown(screen.getByTestId("floating-bar"), { button: 0 });
-    await act(async () => {});
-
-    expect(startDragging).toHaveBeenCalledTimes(1);
-    expect(windowSetFocus).not.toHaveBeenCalled();
-  });
-
-  it("activates the app when the input is clicked, so keystrokes land here", async () => {
-    await renderBar();
-
-    fireEvent.mouseDown(screen.getByPlaceholderText("Ask Juno"), { button: 0 });
-    await act(async () => {});
-
-    expect(windowSetFocus).toHaveBeenCalledTimes(1);
-    // A click in the input is a click, not a drag.
-    expect(startDragging).not.toHaveBeenCalled();
-  });
-
-  it("activates the app when the idle pill is clicked to wake the assistant", async () => {
-    await renderBar();
-    setBarState({ barState: "dictation_ready" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Activate assistant" }));
-    await act(async () => {});
-
-    expect(windowSetFocus).toHaveBeenCalledTimes(1);
-  });
-
-  it("focuses the input the moment the window becomes key, so one click is enough", async () => {
-    await renderBar();
-    const input = screen.getByPlaceholderText("Ask Juno");
-    expect(input).not.toHaveFocus();
-
-    act(() => windowFocus.handler?.({ payload: true }));
-    await act(async () => {});
-
-    expect(input).toHaveFocus();
-    // Keystrokes only reach the page once the webview is first responder.
-    expect(webviewSetFocus).toHaveBeenCalled();
-    expect(invoke).toHaveBeenCalledWith(
-      "ui_handle_interaction",
-      expect.objectContaining({
-        interaction: expect.objectContaining({ interaction_type: "focus" }),
-      }),
-    );
-  });
-
-  it("shows the dictation-ready label instead of an input, and activates on click", async () => {
-    await renderBar();
-
-    setBarState({ barState: "dictation_ready" });
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.getByText("dictation ready")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Activate assistant" }));
-    await act(async () => {});
-
-    expect(invoke).toHaveBeenCalledWith(
-      "ui_handle_interaction",
-      expect.objectContaining({
-        interaction: expect.objectContaining({ interaction_type: "click" }),
-      }),
-    );
-  });
-
-  it("keeps the input usable through the backend's expanding transition", async () => {
-    await renderBar();
-
-    setBarState({ barState: "expanding" });
-    const input = screen.getByPlaceholderText("Ask Juno");
-    expect(input).toBeEnabled();
-    fireEvent.change(input, { target: { value: "hel" } });
-    expect(input).toHaveValue("hel");
+    expect(bar()).toHaveAttribute("data-layout", "voice");
   });
 });

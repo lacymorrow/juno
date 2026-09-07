@@ -266,6 +266,21 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
     }
 }
 
+/// The floating bar's mic button. Drives the same event pipeline the agent
+/// hotkey does (`agent-transcription-start` / `-stop`), so a spoken query from
+/// the bar is transcribed and handed to the agent exactly like a hotkey one.
+/// `start` opens the microphone; `stop` closes it and processes what was said.
+#[tauri::command]
+pub async fn agent_voice(app: AppHandle, action: String) -> Result<(), String> {
+    let event = match action.as_str() {
+        "start" => events::agent::TRANSCRIPTION_START,
+        "stop" => events::agent::TRANSCRIPTION_STOP,
+        other => return Err(format!("unknown agent_voice action: {other}")),
+    };
+    info!("[AgentMonitor] agent_voice({action}) from the bar");
+    app.emit(event, ()).map_err(|e| e.to_string())
+}
+
 // Public function to force reset the agent input state
 pub async fn force_reset_agent_input_state() {
     let mut state = AGENT_INPUT_STATE.lock().await;
