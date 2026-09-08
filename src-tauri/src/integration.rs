@@ -377,18 +377,58 @@ async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
     info!("[Dictation Mode] Force cleanup completed");
 }
 
+/// Which target the current wake-word activation should route to. Set when the
+/// always-listening engine reports a matched phrase, read when the follow-up
+/// transcription arrives. Defaults to the agent.
+static PENDING_VOICE_TARGET: std::sync::Mutex<Option<crate::triggers::TriggerTarget>> =
+    std::sync::Mutex::new(None);
+
+/// Resolve which target a matched wake phrase belongs to by looking it up in the
+/// enabled voice triggers. Falls back to the agent (historical behavior).
+fn voice_target_for_phrase(
+    app_state: &state::AppState,
+    phrase: &str,
+) -> crate::triggers::TriggerTarget {
+    let phrase = phrase.trim().to_lowercase();
+    app_state
+        .get_triggers()
+        .ok()
+        .and_then(|triggers| {
+            triggers
+                .into_iter()
+                .find(|t| {
+                    t.enabled && t.is_voice() && t.voice_phrases().iter().any(|p| p == &phrase)
+                })
+                .map(|t| t.target)
+        })
+        .unwrap_or(crate::triggers::TriggerTarget::Agent)
+}
+
 /// Setup always listening integration with wake word detection and agent activation
 fn setup_always_listening_integration(app_handle: &AppHandle) {
     info!("🔊 Setting up always listening integration...");
 
-    // Listen for always listening wake word activation
+    // Listen for always listening wake word activation. The payload carries the
+    // matched wake phrase, so we resolve which target (agent vs dictation) this
+    // activation should drive and stash it for the follow-up transcription.
     let app_handle_for_wake_word = app_handle.clone();
-    app_handle.listen(constants::events::always_listening::ACTIVATED, move |_event| {
-        info!("[AlwaysListening] Wake word detected - preparing for agent activation");
+    app_handle.listen(constants::events::always_listening::ACTIVATED, move |event| {
+        let matched_phrase: String =
+            serde_json::from_str(event.payload()).unwrap_or_default();
 
         let app_handle_clone = app_handle_for_wake_word.clone();
         safe_spawn_async_task(move || async move {
-            // Update floating bar to indicate agent mode is starting
+            let app_state = app_handle_clone.state::<state::AppState>();
+            let target = voice_target_for_phrase(&app_state, &matched_phrase);
+            if let Ok(mut pending) = PENDING_VOICE_TARGET.lock() {
+                *pending = Some(target);
+            }
+            info!(
+                "[AlwaysListening] Wake phrase '{}' detected -> target {:?}",
+                matched_phrase, target
+            );
+
+            // Update floating bar to indicate activation is starting.
             commands::ui_commands::handle_always_listening_change(&app_handle_clone, true).await;
 
             // Emit event to UI to show wake word was detected
@@ -444,23 +484,61 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
                         trimmed_text
                     );
 
-                    // Only activate agent if we have meaningful content
+                    // Only act if we have meaningful content.
                     if !trimmed_text.is_empty() && trimmed_text.len() > 2 {
-                        // Submit the query to the agent system
-                        if let Err(e) = crate::anthropic::submit_query(
-                            trimmed_text.to_string(),
-                            app_state,
-                            app_handle.clone(),
-                        )
-                        .await
-                        {
-                            crate::error_handling::utils::log_and_emit_error(
-                                app_handle,
-                                "AlwaysListening",
-                                "agent_query_submission",
-                                &e.to_string(),
-                                true,
-                            );
+                        let target = PENDING_VOICE_TARGET
+                            .lock()
+                            .ok()
+                            .and_then(|g| *g)
+                            .unwrap_or(crate::triggers::TriggerTarget::Agent);
+
+                        match target {
+                            crate::triggers::TriggerTarget::Dictation => {
+                                // Voice dictation: type what was said after the
+                                // wake phrase, mirroring the dictation delivery path.
+                                info!(
+                                    "[AlwaysListening] Voice dictation -> typing: '{}'",
+                                    trimmed_text
+                                );
+                                if app_state.get_dictation_clipboard_enabled().unwrap_or(true) {
+                                    if let Err(e) = crate::commands::core::set_clipboard(
+                                        trimmed_text.to_string(),
+                                        app_handle.clone(),
+                                        app_state.clone(),
+                                    )
+                                    .await
+                                    {
+                                        error!("[AlwaysListening] Failed to set clipboard: {}", e);
+                                    }
+                                }
+                                if let Err(e) = crate::commands::keyboard::global_type_text(
+                                    trimmed_text.to_string(),
+                                    app_handle.clone(),
+                                    app_state.clone(),
+                                )
+                                .await
+                                {
+                                    error!("[AlwaysListening] Failed to type dictated text: {}", e);
+                                }
+                            }
+                            crate::triggers::TriggerTarget::Agent => {
+                                // Submit the query to the agent system
+                                if let Err(e) = crate::anthropic::submit_query(
+                                    trimmed_text.to_string(),
+                                    app_state,
+                                    app_handle.clone(),
+                                )
+                                .await
+                                {
+                                    crate::error_handling::utils::log_and_emit_error(
+                                        app_handle,
+                                        "AlwaysListening",
+                                        "agent_query_submission",
+                                        &e.to_string(),
+                                        true,
+                                    );
+                                }
+                            }
                         }
                     } else {
                         info!("[AlwaysListening] Transcribed text was empty or too short - ignoring: '{}'", trimmed_text);

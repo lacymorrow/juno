@@ -293,6 +293,9 @@ pub struct InputSettings {
     pub keyboard_shortcuts: KeyboardShortcuts,
     pub agent_trigger_mode: AgentTriggerMode,
     pub dictation_trigger_mode: DictationTriggerMode,
+    /// Unified activation triggers. Source of truth for registration and
+    /// dispatch; hydrated from centralized settings at boot. Empty until then.
+    pub triggers: Vec<crate::triggers::Trigger>,
 }
 
 /// Synchronized wrapper for backward compatibility
@@ -945,6 +948,23 @@ impl AppState {
             .lock()
             .map(|mut settings| settings.dictation_trigger_mode = mode)
             .map_err(|e| format_error(templates::FAILED_TO_SET, "dictation trigger mode", e))
+    }
+
+    /// Get the unified activation triggers (source of truth for registration).
+    pub fn get_triggers(&self) -> Result<Vec<crate::triggers::Trigger>, String> {
+        self.input_settings
+            .lock()
+            .map(|settings| settings.triggers.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "triggers", e))
+    }
+
+    /// Replace the unified activation triggers in memory. Callers persist and
+    /// re-register separately (see `commands::triggers::set_triggers`).
+    pub fn set_triggers(&self, triggers: Vec<crate::triggers::Trigger>) -> Result<(), String> {
+        self.input_settings
+            .lock()
+            .map(|mut settings| settings.triggers = triggers)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "triggers", e))
     }
 
     // Method to trigger cancellation

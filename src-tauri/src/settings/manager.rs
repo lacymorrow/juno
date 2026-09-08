@@ -68,13 +68,20 @@ impl SettingsManager {
             .store(SETTINGS_STORE_FILE)
             .map_err(|e| format!("Failed to access settings store: {}", e))?;
 
+        // Legacy sections are read first so the triggers list can be migrated
+        // from them when a store predates the unified activation model.
+        let keyboard_shortcuts = self.get_keyboard_shortcuts_from_store(&store)?;
+        let agent = self.get_agent_settings_from_store(&store)?;
+        let audio = self.get_audio_settings_from_store(&store)?;
+        let triggers = self.get_triggers_from_store(&store, &keyboard_shortcuts, &agent, &audio);
+
         let settings = AppSettings {
-            keyboard_shortcuts: self.get_keyboard_shortcuts_from_store(&store)?,
+            keyboard_shortcuts,
             floating_bar: self.get_floating_bar_settings_from_store(&store)?,
-            agent: self.get_agent_settings_from_store(&store)?,
+            agent,
             providers: self.get_provider_settings_from_store(&store)?,
             cloud: self.get_cloud_settings_from_store(&store)?,
-            audio: self.get_audio_settings_from_store(&store)?,
+            audio,
             tools: self.get_tool_settings_from_store(&store)?,
             prompts: self.get_prompt_settings_from_store(&store)?,
             onboarding: self.get_onboarding_settings_from_store(&store)?,
@@ -88,6 +95,7 @@ impl SettingsManager {
                 .unwrap_or(defaults::ADVANCED_SETTINGS_ENABLED),
             cli: self.get_cli_settings_from_store(&store)?,
             voice_transcription: self.get_voice_transcription_settings_from_store(&store)?,
+            triggers,
         };
 
         Ok(settings)
@@ -163,6 +171,11 @@ impl SettingsManager {
             store_keys::VOICE_TRANSCRIPTION,
             serde_json::to_value(&settings.voice_transcription)
                 .map_err(|e| format!("Failed to serialize voice transcription settings: {}", e))?,
+        );
+        store.set(
+            store_keys::TRIGGERS,
+            serde_json::to_value(&settings.triggers)
+                .map_err(|e| format!("Failed to serialize triggers: {}", e))?,
         );
 
         store
@@ -669,6 +682,34 @@ impl SettingsManager {
         {
             Some(settings) => Ok(settings),
             None => Ok(AudioSettings::default()),
+        }
+    }
+
+    /// Read the unified triggers list. When the store predates the model (key
+    /// missing or empty array), synthesize it from the legacy shortcut fields
+    /// so an upgrading user keeps their setup. The migrated list is not written
+    /// back here; it persists on the next `save_all_settings`.
+    fn get_triggers_from_store(
+        &self,
+        store: &tauri_plugin_store::Store<tauri::Wry>,
+        keyboard_shortcuts: &KeyboardShortcuts,
+        agent: &AgentSettings,
+        audio: &AudioSettings,
+    ) -> Vec<crate::triggers::Trigger> {
+        let stored: Option<Vec<crate::triggers::Trigger>> = store
+            .get(store_keys::TRIGGERS)
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        match stored {
+            Some(triggers) if !triggers.is_empty() => crate::triggers::dedupe_by_key(triggers),
+            _ => crate::triggers::migrate_from_legacy(
+                &keyboard_shortcuts.agent_mode,
+                &agent.trigger_mode,
+                &keyboard_shortcuts.dictation_input,
+                &audio.dictation_trigger_mode,
+                audio.always_listening_active,
+                &audio.always_listening_wake_words,
+            ),
         }
     }
 

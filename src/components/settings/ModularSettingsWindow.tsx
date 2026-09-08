@@ -17,6 +17,7 @@ import {
   Shield,
   Terminal,
   Wrench,
+  Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -30,6 +31,7 @@ import {
   NotificationSettings,
   ShortcutsSettings,
   ToolsSettings,
+  TriggersSettings,
 } from "./index";
 import {
   AdvancedSettingsProvider,
@@ -58,6 +60,15 @@ export const settingsCategories: MacCategory[] = [
     tile: "bg-[#8E8E93]",
     description: "Basic app settings and preferences",
     keywords: "startup launch login sound onboarding companion cursor agent mode",
+  },
+  {
+    id: "triggers",
+    name: "Triggers",
+    icon: <Zap className="h-3.5 w-3.5" />,
+    tile: "bg-[#00C7BE]",
+    description: "How you summon Juno",
+    keywords:
+      "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase agent dictation",
   },
   {
     id: "voice",
@@ -175,10 +186,10 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "general", rowId: "big-cursor-enabled", label: "Enable big cursor", keywords: "cursor pointer magnify enlarge big" },
   { sectionId: "general", rowId: "bar-appearance", label: "Bar appearance", keywords: "bar appearance style pill orb persona floating" },
   { sectionId: "general", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup" },
+  // Triggers
+  { sectionId: "triggers", rowId: "add-trigger", label: "Add trigger", keywords: "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
   // Voice & Audio
   { sectionId: "voice", rowId: "whisper-model", label: "Active Model", keywords: "whisper model transcription download" },
-  { sectionId: "voice", rowId: "always-listening", label: "Enable Always Listening", keywords: "wake word always listening hands-free" },
-  { sectionId: "voice", rowId: "dictation-trigger-mode", label: "Trigger Mode", keywords: "dictation trigger tap hold" },
   // AI Provider
   { sectionId: "ai", rowId: "ai-provider", label: "Active Provider", keywords: "provider anthropic openai gemini claude" },
   { sectionId: "ai", rowId: "max-tokens", label: "Max Tokens", keywords: "tokens length limit output" },
@@ -299,6 +310,8 @@ function SettingsWindowContent() {
     switch (selectedCategory) {
       case "general":
         return <GeneralSettings settings={settings} />;
+      case "triggers":
+        return <TriggersSettings settings={settings} />;
       case "voice":
         return <VoiceSettings settings={settings} />;
       case "ai":
