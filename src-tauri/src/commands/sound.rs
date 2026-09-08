@@ -236,19 +236,19 @@ fn resolve_sound_path(app: &AppHandle, file_path: &str) -> Option<PathBuf> {
         // Try multiple possible paths in the bundled resources
         let possible_paths = [
             // Primary bundled path in production builds (_up_ directory)
-            resource_path.join("_up_").join("public").join(&file_path), // resources/_up_/public/sounds/caf/...
-            resource_path.join("_up_").join(&file_path), // resources/_up_/sounds/caf/...
+            resource_path.join("_up_").join("public").join(file_path), // resources/_up_/public/sounds/caf/...
+            resource_path.join("_up_").join(file_path), // resources/_up_/sounds/caf/...
             // Additional paths for development and production compatibility
-            resource_path.join(&file_path), // Direct path: resources/sounds/caf/...
-            resource_path.join("sounds").join(&file_path), // With sounds prefix: resources/sounds/sounds/caf/...
+            resource_path.join(file_path), // Direct path: resources/sounds/caf/...
+            resource_path.join("sounds").join(file_path), // With sounds prefix: resources/sounds/sounds/caf/...
             if let Some(stripped) = file_path.strip_prefix("sounds/") {
                 resource_path.join(stripped) // Remove "sounds/" prefix: resources/caf/...
             } else {
-                resource_path.join(&file_path)
+                resource_path.join(file_path)
             },
             // Try with different sound directory structures
-            resource_path.join("public").join(&file_path), // resources/public/sounds/caf/...
-            resource_path.join("dist").join(&file_path),   // resources/dist/sounds/caf/...
+            resource_path.join("public").join(file_path), // resources/public/sounds/caf/...
+            resource_path.join("dist").join(file_path),   // resources/dist/sounds/caf/...
         ];
 
         for test_path in possible_paths.iter() {
@@ -268,11 +268,11 @@ fn resolve_sound_path(app: &AppHandle, file_path: &str) -> Option<PathBuf> {
 
         // Try relative to current working directory (development mode)
         if let Ok(cwd) = std::env::current_dir() {
-            let mut dev_paths = vec![cwd.join("public").join(&file_path), cwd.join(&file_path)];
+            let mut dev_paths = vec![cwd.join("public").join(file_path), cwd.join(file_path)];
 
             // Try going up one directory level if we're in src-tauri
             if let Some(parent) = cwd.parent() {
-                dev_paths.push(parent.join("public").join(&file_path));
+                dev_paths.push(parent.join("public").join(file_path));
             }
 
             for dev_path in dev_paths.iter() {
@@ -288,7 +288,7 @@ fn resolve_sound_path(app: &AppHandle, file_path: &str) -> Option<PathBuf> {
 
     // Strategy 3: Final fallback - try absolute path
     if final_path.is_none() {
-        let fallback_path = std::path::PathBuf::from(&file_path);
+        let fallback_path = std::path::PathBuf::from(file_path);
         if fallback_path.exists() {
             info!("Found sound at absolute path: {:?}", fallback_path);
             final_path = Some(fallback_path);
