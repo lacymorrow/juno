@@ -81,32 +81,36 @@ export function SettingsRow({
   const { advanced: showAdvanced } = useAdvancedSettings();
   if (advanced && !showAdvanced) return null;
 
+  const hasTopLine = Boolean(label || description || children);
+
   return (
     <div className={cn("px-4 py-2.5", className)}>
-      <div className="flex min-h-[28px] items-center justify-between gap-4">
-        {(label || description) && (
-          <div className="min-w-0 flex-1 space-y-0.5">
-            {label && (
-              <Label
-                htmlFor={htmlFor}
-                className={cn(
-                  "block text-[13px] font-medium leading-tight",
-                  destructive && "text-destructive",
-                )}
-              >
-                {label}
-              </Label>
-            )}
-            {description && (
-              <p className="text-[12px] leading-snug text-muted-foreground">
-                {description}
-              </p>
-            )}
-          </div>
-        )}
-        {children && <div className="shrink-0">{children}</div>}
-      </div>
-      {below && <div className="mt-3">{below}</div>}
+      {hasTopLine && (
+        <div className="flex min-h-[28px] items-center justify-between gap-4">
+          {(label || description) && (
+            <div className="min-w-0 flex-1 space-y-0.5">
+              {label && (
+                <Label
+                  htmlFor={htmlFor}
+                  className={cn(
+                    "block text-[13px] font-medium leading-tight",
+                    destructive && "text-destructive",
+                  )}
+                >
+                  {label}
+                </Label>
+              )}
+              {description && (
+                <p className="text-[12px] leading-snug text-muted-foreground">
+                  {description}
+                </p>
+              )}
+            </div>
+          )}
+          {children && <div className="shrink-0">{children}</div>}
+        </div>
+      )}
+      {below && <div className={cn(hasTopLine && "mt-3")}>{below}</div>}
     </div>
   );
 }

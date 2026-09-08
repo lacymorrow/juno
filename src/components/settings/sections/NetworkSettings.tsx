@@ -14,27 +14,20 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { COMMANDS } from "@/lib/constants.generated";
 
 import { SettingsSectionProps } from "../types";
+import { SettingsGroup, SettingsRow } from "../ui";
 
 export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const [newServerJson, setNewServerJson] = useState("");
   const [cloudTestPassword, setCloudTestPassword] = useState("");
   const [cloudTestStatus, setCloudTestStatus] = useState("");
   const [isCloudTesting, setIsCloudTesting] = useState(false);
-  
+
   const handleOpenConfigDirectory = async () => {
     try {
       await invoke("open_config_directory");
@@ -312,24 +305,18 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
   return (
     <div className="space-y-6">
       {/* MCP Server Configuration - Enhanced JSON Interface */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Server size={20} />
-            MCP Server Configuration
-          </CardTitle>
-          <CardDescription>
-            Configure Model Context Protocol servers using JSON format
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="mcp-json-config">Server Configuration (JSON)</Label>
-            <Textarea
-              id="mcp-json-config"
-              value={newServerJson}
-              onChange={(e) => setNewServerJson(e.target.value)}
-              placeholder={`{
+      <SettingsGroup title="MCP Server Configuration">
+        <SettingsRow
+          htmlFor="mcp-json-config"
+          label="Server Configuration (JSON)"
+          description="Configure Model Context Protocol servers using JSON format"
+          below={
+            <div className="space-y-2">
+              <Textarea
+                id="mcp-json-config"
+                value={newServerJson}
+                onChange={(e) => setNewServerJson(e.target.value)}
+                placeholder={`{
   "mcp-server-firecrawl": {
     "command": "pnpm dlx",
     "args": ["firecrawl-mcp"],
@@ -338,64 +325,71 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     }
   }
 }`}
-              className="h-64 font-mono text-sm"
-            />
-            <div className="text-xs text-muted-foreground space-y-1">
-              <p className="font-medium">
-                Standard Format (Claude Desktop compatible):
-              </p>
-              <p>• Server name as JSON key (e.g. "mcp-server-firecrawl")</p>
-              <p>
-                • <strong>command</strong>: Executable command (required)
-              </p>
-              <p>
-                • <strong>args</strong>: Command arguments (array)
-              </p>
-              <p>
-                • <strong>env</strong>: Environment variables (object)
-              </p>
-              <p>
-                • <strong>auto_start</strong>: Start automatically on app launch
-              </p>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              onClick={handleAddMcpServer}
-              disabled={!newServerJson.trim() || settings.mcpLoading}
-              className="flex items-center gap-2"
-            >
-              <Save size={16} />
-              Add Server
-            </Button>
-            <Button
-              variant="outline"
-              onClick={settings.loadMcpServers}
-              disabled={settings.mcpLoading}
-              className="flex items-center gap-2"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${
-                  settings.mcpLoading ? "animate-spin" : ""
-                }`}
+                className="h-64 font-mono text-sm"
               />
-              Refresh
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleOpenConfigDirectory}
-              className="flex items-center gap-2"
-            >
-              <Folder className="h-4 w-4" />
-              Open Config Directory
-            </Button>
-          </div>
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p className="font-medium">
+                  Standard Format (Claude Desktop compatible):
+                </p>
+                <p>• Server name as JSON key (e.g. "mcp-server-firecrawl")</p>
+                <p>
+                  • <strong>command</strong>: Executable command (required)
+                </p>
+                <p>
+                  • <strong>args</strong>: Command arguments (array)
+                </p>
+                <p>
+                  • <strong>env</strong>: Environment variables (object)
+                </p>
+                <p>
+                  • <strong>auto_start</strong>: Start automatically on app launch
+                </p>
+              </div>
+            </div>
+          }
+        />
 
-          {/* Common MCP Servers Examples */}
-          <div className="pt-4 border-t text-sm text-muted-foreground">
-            <div className="space-y-2">
-              <p className="font-medium">Common MCP Servers:</p>
+        <SettingsRow
+          below={
+            <div className="flex gap-2">
+              <Button
+                onClick={handleAddMcpServer}
+                disabled={!newServerJson.trim() || settings.mcpLoading}
+                className="flex items-center gap-2"
+              >
+                <Save size={16} />
+                Add Server
+              </Button>
+              <Button
+                variant="outline"
+                onClick={settings.loadMcpServers}
+                disabled={settings.mcpLoading}
+                className="flex items-center gap-2"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${
+                    settings.mcpLoading ? "animate-spin" : ""
+                  }`}
+                />
+                Refresh
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleOpenConfigDirectory}
+                className="flex items-center gap-2"
+              >
+                <Folder className="h-4 w-4" />
+                Open Config Directory
+              </Button>
+            </div>
+          }
+        />
+
+        {/* Common MCP Servers Examples */}
+        <SettingsRow
+          label="Common MCP Servers"
+          below={
+            <div className="text-sm text-muted-foreground space-y-2">
               <div className="space-y-1 text-xs font-mono bg-muted/50 p-3 rounded">
                 <div>
                   <strong>File System:</strong> npx
@@ -414,170 +408,159 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 href="https://github.com/modelcontextprotocol/servers"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700"
+                className="inline-flex items-center gap-1 text-primary hover:underline"
               >
                 <ExternalLink className="h-3 w-3" />
                 Browse more servers on GitHub
               </a>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          }
+        />
+      </SettingsGroup>
 
       {/* Active MCP Servers */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Active MCP Servers</CardTitle>
-          <CardDescription>
-            Manage configured MCP servers and their connection status
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {settings.mcpLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <RefreshCw className="h-6 w-6 animate-spin" />
-              <span className="ml-2">Loading MCP servers...</span>
-            </div>
-          ) : settings.mcpServers.length > 0 ? (
-            <div className="space-y-2">
-              {settings.mcpServers.map((server) => {
-                const status = settings.mcpServerStatuses[server.id] || {
-                  Disconnected: null,
-                };
-                const hasError = status.Error !== undefined;
-                const serverTools = settings.mcpTools.filter(
-                  (tool) => tool.server_id === server.id
-                );
+      <SettingsGroup
+        title="Active MCP Servers"
+        footer="Manage configured MCP servers and their connection status"
+      >
+        <SettingsRow
+          below={
+            settings.mcpLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <RefreshCw className="h-6 w-6 animate-spin" />
+                <span className="ml-2">Loading MCP servers...</span>
+              </div>
+            ) : settings.mcpServers.length > 0 ? (
+              <div className="space-y-2">
+                {settings.mcpServers.map((server) => {
+                  const status = settings.mcpServerStatuses[server.id] || {
+                    Disconnected: null,
+                  };
+                  const hasError = status.Error !== undefined;
+                  const serverTools = settings.mcpTools.filter(
+                    (tool) => tool.server_id === server.id
+                  );
 
-                return (
-                  <div
-                    key={server.id}
-                    className="flex items-center justify-between p-3 border rounded-lg"
-                  >
-                    <div className="flex items-center gap-3">
-                      {getMcpServerStatusIcon(status)}
-                      <div className="flex-1">
-                        <div className="font-medium">{server.name}</div>
-                        <div className="text-sm text-gray-500">
-                          {server.description || server.command}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="outline" className="text-xs">
-                            {serverTools.length} tools
-                          </Badge>
-                          {server.auto_start && (
-                            <Badge variant="secondary" className="text-xs">
-                              Auto-start
+                  return (
+                    <div
+                      key={server.id}
+                      className="flex items-center justify-between p-3 border rounded-lg"
+                    >
+                      <div className="flex items-center gap-3">
+                        {getMcpServerStatusIcon(status)}
+                        <div className="flex-1">
+                          <div className="font-medium">{server.name}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {server.description || server.command}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">
+                              {serverTools.length} tools
                             </Badge>
-                          )}
+                            {server.auto_start && (
+                              <Badge variant="secondary" className="text-xs">
+                                Auto-start
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       </div>
+                      <div className="flex items-center gap-2">
+                        {getMcpServerStatusBadge(status)}
+                        {hasError && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              toast.error(`Server Error: ${status.Error}`, {
+                                duration: 5000,
+                              });
+                            }}
+                            className="text-red-600 p-1 h-8 w-8"
+                          >
+                            <AlertCircle className="h-4 w-4" />
+                          </Button>
+                        )}
+                        <Switch
+                          checked={server.enabled}
+                          onCheckedChange={(enabled) =>
+                            handleToggleServer(server.id, enabled)
+                          }
+                        />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {getMcpServerStatusBadge(status)}
-                      {hasError && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            toast.error(`Server Error: ${status.Error}`, {
-                              duration: 5000,
-                            });
-                          }}
-                          className="text-red-600 p-1 h-8 w-8"
-                        >
-                          <AlertCircle className="h-4 w-4" />
-                        </Button>
-                      )}
-                      <Switch
-                        checked={server.enabled}
-                        onCheckedChange={(enabled) =>
-                          handleToggleServer(server.id, enabled)
-                        }
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              <Server className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-              <p className="text-lg font-medium mb-2">
-                No MCP servers configured
-              </p>
-              <p className="text-sm">
-                Add your first MCP server using the configuration above
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Server className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-lg font-medium mb-2">
+                  No MCP servers configured
+                </p>
+                <p className="text-sm">
+                  Add your first MCP server using the configuration above
+                </p>
+              </div>
+            )
+          }
+        />
+      </SettingsGroup>
 
       {/* Available MCP Tools */}
       {settings.mcpTools.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Available MCP Tools</CardTitle>
-            <CardDescription>
-              Tools provided by connected MCP servers. Toggle individual tools
-              on or off.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {settings.mcpTools.map((tool) => (
-                <div
-                  key={`${tool.server_id}-${tool.tool_definition.name}`}
-                  className="flex items-center justify-between p-3 border rounded-lg"
-                >
-                  <div className="flex-1">
-                    <div className="font-medium">
-                      {tool.tool_definition.name}
-                    </div>
-                    <div className="text-sm text-gray-500 mb-1">
-                      from <strong>{tool.server_name}</strong>
-                    </div>
-                    {tool.tool_definition.description && (
-                      <div className="text-xs text-gray-400 max-w-md">
-                        {tool.tool_definition.description}
+        <SettingsGroup
+          title="Available MCP Tools"
+          footer="Tools provided by connected MCP servers. Toggle individual tools on or off."
+        >
+          <SettingsRow
+            below={
+              <div className="space-y-3">
+                {settings.mcpTools.map((tool) => (
+                  <div
+                    key={`${tool.server_id}-${tool.tool_definition.name}`}
+                    className="flex items-center justify-between p-3 border rounded-lg"
+                  >
+                    <div className="flex-1">
+                      <div className="font-medium">
+                        {tool.tool_definition.name}
                       </div>
-                    )}
+                      <div className="text-sm text-muted-foreground mb-1">
+                        from <strong>{tool.server_name}</strong>
+                      </div>
+                      {tool.tool_definition.description && (
+                        <div className="text-xs text-muted-foreground max-w-md">
+                          {tool.tool_definition.description}
+                        </div>
+                      )}
+                    </div>
+                    <Switch
+                      checked={tool.enabled}
+                      onCheckedChange={(enabled) =>
+                        handleToggleTool(
+                          tool.server_id,
+                          tool.tool_definition.name,
+                          enabled
+                        )
+                      }
+                    />
                   </div>
-                  <Switch
-                    checked={tool.enabled}
-                    onCheckedChange={(enabled) =>
-                      handleToggleTool(
-                        tool.server_id,
-                        tool.tool_definition.name,
-                        enabled
-                      )
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                ))}
+              </div>
+            }
+          />
+        </SettingsGroup>
       )}
 
       {/* Cloud Control Testing */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Server size={20} />
-            Cloud Control Testing
-          </CardTitle>
-          <CardDescription>
-            Set an API key and start the cloud connector to enable remote agent
-            control
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="cloud-test-password">
-              Cloud Test Password/API Key
-            </Label>
+      <SettingsGroup
+        title="Cloud Control Testing"
+        footer="Set an API key and start the cloud connector to enable remote agent control"
+      >
+        <SettingsRow
+          htmlFor="cloud-test-password"
+          label="Cloud Test Password/API Key"
+          below={
             <div className="flex gap-2">
               <Input
                 id="cloud-test-password"
@@ -596,58 +579,66 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 Set Password
               </Button>
             </div>
-          </div>
+          }
+        />
 
-          <div className="flex gap-2 flex-wrap">
-            <Button
-              onClick={handleTestCloudConnection}
-              disabled={isCloudTesting}
-              className="flex items-center gap-2"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${isCloudTesting ? "animate-spin" : ""}`}
-              />
-              Test Health
-            </Button>
-            <Button
-              onClick={handleStartCloudConnector}
-              disabled={isCloudTesting}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
-            >
-              <CheckCircle size={16} />
-              Start Connector
-            </Button>
-            <Button
-              onClick={handleStopCloudConnector}
-              disabled={isCloudTesting}
-              variant="destructive"
-              className="flex items-center gap-2"
-            >
-              <RefreshCw size={16} />
-              Stop Connector
-            </Button>
-            <Button
-              onClick={handleGetProductionCloudStatus}
-              variant="outline"
-              className="flex items-center gap-2"
-            >
-              <CheckCircle size={16} />
-              Get Status
-            </Button>
-          </div>
+        <SettingsRow
+          below={
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                onClick={handleTestCloudConnection}
+                disabled={isCloudTesting}
+                className="flex items-center gap-2"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${isCloudTesting ? "animate-spin" : ""}`}
+                />
+                Test Health
+              </Button>
+              <Button
+                onClick={handleStartCloudConnector}
+                disabled={isCloudTesting}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
+              >
+                <CheckCircle size={16} />
+                Start Connector
+              </Button>
+              <Button
+                onClick={handleStopCloudConnector}
+                disabled={isCloudTesting}
+                variant="destructive"
+                className="flex items-center gap-2"
+              >
+                <RefreshCw size={16} />
+                Stop Connector
+              </Button>
+              <Button
+                onClick={handleGetProductionCloudStatus}
+                variant="outline"
+                className="flex items-center gap-2"
+              >
+                <CheckCircle size={16} />
+                Get Status
+              </Button>
+            </div>
+          }
+        />
 
-          {cloudTestStatus && (
-            <div className="space-y-2">
-              <Label>Test Status:</Label>
+        {cloudTestStatus && (
+          <SettingsRow
+            label="Test Status:"
+            below={
               <div className="p-3 bg-muted/50 rounded font-mono text-sm whitespace-pre-wrap">
                 {cloudTestStatus}
               </div>
-            </div>
-          )}
+            }
+          />
+        )}
 
-          <div className="pt-4 border-t text-sm text-muted-foreground">
-            <div className="space-y-2">
-              <p className="font-medium">How to use cloud control:</p>
+        <SettingsRow
+          label="How to use cloud control"
+          below={
+            <div className="text-sm text-muted-foreground space-y-2">
               <div className="space-y-2 text-xs">
                 <div className="bg-blue-50 p-3 rounded border-l-4 border-blue-400">
                   <p className="font-medium text-blue-800">
@@ -681,9 +672,9 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 via cloud commands!
               </p>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          }
+        />
+      </SettingsGroup>
     </div>
   );
 }
