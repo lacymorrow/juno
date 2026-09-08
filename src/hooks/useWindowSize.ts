@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
-import { LogicalSize, PhysicalPosition, Window, currentMonitor } from "@tauri-apps/api/window";
+import { Window, currentMonitor } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 
 interface WindowSizeConfig {
   width: number;
@@ -103,14 +104,18 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
   const clampedX = clamped.x;
   const newY = clamped.y;
 
-  if (clampedX !== pos.x || newY !== pos.y) {
-    await Promise.all([
-      appWindow.setPosition(new PhysicalPosition(clampedX, newY)),
-      appWindow.setSize(new LogicalSize(next.width, next.height)),
-    ]);
-  } else {
-    await appWindow.setSize(new LogicalSize(next.width, next.height));
-  }
+  // Apply the move + resize atomically through the backend (a single macOS
+  // NSWindow setFrame:). Issuing setPosition and setSize separately let the
+  // WindowServer composite them in different frames, so for one frame the
+  // window showed its new width still anchored at the old top-left and the
+  // centered pill/dot visibly jumped before snapping back. One transaction
+  // removes that seam. (Off macOS the command falls back to separate setters.)
+  await invoke("set_bar_frame", {
+    x: clampedX,
+    y: newY,
+    width: next.width,
+    height: next.height,
+  });
 }
 
 /**
