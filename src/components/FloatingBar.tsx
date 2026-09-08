@@ -84,11 +84,19 @@ export type BarLayout = "compact" | "hover" | "voice" | "full";
  * shadow). The window is exactly pill + padding, so the invisible part of
  * the window that catches clicks meant for what's behind it stays small.
  */
-export const BAR_LAYOUTS: Record<BarLayout, { width: number; height: number; pad: number }> = {
-  compact: { width: 56, height: 16, pad: 16 },
-  hover: { width: 132, height: 34, pad: 16 },
-  voice: { width: 220, height: 34, pad: 16 },
-  full: { width: 419, height: 44, pad: 24 },
+// `height` is the pill's own height; `band` is the fixed vertical slot the
+// pill is centred in. compact keeps a tiny pill but shares the idle band with
+// hover/voice, so growing from compact to hover changes only the width — the
+// window height and vertical anchor never move, and nothing jumps vertically
+// when the (delayed) shrink resizes the window.
+export const BAR_LAYOUTS: Record<
+  BarLayout,
+  { width: number; height: number; band: number; pad: number }
+> = {
+  compact: { width: 56, height: 16, band: 34, pad: 16 },
+  hover: { width: 132, height: 34, band: 34, pad: 16 },
+  voice: { width: 220, height: 34, band: 34, pad: 16 },
+  full: { width: 419, height: 44, band: 44, pad: 24 },
 };
 
 export const FLOATING_BAR_DIMENSIONS = {
@@ -136,11 +144,11 @@ export function floatingBarWindowSize({
   return {
     width: l.width + 2 * l.pad,
     height:
-      l.height +
+      l.band +
       2 * l.pad +
       (rosterVisible ? d.ROSTER_STRIP_HEIGHT : 0) +
       (paneOpen ? d.PANE_GAP + d.PANE_HEIGHT : 0),
-    anchorY: l.pad + l.height / 2,
+    anchorY: l.pad + l.band / 2,
   };
 }
 
@@ -862,6 +870,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   const pill = BAR_LAYOUTS[layout];
   const pad = BAR_LAYOUTS[layout].pad;
+  const band = BAR_LAYOUTS[layout].band;
 
   return (
     <div
@@ -874,6 +883,14 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {/* Fixed-height band the pill is centred in. compact and hover share
+          the same band, so the pill's vertical centre never moves and the
+          window's height/anchor stay put when the pill grows or shrinks — only
+          the width changes, which is centre-stable and animates cleanly. */}
+      <div
+        className="flex shrink-0 items-center justify-center transition-[height] duration-200 ease-out"
+        style={{ height: band }}
+      >
       <div
         data-testid="floating-bar"
         data-state={currentUiState}
@@ -882,12 +899,21 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           "relative flex shrink-0 items-center rounded-full",
           "border border-white/10 bg-neutral-950/90 text-white backdrop-blur-xl",
           "transition-[width,height,padding] duration-200 ease-out",
-          layout === "compact" ? "justify-center shadow-lg" : "gap-2 shadow-2xl",
+          layout === "compact" ? "shadow-lg" : "shadow-2xl",
+          // Idle layouts centre their single child so the compact dot and the
+          // hover buttons occupy the same centre — the swap cross-fades in
+          // place instead of the dot teleporting to the left edge.
+          layout === "compact" || layout === "hover" ? "justify-center" : "gap-2",
           layout === "full" ? "px-4" : layout === "compact" ? "px-0" : "px-2",
         )}
         style={{ width: pill.width, height: pill.height }}
       >
-        <StatusDot state={currentUiState} audioLevel={barState.audioLevel} />
+        {/* The status dot lives in the compact idle pill and in the layouts
+            that carry real status (voice, working, input). Hover shows only
+            the buttons, so nothing shifts sideways when the pill grows. */}
+        {layout !== "hover" && (
+          <StatusDot state={currentUiState} audioLevel={barState.audioLevel} />
+        )}
 
         {layout === "compact" ? null : layout === "hover" ? (
           <div
@@ -984,6 +1010,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             )}
           </>
         )}
+      </div>
       </div>
 
       {/* Parallel-agent roster (LAC-2830 §3): appears when 2+ agents run.

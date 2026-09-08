@@ -206,7 +206,7 @@ afterEach(() => {
 describe("floatingBarWindowSize", () => {
   it("is exactly the pill plus shadow padding, anchored on the pill's centre", () => {
     expect(floatingBarWindowSize({ layout: "compact", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 88, height: 48, anchorY: 24 });
+      .toEqual({ width: 88, height: 66, anchorY: 33 });
     expect(floatingBarWindowSize({ layout: "hover", paneOpen: false, rosterVisible: false }))
       .toEqual({ width: 164, height: 66, anchorY: 33 });
     expect(floatingBarWindowSize({ layout: "voice", paneOpen: false, rosterVisible: false }))
@@ -257,7 +257,7 @@ describe("FloatingBar", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
-    expect(lastResize()).toEqual({ width: 88, height: 48, anchorY: 24 });
+    expect(lastResize()).toEqual({ width: 88, height: 66, anchorY: 33 });
   });
 
   it("grows on hover to reveal the mic and type buttons, and shrinks back after the animation", async () => {
@@ -279,7 +279,7 @@ describe("FloatingBar", () => {
     act(() => {
       vi.advanceTimersByTime(SHRINK_DELAY_MS);
     });
-    expect(lastResize()).toEqual({ width: 88, height: 48, anchorY: 24 });
+    expect(lastResize()).toEqual({ width: 88, height: 66, anchorY: 33 });
   });
 
   it("also treats DOM hover as hover, for when Juno is the active app", async () => {
@@ -616,7 +616,7 @@ describe("FloatingBar", () => {
     act(() => {
       vi.advanceTimersByTime(SHRINK_DELAY_MS);
     });
-    expect(lastResize()).toEqual({ width: 88, height: 48, anchorY: 24 });
+    expect(lastResize()).toEqual({ width: 88, height: 66, anchorY: 33 });
   });
 
   it("reopens a dismissed pane when the next query arrives", async () => {
