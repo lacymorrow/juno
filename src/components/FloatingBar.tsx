@@ -882,12 +882,21 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           "relative flex shrink-0 items-center rounded-full",
           "border border-white/10 bg-neutral-950/90 text-white backdrop-blur-xl",
           "transition-[width,height,padding] duration-200 ease-out",
-          layout === "compact" ? "justify-center shadow-lg" : "gap-2 shadow-2xl",
+          layout === "compact" ? "shadow-lg" : "shadow-2xl",
+          // Idle layouts centre their single child so the compact dot and the
+          // hover buttons occupy the same centre — the swap cross-fades in
+          // place instead of the dot teleporting to the left edge.
+          layout === "compact" || layout === "hover" ? "justify-center" : "gap-2",
           layout === "full" ? "px-4" : layout === "compact" ? "px-0" : "px-2",
         )}
         style={{ width: pill.width, height: pill.height }}
       >
-        <StatusDot state={currentUiState} audioLevel={barState.audioLevel} />
+        {/* The status dot lives in the compact idle pill and in the layouts
+            that carry real status (voice, working, input). Hover shows only
+            the buttons, so nothing shifts sideways when the pill grows. */}
+        {layout !== "hover" && (
+          <StatusDot state={currentUiState} audioLevel={barState.audioLevel} />
+        )}
 
         {layout === "compact" ? null : layout === "hover" ? (
           <div
