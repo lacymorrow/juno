@@ -598,8 +598,14 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
         warn!("Failed to reset dictation active state: {}", e);
     }
 
-    // Update floating bar manager
+    // Update floating bar manager (leaves dictation mode).
     crate::commands::ui_commands::handle_dictation_mode_change(&app_handle, false).await;
+
+    // Show the processing (transcribing) state while stop_dictation finalizes
+    // below, matching the on-screen Stop button path. Without this the bar
+    // jumped straight from listening to idle on a key-up; the final-result
+    // handler returns it to idle once the text is produced.
+    crate::commands::ui_commands::handle_dictation_partial(&app_handle, String::new()).await;
 
     if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
         error!(

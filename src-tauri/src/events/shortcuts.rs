@@ -3,10 +3,8 @@
 //! This module handles all global keyboard shortcuts for the Juno application,
 //! including escape key handling, agent mode toggle, and dictation input shortcuts.
 
-use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutEvent, ShortcutState};
-use tauri_plugin_voice_transcription::controller::VoiceController;
 use tracing::{debug, error, info};
 
 use crate::constants::{errors::templates, events};
@@ -357,27 +355,14 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
             crate::commands::sound::SoundType::NotificationDecorative01,
         );
 
-        let app_handle = app.clone();
-        tauri::async_runtime::spawn(async move {
-            // Stop dictation
-            if let Some(voice_controller_state) =
-                app_handle.try_state::<Arc<Mutex<VoiceController>>>()
-            {
-                match tauri_plugin_voice_transcription::commands::stop_dictation(
-                    app_handle.clone(),
-                    voice_controller_state,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        info!("[Dictation Tap Mode] Stopped dictation successfully");
-                    }
-                    Err(e) => {
-                        error!("[Dictation Tap Mode] Failed to stop dictation: {}", e);
-                    }
-                }
-            }
-        });
+        // Route through the same stop event as hold mode. Calling stop_dictation()
+        // directly here skipped handle_dictation_stop, so no bar-state update was
+        // emitted and the bar stayed stuck on "listening" until the slow final
+        // result arrived. Emitting dictation::STOP flips the bar to the processing
+        // state immediately and then finalizes, exactly like a hold release.
+        if let Err(e) = app.emit(events::dictation::STOP, ()) {
+            error!("[Dictation Tap Mode] Failed to emit dictation-stop: {}", e);
+        }
     } else {
         info!("[Dictation Input Shortcut] Tap mode - starting dictation mode transcription");
 
