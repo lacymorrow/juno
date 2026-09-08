@@ -468,7 +468,7 @@ impl AlwaysListeningController {
                                                    activity_duration, audio_buffer.len(), buffer_volume);
 
                                             // Check for wake words or speech
-                                            if Self::detect_intent(
+                                            if let Some(matched_phrase) = Self::detect_intent(
                                                 session.as_mut(),
                                                 &audio_buffer,
                                                 sample_rate,
@@ -476,17 +476,19 @@ impl AlwaysListeningController {
                                                 &app_handle,
                                             ) {
                                                 current_state = AlwaysListeningState::Activated;
-                                                info!("[AlwaysListening] Intent detected - activating transcription");
+                                                info!("[AlwaysListening] Intent detected (phrase: '{}') - activating transcription", matched_phrase);
 
                                                 // Update last activity
                                                 if let Ok(mut activity) = last_activity.lock() {
                                                     *activity = Some(Instant::now());
                                                 }
 
-                                                // Emit activation event
-                                                if let Err(e) = app_handle
-                                                    .emit("always-listening:activated", ())
-                                                {
+                                                // Emit activation event carrying the matched wake
+                                                // phrase so the app can route to the right target.
+                                                if let Err(e) = app_handle.emit(
+                                                    "always-listening:activated",
+                                                    matched_phrase.clone(),
+                                                ) {
                                                     error!("[AlwaysListening] Failed to emit activation event: {}", e);
                                                 }
 
@@ -674,10 +676,10 @@ impl AlwaysListeningController {
         sample_rate: u32,
         wake_words: &[String],
         _app_handle: &AppHandle<R>,
-    ) -> bool {
+    ) -> Option<String> {
         if audio_buffer.is_empty() {
             debug!("[AlwaysListening] detect_intent: Audio buffer is empty");
-            return false;
+            return None;
         }
 
         let audio_duration_ms = (audio_buffer.len() as f32 / sample_rate as f32 * 1000.0) as u32;
@@ -694,7 +696,7 @@ impl AlwaysListeningController {
         if audio_duration_ms < min_duration_for_transcription {
             info!("[AlwaysListening] detect_intent: Audio duration too short ({}ms < {}ms), skipping transcription",
                    audio_duration_ms, min_duration_for_transcription);
-            return false;
+            return None;
         }
 
         // Check audio quality - ensure it has sufficient volume for speech
@@ -702,7 +704,7 @@ impl AlwaysListeningController {
         if avg_volume < MIN_SPEECH_VOLUME {
             info!("[AlwaysListening] detect_intent: Audio volume too low for speech ({:.6} < {:.6}), skipping transcription",
                    avg_volume, MIN_SPEECH_VOLUME);
-            return false;
+            return None;
         }
 
         // Resample if necessary
@@ -735,11 +737,11 @@ impl AlwaysListeningController {
                         }
                         Ok(_) => {
                             warn!("[AlwaysListening] Resampling produced empty output");
-                            return false;
+                            return None;
                         }
                         Err(e) => {
                             warn!("[AlwaysListening] Resampling failed: {:?}", e);
-                            return false;
+                            return None;
                         }
                     }
                 }
@@ -748,7 +750,7 @@ impl AlwaysListeningController {
                         "[AlwaysListening] Failed to create custom resampler: {:?}",
                         e
                     );
-                    return false;
+                    return None;
                 }
             }
         } else {
@@ -761,7 +763,7 @@ impl AlwaysListeningController {
         if resampled_duration_ms < min_duration_for_transcription {
             info!("[AlwaysListening] detect_intent: Resampled audio duration too short ({}ms < {}ms), skipping transcription",
                    resampled_duration_ms, min_duration_for_transcription);
-            return false;
+            return None;
         }
 
         let resampled_volume = Self::calculate_rms_volume(&audio_to_process);
@@ -769,7 +771,7 @@ impl AlwaysListeningController {
             // Allow slightly lower volume after resampling
             info!("[AlwaysListening] detect_intent: Resampled audio volume too low ({:.6} < {:.6}), skipping transcription",
                    resampled_volume, MIN_SPEECH_VOLUME * 0.5);
-            return false;
+            return None;
         }
 
         info!("[AlwaysListening] Running transcription for wake word detection ({}ms of audio, volume: {:.6})",
@@ -784,7 +786,9 @@ impl AlwaysListeningController {
                     text_lower.len()
                 );
 
-                // Check for wake words
+                // Check for wake words. Return the matched phrase (lowercased)
+                // so the app can route this activation to the right target
+                // (e.g. "juno" -> agent, "transcribe" -> dictation).
                 for wake_word in wake_words {
                     let wake_word_lower = wake_word.to_lowercase();
                     if text_lower.contains(&wake_word_lower) {
@@ -792,7 +796,7 @@ impl AlwaysListeningController {
                             "[AlwaysListening] ✅ WAKE WORD DETECTED: '{}' found in '{}'",
                             wake_word, text_lower
                         );
-                        return true;
+                        return Some(wake_word_lower);
                     } else {
                         debug!(
                             "[AlwaysListening] Wake word '{}' not found in '{}'",
@@ -801,25 +805,25 @@ impl AlwaysListeningController {
                     }
                 }
 
-                // No wake words configured — any speech activates
+                // No wake words configured — any speech activates (empty match).
                 if wake_words.is_empty() {
                     info!("[AlwaysListening] Speech activity detected (no wake words configured): '{}'", text_lower);
-                    return true;
+                    return Some(String::new());
                 }
 
                 info!(
                     "[AlwaysListening] ❌ No wake words detected in: '{}'",
                     text_lower
                 );
-                false
+                None
             }
             Ok(None) => {
                 warn!("[AlwaysListening] Empty transcription despite audio presence — check model and audio format");
-                false
+                None
             }
             Err(e) => {
                 error!("[AlwaysListening] Transcription failed: {}", e);
-                false
+                None
             }
         }
     }

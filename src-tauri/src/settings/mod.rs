@@ -43,6 +43,11 @@ pub struct AppSettings {
     pub cli: CLISettings,
     /// Voice transcription configuration
     pub voice_transcription: VoiceTranscriptionSettings,
+    /// Unified activation triggers (methods x targets). Source of truth for the
+    /// Triggers settings UI and for shortcut/voice registration. Older stores
+    /// lack the key and are migrated from the legacy shortcut fields on load.
+    #[serde(default)]
+    pub triggers: Vec<crate::triggers::Trigger>,
 }
 
 /// Keyboard shortcut configuration
@@ -315,6 +320,10 @@ impl Default for AppSettings {
             advanced_settings_enabled: defaults::ADVANCED_SETTINGS_ENABLED,
             cli: CLISettings::default(),
             voice_transcription: VoiceTranscriptionSettings::default(),
+            triggers: crate::triggers::default_triggers(
+                defaults::AGENT_MODE,
+                defaults::DICTATION_INPUT,
+            ),
         }
     }
 }

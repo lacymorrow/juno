@@ -62,6 +62,7 @@ pub mod text_editor;
 pub mod tool_choice;
 pub mod tools;
 pub mod tray_commands;
+pub mod triggers;
 pub mod ui_commands; // Consolidated UI API for all floating elements
 pub mod ui_token_selection;
 pub mod whisper_model;
@@ -122,6 +123,7 @@ pub use self::shortcuts::*;
 pub use self::sound::*;
 pub use self::stop_operations::*;
 pub use self::tool_choice::*;
+pub use self::triggers::*;
 pub use self::ui_token_selection::*; // Re-export tool choice intelligence commands
 pub use self::whisper_model::{
     download_whisper_model, get_current_whisper_model, get_whisper_download_status,

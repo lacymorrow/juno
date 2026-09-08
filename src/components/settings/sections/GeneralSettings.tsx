@@ -229,7 +229,7 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
       <SettingsGroup
         title="Agent"
         advanced
-        footer="Multi-agent mode uses specialized agents for different tasks; single-agent mode uses one agent for everything. Tap to toggle agent mode on and off, or hold to activate it while the key is held (like dictation)."
+        footer="Multi-agent mode uses specialized agents for different tasks; single-agent mode uses one agent for everything."
       >
         <SettingsRow
           htmlFor="agent-mode"
@@ -246,24 +246,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
             <SelectContent>
               <SelectItem value="multi">Multi-Agent (Recommended)</SelectItem>
               <SelectItem value="single">Single Agent</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-        <SettingsRow
-          htmlFor="agent-trigger-mode"
-          label="Trigger mode"
-          description="How the shortcut key activates the agent"
-        >
-          <Select
-            value={settings.agentTriggerMode}
-            onValueChange={settings.handleAgentTriggerModeChange}
-          >
-            <SelectTrigger id="agent-trigger-mode" className="w-[190px]">
-              <SelectValue placeholder="Select trigger mode" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="tap">Tap to Toggle (Default)</SelectItem>
-              <SelectItem value="hold">Hold to Activate</SelectItem>
             </SelectContent>
           </Select>
         </SettingsRow>

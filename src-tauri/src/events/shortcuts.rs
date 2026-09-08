@@ -39,37 +39,19 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         }
     };
 
-    // Parse all shortcuts from configuration (including stop_current_task)
+    // Parse the utility shortcuts (stop / open-settings / voice-activation).
+    // Activation (agent + dictation) is driven by the triggers matrix below.
     let stop_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.stop_current_task);
-    let agent_shortcut: Option<Shortcut> = parse_shortcut_string(&current_shortcuts.agent_mode);
-    let dictation_shortcut: Option<Shortcut> =
-        parse_shortcut_string(&current_shortcuts.dictation_input);
     let settings_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.open_settings);
     let voice_activation_shortcut: Option<Shortcut> =
         parse_shortcut_string(&current_shortcuts.voice_activation);
 
-    debug!(
-        "Current shortcuts — stop:{} agent:{} dictation:{} settings:{} voice:{} | incoming:{:?}",
-        current_shortcuts.stop_current_task,
-        current_shortcuts.agent_mode,
-        current_shortcuts.dictation_input,
-        current_shortcuts.open_settings,
-        current_shortcuts.voice_activation,
-        shortcut
-    );
-
     // Handle each shortcut type (use separate conditions to check all shortcuts)
     if let Some(stop_shortcut_obj) = stop_shortcut {
         if *shortcut == stop_shortcut_obj {
             handle_escape_key_shortcut(app, event);
-        }
-    }
-
-    if let Some(agent_shortcut_obj) = agent_shortcut {
-        if *shortcut == agent_shortcut_obj {
-            handle_agent_mode_shortcut(app, event);
         }
     }
 
@@ -80,17 +62,50 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         }
     }
 
-    // Check dictation shortcut separately (not as else-if to avoid exclusion)
-    if let Some(dictation_shortcut_obj) = dictation_shortcut {
-        if *shortcut == dictation_shortcut_obj {
-            handle_dictation_input_shortcut(app, event);
-        }
-    }
-
     // Check voice activation shortcut
     if let Some(voice_activation_obj) = voice_activation_shortcut {
         if *shortcut == voice_activation_obj {
             handle_voice_activation_shortcut(app, event);
+        }
+    }
+
+    // Route the incoming shortcut through the activation triggers: any enabled
+    // key-bound trigger whose combo matches fires by its own method/target, so
+    // the bounded matrix (push-to-talk / toggle x agent / dictation) works even
+    // when several combos are bound.
+    dispatch_activation_triggers(app, &app_state, shortcut, event);
+}
+
+/// Fire every enabled keyboard trigger whose binding matches `shortcut`.
+fn dispatch_activation_triggers(
+    app: &AppHandle,
+    app_state: &tauri::State<'_, state::AppState>,
+    shortcut: &Shortcut,
+    event: &ShortcutEvent,
+) {
+    use crate::triggers::{Binding, TriggerTarget};
+
+    let triggers = match app_state.get_triggers() {
+        Ok(t) => t,
+        Err(e) => {
+            error!("[GlobalShortcut] Failed to read triggers: {}", e);
+            return;
+        }
+    };
+
+    for trigger in triggers.iter().filter(|t| t.enabled) {
+        let Some(Binding::Keyboard { shortcut: combo }) = &trigger.binding else {
+            continue; // voice + mouse handled elsewhere
+        };
+        let Some(parsed) = parse_shortcut_string(combo) else {
+            continue;
+        };
+        if *shortcut != parsed {
+            continue;
+        }
+        match trigger.target {
+            TriggerTarget::Agent => handle_agent_mode_shortcut(app, event, trigger.method),
+            TriggerTarget::Dictation => handle_dictation_input_shortcut(app, event, trigger.method),
         }
     }
 }
@@ -178,7 +193,79 @@ pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
 }
 
 /// Handle agent mode shortcut (Option+D by default)
-fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
+/// Shared activation routing for a key OR mouse trigger edge. Owns the
+/// onboarding and bar-voice guards so both input sources behave identically,
+/// then drives the agent/dictation monitors by the trigger's own method.
+pub(crate) fn fire_trigger_edge(
+    app: &AppHandle,
+    method: crate::triggers::TriggerMethod,
+    target: crate::triggers::TriggerTarget,
+    pressed: bool,
+) {
+    use crate::triggers::{TriggerMethod, TriggerTarget};
+
+    let app_state = app.state::<state::AppState>();
+
+    // During onboarding, activation is suppressed (callers still emit their own
+    // visual-feedback events before calling this).
+    if app_state.is_onboarding_active() {
+        return;
+    }
+
+    // A bar-initiated spoken query is open: any activation input ends it on
+    // release and consumes both edges, so nothing new starts on the busy
+    // controller (see the historical race note).
+    if crate::agent_monitor::bar_voice_active() {
+        if !pressed {
+            let _ = app.emit(events::agent::TRANSCRIPTION_STOP, ());
+        }
+        return;
+    }
+
+    match target {
+        TriggerTarget::Agent => {
+            let agent_mode = if method == TriggerMethod::PushToTalk {
+                state::AgentTriggerMode::Hold
+            } else {
+                state::AgentTriggerMode::Tap
+            };
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if pressed {
+                    crate::agent_monitor::on_agent_input_pressed().await;
+                } else {
+                    crate::agent_monitor::on_agent_input_released_with_mode(&app_clone, agent_mode)
+                        .await;
+                }
+            });
+        }
+        TriggerTarget::Dictation => match method {
+            TriggerMethod::PushToTalk => {
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if pressed {
+                        crate::dictation_monitor::on_dictation_input_pressed(&app_clone).await;
+                    } else {
+                        crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
+                    }
+                });
+            }
+            TriggerMethod::Toggle => {
+                // Tap: act on the release edge only (press+release = one tap).
+                if !pressed {
+                    handle_dictation_tap_mode(app);
+                }
+            }
+            TriggerMethod::Voice => {} // voice never routes through key/mouse dispatch
+        },
+    }
+}
+
+fn handle_agent_mode_shortcut(
+    app: &AppHandle,
+    event: &ShortcutEvent,
+    method: crate::triggers::TriggerMethod,
+) {
     // Emit shortcut detection events for visual feedback in onboarding
     let shortcut_state = match event.state() {
         ShortcutState::Pressed => "pressed",
@@ -198,51 +285,26 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         );
     }
 
-    // During onboarding, only provide visual feedback — don't trigger agent mode
-    let app_state = app.state::<state::AppState>();
-    if app_state.is_onboarding_active() {
-        info!("[Agent Mode Shortcut] Pressed during onboarding - visual feedback only");
-        return;
-    }
-
-    // A spoken query started from the bar mic is open: this shortcut ends it
-    // (processing the result) instead of trying to open a second session.
-    if crate::agent_monitor::bar_voice_active() {
-        // End the bar's spoken query. Emit on RELEASE, not press: the stop
-        // handler clears bar_voice_active within a fraction of a millisecond,
-        // so a press-time emit would let this same key's release race through
-        // and start dictation on the busy controller. Both edges return here,
-        // and the flag is still set at release because nothing has cleared it
-        // yet, so exactly one stop is sent and nothing else starts.
-        if event.state() == ShortcutState::Released {
-            info!("[Agent Mode Shortcut] Ending bar-initiated voice session");
-            let _ = app.emit(events::agent::TRANSCRIPTION_STOP, ());
-        }
-        return;
-    }
-
-    // Unified behavior: forward both press and release to agent_monitor.
-    // AgentMonitor will branch based on AgentTriggerMode (tap vs hold).
-    let app_clone = app.clone();
-    let event_state = event.state();
-    tauri::async_runtime::spawn(async move {
-        if event_state == ShortcutState::Pressed {
-            crate::agent_monitor::on_agent_input_pressed().await;
-        } else if event_state == ShortcutState::Released {
-            crate::agent_monitor::on_agent_input_released(&app_clone).await;
-        }
-    });
+    // Route the actual activation (onboarding + bar-voice guards live in the
+    // shared core, so keyboard and mouse triggers behave identically).
+    fire_trigger_edge(
+        app,
+        method,
+        crate::triggers::TriggerTarget::Agent,
+        event.state() == ShortcutState::Pressed,
+    );
 }
 
 // Removed handle_agent_tap_mode - unified through AgentMonitor
 
 /// Handle dictation input shortcut (Option+Space by default)
-fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
-    let app_clone = app.clone();
-    let event_state = event.state();
-
+fn handle_dictation_input_shortcut(
+    app: &AppHandle,
+    event: &ShortcutEvent,
+    method: crate::triggers::TriggerMethod,
+) {
     // Emit shortcut detection events for visual feedback in onboarding
-    let shortcut_state = match event_state {
+    let shortcut_state = match event.state() {
         ShortcutState::Pressed => "pressed",
         ShortcutState::Released => "released",
     };
@@ -260,67 +322,14 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
         );
     }
 
-    // During onboarding, only provide visual feedback — don't trigger dictation
-    let app_state = app.state::<state::AppState>();
-    if app_state.is_onboarding_active() {
-        info!("[Dictation Input Shortcut] Pressed during onboarding - visual feedback only");
-        return;
-    }
-
-    // The bar mic starts a spoken agent query; let this shortcut end it too,
-    // so the same key the user reaches for stops what the mic started.
-    if crate::agent_monitor::bar_voice_active() {
-        // Emit on RELEASE and consume both edges (see the agent-mode handler),
-        // so the release cannot fall through and start dictation on top of the
-        // session we are ending.
-        if event.state() == ShortcutState::Released {
-            info!("[Dictation Input Shortcut] Ending bar-initiated voice session");
-            let _ = app.emit(events::agent::TRANSCRIPTION_STOP, ());
-        }
-        return;
-    }
-
-    // FIXED: Check dictation trigger mode to determine behavior
-    let trigger_mode = app_state
-        .get_dictation_trigger_mode()
-        .unwrap_or(state::DictationTriggerMode::Hold);
-
-    info!(
-        "[Dictation Input Shortcut] Trigger mode: {:?}, event state: {:?}",
-        trigger_mode,
-        event.state()
+    // Route the actual activation through the shared core (onboarding +
+    // bar-voice guards, tap/hold from this trigger's method).
+    fire_trigger_edge(
+        app,
+        method,
+        crate::triggers::TriggerTarget::Dictation,
+        event.state() == ShortcutState::Pressed,
     );
-    match trigger_mode {
-        state::DictationTriggerMode::Tap => {
-            // Tap mode: Only handle key release (press+release = tap)
-            if event.state() == ShortcutState::Released {
-                info!("[Dictation Input Shortcut] Tap mode - calling handle_dictation_tap_mode");
-                handle_dictation_tap_mode(app);
-            }
-        }
-        state::DictationTriggerMode::Hold => {
-            // Hold mode: Handle both press and release, route to dictation_monitor
-            info!(
-                "[Dictation Shortcut] Hold mode - spawning async handler for {:?}",
-                event_state
-            );
-            tauri::async_runtime::spawn(async move {
-                info!(
-                    "[Dictation Shortcut] Async task started for {:?}",
-                    event_state
-                );
-                if event_state == ShortcutState::Pressed {
-                    crate::dictation_monitor::on_dictation_input_pressed(&app_clone).await;
-                } else if event_state == ShortcutState::Released {
-                    crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
-                }
-                info!(
-                    "[Dictation Shortcut] Async task completed for {:?}",
-                    event_state
-                );
-            });
-        }
-    }
 }
 
 /// Handle dictation tap mode (new functionality)

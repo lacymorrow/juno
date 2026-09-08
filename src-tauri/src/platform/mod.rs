@@ -6,8 +6,9 @@
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+pub mod mouse_button_monitor;
 /// Passive stop-key (Escape) observer — macOS implementation plus stubs elsewhere.
-pub mod stop_key_monitor;
+pub mod stop_key_monitor; // Passive mouse-button trigger observer
 
 #[cfg(target_os = "windows")]
 pub mod windows;
