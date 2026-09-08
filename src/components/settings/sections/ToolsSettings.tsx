@@ -5,16 +5,10 @@ import { useState, useEffect } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 
 import { SettingsSectionProps } from "../types";
+import { SettingsGroup, SettingsRow } from "../ui";
 
 export default function ToolsSettings({ settings }: SettingsSectionProps) {
   const [toolApprovalRequired, setToolApprovalRequired] = useState(false);
@@ -201,40 +195,19 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Tools</h3>
-
-        {/* Tool Approval Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield size={20} />
-              Tool Approval
-            </CardTitle>
-            <CardDescription>
-              Control whether the agent requires your approval before executing
-              tools
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <div className="font-medium">Require Tool Approval</div>
-                <div className="text-sm text-gray-500">
-                  Agent will ask for permission before executing each tool
-                </div>
-              </div>
-              <Switch
-                checked={toolApprovalRequired}
-                disabled={toolApprovalLoading}
-                onCheckedChange={handleToggleToolApproval}
-              />
-            </div>
-
-            {toolApprovalRequired && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+      <SettingsGroup
+        title="Tool Approval"
+        footer="Control whether the agent requires your approval before executing tools"
+      >
+        <SettingsRow
+          htmlFor="tool-approval-required"
+          label="Require Tool Approval"
+          description="Agent will ask for permission before executing each tool"
+          below={
+            toolApprovalRequired && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                 <div className="flex items-start gap-2">
-                  <Shield className="h-4 w-4 text-amber-600 mt-0.5" />
+                  <Shield className="mt-0.5 h-4 w-4 text-amber-600" />
                   <div className="text-sm text-amber-800">
                     <div className="font-medium">Approval Required Mode</div>
                     <div className="mt-1">
@@ -245,84 +218,49 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
                   </div>
                 </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            )
+          }
+        >
+          <Switch
+            id="tool-approval-required"
+            checked={toolApprovalRequired}
+            disabled={toolApprovalLoading}
+            onCheckedChange={handleToggleToolApproval}
+          />
+        </SettingsRow>
+      </SettingsGroup>
 
-        {/* Smooth Mouse Movement Setting */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="lucide lucide-mouse-pointer-2"
-              >
-                <path d="m4 4 7.07 17 2.51-7.39L17 11.07 4 4z" />
-                <path d="m13 13 6 6" />
-              </svg>
-              Smooth Mouse Movement
-            </CardTitle>
-            <CardDescription>
-              Enable or disable smooth mouse movement for computer actions.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <div className="font-medium">Enable Smooth Mouse Movement</div>
-                <div className="text-sm text-gray-500">
-                  When enabled, mouse movements will be animated for better
-                  visual feedback.
-                </div>
-              </div>
-              <Switch
-                checked={smoothMouseMovement}
-                disabled={smoothMouseMovementLoading}
-                onCheckedChange={handleToggleSmoothMouseMovement}
-              />
-            </div>
-          </CardContent>
-        </Card>
+      <SettingsGroup
+        title="Smooth Mouse Movement"
+        footer="Enable or disable smooth mouse movement for computer actions."
+      >
+        <SettingsRow
+          htmlFor="smooth-mouse-movement"
+          label="Enable Smooth Mouse Movement"
+          description="When enabled, mouse movements will be animated for better visual feedback."
+        >
+          <Switch
+            id="smooth-mouse-movement"
+            checked={smoothMouseMovement}
+            disabled={smoothMouseMovementLoading}
+            onCheckedChange={handleToggleSmoothMouseMovement}
+          />
+        </SettingsRow>
+      </SettingsGroup>
 
-        {/* Companion Mode */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Eye size={20} />
-              Companion Mode
-            </CardTitle>
-            <CardDescription>
-              Watch and advise without taking any actions on your computer
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <div className="font-medium">Enable Companion Mode</div>
-                <div className="text-sm text-gray-500">
-                  Agent observes your screen and answers questions — no clicking,
-                  typing, or automation
-                </div>
-              </div>
-              <Switch
-                checked={companionMode}
-                disabled={companionModeLoading}
-                onCheckedChange={handleToggleCompanionMode}
-              />
-            </div>
-
-            {companionMode && (
-              <div className="p-3 bg-muted border border-border rounded-lg">
+      <SettingsGroup
+        title="Companion Mode"
+        footer="Watch and advise without taking any actions on your computer"
+      >
+        <SettingsRow
+          htmlFor="companion-mode"
+          label="Enable Companion Mode"
+          description="Agent observes your screen and answers questions — no clicking, typing, or automation"
+          below={
+            companionMode && (
+              <div className="rounded-lg border border-border bg-muted p-3">
                 <div className="flex items-start gap-2">
-                  <Eye className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <Eye className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="text-sm text-foreground">
                     <div className="font-medium">Companion Mode Active</div>
                     <div className="mt-1">
@@ -333,105 +271,114 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
                   </div>
                 </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            )
+          }
+        >
+          <Switch
+            id="companion-mode"
+            checked={companionMode}
+            disabled={companionModeLoading}
+            onCheckedChange={handleToggleCompanionMode}
+          />
+        </SettingsRow>
+      </SettingsGroup>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Tool Categories</CardTitle>
-            <CardDescription>
-              Enable or disable categories of tools available to the AI agent
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {settings.toolConfigLoading ? (
+      <SettingsGroup
+        title="Tool Categories"
+        footer="Enable or disable categories of tools available to the AI agent"
+      >
+        {settings.toolConfigLoading ? (
+          <SettingsRow
+            below={
               <div className="flex items-center justify-center py-8">
                 <RefreshCw className="h-6 w-6 animate-spin" />
                 <span className="ml-2">Loading tool configurations...</span>
               </div>
-            ) : (
-              <div className="space-y-4">
-                {Object.entries(settings.toolConfigurations).map(
-                  ([categoryName, category]) => (
-                    <div key={categoryName} className="border rounded-lg">
-                      <div className="flex items-center justify-between p-4 border-b">
-                        <div>
-                          <div className="font-medium">{category.name}</div>
-                          <div className="text-sm text-gray-500">
-                            {category.description}
-                          </div>
-                        </div>
-                        <Switch
-                          checked={category.enabled}
-                          onCheckedChange={(enabled) =>
-                            handleToggleCategory(categoryName, enabled)
-                          }
-                        />
-                      </div>
-
-                      {category.enabled && (
-                        <div className="p-4 space-y-2">
-                          {category.tools.map((tool) => (
-                            <div
-                              key={tool.name}
-                              className="flex items-center justify-between p-2 rounded bg-gray-50"
-                            >
-                              <div>
-                                <div className="text-sm font-medium">
-                                  {tool.name}
-                                </div>
-                                {tool.description && (
-                                  <div className="text-xs text-gray-500">
-                                    {tool.description}
-                                  </div>
-                                )}
-                                {tool.required && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="mt-1 text-xs"
-                                  >
-                                    Required
-                                  </Badge>
-                                )}
+            }
+          />
+        ) : (
+          <>
+            {Object.entries(settings.toolConfigurations).map(
+              ([categoryName, category]) => (
+                <SettingsRow
+                  key={categoryName}
+                  label={category.name}
+                  description={category.description}
+                  below={
+                    category.enabled && (
+                      <div className="space-y-2">
+                        {category.tools.map((tool) => (
+                          <div
+                            key={tool.name}
+                            className="flex items-center justify-between gap-4 rounded-md bg-muted p-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-[13px] font-medium">
+                                {tool.name}
                               </div>
-                              <Switch
-                                checked={tool.enabled}
-                                disabled={tool.required}
-                                onCheckedChange={(enabled) =>
-                                  handleToggleTool(tool.name, enabled)
-                                }
-                              />
+                              {tool.description && (
+                                <div className="text-[12px] text-muted-foreground">
+                                  {tool.description}
+                                </div>
+                              )}
+                              {tool.required && (
+                                <Badge
+                                  variant="secondary"
+                                  className="mt-1 text-xs"
+                                >
+                                  Required
+                                </Badge>
+                              )}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                )}
-
-                {Object.keys(settings.toolConfigurations).length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    No tool configurations available
-                  </div>
-                )}
-              </div>
+                            <Switch
+                              checked={tool.enabled}
+                              disabled={tool.required}
+                              onCheckedChange={(enabled) =>
+                                handleToggleTool(tool.name, enabled)
+                              }
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  }
+                >
+                  <Switch
+                    checked={category.enabled}
+                    onCheckedChange={(enabled) =>
+                      handleToggleCategory(categoryName, enabled)
+                    }
+                  />
+                </SettingsRow>
+              )
             )}
 
-            <div className="pt-4 border-t">
-              <Button
-                onClick={handleResetToolConfiguration}
-                variant="outline"
-                disabled={settings.toolConfigLoading}
-                className="w-full"
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Reset Tool Configuration
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            {Object.keys(settings.toolConfigurations).length === 0 && (
+              <SettingsRow
+                below={
+                  <div className="py-8 text-center text-muted-foreground">
+                    No tool configurations available
+                  </div>
+                }
+              />
+            )}
+          </>
+        )}
+
+        <SettingsRow
+          below={
+            <Button
+              onClick={handleResetToolConfiguration}
+              variant="outline"
+              disabled={settings.toolConfigLoading}
+              className="w-full"
+            >
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Reset Tool Configuration
+            </Button>
+          }
+        />
+      </SettingsGroup>
     </div>
   );
 }

@@ -8,13 +8,6 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -23,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useEventListener } from "@/hooks/useEventListener";
+import { SettingsGroup, SettingsRow } from "../ui";
 
 interface ScheduledAutomation {
   id: string;
@@ -211,83 +205,76 @@ export default function AutomationsSettings() {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Scheduled Automations</CardTitle>
-              <CardDescription>
-                Recurring agent tasks that run on a schedule. You can also ask the
-                agent directly — e.g. "check my emails every morning".
-              </CardDescription>
-            </div>
-            <Button onClick={openCreateDialog}>New automation</Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {automations.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No automations yet. Create one here, or ask the agent to schedule
-              something for you.
-            </p>
-          ) : (
-            automations.map((automation) => (
-              <div
-                key={automation.id}
-                className="flex items-start justify-between gap-4 rounded-lg border p-4"
-              >
-                <div className="min-w-0 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{automation.name}</span>
-                    {!automation.enabled && <Badge variant="outline">Paused</Badge>}
-                    {automation.last_result?.startsWith("error") && (
-                      <Badge variant="destructive">Last run failed</Badge>
-                    )}
-                  </div>
-                  <p className="truncate text-sm text-muted-foreground">
-                    {automation.query}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
+      <SettingsGroup
+        title="Scheduled Automations"
+        footer='Recurring agent tasks that run on a schedule. You can also ask the agent directly — e.g. "check my emails every morning".'
+      >
+        <SettingsRow
+          label="Automations"
+          description="Recurring tasks the agent runs on a schedule"
+        >
+          <Button onClick={openCreateDialog}>New automation</Button>
+        </SettingsRow>
+        {automations.length === 0 ? (
+          <SettingsRow description="No automations yet. Create one here, or ask the agent to schedule something for you." />
+        ) : (
+          automations.map((automation) => (
+            <SettingsRow
+              key={automation.id}
+              label={
+                <span className="flex items-center gap-2">
+                  <span className="truncate font-medium">{automation.name}</span>
+                  {!automation.enabled && <Badge variant="outline">Paused</Badge>}
+                  {automation.last_result?.startsWith("error") && (
+                    <Badge variant="destructive">Last run failed</Badge>
+                  )}
+                </span>
+              }
+              description={
+                <>
+                  <span className="block truncate">{automation.query}</span>
+                  <span className="block">
                     {automation.natural_language || automation.cron}
                     {" · next run "}
                     {automation.enabled ? formatTime(automation.next_run_at) : "—"}
                     {automation.last_run_at
                       ? ` · last run ${formatTime(automation.last_run_at)}`
                       : ""}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRunNow(automation)}
-                  >
-                    Run now
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => openEditDialog(automation)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(automation)}
-                  >
-                    Delete
-                  </Button>
-                  <Switch
-                    checked={automation.enabled}
-                    onCheckedChange={(checked) => handleToggle(automation, checked)}
-                  />
-                </div>
+                  </span>
+                </>
+              }
+            >
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleRunNow(automation)}
+                >
+                  Run now
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => openEditDialog(automation)}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDelete(automation)}
+                >
+                  Delete
+                </Button>
+                <Switch
+                  checked={automation.enabled}
+                  onCheckedChange={(checked) => handleToggle(automation, checked)}
+                />
               </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+            </SettingsRow>
+          ))
+        )}
+      </SettingsGroup>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg">

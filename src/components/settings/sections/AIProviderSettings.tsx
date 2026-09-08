@@ -19,15 +19,7 @@ import {
 } from "@/components/ai-elements/model-selector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -38,7 +30,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Save, Check, CheckCircle } from "lucide-react";
 import { SettingsSectionProps } from "../types";
-import { AdvancedOnly } from "../AdvancedSettingsContext";
+import { SettingsGroup, SettingsRow } from "../ui";
 import { useMemo, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS } from "@/lib/constants.generated";
@@ -109,75 +101,79 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <AdvancedOnly>
-        <Card>
-          <CardHeader>
-            <CardTitle>Provider Selection</CardTitle>
-            <CardDescription>Choose your AI provider and model</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="ai-provider">Active Provider</Label>
-              <Select
-                value={settings.activeProvider}
-                onValueChange={settings.handleActiveProviderChange}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select AI provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {settings.providers.map((provider) => (
-                    <SelectItem
-                      key={provider.id}
-                      value={provider.id}
-                      disabled={!provider.is_available}
-                      className={!provider.is_available ? "opacity-50" : undefined}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span>{provider.name}</span>
-                        {!provider.is_available && (
-                          <Badge
-                            variant="outline"
-                            className="text-xs text-muted-foreground"
-                          >
-                            {provider.id === "claude_cli"
-                              ? "CLI not found"
-                              : "No API key"}
-                          </Badge>
-                        )}
-                        {provider.is_available && provider.computer_use_supported && (
-                          <Badge
-                            variant="secondary"
-                            className="text-xs bg-blue-100 text-blue-800"
-                          >
-                            Computer Use
-                          </Badge>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {currentProvider && (
-                <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">
-                    {currentProvider.description}
-                  </p>
-                  {currentProvider.computer_use_supported && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <CheckCircle className="h-4 w-4 text-green-600" />
-                      <span className="text-green-700">
-                        Computer use capabilities available
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+      <SettingsGroup
+        title="Provider Selection"
+        advanced
+        footer="Choose your AI provider and model"
+      >
+        <SettingsRow
+          htmlFor="ai-provider"
+          label="Active Provider"
+          below={
+            currentProvider && (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  {currentProvider.description}
+                </p>
+                {currentProvider.computer_use_supported && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <span className="text-green-700">
+                      Computer use capabilities available
+                    </span>
+                  </div>
+                )}
+              </div>
+            )
+          }
+        >
+          <Select
+            value={settings.activeProvider}
+            onValueChange={settings.handleActiveProviderChange}
+          >
+            <SelectTrigger id="ai-provider" className="w-[220px]">
+              <SelectValue placeholder="Select AI provider" />
+            </SelectTrigger>
+            <SelectContent>
+              {settings.providers.map((provider) => (
+                <SelectItem
+                  key={provider.id}
+                  value={provider.id}
+                  disabled={!provider.is_available}
+                  className={!provider.is_available ? "opacity-50" : undefined}
+                >
+                  <div className="flex items-center gap-2">
+                    <span>{provider.name}</span>
+                    {!provider.is_available && (
+                      <Badge
+                        variant="outline"
+                        className="text-xs text-muted-foreground"
+                      >
+                        {provider.id === "claude_cli"
+                          ? "CLI not found"
+                          : "No API key"}
+                      </Badge>
+                    )}
+                    {provider.is_available && provider.computer_use_supported && (
+                      <Badge
+                        variant="secondary"
+                        className="text-xs bg-blue-100 text-blue-800"
+                      >
+                        Computer Use
+                      </Badge>
+                    )}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
 
-            {/* Model selector — same component as chat input */}
+        {/* Model selector — same component as chat input */}
+        <SettingsRow
+          label="Model"
+          below={
             <div className="space-y-2">
-              <Label>Model</Label>
               <ModelSelector open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
                 <Button
                   variant="outline"
@@ -268,124 +264,125 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                 </div>
               )}
             </div>
-          </CardContent>
-        </Card>
-      </AdvancedOnly>
+          }
+        />
+      </SettingsGroup>
 
       {settings.activeProvider && settings.providerSettings && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Provider Configuration</CardTitle>
-            <CardDescription>
-              Configure settings for{" "}
-              {settings.activeProvider === "claude_cli"
-                ? "Claude CLI"
-                : settings.activeProvider}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {settings.activeProvider === "claude_cli" ? (
-              <div className="rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
-                <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                  No API key needed
-                </p>
-                <p className="mt-1 text-sm text-blue-700 dark:text-blue-300">
-                  Claude CLI uses your existing authentication. Run{" "}
-                  <code className="rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900">
-                    claude login
-                  </code>{" "}
-                  in your terminal if not authenticated.
-                </p>
-              </div>
-            ) : (
-              <EnvironmentVariables>
-                <EnvironmentVariablesHeader>
-                  <EnvironmentVariablesTitle>API Keys</EnvironmentVariablesTitle>
-                  <EnvironmentVariablesToggle />
-                </EnvironmentVariablesHeader>
-                <EnvironmentVariablesContent>
-                  <EnvironmentVariable
-                    name={`${(settings.activeProvider ?? "").toUpperCase()}_API_KEY`}
-                    value={settings.formData.apiKey}
-                    onChange={(val) =>
-                      settings.setFormData((prev) => ({
-                        ...prev,
-                        apiKey: val,
-                      }))
-                    }
-                    required
-                  />
-                </EnvironmentVariablesContent>
-              </EnvironmentVariables>
-            )}
-
-            <AdvancedOnly>
-              {/* Max tokens / temperature — not applicable to Claude CLI (managed by the CLI) */}
-              {settings.activeProvider !== "claude_cli" && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="max-tokens">Max Tokens</Label>
-                    <Input
-                      id="max-tokens"
-                      type="number"
-                      value={settings.formData.maxTokens}
-                      onChange={(e) =>
-                        settings.setFormData((prev) => ({
-                          ...prev,
-                          maxTokens: e.target.value,
-                        }))
-                      }
-                      placeholder="e.g., 4000"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="temperature">Temperature</Label>
-                    <Input
-                      id="temperature"
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="2"
-                      value={settings.formData.temperature}
-                      onChange={(e) =>
-                        settings.setFormData((prev) => ({
-                          ...prev,
-                          temperature: e.target.value,
-                        }))
-                      }
-                      placeholder="e.g., 0.7"
-                    />
-                  </div>
+        <SettingsGroup
+          title="Provider Configuration"
+          footer={`Configure settings for ${
+            settings.activeProvider === "claude_cli"
+              ? "Claude CLI"
+              : settings.activeProvider
+          }`}
+        >
+          <SettingsRow
+            below={
+              settings.activeProvider === "claude_cli" ? (
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
+                  <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                    No API key needed
+                  </p>
+                  <p className="mt-1 text-sm text-blue-700 dark:text-blue-300">
+                    Claude CLI uses your existing authentication. Run{" "}
+                    <code className="rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900">
+                      claude login
+                    </code>{" "}
+                    in your terminal if not authenticated.
+                  </p>
                 </div>
-              )}
+              ) : (
+                <EnvironmentVariables>
+                  <EnvironmentVariablesHeader>
+                    <EnvironmentVariablesTitle>API Keys</EnvironmentVariablesTitle>
+                    <EnvironmentVariablesToggle />
+                  </EnvironmentVariablesHeader>
+                  <EnvironmentVariablesContent>
+                    <EnvironmentVariable
+                      name={`${(settings.activeProvider ?? "").toUpperCase()}_API_KEY`}
+                      value={settings.formData.apiKey}
+                      onChange={(val) =>
+                        settings.setFormData((prev) => ({
+                          ...prev,
+                          apiKey: val,
+                        }))
+                      }
+                      required
+                    />
+                  </EnvironmentVariablesContent>
+                </EnvironmentVariables>
+              )
+            }
+          />
 
-              <div className="space-y-2">
-                <Label htmlFor="system-prompt">System Prompt</Label>
-                <Textarea
-                  id="system-prompt"
-                  value={settings.formData.systemPrompt}
+          {/* Max tokens / temperature — not applicable to Claude CLI (managed by the CLI) */}
+          {settings.activeProvider !== "claude_cli" && (
+            <>
+              <SettingsRow advanced htmlFor="max-tokens" label="Max Tokens">
+                <Input
+                  id="max-tokens"
+                  type="number"
+                  value={settings.formData.maxTokens}
                   onChange={(e) =>
                     settings.setFormData((prev) => ({
                       ...prev,
-                      systemPrompt: e.target.value,
+                      maxTokens: e.target.value,
                     }))
                   }
-                  placeholder="Enter custom system prompt (optional)"
-                  rows={4}
+                  placeholder="e.g., 4000"
+                  className="w-[120px]"
                 />
-              </div>
-            </AdvancedOnly>
+              </SettingsRow>
 
-            <Button
-              onClick={settings.handleSaveProviderSettings}
-              className="w-full"
-            >
+              <SettingsRow advanced htmlFor="temperature" label="Temperature">
+                <Input
+                  id="temperature"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="2"
+                  value={settings.formData.temperature}
+                  onChange={(e) =>
+                    settings.setFormData((prev) => ({
+                      ...prev,
+                      temperature: e.target.value,
+                    }))
+                  }
+                  placeholder="e.g., 0.7"
+                  className="w-[120px]"
+                />
+              </SettingsRow>
+            </>
+          )}
+
+          <SettingsRow
+            advanced
+            htmlFor="system-prompt"
+            label="System Prompt"
+            below={
+              <Textarea
+                id="system-prompt"
+                value={settings.formData.systemPrompt}
+                onChange={(e) =>
+                  settings.setFormData((prev) => ({
+                    ...prev,
+                    systemPrompt: e.target.value,
+                  }))
+                }
+                placeholder="Enter custom system prompt (optional)"
+                rows={4}
+              />
+            }
+          />
+
+          <SettingsRow>
+            <Button onClick={settings.handleSaveProviderSettings}>
               <Save className="w-4 h-4 mr-2" />
               Save Provider Settings
             </Button>
-          </CardContent>
-        </Card>
+          </SettingsRow>
+        </SettingsGroup>
       )}
     </div>
   );

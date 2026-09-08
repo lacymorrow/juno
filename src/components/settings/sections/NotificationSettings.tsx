@@ -2,16 +2,8 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -20,15 +12,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import {
-  Bell,
-  BellOff,
-  Volume2,
-  VolumeX,
-  TestTube,
-  Shield,
-  Info,
-} from "lucide-react";
+import { TestTube } from "lucide-react";
+import { SettingsGroup, SettingsRow } from "../ui";
 import {
   NotificationSettings as NotificationSettingsType,
   NotificationType,
@@ -217,7 +202,10 @@ export default function NotificationSettings() {
   const getPermissionStatusBadge = () => {
     if (systemPermission.granted) {
       return (
-        <Badge variant="default" className="bg-green-100 text-green-800">
+        <Badge
+          variant="default"
+          className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+        >
           Granted
         </Badge>
       );
@@ -245,240 +233,174 @@ export default function NotificationSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Notification Type */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Bell className="w-5 h-5" />
-            Notification Type
-          </CardTitle>
-          <CardDescription>
-            Choose how you want to receive notifications from Juno
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-3">
-            <Label htmlFor="notification-type">Notification Method</Label>
-            <Select
-              value={notificationSettings.type}
-              onValueChange={(value) =>
-                updateNotificationType(value as NotificationType)
-              }
-            >
-              <SelectTrigger id="notification-type">
-                <SelectValue placeholder="Select notification type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="system">System Notifications</SelectItem>
-                <SelectItem value="toast">Toast Notifications</SelectItem>
-                <SelectItem value="both">Both System & Toast</SelectItem>
-                <SelectItem value="disabled">Disabled</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-sm text-gray-600">
-              {getTypeDescription(notificationSettings.type)}
-            </p>
-          </div>
+      <SettingsGroup
+        title="Notification Type"
+        footer="Choose how you want to receive notifications from Juno"
+      >
+        <SettingsRow
+          htmlFor="notification-type"
+          label="Notification method"
+          description={getTypeDescription(notificationSettings.type)}
+        >
+          <Select
+            value={notificationSettings.type}
+            onValueChange={(value) =>
+              updateNotificationType(value as NotificationType)
+            }
+          >
+            <SelectTrigger id="notification-type" className="w-[190px]">
+              <SelectValue placeholder="Select notification type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="system">System Notifications</SelectItem>
+              <SelectItem value="toast">Toast Notifications</SelectItem>
+              <SelectItem value="both">Both System & Toast</SelectItem>
+              <SelectItem value="disabled">Disabled</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+        <SettingsRow label="Test notification">
+          <Button
+            onClick={testNotification}
+            disabled={loading || notificationSettings.type === "disabled"}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2"
+          >
+            <TestTube className="w-4 h-4" />
+            {loading ? "Sending..." : "Test Notification"}
+          </Button>
+        </SettingsRow>
+      </SettingsGroup>
 
-          {/* Test Notification Button */}
-          <div className="pt-4">
-            <Button
-              onClick={testNotification}
-              disabled={loading || notificationSettings.type === "disabled"}
-              variant="outline"
-              className="flex items-center gap-2"
-            >
-              <TestTube className="w-4 h-4" />
-              {loading ? "Sending..." : "Test Notification"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* System Notification Permission */}
       {(notificationSettings.type === "system" ||
         notificationSettings.type === "both") && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="w-5 h-5" />
-              System Notification Permission
-            </CardTitle>
-            <CardDescription>
-              System notifications require permission from macOS
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">Permission Status</p>
-                <p className="text-sm text-gray-600">
-                  {systemPermission.granted
-                    ? "Juno can show system notifications"
-                    : systemPermission.denied
-                    ? "Permission denied. Enable in System Settings > Notifications"
-                    : "Permission not yet requested"}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {getPermissionStatusBadge()}
-                {!systemPermission.granted && (
-                  <Button
-                    onClick={requestSystemPermission}
-                    disabled={permissionLoading}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {permissionLoading ? "Requesting..." : "Request Permission"}
-                  </Button>
-                )}
-              </div>
+        <SettingsGroup
+          title="System Notification Permission"
+          footer="System notifications require permission from macOS"
+        >
+          <SettingsRow
+            label="Permission status"
+            description={
+              systemPermission.granted
+                ? "Juno can show system notifications"
+                : systemPermission.denied
+                ? "Permission denied. Enable in System Settings > Notifications"
+                : "Permission not yet requested"
+            }
+          >
+            <div className="flex items-center gap-2">
+              {getPermissionStatusBadge()}
+              {!systemPermission.granted && (
+                <Button
+                  onClick={requestSystemPermission}
+                  disabled={permissionLoading}
+                  size="sm"
+                  variant="outline"
+                >
+                  {permissionLoading ? "Requesting..." : "Request Permission"}
+                </Button>
+              )}
             </div>
-          </CardContent>
-        </Card>
+          </SettingsRow>
+        </SettingsGroup>
       )}
 
-      {/* Sound Settings */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            {notificationSettings.sound_enabled ? (
-              <Volume2 className="w-5 h-5" />
-            ) : (
-              <VolumeX className="w-5 h-5" />
-            )}
-            Sound Settings
-          </CardTitle>
-          <CardDescription>
-            Configure notification sound preferences
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <Label htmlFor="sound-enabled">Notification Sounds</Label>
-              <p className="text-sm text-gray-600">
-                Play a sound when notifications are shown
-              </p>
-            </div>
-            <Switch
-              id="sound-enabled"
-              checked={notificationSettings.sound_enabled}
-              onCheckedChange={updateSoundEnabled}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <SettingsGroup title="Sound" footer="Configure notification sound preferences">
+        <SettingsRow
+          htmlFor="sound-enabled"
+          label="Notification sounds"
+          description="Play a sound when notifications are shown"
+        >
+          <Switch
+            id="sound-enabled"
+            checked={notificationSettings.sound_enabled}
+            onCheckedChange={updateSoundEnabled}
+          />
+        </SettingsRow>
+      </SettingsGroup>
 
-      {/* Toast Notification Settings */}
       {(notificationSettings.type === "toast" ||
         notificationSettings.type === "both") && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Info className="w-5 h-5" />
-              Toast Notification Settings
-            </CardTitle>
-            <CardDescription>
-              Configure in-app toast notification behavior
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Duration */}
-            <div className="space-y-3">
-              <Label htmlFor="duration">
-                Duration: {notificationSettings.duration / 1000}s
-              </Label>
-              <Slider
-                id="duration"
-                min={1000}
-                max={15000}
-                step={500}
-                value={[notificationSettings.duration]}
-                onValueChange={([value]: number[]) => updateDuration(value)}
-                className="w-full"
-              />
-              <p className="text-sm text-gray-600">
-                How long toast notifications stay visible (1-15 seconds)
-              </p>
-            </div>
-
-            {/* Position */}
-            <div className="space-y-3">
-              <Label htmlFor="position">Position</Label>
-              <Select
-                value={notificationSettings.position}
-                onValueChange={updatePosition}
-              >
-                <SelectTrigger id="position">
-                  <SelectValue placeholder="Select position" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="top-left">Top Left</SelectItem>
-                  <SelectItem value="top-center">Top Center</SelectItem>
-                  <SelectItem value="top-right">Top Right</SelectItem>
-                  <SelectItem value="bottom-left">Bottom Left</SelectItem>
-                  <SelectItem value="bottom-center">Bottom Center</SelectItem>
-                  <SelectItem value="bottom-right">Bottom Right</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-sm text-gray-600">
-                Where toast notifications appear on screen
-              </p>
-            </div>
-
-            {/* Show Icons */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <Label htmlFor="show-icons">Show Icons</Label>
-                <p className="text-sm text-gray-600">
-                  Display icons in toast notifications
-                </p>
+        <SettingsGroup
+          title="Toast Notifications"
+          footer="Configure in-app toast notification behavior"
+        >
+          <SettingsRow
+            htmlFor="duration"
+            label="Duration"
+            description="How long toast notifications stay visible (1-15 seconds)"
+            below={
+              <div className="flex items-center gap-3">
+                <Slider
+                  id="duration"
+                  min={1000}
+                  max={15000}
+                  step={500}
+                  value={[notificationSettings.duration]}
+                  onValueChange={([value]: number[]) => updateDuration(value)}
+                  className="flex-1"
+                />
+                <span className="w-10 shrink-0 text-right text-[13px] tabular-nums text-muted-foreground">
+                  {notificationSettings.duration / 1000}s
+                </span>
               </div>
-              <Switch
-                id="show-icons"
-                checked={notificationSettings.show_icons}
-                onCheckedChange={updateShowIcons}
-              />
-            </div>
+            }
+          />
 
-            {/* Persist Important */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <Label htmlFor="persist-important">
-                  Persist Important Notifications
-                </Label>
-                <p className="text-sm text-gray-600">
-                  Keep important notifications until manually dismissed
-                </p>
-              </div>
-              <Switch
-                id="persist-important"
-                checked={notificationSettings.persist_important}
-                onCheckedChange={updatePersistImportant}
-              />
-            </div>
-          </CardContent>
-        </Card>
+          <SettingsRow
+            htmlFor="position"
+            label="Position"
+            description="Where toast notifications appear on screen"
+          >
+            <Select
+              value={notificationSettings.position}
+              onValueChange={updatePosition}
+            >
+              <SelectTrigger id="position" className="w-[190px]">
+                <SelectValue placeholder="Select position" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="top-left">Top Left</SelectItem>
+                <SelectItem value="top-center">Top Center</SelectItem>
+                <SelectItem value="top-right">Top Right</SelectItem>
+                <SelectItem value="bottom-left">Bottom Left</SelectItem>
+                <SelectItem value="bottom-center">Bottom Center</SelectItem>
+                <SelectItem value="bottom-right">Bottom Right</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+
+          <SettingsRow
+            htmlFor="show-icons"
+            label="Show icons"
+            description="Display icons in toast notifications"
+          >
+            <Switch
+              id="show-icons"
+              checked={notificationSettings.show_icons}
+              onCheckedChange={updateShowIcons}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            htmlFor="persist-important"
+            label="Persist important notifications"
+            description="Keep important notifications until manually dismissed"
+          >
+            <Switch
+              id="persist-important"
+              checked={notificationSettings.persist_important}
+              onCheckedChange={updatePersistImportant}
+            />
+          </SettingsRow>
+        </SettingsGroup>
       )}
 
-      {/* Disabled State Info */}
       {notificationSettings.type === "disabled" && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BellOff className="w-5 h-5" />
-              Notifications Disabled
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-gray-600">
-              All notifications are currently disabled. Juno will not show any
-              notifications for agent actions, completions, or errors. You can
-              re-enable them by selecting a different notification type above.
-            </p>
-          </CardContent>
-        </Card>
+        <SettingsGroup title="Notifications Disabled">
+          <SettingsRow description="All notifications are currently disabled. Juno will not show any notifications for agent actions, completions, or errors. You can re-enable them by selecting a different notification type above." />
+        </SettingsGroup>
       )}
     </div>
   );

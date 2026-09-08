@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import ModularSettingsWindow, {
   settingsCategories,
   visibleCategories,
+  searchCategories,
 } from "../settings/ModularSettingsWindow";
 import {
   AdvancedOnly,
@@ -30,6 +31,8 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     label: "settings",
     setTitle: vi.fn(() => Promise.resolve()),
+    theme: vi.fn(() => Promise.resolve("light")),
+    onThemeChanged: vi.fn(() => Promise.resolve(() => {})),
   }),
 }));
 
@@ -52,6 +55,7 @@ vi.mock("../settings/index", () => {
     GeneralSettings: stub("general"),
     VoiceSettings: stub("voice"),
     AIProviderSettings: stub("ai"),
+    NotificationSettings: stub("notifications"),
     ToolsSettings: stub("tools"),
     AutomationsSettings: stub("automations"),
     NetworkSettings: stub("network"),
@@ -95,6 +99,7 @@ const BASIC_SECTIONS = [
   "General",
   "Voice & Audio",
   "AI Provider",
+  "Notifications",
   "Security & Privacy",
   "Keyboard Shortcuts",
 ];
@@ -123,6 +128,7 @@ describe("visibleCategories", () => {
       "general",
       "voice",
       "ai",
+      "notifications",
       "security",
       "shortcuts",
     ]);
@@ -130,6 +136,36 @@ describe("visibleCategories", () => {
 
   it("returns every section in advanced mode", () => {
     expect(visibleCategories(true)).toEqual(settingsCategories);
+  });
+});
+
+describe("searchCategories", () => {
+  const all = settingsCategories;
+
+  it("returns everything for an empty or whitespace query", () => {
+    expect(searchCategories(all, "")).toEqual(all);
+    expect(searchCategories(all, "   ")).toEqual(all);
+  });
+
+  it("matches on the visible name", () => {
+    expect(searchCategories(all, "network").map((c) => c.id)).toEqual(["network"]);
+  });
+
+  it("matches on hidden keywords, not just the name", () => {
+    // "microphone" appears only in keywords, for Voice and Security.
+    const ids = searchCategories(all, "microphone").map((c) => c.id);
+    expect(ids).toContain("voice");
+    expect(ids).toContain("security");
+    expect(ids).not.toContain("network");
+  });
+
+  it("requires every term to match (AND)", () => {
+    expect(searchCategories(all, "mcp servers").map((c) => c.id)).toEqual(["network"]);
+    expect(searchCategories(all, "mcp zzzz")).toEqual([]);
+  });
+
+  it("is case-insensitive", () => {
+    expect(searchCategories(all, "KEYBOARD").map((c) => c.id)).toEqual(["shortcuts"]);
   });
 });
 
@@ -301,15 +337,15 @@ describe("GeneralSettings in basic mode", () => {
       expect(invokeMock).toHaveBeenCalledWith(GET_ADVANCED_SETTINGS_ENABLED)
     );
 
-    expect(screen.getByText("Launch at Login")).toBeInTheDocument();
-    expect(screen.getByText("Enable Sound Effects")).toBeInTheDocument();
+    expect(screen.getByText("Launch at login")).toBeInTheDocument();
+    expect(screen.getByText("Sound effects")).toBeInTheDocument();
     for (const hidden of [
-      "Bar Appearance",
-      "Agent Mode",
-      "Agent Trigger Mode",
-      "Companion Mode",
-      "Big Cursor",
-      "Restart Onboarding Flow",
+      "Bar appearance",
+      "Agent mode",
+      "Trigger mode",
+      "Enable Companion Mode",
+      "Enable big cursor",
+      "Restart onboarding",
     ]) {
       expect(screen.queryByText(hidden)).not.toBeInTheDocument();
     }
@@ -324,18 +360,49 @@ describe("GeneralSettings in basic mode", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByText("Bar Appearance")).toBeInTheDocument()
+      expect(screen.getByText("Bar appearance")).toBeInTheDocument()
     );
-    expect(screen.getByText("Launch at Login")).toBeInTheDocument();
+    expect(screen.getByText("Launch at login")).toBeInTheDocument();
     for (const shown of [
-      "Agent Mode",
-      "Agent Trigger Mode",
-      "Companion Mode",
-      "Big Cursor",
-      "Restart Onboarding Flow",
+      "Agent mode",
+      "Trigger mode",
+      "Enable Companion Mode",
+      "Enable big cursor",
+      "Restart onboarding",
     ]) {
       // Card titles and field labels can repeat the same text.
       expect(screen.getAllByText(shown).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("ModularSettingsWindow search", () => {
+  it("filters the sidebar to matching sections and clears back to all", async () => {
+    mockBackend(true);
+    render(<ModularSettingsWindow />);
+    await waitFor(() => expect(sidebarButton("Network")).toBeInTheDocument());
+
+    const search = screen.getByLabelText("Search settings");
+    fireEvent.change(search, { target: { value: "network" } });
+
+    await waitFor(() => expect(sidebarButton("General")).not.toBeInTheDocument());
+    expect(sidebarButton("Network")).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "" } });
+    await waitFor(() => expect(sidebarButton("General")).toBeInTheDocument());
+  });
+
+  it("shows an empty state when nothing matches", async () => {
+    mockBackend(true);
+    render(<ModularSettingsWindow />);
+    await waitFor(() => expect(sidebarButton("General")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Search settings"), {
+      target: { value: "zzzznomatch" },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("No settings found")).toBeInTheDocument()
+    );
   });
 });

@@ -1,13 +1,5 @@
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -20,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Download, Save } from "lucide-react";
 import { useState } from "react";
 import { SettingsSectionProps } from "../types";
-import { AdvancedOnly } from "../AdvancedSettingsContext";
+import { SettingsGroup, SettingsRow } from "../ui";
 
 export default function VoiceSettings({ settings }: SettingsSectionProps) {
   const {
@@ -64,307 +56,273 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Text-to-Speech</CardTitle>
-          <CardDescription>Configure voice output settings</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="tts-provider">TTS Provider</Label>
-            <Select
-              value={settings.ttsProvider}
-              onValueChange={settings.handleTtsProviderChange}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select TTS provider" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="off">Off</SelectItem>
-                <SelectItem value="system">System</SelectItem>
-                <SelectItem value="kokoro">Kokoro (Local)</SelectItem>
-                <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
-                <SelectItem value="replicate">Replicate</SelectItem>
-                <SelectItem value="chatterbox">Chatterbox (Cloud)</SelectItem>
-                <SelectItem value="supertonic">Supertonic (Local)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+      <SettingsGroup title="Text-to-Speech" footer="Configure voice output settings">
+        <SettingsRow htmlFor="tts-provider" label="TTS Provider">
+          <Select
+            value={settings.ttsProvider}
+            onValueChange={settings.handleTtsProviderChange}
+          >
+            <SelectTrigger id="tts-provider" className="w-[190px]">
+              <SelectValue placeholder="Select TTS provider" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="off">Off</SelectItem>
+              <SelectItem value="system">System</SelectItem>
+              <SelectItem value="kokoro">Kokoro (Local)</SelectItem>
+              <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
+              <SelectItem value="replicate">Replicate</SelectItem>
+              <SelectItem value="chatterbox">Chatterbox (Cloud)</SelectItem>
+              <SelectItem value="supertonic">Supertonic (Local)</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
 
-          {settings.ttsProvider === "chatterbox" && (
-            <div className="mt-4 space-y-4 rounded-md border p-4">
-              <p className="text-xs text-muted-foreground">
-                Chatterbox is MIT-licensed and runs on Replicate (~$0.006/sec).
-                Requires a Replicate API key.
-              </p>
+        {settings.ttsProvider === "chatterbox" && (
+          <>
+            <SettingsRow description="Chatterbox is MIT-licensed and runs on Replicate (~$0.006/sec). Requires a Replicate API key." />
 
-              <AdvancedOnly>
-                <div className="space-y-2">
-                  <Label htmlFor="chatterbox-ref-audio">
-                    Reference Audio URL (optional)
-                  </Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="chatterbox-ref-audio"
-                      value={chatterboxRefUrl}
-                      onChange={(e) => setChatterboxRefUrl(e.target.value)}
-                      placeholder="https://example.com/voice-sample.wav"
-                      className="flex-1"
-                    />
-                    <Button size="sm" onClick={saveChatterboxSettings} variant="outline">
-                      <Save className="h-3 w-3" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    5–10s WAV/MP3 URL for voice cloning. Leave blank for default voice.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="chatterbox-exaggeration">
-                    Emotion Exaggeration:{" "}
-                    {chatterboxExag.toFixed(2)}
-                  </Label>
-                  <input
-                    type="range"
-                    id="chatterbox-exaggeration"
-                    min="0"
-                    max="2"
-                    step="0.05"
-                    value={chatterboxExag}
-                    onChange={(e) => setChatterboxExag(parseFloat(e.target.value))}
-                    onMouseUp={saveChatterboxSettings}
-                    onTouchEnd={saveChatterboxSettings}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+            <SettingsRow
+              advanced
+              htmlFor="chatterbox-ref-audio"
+              label="Reference Audio URL (optional)"
+              description="5–10s WAV/MP3 URL for voice cloning. Leave blank for default voice."
+              below={
+                <div className="flex gap-2">
+                  <Input
+                    id="chatterbox-ref-audio"
+                    value={chatterboxRefUrl}
+                    onChange={(e) => setChatterboxRefUrl(e.target.value)}
+                    placeholder="https://example.com/voice-sample.wav"
+                    className="flex-1"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    0 = neutral, 1 = natural, 2 = very expressive
-                  </p>
+                  <Button size="sm" onClick={saveChatterboxSettings} variant="outline">
+                    <Save className="h-3 w-3" />
+                  </Button>
                 </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label htmlFor="chatterbox-hd">Use Chatterbox HD</Label>
-                    <p className="text-xs text-gray-500">
-                      Higher quality, slightly slower (resemble-ai/chatterbox-hd)
-                    </p>
-                  </div>
-                  <Switch
-                    id="chatterbox-hd"
-                    checked={chatterboxHd}
-                    onCheckedChange={(checked) => {
-                      setChatterboxHd(checked);
-                      handleChatterboxSettingsChange(chatterboxRefUrl, chatterboxExag, checked);
-                    }}
-                  />
-                </div>
-              </AdvancedOnly>
-            </div>
-          )}
-
-          {settings.ttsProvider === "supertonic" && (
-            <div className="mt-4 space-y-4 rounded-md border p-4">
-              <p className="text-xs text-muted-foreground">
-                Supertonic is an MIT-licensed on-device TTS engine. 31 languages, 167x real-time on Apple Silicon.
-                Requires: pip install supertonic &amp;&amp; supertonic serve
-              </p>
-
-              <AdvancedOnly>
-                <div className="space-y-2">
-                  <Label htmlFor="supertonic-server-url">Server URL</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="supertonic-server-url"
-                      value={stServerUrl}
-                      onChange={(e) => setStServerUrl(e.target.value)}
-                      placeholder="http://localhost:8000"
-                      className="flex-1"
-                    />
-                    <Button size="sm" onClick={saveSupertonicSettings} variant="outline">
-                      <Save className="h-3 w-3" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    URL of the local Supertonic server (supertonic serve).
-                  </p>
-                </div>
-              </AdvancedOnly>
-
-              <div className="space-y-2">
-                <Label htmlFor="supertonic-voice">Voice</Label>
-                <Select
-                  value={stVoice}
-                  onValueChange={(v) => {
-                    setStVoice(v);
-                    handleSupertonicSettingsChange(stServerUrl, v, stSpeed);
-                  }}
-                >
-                  <SelectTrigger id="supertonic-voice">
-                    <SelectValue placeholder="Select voice" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="M1">M1 (Male)</SelectItem>
-                    <SelectItem value="F1">F1 (Female)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <AdvancedOnly>
-                <div className="space-y-2">
-                  <Label htmlFor="supertonic-speed">
-                    Speed: {stSpeed.toFixed(2)}x
-                  </Label>
-                  <input
-                    type="range"
-                    id="supertonic-speed"
-                    min="0.5"
-                    max="2"
-                    step="0.05"
-                    value={stSpeed}
-                    onChange={(e) => setStSpeed(parseFloat(e.target.value))}
-                    onMouseUp={saveSupertonicSettings}
-                    onTouchEnd={saveSupertonicSettings}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    0.5 = slow, 1.05 = default, 2.0 = fast
-                  </p>
-                </div>
-              </AdvancedOnly>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Dictation Settings</CardTitle>
-          <CardDescription>
-            Configure voice input and transcription
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label htmlFor="dictation-clipboard">
-                Enable Clipboard Integration
-              </Label>
-              <p className="text-xs text-gray-500">
-                Automatically copy dictated text to clipboard
-              </p>
-            </div>
-            <Switch
-              id="dictation-clipboard"
-              checked={settings.dictationClipboardEnabled}
-              onCheckedChange={settings.handleDictationClipboardChange}
+              }
             />
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="dictation-trigger-mode">Trigger Mode</Label>
-            <Select
-              value={settings.dictationTriggerMode}
-              onValueChange={settings.handleDictationTriggerModeChange}
+            <SettingsRow
+              advanced
+              htmlFor="chatterbox-exaggeration"
+              label={`Emotion Exaggeration: ${chatterboxExag.toFixed(2)}`}
+              description="0 = neutral, 1 = natural, 2 = very expressive"
+              below={
+                <input
+                  type="range"
+                  id="chatterbox-exaggeration"
+                  min="0"
+                  max="2"
+                  step="0.05"
+                  value={chatterboxExag}
+                  onChange={(e) => setChatterboxExag(parseFloat(e.target.value))}
+                  onMouseUp={saveChatterboxSettings}
+                  onTouchEnd={saveChatterboxSettings}
+                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
+                />
+              }
+            />
+
+            <SettingsRow
+              advanced
+              htmlFor="chatterbox-hd"
+              label="Use Chatterbox HD"
+              description="Higher quality, slightly slower (resemble-ai/chatterbox-hd)"
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Select trigger mode" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="tap">Tap to Toggle</SelectItem>
-                <SelectItem value="hold">Hold to Activate (Default)</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-gray-500">
+              <Switch
+                id="chatterbox-hd"
+                checked={chatterboxHd}
+                onCheckedChange={(checked) => {
+                  setChatterboxHd(checked);
+                  handleChatterboxSettingsChange(chatterboxRefUrl, chatterboxExag, checked);
+                }}
+              />
+            </SettingsRow>
+          </>
+        )}
+
+        {settings.ttsProvider === "supertonic" && (
+          <>
+            <SettingsRow description="Supertonic is an MIT-licensed on-device TTS engine. 31 languages, 167x real-time on Apple Silicon. Requires: pip install supertonic && supertonic serve" />
+
+            <SettingsRow
+              advanced
+              htmlFor="supertonic-server-url"
+              label="Server URL"
+              description="URL of the local Supertonic server (supertonic serve)."
+              below={
+                <div className="flex gap-2">
+                  <Input
+                    id="supertonic-server-url"
+                    value={stServerUrl}
+                    onChange={(e) => setStServerUrl(e.target.value)}
+                    placeholder="http://localhost:8000"
+                    className="flex-1"
+                  />
+                  <Button size="sm" onClick={saveSupertonicSettings} variant="outline">
+                    <Save className="h-3 w-3" />
+                  </Button>
+                </div>
+              }
+            />
+
+            <SettingsRow htmlFor="supertonic-voice" label="Voice">
+              <Select
+                value={stVoice}
+                onValueChange={(v) => {
+                  setStVoice(v);
+                  handleSupertonicSettingsChange(stServerUrl, v, stSpeed);
+                }}
+              >
+                <SelectTrigger id="supertonic-voice" className="w-[190px]">
+                  <SelectValue placeholder="Select voice" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="M1">M1 (Male)</SelectItem>
+                  <SelectItem value="F1">F1 (Female)</SelectItem>
+                </SelectContent>
+              </Select>
+            </SettingsRow>
+
+            <SettingsRow
+              advanced
+              htmlFor="supertonic-speed"
+              label={`Speed: ${stSpeed.toFixed(2)}x`}
+              description="0.5 = slow, 1.05 = default, 2.0 = fast"
+              below={
+                <input
+                  type="range"
+                  id="supertonic-speed"
+                  min="0.5"
+                  max="2"
+                  step="0.05"
+                  value={stSpeed}
+                  onChange={(e) => setStSpeed(parseFloat(e.target.value))}
+                  onMouseUp={saveSupertonicSettings}
+                  onTouchEnd={saveSupertonicSettings}
+                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
+                />
+              }
+            />
+          </>
+        )}
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Dictation Settings"
+        footer="Configure voice input and transcription"
+      >
+        <SettingsRow
+          htmlFor="dictation-clipboard"
+          label="Enable Clipboard Integration"
+          description="Automatically copy dictated text to clipboard"
+        >
+          <Switch
+            id="dictation-clipboard"
+            checked={settings.dictationClipboardEnabled}
+            onCheckedChange={settings.handleDictationClipboardChange}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          htmlFor="dictation-trigger-mode"
+          label="Trigger Mode"
+          below={
+            <p className="text-[12px] leading-snug text-muted-foreground">
               <strong>Tap to Toggle:</strong> Press and release to toggle
               dictation mode on/off.
               <br />
               <strong>Hold to Activate:</strong> Hold key to activate dictation,
               release to stop (traditional dictation behavior).
             </p>
-          </div>
-        </CardContent>
-      </Card>
+          }
+        >
+          <Select
+            value={settings.dictationTriggerMode}
+            onValueChange={settings.handleDictationTriggerModeChange}
+          >
+            <SelectTrigger id="dictation-trigger-mode" className="w-[190px]">
+              <SelectValue placeholder="Select trigger mode" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="tap">Tap to Toggle</SelectItem>
+              <SelectItem value="hold">Hold to Activate (Default)</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsGroup>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Always Listening</CardTitle>
-          <CardDescription>
-            Configure wake word detection for hands-free activation
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label htmlFor="always-listening">Enable Always Listening</Label>
-              <p className="text-xs text-gray-500">
-                Listen for wake words to activate Juno
-              </p>
-            </div>
-            <Switch
-              id="always-listening"
-              checked={settings.alwaysListeningActive}
-              onCheckedChange={settings.handleAlwaysListeningToggle}
+      <SettingsGroup
+        title="Always Listening"
+        footer="Configure wake word detection for hands-free activation"
+      >
+        <SettingsRow
+          htmlFor="always-listening"
+          label="Enable Always Listening"
+          description="Listen for wake words to activate Juno"
+        >
+          <Switch
+            id="always-listening"
+            checked={settings.alwaysListeningActive}
+            onCheckedChange={settings.handleAlwaysListeningToggle}
+          />
+        </SettingsRow>
+
+        {settings.alwaysListeningActive && (
+          <>
+            <SettingsRow
+              advanced
+              htmlFor="sensitivity"
+              label={`Sensitivity: ${(settings.alwaysListeningSensitivity * 100).toFixed(0)}%`}
+              below={
+                <input
+                  type="range"
+                  id="sensitivity"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={settings.alwaysListeningSensitivity}
+                  onChange={(e) =>
+                    settings.handleSensitivityChange(parseFloat(e.target.value))
+                  }
+                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
+                />
+              }
             />
-          </div>
 
-          <AdvancedOnly>
-            {settings.alwaysListeningActive && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="sensitivity">
-                    Sensitivity:{" "}
-                    {(settings.alwaysListeningSensitivity * 100).toFixed(0)}%
-                  </Label>
-                  <input
-                    type="range"
-                    id="sensitivity"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={settings.alwaysListeningSensitivity}
-                    onChange={(e) =>
-                      settings.handleSensitivityChange(parseFloat(e.target.value))
-                    }
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+            <SettingsRow
+              advanced
+              htmlFor="wake-words"
+              label="Wake Words"
+              description="Separate multiple wake words with commas"
+              below={
+                <div className="flex gap-2">
+                  <Input
+                    id="wake-words"
+                    value={settings.wakeWordsInput}
+                    onChange={(e) => settings.setWakeWordsInput(e.target.value)}
+                    placeholder="hey juno, computer"
+                    className="flex-1"
                   />
+                  <Button onClick={settings.handleWakeWordsChange} size="sm">
+                    <Save className="w-4 h-4" />
+                  </Button>
                 </div>
+              }
+            />
+          </>
+        )}
+      </SettingsGroup>
 
-                <div className="space-y-2">
-                  <Label htmlFor="wake-words">Wake Words</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="wake-words"
-                      value={settings.wakeWordsInput}
-                      onChange={(e) => settings.setWakeWordsInput(e.target.value)}
-                      placeholder="hey juno, computer"
-                      className="flex-1"
-                    />
-                    <Button onClick={settings.handleWakeWordsChange} size="sm">
-                      <Save className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    Separate multiple wake words with commas
-                  </p>
-                </div>
-              </>
-            )}
-          </AdvancedOnly>
-        </CardContent>
-      </Card>
-
-      <AdvancedOnly>
-        <Card>
-          <CardHeader>
-            <CardTitle>Speech-to-Text Model</CardTitle>
-            <CardDescription>
-              Choose the Whisper model used for transcription. Larger models are
-              more accurate but require a one-time download.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {whisperDownloading && (
-              <div className="space-y-2 rounded-md border p-3 bg-muted/40">
+      <SettingsGroup
+        title="Speech-to-Text Model"
+        advanced
+        footer="Choose the Whisper model used for transcription. Larger models are more accurate but require a one-time download."
+      >
+        {whisperDownloading && (
+          <SettingsRow
+            below={
+              <div className="space-y-2 rounded-md border border-border p-3 bg-muted/40">
                 <p className="text-sm font-medium">
                   Downloading {downloadingModel?.display_name ?? whisperDownloading}…
                 </p>
@@ -383,83 +341,87 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
                   <Progress className="h-2 animate-pulse" />
                 )}
               </div>
-            )}
+            }
+          />
+        )}
 
-            <div className="space-y-2">
-              <Label htmlFor="whisper-model">Active Model</Label>
-              <Select
-                value={currentWhisperModel}
-                onValueChange={(id) => {
-                  const model = whisperModels.find((m) => m.id === id);
-                  if (model?.downloaded) {
-                    handleWhisperModelChange(id);
-                  }
-                }}
-                disabled={!!whisperDownloading}
-              >
-                <SelectTrigger id="whisper-model">
-                  <SelectValue placeholder="Select model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {whisperModels.map((model) => (
-                    <SelectItem
-                      key={model.id}
-                      value={model.id}
-                      disabled={!model.downloaded}
+        <SettingsRow
+          htmlFor="whisper-model"
+          label="Active Model"
+          description={
+            selectedModel
+              ? selectedModel.downloaded
+                ? `Active — ${selectedModel.size_mb} MB`
+                : `Not downloaded yet — ${selectedModel.size_mb} MB`
+              : undefined
+          }
+        >
+          <Select
+            value={currentWhisperModel}
+            onValueChange={(id) => {
+              const model = whisperModels.find((m) => m.id === id);
+              if (model?.downloaded) {
+                handleWhisperModelChange(id);
+              }
+            }}
+            disabled={!!whisperDownloading}
+          >
+            <SelectTrigger id="whisper-model" className="w-[220px]">
+              <SelectValue placeholder="Select model" />
+            </SelectTrigger>
+            <SelectContent>
+              {whisperModels.map((model) => (
+                <SelectItem
+                  key={model.id}
+                  value={model.id}
+                  disabled={!model.downloaded}
+                >
+                  {model.display_name}
+                  {model.is_default ? " (Recommended)" : ""}
+                  {!model.downloaded ? " — not downloaded" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+
+        <SettingsRow
+          label="Download a Model"
+          below={
+            <div className="grid gap-2">
+              {whisperModels
+                .filter((m) => !m.downloaded)
+                .map((model) => (
+                  <div
+                    key={model.id}
+                    className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+                  >
+                    <div>
+                      <p className="text-sm font-medium">{model.display_name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {model.size_mb} MB
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleWhisperModelDownload(model.id)}
+                      disabled={!!whisperDownloading}
                     >
-                      {model.display_name}
-                      {model.is_default ? " (Recommended)" : ""}
-                      {!model.downloaded ? " — not downloaded" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {selectedModel && (
+                      <Download className="mr-1 h-3 w-3" />
+                      Download
+                    </Button>
+                  </div>
+                ))}
+              {whisperModels.filter((m) => !m.downloaded).length === 0 && (
                 <p className="text-xs text-muted-foreground">
-                  {selectedModel.downloaded
-                    ? `Active — ${selectedModel.size_mb} MB`
-                    : `Not downloaded yet — ${selectedModel.size_mb} MB`}
+                  All available models are downloaded.
                 </p>
               )}
             </div>
-
-            <div className="space-y-2">
-              <Label>Download a Model</Label>
-              <div className="grid gap-2">
-                {whisperModels
-                  .filter((m) => !m.downloaded)
-                  .map((model) => (
-                    <div
-                      key={model.id}
-                      className="flex items-center justify-between rounded-md border px-3 py-2"
-                    >
-                      <div>
-                        <p className="text-sm font-medium">{model.display_name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {model.size_mb} MB
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleWhisperModelDownload(model.id)}
-                        disabled={!!whisperDownloading}
-                      >
-                        <Download className="mr-1 h-3 w-3" />
-                        Download
-                      </Button>
-                    </div>
-                  ))}
-                {whisperModels.filter((m) => !m.downloaded).length === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    All available models are downloaded.
-                  </p>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </AdvancedOnly>
+          }
+        />
+      </SettingsGroup>
     </div>
   );
 }

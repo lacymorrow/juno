@@ -1,16 +1,9 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { ChevronDown, Info, Keyboard, RefreshCw, RotateCcw } from "lucide-react";
+import { ChevronDown, Info, RefreshCw, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Collapsible,
   CollapsibleContent,
@@ -19,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { SettingsSectionProps } from "../types";
+import { SettingsGroup, SettingsRow } from "../ui";
 import ShortcutInput from "../ShortcutInput";
 
 export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
@@ -70,91 +64,85 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Keyboard size={20} />
-            Global Shortcuts
-          </CardTitle>
-          <CardDescription>
-            System-wide shortcuts. Click a row's info icon for what it does.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {settings.shortcutsLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <RefreshCw className="h-6 w-6 animate-spin" />
-              <span className="ml-2">Loading shortcuts...</span>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Customizable Shortcuts */}
-              <div className="space-y-2">
-                <h4 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide border-b pb-1.5">
-                  Customizable Shortcuts
-                </h4>
-                {Object.entries(settings.keyboardShortcuts)
-                  .filter(([key]) => key !== "open_settings") // Don't allow changing settings shortcut
-                  .map(([shortcutName, shortcutValue]) => (
-                    <ShortcutInput
-                      key={shortcutName}
-                      label={getShortcutDisplayName(shortcutName)}
-                      description={getShortcutDescription(shortcutName)}
-                      value={shortcutValue}
-                      shortcutName={shortcutName}
-                      isSystemManaged={false}
-                      onSave={handleShortcutChange}
-                      isLoading={settings.shortcutsLoading}
-                    />
-                  ))}
-              </div>
-
-              {/* Fixed System Shortcuts */}
-              <div className="space-y-2">
-                <h4 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide border-b pb-1.5">
-                  System Shortcuts
-                </h4>
-                <ShortcutInput
-                  label="Cancel Current Operation"
-                  description="Stop any running AI task or operation"
-                  value="Escape"
-                  shortcutName="stop_current_task"
-                  isSystemManaged={true}
-                  onSave={handleShortcutChange}
-                  isLoading={settings.shortcutsLoading}
-                />
-                <ShortcutInput
-                  label="Open Settings"
-                  description="Open the settings menu"
-                  value={settings.keyboardShortcuts.open_settings || "⌘+,"}
-                  shortcutName="open_settings"
-                  isSystemManaged={true}
-                  onSave={handleShortcutChange}
-                  isLoading={settings.shortcutsLoading}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="pt-3 border-t">
-            <Button
-              onClick={handleResetShortcuts}
-              variant="outline"
-              size="sm"
-              disabled={settings.shortcutsLoading}
-              className="w-full"
-            >
-              <RotateCcw className="size-3.5" />
-              Reset to Defaults
-            </Button>
+      {settings.shortcutsLoading ? (
+        <SettingsGroup title="Global Shortcuts">
+          <div className="flex items-center justify-center py-8">
+            <RefreshCw className="h-6 w-6 animate-spin" />
+            <span className="ml-2">Loading shortcuts...</span>
           </div>
+        </SettingsGroup>
+      ) : (
+        <>
+          <SettingsGroup
+            title="Customizable Shortcuts"
+            footer="System-wide shortcuts. Click a row's info icon for what it does."
+          >
+            <div className="space-y-2 p-3">
+              {Object.entries(settings.keyboardShortcuts)
+                .filter(([key]) => key !== "open_settings") // Don't allow changing settings shortcut
+                .map(([shortcutName, shortcutValue]) => (
+                  <ShortcutInput
+                    key={shortcutName}
+                    label={getShortcutDisplayName(shortcutName)}
+                    description={getShortcutDescription(shortcutName)}
+                    value={shortcutValue}
+                    shortcutName={shortcutName}
+                    isSystemManaged={false}
+                    onSave={handleShortcutChange}
+                    isLoading={settings.shortcutsLoading}
+                  />
+                ))}
+            </div>
+          </SettingsGroup>
 
-          {/* Usage tips — collapsed by default (progressive disclosure) */}
+          <SettingsGroup title="System Shortcuts">
+            <div className="space-y-2 p-3">
+              <ShortcutInput
+                label="Cancel Current Operation"
+                description="Stop any running AI task or operation"
+                value="Escape"
+                shortcutName="stop_current_task"
+                isSystemManaged={true}
+                onSave={handleShortcutChange}
+                isLoading={settings.shortcutsLoading}
+              />
+              <ShortcutInput
+                label="Open Settings"
+                description="Open the settings menu"
+                value={settings.keyboardShortcuts.open_settings || "⌘+,"}
+                shortcutName="open_settings"
+                isSystemManaged={true}
+                onSave={handleShortcutChange}
+                isLoading={settings.shortcutsLoading}
+              />
+            </div>
+          </SettingsGroup>
+        </>
+      )}
+
+      <SettingsGroup>
+        <SettingsRow
+          label="Reset all shortcuts"
+          description="Restore every keyboard shortcut to its default"
+        >
+          <Button
+            onClick={handleResetShortcuts}
+            variant="outline"
+            size="sm"
+            disabled={settings.shortcutsLoading}
+          >
+            <RotateCcw className="size-3.5" />
+            Reset to Defaults
+          </Button>
+        </SettingsRow>
+
+        {/* Usage tips — collapsed by default (progressive disclosure) */}
+        <div className="px-4 py-2.5">
           <Collapsible open={tipsOpen} onOpenChange={setTipsOpen}>
             <CollapsibleTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-xs text-muted-foreground hover:text-foreground"
+                className="flex w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               >
                 <Info className="size-3.5" aria-hidden="true" />
                 <span>Keyboard shortcut tips</span>
@@ -168,7 +156,7 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
               </button>
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <ul className="mt-1 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1 list-disc list-inside">
+              <ul className="mt-2 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1 list-disc list-inside">
                 <li>
                   Click on the capture area and press your desired key combination
                 </li>
@@ -186,8 +174,8 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
               </ul>
             </CollapsibleContent>
           </Collapsible>
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsGroup>
     </div>
   );
 }
