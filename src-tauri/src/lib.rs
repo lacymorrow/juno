@@ -602,6 +602,7 @@ pub fn run() {
             validate_keyboard_shortcut,
             get_shortcut_suggestions,
             get_shortcut_best_practices,
+            commands::escape_key_coordinator::set_bar_pane_open,
             commands::escape_key_coordinator::get_escape_key_coordinator_status,
             commands::escape_key_coordinator::force_unregister_escape_key,
             commands::escape_key_coordinator::test_escape_key_flow,

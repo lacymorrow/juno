@@ -164,9 +164,21 @@ pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
         return;
     }
 
-    info!("[Escape Key] Pressed - initiating coordinated stop");
     let app_handle_clone = app.clone();
     tauri::async_runtime::spawn(async move {
+        // When nothing is actually running, Escape has no work to cancel — treat
+        // it as "close the chat pane" instead, so the global monitor lets Escape
+        // dismiss the pane even when the bar is not focused. The pane arms this
+        // monitor only while it is open (see `set_bar_pane_open`).
+        if !crate::commands::escape_key_coordinator::something_to_stop(&app_handle_clone).await {
+            info!("[Escape Key] Pressed while idle - dismissing chat pane");
+            if let Err(e) = app_handle_clone.emit(events::bar::DISMISS_PANE, ()) {
+                error!("[Escape Key] Failed to emit dismiss-pane: {}", e);
+            }
+            return;
+        }
+
+        info!("[Escape Key] Pressed - initiating coordinated stop");
         // Immediate visual feedback — set bar to Stopping state before cleanup begins
         crate::commands::ui_commands::set_stopping_state().await;
 

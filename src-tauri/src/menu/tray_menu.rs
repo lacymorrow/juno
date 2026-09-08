@@ -205,7 +205,7 @@ pub fn create_state_aware_tray_menu(
     };
 
     // Build menu items with proper accelerators
-    let show_hide_item = MenuItemBuilder::new("Show/Hide Juno")
+    let show_hide_item = MenuItemBuilder::new("Show/Hide Chat")
         .id(tray_menu_ids::SHOW_HIDE)
         .build(app)?;
 
@@ -588,17 +588,22 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
 
     match event_id {
         tray_menu_ids::SHOW_HIDE => {
-            info!("[TrayMenu] Show/Hide menu item clicked");
-            // Toggle main window visibility
-            if let Some(window) = app_handle.get_webview_window("main") {
-                let is_visible = window.is_visible().unwrap_or(false);
-                if is_visible {
-                    let _ = window.hide();
-                } else {
+            info!("[TrayMenu] Show/Hide Chat menu item clicked");
+            // The floating bar is the app's surface now; make sure it is visible,
+            // then toggle its chat pane so this reopens a dismissed conversation
+            // (or hides it again).
+            let label = crate::constants::ui::window_labels::FLOATING_BAR;
+            if let Some(window) = app_handle.get_webview_window(label) {
+                if !window.is_visible().unwrap_or(false) {
                     let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
                 }
+            }
+            if let Err(e) = app_handle.emit(events::bar::TOGGLE_PANE, ()) {
+                error!(
+                    "{} {}",
+                    prefixes::TRAY_MENU,
+                    format_error(templates::FAILED_TO_EMIT, "toggle chat pane", e)
+                );
             }
         }
         tray_menu_ids::NEW_CHAT => {
