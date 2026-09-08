@@ -326,14 +326,9 @@ export default function SecuritySettings() {
                 variant="outline"
                 size="sm"
                 className="flex items-center gap-1"
-                disabled={isLoadingPermissions}
               >
-                <RefreshCw
-                  className={`w-4 h-4 ${
-                    isLoadingPermissions ? "animate-spin" : ""
-                  }`}
-                />
-                {isLoadingPermissions ? "Checking..." : "Refresh"}
+                <RefreshCw className="w-4 h-4" />
+                Refresh
               </Button>
             </SettingsRow>
           )
