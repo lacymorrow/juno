@@ -336,8 +336,12 @@ pub fn validate(triggers: &[Trigger], reserved: &[String]) -> Result<(), String>
                 }
             }
             TriggerMethod::PushToTalk | TriggerMethod::Toggle => {
+                // A freshly added trigger has no binding yet. That is allowed to
+                // persist (the UI shows it as unconfigured); it simply is not
+                // registered until a key or mouse button is recorded. Only
+                // validate a binding that actually exists.
                 let Some(binding) = t.binding.as_ref() else {
-                    return Err("This trigger needs a key or mouse button.".to_string());
+                    continue;
                 };
                 let label = binding.describe();
                 if reserved.iter().any(|r| r.eq_ignore_ascii_case(&label)) {
@@ -395,6 +399,21 @@ mod tests {
     fn validate_accepts_default_set() {
         let ts = default_triggers("Option+D", "Option+Space");
         assert!(validate(&ts, &["Escape".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn validate_allows_unconfigured_binding() {
+        // A just-added trigger with no binding must be savable so the "+" flow
+        // can persist it before the user records a key/mouse button.
+        let ts = vec![Trigger {
+            method: TriggerMethod::Toggle,
+            target: TriggerTarget::Agent,
+            binding: None,
+            phrase: None,
+            require_hey_prefix: false,
+            enabled: true,
+        }];
+        assert!(validate(&ts, &[]).is_ok());
     }
 
     #[test]
