@@ -100,12 +100,13 @@
         "height": 600,
         "minWidth": 420,
         "minHeight": 300,
-        "hiddenTitle": false,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
         "resizable": true,
         "visible": false,
         "skipTaskbar": false,
         "shadow": true,
-        "transparent": false,
+        "transparent": true,
         "alwaysOnTop": false
       }
     ],

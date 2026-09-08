@@ -36,6 +36,7 @@ import {
   useAdvancedSettings,
 } from "./AdvancedSettingsContext";
 import { SettingsCategory } from "./types";
+import { SETTINGS_ROW_ID_PREFIX } from "./ui";
 
 /**
  * Sidebar sections, styled like macOS System Settings: a coloured icon tile
@@ -155,6 +156,63 @@ export function searchCategories(
   });
 }
 
+/**
+ * A searchable row inside a section. `rowId` matches the anchor a
+ * {@link SettingsRow} renders (`id` prop, else its `htmlFor`), so a match can
+ * be scrolled to and highlighted. This is a small static index maintained
+ * alongside the sections — extend it when a row deserves to be findable.
+ */
+export interface SettingsRowEntry {
+  sectionId: string;
+  rowId: string;
+  label: string;
+  keywords: string;
+}
+
+export const settingsRowIndex: SettingsRowEntry[] = [
+  // General
+  { sectionId: "general", rowId: "auto-launch", label: "Launch at login", keywords: "startup login boot autostart" },
+  { sectionId: "general", rowId: "big-cursor-enabled", label: "Enable big cursor", keywords: "cursor pointer magnify enlarge big" },
+  { sectionId: "general", rowId: "bar-appearance", label: "Bar appearance", keywords: "bar appearance style pill orb persona floating" },
+  { sectionId: "general", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup" },
+  // Voice & Audio
+  { sectionId: "voice", rowId: "whisper-model", label: "Active Model", keywords: "whisper model transcription download" },
+  { sectionId: "voice", rowId: "always-listening", label: "Enable Always Listening", keywords: "wake word always listening hands-free" },
+  { sectionId: "voice", rowId: "dictation-trigger-mode", label: "Trigger Mode", keywords: "dictation trigger tap hold" },
+  // AI Provider
+  { sectionId: "ai", rowId: "ai-provider", label: "Active Provider", keywords: "provider anthropic openai gemini claude" },
+  { sectionId: "ai", rowId: "max-tokens", label: "Max Tokens", keywords: "tokens length limit output" },
+  { sectionId: "ai", rowId: "temperature", label: "Temperature", keywords: "temperature randomness creativity sampling" },
+  { sectionId: "ai", rowId: "system-prompt", label: "System Prompt", keywords: "system prompt instructions persona" },
+  // Notifications
+  { sectionId: "notifications", rowId: "notification-type", label: "Notification method", keywords: "banner alert method delivery" },
+  { sectionId: "notifications", rowId: "position", label: "Position", keywords: "position corner placement screen" },
+  // Tools
+  { sectionId: "tools", rowId: "tool-approval-required", label: "Require Tool Approval", keywords: "approval confirm permission tools" },
+  { sectionId: "tools", rowId: "smooth-mouse-movement", label: "Enable Smooth Mouse Movement", keywords: "smooth mouse movement animation cursor" },
+  // Network
+  { sectionId: "network", rowId: "mcp-json-config", label: "Server Configuration (JSON)", keywords: "mcp json server configuration endpoints" },
+  // Advanced
+  { sectionId: "advanced", rowId: "debug-mode", label: "Debug Mode", keywords: "debug logs verbose developer" },
+  { sectionId: "advanced", rowId: "performance-monitoring", label: "Performance Monitoring", keywords: "performance monitoring metrics profiling" },
+  { sectionId: "advanced", rowId: "reset-all-settings", label: "Reset all settings", keywords: "reset factory defaults erase wipe" },
+];
+
+/**
+ * Rows whose label/keywords match every term of the query. Exported for tests.
+ * Empty query yields nothing — row deep-linking only kicks in on an active
+ * search, section-level filtering handles the rest.
+ */
+export function searchRows(query: string): SettingsRowEntry[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const terms = q.split(/\s+/);
+  return settingsRowIndex.filter((r) => {
+    const haystack = `${r.label} ${r.keywords}`.toLowerCase();
+    return terms.every((t) => haystack.includes(t));
+  });
+}
+
 export default function ModularSettingsWindow() {
   return (
     <AdvancedSettingsProvider>
@@ -174,10 +232,27 @@ function SettingsWindowContent() {
   const window = getCurrentWindow();
 
   const categories = useMemo(() => visibleCategories(advanced), [advanced]);
-  const filtered = useMemo(
-    () => searchCategories(categories, query),
+
+  // Rows (inside sections) that match the query, restricted to visible sections.
+  const rowMatches = useMemo(
+    () =>
+      searchRows(query).filter((r) =>
+        categories.some((c) => c.id === r.sectionId),
+      ),
     [categories, query],
   );
+
+  // Sidebar list: sections matching by name/keywords, plus any section that
+  // owns a matching row so a row search doesn't hide its own section.
+  const filtered = useMemo(() => {
+    const sectionHits = searchCategories(categories, query);
+    if (rowMatches.length === 0) return sectionHits;
+    const allowed = new Set([
+      ...sectionHits.map((c) => c.id),
+      ...rowMatches.map((r) => r.sectionId),
+    ]);
+    return categories.filter((c) => allowed.has(c.id));
+  }, [categories, query, rowMatches]);
 
   // Keep the selection valid as the visible list changes (toggle off while on
   // a hidden section, or a search that hides the current one).
@@ -187,10 +262,34 @@ function SettingsWindowContent() {
     }
   }, [filtered, categories, selectedCategory]);
 
-  // Scroll the content pane back to the top whenever the section changes.
+  // Row-level deep-linking: when the query points at a specific row, jump to
+  // its section and briefly highlight the row. The first match wins.
   useEffect(() => {
+    const target = rowMatches[0];
+    if (!target) return;
+    setSelectedCategory(target.sectionId);
+
+    // Wait for the target section to render, then scroll + flash the row.
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById(
+        `${SETTINGS_ROW_ID_PREFIX}${target.rowId}`,
+      );
+      if (!el) return;
+      el.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      const ring = ["ring-2", "ring-primary/50", "rounded-md"];
+      el.classList.add(...ring);
+      // Plain setTimeout — the local `window` is the Tauri window, not global.
+      setTimeout(() => el.classList.remove(...ring), 1600);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [rowMatches]);
+
+  // Scroll the content pane back to the top whenever the section changes.
+  // Skip when a row is deep-linked — that effect scrolls to the row instead.
+  useEffect(() => {
+    if (rowMatches.length > 0) return;
     contentRef.current?.scrollTo?.({ top: 0 });
-  }, [selectedCategory]);
+  }, [selectedCategory, rowMatches]);
 
   useEffect(() => {
     window.setTitle("Juno Settings").catch(() => {});
@@ -233,9 +332,11 @@ function SettingsWindowContent() {
           '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif',
       }}
     >
-      <div className="flex h-screen w-full min-w-0 bg-background text-foreground">
-        {/* Sidebar */}
-        <aside className="flex w-[220px] shrink-0 flex-col border-r border-border bg-sidebar">
+      {/* Transparent body so the native window vibrancy shows through the
+          translucent sidebar; the content pane stays opaque for readability. */}
+      <div className="flex h-screen w-full min-w-0 bg-transparent text-foreground">
+        {/* Sidebar — translucent so the macOS vibrancy blur shows through. */}
+        <aside className="flex w-[220px] shrink-0 flex-col border-r border-border bg-sidebar/70">
           {/* Drag region + traffic-light clearance */}
           <div
             data-tauri-drag-region

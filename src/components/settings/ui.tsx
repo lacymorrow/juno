@@ -52,9 +52,18 @@ export function SettingsGroup({
   );
 }
 
+/** Prefix for the DOM anchor id set on a searchable row. */
+export const SETTINGS_ROW_ID_PREFIX = "settings-row-";
+
 interface SettingsRowProps {
   label?: React.ReactNode;
   description?: React.ReactNode;
+  /**
+   * Stable anchor key so search deep-linking can scroll to and highlight this
+   * row. Rendered as `settings-row-<id>`. Falls back to `htmlFor` when omitted,
+   * so most control rows are addressable without extra wiring.
+   */
+  id?: string;
   /** Associates the label with a control for accessibility. */
   htmlFor?: string;
   /** The control shown at the right edge of the row. */
@@ -71,6 +80,7 @@ interface SettingsRowProps {
 export function SettingsRow({
   label,
   description,
+  id,
   htmlFor,
   children,
   below,
@@ -82,9 +92,18 @@ export function SettingsRow({
   if (advanced && !showAdvanced) return null;
 
   const hasTopLine = Boolean(label || description || children);
+  const anchor = id ?? htmlFor;
 
   return (
-    <div className={cn("px-4 py-2.5", className)}>
+    <div
+      id={anchor ? `${SETTINGS_ROW_ID_PREFIX}${anchor}` : undefined}
+      className={cn(
+        "px-4 py-2.5",
+        // Keep a deep-linked row clear of the drag band when scrolled into view.
+        anchor && "scroll-mt-16 transition-shadow",
+        className,
+      )}
+    >
       {hasTopLine && (
         <div className="flex min-h-[28px] items-center justify-between gap-4">
           {(label || description) && (
