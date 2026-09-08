@@ -21,6 +21,7 @@ pub mod store_keys {
     pub const ADVANCED_SETTINGS_ENABLED: &str = "advanced_settings_enabled";
     pub const CLI: &str = "cli";
     pub const VOICE_TRANSCRIPTION: &str = "voice_transcription";
+    pub const TRIGGERS: &str = "triggers";
 }
 
 /// Keyboard shortcut setting keys

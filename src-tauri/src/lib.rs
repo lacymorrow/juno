@@ -46,6 +46,7 @@ pub mod state;
 pub mod state_management; // Application state management, initialization, and monitoring
 pub mod testing; // Test harness and mock implementations for headless integration tests
 pub mod tools;
+pub mod triggers; // Unified activation model (methods x targets)
 pub mod tts;
 pub mod utils;
 pub mod voice_control;
@@ -107,6 +108,7 @@ use crate::commands::{
     reset_keyboard_shortcuts, set_keyboard_shortcut, set_keyboard_shortcuts,
     validate_keyboard_shortcut,
 };
+use crate::commands::{get_triggers, set_triggers};
 
 // Import MCP commands explicitly
 use crate::commands::mcp::{
@@ -595,6 +597,8 @@ pub fn run() {
             set_keyboard_shortcut,
             set_keyboard_shortcuts,
             reset_keyboard_shortcuts,
+            get_triggers,
+            set_triggers,
             validate_keyboard_shortcut,
             get_shortcut_suggestions,
             get_shortcut_best_practices,

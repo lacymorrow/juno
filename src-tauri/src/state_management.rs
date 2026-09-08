@@ -140,6 +140,24 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
         );
     }
 
+    // Load the unified activation triggers into state (migrated from the legacy
+    // fields on older stores). Must precede shortcut registration, which now
+    // reads triggers from state.
+    match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+        Ok(sm) => match sm.get_all_settings().await {
+            Ok(all) => {
+                if let Err(e) = app_state.set_triggers(all.triggers) {
+                    warn!("Failed to load triggers into state: {}", e);
+                }
+            }
+            Err(e) => warn!(
+                "Failed to read settings for triggers: {} - using defaults",
+                e
+            ),
+        },
+        Err(e) => warn!("Failed to create settings manager for triggers: {}", e),
+    }
+
     // Load tool configuration from centralized settings
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager for tool config: {}", e))?;
@@ -625,6 +643,24 @@ async fn restore_always_listening_if_needed(app_handle: &AppHandle, app_state: &
             {
                 Ok(_) => {
                     info!("[State] Successfully restored always listening mode on startup");
+
+                    // Push the saved wake words so custom voice-trigger phrases
+                    // (e.g. "transcribe") survive a restart, not just defaults.
+                    let wake_words = app_state
+                        .get_always_listening_wake_words()
+                        .unwrap_or_default();
+                    if !wake_words.is_empty() {
+                        if let Err(e) =
+                            crate::commands::always_listening::set_always_listening_wake_words(
+                                wake_words,
+                                app_handle.clone(),
+                                app_handle.state::<AppState>(),
+                            )
+                            .await
+                        {
+                            warn!("[State] Failed to apply saved wake words on startup: {}", e);
+                        }
+                    }
 
                     // Emit event to update UI
                     if let Err(e) = app_handle.emit(

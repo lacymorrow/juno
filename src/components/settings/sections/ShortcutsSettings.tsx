@@ -20,8 +20,6 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
 
   const getShortcutDisplayName = (shortcutName: string): string => {
     const names: { [key: string]: string } = {
-      agent_mode: "Agent Mode",
-      dictation_input: "Start Dictation",
       stop_current_task: "Stop Current Task",
       open_settings: "Open Settings",
       voice_activation: "Voice Activation",
@@ -31,8 +29,6 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
 
   const getShortcutDescription = (shortcutName: string): string => {
     const descriptions: { [key: string]: string } = {
-      agent_mode: "Activate agent mode",
-      dictation_input: "Activate voice input for dictation",
       stop_current_task: "Stop the current AI task or operation",
       open_settings: "Open the settings window",
       voice_activation: "Toggle voice recording from anywhere — no Juno window required",
@@ -79,7 +75,14 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
           >
             <div className="space-y-2 p-3">
               {Object.entries(settings.keyboardShortcuts)
-                .filter(([key]) => key !== "open_settings") // Don't allow changing settings shortcut
+                // open_settings is system-managed; agent_mode + dictation_input
+                // moved to the Triggers screen (single source of truth).
+                .filter(
+                  ([key]) =>
+                    !["open_settings", "agent_mode", "dictation_input"].includes(
+                      key,
+                    ),
+                )
                 .map(([shortcutName, shortcutValue]) => (
                   <ShortcutInput
                     key={shortcutName}

@@ -230,17 +230,26 @@ pub async fn on_agent_input_pressed() {
     }
 }
 
-// Called when agent input key is released
+// Called when agent input key is released. Uses the target's configured
+// trigger mode from state.
 pub async fn on_agent_input_released(app_handle: &AppHandle) {
-    info!("[AgentMonitor] on_agent_input_released() called");
-    let mut state = AGENT_INPUT_STATE.lock().await;
-    let (agent_started, threshold_reached, duration) = state.end_hold();
-
-    // Branch based on AgentTriggerMode
     let trigger_mode = app_handle
         .state::<AppState>()
         .get_agent_trigger_mode()
         .unwrap_or(AgentTriggerMode::Tap);
+    on_agent_input_released_with_mode(app_handle, trigger_mode).await;
+}
+
+/// Release handler with an explicit trigger mode, so a specific trigger
+/// (push-to-talk vs toggle) drives the behavior regardless of the global
+/// setting. This lets the unified triggers matrix bind both methods.
+pub async fn on_agent_input_released_with_mode(
+    app_handle: &AppHandle,
+    trigger_mode: AgentTriggerMode,
+) {
+    info!("[AgentMonitor] on_agent_input_released() called");
+    let mut state = AGENT_INPUT_STATE.lock().await;
+    let (agent_started, threshold_reached, duration) = state.end_hold();
 
     if threshold_reached {
         info!("[AgentMonitor] Agent input released after threshold reached - stopping transcription to process with agent");

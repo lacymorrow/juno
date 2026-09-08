@@ -5,7 +5,7 @@ use crate::state::{AppState, KeyboardShortcuts};
 use serde_json;
 use tauri::{AppHandle, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Get the current keyboard shortcuts configuration
 #[tauri::command]
@@ -466,50 +466,46 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     // Import parse_shortcut_string from lib.rs
     use crate::parse_shortcut_string;
 
-    // Register the agent mode shortcut with error handling
-    if let Some(shortcut) = parse_shortcut_string(&shortcuts.agent_mode) {
-        match app.global_shortcut().register(shortcut) {
-            Ok(()) => {
-                info!(
-                    "✅ Successfully registered agent mode shortcut: {}",
-                    shortcuts.agent_mode
-                );
+    // Register every keyboard binding across the enabled activation triggers.
+    // The set is deduped: two triggers may not share a binding (validated on
+    // save), but the same combo must never be registered twice. Mouse bindings
+    // and voice phrases are handled by their own subsystems, not here.
+    let triggers = state.get_triggers().unwrap_or_default();
+    let mut registered_combos: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut mouse_bindings: Vec<crate::platform::mouse_button_monitor::MouseBinding> = Vec::new();
+    for trigger in triggers.iter().filter(|t| t.enabled) {
+        match &trigger.binding {
+            Some(crate::triggers::Binding::Keyboard { shortcut: combo }) => {
+                let key = combo.to_lowercase();
+                if !registered_combos.insert(key) {
+                    continue; // already registered this combo
+                }
+                match parse_shortcut_string(combo) {
+                    Some(shortcut) => match app.global_shortcut().register(shortcut) {
+                        Ok(()) => info!(
+                            "✅ Registered trigger shortcut: {} ({:?} -> {:?})",
+                            combo, trigger.method, trigger.target
+                        ),
+                        Err(e) => error!(
+                            "❌ Failed to register trigger shortcut ({}): {} - may be missing Input Monitoring permissions",
+                            combo, e
+                        ),
+                    },
+                    None => warn!("Failed to parse trigger shortcut: {}", combo),
+                }
             }
-            Err(e) => {
-                error!("❌ Failed to register agent mode shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.agent_mode, e);
-                // Don't fail - continue with other shortcuts
+            Some(crate::triggers::Binding::Mouse { button }) => {
+                mouse_bindings.push((*button, trigger.method, trigger.target));
             }
+            None => {}
         }
-    } else {
-        warn!(
-            "Failed to parse agent mode shortcut: {}",
-            shortcuts.agent_mode
-        );
     }
 
-    // Register the dictation input shortcut with error handling
-    if let Some(shortcut) = parse_shortcut_string(&shortcuts.dictation_input) {
-        debug!(
-            "Attempting to register dictation input shortcut: {} -> {:?}",
-            shortcuts.dictation_input, shortcut
-        );
-        match app.global_shortcut().register(shortcut) {
-            Ok(()) => {
-                info!(
-                    "✅ Successfully registered dictation input shortcut: {} -> {:?}",
-                    shortcuts.dictation_input, shortcut
-                );
-            }
-            Err(e) => {
-                error!("❌ Failed to register dictation input shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.dictation_input, e);
-                // Don't fail - continue with other shortcuts
-            }
-        }
-    } else {
-        warn!(
-            "Failed to parse dictation input shortcut: {}",
-            shortcuts.dictation_input
-        );
+    // Install (or tear down) the passive mouse-button observer for any
+    // mouse-bound triggers. Keyboard goes through the global-shortcut plugin
+    // above; mouse buttons cannot, so they use the NSEvent monitor.
+    if let Err(e) = crate::platform::mouse_button_monitor::sync(app, mouse_bindings) {
+        error!("Failed to sync mouse-button monitor: {}", e);
     }
 
     // Register the voice activation shortcut with error handling
