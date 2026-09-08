@@ -842,6 +842,72 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [inputOpen, paneOpen, isWorking, closeInput, handleBlur, dismissPane]);
 
+  // === DOCK-AWARE GROWTH DIRECTION ===
+  //
+  // When the bar is docked in the bottom half of its display, its chat pane
+  // (and the roster strip) open ABOVE the pill so they never run off the
+  // bottom; the window then grows upward while the pill stays put. In the top
+  // half it keeps the original downward growth. Recomputed whenever the pane or
+  // roster opens and after a snap settles, since the dock can change.
+  const [growUp, setGrowUp] = useState(false);
+
+  const recomputeGrowUp = useCallback(async () => {
+    try {
+      const win = getCurrentWindow();
+      const [pos, size, mons] = await Promise.all([
+        win.outerPosition(),
+        win.outerSize(),
+        availableMonitors(),
+      ]);
+      const centerX = pos.x + size.width / 2;
+      const centerY = pos.y + size.height / 2;
+      const mon =
+        mons.find(
+          (m) =>
+            centerX >= m.position.x &&
+            centerX < m.position.x + m.size.width &&
+            centerY >= m.position.y &&
+            centerY < m.position.y + m.size.height,
+        ) ?? mons[0];
+      if (!mon) return;
+      setGrowUp(centerY >= mon.position.y + mon.size.height / 2);
+    } catch (error) {
+      console.debug("FloatingBar: growUp recompute failed:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (paneOpen || showRosterStrip) void recomputeGrowUp();
+  }, [paneOpen, showRosterStrip, recomputeGrowUp]);
+
+  // On launch, reopen where the bar last settled (its snapped well), if that
+  // spot is still on some monitor. Runs once, independent of the first resize
+  // so it does not fight window sizing.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const saved = await invoke<{ x: number; y: number } | null>("get_bar_position");
+        if (cancelled || !saved) return;
+        const mons = await availableMonitors();
+        const onScreen = mons.some(
+          (m) =>
+            saved.x >= m.position.x &&
+            saved.x < m.position.x + m.size.width &&
+            saved.y >= m.position.y &&
+            saved.y < m.position.y + m.size.height,
+        );
+        if (!onScreen) return;
+        await getCurrentWindow().setPosition(new PhysicalPosition(saved.x, saved.y));
+      } catch (error) {
+        console.debug("FloatingBar: restore well failed:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // === WINDOW RESIZING ===
 
   const { resizeWindowIfChanged } = useWindowSize(windowLabel);
@@ -851,8 +917,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     const next = floatingBarWindowSize({ layout, paneOpen, rosterVisible: showRosterStrip });
     const prev = lastWindowRef.current;
     lastWindowRef.current = { width: next.width, height: next.height };
+    // growUp is only sent when set, so the downward path's resize config (and
+    // its tests) stay byte-for-byte identical.
+    const config = growUp ? { ...next, growUp: true } : next;
     const apply = () =>
-      resizeWindowIfChanged(next).catch((error) =>
+      resizeWindowIfChanged(config).catch((error) =>
         console.error("❌ FloatingBar: Failed to resize window:", error),
       );
     // Growing: make room first, then the pill animates into it. Shrinking:
@@ -864,7 +933,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
     const t = setTimeout(apply, SHRINK_DELAY_MS);
     return () => clearTimeout(t);
-  }, [layout, paneOpen, showRosterStrip, resizeWindowIfChanged]);
+  }, [layout, paneOpen, showRosterStrip, growUp, resizeWindowIfChanged]);
 
   // === DRAG ANYWHERE, SNAP INTO A WELL ===
   //
@@ -912,12 +981,20 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       if (!target) return;
       snapAnimatingRef.current = true;
       await animateWindowTo(win, { x: pos.x, y: pos.y }, { x: target.x, y: target.y });
+      // Remember where it landed so the bar reopens here next launch, and
+      // re-derive the growth direction since the dock may have changed.
+      try {
+        await invoke("set_bar_position", { x: target.x, y: target.y });
+      } catch (error) {
+        console.debug("FloatingBar: persist well failed:", error);
+      }
+      void recomputeGrowUp();
     } catch (error) {
       console.debug("FloatingBar: settle into well failed:", error);
     } finally {
       snapAnimatingRef.current = false;
     }
-  }, []);
+  }, [recomputeGrowUp]);
 
   const onRootMouseDown = useCallback((e: ReactMouseEvent) => {
     if (e.button !== 0) return;
@@ -974,6 +1051,37 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const pad = BAR_LAYOUTS[layout].pad;
   const band = BAR_LAYOUTS[layout].band;
 
+  // The pane and roster render either below the pill (default, growing down) or
+  // above it (docked in the bottom half, growing up); only the margin side and
+  // the render order flip, so build each once and place them by `growUp`.
+  const chatPaneNode = paneOpen ? (
+    <div className={cn("shrink-0", growUp ? "mb-2" : "mt-2")}>
+      <BarChatPane
+        messages={chat.messages}
+        isProcessing={isWorking}
+        height={FLOATING_BAR_DIMENSIONS.PANE_HEIGHT}
+        copyingMessageId={chat.copyingMessageId}
+        savingMessageId={chat.savingMessageId}
+        onCopyResponse={chat.handleCopyResponse}
+        onSaveResponse={chat.handleSaveResponse}
+        onApprovalUpdate={chat.handleApprovalUpdate}
+        onContinuationUpdate={chat.handleContinuationUpdate}
+        onDismiss={dismissPane}
+        onNewChat={startNewChat}
+      />
+    </div>
+  ) : null;
+
+  // Parallel-agent roster (LAC-2830 §3): appears when 2+ agents run. Clicking a
+  // dot focuses that agent; background sessions keep working.
+  const rosterNode = showRosterStrip ? (
+    <AgentRosterStrip
+      sessions={agentSessions}
+      onFocus={focusSession}
+      className={growUp ? "mb-1.5" : "mt-1.5"}
+    />
+  ) : null;
+
   return (
     <div
       className="relative flex h-screen w-screen cursor-grab select-none flex-col items-center overflow-hidden active:cursor-grabbing"
@@ -985,6 +1093,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {/* Docked in the bottom half: the pane and roster open ABOVE the pill so
+          the window grows upward and nothing runs off the bottom. The pill
+          stays anchored either way. */}
+      {growUp && chatPaneNode}
+      {growUp && rosterNode}
+
       {/* Fixed-height band the pill is centred in. compact and hover share
           the same band, so the pill's vertical centre never moves and the
           window's height/anchor stay put when the pill grows or shrinks — only
@@ -1115,29 +1229,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       </div>
       </div>
 
-      {/* Parallel-agent roster (LAC-2830 §3): appears when 2+ agents run.
-          Clicking a dot focuses that agent; background sessions keep working. */}
-      {showRosterStrip && (
-        <AgentRosterStrip sessions={agentSessions} onFocus={focusSession} className="mt-1.5" />
-      )}
-
-      {paneOpen && (
-        <div className="mt-2 shrink-0">
-          <BarChatPane
-            messages={chat.messages}
-            isProcessing={isWorking}
-            height={FLOATING_BAR_DIMENSIONS.PANE_HEIGHT}
-            copyingMessageId={chat.copyingMessageId}
-            savingMessageId={chat.savingMessageId}
-            onCopyResponse={chat.handleCopyResponse}
-            onSaveResponse={chat.handleSaveResponse}
-            onApprovalUpdate={chat.handleApprovalUpdate}
-            onContinuationUpdate={chat.handleContinuationUpdate}
-            onDismiss={dismissPane}
-            onNewChat={startNewChat}
-          />
-        </div>
-      )}
+      {/* Default (top-half) downward growth: roster then pane below the pill. */}
+      {!growUp && rosterNode}
+      {!growUp && chatPaneNode}
     </div>
   );
 }
