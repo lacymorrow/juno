@@ -438,7 +438,7 @@ fn current_binding(app_handle: &AppHandle) -> StopKeyBinding {
 }
 
 /// Is anything live that a stop-key press would need to stop?
-async fn something_to_stop(app_handle: &AppHandle) -> bool {
+pub(crate) async fn something_to_stop(app_handle: &AppHandle) -> bool {
     let Some(state) = app_handle.try_state::<crate::state::AppState>() else {
         return false;
     };
@@ -458,6 +458,28 @@ static ESCAPE_KEY_COORDINATOR: Lazy<EscapeKeyCoordinator> = Lazy::new(EscapeKeyC
 /// Get the global escape key coordinator
 pub fn get_escape_key_coordinator() -> &'static EscapeKeyCoordinator {
     &ESCAPE_KEY_COORDINATOR
+}
+
+/// Ledger user that keeps the passive Escape monitor armed while the floating
+/// bar's chat pane is open, so a global Escape can dismiss it while nothing is
+/// running (see `handle_stop_key_event`).
+pub const BAR_PANE_ESCAPE_USER: &str = "bar_pane";
+
+/// Arm or disarm the global Escape monitor for the chat pane. The frontend calls
+/// this as the pane opens and closes; the monitor stays passive and
+/// non-consuming, so Escape still reaches every other app.
+#[tauri::command]
+pub async fn set_bar_pane_open(app_handle: AppHandle, open: bool) -> Result<(), String> {
+    let coordinator = get_escape_key_coordinator();
+    if open {
+        coordinator
+            .register_escape_user(&app_handle, BAR_PANE_ESCAPE_USER)
+            .await
+    } else {
+        coordinator
+            .unregister_escape_user(&app_handle, BAR_PANE_ESCAPE_USER)
+            .await
+    }
 }
 
 /// Tauri command to register escape key user

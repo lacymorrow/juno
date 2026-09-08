@@ -155,6 +155,8 @@ export const EVENTS = {
   BAR_COMPLETE_TRANSITION: 'floating-bar-complete-transition',
   BAR_CLEAR_ERROR: 'floating-bar-clear-error',
   BAR_CONFIG_CHANGED: 'floating-bar-config-changed',
+  BAR_TOGGLE_PANE: 'bar-toggle-pane',
+  BAR_DISMISS_PANE: 'bar-dismiss-pane',
   TOOLS_USAGE: 'tool-usage',
   TOOLS_APPROVAL_REQUEST: 'tool-approval-request',
   TOOLS_COMMAND_EXECUTION_START: 'command-execution-start',

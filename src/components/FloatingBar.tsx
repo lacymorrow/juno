@@ -615,6 +615,43 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     setPaneDismissed(false);
   }, [chat.startNewChat]);
 
+  // Arm the global Escape monitor only while the pane is open, so Escape can
+  // dismiss the pane even when the bar is not focused (the backend emits
+  // BAR_DISMISS_PANE when nothing is running). The ledger is idempotent.
+  useEffect(() => {
+    void invoke("set_bar_pane_open", { open: paneOpen }).catch(() => {});
+  }, [paneOpen]);
+  useEffect(
+    () => () => {
+      void invoke("set_bar_pane_open", { open: false }).catch(() => {});
+    },
+    [],
+  );
+
+  // External open/close of the pane: the tray "Show/Hide Chat" toggles it (so a
+  // dismissed conversation can be reopened, showing the retained history), and a
+  // global Escape dismisses it.
+  useEffect(() => {
+    const unlisteners: Array<() => void> = [];
+    let active = true;
+    void (async () => {
+      const dismiss = await listen(EVENTS.BAR_DISMISS_PANE, () => dismissPane());
+      const toggle = await listen(EVENTS.BAR_TOGGLE_PANE, () =>
+        setPaneDismissed((d) => !d),
+      );
+      if (active) {
+        unlisteners.push(dismiss, toggle);
+      } else {
+        dismiss();
+        toggle();
+      }
+    })();
+    return () => {
+      active = false;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [dismissPane]);
+
   // === INTERACTIONS ===
 
   const createInteraction = useCallback(

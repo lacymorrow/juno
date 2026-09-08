@@ -295,6 +295,12 @@ pub mod bar {
     pub const COMPLETE_TRANSITION: &str = "floating-bar-complete-transition";
     pub const CLEAR_ERROR: &str = "floating-bar-clear-error";
     pub const CONFIG_CHANGED: &str = "floating-bar-config-changed";
+    /// Reopen the chat pane if a conversation is retained, or close it if it is
+    /// already open (tray "Show/Hide Chat"). Frontend flips its dismissed state.
+    pub const TOGGLE_PANE: &str = "bar-toggle-pane";
+    /// Close the chat pane. Emitted by the global Escape monitor when nothing is
+    /// running, so Escape dismisses the pane even when the bar is not focused.
+    pub const DISMISS_PANE: &str = "bar-dismiss-pane";
 }
 
 /// Tool and command execution events
