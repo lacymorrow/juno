@@ -288,13 +288,20 @@ pub async fn handle_window_menu_event(app: &AppHandle, event_id: &str) {
 /// opens normally (e.g. on non-macOS builds this is compiled out entirely).
 #[cfg(target_os = "macos")]
 fn apply_settings_vibrancy(app: &AppHandle) {
-    use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+    // `apply_vibrancy` touches AppKit and must run on the main thread; this is
+    // called from an async command (a worker thread), so hop over explicitly.
+    // Without this the call fails with "can only be used on the main thread"
+    // and the sidebar renders as bare alpha instead of a frosted blur.
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
-    if let Some(window) = app.get_webview_window(window_labels::SETTINGS) {
-        if let Err(e) = apply_vibrancy(&window, NSVisualEffectMaterial::Sidebar, None, None) {
-            warn!("Failed to apply settings window vibrancy: {}", e);
+        if let Some(window) = app.get_webview_window(window_labels::SETTINGS) {
+            if let Err(e) = apply_vibrancy(&window, NSVisualEffectMaterial::Sidebar, None, None) {
+                warn!("Failed to apply settings window vibrancy: {}", e);
+            }
         }
-    }
+    });
 }
 
 /// Open the native settings window
