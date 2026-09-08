@@ -277,11 +277,17 @@ pub async fn on_agent_input_released_with_mode(
         // Tap mode: no start yet on press; release should initiate agent transcription
         if matches!(trigger_mode, AgentTriggerMode::Tap) {
             info!("[AgentMonitor] Tap trigger: starting agent transcription on release");
+            // Mark the agent voice session open so the NEXT tap of this toggle
+            // is caught by the stop-guard (fire_trigger_edge) and finalizes the
+            // query, instead of starting a second session. Cleared when the
+            // session ends in handle_agent_transcription_stop / _cancel.
+            set_bar_voice_active(true);
             if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
                 error!(
                     "[AgentMonitor] Failed to emit agent-transcription-start: {}",
                     e
                 );
+                set_bar_voice_active(false);
             }
         }
         debug!(
