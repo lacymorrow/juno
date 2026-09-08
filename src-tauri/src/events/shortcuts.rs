@@ -343,7 +343,10 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
         // Immediate stop cue on the tap edge — before the async stop that waits
         // on speech-to-text finalization. Keeps tap-mode stop as responsive as
         // hold-mode release.
-        crate::commands::sound::play_cue(app, crate::commands::sound::SoundType::NotificationDecorative01);
+        crate::commands::sound::play_cue(
+            app,
+            crate::commands::sound::SoundType::NotificationDecorative01,
+        );
 
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -371,7 +374,10 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
 
         // Immediate start cue on the tap edge — before the async start that
         // initializes audio capture.
-        crate::commands::sound::play_cue(app, crate::commands::sound::SoundType::NotificationAmbient);
+        crate::commands::sound::play_cue(
+            app,
+            crate::commands::sound::SoundType::NotificationAmbient,
+        );
 
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
