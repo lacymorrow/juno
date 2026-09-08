@@ -29,7 +29,7 @@ import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI } from "@/lib/constants.generated";
-import { computeWells, nearestWell, easeOutCubic } from "@/lib/snapWells";
+import { computeWells, nearestWell, easeOutCubic, type Well } from "@/lib/snapWells";
 import { AgentRosterStrip } from "./AgentRosterStrip";
 import { BarChatPane } from "./bar/BarChatPane";
 import type { BarAppearance } from "@/components/bar/barAppearance";
@@ -880,27 +880,62 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     if (paneOpen || showRosterStrip) void recomputeGrowUp();
   }, [paneOpen, showRosterStrip, recomputeGrowUp]);
 
-  // On launch, reopen where the bar last settled (its snapped well), if that
-  // spot is still on some monitor. Runs once, independent of the first resize
-  // so it does not fight window sizing.
+  // On launch the bar always lands in a well, never at an arbitrary spot.
+  // A remembered position is re-snapped to the nearest current well (so it
+  // survives a resolution / monitor change); a fresh install with nothing saved
+  // defaults to the least-intrusive well: top-right on the monitor the bar
+  // opened on. Top-right clears the menu bar and the Dock, unlike the bottom
+  // wells which do not yet measure the Dock. Runs once, independent of the
+  // first resize so it does not fight window sizing.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
+        const win = getCurrentWindow();
         const saved = await invoke<{ x: number; y: number } | null>("get_bar_position");
-        if (cancelled || !saved) return;
-        const mons = await availableMonitors();
-        const onScreen = mons.some(
-          (m) =>
-            saved.x >= m.position.x &&
-            saved.x < m.position.x + m.size.width &&
-            saved.y >= m.position.y &&
-            saved.y < m.position.y + m.size.height,
+        const [size, pos, mons] = await Promise.all([
+          win.outerSize(),
+          win.outerPosition(),
+          availableMonitors(),
+        ]);
+        if (cancelled || !mons.length) return;
+
+        const wells = computeWells(
+          mons.map((m) => ({
+            position: { x: m.position.x, y: m.position.y },
+            size: { width: m.size.width, height: m.size.height },
+            scaleFactor: m.scaleFactor,
+          })),
+          { windowWidth: size.width, windowHeight: size.height, includeCenter: true },
         );
-        if (!onScreen) return;
-        await getCurrentWindow().setPosition(new PhysicalPosition(saved.x, saved.y));
+        if (!wells.length) return;
+
+        let target: Well | null = saved ? nearestWell(saved, wells) : null;
+        if (!target) {
+          // The monitor the window currently sits on (fall back to the first).
+          const monIndex = mons.findIndex(
+            (m) =>
+              pos.x >= m.position.x &&
+              pos.x < m.position.x + m.size.width &&
+              pos.y >= m.position.y &&
+              pos.y < m.position.y + m.size.height,
+          );
+          const mon = monIndex >= 0 ? monIndex : 0;
+          target =
+            wells.find((w) => w.monitorIndex === mon && w.col === "right" && w.row === "top") ??
+            wells.find((w) => w.col === "right" && w.row === "top") ??
+            wells[0];
+        }
+        if (cancelled || !target) return;
+
+        await win.setPosition(new PhysicalPosition(target.x, target.y));
+        try {
+          await invoke("set_bar_position", { x: target.x, y: target.y });
+        } catch {
+          // best effort; a failed persist just means we re-default next launch
+        }
       } catch (error) {
-        console.debug("FloatingBar: restore well failed:", error);
+        console.debug("FloatingBar: default/restore well failed:", error);
       }
     })();
     return () => {
@@ -984,7 +1019,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           size: { width: m.size.width, height: m.size.height },
           scaleFactor: m.scaleFactor,
         })),
-        { windowWidth: size.width, windowHeight: size.height },
+        { windowWidth: size.width, windowHeight: size.height, includeCenter: true },
       );
       const target = nearestWell({ x: pos.x, y: pos.y }, wells);
       if (!target) return;
