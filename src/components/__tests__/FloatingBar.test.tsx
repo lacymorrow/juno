@@ -48,6 +48,13 @@ const windowFocus = vi.hoisted(() => ({
 }));
 const windowSetFocus = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const startDragging = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const windowSetPosition = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+// The window's reported outer top-left; a test can move it to a drop point.
+const outerPos = vi.hoisted(() => ({ x: 100, y: 100 }));
+// One 1000×800 monitor at the origin by default; a test can swap this out.
+const monitors = vi.hoisted(() => ({
+  value: [{ position: { x: 0, y: 0 }, size: { width: 1000, height: 800 }, scaleFactor: 1 }],
+}));
 // Where the OS says the cursor is; the window sits at 100,100 sized 164x66.
 const cursor = vi.hoisted(() => ({ x: 0, y: 0 }));
 vi.mock("@tauri-apps/api/window", () => ({
@@ -59,9 +66,19 @@ vi.mock("@tauri-apps/api/window", () => ({
     }),
     setFocus: windowSetFocus,
     startDragging,
-    outerPosition: async () => ({ x: 100, y: 100 }),
+    setPosition: windowSetPosition,
+    outerPosition: async () => ({ ...outerPos }),
     outerSize: async () => ({ width: 164, height: 66 }),
   }),
+  availableMonitors: async () => monitors.value,
+  PhysicalPosition: class {
+    x: number;
+    y: number;
+    constructor(x: number, y: number) {
+      this.x = x;
+      this.y = y;
+    }
+  },
   cursorPosition: async () => ({ x: cursor.x, y: cursor.y }),
 }));
 
@@ -192,6 +209,12 @@ beforeEach(() => {
   windowSetFocus.mockClear();
   webviewSetFocus.mockClear();
   startDragging.mockClear();
+  windowSetPosition.mockClear();
+  outerPos.x = 100;
+  outerPos.y = 100;
+  monitors.value = [
+    { position: { x: 0, y: 0 }, size: { width: 1000, height: 800 }, scaleFactor: 1 },
+  ];
   listenHandlers.clear();
   eventHandlers.clear();
 });
@@ -497,6 +520,51 @@ describe("FloatingBar", () => {
     fireEvent.click(mic);
     await act(async () => {});
     expect(invoke).not.toHaveBeenCalledWith("agent_voice", expect.anything());
+  });
+
+  it("settles into the nearest well after a drag, gliding to it", async () => {
+    await renderBar();
+    await hover(true);
+    const mic = screen.getByRole("button", { name: "Talk to Juno" });
+
+    // Drag hands off to the OS window drag.
+    fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(mic, { clientX: 30, clientY: 20 });
+    expect(startDragging).toHaveBeenCalledTimes(1);
+
+    // The OS drops the window near the bottom-right; release settles it.
+    outerPos.x = 850;
+    outerPos.y = 700;
+    fireEvent.mouseUp(window);
+
+    // Let the async settle + the rAF glide run to completion.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 500));
+    });
+
+    expect(windowSetPosition).toHaveBeenCalled();
+    const last = (windowSetPosition.mock.calls.at(-1) as unknown[])[0] as {
+      x: number;
+      y: number;
+    };
+    // Nearest well to (850,700) on a 1000×800 monitor, window 164×66:
+    // right column x = 1000 − 16 − 164 = 820 ; bottom row y = 800 − 16 − 66 = 718.
+    expect(last).toMatchObject({ x: 820, y: 718 });
+  });
+
+  it("does not settle when the press was a click, not a drag", async () => {
+    await renderBar();
+    await hover(true);
+    const mic = screen.getByRole("button", { name: "Talk to Juno" });
+
+    fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseUp(window);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(startDragging).not.toHaveBeenCalled();
+    expect(windowSetPosition).not.toHaveBeenCalled();
   });
 
   it("treats a press and release without movement as the click it is", async () => {

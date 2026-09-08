@@ -15,7 +15,12 @@
 import { useEffect, useState, useCallback, useRef, FormEvent, MouseEvent as ReactMouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  availableMonitors,
+  cursorPosition,
+  getCurrentWindow,
+  PhysicalPosition,
+} from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Mic, Square, Type } from "lucide-react";
 
@@ -24,6 +29,7 @@ import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI } from "@/lib/constants.generated";
+import { computeWells, nearestWell, easeOutCubic } from "@/lib/snapWells";
 import { AgentRosterStrip } from "./AgentRosterStrip";
 import { BarChatPane } from "./bar/BarChatPane";
 import type { BarAppearance } from "@/components/bar/barAppearance";
@@ -150,6 +156,45 @@ export function floatingBarWindowSize({
       (paneOpen ? d.PANE_GAP + d.PANE_HEIGHT : 0),
     anchorY: l.pad + l.band / 2,
   };
+}
+
+/** Settle animation: min/max duration, and the travel below which it's skipped. */
+export const SNAP_MIN_MS = 160;
+export const SNAP_MAX_MS = 340;
+export const SNAP_MIN_TRAVEL_PX = 2;
+
+/**
+ * Animate a window's top-left from `from` to `to` (physical px) with an
+ * ease-out, so a released bar glides into its well instead of teleporting.
+ */
+async function animateWindowTo(
+  win: ReturnType<typeof getCurrentWindow>,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) + Math.abs(dy) < SNAP_MIN_TRAVEL_PX) return;
+  const duration = Math.min(
+    SNAP_MAX_MS,
+    Math.max(SNAP_MIN_MS, Math.hypot(dx, dy) * 0.35),
+  );
+  const start = performance.now();
+  await new Promise<void>((resolve) => {
+    const step = () => {
+      const t = Math.min(1, (performance.now() - start) / duration);
+      const e = easeOutCubic(t);
+      void win.setPosition(
+        new PhysicalPosition(
+          Math.round(from.x + dx * e),
+          Math.round(from.y + dy * e),
+        ),
+      );
+      if (t < 1) requestAnimationFrame(step);
+      else resolve();
+    };
+    requestAnimationFrame(step);
+  });
 }
 
 /** Component name for backend interactions — MUST match backend element ids */
@@ -821,15 +866,58 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     return () => clearTimeout(t);
   }, [layout, paneOpen, showRosterStrip, resizeWindowIfChanged]);
 
-  // === DRAG ANYWHERE, CLICK WHERE YOU CLICKED ===
+  // === DRAG ANYWHERE, SNAP INTO A WELL ===
   //
   // A mousedown anywhere except the text input and the chat body arms a
   // drag; moving past the threshold hands the gesture to the OS window drag
   // and swallows the click that would otherwise fire on release. A press
   // and release without movement is an ordinary click on the button.
+  //
+  // The bar drags anywhere, but on release it glides into the nearest well —
+  // the tidy anchor points around every display (corners + edge-midpoints).
+  // The user aims roughly; the wells make it land deliberately.
 
   const dragArmRef = useRef<{ x: number; y: number } | null>(null);
   const draggedRef = useRef(false);
+  // Set the moment a drag hands off to the OS; consumed once on release to
+  // settle the bar into the nearest well.
+  const snapArmedRef = useRef(false);
+  const snapAnimatingRef = useRef(false);
+
+  /**
+   * On release after a drag, glide the bar into the nearest well — the tidy
+   * anchor points around every display (corners and edge-midpoints). The bar
+   * still drags anywhere; the wells only decide where it lands.
+   */
+  const settleIntoWell = useCallback(async () => {
+    if (!snapArmedRef.current || snapAnimatingRef.current) return;
+    snapArmedRef.current = false;
+    try {
+      const win = getCurrentWindow();
+      const [pos, size, monitors] = await Promise.all([
+        win.outerPosition(),
+        win.outerSize(),
+        availableMonitors(),
+      ]);
+      if (!monitors.length) return;
+      const wells = computeWells(
+        monitors.map((m) => ({
+          position: { x: m.position.x, y: m.position.y },
+          size: { width: m.size.width, height: m.size.height },
+          scaleFactor: m.scaleFactor,
+        })),
+        { windowWidth: size.width, windowHeight: size.height },
+      );
+      const target = nearestWell({ x: pos.x, y: pos.y }, wells);
+      if (!target) return;
+      snapAnimatingRef.current = true;
+      await animateWindowTo(win, { x: pos.x, y: pos.y }, { x: target.x, y: target.y });
+    } catch (error) {
+      console.debug("FloatingBar: settle into well failed:", error);
+    } finally {
+      snapAnimatingRef.current = false;
+    }
+  }, []);
 
   const onRootMouseDown = useCallback((e: ReactMouseEvent) => {
     if (e.button !== 0) return;
@@ -849,6 +937,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       return;
     dragArmRef.current = null;
     draggedRef.current = true;
+    snapArmedRef.current = true;
     e.preventDefault();
     getCurrentWindow()
       .startDragging()
@@ -859,12 +948,25 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     dragArmRef.current = null;
   }, []);
 
-  const onRootClickCapture = useCallback((e: ReactMouseEvent) => {
-    if (!draggedRef.current) return;
-    draggedRef.current = false;
-    e.stopPropagation();
-    e.preventDefault();
-  }, []);
+  const onRootClickCapture = useCallback(
+    (e: ReactMouseEvent) => {
+      if (!draggedRef.current) return;
+      draggedRef.current = false;
+      e.stopPropagation();
+      e.preventDefault();
+      void settleIntoWell();
+    },
+    [settleIntoWell],
+  );
+
+  // A drag that ends off the pill (fast flick, release outside) never fires a
+  // click, so a window-level mouseup is the reliable settle trigger; whichever
+  // path fires first disarms the other.
+  useEffect(() => {
+    const onUp = () => void settleIntoWell();
+    window.addEventListener("mouseup", onUp, true);
+    return () => window.removeEventListener("mouseup", onUp, true);
+  }, [settleIntoWell]);
 
   // === RENDER ===
 
