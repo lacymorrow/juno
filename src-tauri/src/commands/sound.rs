@@ -254,27 +254,25 @@ pub async fn play_sound_file(
 
     info!("Playing sound from: {:?}", sound_path);
 
-    // Play the audio file
-    match play_audio_file(&sound_path) {
-        Ok(_) => {
-            let success_msg = format!("Successfully played sound: {}", result_path);
-            info!("{}", success_msg);
-            Ok(SoundPlayResult {
-                success: true,
-                message: success_msg,
-                file_path: Some(result_path),
-            })
+    // Play the audio file WITHOUT blocking. A UI cue (recording start/stop,
+    // etc.) must fire immediately and must never hold the async runtime — or
+    // the caller — for the clip's duration. `afplay` is a blocking subprocess
+    // (`.output()` waits for the whole clip), so run it on a blocking thread
+    // and don't await it: the cue is fire-and-forget. Blocking here was what
+    // made start/stop cues feel mistimed and the app unresponsive on stop.
+    let playback_path = sound_path.clone();
+    let log_path = result_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(e) = play_audio_file(&playback_path) {
+            error!("Failed to play sound {}: {}", log_path, e);
         }
-        Err(e) => {
-            let error_msg = format!("Failed to play sound {}: {}", result_path, e);
-            error!("{}", error_msg);
-            Ok(SoundPlayResult {
-                success: false,
-                message: error_msg,
-                file_path: Some(result_path),
-            })
-        }
-    }
+    });
+
+    Ok(SoundPlayResult {
+        success: true,
+        message: format!("Playing sound: {}", result_path),
+        file_path: Some(result_path),
+    })
 }
 
 /// Play a simple notification sound (convenience function)
