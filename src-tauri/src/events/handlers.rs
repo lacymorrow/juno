@@ -355,11 +355,10 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, _pa
         }
     }
 
-    // Play voice end sound automatically when dictation stops
-    let state = app_handle.state::<crate::state::AppState>();
-    if let Err(e) = crate::commands::sound::play_voice_end_sound(app_handle.clone(), state).await {
-        warn!("Failed to play voice end sound: {}", e);
-    }
+    // NOTE: the stop cue is played on the key-up edge
+    // (dictation_monitor::on_dictation_input_released / the tap handler), not
+    // here — this handler only runs after speech-to-text finalization, which is
+    // exactly the multi-second delay that made stopping feel unresponsive.
 
     // Resume always listening mode if it was active before dictation
     let app_state = app_handle.state::<crate::state::AppState>();
@@ -463,16 +462,10 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
                     }
                 }
 
-                // Play voice start sound
-                let app_state_for_sound = app_handle.state::<state::AppState>();
-                if let Err(e) = crate::commands::sound::play_voice_start_sound(
-                    app_handle.clone(),
-                    app_state_for_sound,
-                )
-                .await
-                {
-                    warn!("Failed to play voice start sound: {}", e);
-                }
+                // NOTE: the start cue is played on the key-down edge
+                // (dictation_monitor::on_dictation_input_pressed / the tap
+                // handler), not here — this handler only runs after audio
+                // capture has initialized, which is too late to feel instant.
             }
             Err(e) => {
                 error!("[Dictation Mode] Failed to start dictation: {}", e);
@@ -594,16 +587,12 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
 async fn handle_dictation_stop(app_handle: AppHandle) {
     info!("[Event] Stopping dictation normally");
 
-    // Stop dictation using the voice transcription plugin command
-    if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-        let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
-            app_handle.clone(),
-            controller_state,
-        )
-        .await;
-    }
-
-    // Reset state
+    // Reset visible state FIRST, before the speech-to-text finalization below.
+    // `stop_dictation()` blocks for however long the final transcription takes
+    // (often a second or more); doing the state reset and bar update after it
+    // left the bar visually stuck in dictation mode the whole time. Flip the
+    // bar out of dictation mode now so the UI reacts to the key-up immediately,
+    // then finalize the transcription.
     let app_state = app_handle.state::<state::AppState>();
     if let Err(e) = app_state.set_dictation_active(false) {
         warn!("Failed to reset dictation active state: {}", e);
@@ -619,7 +608,19 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
         );
     }
 
-    // Resume always listening mode if it was active before dictation
+    // Now finalize transcription (this is the slow part — it produces the text)
+    if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+        let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+            app_handle.clone(),
+            controller_state,
+        )
+        .await;
+    }
+
+    // Resume always listening mode if it was active before dictation.
+    // Re-fetch state here rather than holding the earlier `State` handle across
+    // the awaits above.
+    let app_state = app_handle.state::<state::AppState>();
     let should_resume_always_listening = app_state
         .audio_settings
         .lock()
