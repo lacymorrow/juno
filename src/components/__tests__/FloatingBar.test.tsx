@@ -33,6 +33,8 @@ vi.mock("@tauri-apps/api/event", () => ({
     listenHandlers.set(event, handler);
     return () => listenHandlers.delete(event);
   }),
+  // The bar broadcasts snap-wells-show/hide to drive the drop indicator overlay.
+  emit: vi.fn(async () => {}),
 }));
 
 vi.mock("@/hooks/useEventListener", () => ({

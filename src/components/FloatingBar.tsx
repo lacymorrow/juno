@@ -14,7 +14,7 @@
 
 import { useEffect, useState, useCallback, useRef, FormEvent, MouseEvent as ReactMouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import {
   availableMonitors,
   cursorPosition,
@@ -883,6 +883,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // settle the bar into the nearest well.
   const snapArmedRef = useRef(false);
   const snapAnimatingRef = useRef(false);
+  // Whether the snap-well drop indicator overlay is currently shown, so we
+  // hide it exactly once on release regardless of which settle path fires.
+  const snapOverlayShownRef = useRef(false);
 
   /**
    * On release after a drag, glide the bar into the nearest well — the tidy
@@ -890,6 +893,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
    * still drags anywhere; the wells only decide where it lands.
    */
   const settleIntoWell = useCallback(async () => {
+    // Hide the drop indicator overlay on any release path, even if the settle
+    // below no-ops (drag not armed, or already consumed by another path).
+    if (snapOverlayShownRef.current) {
+      snapOverlayShownRef.current = false;
+      void emit("snap-wells-hide");
+    }
     if (!snapArmedRef.current || snapAnimatingRef.current) return;
     snapArmedRef.current = false;
     try {
@@ -939,7 +948,23 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     draggedRef.current = true;
     snapArmedRef.current = true;
     e.preventDefault();
-    getCurrentWindow()
+    const win = getCurrentWindow();
+    // Show the snap-well drop indicator overlay for the length of the drag.
+    if (!snapOverlayShownRef.current) {
+      snapOverlayShownRef.current = true;
+      win
+        .outerSize()
+        .then((size) =>
+          emit("snap-wells-show", {
+            windowWidth: size.width,
+            windowHeight: size.height,
+          }),
+        )
+        .catch((error) =>
+          console.debug("FloatingBar: snap-wells-show failed:", error),
+        );
+    }
+    win
       .startDragging()
       .catch((error) => console.debug("FloatingBar: startDragging failed:", error));
   }, []);
