@@ -22,7 +22,7 @@ use {
     cocoa::{
         appkit::{NSWindow, NSWindowCollectionBehavior},
         base::{id as cocoa_id, nil, BOOL, NO, YES},
-        foundation::NSRect,
+        foundation::{NSPoint, NSRect, NSSize},
     },
     objc::{
         class,
@@ -118,6 +118,59 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
 }
 
 /// Setup macOS-specific styling and behavior for the floating panel window
+/// Atomically move + resize the floating bar in a single `NSWindow setFrame:`.
+///
+/// Tauri exposes `set_position` and `set_size` separately; issuing both for a
+/// compact<->hover transition let the WindowServer composite them in different
+/// frames, so for one frame the window showed its new width still anchored at
+/// the old top-left and the centered pill/dot jumped ~half the width delta
+/// before snapping back. One `setFrame:display:animate:NO` changes origin and
+/// size in a single transaction, so no intermediate frame can exist.
+///
+/// The Cocoa frame is derived as a delta from the window's *current* frame
+/// rather than by an absolute top-left->bottom-left flip. That cancels the
+/// primary-screen height and any multi-monitor origin, and is exact as long as
+/// the window stays on one display (constant scale factor) across the resize,
+/// which a same-spot compact<->hover transition always does.
+///
+/// `x_phys`/`y_phys` are the target top-left in Tauri physical pixels;
+/// `w_pt`/`h_pt` are the target size in logical points.
+#[cfg(target_os = "macos")]
+pub fn set_bar_frame_atomic(
+    app_handle: &AppHandle,
+    x_phys: f64,
+    y_phys: f64,
+    w_pt: f64,
+    h_pt: f64,
+) -> Result<(), String> {
+    let label = constants::ui::window_labels::FLOATING_BAR;
+    let window = app_handle
+        .get_webview_window(label)
+        .ok_or("floating-bar window not found")?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let cur = window.outer_position().map_err(|e| e.to_string())?;
+    let ns_window = window.ns_window().map_err(|e| e.to_string())? as cocoa_id;
+
+    // SAFETY: `frame`/`setFrame:` are standard NSWindow selectors; ns_window is
+    // a live window handle from Tauri. Called on whatever thread invokes the
+    // command; NSWindow's frame setters are main-thread-only, so callers route
+    // this through a command that Tauri dispatches on the main thread.
+    unsafe {
+        let frame: NSRect = msg_send![ns_window, frame];
+        let dx_pt = (x_phys - cur.x as f64) / scale;
+        let dy_top_pt = (y_phys - cur.y as f64) / scale; // + = window moved down
+        let cur_top_y = frame.origin.y + frame.size.height; // Cocoa top edge (y-up)
+        let new_origin_x = frame.origin.x + dx_pt;
+        let new_origin_y = cur_top_y - dy_top_pt - h_pt; // keep top-left fixed
+        let new_frame = NSRect::new(
+            NSPoint::new(new_origin_x, new_origin_y),
+            NSSize::new(w_pt, h_pt),
+        );
+        let _: () = msg_send![ns_window, setFrame: new_frame display: YES animate: NO];
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn setup_floating_panel_window(app_handle: &AppHandle) {
     if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_PANEL) {

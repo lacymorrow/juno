@@ -51,3 +51,46 @@ pub async fn set_bar_position(app_handle: AppHandle, x: i32, y: i32) -> Result<(
 
     Ok(())
 }
+
+/// Move + resize the floating bar atomically so a compact<->hover transition
+/// cannot show an intermediate frame (which made the centered dot jump). On
+/// macOS this is a single `NSWindow setFrame:`, dispatched to the main thread;
+/// elsewhere it falls back to separate position/size calls. `x`/`y` are the
+/// target top-left in physical pixels; `width`/`height` are logical points.
+#[command]
+pub async fn set_bar_frame(
+    app_handle: AppHandle,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let app = app_handle.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        app_handle
+            .run_on_main_thread(move || {
+                let _ = tx.send(crate::platform::macos::set_bar_frame_atomic(
+                    &app, x, y, width, height,
+                ));
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv()
+            .map_err(|e| format!("set_bar_frame main-thread call dropped: {}", e))?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri::{LogicalSize, Manager, PhysicalPosition};
+        let window = app_handle
+            .get_webview_window(crate::constants::ui::window_labels::FLOATING_BAR)
+            .ok_or("floating-bar window not found")?;
+        window
+            .set_position(PhysicalPosition::new(x, y))
+            .map_err(|e| e.to_string())?;
+        window
+            .set_size(LogicalSize::new(width, height))
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
