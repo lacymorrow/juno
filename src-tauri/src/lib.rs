@@ -30,6 +30,7 @@ pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
 pub mod constants;
+pub mod conversation_history; // Persist/list/load past conversations across restart
 pub mod cursor_scale;
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
@@ -602,6 +603,11 @@ pub fn run() {
             validate_keyboard_shortcut,
             get_shortcut_suggestions,
             get_shortcut_best_practices,
+            commands::conversations::list_conversations,
+            commands::conversations::get_current_conversation_id,
+            commands::conversations::load_conversation,
+            commands::conversations::new_conversation,
+            commands::conversations::delete_conversation,
             commands::escape_key_coordinator::set_bar_pane_open,
             commands::escape_key_coordinator::get_escape_key_coordinator_status,
             commands::escape_key_coordinator::force_unregister_escape_key,
@@ -1001,6 +1007,22 @@ pub fn run() {
 
             // Start the scheduled automations service (user-facing cron schedules)
             scheduler::start_scheduler(app.handle().clone());
+
+            // Wire conversation-history persistence: tee every added message to a
+            // background task that saves the current conversation to disk. The
+            // sink is set on the shared memory manager, so every per-query clone
+            // of it forwards messages too. Startup keeps a fresh (empty) chat.
+            {
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                let history_app = app.handle().clone();
+                let state = app.state::<state::AppState>();
+                let memory_manager = state.memory_manager.clone();
+                let current_conversation_id = state.current_conversation_id.clone();
+                conversation_history::spawn_persist_task(history_app, current_conversation_id, rx);
+                tauri::async_runtime::spawn(async move {
+                    memory_manager.lock().await.set_persist_sink(tx);
+                });
+            }
 
             // --- Setup All Event Listeners ---
             // Setup basic event listeners using the events module

@@ -159,6 +159,9 @@ pub struct AdvancedMemoryManager {
     visual_summaries: Arc<RwLock<Vec<VisualContextSummary>>>,
     summary_cache: Arc<RwLock<std::collections::HashMap<String, String>>>,
     current_execution_id: Arc<RwLock<Option<String>>>,
+    /// Optional tee of every added message to the history persister, set once at
+    /// startup and shared by every clone (the runner clones this manager).
+    persist_sink: Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Message>>>>,
 }
 
 impl AdvancedMemoryManager {
@@ -173,6 +176,7 @@ impl AdvancedMemoryManager {
             visual_summaries: Arc::new(RwLock::new(Vec::new())),
             summary_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
             current_execution_id: Arc::new(RwLock::new(None)),
+            persist_sink: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -187,7 +191,26 @@ impl AdvancedMemoryManager {
             visual_summaries: Arc::new(RwLock::new(Vec::new())),
             summary_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
             current_execution_id: Arc::new(RwLock::new(None)),
+            persist_sink: Arc::new(std::sync::Mutex::new(None)),
         }
+    }
+
+    /// Tee added messages to the history persister. Idempotent; last wins.
+    pub fn set_persist_sink(&self, tx: tokio::sync::mpsc::UnboundedSender<Message>) {
+        if let Ok(mut guard) = self.persist_sink.lock() {
+            *guard = Some(tx);
+        }
+    }
+
+    /// Replace the live conversation wholesale (used when a past conversation is
+    /// reloaded). Does not tee to the persister and does not prune, so a reload
+    /// neither re-saves the file nor drops loaded turns.
+    pub async fn replace_messages(&self, new_messages: Vec<Message>) {
+        {
+            let mut messages = self.messages.write().await;
+            *messages = new_messages;
+        }
+        self.pending_tool_calls.write().await.clear();
     }
 
     pub fn with_visual_config(mut self, visual_config: VisualContextConfig) -> Self {
@@ -1528,6 +1551,18 @@ impl MemoryManager for AdvancedMemoryManager {
         drop(pending);
 
         log::debug!("Memory: Added message. Role={:?}", message.role);
+
+        // Tee the message to the history persister BEFORE the prune below, so the
+        // saved conversation keeps its full history even when the live context is
+        // capped. The lock is never held across the send.
+        let sink = self
+            .persist_sink
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone());
+        if let Some(tx) = sink {
+            let _ = tx.send(message.clone());
+        }
 
         // RE-ENABLED: Auto-pruning and metrics with safer implementation
         self.prune_memory_if_needed().await?;

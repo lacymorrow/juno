@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { isDevelopment } from "@/lib";
 import {
   ArrowLeft,
+  History,
   MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,7 +18,7 @@ import {
 } from "lucide-react";
 
 // Type for view state
-export type AppView = "chat" | "devtools" | "permissions";
+export type AppView = "chat" | "devtools" | "permissions" | "history";
 
 interface AppHeaderProps {
   serverStatus: "connected" | "connecting" | "error";
@@ -82,21 +83,36 @@ export function AppHeader({
       </div>
 
       <div className="flex items-center gap-1 flex-shrink-0">
-        {/* New Chat Button - only show in chat view */}
-        {currentView === "chat" && onNewChat && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onNewChat}
-            title="New Chat"
-            className="h-7 w-7 p-0"
-            disabled={isProcessing}
-          >
-            <MessageSquarePlus size={14} />
-          </Button>
+        {/* New Chat + History - only show in chat view */}
+        {currentView === "chat" && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onViewChange("history")}
+              title="Chat history"
+              className="h-7 w-7 p-0"
+            >
+              <History size={14} />
+            </Button>
+            {onNewChat && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onNewChat}
+                title="New Chat"
+                className="h-7 w-7 p-0"
+                disabled={isProcessing}
+              >
+                <MessageSquarePlus size={14} />
+              </Button>
+            )}
+          </>
         )}
-        {/* Back Button - show for devtools, permissions views */}
-        {(currentView === "devtools" || currentView === "permissions") && (
+        {/* Back Button - show for devtools, permissions, history views */}
+        {(currentView === "devtools" ||
+          currentView === "permissions" ||
+          currentView === "history") && (
           <Button
             variant="ghost"
             size="sm"

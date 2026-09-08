@@ -25,6 +25,7 @@ pub mod cloud;
 pub mod cloud_test;
 pub mod collaborative_ai_commands;
 pub mod config_file;
+pub mod conversations; // Conversation history: list/load/delete/new past chats
 pub mod debug_tools;
 pub mod dictation_state_manager;
 pub mod element;
