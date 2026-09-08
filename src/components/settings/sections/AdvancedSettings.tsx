@@ -77,6 +77,7 @@ export default function AdvancedSettings({
 
       <SettingsGroup title="Reset Settings">
         <SettingsRow
+          id="reset-all-settings"
           label="Reset all settings"
           description="Reset all settings to their default values"
           below={

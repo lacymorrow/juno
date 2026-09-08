@@ -428,6 +428,7 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         }
       >
         <SettingsRow
+          id="restart-onboarding"
           label="Restart onboarding"
           description={
             onboardingInfo?.is_development_mode

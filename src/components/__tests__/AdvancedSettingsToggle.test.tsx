@@ -2,10 +2,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 
+// Rendering the full settings window in jsdom is slow (Radix + many sections),
+// and several tests re-render it end to end. Give the file more headroom than
+// the 5s default so a loaded CI worker doesn't flake on the heavier cases.
+vi.setConfig({ testTimeout: 20000 });
+
 import ModularSettingsWindow, {
   settingsCategories,
+  settingsRowIndex,
   visibleCategories,
   searchCategories,
+  searchRows,
 } from "../settings/ModularSettingsWindow";
 import {
   AdvancedOnly,
@@ -166,6 +173,37 @@ describe("searchCategories", () => {
 
   it("is case-insensitive", () => {
     expect(searchCategories(all, "KEYBOARD").map((c) => c.id)).toEqual(["shortcuts"]);
+  });
+});
+
+describe("searchRows", () => {
+  it("returns nothing for an empty or whitespace query", () => {
+    expect(searchRows("")).toEqual([]);
+    expect(searchRows("   ")).toEqual([]);
+  });
+
+  it("matches a row on its label or keywords and reports its section", () => {
+    const hits = searchRows("temperature");
+    expect(hits.map((r) => r.rowId)).toContain("temperature");
+    expect(hits.every((r) => r.sectionId === "ai")).toBe(true);
+  });
+
+  it("requires every term to match (AND)", () => {
+    expect(searchRows("reset factory").map((r) => r.rowId)).toEqual([
+      "reset-all-settings",
+    ]);
+    expect(searchRows("reset zzzz")).toEqual([]);
+  });
+
+  it("is case-insensitive", () => {
+    expect(searchRows("WHISPER").map((r) => r.rowId)).toContain("whisper-model");
+  });
+
+  it("indexes every row against a real section id", () => {
+    const sectionIds = new Set(settingsCategories.map((c) => c.id));
+    for (const row of settingsRowIndex) {
+      expect(sectionIds.has(row.sectionId)).toBe(true);
+    }
   });
 });
 
@@ -404,5 +442,38 @@ describe("ModularSettingsWindow search", () => {
     await waitFor(() =>
       expect(screen.getByText("No settings found")).toBeInTheDocument()
     );
+  });
+
+  it("deep-links a row keyword to its section and keeps that section listed", async () => {
+    mockBackend(true);
+    render(<ModularSettingsWindow />);
+    await waitFor(() => expect(sidebarButton("General")).toBeInTheDocument());
+
+    // "temperature" only lives in a row index entry for the AI Provider section,
+    // so a plain section search would miss it — deep-linking must select AI.
+    fireEvent.change(screen.getByLabelText("Search settings"), {
+      target: { value: "temperature" },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("section-ai")).toBeInTheDocument()
+    );
+    expect(sidebarButton("AI Provider")).toBeInTheDocument();
+    expect(sidebarButton("General")).not.toBeInTheDocument();
+  });
+
+  it("deep-links a row in an advanced section", async () => {
+    mockBackend(true);
+    render(<ModularSettingsWindow />);
+    await waitFor(() => expect(sidebarButton("Advanced")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Search settings"), {
+      target: { value: "reset factory" },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("section-advanced")).toBeInTheDocument()
+    );
+    expect(sidebarButton("Advanced")).toBeInTheDocument();
   });
 });
