@@ -47,11 +47,13 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
       : 0;
   if (next.anchorY !== undefined) lastAnchorByLabel.set(appWindow.label, next.anchorY);
 
-  const newY = await clampedTop(pos.y + anchorShift, physNextH);
+  const clamped = await clampToMonitor(newX, pos.y + anchorShift, physNextW, physNextH);
+  const clampedX = clamped.x;
+  const newY = clamped.y;
 
-  if (newX !== pos.x || newY !== pos.y) {
+  if (clampedX !== pos.x || newY !== pos.y) {
     await Promise.all([
-      appWindow.setPosition(new PhysicalPosition(newX, newY)),
+      appWindow.setPosition(new PhysicalPosition(clampedX, newY)),
       appWindow.setSize(new LogicalSize(next.width, next.height)),
     ]);
   } else {
@@ -60,21 +62,32 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
 }
 
 /**
- * A window that grows downward (the bar opening its chat pane) must not run
- * off the bottom of the screen. Returns the top edge to use: unchanged when
- * the new height fits, otherwise moved up just enough to fit, never above the
- * monitor's top. Falls back to the current position when monitor info is
- * unavailable (tests, headless).
+ * Keep a resized window on its current monitor. A window growing downward (the
+ * bar opening its chat pane) must not run off the bottom; an edge-docked bar
+ * whose pane widens must not run off the left or right. Each axis is left
+ * untouched when it already fits, otherwise nudged just enough to fit, never
+ * past the monitor's opposite edge. Falls back to the input position when
+ * monitor info is unavailable (tests, headless).
  */
-async function clampedTop(currentY: number, physNextH: number): Promise<number> {
+async function clampToMonitor(
+  x: number,
+  y: number,
+  physW: number,
+  physH: number,
+): Promise<{ x: number; y: number }> {
   try {
     const monitor = await currentMonitor();
-    if (!monitor) return currentY;
-    const bottom = monitor.position.y + monitor.size.height;
-    if (currentY + physNextH <= bottom) return currentY;
-    return Math.max(monitor.position.y, bottom - physNextH);
+    if (!monitor) return { x, y };
+    const { position, size } = monitor;
+    const right = position.x + size.width;
+    const bottom = position.y + size.height;
+    const clampedX =
+      x + physW <= right ? Math.max(position.x, x) : Math.max(position.x, right - physW);
+    const clampedY =
+      y + physH <= bottom ? Math.max(position.y, y) : Math.max(position.y, bottom - physH);
+    return { x: clampedX, y: clampedY };
   } catch {
-    return currentY;
+    return { x, y };
   }
 }
 
