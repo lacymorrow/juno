@@ -1,11 +1,22 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex as StdMutex;
 use tauri::{AppHandle, Manager};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 // Add base64 import for TTS audio playback
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use std::io::Write;
 use tempfile::Builder as TempFileBuilder;
+
+/// Process-wide cache of resolved sound-file paths.
+///
+/// Resolving a clip means probing ~10 candidate locations with `exists()` —
+/// cheap once, but wasteful to repeat on every keypress for the same cue. The
+/// resolved absolute path never changes for the life of the process, so cache
+/// it the first time and skip the filesystem probing thereafter.
+static SOUND_PATH_CACHE: once_cell::sync::Lazy<StdMutex<HashMap<String, PathBuf>>> =
+    once_cell::sync::Lazy::new(|| StdMutex::new(HashMap::new()));
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SoundPlayResult {
@@ -166,82 +177,9 @@ pub async fn play_sound_file(
         });
     }
 
-    // Strategy 1: Try bundled resources (production builds)
-    let mut final_path = None;
-    let mut found_path = None;
-
-    if let Ok(resource_path) = app.path().resource_dir() {
-        info!("Resource directory: {:?}", resource_path);
-
-        // Try multiple possible paths in the bundled resources
-        let possible_paths = [
-            // Primary bundled path in production builds (_up_ directory)
-            resource_path.join("_up_").join("public").join(&file_path), // resources/_up_/public/sounds/caf/...
-            resource_path.join("_up_").join(&file_path), // resources/_up_/sounds/caf/...
-            // Additional paths for development and production compatibility
-            resource_path.join(&file_path), // Direct path: resources/sounds/caf/...
-            resource_path.join("sounds").join(&file_path), // With sounds prefix: resources/sounds/sounds/caf/...
-            if let Some(stripped) = file_path.strip_prefix("sounds/") {
-                resource_path.join(stripped) // Remove "sounds/" prefix: resources/caf/...
-            } else {
-                resource_path.join(&file_path)
-            },
-            // Try with different sound directory structures
-            resource_path.join("public").join(&file_path), // resources/public/sounds/caf/...
-            resource_path.join("dist").join(&file_path),   // resources/dist/sounds/caf/...
-        ];
-
-        for test_path in possible_paths.iter() {
-            if test_path.exists() {
-                info!("Found sound in bundled resources: {:?}", test_path);
-                final_path = Some(test_path.clone());
-                found_path = Some(file_path.clone());
-                break;
-            } else {
-                info!("Checked bundled path (not found): {:?}", test_path);
-            }
-        }
-    }
-
-    // Strategy 2: Try development mode paths (when bundled resources not available)
-    if final_path.is_none() && cfg!(debug_assertions) {
-        info!("Bundled resources not found, trying development paths...");
-
-        // Try relative to current working directory (development mode)
-        if let Ok(cwd) = std::env::current_dir() {
-            let mut dev_paths = vec![cwd.join("public").join(&file_path), cwd.join(&file_path)];
-
-            // Try going up one directory level if we're in src-tauri
-            if let Some(parent) = cwd.parent() {
-                dev_paths.push(parent.join("public").join(&file_path));
-            }
-
-            for dev_path in dev_paths.iter() {
-                info!("Checking development path: {:?}", dev_path);
-                if dev_path.exists() {
-                    info!("Found sound in development path: {:?}", dev_path);
-                    final_path = Some(dev_path.clone());
-                    found_path = Some(file_path.clone());
-                    break;
-                }
-            }
-        }
-    }
-
-    // Strategy 3: Final fallback - try absolute path
-    if final_path.is_none() {
-        let fallback_path = std::path::PathBuf::from(&file_path);
-        if fallback_path.exists() {
-            info!("Found sound at absolute path: {:?}", fallback_path);
-            final_path = Some(fallback_path);
-            found_path = Some(file_path.clone());
-        }
-    }
-
-    // If no path found, return error
-    let (sound_path, result_path) = match (final_path, found_path) {
-        (Some(path), Some(result)) => (path, result),
-        _ => {
+    let sound_path = match resolve_sound_path(&app, &file_path) {
+        Some(path) => path,
+        None => {
             let error_msg = format!("Sound file not found: {}", file_path);
             error!("{}", error_msg);
             return Ok(SoundPlayResult {
@@ -261,7 +199,7 @@ pub async fn play_sound_file(
     // and don't await it: the cue is fire-and-forget. Blocking here was what
     // made start/stop cues feel mistimed and the app unresponsive on stop.
     let playback_path = sound_path.clone();
-    let log_path = result_path.clone();
+    let log_path = file_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         if let Err(e) = play_audio_file(&playback_path) {
             error!("Failed to play sound {}: {}", log_path, e);
@@ -270,9 +208,141 @@ pub async fn play_sound_file(
 
     Ok(SoundPlayResult {
         success: true,
-        message: format!("Playing sound: {}", result_path),
-        file_path: Some(result_path),
+        message: format!("Playing sound: {}", file_path),
+        file_path: Some(file_path),
     })
+}
+
+/// Resolve a sound file's on-disk path, caching the result.
+///
+/// `file_path` is the resource-relative path (e.g. `sounds/caf/...`). The first
+/// call for a given clip probes the bundled-resource, development, and
+/// absolute-path candidates; every later call for the same clip returns the
+/// cached `PathBuf` without touching the filesystem.
+fn resolve_sound_path(app: &AppHandle, file_path: &str) -> Option<PathBuf> {
+    if let Ok(cache) = SOUND_PATH_CACHE.lock() {
+        if let Some(path) = cache.get(file_path) {
+            debug!("Sound path cache hit for {}: {:?}", file_path, path);
+            return Some(path.clone());
+        }
+    }
+
+    // Strategy 1: Try bundled resources (production builds)
+    let mut final_path = None;
+
+    if let Ok(resource_path) = app.path().resource_dir() {
+        info!("Resource directory: {:?}", resource_path);
+
+        // Try multiple possible paths in the bundled resources
+        let possible_paths = [
+            // Primary bundled path in production builds (_up_ directory)
+            resource_path.join("_up_").join("public").join(file_path), // resources/_up_/public/sounds/caf/...
+            resource_path.join("_up_").join(file_path), // resources/_up_/sounds/caf/...
+            // Additional paths for development and production compatibility
+            resource_path.join(file_path), // Direct path: resources/sounds/caf/...
+            resource_path.join("sounds").join(file_path), // With sounds prefix: resources/sounds/sounds/caf/...
+            if let Some(stripped) = file_path.strip_prefix("sounds/") {
+                resource_path.join(stripped) // Remove "sounds/" prefix: resources/caf/...
+            } else {
+                resource_path.join(file_path)
+            },
+            // Try with different sound directory structures
+            resource_path.join("public").join(file_path), // resources/public/sounds/caf/...
+            resource_path.join("dist").join(file_path),   // resources/dist/sounds/caf/...
+        ];
+
+        for test_path in possible_paths.iter() {
+            if test_path.exists() {
+                info!("Found sound in bundled resources: {:?}", test_path);
+                final_path = Some(test_path.clone());
+                break;
+            } else {
+                info!("Checked bundled path (not found): {:?}", test_path);
+            }
+        }
+    }
+
+    // Strategy 2: Try development mode paths (when bundled resources not available)
+    if final_path.is_none() && cfg!(debug_assertions) {
+        info!("Bundled resources not found, trying development paths...");
+
+        // Try relative to current working directory (development mode)
+        if let Ok(cwd) = std::env::current_dir() {
+            let mut dev_paths = vec![cwd.join("public").join(file_path), cwd.join(file_path)];
+
+            // Try going up one directory level if we're in src-tauri
+            if let Some(parent) = cwd.parent() {
+                dev_paths.push(parent.join("public").join(file_path));
+            }
+
+            for dev_path in dev_paths.iter() {
+                info!("Checking development path: {:?}", dev_path);
+                if dev_path.exists() {
+                    info!("Found sound in development path: {:?}", dev_path);
+                    final_path = Some(dev_path.clone());
+                    break;
+                }
+            }
+        }
+    }
+
+    // Strategy 3: Final fallback - try absolute path
+    if final_path.is_none() {
+        let fallback_path = std::path::PathBuf::from(file_path);
+        if fallback_path.exists() {
+            info!("Found sound at absolute path: {:?}", fallback_path);
+            final_path = Some(fallback_path);
+        }
+    }
+
+    if let Some(ref path) = final_path {
+        if let Ok(mut cache) = SOUND_PATH_CACHE.lock() {
+            cache.insert(file_path.to_string(), path.clone());
+        }
+    }
+
+    final_path
+}
+
+/// Fire a short UI cue with the lowest possible latency.
+///
+/// Unlike `play_sound_by_type` / `play_sound_file` (async Tauri commands a
+/// caller `invoke`s and awaits), this is a plain synchronous function meant to
+/// be called directly on the key-event thread. It reads the sound setting from
+/// in-memory state, resolves the clip path from the process-wide cache (no
+/// per-press filesystem probing after the first call), and spawns `afplay` on a
+/// detached thread. It returns in microseconds so the gesture that triggered it
+/// — a dictation start/stop, say — is never held up waiting on audio init or
+/// speech-to-text finalization.
+pub fn play_cue(app: &AppHandle, sound_type: SoundType) {
+    // Respect the user's sound toggle — a cheap in-memory read. Default to
+    // playing if state is somehow unavailable, matching the commands above.
+    let enabled = app
+        .try_state::<crate::state::AppState>()
+        .and_then(|s| s.get_sound_enabled().ok())
+        .unwrap_or(true);
+    if !enabled {
+        return;
+    }
+
+    let file_path = sound_type.get_file_path();
+    let directory = if cfg!(target_os = "macos") {
+        "sounds/caf"
+    } else {
+        "sounds/ogg"
+    };
+    let full_path = format!("{}/{}", directory, file_path);
+
+    let Some(path) = resolve_sound_path(app, &full_path) else {
+        error!("[Cue] Sound file not found: {}", full_path);
+        return;
+    };
+
+    std::thread::spawn(move || {
+        if let Err(e) = play_audio_file(&path) {
+            error!("[Cue] Failed to play cue {:?}: {}", path, e);
+        }
+    });
 }
 
 /// Play a simple notification sound (convenience function)

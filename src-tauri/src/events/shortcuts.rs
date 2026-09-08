@@ -310,7 +310,7 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
                     event_state
                 );
                 if event_state == ShortcutState::Pressed {
-                    crate::dictation_monitor::on_dictation_input_pressed().await;
+                    crate::dictation_monitor::on_dictation_input_pressed(&app_clone).await;
                 } else if event_state == ShortcutState::Released {
                     crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
                 }
@@ -340,6 +340,14 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
     if is_dictation_active {
         info!("[Dictation Input Shortcut] Tap mode - stopping active dictation");
 
+        // Immediate stop cue on the tap edge — before the async stop that waits
+        // on speech-to-text finalization. Keeps tap-mode stop as responsive as
+        // hold-mode release.
+        crate::commands::sound::play_cue(
+            app,
+            crate::commands::sound::SoundType::NotificationDecorative01,
+        );
+
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             // Stop dictation
@@ -363,6 +371,13 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
         });
     } else {
         info!("[Dictation Input Shortcut] Tap mode - starting dictation mode transcription");
+
+        // Immediate start cue on the tap edge — before the async start that
+        // initializes audio capture.
+        crate::commands::sound::play_cue(
+            app,
+            crate::commands::sound::SoundType::NotificationAmbient,
+        );
 
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
