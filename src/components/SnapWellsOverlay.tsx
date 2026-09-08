@@ -151,12 +151,12 @@ export const SnapWellsOverlay = () => {
         ]);
 
         // Same wells the bar snaps to: same computeWells, same bar size, and
-        // the default margin/topInset (FloatingBar's settleIntoWell passes no
-        // overrides, so we mustn't either).
+        // the same includeCenter (FloatingBar's settleIntoWell enables the
+        // centre well, so this must too, or the indicator would miss a hole).
         const wells: Well[] = computeWells(monitorRects, {
           windowWidth,
           windowHeight,
-          includeCenter: false,
+          includeCenter: true,
         });
 
         const nextHoles: Hole[] = wells.map((w, i) => {
