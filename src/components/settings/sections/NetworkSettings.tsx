@@ -112,7 +112,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const getMcpServerStatusIcon = (status: any) => {
     if (!status) {
-      return <Square className="h-4 w-4 text-gray-400" />;
+      return <Square className="h-4 w-4 text-muted-foreground" />;
     }
 
     if (status.Connected !== undefined) {
@@ -122,7 +122,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     } else if (status.Error !== undefined || status.Timeout !== undefined) {
       return <AlertCircle className="h-4 w-4 text-red-500" />;
     } else {
-      return <Square className="h-4 w-4 text-gray-400" />;
+      return <Square className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
