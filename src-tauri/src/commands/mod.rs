@@ -20,6 +20,7 @@ pub mod safari_tools;
 pub mod agent_continuation;
 pub mod agent_sessions; // Parallel agent-session registry commands (LAC-1432)
 pub mod always_listening;
+pub mod bar_position; // Floating-bar last-well persistence
 pub mod cloud;
 pub mod cloud_test;
 pub mod collaborative_ai_commands;

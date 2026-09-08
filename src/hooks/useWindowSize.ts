@@ -11,12 +11,56 @@ interface WindowSizeConfig {
    * Omitted: the top edge stays put.
    */
   anchorY?: number;
+  /**
+   * Grow upward instead of downward. When the bar is docked in the bottom half
+   * of its display, its chat pane opens ABOVE the pill: the window's added
+   * height must extend up while the pill's on-screen position is unchanged
+   * (the bottom edge moves down as much as the top moves up only through the
+   * `anchorY` maths — the pill itself stays put). Omitted/false keeps today's
+   * downward growth.
+   */
+  growUp?: boolean;
 }
 
 // Cache last applied sizes per window to avoid redundant resizes
 const lastSizeByLabel: Map<string, { width: number; height: number }> = new Map();
-// Last anchor per window, so the next resize knows where the anchor was.
-const lastAnchorByLabel: Map<string, number> = new Map();
+
+/** What the last resize left behind, so the next one can keep the pill fixed. */
+interface AnchorState {
+  /** Physical height applied last time. */
+  physH: number;
+  /** Logical anchorY passed last time (pill centre offset from the near edge). */
+  anchor: number;
+  /** Whether that resize grew upward. */
+  growUp: boolean;
+}
+// Last anchor state per window, so the next resize knows where the pill was.
+const lastAnchorByLabel: Map<string, AnchorState> = new Map();
+
+/**
+ * The new physical top edge for a resize that keeps the pill's vertical centre
+ * at the same screen position, whichever direction the window grows.
+ *
+ * `anchor` is the pill centre's distance from the window's *near* edge (top when
+ * growing down, bottom when growing up), so the pill centre's distance from the
+ * top is `anchor` (down) or `physH - anchor` (up). Keeping `top + that distance`
+ * constant across the resize both fixes the pill and moves the top up when a
+ * growUp window gains height. Falls back to a top-anchored resize when there is
+ * no previous state or no anchor (matching the original downward behaviour).
+ */
+export function anchoredTop(
+  prevTop: number,
+  prev: AnchorState | undefined,
+  next: { physH: number; anchor?: number; growUp?: boolean },
+  scale: number,
+): number {
+  if (prev === undefined || next.anchor === undefined) return prevTop;
+  const fromTop = (physH: number, anchor: number, growUp: boolean) =>
+    growUp ? physH - Math.round(anchor * scale) : Math.round(anchor * scale);
+  const fOld = fromTop(prev.physH, prev.anchor, prev.growUp);
+  const fNew = fromTop(next.physH, next.anchor, next.growUp ?? false);
+  return prevTop + fOld - fNew;
+}
 
 /**
  * Center-stable resize: adjusts the window X position so the horizontal center
@@ -41,13 +85,21 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
   const newX = dx !== 0 ? Math.round(pos.x - dx / 2) : pos.x;
 
   const prevAnchor = lastAnchorByLabel.get(appWindow.label);
-  const anchorShift =
-    next.anchorY !== undefined && prevAnchor !== undefined
-      ? Math.round((prevAnchor - next.anchorY) * scaleFactor)
-      : 0;
-  if (next.anchorY !== undefined) lastAnchorByLabel.set(appWindow.label, next.anchorY);
+  const anchoredY = anchoredTop(
+    pos.y,
+    prevAnchor,
+    { physH: physNextH, anchor: next.anchorY, growUp: next.growUp },
+    scaleFactor,
+  );
+  if (next.anchorY !== undefined) {
+    lastAnchorByLabel.set(appWindow.label, {
+      physH: physNextH,
+      anchor: next.anchorY,
+      growUp: next.growUp ?? false,
+    });
+  }
 
-  const clamped = await clampToMonitor(newX, pos.y + anchorShift, physNextW, physNextH);
+  const clamped = await clampToMonitor(newX, anchoredY, physNextW, physNextH);
   const clampedX = clamped.x;
   const newY = clamped.y;
 

@@ -281,10 +281,40 @@ pub async fn handle_window_menu_event(app: &AppHandle, event_id: &str) {
 /// Tauri command functions for window management
 /// These are the command handlers that can be called from the frontend
 ///
+/// Apply native macOS sidebar vibrancy to the settings window so its
+/// translucent sidebar blurs the desktop behind it, like System Settings.
+///
+/// This is best-effort: any failure is logged and ignored so the window still
+/// opens normally (e.g. on non-macOS builds this is compiled out entirely).
+#[cfg(target_os = "macos")]
+fn apply_settings_vibrancy(app: &AppHandle) {
+    // `apply_vibrancy` touches AppKit and must run on the main thread; this is
+    // called from an async command (a worker thread), so hop over explicitly.
+    // Without this the call fails with "can only be used on the main thread"
+    // and the sidebar renders as bare alpha instead of a frosted blur.
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+
+        if let Some(window) = app.get_webview_window(window_labels::SETTINGS) {
+            if let Err(e) = apply_vibrancy(&window, NSVisualEffectMaterial::Sidebar, None, None) {
+                warn!("Failed to apply settings window vibrancy: {}", e);
+            }
+        }
+    });
+}
+
 /// Open the native settings window
 #[tauri::command]
 pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::create_or_show_window(&app, WindowConfig::settings()).await
+    WindowManager::create_or_show_window(&app, WindowConfig::settings()).await?;
+
+    // Give the settings window the native translucent-sidebar look. Applied
+    // after the window exists/shows; idempotent across repeated opens.
+    #[cfg(target_os = "macos")]
+    apply_settings_vibrancy(&app);
+
+    Ok(())
 }
 
 /// Close the native settings window
