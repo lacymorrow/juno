@@ -324,6 +324,9 @@ pub struct AppState {
     pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
     pub memory_manager:
         Arc<TokioMutex<crate::agent::implementations::memory_manager::AdvancedMemoryManager>>,
+    /// The active conversation's id. Minted fresh on startup so every launch
+    /// begins a new chat; rotated by `new_conversation`. History is keyed by it.
+    pub current_conversation_id: Arc<TokioMutex<String>>,
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>,
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>,
     pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>,
@@ -415,6 +418,9 @@ impl AppState {
 
                 AdvancedMemoryManager::with_config(memory_config).with_visual_config(visual_config)
             })),
+            current_conversation_id: Arc::new(TokioMutex::new(
+                crate::conversation_history::new_id(),
+            )),
             permissions_state: Arc::new(TokioMutex::new(None)),
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
             cloud_client: Arc::new(TokioMutex::new(None)),

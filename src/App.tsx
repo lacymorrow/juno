@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
-import { COMMANDS } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
+import type { ChatMessage } from "@/types/chat";
 
 import { AppHeader } from "@/components/AppHeader";
 import DevToolsPanel from "@/components/DevToolsPanel";
 import { ModalSystem } from "@/components/ModalSystem";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
+import { HistoryView } from "@/components/HistoryView";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -53,6 +55,35 @@ function App() {
         clearTimeout(timer);
       }
     };
+  }, []);
+
+  // A past conversation was reloaded (from the History view, or after deleting
+  // the active one): the backend owns the snapshot and hands it over here, so
+  // the chat repopulates. Reopening a dismissed chat this way surfaces the
+  // retained history the pane no longer showed.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const fn = await listen<{ messages: ChatMessage[] }>(
+        EVENTS.MESSAGES_CONVERSATION_LOADED,
+        (event) => {
+          if (!mounted) return;
+          // Repopulate the chat with the backend's snapshot. Navigation is the
+          // caller's job (the History row switches to chat itself), so this stays
+          // put when the active conversation is merely cleared (e.g. deleted).
+          conversation.updateConversation(event.payload?.messages ?? []);
+        },
+      );
+      if (mounted) unlisten = fn;
+      else fn();
+    })();
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Use voice sounds hook
@@ -142,12 +173,22 @@ function App() {
   });
 
   // Menu events integration
+  // "New Chat" rotates the backend conversation id (finalizing the previous one
+  // in history) and clears this window's view. Routing through the backend fixes
+  // the old behavior where a new chat left the backend conversation intact.
+  const handleNewChat = useCallback(() => {
+    invoke("new_conversation").catch((err) =>
+      console.error("Failed to start new conversation:", err),
+    );
+    conversation.startNewChat();
+  }, [conversation.startNewChat]);
+
   useMenuEvents({
     setCurrentView: appState.setCurrentView,
     setIsDevPanelOpen: appState.setIsDevPanelOpen,
     setActiveModal: appState.setActiveModal,
     setFeedbackData: appState.setFeedbackData,
-    startNewChat: conversation.startNewChat,
+    startNewChat: handleNewChat,
     addSystemMessage: conversation.addSystemMessage,
     handleUpdateCheck,
   });
@@ -390,7 +431,7 @@ function App() {
         serverStatus={appState.serverStatus}
         isProcessing={appState.isProcessing}
         isDevPanelOpen={appState.isDevPanelOpen}
-        onNewChat={conversation.startNewChat}
+        onNewChat={handleNewChat}
       />
 
       {/* Main Content */}
@@ -435,6 +476,17 @@ function App() {
                 )}
 
                 {appState.currentView === "permissions" && <PermissionsFlow />}
+
+                {appState.currentView === "history" && (
+                  <HistoryView
+                    onLoad={(id) => {
+                      invoke("load_conversation", { id }).catch((err) =>
+                        console.error("Failed to load conversation:", err),
+                      );
+                      appState.setCurrentView("chat");
+                    }}
+                  />
+                )}
               </div>
             </div>
           </ResizablePanel>
