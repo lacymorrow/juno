@@ -11,6 +11,7 @@ import { SettingsProvider } from "./contexts/SettingsContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
 import { DesktopCursorOverlay } from "./components/DesktopCursorOverlay";
+import { SnapWellsOverlay } from "./components/SnapWellsOverlay";
 import { BarHost } from "./components/bar/BarHost";
 
 import "./styles/globals.css";
@@ -40,6 +41,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
               <Route path="/floating-panel" element={<FloatingPanel />} />
               <Route path="/onboarding" element={<OnboardingWindow />} />
               <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
+              <Route path="/snap-wells-overlay" element={<SnapWellsOverlay />} />
             </Routes>
           </BrowserRouter>
         </TooltipProvider>
