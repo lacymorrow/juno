@@ -296,12 +296,20 @@ async fn force_stop_voice_controller(app_handle: &AppHandle) {
 }
 
 // Called when dictation input key is pressed down
-pub async fn on_dictation_input_pressed() {
+pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
     info!("[DictationMonitor] on_dictation_input_pressed called");
     let mut state = DICTATION_INPUT_STATE.lock().await;
     info!("[DictationMonitor] Acquired lock, calling start_hold");
     let started = state.start_hold();
     if started {
+        // Fire the start cue right here, on the key-down edge — not from the
+        // downstream transcription-start handler, which only runs after audio
+        // capture has initialized. The user must hear feedback the instant they
+        // press, with no delay. `play_cue` is fire-and-forget (returns in µs).
+        crate::commands::sound::play_cue(
+            app_handle,
+            crate::commands::sound::SoundType::NotificationAmbient,
+        );
         info!("[DictationMonitor] Dictation input pressed down - starting immediate tracking");
     } else {
         warn!("[DictationMonitor] Dictation input pressed down - ignored (transcription_started={}, last_cancel={:?})",
@@ -317,6 +325,15 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) {
 
     if threshold_reached {
         info!("[DictationMonitor] Dictation input released after threshold reached - completing Dictation Mode normally");
+
+        // Fire the stop cue on the key-up edge, before emitting STOP. The STOP
+        // handler awaits speech-to-text finalization (seconds), and the old
+        // end cue played only after that — which is exactly why stopping felt
+        // unresponsive. Play it now so the user hears the release immediately.
+        crate::commands::sound::play_cue(
+            app_handle,
+            crate::commands::sound::SoundType::NotificationDecorative01,
+        );
 
         // Emit event to stop dictation normally
         if let Err(e) = app_handle.emit(events::dictation::STOP, ()) {
