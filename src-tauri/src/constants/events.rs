@@ -231,6 +231,9 @@ pub mod dev {
 /// User message events
 pub mod messages {
     pub const USER_MESSAGE_SUBMITTED: &str = "user-message-submitted";
+    /// A past conversation was reloaded; payload carries a `messages` array of
+    /// ChatMessage for the frontend to drop straight into the chat.
+    pub const CONVERSATION_LOADED: &str = "conversation-loaded";
 }
 
 /// Cloud and connection events

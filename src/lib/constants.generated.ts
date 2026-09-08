@@ -123,6 +123,7 @@ export const EVENTS = {
   PERMISSIONS_GRANTED: 'permission-granted',
   DEV_TOOL_NOTIFICATION: 'dev-tool-notification',
   MESSAGES_USER_MESSAGE_SUBMITTED: 'user-message-submitted',
+  MESSAGES_CONVERSATION_LOADED: 'conversation-loaded',
   CLOUD_WEBSOCKET_CONNECT: 'websocket-connect',
   CLOUD_WEBSOCKET_SEND: 'websocket-send',
   CLOUD_WEBSOCKET_DISCONNECT: 'websocket-disconnect',
