@@ -1,20 +1,24 @@
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { useSystemTheme } from "@/hooks/useSystemTheme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { invoke } from "@tauri-apps/api/core";
 import {
+  Bell,
   Brain,
   CalendarClock,
   Keyboard,
   Mic,
   Network,
+  Search,
   Settings,
   Shield,
   Terminal,
   Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   GeneralSettings,
   VoiceSettings,
@@ -23,6 +27,7 @@ import {
   AdvancedSettings,
   AutomationsSettings,
   NetworkSettings,
+  NotificationSettings,
   ShortcutsSettings,
   ToolsSettings,
 } from "./index";
@@ -33,74 +38,121 @@ import {
 import { SettingsCategory } from "./types";
 
 /**
- * Sidebar sections. `advanced: true` hides a section until the
- * "Advanced settings" toggle is on. Sections without the flag can still
- * gate individual cards/fields with `<AdvancedOnly>`.
+ * Sidebar sections, styled like macOS System Settings: a coloured icon tile
+ * plus a single label. `keywords` feed the sidebar search; `advanced: true`
+ * hides a section until the "Advanced settings" toggle is on.
  */
-export const settingsCategories: SettingsCategory[] = [
+interface MacCategory extends SettingsCategory {
+  /** Tailwind-ready background colour for the sidebar icon tile. */
+  tile: string;
+  /** Extra search terms beyond the visible name. */
+  keywords: string;
+}
+
+export const settingsCategories: MacCategory[] = [
   {
     id: "general",
     name: "General",
-    icon: <Settings className="w-8 h-8" />,
+    icon: <Settings className="h-3.5 w-3.5" />,
+    tile: "bg-[#8E8E93]",
     description: "Basic app settings and preferences",
+    keywords: "startup launch login sound onboarding companion cursor agent mode",
   },
   {
     id: "voice",
     name: "Voice & Audio",
-    icon: <Mic className="w-8 h-8" />,
+    icon: <Mic className="h-3.5 w-3.5" />,
+    tile: "bg-[#FF2D55]",
     description: "Voice transcription and audio settings",
+    keywords: "microphone dictation speech transcription tts audio input output",
   },
   {
     id: "ai",
     name: "AI Provider",
-    icon: <Brain className="w-8 h-8" />,
+    icon: <Brain className="h-3.5 w-3.5" />,
+    tile: "bg-[#AF52DE]",
     description: "Configure AI models and providers",
+    keywords: "model anthropic openai gemini api key provider claude llm",
+  },
+  {
+    id: "notifications",
+    name: "Notifications",
+    icon: <Bell className="h-3.5 w-3.5" />,
+    tile: "bg-[#FF3B30]",
+    description: "Alerts, sounds, and delivery",
+    keywords: "alerts banners sounds badges push notify",
   },
   {
     id: "tools",
     name: "Tools",
-    icon: <Wrench className="w-8 h-8" />,
-    description: "Enable/disable agent tools and categories",
+    icon: <Wrench className="h-3.5 w-3.5" />,
+    tile: "bg-[#FF9500]",
+    description: "Enable and disable agent tools",
     advanced: true,
+    keywords: "tools capabilities categories enable disable permissions",
   },
   {
     id: "automations",
     name: "Automations",
-    icon: <CalendarClock className="w-8 h-8" />,
-    description: "Scheduled agent tasks that run automatically",
+    icon: <CalendarClock className="h-3.5 w-3.5" />,
+    tile: "bg-[#5856D6]",
+    description: "Scheduled agent tasks",
     advanced: true,
+    keywords: "schedule cron tasks recurring automatic jobs",
   },
   {
     id: "network",
     name: "Network",
-    icon: <Network className="w-8 h-8" />,
+    icon: <Network className="h-3.5 w-3.5" />,
+    tile: "bg-[#007AFF]",
     description: "MCP servers and network configuration",
     advanced: true,
+    keywords: "mcp servers proxy connection endpoints",
   },
   {
     id: "security",
     name: "Security & Privacy",
-    icon: <Shield className="w-8 h-8" />,
+    icon: <Shield className="h-3.5 w-3.5" />,
+    tile: "bg-[#34C759]",
     description: "Permissions and security settings",
+    keywords: "permissions privacy accessibility screen recording camera microphone approvals",
   },
   {
     id: "shortcuts",
     name: "Keyboard Shortcuts",
-    icon: <Keyboard className="w-8 h-8" />,
+    icon: <Keyboard className="h-3.5 w-3.5" />,
+    tile: "bg-[#64748B]",
     description: "Customize keyboard shortcuts",
+    keywords: "hotkeys keybindings shortcut keys trigger",
   },
   {
     id: "advanced",
     name: "Advanced",
-    icon: <Terminal className="w-8 h-8" />,
+    icon: <Terminal className="h-3.5 w-3.5" />,
+    tile: "bg-[#48484A]",
     description: "System settings and reset options",
     advanced: true,
+    keywords: "reset developer logs debug data storage",
   },
 ];
 
 /** Categories visible for the given toggle state. Exported for tests. */
-export function visibleCategories(showAdvanced: boolean): SettingsCategory[] {
+export function visibleCategories(showAdvanced: boolean): MacCategory[] {
   return settingsCategories.filter((c) => showAdvanced || !c.advanced);
+}
+
+/** Categories matching a search query (name + keywords). Exported for tests. */
+export function searchCategories(
+  categories: MacCategory[],
+  query: string,
+): MacCategory[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return categories;
+  const terms = q.split(/\s+/);
+  return categories.filter((c) => {
+    const haystack = `${c.name} ${c.description ?? ""} ${c.keywords}`.toLowerCase();
+    return terms.every((t) => haystack.includes(t));
+  });
 }
 
 export default function ModularSettingsWindow() {
@@ -113,44 +165,36 @@ export default function ModularSettingsWindow() {
 
 function SettingsWindowContent() {
   const [selectedCategory, setSelectedCategory] = useState("general");
+  const [query, setQuery] = useState("");
   const settings = useSettingsContext();
+  const theme = useSystemTheme();
+  const contentRef = useRef<HTMLDivElement>(null);
   const { advanced, loading: advancedLoading, setAdvanced } =
     useAdvancedSettings();
   const window = getCurrentWindow();
 
   const categories = useMemo(() => visibleCategories(advanced), [advanced]);
+  const filtered = useMemo(
+    () => searchCategories(categories, query),
+    [categories, query],
+  );
 
-  // Turning the toggle off while on a hidden section: jump to the first
-  // visible one so the content pane never shows an orphaned section.
+  // Keep the selection valid as the visible list changes (toggle off while on
+  // a hidden section, or a search that hides the current one).
   useEffect(() => {
-    if (!categories.some((c) => c.id === selectedCategory)) {
-      setSelectedCategory(categories[0]?.id ?? "general");
+    if (!filtered.some((c) => c.id === selectedCategory)) {
+      setSelectedCategory(filtered[0]?.id ?? categories[0]?.id ?? "general");
     }
-  }, [categories, selectedCategory]);
+  }, [filtered, categories, selectedCategory]);
+
+  // Scroll the content pane back to the top whenever the section changes.
+  useEffect(() => {
+    contentRef.current?.scrollTo?.({ top: 0 });
+  }, [selectedCategory]);
 
   useEffect(() => {
-    // Set up the window properly for macOS
-    const setupWindow = async () => {
-      try {
-        await window.setTitle("Juno Settings");
-        if (window.label === "settings") {
-          console.log("Modular settings window initialized");
-        }
-      } catch (error) {
-        console.error("Failed to setup modular settings window:", error);
-      }
-    };
-
-    setupWindow();
+    window.setTitle("Juno Settings").catch(() => {});
   }, [window]);
-
-  const handleCloseWindow = async () => {
-    try {
-      await invoke("close_settings_window");
-    } catch (error) {
-      console.error("Failed to close settings window:", error);
-    }
-  };
 
   const renderCategoryContent = () => {
     switch (selectedCategory) {
@@ -160,6 +204,8 @@ function SettingsWindowContent() {
         return <VoiceSettings settings={settings} />;
       case "ai":
         return <AIProviderSettings settings={settings} />;
+      case "notifications":
+        return <NotificationSettings />;
       case "tools":
         return <ToolsSettings settings={settings} />;
       case "automations":
@@ -180,96 +226,111 @@ function SettingsWindowContent() {
   const current = categories.find((c) => c.id === selectedCategory);
 
   return (
-    <div className="flex w-full min-w-0 h-screen bg-gray-50">
-      {/* Sidebar with categories - macOS style */}
-      <div className="w-64 shrink-0 bg-white border-r border-gray-200 flex flex-col">
-        <div className="p-6 border-b border-gray-200">
-          <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
-        </div>
+    <div
+      className={cn(theme === "dark" && "dark")}
+      style={{
+        fontFamily:
+          '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif',
+      }}
+    >
+      <div className="flex h-screen w-full min-w-0 bg-background text-foreground">
+        {/* Sidebar */}
+        <aside className="flex w-[220px] shrink-0 flex-col border-r border-border bg-sidebar">
+          {/* Drag region + traffic-light clearance */}
+          <div
+            data-tauri-drag-region
+            className="h-9 shrink-0"
+          />
 
-        <div className="flex-1 overflow-y-auto p-4">
-          <nav aria-label="Settings sections" className="space-y-1">
-            {categories.map((category) => (
-              <button
-                key={category.id}
-                onClick={() => setSelectedCategory(category.id)}
-                aria-current={
-                  selectedCategory === category.id ? "page" : undefined
-                }
-                className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-colors ${
-                  selectedCategory === category.id
-                    ? "bg-blue-100 text-blue-700"
-                    : "text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                <div
-                  className={`${
-                    selectedCategory === category.id
-                      ? "text-blue-600"
-                      : "text-gray-500"
-                  }`}
+          {/* Search */}
+          <div className="px-3 pb-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search"
+                aria-label="Search settings"
+                className="h-7 rounded-[7px] bg-black/[0.04] pl-8 text-[13px] shadow-none dark:bg-white/[0.06]"
+              />
+            </div>
+          </div>
+
+          {/* Category list */}
+          <nav
+            aria-label="Settings sections"
+            className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-2"
+          >
+            {filtered.map((category) => {
+              const active = selectedCategory === category.id;
+              return (
+                <button
+                  key={category.id}
+                  onClick={() => setSelectedCategory(category.id)}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-[7px] px-2 py-1 text-left transition-colors",
+                    active
+                      ? "bg-accent text-accent-foreground"
+                      : "text-foreground hover:bg-accent/50",
+                  )}
                 >
-                  {category.icon}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-sm">{category.name}</div>
-                  <div className="text-xs text-gray-500 mt-0.5 leading-tight">
-                    {category.description}
-                  </div>
-                </div>
-              </button>
-            ))}
+                  <span
+                    className={cn(
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-white shadow-sm",
+                      category.tile,
+                    )}
+                  >
+                    {category.icon}
+                  </span>
+                  <span className="truncate text-[13px] font-medium">
+                    {category.name}
+                  </span>
+                </button>
+              );
+            })}
+            {filtered.length === 0 && (
+              <p className="px-2 py-4 text-center text-[12px] text-muted-foreground">
+                No settings found
+              </p>
+            )}
           </nav>
-        </div>
 
-        {/* Footer: advanced toggle (always visible) + close button */}
-        <div className="p-4 border-t border-gray-200 space-y-3">
-          <div className="flex items-center justify-between gap-3 px-1">
-            <div className="min-w-0">
+          {/* Footer: advanced toggle */}
+          <div className="border-t border-border px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3">
               <Label
                 htmlFor="advanced-settings-toggle"
-                className="text-sm font-medium text-gray-900"
+                className="text-[12px] font-medium text-muted-foreground"
               >
-                Advanced settings
+                Show advanced settings
               </Label>
-              <p className="text-xs text-gray-500 mt-0.5 leading-tight">
-                Show every option
-              </p>
+              <Switch
+                id="advanced-settings-toggle"
+                checked={advanced}
+                onCheckedChange={(checked) => void setAdvanced(checked)}
+                disabled={advancedLoading}
+              />
             </div>
-            <Switch
-              id="advanced-settings-toggle"
-              checked={advanced}
-              onCheckedChange={(checked) => {
-                void setAdvanced(checked);
-              }}
-              disabled={advancedLoading}
-            />
           </div>
-          <button
-            onClick={handleCloseWindow}
-            className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-colors"
-          >
-            Close Settings
-          </button>
-        </div>
-      </div>
+        </aside>
 
-      {/* Main content area */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Title bar area */}
-        <div className="h-12 flex items-center justify-between px-6 bg-transparent">
-          <div className="flex items-center gap-3">
-            <div className="text-gray-500">{current?.icon}</div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              {current?.name}
-            </h2>
+        {/* Content */}
+        <main className="flex min-w-0 flex-1 flex-col bg-background">
+          <div
+            data-tauri-drag-region
+            className="flex h-9 shrink-0 items-center"
+          />
+          <div ref={contentRef} className="flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-[640px] px-8 pb-10">
+              <h1 className="pb-4 pt-1 text-[22px] font-bold tracking-tight">
+                {current?.name}
+              </h1>
+              {renderCategoryContent()}
+            </div>
           </div>
-        </div>
-
-        {/* Settings content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-2xl">{renderCategoryContent()}</div>
-        </div>
+        </main>
       </div>
     </div>
   );

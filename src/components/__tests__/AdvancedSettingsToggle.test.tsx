@@ -30,6 +30,8 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     label: "settings",
     setTitle: vi.fn(() => Promise.resolve()),
+    theme: vi.fn(() => Promise.resolve("light")),
+    onThemeChanged: vi.fn(() => Promise.resolve(() => {})),
   }),
 }));
 
@@ -52,6 +54,7 @@ vi.mock("../settings/index", () => {
     GeneralSettings: stub("general"),
     VoiceSettings: stub("voice"),
     AIProviderSettings: stub("ai"),
+    NotificationSettings: stub("notifications"),
     ToolsSettings: stub("tools"),
     AutomationsSettings: stub("automations"),
     NetworkSettings: stub("network"),
@@ -95,6 +98,7 @@ const BASIC_SECTIONS = [
   "General",
   "Voice & Audio",
   "AI Provider",
+  "Notifications",
   "Security & Privacy",
   "Keyboard Shortcuts",
 ];
@@ -123,6 +127,7 @@ describe("visibleCategories", () => {
       "general",
       "voice",
       "ai",
+      "notifications",
       "security",
       "shortcuts",
     ]);
