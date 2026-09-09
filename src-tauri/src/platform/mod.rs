@@ -4,6 +4,8 @@
 //! Currently supports macOS with comprehensive window management and mouse tracking.
 
 #[cfg(target_os = "macos")]
+pub mod cursor_follow; // Keep the bar on the display the cursor is on
+#[cfg(target_os = "macos")]
 pub mod macos;
 
 pub mod mouse_button_monitor;

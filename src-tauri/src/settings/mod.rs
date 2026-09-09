@@ -78,6 +78,10 @@ pub struct FloatingBarSettings {
     pub auto_hide_delay: u32,
     pub opacity: f32,
     pub bar_appearance: String,
+    /// Follow the cursor across displays: the bar re-homes to the same drag-well
+    /// slot on whichever display the cursor is on. On by default.
+    #[serde(default = "defaults::follow_cursor_display")]
+    pub follow_cursor_display: bool,
 }
 
 /// Agent behavior and execution settings
@@ -349,6 +353,7 @@ impl Default for FloatingBarSettings {
             auto_hide_delay: crate::constants::timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
             opacity: 0.95,
             bar_appearance: ui::bar_appearances::FLOATING.to_string(),
+            follow_cursor_display: defaults::follow_cursor_display(),
         }
     }
 }
