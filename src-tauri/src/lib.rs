@@ -1024,6 +1024,24 @@ pub fn run() {
                 });
             }
 
+            // Keep the floating bar on the display the cursor is on. The poll task
+            // runs for the app's life, gated by the follow setting (loaded here).
+            #[cfg(target_os = "macos")]
+            {
+                let follow_app = app.handle().clone();
+                crate::platform::cursor_follow::start(follow_app.clone());
+                tauri::async_runtime::spawn(async move {
+                    if let Ok(mgr) = crate::settings::manager::SettingsManager::new(follow_app) {
+                        let enabled = mgr
+                            .get_floating_bar_settings()
+                            .await
+                            .map(|s| s.follow_cursor_display)
+                            .unwrap_or(true);
+                        crate::platform::cursor_follow::set_enabled(enabled);
+                    }
+                });
+            }
+
             // --- Setup All Event Listeners ---
             // Setup basic event listeners using the events module
             events::handlers::setup_event_listeners(app.handle());

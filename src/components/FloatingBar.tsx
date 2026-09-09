@@ -29,7 +29,14 @@ import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI } from "@/lib/constants.generated";
-import { computeWells, nearestWell, easeOutCubic, type Well } from "@/lib/snapWells";
+import {
+  computeWells,
+  nearestWell,
+  easeOutCubic,
+  type Well,
+  type WellCol,
+  type WellRow,
+} from "@/lib/snapWells";
 import { AgentRosterStrip } from "./AgentRosterStrip";
 import { BarChatPane } from "./bar/BarChatPane";
 import type { BarAppearance } from "@/components/bar/barAppearance";
@@ -966,6 +973,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         if (cancelled || !target) return;
 
         await win.setPosition(new PhysicalPosition(target.x, target.y));
+        currentSlotRef.current = { col: target.col, row: target.row };
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
         } catch {
@@ -1024,6 +1032,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // settle the bar into the nearest well.
   const snapArmedRef = useRef(false);
   const snapAnimatingRef = useRef(false);
+  // The drag-well slot the bar currently occupies (col/row), so it can re-home
+  // to the same slot on another display when the cursor moves there.
+  const currentSlotRef = useRef<{ col: WellCol; row: WellRow } | null>(null);
   // Whether the snap-well drop indicator overlay is currently shown, so we
   // hide it exactly once on release regardless of which settle path fires.
   const snapOverlayShownRef = useRef(false);
@@ -1062,6 +1073,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       if (!target) return;
       snapAnimatingRef.current = true;
       await animateWindowTo(win, { x: pos.x, y: pos.y }, { x: target.x, y: target.y });
+      currentSlotRef.current = { col: target.col, row: target.row };
       // Remember where it landed so the bar reopens here next launch, and
       // re-derive the growth direction since the dock may have changed.
       try {
@@ -1076,6 +1088,82 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       snapAnimatingRef.current = false;
     }
   }, [recomputeGrowUp]);
+
+  // The cursor moved to another display (backend poll): re-home the compact pill
+  // to the same drag-well slot on that display, so it is always where the user
+  // is looking. Only the idle pill follows — a dragging bar or an open chat pane
+  // is left where it is.
+  const handleCursorDisplayChange = useCallback(
+    async ({ x, y }: { x: number; y: number }) => {
+      if (paneOpen || isWorking) return;
+      if (snapArmedRef.current || snapAnimatingRef.current) return;
+      const slot = currentSlotRef.current;
+      if (!slot) return;
+      const contains = (
+        m: { position: { x: number; y: number }; size: { width: number; height: number } },
+        px: number,
+        py: number,
+      ) =>
+        px >= m.position.x &&
+        px < m.position.x + m.size.width &&
+        py >= m.position.y &&
+        py < m.position.y + m.size.height;
+      try {
+        const win = getCurrentWindow();
+        const [size, pos, mons] = await Promise.all([
+          win.outerSize(),
+          win.outerPosition(),
+          availableMonitors(),
+        ]);
+        if (!mons.length) return;
+        const targetIdx = mons.findIndex((m) => contains(m, x, y));
+        if (targetIdx < 0) return;
+        // Already on the cursor's display — nothing to do.
+        const barIdx = mons.findIndex((m) => contains(m, pos.x, pos.y));
+        if (barIdx === targetIdx) return;
+        const wells = computeWells(
+          mons.map((m) => ({
+            position: { x: m.position.x, y: m.position.y },
+            size: { width: m.size.width, height: m.size.height },
+            scaleFactor: m.scaleFactor,
+          })),
+          { windowWidth: size.width, windowHeight: size.height, includeCenter: true },
+        );
+        const target = wells.find(
+          (w) => w.monitorIndex === targetIdx && w.col === slot.col && w.row === slot.row,
+        );
+        if (!target) return;
+        await win.setPosition(new PhysicalPosition(target.x, target.y));
+        currentSlotRef.current = { col: target.col, row: target.row };
+        try {
+          await invoke("set_bar_position", { x: target.x, y: target.y });
+        } catch {
+          // best effort persist
+        }
+        void recomputeGrowUp();
+      } catch (error) {
+        console.debug("FloatingBar: cursor-follow move failed:", error);
+      }
+    },
+    [paneOpen, isWorking, recomputeGrowUp],
+  );
+
+  useEffect(() => {
+    const unlisteners: Array<() => void> = [];
+    let active = true;
+    void (async () => {
+      const fn = await listen<{ x: number; y: number }>(
+        EVENTS.BAR_CURSOR_DISPLAY_CHANGED,
+        (event) => void handleCursorDisplayChange(event.payload),
+      );
+      if (active) unlisteners.push(fn);
+      else fn();
+    })();
+    return () => {
+      active = false;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [handleCursorDisplayChange]);
 
   const onRootMouseDown = useCallback((e: ReactMouseEvent) => {
     if (e.button !== 0) return;

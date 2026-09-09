@@ -213,6 +213,13 @@ impl UIManager {
         let settings_manager = SettingsManager::new(self.app_handle.clone())
             .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
+        // Preserve fields this config view does not own (read-modify-write):
+        // follow_cursor_display is set only via the settings toggle.
+        let follow_cursor_display = settings_manager
+            .get_floating_bar_settings()
+            .await
+            .map(|s| s.follow_cursor_display)
+            .unwrap_or_else(|_| crate::constants::settings::defaults::follow_cursor_display());
         let settings = FloatingBarSettings {
             show_voice_indicator: self.bar_config.show_voice_indicator,
             enable_animations: self.bar_config.enable_animations,
@@ -220,6 +227,7 @@ impl UIManager {
             auto_hide_delay: self.bar_config.auto_hide_delay,
             opacity: self.bar_config.opacity,
             bar_appearance: self.bar_config.bar_appearance.clone(),
+            follow_cursor_display,
         };
 
         settings_manager

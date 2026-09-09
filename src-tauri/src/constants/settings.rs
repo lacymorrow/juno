@@ -149,6 +149,12 @@ pub mod defaults {
     pub fn big_cursor_enabled() -> bool {
         BIG_CURSOR_ENABLED
     }
+    /// The floating bar follows the cursor to whichever display it is on, so the
+    /// user never hunts for it. On by default; older stores lack the key.
+    pub const FOLLOW_CURSOR_DISPLAY: bool = true;
+    pub fn follow_cursor_display() -> bool {
+        FOLLOW_CURSOR_DISPLAY
+    }
     pub fn big_cursor_scale() -> f32 {
         BIG_CURSOR_SCALE
     }
