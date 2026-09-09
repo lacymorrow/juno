@@ -27,6 +27,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     UI.BAR_APPEARANCES_FLOATING
   );
   const [barAppearanceLoading, setBarAppearanceLoading] = useState(false);
+  const [followCursorDisplay, setFollowCursorDisplay] = useState(true);
+  const [followCursorLoading, setFollowCursorLoading] = useState(false);
   const [bigCursorEnabled, setBigCursorEnabled] = useState(true);
   const [bigCursorScale, setBigCursorScale] = useState(3.0);
   const [bigCursorLoading, setBigCursorLoading] = useState(false);
@@ -52,6 +54,14 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         }>("ui_get_bar_config");
         if (barConfig?.bar_appearance) {
           setBarAppearance(barConfig.bar_appearance);
+        }
+
+        // Load "follow cursor across displays"
+        const barSettings = await invoke<{ follow_cursor_display?: boolean }>(
+          "get_floating_bar_settings",
+        );
+        if (typeof barSettings?.follow_cursor_display === "boolean") {
+          setFollowCursorDisplay(barSettings.follow_cursor_display);
         }
 
         // Load big cursor settings
@@ -123,6 +133,33 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
       });
     } finally {
       setRestartOnboardingLoading(false);
+    }
+  };
+
+  const handleFollowCursorChange = async (enabled: boolean) => {
+    if (followCursorLoading) return;
+    setFollowCursorLoading(true);
+    try {
+      // Read-modify-write: this command takes the whole settings object.
+      const current = await invoke<Record<string, unknown>>(
+        "get_floating_bar_settings",
+      );
+      await invoke("set_floating_bar_settings", {
+        settings: { ...current, follow_cursor_display: enabled },
+      });
+      setFollowCursorDisplay(enabled);
+      toast.success(
+        enabled
+          ? "Bar will follow your cursor across displays"
+          : "Bar will stay on its display",
+      );
+    } catch (error) {
+      console.error("Failed to update follow-cursor setting:", error);
+      toast.error("Failed to update setting", {
+        description: error as string,
+      });
+    } finally {
+      setFollowCursorLoading(false);
     }
   };
 
@@ -397,6 +434,18 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
               </SelectItem>
             </SelectContent>
           </Select>
+        </SettingsRow>
+        <SettingsRow
+          htmlFor="follow-cursor-display"
+          label="Follow cursor across displays"
+          description="Keep the bar on whichever display your cursor is on, so you never hunt for it"
+        >
+          <Switch
+            id="follow-cursor-display"
+            checked={followCursorDisplay}
+            onCheckedChange={handleFollowCursorChange}
+            disabled={followCursorLoading}
+          />
         </SettingsRow>
       </SettingsGroup>
 

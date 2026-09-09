@@ -243,7 +243,13 @@ pub async fn set_floating_bar_settings(
     settings_manager
         .set_floating_bar_settings(&settings)
         .await
-        .map_err(|e| format_error(templates::FAILED_TO_SET, actions::FLOATING_BAR_SETTINGS, e))
+        .map_err(|e| format_error(templates::FAILED_TO_SET, actions::FLOATING_BAR_SETTINGS, e))?;
+
+    // Arm/disarm the cursor-display follower to match the new setting.
+    #[cfg(target_os = "macos")]
+    crate::platform::cursor_follow::set_enabled(settings.follow_cursor_display);
+
+    Ok(())
 }
 
 #[command]
