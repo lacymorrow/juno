@@ -80,7 +80,7 @@ impl CloudCommandProcessor {
             security.validate_command(&command)?;
 
             // Check rate limits
-            security.check_rate_limit(&command.command_type)?;
+            security.check_rate_limit(&command.command_type).await?;
 
             // Log sanitized command
             let sanitized = security.sanitize_for_logging(&command);

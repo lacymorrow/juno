@@ -1,21 +1,14 @@
-//! # Cloud Configuration Module - Maximally Permissive
+//! # Cloud Configuration Module
 //!
-//! Cloud configuration settings aligned with local tools' minimal restrictions.
-//! Uses Low security level by default and minimal command restrictions.
-//!
-//! ## Production Backend Status: ✅ VERIFIED HEALTHY
-//! - **WebSocket**: wss://juno-cloud-backend.fly.dev/ws
-//! - **API**: https://juno-cloud-backend.fly.dev/api
-//! - **Health**: https://juno-cloud-backend.fly.dev/health
-//! - **Uptime**: 15+ days (extremely stable)
-//! - **All Tests**: PASSED (4/4)
+//! Cloud configuration settings. Cloud is disabled by default (the hosted
+//! backend is not running, see LAC-3729) and new configs default to the
+//! High security level. The user's stored security level is preserved on
+//! load; it is never downgraded (2026-09 security audit).
 //!
 //! ## Configuration Features:
-//! - Low security level by default (maximally permissive)
-//! - Minimal denied commands list (only truly destructive)
-//! - Generous timeouts and limits
+//! - Disabled by default, High security level by default
+//! - Denied commands list for destructive patterns
 //! - Store-based configuration management
-//! - Production backend enabled by default
 //!
 //! ## Usage
 //! Used by: Cloud service initialization, settings UI
@@ -90,7 +83,7 @@ static DENIED_COMMANDS_VEC: LazyLock<Vec<String>> =
 static ALLOWED_COMMANDS_VEC: LazyLock<Vec<String>> =
     LazyLock::new(|| ALLOWED_COMMANDS.iter().map(|&s| s.to_string()).collect());
 
-/// Cloud configuration settings - maximally permissive
+/// Cloud configuration settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudConfig {
     pub enabled: bool,
@@ -110,9 +103,9 @@ pub struct CloudConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityLevel {
-    Low,    // Allow all commands except denied (MAXIMALLY PERMISSIVE - DEFAULT)
-    Medium, // Allow all commands except denied (same as Low now)
-    High,   // Allow all commands except denied (same as Low now)
+    Low,
+    Medium,
+    High, // Default for new configs (2026-09 security audit)
 }
 
 impl Default for CloudConfig {
@@ -128,10 +121,12 @@ impl Default for CloudConfig {
             auto_connect: true,
             reconnect_interval: 30,
             heartbeat_interval: 60,
-            command_timeout: 600, // Increased from 300 to 600 seconds (10 minutes)
-            security_level: SecurityLevel::Low, // Changed from Medium to Low (maximally permissive)
+            command_timeout: 600,
+            // New configs default to the most restrictive level; the stored level
+            // is preserved on load and never downgraded (2026-09 security audit).
+            security_level: SecurityLevel::High,
             allowed_commands: ALLOWED_COMMANDS_VEC.clone(), // Use lazy-initialized static
-            denied_commands: DENIED_COMMANDS_VEC.clone(), // Use lazy-initialized static
+            denied_commands: DENIED_COMMANDS_VEC.clone(),   // Use lazy-initialized static
         }
     }
 }
@@ -145,35 +140,25 @@ impl CloudConfig {
     ) -> Result<Self, CloudError> {
         match settings_manager.get_cloud_settings().await {
             Ok(cloud_settings) => {
-                let mut config = Self::from_centralized_settings(&cloud_settings);
-                // Ensure we're using maximally permissive defaults for existing configs
-                config.migrate_to_permissive_defaults();
-                info!("Loaded cloud configuration from centralized settings (migrated to permissive defaults)");
+                // Preserve the user's stored security level as-is. A forced
+                // migration to SecurityLevel::Low used to run here on every
+                // load; removed in the 2026-09 security audit.
+                let config = Self::from_centralized_settings(&cloud_settings);
+                info!("Loaded cloud configuration from centralized settings");
                 Ok(config)
             }
             Err(e) => {
-                info!("Failed to load cloud settings from centralized system ({}), creating maximally permissive default", e);
-                // No valid configuration found, create and save maximally permissive default
+                info!(
+                    "Failed to load cloud settings from centralized system ({}), creating default",
+                    e
+                );
+                // No valid configuration found, create and save the default (disabled, High)
                 let default_config = Self::default();
                 default_config
                     .save_to_centralized_settings(settings_manager)
                     .await?;
                 Ok(default_config)
             }
-        }
-    }
-
-    /// Migrate existing config to maximally permissive defaults
-    fn migrate_to_permissive_defaults(&mut self) {
-        // Ensure we're using Low security (maximally permissive)
-        self.security_level = SecurityLevel::Low;
-
-        // Update denied commands to only truly destructive ones (use static reference)
-        self.denied_commands = DENIED_COMMANDS_VEC.clone();
-
-        // Ensure generous timeout
-        if self.command_timeout < 600 {
-            self.command_timeout = 600;
         }
     }
 
@@ -193,7 +178,7 @@ impl CloudConfig {
                 CloudError::ConfigError(format!("Failed to save cloud settings: {}", e))
             })?;
 
-        info!("Saved maximally permissive cloud configuration to centralized settings");
+        info!("Saved cloud configuration to centralized settings");
         Ok(())
     }
 
@@ -373,11 +358,50 @@ impl CloudConfig {
                 "low" => SecurityLevel::Low,
                 "medium" => SecurityLevel::Medium,
                 "high" => SecurityLevel::High,
-                _ => SecurityLevel::Low, // Default to low (maximally permissive)
+                _ => SecurityLevel::High, // Unknown values fail closed to the strictest level
             },
             // Set default values for fields not in CloudSettings (use static references)
             allowed_commands: ALLOWED_COMMANDS_VEC.clone(),
             denied_commands: DENIED_COMMANDS_VEC.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_is_disabled_and_high_security() {
+        let config = CloudConfig::default();
+        assert!(!config.enabled);
+        assert!(matches!(config.security_level, SecurityLevel::High));
+    }
+
+    #[test]
+    fn stored_security_level_is_preserved_not_downgraded() {
+        let settings = CloudSettings {
+            security_level: "medium".to_string(),
+            ..Default::default()
+        };
+        let config = CloudConfig::from_centralized_settings(&settings);
+        assert!(matches!(config.security_level, SecurityLevel::Medium));
+
+        let settings = CloudSettings {
+            security_level: "high".to_string(),
+            ..Default::default()
+        };
+        let config = CloudConfig::from_centralized_settings(&settings);
+        assert!(matches!(config.security_level, SecurityLevel::High));
+    }
+
+    #[test]
+    fn unknown_security_level_fails_closed_to_high() {
+        let settings = CloudSettings {
+            security_level: "garbage".to_string(),
+            ..Default::default()
+        };
+        let config = CloudConfig::from_centralized_settings(&settings);
+        assert!(matches!(config.security_level, SecurityLevel::High));
     }
 }

@@ -167,7 +167,7 @@ impl CloudClient {
         // Start heartbeat task
         let heartbeat_handle = {
             let sender = ws_sender.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let mut heartbeat_timer = time::interval(Duration::from_secs(
                     crate::constants::timeouts::CLOUD_HEARTBEAT_INTERVAL_SECONDS,
                 ));
@@ -200,7 +200,7 @@ impl CloudClient {
         let status_handle = {
             let sender = ws_sender.clone();
             let client = self.clone_for_task();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let mut status_timer = time::interval(Duration::from_secs(
                     crate::constants::timeouts::CLOUD_STATUS_INTERVAL_SECONDS,
                 ));
