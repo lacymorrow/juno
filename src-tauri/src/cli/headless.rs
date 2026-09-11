@@ -678,6 +678,9 @@ impl HeadlessRuntime {
                     auto_start: *auto_start,
                     timeout_seconds: *timeout,
                     max_retries: 3,
+                    // HTTP transport spawns no process; the spawn approval gate
+                    // does not apply, so no pre-approval is granted here.
+                    approved: false,
                 };
 
                 let state = self.app_handle.state::<AppState>();

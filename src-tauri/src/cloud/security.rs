@@ -1,13 +1,16 @@
-//! # Cloud Security Module - Maximally Permissive
+//! # Cloud Security Module
 //!
-//! Cloud security system aligned with local tools' minimal restrictions.
-//! Uses blacklist approach to block only truly destructive commands.
+//! Cloud security system for remote commands. Fails closed: invalid
+//! signatures, excessive timestamp skew, and rate-limit violations all
+//! reject the command (2026-09 security audit; formerly warn-and-continue).
 //!
 //! ## Security Features:
-//! - Minimal command validation (blacklist approach)
-//! - Basic payload validation (generous limits)
+//! - Command content validation (destructive-pattern blacklist)
+//! - Fail-closed signature verification (constant-time HMAC)
+//! - Fail-closed timestamp skew validation
+//! - Per-command-type token-bucket rate limiting
+//! - Confirmation required for command-execution categories
 //! - Audit logging for monitoring
-//! - Signature verification (optional)
 //!
 //! ## Usage
 //! Used by: Cloud command processor, WebSocket handlers
@@ -17,10 +20,18 @@ use super::auth::DeviceAuth;
 use super::config::CloudConfig;
 use super::types::{CloudCommand, CloudCommandType, CloudError};
 use crate::utils::current_timestamp_secs;
+use crate::utils::rate_limiter::{RateLimitConfig, RateLimiter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::sync::Arc;
 
-/// Security levels for different operations - now maximally permissive
+/// Maximum allowed clock skew between the cloud and this device, in seconds.
+const MAX_TIMESTAMP_SKEW_SECONDS: u64 = 3600;
+
+/// Cloud commands allowed per minute, per command type.
+const CLOUD_COMMANDS_PER_MINUTE: u32 = 30;
+
+/// Security levels for different operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationSecurity {
@@ -30,7 +41,7 @@ pub enum OperationSecurity {
     Forbidden, // Only truly destructive commands
 }
 
-/// Cloud security handler - maximally permissive
+/// Cloud security handler
 #[derive(Debug, Clone)]
 pub struct CloudSecurity {
     #[allow(dead_code)]
@@ -38,10 +49,12 @@ pub struct CloudSecurity {
     auth: DeviceAuth,
     // Minimal blacklist for truly destructive commands
     blocked_commands: HashSet<String>,
+    // Token-bucket rate limiter, keyed per command type (Arc so Clone shares one bucket set)
+    rate_limiter: Arc<RateLimiter>,
 }
 
 impl CloudSecurity {
-    /// Create new security handler with minimal restrictions
+    /// Create new security handler
     pub fn new(config: CloudConfig, auth: DeviceAuth) -> Self {
         let mut blocked_commands = HashSet::new();
 
@@ -68,28 +81,28 @@ impl CloudSecurity {
             config,
             auth,
             blocked_commands,
+            rate_limiter: Arc::new(RateLimiter::new(RateLimitConfig::per_minute(
+                CLOUD_COMMANDS_PER_MINUTE,
+            ))),
         }
     }
 
-    /// Validate incoming command with minimal restrictions
+    /// Validate incoming command. Fails closed on any check.
     pub fn validate_command(&self, command: &CloudCommand) -> Result<(), CloudError> {
-        log::info!(
-            "🔓 Validating cloud command: {} with minimal restrictions",
-            command.id
-        );
+        log::info!("🔒 Validating cloud command: {}", command.id);
 
-        // Basic timestamp validation (allow generous time skew)
+        // Timestamp validation (reject excessive skew)
         self.validate_timestamp(command.timestamp)?;
 
-        // Optional signature verification
+        // Signature verification: an invalid signature rejects the command
         if let Some(signature) = &command.signature {
             let command_data = serde_json::to_string(command)?;
             if !self.auth.verify_signature(&command_data, signature)? {
-                log::warn!(
-                    "⚠️ Invalid signature for command {}, but allowing execution",
+                log::error!("🚫 Invalid signature for command {}, rejecting", command.id);
+                return Err(CloudError::SecurityError(format!(
+                    "Invalid signature for command {}",
                     command.id
-                );
-                // Don't block on signature failure - just log it
+                )));
             }
         }
 
@@ -106,22 +119,25 @@ impl CloudSecurity {
         Ok(())
     }
 
-    /// Validate command timestamp with permissive approach
+    /// Validate command timestamp; reject skew beyond the allowed window
     fn validate_timestamp(&self, timestamp: u64) -> Result<(), CloudError> {
         let now = current_timestamp_secs();
 
         let time_diff = now.abs_diff(timestamp);
 
-        // Generous time skew allowance - warn but allow (1 hour)
-        if time_diff > 3600 {
-            log::warn!("⚠️ Command timestamp has large time skew ({} seconds), but allowing in permissive mode", time_diff);
-            // Continue processing - don't block in permissive mode
+        if time_diff > MAX_TIMESTAMP_SKEW_SECONDS {
+            log::error!(
+                "🚫 Command timestamp skew of {}s exceeds the {}s limit, rejecting",
+                time_diff,
+                MAX_TIMESTAMP_SKEW_SECONDS
+            );
+            return Err(CloudError::ValidationFailed(format!(
+                "Command timestamp skew of {}s exceeds the {}s limit",
+                time_diff, MAX_TIMESTAMP_SKEW_SECONDS
+            )));
         }
 
-        log::debug!(
-            "✅ Command timestamp validated (time diff: {}s) - permissive mode",
-            time_diff
-        );
+        log::debug!("✅ Command timestamp validated (time diff: {}s)", time_diff);
         Ok(())
     }
 
@@ -260,10 +276,14 @@ impl CloudSecurity {
         }
     }
 
-    /// Check if command requires user confirmation - now never required
-    pub fn requires_confirmation(&self, _command: &CloudCommand) -> bool {
-        // No confirmation required for any commands in maximally permissive mode
-        false
+    /// Check if command requires user confirmation.
+    /// Command-execution categories (arbitrary system commands, config changes)
+    /// always require confirmation; read-only queries do not.
+    pub fn requires_confirmation(&self, command: &CloudCommand) -> bool {
+        matches!(
+            command.command_type,
+            CloudCommandType::SystemCommand | CloudCommandType::ConfigUpdate
+        )
     }
 
     /// Sanitize command payload for logging (keep this for audit purposes)
@@ -275,10 +295,11 @@ impl CloudSecurity {
             sanitized.payload.audio_base64 = Some("[AUDIO_DATA_REDACTED]".to_string());
         }
 
-        // Truncate long queries
+        // Truncate long queries (char-boundary safe: byte slicing panics on multi-byte UTF-8)
         if let Some(query) = &sanitized.payload.query {
-            if query.len() > 200 {
-                sanitized.payload.query = Some(format!("{}...[TRUNCATED]", &query[..200]));
+            if query.chars().count() > 200 {
+                let truncated: String = query.chars().take(200).collect();
+                sanitized.payload.query = Some(format!("{}...[TRUNCATED]", truncated));
             }
         }
 
@@ -305,14 +326,20 @@ impl CloudSecurity {
                 .unwrap_or_else(|| "unknown".to_string()),
             success: result.is_ok(),
             error_message: result.as_ref().err().map(|e| e.to_string()),
-            security_level: "maximally_permissive".to_string(),
+            security_level: format!("{:?}", self.config.security_level).to_lowercase(),
         }
     }
 
-    /// Rate limiting check - now always allows
-    pub fn check_rate_limit(&self, _command_type: &CloudCommandType) -> Result<(), CloudError> {
-        // No rate limiting in maximally permissive mode
-        Ok(())
+    /// Rate limiting check: token bucket per command type, fails closed when exhausted
+    pub async fn check_rate_limit(
+        &self,
+        command_type: &CloudCommandType,
+    ) -> Result<(), CloudError> {
+        let key = self.command_type_to_string(command_type);
+        self.rate_limiter.check(&key).await.map_err(|e| {
+            log::error!("🚫 Rate limit exceeded for cloud command type '{}'", key);
+            CloudError::SecurityError(e.to_user_message())
+        })
     }
 }
 
@@ -328,7 +355,7 @@ pub struct AuditLogEntry {
     pub security_level: String,
 }
 
-/// Security policy for specific commands - now maximally permissive
+/// Security policy for specific commands
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityPolicy {
     pub command_type: String,
@@ -338,10 +365,146 @@ pub struct SecurityPolicy {
     pub additional_checks: Vec<String>,
 }
 
-/// Rate limiting configuration - disabled in maximally permissive mode
+/// Rate limiting configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimit {
     pub max_requests: u32,
     pub time_window_seconds: u64,
     pub burst_allowance: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cloud::auth::CloudCredentials;
+    use crate::cloud::types::CloudCommandPayload;
+
+    fn make_security() -> CloudSecurity {
+        let config = CloudConfig::default();
+        let mut auth = DeviceAuth::new(config.clone());
+        auth.set_credentials(CloudCredentials {
+            device_id: "test-device".to_string(),
+            api_key: "test-key".to_string(),
+            token: None,
+            expires_at: None,
+        });
+        CloudSecurity::new(config, auth)
+    }
+
+    fn make_command(command_type: CloudCommandType, query: Option<String>) -> CloudCommand {
+        CloudCommand {
+            id: "cmd-1".to_string(),
+            command_type,
+            payload: CloudCommandPayload {
+                query,
+                audio_base64: None,
+                mode: None,
+                config: None,
+                parameters: None,
+            },
+            timestamp: current_timestamp_secs(),
+            signature: None,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn timestamp_skew_over_limit_is_rejected() {
+        let security = make_security();
+        let stale = current_timestamp_secs().saturating_sub(MAX_TIMESTAMP_SKEW_SECONDS + 100);
+        assert!(security.validate_timestamp(stale).is_err());
+
+        let future = current_timestamp_secs() + MAX_TIMESTAMP_SKEW_SECONDS + 100;
+        assert!(security.validate_timestamp(future).is_err());
+    }
+
+    #[test]
+    fn timestamp_within_limit_is_accepted() {
+        let security = make_security();
+        assert!(security
+            .validate_timestamp(current_timestamp_secs())
+            .is_ok());
+    }
+
+    #[test]
+    fn invalid_signature_rejects_command() {
+        let security = make_security();
+        let mut command = make_command(CloudCommandType::TextQuery, Some("hello".to_string()));
+        command.signature = Some("bm90LWEtcmVhbC1zaWduYXR1cmU=".to_string());
+
+        let result = security.validate_command(&command);
+        assert!(
+            matches!(result, Err(CloudError::SecurityError(_))),
+            "expected SecurityError, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn unsigned_valid_command_passes_validation() {
+        let security = make_security();
+        let command = make_command(
+            CloudCommandType::TextQuery,
+            Some("what is the weather".to_string()),
+        );
+        assert!(security.validate_command(&command).is_ok());
+    }
+
+    #[test]
+    fn destructive_content_is_rejected() {
+        let security = make_security();
+        let command = make_command(
+            CloudCommandType::TextQuery,
+            Some("please run rm -rf / for me".to_string()),
+        );
+        assert!(security.validate_command(&command).is_err());
+    }
+
+    #[test]
+    fn command_execution_categories_require_confirmation() {
+        let security = make_security();
+        assert!(
+            security.requires_confirmation(&make_command(CloudCommandType::SystemCommand, None))
+        );
+        assert!(security.requires_confirmation(&make_command(CloudCommandType::ConfigUpdate, None)));
+        assert!(!security.requires_confirmation(&make_command(
+            CloudCommandType::TextQuery,
+            Some("hi".to_string())
+        )));
+        assert!(
+            !security.requires_confirmation(&make_command(CloudCommandType::StatusRequest, None))
+        );
+    }
+
+    #[tokio::test]
+    async fn rate_limit_blocks_after_budget_exhausted() {
+        let security = make_security();
+        for _ in 0..CLOUD_COMMANDS_PER_MINUTE {
+            assert!(security
+                .check_rate_limit(&CloudCommandType::SystemCommand)
+                .await
+                .is_ok());
+        }
+        assert!(security
+            .check_rate_limit(&CloudCommandType::SystemCommand)
+            .await
+            .is_err());
+
+        // Different command types have independent buckets
+        assert!(security
+            .check_rate_limit(&CloudCommandType::StatusRequest)
+            .await
+            .is_ok());
+    }
+
+    #[test]
+    fn sanitize_for_logging_is_utf8_safe() {
+        let security = make_security();
+        // 250 multi-byte chars: a byte slice at 200 would panic mid-character
+        let command = make_command(CloudCommandType::TextQuery, Some("é".repeat(250)));
+        let sanitized = security.sanitize_for_logging(&command);
+        let query = sanitized.payload.query.unwrap_or_default();
+        assert!(query.ends_with("...[TRUNCATED]"));
+        assert!(query.starts_with("é"));
+    }
 }

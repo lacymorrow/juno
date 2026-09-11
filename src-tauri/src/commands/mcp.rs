@@ -247,6 +247,45 @@ pub async fn set_mcp_server_enabled(
     Ok(())
 }
 
+/// Approve an MCP server (by name) to spawn its configured command.
+/// An MCP server config describes an arbitrary executable; the backend refuses
+/// to spawn it until the user has explicitly approved the server through this
+/// command (2026-09 security audit, MCP arbitrary spawn).
+#[tauri::command]
+pub async fn approve_mcp_server(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    server_name: String,
+) -> Result<(), String> {
+    info!("Approving MCP server to spawn: {}", server_name);
+
+    // Persist the approval in the tool configuration
+    let found_in_config = {
+        let tool_config = state.get_tool_config_manager().await;
+        let mut config_guard = tool_config.lock().await;
+        config_guard.approve_mcp_server(&server_name)
+    };
+
+    // Update the live MCP manager so the approval applies without a restart
+    let found_in_manager = {
+        let mcp_manager = state.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+        manager_guard.approve_server(&server_name).await.is_ok()
+    };
+
+    if !found_in_config && !found_in_manager {
+        return Err(format!("MCP server not found: {}", server_name));
+    }
+
+    // Save configuration so the approval survives restarts
+    state.save_tool_config(&app_handle).await?;
+
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
+
+    Ok(())
+}
+
 /// Toggle an MCP server on/off (alias for set_mcp_server_enabled for frontend compatibility)
 #[tauri::command]
 pub async fn toggle_mcp_server(

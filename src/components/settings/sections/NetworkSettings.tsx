@@ -16,17 +16,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { COMMANDS } from "@/lib/constants.generated";
 
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 
 export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const [newServerJson, setNewServerJson] = useState("");
-  const [cloudTestPassword, setCloudTestPassword] = useState("");
-  const [cloudTestStatus, setCloudTestStatus] = useState("");
-  const [isCloudTesting, setIsCloudTesting] = useState(false);
 
   const handleOpenConfigDirectory = async () => {
     try {
@@ -211,94 +206,6 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     } catch (error) {
       console.error("Failed to toggle tool:", error);
       toast.error("Failed to toggle tool");
-    }
-  };
-
-  const handleSetCloudPassword = async () => {
-    if (!cloudTestPassword.trim()) {
-      toast.error("Please enter a password");
-      return;
-    }
-
-    try {
-      await invoke("update_cloud_config", {
-        enabled: true,
-        api_key: cloudTestPassword,
-        device_name: "Juno Test Agent",
-        auto_connect: true,
-      });
-      toast.success("Cloud test password set successfully");
-      setCloudTestStatus("Password set - ready for testing");
-    } catch (error) {
-      console.error("Failed to set cloud password:", error);
-      toast.error("Failed to set cloud password");
-    }
-  };
-
-  const handleTestCloudConnection = async () => {
-    setIsCloudTesting(true);
-    try {
-      const result = await invoke("test_cloud_backend_connection");
-      setCloudTestStatus(result as string);
-      toast.success("Cloud connection test completed");
-    } catch (error) {
-      console.error("Cloud test failed:", error);
-      setCloudTestStatus(`❌ Test failed: ${error}`);
-      toast.error("Cloud connection test failed");
-    } finally {
-      setIsCloudTesting(false);
-    }
-  };
-
-  // const handleGetCloudStatus = async () => {
-  //   try {
-  //     const status = await invoke(COMMANDS.CLOUD_GET_CLOUD_CONFIG_STATUS);
-  //     setCloudTestStatus(JSON.stringify(status, null, 2));
-  //     toast.success("Cloud status retrieved");
-  //   } catch (error) {
-  //     console.error("Failed to get cloud status:", error);
-  //     toast.error("Failed to get cloud status");
-  //   }
-  // };
-
-  const handleStartCloudConnector = async () => {
-    try {
-      setIsCloudTesting(true);
-      await invoke(COMMANDS.CLOUD_START_PRODUCTION_CLOUD_CONNECTOR);
-      setCloudTestStatus("✅ Cloud connector started successfully");
-      toast.success("Cloud connector started");
-    } catch (error) {
-      console.error("Failed to start cloud connector:", error);
-      setCloudTestStatus(`❌ Failed to start: ${error}`);
-      toast.error("Failed to start cloud connector");
-    } finally {
-      setIsCloudTesting(false);
-    }
-  };
-
-  const handleStopCloudConnector = async () => {
-    try {
-      setIsCloudTesting(true);
-      await invoke(COMMANDS.CLOUD_STOP_PRODUCTION_CLOUD_CONNECTOR);
-      setCloudTestStatus("🛑 Cloud connector stopped");
-      toast.success("Cloud connector stopped");
-    } catch (error) {
-      console.error("Failed to stop cloud connector:", error);
-      setCloudTestStatus(`❌ Failed to stop: ${error}`);
-      toast.error("Failed to stop cloud connector");
-    } finally {
-      setIsCloudTesting(false);
-    }
-  };
-
-  const handleGetProductionCloudStatus = async () => {
-    try {
-      const status = await invoke(COMMANDS.CLOUD_GET_PRODUCTION_CLOUD_STATUS);
-      setCloudTestStatus(JSON.stringify(status, null, 2));
-      toast.success("Production cloud status retrieved");
-    } catch (error) {
-      console.error("Failed to get production cloud status:", error);
-      toast.error("Failed to get production cloud status");
     }
   };
 
@@ -552,129 +459,10 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
         </SettingsGroup>
       )}
 
-      {/* Cloud Control Testing */}
-      <SettingsGroup
-        title="Cloud Control Testing"
-        footer="Set an API key and start the cloud connector to enable remote agent control"
-      >
-        <SettingsRow
-          htmlFor="cloud-test-password"
-          label="Cloud Test Password/API Key"
-          below={
-            <div className="flex gap-2">
-              <Input
-                id="cloud-test-password"
-                type="password"
-                value={cloudTestPassword}
-                onChange={(e) => setCloudTestPassword(e.target.value)}
-                placeholder="Enter test password or API key"
-                className="flex-1"
-              />
-              <Button
-                onClick={handleSetCloudPassword}
-                disabled={!cloudTestPassword.trim()}
-                className="flex items-center gap-2"
-              >
-                <Save size={16} />
-                Set Password
-              </Button>
-            </div>
-          }
-        />
-
-        <SettingsRow
-          below={
-            <div className="flex gap-2 flex-wrap">
-              <Button
-                onClick={handleTestCloudConnection}
-                disabled={isCloudTesting}
-                className="flex items-center gap-2"
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${isCloudTesting ? "animate-spin" : ""}`}
-                />
-                Test Health
-              </Button>
-              <Button
-                onClick={handleStartCloudConnector}
-                disabled={isCloudTesting}
-                className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
-              >
-                <CheckCircle size={16} />
-                Start Connector
-              </Button>
-              <Button
-                onClick={handleStopCloudConnector}
-                disabled={isCloudTesting}
-                variant="destructive"
-                className="flex items-center gap-2"
-              >
-                <RefreshCw size={16} />
-                Stop Connector
-              </Button>
-              <Button
-                onClick={handleGetProductionCloudStatus}
-                variant="outline"
-                className="flex items-center gap-2"
-              >
-                <CheckCircle size={16} />
-                Get Status
-              </Button>
-            </div>
-          }
-        />
-
-        {cloudTestStatus && (
-          <SettingsRow
-            label="Test Status:"
-            below={
-              <div className="p-3 bg-muted/50 rounded font-mono text-sm whitespace-pre-wrap">
-                {cloudTestStatus}
-              </div>
-            }
-          />
-        )}
-
-        <SettingsRow
-          label="How to use cloud control"
-          below={
-            <div className="text-sm text-muted-foreground space-y-2">
-              <div className="space-y-2 text-xs">
-                <div className="bg-blue-50 p-3 rounded border-l-4 border-blue-400">
-                  <p className="font-medium text-blue-800">
-                    Step 1: Set API Key
-                  </p>
-                  <p className="text-blue-700">
-                    Enter any password/API key above and click "Set Password"
-                  </p>
-                </div>
-                <div className="bg-green-50 p-3 rounded border-l-4 border-green-400">
-                  <p className="font-medium text-green-800">
-                    Step 2: Start Connector
-                  </p>
-                  <p className="text-green-700">
-                    Click "Start Connector" to connect your Juno app to the
-                    cloud backend
-                  </p>
-                </div>
-                <div className="bg-purple-50 p-3 rounded border-l-4 border-purple-400">
-                  <p className="font-medium text-purple-800">
-                    Step 3: Send Commands
-                  </p>
-                  <p className="text-purple-700">
-                    Use the WebSocket scripts in <code>/websocket-test/</code>{" "}
-                    to send agent commands
-                  </p>
-                </div>
-              </div>
-              <p className="text-xs text-amber-600 font-medium">
-                💡 Once connected, your Juno agent can be controlled remotely
-                via cloud commands!
-              </p>
-            </div>
-          }
-        />
-      </SettingsGroup>
+      {/* Cloud Control Testing UI removed for this release: the hosted cloud
+          backend is offline and cloud stays disabled by default in the backend
+          (see LAC-3729 and the 2026-09 security audit). Restore deliberately,
+          not silently, if the cloud subsystem ever ships. */}
     </div>
   );
 }

@@ -99,6 +99,7 @@ impl TokenBucket {
 }
 
 /// Rate limiter for tracking request rates per key
+#[derive(Debug)]
 pub struct RateLimiter {
     buckets: Arc<Mutex<HashMap<String, TokenBucket>>>,
     config: RateLimitConfig,

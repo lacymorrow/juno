@@ -215,9 +215,86 @@ impl DeviceAuth {
         Ok(general_purpose::STANDARD.encode(result.into_bytes()))
     }
 
-    /// Verify signature from cloud
+    /// Verify signature from cloud.
+    /// Uses HMAC's built-in constant-time verification (via the `subtle` crate
+    /// under the hood) so signature comparison cannot leak timing information.
     pub fn verify_signature(&self, data: &str, signature: &str) -> Result<bool, CloudError> {
-        let expected_signature = self.create_signature(data)?;
-        Ok(expected_signature == signature)
+        let creds = self
+            .credentials
+            .as_ref()
+            .ok_or_else(|| CloudError::SecurityError("No credentials for signing".to_string()))?;
+
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+
+        type HmacSha256 = Hmac<Sha256>;
+
+        // A signature that is not valid base64 can never match; treat as invalid.
+        let signature_bytes = match general_purpose::STANDARD.decode(signature) {
+            Ok(bytes) => bytes,
+            Err(_) => return Ok(false),
+        };
+
+        let mut mac = HmacSha256::new_from_slice(creds.api_key.as_bytes())
+            .map_err(|e| CloudError::SecurityError(format!("Failed to create HMAC: {}", e)))?;
+        mac.update(data.as_bytes());
+
+        Ok(mac.verify_slice(&signature_bytes).is_ok())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn auth_with_credentials(api_key: &str) -> DeviceAuth {
+        let mut auth = DeviceAuth::new(CloudConfig::default());
+        auth.set_credentials(CloudCredentials {
+            device_id: "test-device".to_string(),
+            api_key: api_key.to_string(),
+            token: None,
+            expires_at: None,
+        });
+        auth
+    }
+
+    #[test]
+    fn verify_signature_accepts_valid_signature() {
+        let auth = auth_with_credentials("test-key");
+        let data = "payload with unicode: héllo 🚀";
+        let signature = auth.create_signature(data).expect("signing should work");
+        assert!(auth
+            .verify_signature(data, &signature)
+            .expect("verify should not error"));
+    }
+
+    #[test]
+    fn verify_signature_rejects_tampered_data() {
+        let auth = auth_with_credentials("test-key");
+        let signature = auth
+            .create_signature("original data")
+            .expect("signing should work");
+        assert!(!auth
+            .verify_signature("tampered data", &signature)
+            .expect("verify should not error"));
+    }
+
+    #[test]
+    fn verify_signature_rejects_wrong_key() {
+        let signer = auth_with_credentials("key-a");
+        let verifier = auth_with_credentials("key-b");
+        let data = "payload";
+        let signature = signer.create_signature(data).expect("signing should work");
+        assert!(!verifier
+            .verify_signature(data, &signature)
+            .expect("verify should not error"));
+    }
+
+    #[test]
+    fn verify_signature_rejects_invalid_base64() {
+        let auth = auth_with_credentials("test-key");
+        assert!(!auth
+            .verify_signature("payload", "not-valid-base64!!!")
+            .expect("verify should not error"));
     }
 }
