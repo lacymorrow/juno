@@ -2,60 +2,35 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Basic key to ensure the entitlements file is valid -->
+    <!-- JIT for the WKWebView-hosted frontend under hardened runtime -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
 
-    <!-- Accessibility permissions -->
+    <!-- Apple Events: required for AppleScript-driven automation (media control, app scripting) -->
     <key>com.apple.security.automation.apple-events</key>
     <true/>
 
-    <!-- Allow unsigned executable memory for accessibility APIs -->
-    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
-
-    <!-- Disable hardened runtime restrictions that might interfere with accessibility -->
+    <!-- Library validation stays disabled: whisper/Metal dylibs from the
+         voice-transcription plugin are not signed with our Team ID -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 
-    <!-- Allow DYLD environment variables for runtime loading -->
-    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <!-- Hardened-runtime microphone access for native voice recording -->
+    <key>com.apple.security.device.audio-input</key>
     <true/>
 
-    <!-- Screen recording permissions -->
+    <!-- Hardened-runtime camera access -->
     <key>com.apple.security.device.camera</key>
     <true/>
 
-    <!-- Microphone permissions -->
-    <key>com.apple.security.device.microphone</key>
-    <true/>
-
-    <!-- Location access for contextual queries (weather, timezone) -->
-    <key>com.apple.security.personal-information.location</key>
-    <true/>
-
-    <!-- Network access for cloud features -->
-    <key>com.apple.security.network.client</key>
-    <true/>
-
-    <!-- File access for user data -->
-    <key>com.apple.security.files.user-selected.read-write</key>
-    <true/>
-
-    <!-- Input monitoring for global shortcuts (CRITICAL) -->
-    <key>com.apple.security.input-monitoring</key>
-    <true/>
-
-    <!-- Allow system extension loading for low-level system access -->
-    <key>com.apple.security.system-extension</key>
-    <true/>
-
-    <!-- Full disk access (optional but helps with file operations) -->
-    <key>com.apple.security.files.downloads.read-write</key>
-    <true/>
-
-    <!-- Additional automation permissions -->
-    <key>com.apple.security.automation.scripting-targets</key>
-    <true/>
+    <!-- 2026-09 security audit cleanup. Removed:
+         - cs.allow-unsigned-executable-memory and cs.allow-dyld-environment-variables
+           (code-injection vectors; not needed for accessibility APIs)
+         - device.microphone, personal-information.location, network.client,
+           files.user-selected.read-write, files.downloads.read-write
+           (App Sandbox-only keys; inert without com.apple.security.app-sandbox)
+         - input-monitoring (not a real entitlement; Input Monitoring is TCC-only)
+         - system-extension (wrong key name; we ship no system extension)
+         - automation.scripting-targets (takes a dict of targets, not <true/>) -->
 </dict>
 </plist>

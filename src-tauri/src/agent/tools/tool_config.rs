@@ -267,6 +267,7 @@ impl ToolConfigManager {
                 auto_start: settings_server.auto_start,
                 timeout_seconds: settings_server.timeout_seconds,
                 max_retries: settings_server.max_retries,
+                approved: settings_server.approved,
             };
             mcp_servers.insert(settings_server.id.clone(), server_config);
         }
@@ -332,6 +333,7 @@ impl ToolConfigManager {
                 auto_start: server_config.auto_start,
                 timeout_seconds: server_config.timeout_seconds,
                 max_retries: server_config.max_retries,
+                approved: server_config.approved,
             };
             mcp_servers.push(settings_server);
         }
@@ -773,6 +775,23 @@ impl ToolConfigManager {
     /// * `config` - Updated server configuration
     pub fn update_mcp_server(&mut self, config: MCPServerConfig) {
         self.mcp_servers.insert(config.id.clone(), config);
+    }
+
+    /// Approve an MCP server (by name) to spawn its configured command.
+    /// Returns true if a matching server was found. This is the persisted half
+    /// of the explicit spawn-approval gate (2026-09 security audit).
+    ///
+    /// # Arguments
+    /// * `server_name` - Name of the server to approve
+    pub fn approve_mcp_server(&mut self, server_name: &str) -> bool {
+        let mut found = false;
+        for config in self.mcp_servers.values_mut() {
+            if config.name == server_name {
+                config.approved = true;
+                found = true;
+            }
+        }
+        found
     }
 
     /// Add tools from an MCP server

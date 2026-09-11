@@ -29,6 +29,12 @@ pub struct MCPServerConfig {
     pub auto_start: bool,
     pub timeout_seconds: u64,
     pub max_retries: u32,
+    /// Explicit user approval gate: an MCP server config describes an arbitrary
+    /// command to spawn, so the process is never started until the user has
+    /// approved this server (via the `approve_mcp_server` Tauri command).
+    /// Defaults to false, including for configs saved before this field existed.
+    #[serde(default)]
+    pub approved: bool,
 }
 
 impl MCPServerConfig {
@@ -45,6 +51,7 @@ impl MCPServerConfig {
             auto_start: true,
             timeout_seconds: 30,
             max_retries: 3,
+            approved: false,
         }
     }
 
@@ -262,6 +269,19 @@ impl MCPServerConnection {
             return Ok(());
         }
 
+        // Approval gate: never spawn an arbitrary configured command without
+        // explicit user approval (2026-09 security audit, MCP arbitrary spawn).
+        if !self.config.approved {
+            let err = format!(
+                "MCP server '{}' is not approved to run. Approve it first (approve_mcp_server) \
+                 before it can spawn its command: {} {:?}",
+                self.config.name, self.config.command, self.config.args
+            );
+            error!("{}", err);
+            self.status = MCPServerStatus::Error(err.clone());
+            return Err(err);
+        }
+
         // Start the server process
         let mut command = Command::new(&self.config.command);
         command.args(&self.config.args);
@@ -375,7 +395,7 @@ impl MCPServerConnection {
     async fn start_stderr_monitoring(&mut self) {
         if let Some(stderr_reader) = self.stderr_reader.take() {
             let server_name = self.config.name.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let mut reader = stderr_reader;
                 let mut line = String::new();
                 loop {
@@ -1179,6 +1199,40 @@ impl MCPManager {
     pub async fn get_server_configs(&self) -> Vec<MCPServerConfig> {
         let configs = self.configs.read().await;
         configs.values().cloned().collect()
+    }
+
+    /// Approve a server (by name) to spawn its configured command.
+    /// This is the explicit user gate required before any MCP server process
+    /// is started (2026-09 security audit).
+    pub async fn approve_server(&self, server_name: &str) -> Result<(), String> {
+        let mut found = false;
+
+        {
+            let mut configs = self.configs.write().await;
+            for config in configs.values_mut() {
+                if config.name == server_name {
+                    config.approved = true;
+                    found = true;
+                }
+            }
+        }
+
+        {
+            let mut servers = self.servers.write().await;
+            for connection in servers.values_mut() {
+                if connection.config.name == server_name {
+                    connection.config.approved = true;
+                    found = true;
+                }
+            }
+        }
+
+        if found {
+            info!("MCP server '{}' approved to spawn", server_name);
+            Ok(())
+        } else {
+            Err(format!("MCP server not found: {}", server_name))
+        }
     }
 }
 

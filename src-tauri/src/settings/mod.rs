@@ -220,6 +220,11 @@ pub struct MCPServerConfig {
     pub auto_start: bool,
     pub timeout_seconds: u64,
     pub max_retries: u32,
+    /// Explicit user approval to spawn this server's command (defaults to
+    /// false for configs saved before this field existed). See
+    /// `agent::tools::mcp_integration::MCPServerConfig::approved`.
+    #[serde(default)]
+    pub approved: bool,
 }
 
 /// Prompt configuration and templates
@@ -391,7 +396,8 @@ impl Default for CloudSettings {
             reconnect_interval: 30,
             heartbeat_interval: 60,
             command_timeout: 30,
-            security_level: "low".to_string(),
+            // New configs default to the most restrictive level (2026-09 security audit)
+            security_level: "high".to_string(),
         }
     }
 }
