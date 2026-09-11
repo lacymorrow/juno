@@ -1,22 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
+import { Eye, EyeOff, AlertCircle, Loader2, ExternalLink } from "lucide-react";
 import {
-  Accessibility,
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  Key,
-  Keyboard,
-  Monitor,
-  AlertCircle,
-  Loader2,
-  Mic,
-  Terminal,
-  ExternalLink,
-} from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { LucideIcon } from "lucide-react";
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactElement,
+} from "react";
 import { useEventListener } from "@/hooks/useEventListener";
 
 // ── Visual language ──────────────────────────────────────────────────────────
@@ -31,17 +24,20 @@ const SF_FONT =
 const FOCUS_RING =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#007AFF]/50 dark:focus-visible:ring-[#0A84FF]/50";
 
-// The single primary button (macOS assistant style: filled system blue).
-const BTN_PRIMARY = `inline-flex h-9 min-w-[200px] items-center justify-center rounded-lg bg-[#007AFF] px-5 text-[13px] font-medium text-white transition-colors hover:bg-[#0071E8] active:bg-[#0068D6] disabled:bg-muted disabled:text-muted-foreground dark:bg-[#0A84FF] dark:hover:bg-[#2B90FF] dark:active:bg-[#0074E8] ${FOCUS_RING}`;
+// The single primary button. Capsule shape — current macOS (Tahoe) push
+// buttons and every control in System Settings are capsules, not rounded rects.
+const BTN_PRIMARY = `inline-flex h-9 min-w-[200px] items-center justify-center rounded-full bg-[#007AFF] px-5 text-[13px] font-medium text-white transition-colors hover:bg-[#0071E8] active:bg-[#0068D6] disabled:bg-muted disabled:text-muted-foreground dark:bg-[#0A84FF] dark:hover:bg-[#2B90FF] dark:active:bg-[#0074E8] ${FOCUS_RING}`;
 
 // Small in-row action (permission checklist rows).
-const BTN_ROW = `inline-flex h-7 items-center justify-center rounded-md bg-[#007AFF] px-3 text-[12px] font-medium text-white transition-colors hover:bg-[#0071E8] disabled:opacity-50 dark:bg-[#0A84FF] dark:hover:bg-[#2B90FF] ${FOCUS_RING}`;
-const BTN_ROW_QUIET = `inline-flex h-7 items-center justify-center rounded-md border border-border bg-transparent px-3 text-[12px] font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 ${FOCUS_RING}`;
+const BTN_ROW = `inline-flex h-7 items-center justify-center rounded-full bg-[#007AFF] px-3.5 text-[12px] font-medium text-white transition-colors hover:bg-[#0071E8] disabled:opacity-50 dark:bg-[#0A84FF] dark:hover:bg-[#2B90FF] ${FOCUS_RING}`;
+const BTN_ROW_QUIET = `inline-flex h-7 items-center justify-center rounded-full border border-border bg-transparent px-3.5 text-[12px] font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 ${FOCUS_RING}`;
 
 // Plain text link (skip affordances).
 const LINK_QUIET = `rounded px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground ${FOCUS_RING}`;
 
-const GREEN = "text-[#1E8E3E] dark:text-[#30D158]";
+// Apple systemGreen — used only as the fill of check glyphs, never as text
+// (System Settings marks success with a green check beside gray text).
+const GREEN = "text-[#34C759] dark:text-[#30D158]";
 
 // Permission status interface matching backend (snake_case)
 interface PermissionStatus {
@@ -69,24 +65,135 @@ interface PermissionsState {
 // (auto_grant_permissions) can flip the remaining toggles itself. `stateKey` maps
 // to the backend PermissionsState; the request command's first call shows the
 // native prompt when one exists, later calls open the exact Settings pane.
+// ── Hand-drawn glyphs ────────────────────────────────────────────────────────
+// Drawn on a 24pt grid to echo the REAL System Settings privacy icons (filled
+// forms, SF-weight strokes) rather than a generic icon pack — the tiles should
+// read as the same rows the user is about to see in Settings. Verified against
+// the current macOS Privacy & Security pane. All inherit currentColor.
+type GlyphProps = { className?: string; style?: CSSProperties };
+type GlyphComponent = (props: GlyphProps) => ReactElement;
+
+/** Person-in-circle — the universal Accessibility mark. */
+const AccessibilityGlyph: GlyphComponent = (props) => (
+  <svg viewBox="0 0 24 24" aria-hidden {...props}>
+    <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <circle cx="12" cy="7" r="1.85" fill="currentColor" />
+    <path
+      d="M6.9 10.2c1.7.5 3.4.75 5.1.75s3.4-.25 5.1-.75M12 10.95v3M12 13.95l-1.95 4.4M12 13.95l1.95 4.4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+/** Filled display with stand — Screen & System Audio Recording. */
+const ScreenGlyph: GlyphComponent = (props) => (
+  <svg viewBox="0 0 24 24" aria-hidden {...props}>
+    <rect x="3.2" y="4.6" width="17.6" height="11.5" rx="1.9" fill="currentColor" />
+    <path d="M10.7 16.1h2.6v2.1h-2.6z" fill="currentColor" />
+    <rect x="7.4" y="18.2" width="9.2" height="1.7" rx="0.85" fill="currentColor" />
+  </svg>
+);
+
+/** Filled mic capsule with bracket and base. */
+const MicGlyph: GlyphComponent = (props) => (
+  <svg viewBox="0 0 24 24" aria-hidden {...props}>
+    <rect x="9.5" y="2.6" width="5" height="10.2" rx="2.5" fill="currentColor" />
+    <path
+      d="M6.7 10.4v1.4a5.3 5.3 0 0 0 10.6 0v-1.4M12 17.2v2.6M8.9 20.9h6.2"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+/** Keyboard with key rows and space bar — Input Monitoring. */
+const KeyboardGlyph: GlyphComponent = (props) => (
+  <svg viewBox="0 0 24 24" aria-hidden {...props}>
+    <rect x="2.9" y="6.4" width="18.2" height="11" rx="1.9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    {[6.2, 9.1, 12, 14.9, 17.8].map((x) => (
+      <rect key={`a${x}`} x={x - 0.75} y="8.9" width="1.5" height="1.5" rx="0.35" fill="currentColor" />
+    ))}
+    {[7.65, 10.55, 13.45, 16.35].map((x) => (
+      <rect key={`b${x}`} x={x - 0.75} y="11.6" width="1.5" height="1.5" rx="0.35" fill="currentColor" />
+    ))}
+    <rect x="7.6" y="14.3" width="8.8" height="1.5" rx="0.75" fill="currentColor" />
+  </svg>
+);
+
+/** Vertical key with round bow and two teeth (SF key style). */
+const KeyGlyph: GlyphComponent = (props) => (
+  <svg viewBox="0 0 24 24" aria-hidden {...props}>
+    <circle cx="12" cy="7" r="3.5" fill="none" stroke="currentColor" strokeWidth="2.1" />
+    <path
+      d="M12 10.5v8.4M12 15.1h2.7M12 18.7h2.2"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.1"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+/** Prompt chevron and command line — Terminal. */
+const TerminalGlyph: GlyphComponent = (props) => (
+  <svg viewBox="0 0 24 24" aria-hidden {...props}>
+    <path
+      d="m6 7.6 4.6 4.1L6 15.8M12.9 16.4h5.2"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+/** Filled green circle with a white check — how macOS lists mark "done". */
+const CheckGlyph: GlyphComponent = (props) => (
+  <svg viewBox="0 0 24 24" aria-hidden {...props}>
+    <circle cx="12" cy="12" r="10" fill="currentColor" />
+    <path
+      d="m7.7 12.4 2.9 2.9 5.8-6"
+      fill="none"
+      stroke="#fff"
+      strokeWidth="2.1"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 interface PermissionDef {
   stateKey: "accessibility" | "screen_recording" | "microphone" | "input_monitoring";
   title: string;
   why: string;
-  icon: LucideIcon;
-  /** System Settings-style icon tile color (Apple system palette). */
+  icon: GlyphComponent;
+  /** System Settings-style icon tile color (Apple system palette, light). */
   tint: string;
+  /** Dark-mode tile color — Apple shifts every tile tint in dark mode. */
+  tintDark: string;
   required: boolean;
   hasPrompt: boolean;
 }
 
+// Tile tints follow the real Privacy & Security list: Accessibility is system
+// blue, Microphone is system orange, and the system-access cluster (Screen
+// Recording, Input Monitoring, Full Disk Access…) shares graphite squircles —
+// repeated graphite IS the native look; a rainbow of invented tints is not.
 const PERMISSION_FLOW: PermissionDef[] = [
   {
     stateKey: "accessibility",
     title: "Accessibility",
     why: "Lets Juno click, type, and move the cursor for you.",
-    icon: Accessibility,
+    icon: AccessibilityGlyph,
     tint: "#007AFF",
+    tintDark: "#0A84FF",
     required: true,
     hasPrompt: false,
   },
@@ -94,8 +201,9 @@ const PERMISSION_FLOW: PermissionDef[] = [
     stateKey: "screen_recording",
     title: "Screen Recording",
     why: "Lets Juno see what's on screen so it knows what to do.",
-    icon: Monitor,
-    tint: "#30B0C7",
+    icon: ScreenGlyph,
+    tint: "#48484E",
+    tintDark: "#63636B",
     required: true,
     hasPrompt: true,
   },
@@ -103,8 +211,9 @@ const PERMISSION_FLOW: PermissionDef[] = [
     stateKey: "microphone",
     title: "Microphone",
     why: "Lets you talk to Juno instead of typing.",
-    icon: Mic,
+    icon: MicGlyph,
     tint: "#FF9500",
+    tintDark: "#FF9F0A",
     required: false,
     hasPrompt: true,
   },
@@ -112,8 +221,9 @@ const PERMISSION_FLOW: PermissionDef[] = [
     stateKey: "input_monitoring",
     title: "Input Monitoring",
     why: "Lets your keyboard shortcut reach Juno from any app.",
-    icon: Keyboard,
-    tint: "#8E8E93",
+    icon: KeyboardGlyph,
+    tint: "#48484E",
+    tintDark: "#63636B",
     required: false,
     hasPrompt: false,
   },
@@ -135,27 +245,33 @@ const AUTO_STAGE_COPY: Record<string, string> = {
 };
 
 /** macOS System Settings-style icon tile: a small rounded square in an Apple
- *  system color with a white glyph. Matches the Settings window's sidebar. */
+ *  system color with a white glyph. Matches the Settings window's own list.
+ *  The tint shifts between themes via CSS variables, the way Apple's do. */
 function IconTile({
   icon: Icon,
   tint,
+  tintDark,
   size = 28,
 }: {
-  icon: LucideIcon;
+  icon: GlyphComponent;
   tint: string;
+  tintDark?: string;
   size?: number;
 }) {
   return (
     <span
       aria-hidden
-      className="flex shrink-0 items-center justify-center rounded-[7px] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)]"
-      style={{ backgroundColor: tint, width: size, height: size }}
+      className="flex shrink-0 items-center justify-center rounded-[7px] bg-[var(--tile)] text-white shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.12)] dark:bg-[var(--tile-dark)]"
+      style={
+        {
+          width: size,
+          height: size,
+          "--tile": tint,
+          "--tile-dark": tintDark ?? tint,
+        } as CSSProperties
+      }
     >
-      <Icon
-        className="text-white"
-        strokeWidth={2}
-        style={{ width: size * 0.58, height: size * 0.58 }}
-      />
+      <Icon style={{ width: size * 0.64, height: size * 0.64 }} />
     </span>
   );
 }
@@ -189,9 +305,8 @@ const getOnboardingSteps = (
     description: isDevelopmentMode
       ? "Juno helps you automate tasks, manage your workflow, and get more done with your Mac. You're running in development mode, so onboarding will always show on startup."
       : "Talk to your Mac and it gets things done. Setup takes about a minute.",
-    icon: (
-      <img src="/juno.png" alt="Juno" className="h-24 w-24 object-contain drop-shadow-sm" />
-    ),
+    // No shadow on the app icon — Apple setup assistants never shadow them.
+    icon: <img src="/juno.png" alt="Juno" className="h-24 w-24 object-contain" />,
     action: "Get Started",
   },
   // Onboarding stays as short as possible: only what the app needs to function
@@ -206,7 +321,7 @@ const getOnboardingSteps = (
           title: "Connect Your AI",
           description:
             "Use your Claude subscription, or paste an API key from Anthropic, OpenAI, or Google.",
-          icon: <IconTile icon={Key} tint="#8E8E93" size={48} />,
+          icon: <IconTile icon={KeyGlyph} tint="#8E8E93" tintDark="#98989D" size={48} />,
           action: "Continue",
         },
       ]),
@@ -307,12 +422,13 @@ function KeyboardShortcutDisplay({
     <div className="my-8 flex items-center justify-center gap-3">
       {keys.map((keySymbol, index) => (
         <div key={index} className="flex items-center gap-3">
-          {/* macOS-style key cap: flat fill, hairline border, subtle base edge. */}
+          {/* macOS-style key cap: flat fill, hairline border, subtle base edge.
+              Proportions follow the Keyboard Viewer (shallower than square). */}
           <div
-            className={`flex h-12 min-w-[48px] items-center justify-center rounded-lg border px-3 text-[15px] font-medium transition-colors duration-150 ${
+            className={`flex h-11 min-w-[44px] items-center justify-center rounded-[9px] border px-3 text-[14px] font-medium transition-colors duration-150 ${
               isActivated
                 ? "border-[#007AFF] bg-[#007AFF] text-white dark:border-[#0A84FF] dark:bg-[#0A84FF]"
-                : "border-border bg-muted/40 text-foreground shadow-[inset_0_-1.5px_0_rgba(0,0,0,0.06)] dark:shadow-[inset_0_-1.5px_0_rgba(0,0,0,0.4)]"
+                : "border-border bg-muted/40 text-foreground shadow-[inset_0_-1px_0_rgba(0,0,0,0.06)] dark:shadow-[inset_0_-1px_0_rgba(0,0,0,0.4)]"
             }`}
           >
             {keySymbol}
@@ -322,9 +438,7 @@ function KeyboardShortcutDisplay({
           )}
         </div>
       ))}
-      {isActivated && (
-        <CheckCircle2 className={`h-5 w-5 ${GREEN}`} aria-hidden />
-      )}
+      {isActivated && <CheckGlyph className={`h-5 w-5 ${GREEN}`} />}
     </div>
   );
 }
@@ -343,16 +457,17 @@ function SettingsToggleDemo() {
 
   return (
     <div aria-hidden className="mb-4 flex justify-center">
-      <div className="w-[300px] rounded-[10px] border border-border bg-card px-3 py-2.5 shadow-sm">
+      <div className="w-[300px] rounded-xl border border-border bg-card px-3 py-2.5 shadow-sm">
         <div className="relative flex items-center gap-2.5">
           <img src="/juno.png" alt="" className="h-5 w-5 object-contain" />
           <span className="flex-1 text-left text-[13px] text-foreground">Juno</span>
 
-          {/* macOS-style switch */}
-          <div className="relative h-[22px] w-[38px]">
+          {/* macOS-style switch — 36×20 with a 16pt knob, measured against the
+              real System Settings toggles rather than the iOS 51×31 size. */}
+          <div className="relative h-[20px] w-[36px]">
             {prefersReducedMotion ? (
               <div className="h-full w-full rounded-full bg-[#007AFF] dark:bg-[#0A84FF]">
-                <div className="absolute top-[2px] h-[18px] w-[18px] translate-x-[18px] rounded-full bg-white shadow-sm" />
+                <div className="absolute top-[2px] h-[16px] w-[16px] translate-x-[18px] rounded-full bg-white shadow-sm" />
               </div>
             ) : (
               <>
@@ -372,7 +487,7 @@ function SettingsToggleDemo() {
                   transition={{ duration: CYCLE, times: TIMES, repeat: Infinity, ease: "easeInOut" }}
                 />
                 <motion.div
-                  className="absolute top-[2px] h-[18px] w-[18px] rounded-full bg-white shadow-sm"
+                  className="absolute top-[2px] h-[16px] w-[16px] rounded-full bg-white shadow-sm"
                   animate={{ x: [2, 2, 2, 2, 18, 18, 2] }}
                   transition={{ duration: CYCLE, times: TIMES, repeat: Infinity, ease: "easeInOut" }}
                 />
@@ -385,7 +500,7 @@ function SettingsToggleDemo() {
                 width="17"
                 height="22"
                 viewBox="0 0 13 20"
-                className="absolute left-[10px] top-[10px] z-10"
+                className="absolute left-[9px] top-[9px] z-10"
                 animate={{
                   x: [-130, -130, 0, 0, 0, 0, -130],
                   y: [64, 64, 0, 0, 0, 0, 64],
@@ -448,7 +563,7 @@ function PermissionRow({
             <span className="text-[11px] text-muted-foreground">Optional</span>
           )}
         </div>
-        <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{def.why}</p>
+        <p className="mt-px text-[12px] leading-[1.4] text-muted-foreground">{def.why}</p>
         {active && waiting && !granted && (
           <p className="mt-1.5 flex items-center gap-1.5 text-[12px] text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
@@ -464,7 +579,9 @@ function PermissionRow({
       </div>
       <div className="flex shrink-0 items-center gap-2 pt-0.5">
         {granted ? (
-          <CheckCircle2 className={`h-[18px] w-[18px] ${GREEN}`} aria-label="Granted" />
+          <span role="img" aria-label="Granted">
+            <CheckGlyph className={`h-[18px] w-[18px] ${GREEN}`} />
+          </span>
         ) : active ? (
           <>
             {!def.required && (
@@ -1356,7 +1473,7 @@ export default function OnboardingFlow({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-background"
-      style={{ fontFamily: SF_FONT }}
+      style={{ fontFamily: SF_FONT, WebkitFontSmoothing: "antialiased" } as CSSProperties}
     >
       <div className="max-h-[90vh] w-full max-w-[520px] overflow-y-auto px-8 py-10">
         {/* Progress: a macOS-style page control. Only the current page is dark. */}
@@ -1402,7 +1519,7 @@ export default function OnboardingFlow({
                 </h2>
               </div>
 
-              <p className="mx-auto max-w-[42ch] text-[13px] leading-relaxed text-muted-foreground">
+              <p className="mx-auto max-w-[42ch] text-[13px] leading-[1.45] text-muted-foreground">
                 {step.description}
               </p>
 
@@ -1460,7 +1577,7 @@ export default function OnboardingFlow({
                 <div className="space-y-3 pt-4 text-left">
                   {/* Claude CLI card */}
                   <div
-                    className={`rounded-[10px] border p-4 transition-colors ${
+                    className={`rounded-xl border p-4 transition-colors ${
                       cliSelected
                         ? "border-[#007AFF] bg-[#007AFF]/[0.06] dark:border-[#0A84FF] dark:bg-[#0A84FF]/[0.10] cursor-pointer"
                         : cliAvailable && cliAuthenticated
@@ -1477,14 +1594,16 @@ export default function OnboardingFlow({
                     } : undefined}
                   >
                     <div className="flex items-start gap-3">
-                      <IconTile icon={Terminal} tint="#3A3A3C" />
+                      <IconTile icon={TerminalGlyph} tint="#2C2C2E" tintDark="#3A3A3C" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-[13px] font-medium text-foreground">
                             Use your Claude subscription
                           </span>
                           {cliSelected && (
-                            <CheckCircle2 className="h-4 w-4 text-[#007AFF] dark:text-[#0A84FF]" aria-label="Selected" />
+                            <span role="img" aria-label="Selected">
+                              <CheckGlyph className="h-4 w-4 text-[#007AFF] dark:text-[#0A84FF]" />
+                            </span>
                           )}
                         </div>
                         <p className="mt-0.5 text-[12px] text-muted-foreground">
@@ -1496,8 +1615,10 @@ export default function OnboardingFlow({
                               <Loader2 className="h-3 w-3 animate-spin" /> Checking
                             </span>
                           ) : cliAvailable && cliAuthenticated ? (
-                            <span className={`inline-flex items-center gap-1.5 ${GREEN}`}>
-                              <CheckCircle2 className="h-3 w-3" /> Detected and signed in
+                            // Green check beside gray text — how System Settings
+                            // marks status; green text itself is not native.
+                            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                              <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> Detected and signed in
                             </span>
                           ) : cliAvailable ? (
                             <span className="inline-flex items-center gap-1.5 text-muted-foreground">
@@ -1533,7 +1654,7 @@ export default function OnboardingFlow({
                       value={apiKey}
                       onChange={(e) => handleApiKeyChange(e.target.value)}
                       placeholder="Paste your API key"
-                      className={`h-10 w-full rounded-lg border border-border bg-card px-3 pr-10 font-mono text-[13px] text-foreground placeholder:font-sans placeholder:text-muted-foreground transition-colors focus:border-[#007AFF] dark:focus:border-[#0A84FF] ${FOCUS_RING}`}
+                      className={`h-10 w-full rounded-[10px] border border-border bg-card px-3 pr-10 font-mono text-[13px] text-foreground placeholder:font-sans placeholder:text-muted-foreground transition-colors focus:border-[#007AFF] dark:focus:border-[#0A84FF] ${FOCUS_RING}`}
                       spellCheck={false}
                       autoComplete="off"
                       aria-label="API key"
@@ -1558,12 +1679,12 @@ export default function OnboardingFlow({
                     {apiKeyError ? (
                       <span className="text-red-600 dark:text-red-400">Couldn't save: {apiKeyError}</span>
                     ) : apiKeySaved ? (
-                      <span className={`inline-flex items-center gap-1.5 ${GREEN}`}>
-                        <CheckCircle2 className="h-3 w-3" /> Saved — {detectedProvider?.name} is your active provider
+                      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                        <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> Saved — {detectedProvider?.name} is your active provider
                       </span>
                     ) : detectedProvider ? (
-                      <span className={`inline-flex items-center gap-1.5 ${GREEN}`}>
-                        <CheckCircle2 className="h-3 w-3" /> {detectedProvider.name} key detected
+                      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                        <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> {detectedProvider.name} key detected
                       </span>
                     ) : apiKey.trim().length > 0 ? (
                       <span className="inline-flex items-center gap-1.5 text-muted-foreground">
@@ -1601,7 +1722,7 @@ export default function OnboardingFlow({
                         !permissionsState.accessibility.granted && <SettingsToggleDemo />}
 
                       {/* The inset group, matching the Settings window. */}
-                      <div className="divide-y divide-border overflow-hidden rounded-[10px] border border-border bg-card">
+                      <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
                         {PERMISSION_FLOW.map((def, i) => (
                           <PermissionRow
                             key={def.stateKey}
