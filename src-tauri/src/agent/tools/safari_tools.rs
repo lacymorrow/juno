@@ -140,6 +140,30 @@ fn validate_javascript_safety(javascript: &str) -> Result<(), AgentError> {
     Ok(())
 }
 
+/// Validates that a navigation URL is a well-formed http(s) URL.
+///
+/// Safari's `set URL` AppleScript happily executes `javascript:` URLs in the
+/// page context and opens `file:` and `data:` URLs, so navigation must be
+/// restricted to web schemes (audit 2026-02-08 item #16). The URL is parsed
+/// with the `url` crate and the scheme compared exactly; substring checks like
+/// `starts_with("http")` would accept schemes such as `httpx:` or allow
+/// leading-whitespace tricks.
+///
+/// Returns the canonical serialization of the parsed URL on success so callers
+/// navigate to exactly what was validated.
+pub fn validate_navigation_url(raw_url: &str) -> Result<String, AgentError> {
+    let parsed = url::Url::parse(raw_url.trim())
+        .map_err(|e| AgentError::InputError(format!("Invalid URL '{}': {}", raw_url.trim(), e)))?;
+
+    match parsed.scheme() {
+        "http" | "https" => Ok(parsed.to_string()),
+        other => Err(AgentError::InputError(format!(
+            "URL scheme '{}' is not allowed for navigation; only http and https are permitted",
+            other
+        ))),
+    }
+}
+
 /// Safari Tools - Provides Safari-specific JavaScript injection and DOM automation
 #[derive(Debug)]
 pub struct SafariTools {
@@ -609,10 +633,14 @@ if (element) {{
     }
 
     /// Navigates Safari to a URL
+    ///
+    /// Only http/https URLs are accepted; `javascript:`, `file:`, and `data:`
+    /// URLs are rejected before any AppleScript runs (audit item #16).
     pub fn navigate_to_url(&self, url: &str) -> Result<Value, AgentError> {
+        let url = validate_navigation_url(url)?;
         log::info!("Navigating Safari to URL: {}", url);
 
-        let escaped_url = escape_for_applescript(url);
+        let escaped_url = escape_for_applescript(&url);
         let applescript = format!(
             r#"tell application "Safari" to set URL of current tab of first window to "{}""#,
             escaped_url
@@ -951,6 +979,61 @@ mod tests {
         // Test acceptable length
         let ok_js = "a".repeat(10000);
         assert!(validate_javascript_safety(&ok_js).is_ok());
+    }
+
+    #[test]
+    fn test_validate_navigation_url_accepts_web_schemes() {
+        assert_eq!(
+            validate_navigation_url("https://example.com")
+                .ok()
+                .as_deref(),
+            Some("https://example.com/")
+        );
+        assert_eq!(
+            validate_navigation_url("http://example.com/path?q=1")
+                .ok()
+                .as_deref(),
+            Some("http://example.com/path?q=1")
+        );
+        // Leading/trailing whitespace is trimmed, not a bypass
+        assert_eq!(
+            validate_navigation_url("  https://example.com  ")
+                .ok()
+                .as_deref(),
+            Some("https://example.com/")
+        );
+        // Scheme comparison is on the parsed URL, so case-variant schemes
+        // normalize rather than slip through
+        assert_eq!(
+            validate_navigation_url("HTTPS://example.com")
+                .ok()
+                .as_deref(),
+            Some("https://example.com/")
+        );
+    }
+
+    #[test]
+    fn test_validate_navigation_url_rejects_dangerous_schemes() {
+        assert!(validate_navigation_url("javascript:alert(document.cookie)").is_err());
+        assert!(validate_navigation_url("JavaScript:alert(1)").is_err());
+        assert!(validate_navigation_url("file:///etc/passwd").is_err());
+        assert!(validate_navigation_url("data:text/html,<script>alert(1)</script>").is_err());
+        assert!(validate_navigation_url("ftp://example.com").is_err());
+        assert!(validate_navigation_url("vbscript:msgbox(1)").is_err());
+        assert!(validate_navigation_url("about:blank").is_err());
+    }
+
+    #[test]
+    fn test_validate_navigation_url_rejects_lookalikes_and_garbage() {
+        // Substring checks would accept these; a parsed scheme match must not
+        assert!(validate_navigation_url("httpx://example.com").is_err());
+        assert!(validate_navigation_url("https-not-really://example.com").is_err());
+        // Scheme-relative and bare hosts are not absolute http(s) URLs
+        assert!(validate_navigation_url("//example.com").is_err());
+        assert!(validate_navigation_url("example.com").is_err());
+        assert!(validate_navigation_url("").is_err());
+        assert!(validate_navigation_url("   ").is_err());
+        assert!(validate_navigation_url("javascript\t:alert(1)").is_err());
     }
 
     #[test]
