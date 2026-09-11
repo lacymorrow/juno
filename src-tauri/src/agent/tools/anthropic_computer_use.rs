@@ -645,6 +645,12 @@ impl SecurityConfig {
 }
 
 /// Validates file path for security concerns
+///
+/// Beyond the fast string checks, the path is canonicalized (resolving `..`
+/// segments and symlinks) and must resolve inside an allowed workspace root:
+/// the process working directory or the agent's `~/Juno` output directory.
+/// This closes the bypass where absolute paths like `/etc/anything` passed
+/// the string-only checks (security audit 2026-02-08, items #13/#14).
 fn validate_file_path(path: &str, config: &SecurityConfig) -> Result<PathBuf, String> {
     // Check for path traversal attempts
     if path.contains("../") || path.contains("..\\") {
@@ -666,7 +672,9 @@ fn validate_file_path(path: &str, config: &SecurityConfig) -> Result<PathBuf, St
         }
     }
 
-    Ok(path_buf)
+    // Canonicalize and enforce the workspace boundary (shared helper, same
+    // roots as basic_tools plus ~/Juno). Fails closed if no root resolves.
+    crate::agent::tools::path_security::resolve_within_default_roots(path)
 }
 
 /// Validates file size against security limits

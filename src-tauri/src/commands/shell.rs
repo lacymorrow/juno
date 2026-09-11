@@ -237,67 +237,7 @@ impl ShellSession {
 
     /// Validate command for basic security - prevent catastrophic and unsafe redirections/paths
     fn validate_command(&self, command: &str) -> Result<(), String> {
-        // Reject commands that are too long (potential buffer overflow)
-        if command.len() > 10000 {
-            return Err("Command is too long".to_string());
-        }
-
-        // Only check for truly catastrophic patterns
-        let catastrophic_patterns = [
-            "rm -rf /",                    // Delete entire filesystem
-            "rm -rf /*",                   // Delete entire filesystem
-            ":(){ :|:& };:",               // Fork bomb
-            "> /dev/sda",                  // Overwrite disk
-            "dd if=/dev/zero of=/dev/sda", // Wipe disk
-            "mkfs.ext4 /dev/sda",          // Format main disk
-        ];
-
-        let cmd_lower = command.to_lowercase();
-        for pattern in &catastrophic_patterns {
-            if cmd_lower.contains(pattern) {
-                return Err(format!(
-                    "Command contains catastrophic pattern that could destroy the system: {}",
-                    pattern
-                ));
-            }
-        }
-
-        // In development mode, allow almost everything
-        if cfg!(debug_assertions) {
-            return Ok(());
-        }
-
-        // In production, be stricter: block sudo/doas and dangerous redirections/absolute destructive paths
-        if cmd_lower.contains("sudo") || cmd_lower.contains("doas") {
-            return Err("Privilege escalation commands are not allowed in production".to_string());
-        }
-
-        // Block writing to root/system-sensitive absolute paths via redirection
-        // Simple heuristic without full shell parsing; covers common cases safely
-        let redir_patterns = [
-            ">/etc/",
-            "> /etc/",
-            ">/bin/",
-            "> /bin/",
-            ">/usr/bin/",
-            "> /usr/bin/",
-            ">/usr/local/bin/",
-            "> /usr/local/bin/",
-            ">/System/",
-            "> /System/",
-        ];
-        for pat in &redir_patterns {
-            if cmd_lower.contains(pat) {
-                return Err("Redirection to system directories is not allowed".to_string());
-            }
-        }
-
-        // Block obvious path traversal attempts in redirections
-        if cmd_lower.contains("> ../") || cmd_lower.contains(">../../") {
-            return Err("Path traversal in redirection is not allowed".to_string());
-        }
-
-        Ok(())
+        validate_command_security(command)
     }
 
     /// Execute command directly via stdin/stdout with proper timeout handling
@@ -528,6 +468,127 @@ impl ShellSession {
         // If we can't find/parse exit code, assume error (-1)
         (output.to_string(), -1)
     }
+}
+
+/// Validate a shell command for basic security.
+///
+/// Applied identically in debug and release builds; the previous
+/// `cfg!(debug_assertions)` bypass that skipped all non-catastrophic checks
+/// in development was removed (security audit 2026-02-08, item #2).
+///
+/// The command is normalized (lowercased, whitespace runs collapsed) before
+/// pattern matching so spacing tricks like `rm  -rf   /` cannot dodge the
+/// blocklist, and `rm` flag permutations (`rm -r -f /`, `rm -fr /`,
+/// `rm --recursive --force /`) are caught by a small tokenizer.
+pub(crate) fn validate_command_security(command: &str) -> Result<(), String> {
+    // Reject commands that are too long (potential buffer overflow)
+    if command.len() > 10000 {
+        return Err("Command is too long".to_string());
+    }
+
+    // Normalize: lowercase + collapse whitespace runs to single spaces
+    let normalized = command
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Check for truly catastrophic patterns
+    let catastrophic_patterns = [
+        "rm -rf /",                    // Delete entire filesystem
+        "rm -rf /*",                   // Delete entire filesystem
+        ":(){ :|:& };:",               // Fork bomb
+        ":(){:|:&};:",                 // Fork bomb (no spaces)
+        "> /dev/sda",                  // Overwrite disk
+        ">/dev/sda",                   // Overwrite disk (no space)
+        "dd if=/dev/zero of=/dev/sda", // Wipe disk
+        "mkfs.ext4 /dev/sda",          // Format main disk
+    ];
+
+    for pattern in &catastrophic_patterns {
+        if normalized.contains(pattern) {
+            return Err(format!(
+                "Command contains catastrophic pattern that could destroy the system: {}",
+                pattern
+            ));
+        }
+    }
+
+    // Catch rm flag permutations targeting the filesystem root
+    if is_catastrophic_rm(&normalized) {
+        return Err(
+            "Command contains catastrophic pattern that could destroy the system: recursive forced rm of /"
+                .to_string(),
+        );
+    }
+
+    // Block privilege escalation
+    if normalized.contains("sudo") || normalized.contains("doas") {
+        return Err("Privilege escalation commands are not allowed".to_string());
+    }
+
+    // Block writing to root/system-sensitive absolute paths via redirection
+    // Simple heuristic without full shell parsing; covers common cases safely
+    let redir_patterns = [
+        ">/etc/",
+        "> /etc/",
+        ">/bin/",
+        "> /bin/",
+        ">/usr/bin/",
+        "> /usr/bin/",
+        ">/usr/local/bin/",
+        "> /usr/local/bin/",
+        ">/system/",
+        "> /system/",
+    ];
+    for pat in &redir_patterns {
+        if normalized.contains(pat) {
+            return Err("Redirection to system directories is not allowed".to_string());
+        }
+    }
+
+    // Block obvious path traversal attempts in redirections
+    if normalized.contains("> ../") || normalized.contains(">../../") {
+        return Err("Path traversal in redirection is not allowed".to_string());
+    }
+
+    Ok(())
+}
+
+/// Detect `rm` invocations that combine recursive + force flags (in any
+/// order or split across tokens) with the filesystem root as a target.
+fn is_catastrophic_rm(normalized: &str) -> bool {
+    let tokens: Vec<&str> = normalized.split(' ').collect();
+    for (i, token) in tokens.iter().enumerate() {
+        if *token != "rm" {
+            continue;
+        }
+        let mut recursive = false;
+        let mut force = false;
+        for tok in &tokens[i + 1..] {
+            // Stop at command separators; a later command is a new context
+            if matches!(*tok, ";" | "&&" | "||" | "|") {
+                break;
+            }
+            if *tok == "--recursive" {
+                recursive = true;
+            } else if *tok == "--force" {
+                force = true;
+            } else if tok.starts_with('-') && !tok.starts_with("--") {
+                // Combined short flags: -rf, -fr, -r, -f (input is lowercased,
+                // so -R is covered as -r)
+                if tok.contains('r') {
+                    recursive = true;
+                }
+                if tok.contains('f') {
+                    force = true;
+                }
+            } else if (*tok == "/" || *tok == "/*") && recursive && force {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 impl Drop for ShellSession {
@@ -821,5 +882,97 @@ pub async fn bash_command(
             debug_op.complete(Some(&app), false);
             Err(err_msg)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- The debug-mode bypass is gone: these must fail in ALL build modes ---
+    // (These tests run under cfg(debug_assertions); before the fix,
+    // validate_command returned Ok(()) for everything below in debug builds.)
+
+    #[test]
+    fn sudo_blocked_in_debug_builds_too() {
+        assert!(validate_command_security("sudo rm /etc/hosts").is_err());
+    }
+
+    #[test]
+    fn doas_blocked_in_debug_builds_too() {
+        assert!(validate_command_security("doas cat /etc/shadow").is_err());
+    }
+
+    #[test]
+    fn system_redirection_blocked_in_debug_builds_too() {
+        assert!(validate_command_security("echo pwned > /etc/hosts").is_err());
+        assert!(validate_command_security("echo pwned >/etc/hosts").is_err());
+        assert!(validate_command_security("echo x > /System/foo").is_err());
+    }
+
+    #[test]
+    fn traversal_redirection_blocked() {
+        assert!(validate_command_security("echo x > ../outside.txt").is_err());
+    }
+
+    // --- rm variant canonicalization ---
+
+    #[test]
+    fn rm_rf_root_blocked() {
+        assert!(validate_command_security("rm -rf /").is_err());
+        assert!(validate_command_security("rm -rf /*").is_err());
+    }
+
+    #[test]
+    fn rm_flag_order_variants_blocked() {
+        assert!(validate_command_security("rm -fr /").is_err());
+        assert!(validate_command_security("rm -r -f /").is_err());
+        assert!(validate_command_security("rm -f -r /").is_err());
+        assert!(validate_command_security("rm --recursive --force /").is_err());
+        assert!(validate_command_security("rm -Rf /").is_err());
+    }
+
+    #[test]
+    fn rm_whitespace_variants_blocked() {
+        assert!(validate_command_security("rm  -rf   /").is_err());
+        assert!(validate_command_security("rm\t-rf\t/").is_err());
+        assert!(validate_command_security("  rm   -r   -f   / ").is_err());
+    }
+
+    #[test]
+    fn fork_bomb_blocked() {
+        assert!(validate_command_security(":(){ :|:& };:").is_err());
+        assert!(validate_command_security(":(){:|:&};:").is_err());
+    }
+
+    #[test]
+    fn disk_wipe_blocked() {
+        assert!(validate_command_security("dd if=/dev/zero of=/dev/sda").is_err());
+        assert!(validate_command_security("mkfs.ext4 /dev/sda").is_err());
+        assert!(validate_command_security("echo x > /dev/sda").is_err());
+    }
+
+    #[test]
+    fn overlong_command_blocked() {
+        let long_cmd = "a".repeat(10_001);
+        assert!(validate_command_security(&long_cmd).is_err());
+    }
+
+    // --- Benign commands still pass ---
+
+    #[test]
+    fn benign_commands_allowed() {
+        assert!(validate_command_security("ls -la").is_ok());
+        assert!(validate_command_security("git status").is_ok());
+        assert!(validate_command_security("echo hello world").is_ok());
+        assert!(validate_command_security("cargo check").is_ok());
+    }
+
+    #[test]
+    fn scoped_rm_allowed() {
+        // rm of a specific relative file is not catastrophic (the runner's
+        // risk classifier still flags it High and gates it behind approval)
+        assert!(validate_command_security("rm old_file.txt").is_ok());
+        assert!(validate_command_security("rm -rf ./build").is_ok());
     }
 }

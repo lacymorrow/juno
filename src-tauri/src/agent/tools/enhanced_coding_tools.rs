@@ -743,16 +743,24 @@ impl EnhancedCodingToolProvider {
         file_path: &str,
         content: &str,
     ) -> Result<Value, AgentError> {
-        match fs::write(file_path, content) {
+        // Canonicalize and enforce the workspace boundary before writing;
+        // this path previously had no validation at all (security audit
+        // 2026-02-08, item #14). Allowed roots: the process working
+        // directory and the agent's ~/Juno output directory.
+        let safe_path = crate::agent::tools::path_security::resolve_within_default_roots(file_path)
+            .map_err(AgentError::InputError)?;
+
+        match fs::write(&safe_path, content) {
             Ok(_) => Ok(json!({
                 "success": true,
-                "file_path": file_path,
+                "file_path": safe_path.to_string_lossy(),
                 "bytes_written": content.len(),
                 "created_at": chrono::Utc::now().to_rfc3339()
             })),
             Err(e) => Err(AgentError::ToolError(format!(
                 "Failed to create file {}: {}",
-                file_path, e
+                safe_path.display(),
+                e
             ))),
         }
     }
