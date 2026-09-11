@@ -783,7 +783,7 @@ impl RGBConnectedGraphAnalyzer {
             let display_info_clone = display_info.clone();
             let config = self.config.clone();
 
-            let task = tokio::spawn(async move {
+            let task = tauri::async_runtime::spawn(async move {
                 let mut chunk_similarities = Vec::new();
 
                 for (i, patch1) in chunk_patches.iter().enumerate() {

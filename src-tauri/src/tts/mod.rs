@@ -58,7 +58,7 @@ struct AudioPlaybackHandle {
     #[allow(dead_code)] // May be used for future playback status checking
     playback_started: Arc<AtomicBool>,
     // Keep the spawn handle alive to prevent task cancellation
-    _task_handle: tokio::task::JoinHandle<()>,
+    _task_handle: tauri::async_runtime::JoinHandle<()>,
 }
 
 impl AudioPlaybackHandle {
@@ -249,7 +249,7 @@ async fn play_base64_audio_with_tracking(
             let playback_started_clone = playback_started.clone();
 
             // FIXED: Move temp_file into the spawned task to ensure proper lifecycle management
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 // Add a small delay to ensure afplay has time to start
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 playback_started_clone.store(true, Ordering::SeqCst);
@@ -323,7 +323,7 @@ async fn play_base64_audio_with_tracking(
             let playback_started_clone = playback_started.clone();
 
             // FIXED: Move temp_file into the spawned task to ensure proper lifecycle management
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 // Add a small delay to ensure aplay has time to start
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 playback_started_clone.store(true, Ordering::SeqCst);

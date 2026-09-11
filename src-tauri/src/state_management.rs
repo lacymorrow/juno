@@ -392,7 +392,7 @@ async fn start_background_state_tasks(app_handle: AppHandle) {
 /// Start MCP server retry background task
 async fn start_mcp_retry_task(app_handle: AppHandle) {
     let retry_app_handle = app_handle.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let app_state = retry_app_handle.state::<AppState>();
         let mut interval = tokio::time::interval(Duration::from_secs(60)); // Check every minute
 

@@ -26,10 +26,14 @@ impl<T> ManagedResource<T> {
         }
     }
 
-    /// Take the resource, disabling automatic cleanup
-    pub fn take(mut self) -> T {
+    /// Take the resource, disabling automatic cleanup.
+    ///
+    /// Returns `None` if the resource has already been consumed. This cannot
+    /// happen today (construction always sets it and `take` consumes `self`),
+    /// but callers handle it rather than panicking (no-unwrap rule).
+    pub fn take(mut self) -> Option<T> {
         self.cleanup = None;
-        self.resource.take().expect("Resource already taken")
+        self.resource.take()
     }
 
     /// Get a reference to the resource
@@ -110,12 +114,23 @@ impl<T: Send + 'static> ResourcePool<T> {
         pool.retain(|r| r.age() < self.max_age);
 
         if let Some(managed) = pool.pop() {
-            info!(
-                "Retrieved resource from pool {}, remaining: {}",
-                self.name,
-                pool.len()
-            );
-            Some(managed.take())
+            match managed.take() {
+                Some(resource) => {
+                    info!(
+                        "Retrieved resource from pool {}, remaining: {}",
+                        self.name,
+                        pool.len()
+                    );
+                    Some(resource)
+                }
+                None => {
+                    warn!(
+                        "Pooled resource in {} was already consumed - treating as empty",
+                        self.name
+                    );
+                    None
+                }
+            }
         } else {
             debug!("No resources available in pool {}", self.name);
             None

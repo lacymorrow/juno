@@ -576,7 +576,13 @@ impl AdvancedMemoryManager {
                 .filter(|m| !m.content.is_empty())
                 .map(|m| {
                     let content = if m.content.len() > summary::MAX_SHORT_CONTENT_LENGTH {
-                        format!("{}...", &m.content[..summary::MAX_SHORT_CONTENT_LENGTH])
+                        format!(
+                            "{}...",
+                            crate::utils::strings::truncate_chars(
+                                &m.content,
+                                summary::MAX_SHORT_CONTENT_LENGTH
+                            )
+                        )
                     } else {
                         m.content.clone()
                     };
@@ -845,7 +851,7 @@ impl AdvancedMemoryManager {
         let config = self.config.read().await;
         if config.enable_summarization {
             drop(config);
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 // Background context optimization - don't block startup
                 // This would trigger summarization of old conversations
             });

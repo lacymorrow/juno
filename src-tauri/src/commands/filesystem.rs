@@ -406,7 +406,11 @@ pub async fn get_file_content(
 
     if debug_config.send_notifications {
         let preview = if content.len() > 100 {
-            format!("{}... ({} chars)", &content[..100], content.len())
+            format!(
+                "{}... ({} chars)",
+                crate::utils::strings::truncate_chars(&content, 100),
+                content.len()
+            )
         } else {
             content.clone()
         };
@@ -514,7 +518,11 @@ pub async fn set_file_content(
         Ok(_) => {
             if debug_config.send_notifications {
                 let preview = if content.len() > 100 {
-                    format!("{}... ({} chars)", &content[..100], content.len())
+                    format!(
+                        "{}... ({} chars)",
+                        crate::utils::strings::truncate_chars(&content, 100),
+                        content.len()
+                    )
                 } else {
                     content.clone()
                 };
