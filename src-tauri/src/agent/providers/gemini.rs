@@ -325,14 +325,15 @@ impl AgentBrain for GeminiBrain {
             },
         };
 
-        let url = format!(
-            "{}/{}:generateContent?key={}",
-            GEMINI_API_BASE, self.model, self.api_key
-        );
+        let url = format!("{}/{}:generateContent", GEMINI_API_BASE, self.model);
 
+        // The API key goes in the x-goog-api-key header, never in the URL:
+        // query strings end up in HTTP client logs, proxy logs, and error
+        // messages (audit 2026-02-08 item #21).
         let response = self
             .client
             .post(&url)
+            .header("x-goog-api-key", &self.api_key)
             .json(&request)
             .send()
             .await

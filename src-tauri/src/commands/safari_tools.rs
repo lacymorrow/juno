@@ -5,7 +5,7 @@
 //! Complements existing browser automation with Safari-optimized performance.
 
 use crate::agent::core::ToolResult;
-use crate::agent::tools::safari_tools::get_safari_tools;
+use crate::agent::tools::safari_tools::{get_safari_tools, validate_navigation_url};
 use serde_json::Value;
 use tauri::command;
 
@@ -66,8 +66,12 @@ pub async fn safari_get_url() -> Result<ToolResult, String> {
 }
 
 /// Navigates Safari to a specific URL
+///
+/// Only http/https URLs are accepted (validated here and again in the tool
+/// layer, which is the choke point for all navigation paths).
 #[command]
 pub async fn safari_navigate(url: String) -> Result<ToolResult, String> {
+    let url = validate_navigation_url(&url).map_err(|e| e.to_string())?;
     match get_safari_tools().navigate_to_url(&url) {
         Ok(output) => Ok(ToolResult {
             call_id: format!("safari_navigate_{}", url.len()),
@@ -155,7 +159,10 @@ pub async fn execute_safari_tool(
             let url = parameters["url"]
                 .as_str()
                 .ok_or("Missing or invalid url parameter")?;
-            match get_safari_tools().navigate_to_url(url) {
+            // Scheme validation happens in navigate_to_url; validate here too so
+            // the command layer rejects bad URLs even if the tool layer changes.
+            let url = validate_navigation_url(url).map_err(|e| e.to_string())?;
+            match get_safari_tools().navigate_to_url(&url) {
                 Ok(output) => Ok(output),
                 Err(e) => Err(e.to_string()),
             }
