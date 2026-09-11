@@ -141,7 +141,7 @@ pub struct TimerManager {
     /// Map of active timer tasks by ID
     pub active_timers: Arc<Mutex<HashMap<String, TimerTask>>>,
     /// Map of monitoring task handles by timer ID
-    pub monitoring_tasks: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+    pub monitoring_tasks: Arc<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
 }
 
 impl TimerManager {
@@ -203,7 +203,7 @@ impl TimerManager {
     pub async fn add_monitoring_task(
         &self,
         timer_id: String,
-        task_handle: tokio::task::JoinHandle<()>,
+        task_handle: tauri::async_runtime::JoinHandle<()>,
     ) {
         let mut monitoring_tasks = self.monitoring_tasks.lock().await;
         monitoring_tasks.insert(timer_id, task_handle);
@@ -366,7 +366,7 @@ mod timer_tools_impl {
         let app_handle_clone = app_handle.clone();
         let timer_manager_clone = timer_manager.clone();
         let timer_id_clone = timer_id.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             sleep(Duration::from_secs(delay_seconds)).await;
 
             // Check if timer is still active (might have been cancelled)
@@ -533,7 +533,7 @@ mod timer_tools_impl {
         let timer_id_clone = timer_id.clone();
         let _description_clone = description.clone();
 
-        let monitoring_task = tokio::spawn(async move {
+        let monitoring_task = tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(check_interval_seconds));
             let mut previous_screenshot = initial_screenshot;
             let start_time = SystemTime::now()
@@ -784,7 +784,7 @@ mod timer_tools_impl {
             0
         };
 
-        let monitoring_task = tokio::spawn(async move {
+        let monitoring_task = tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(check_interval_seconds));
             let mut last_exists = initial_exists;
             let mut last_size = initial_size;

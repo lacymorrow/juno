@@ -101,38 +101,55 @@ const FILLER_WORDS: &[&str] = &[
     "thank",
 ];
 
-static APP_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b(?:on |in |from |with |using )?(spotify|apple music|itunes)\b").unwrap()
+/// The compiled intent grammar. Bundled so compilation is all-or-nothing and
+/// a single failure path covers every pattern.
+struct MediaPatterns {
+    app: Regex,
+    pause: Regex,
+    play: Regex,
+    next: Regex,
+    previous: Regex,
+    status: Regex,
+    music_noun: Regex,
+}
+
+impl MediaPatterns {
+    fn compile() -> Result<Self, regex::Error> {
+        Ok(Self {
+            app: Regex::new(r"\b(?:on |in |from |with |using )?(spotify|apple music|itunes)\b")?,
+            pause: Regex::new(
+                r"^(?:pause|stop)(?: (?:music|song|track|playback|playing|audio))?$",
+            )?,
+            play: Regex::new(
+                r"^(?:(?:play|unpause)(?: (?:music|song|track|playback|audio))?|(?:resume|continue|start|keep) (?:music|song|track|playback|playing|audio))$",
+            )?,
+            next: Regex::new(
+                r"^(?:(?:next|skip)(?: (?:song|track|one|ahead|forward|music))?|play next(?: (?:song|track))?)$",
+            )?,
+            previous: Regex::new(
+                r"^(?:previous(?: (?:song|track|one))?|(?:last|prior) (?:song|track)|(?:go )?back (?:song|track)|play (?:previous|last) (?:song|track))$",
+            )?,
+            status: Regex::new(
+                r"^(?:what is(?: (?:playing|on|song|track))?|what (?:song|track|music) is(?: (?:playing|on))?|what is (?:song|track|music) playing|what am i listening to|now playing|which (?:song|track) is(?: playing)?)$",
+            )?,
+            music_noun: Regex::new(r"\b(?:music|song|track|playback|playing|listening|audio)\b")?,
+        })
+    }
+}
+
+/// Compiled once on first use. The patterns are literals, so a failure means a
+/// developer broke one; instead of panicking (no-unwrap rule) we log loudly and
+/// disable local intent matching — every query then falls through to the agent.
+static PATTERNS: Lazy<Option<MediaPatterns>> = Lazy::new(|| match MediaPatterns::compile() {
+    Ok(patterns) => Some(patterns),
+    Err(e) => {
+        tracing::error!(
+            "local_intents: media intent regex failed to compile ({}); local media intent matching disabled",
+            e
+        );
+        None
+    }
 });
-static PAUSE_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(?:pause|stop)(?: (?:music|song|track|playback|playing|audio))?$").unwrap()
-});
-static PLAY_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"^(?:(?:play|unpause)(?: (?:music|song|track|playback|audio))?|(?:resume|continue|start|keep) (?:music|song|track|playback|playing|audio))$",
-    )
-    .unwrap()
-});
-static NEXT_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"^(?:(?:next|skip)(?: (?:song|track|one|ahead|forward|music))?|play next(?: (?:song|track))?)$",
-    )
-    .unwrap()
-});
-static PREVIOUS_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"^(?:previous(?: (?:song|track|one))?|(?:last|prior) (?:song|track)|(?:go )?back (?:song|track)|play (?:previous|last) (?:song|track))$",
-    )
-    .unwrap()
-});
-static STATUS_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"^(?:what is(?: (?:playing|on|song|track))?|what (?:song|track|music) is(?: (?:playing|on))?|what is (?:song|track|music) playing|what am i listening to|now playing|which (?:song|track) is(?: playing)?)$",
-    )
-    .unwrap()
-});
-static MUSIC_NOUN_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\b(?:music|song|track|playback|playing|listening|audio)\b").unwrap());
 
 /// Lower-case, strip punctuation, expand contractions, drop filler words.
 fn normalize(query: &str) -> String {
@@ -164,9 +181,9 @@ fn normalize(query: &str) -> String {
 }
 
 /// Pull the named player out of the phrase, returning the remainder.
-fn extract_app(phrase: &str) -> (Option<&'static str>, String) {
+fn extract_app(patterns: &MediaPatterns, phrase: &str) -> (Option<&'static str>, String) {
     let mut app = None;
-    let rest = APP_PATTERN.replace_all(phrase, |caps: &regex::Captures| {
+    let rest = patterns.app.replace_all(phrase, |caps: &regex::Captures| {
         app = Some(match &caps[1] {
             "spotify" => "Spotify",
             _ => "Music",
@@ -179,23 +196,24 @@ fn extract_app(phrase: &str) -> (Option<&'static str>, String) {
 
 /// Parse a raw user query into a playback intent, if it is one.
 pub fn parse_media_intent(query: &str) -> Option<MediaIntent> {
+    let patterns = PATTERNS.as_ref()?;
     let normalized = normalize(query);
     if normalized.is_empty() {
         return None;
     }
-    let (app, phrase) = extract_app(&normalized);
+    let (app, phrase) = extract_app(patterns, &normalized);
     if phrase.is_empty() {
         return None;
     }
-    let names_music = MUSIC_NOUN_PATTERN.is_match(&phrase);
+    let names_music = patterns.music_noun.is_match(&phrase);
 
-    let action = if PAUSE_PATTERN.is_match(&phrase) {
+    let action = if patterns.pause.is_match(&phrase) {
         Some(MediaAction::Pause)
-    } else if PLAY_PATTERN.is_match(&phrase) {
+    } else if patterns.play.is_match(&phrase) {
         Some(MediaAction::Play)
-    } else if NEXT_PATTERN.is_match(&phrase) {
+    } else if patterns.next.is_match(&phrase) {
         Some(MediaAction::Next)
-    } else if PREVIOUS_PATTERN.is_match(&phrase) {
+    } else if patterns.previous.is_match(&phrase) {
         Some(MediaAction::Previous)
     } else {
         None
@@ -208,7 +226,7 @@ pub fn parse_media_intent(query: &str) -> Option<MediaIntent> {
         });
     }
 
-    if STATUS_PATTERN.is_match(&phrase) {
+    if patterns.status.is_match(&phrase) {
         // "what is" / "what is on" alone are only about music when a player is named
         if (phrase == "what is" || phrase == "what is on") && app.is_none() {
             return None;

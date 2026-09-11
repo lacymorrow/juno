@@ -511,7 +511,7 @@ fn sanitize_event_for_logging(event: &AgentEvent) -> AgentEvent {
                 if base64.len() > 100 {
                     format!(
                         "{}...[BASE64_SCREENSHOT_TRUNCATED_{}bytes]",
-                        &base64[..std::cmp::min(50, base64.len())],
+                        crate::utils::strings::truncate_chars(base64, 50),
                         base64.len()
                     )
                 } else {
@@ -536,8 +536,7 @@ fn sanitize_event_for_logging(event: &AgentEvent) -> AgentEvent {
             let sanitized_base64 = if payload.screenshot_base64.len() > 100 {
                 format!(
                     "{}...[BASE64_SCREENSHOT_TRUNCATED_{}bytes]",
-                    &payload.screenshot_base64
-                        [..std::cmp::min(50, payload.screenshot_base64.len())],
+                    crate::utils::strings::truncate_chars(&payload.screenshot_base64, 50),
                     payload.screenshot_base64.len()
                 )
             } else {
@@ -1167,7 +1166,10 @@ impl ToolMetadata {
         if let Some(command) = inputs.get("command").and_then(|v| v.as_str()) {
             // Truncate very long commands for display
             if command.len() > 100 {
-                return Some(format!("{}...", &command[..97]));
+                return Some(format!(
+                    "{}...",
+                    crate::utils::strings::truncate_chars(command, 97)
+                ));
             }
             return Some(command.to_string());
         }
@@ -1183,7 +1185,10 @@ impl ToolMetadata {
         if let Some(text) = inputs.get("text").and_then(|v| v.as_str()) {
             // Truncate very long text for display
             if text.len() > 50 {
-                return Some(format!("\"{}...\"", &text[..47]));
+                return Some(format!(
+                    "\"{}...\"",
+                    crate::utils::strings::truncate_chars(text, 47)
+                ));
             }
             return Some(format!("\"{}\"", text));
         }
@@ -1499,7 +1504,7 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
 
     // CRITICAL FIX: Use a single background task to prevent audio overlap
     // invoke_tts now properly waits for actual audio completion before cleanup
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         // Get the app state for TTS invocation
         let app_state = match app_handle.try_state::<crate::state::AppState>() {
             Some(state) => state,

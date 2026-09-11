@@ -225,7 +225,7 @@ async fn test_environment_variables() -> Result<serde_json::Value, String> {
             Ok(value) => {
                 // Only show first 8 characters for security
                 let masked_value = if value.len() > 8 {
-                    format!("{}...", &value[..8])
+                    format!("{}...", utils::strings::truncate_chars(&value, 8))
                 } else {
                     "***".to_string()
                 };

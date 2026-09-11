@@ -320,9 +320,9 @@ pub async fn force_reset_agent_input_state() {
 }
 
 // Background task to monitor agent state and handle timeouts
-pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandle<()> {
+pub fn start_agent_monitor_task(app_handle: AppHandle) -> tauri::async_runtime::JoinHandle<()> {
     info!("[AgentMonitor] Starting background monitoring task");
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
 
         loop {

@@ -432,7 +432,10 @@ pub(crate) async fn get_selected_text(
                 // Send debug notification if enabled
                 if debug_config.send_notifications {
                     let preview = if selected_text.len() > 50 {
-                        format!("{}...", &selected_text[..50])
+                        format!(
+                            "{}...",
+                            crate::utils::strings::truncate_chars(&selected_text, 50)
+                        )
                     } else {
                         selected_text.clone()
                     };
