@@ -7,6 +7,7 @@ pub mod coordinates;
 pub mod key_parsing;
 pub mod network;
 pub mod string_cache;
+pub mod strings;
 
 pub mod log_formatter;
 pub mod rate_limiter;
@@ -1637,7 +1638,7 @@ async fn get_clipboard_content_safe(app_state: Option<&crate::state::AppState>) 
                 if content.len() > MAX_CLIPBOARD_LENGTH {
                     Some(format!(
                         "{}... (truncated from {} chars)",
-                        &content[..MAX_CLIPBOARD_LENGTH],
+                        strings::truncate_chars(&content, MAX_CLIPBOARD_LENGTH),
                         content.len()
                     ))
                 } else if content.trim().is_empty() {
@@ -1695,7 +1696,10 @@ async fn get_selected_text_via_accessibility(app_state: &crate::state::AppState)
                                 let text = if selected_str.len() > MAX_SELECTED_TEXT_LENGTH {
                                     format!(
                                         "{}... (truncated from {} chars)",
-                                        &selected_str[..MAX_SELECTED_TEXT_LENGTH],
+                                        strings::truncate_chars(
+                                            selected_str,
+                                            MAX_SELECTED_TEXT_LENGTH
+                                        ),
                                         selected_str.len()
                                     )
                                 } else {
@@ -1723,7 +1727,10 @@ async fn get_selected_text_via_accessibility(app_state: &crate::state::AppState)
                                     let text = if selected_text.len() > MAX_SELECTED_TEXT_LENGTH {
                                         format!(
                                             "{}... (truncated from {} chars)",
-                                            &selected_text[..MAX_SELECTED_TEXT_LENGTH],
+                                            strings::truncate_chars(
+                                                &selected_text,
+                                                MAX_SELECTED_TEXT_LENGTH
+                                            ),
                                             selected_text.len()
                                         )
                                     } else {
@@ -1851,7 +1858,7 @@ async fn get_selected_text_via_clipboard_trick(
                 let result = if text.len() > MAX_SELECTED_TEXT_LENGTH {
                     format!(
                         "{}... (truncated from {} chars)",
-                        &text[..MAX_SELECTED_TEXT_LENGTH],
+                        strings::truncate_chars(&text, MAX_SELECTED_TEXT_LENGTH),
                         text.len()
                     )
                 } else {
