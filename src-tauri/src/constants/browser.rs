@@ -17,7 +17,9 @@ pub mod chrome_debug_urls {
 pub mod chrome_flags {
     pub const REMOTE_DEBUG_PORT_FLAG: &str = "--remote-debugging-port=9222";
     pub const HEADLESS_FLAG: &str = "--headless";
-    pub const NO_SANDBOX_FLAG: &str = "--no-sandbox";
+    // "--no-sandbox" and "--disable-web-security" are deliberately absent:
+    // Chrome must always launch with its sandbox and same-origin policy intact
+    // (audit 2026-02-08 item #17).
     pub const DISABLE_GPU_FLAG: &str = "--disable-gpu";
     pub const DISABLE_DEV_SHM_FLAG: &str = "--disable-dev-shm-usage";
 }
