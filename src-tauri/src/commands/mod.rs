@@ -44,7 +44,6 @@ pub mod native_permissions;
 pub mod notifications;
 pub mod onboarding;
 pub mod onboarding_analytics;
-pub mod onboarding_guidance;
 pub mod orchestrator;
 pub mod permissions;
 pub mod persistent_memory;
@@ -114,7 +113,6 @@ pub use self::memory::*;
 pub use self::mouse::*;
 pub use self::onboarding::*;
 pub use self::onboarding_analytics::*;
-pub use self::onboarding_guidance::*;
 pub use self::orchestrator::*;
 pub use self::permissions::*;
 pub use self::ui_commands::*; // Re-export consolidated UI API commands

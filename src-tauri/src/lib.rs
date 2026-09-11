@@ -711,16 +711,7 @@ pub fn run() {
             commands::check_claude_cli_available,
             // Guided onboarding state machine
             commands::get_onboarding_state,
-            commands::onboarding_action,
-            // Cursor overlay animation (onboarding guidance)
-            commands::animate_cursor_to,
-            commands::show_cursor_highlight,
-            commands::show_cursor_bubble,
-            commands::dismiss_cursor_overlay,
             commands::save_user_role,
-            // Phase C: guided cursor flight to System Settings + permission demos
-            commands::guide_to_system_settings,
-            commands::run_permission_demo,
             commands::auto_grant_permissions,
             commands::cancel_auto_grant,
             // Phase D: onboarding analytics (local buffer; no external network)
