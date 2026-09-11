@@ -277,18 +277,6 @@ pub mod onboarding {
     pub const STATE_CHANGED: &str = "onboarding-state-changed";
 }
 
-/// Cursor overlay animation events (used by onboarding cursor guidance)
-pub mod cursor {
-    /// Per-frame position event for animated cursor movement (60fps)
-    pub const ANIMATION_FRAME: &str = "cursor-animation-frame";
-    /// Show a pulsing highlight ring at a target position
-    pub const HIGHLIGHT: &str = "cursor-highlight";
-    /// Show a speech bubble at a position
-    pub const BUBBLE: &str = "cursor-bubble";
-    /// Dismiss the cursor overlay with a fade-out
-    pub const DISMISS_OVERLAY: &str = "cursor-dismiss-overlay";
-}
-
 /// Notification events
 pub mod notifications {
     pub const TOAST: &str = "toast-notification";

@@ -5,13 +5,6 @@ import {
   CopyButton,
 } from "@/components/ui/agent-actions";
 import {
-  OnboardingActionButton,
-  OnboardingActions,
-  PermissionStatusCard,
-  PermissionStatusGrid,
-  ProviderSelector,
-} from "@/components/ui/onboarding-components";
-import {
   AnimatedCard,
   AnimatedNumber,
   AnimatedList,
@@ -483,13 +476,6 @@ const availableComponents = {
   QueryButton,
   OpenButton,
   CopyButton,
-
-  // Onboarding inline components
-  OnboardingActionButton,
-  OnboardingActions,
-  PermissionStatusCard,
-  PermissionStatusGrid,
-  ProviderSelector,
 } as Record<string, React.ComponentType<any>>;
 
 export function JsxMessageRenderer({

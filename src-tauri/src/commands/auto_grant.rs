@@ -35,6 +35,79 @@ use tracing::{debug, info, warn};
 /// first in case the run is cancelled partway.
 const AUTOMATABLE: [&str; 2] = ["screen_recording", "input_monitoring"];
 
+// ── System Settings window discovery ─────────────────────────────────────────
+// Moved here from the retired chat-based onboarding guidance module — the
+// auto-grant flow is now the only consumer.
+
+#[cfg(target_os = "macos")]
+fn find_system_settings_window_bounds() -> Option<(f64, f64, f64, f64)> {
+    use computer_use_ai_sdk::Desktop;
+
+    // Background apps + don't activate — the AX query must not steal focus.
+    let desktop = match Desktop::new(true, false) {
+        Ok(d) => d,
+        Err(e) => {
+            debug!("[auto-grant] Desktop init failed: {}", e);
+            return None;
+        }
+    };
+
+    // System Settings is named "System Settings" on macOS Ventura+ and "System Preferences" on Monterey.
+    for name in ["System Settings", "System Preferences"] {
+        if let Ok(app) = desktop.application(name) {
+            // First child of the application is typically its main window.
+            if let Ok(children) = app.children() {
+                for child in &children {
+                    if let Ok(b) = child.bounds() {
+                        // Filter out zero-area placeholders
+                        if b.2 > 100.0 && b.3 > 100.0 {
+                            return Some(b);
+                        }
+                    }
+                }
+            }
+            // No usable window child — try app bounds directly
+            if let Ok(b) = app.bounds() {
+                if b.2 > 100.0 && b.3 > 100.0 {
+                    return Some(b);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn find_system_settings_window_bounds() -> Option<(f64, f64, f64, f64)> {
+    None
+}
+
+/// Wait up to `timeout_ms` for the System Settings window to be findable via AX.
+/// Polls every 150ms.
+#[cfg(target_os = "macos")]
+async fn wait_for_settings_window(timeout_ms: u64) -> Option<(f64, f64, f64, f64)> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        // Run the AX call on a blocking thread to avoid stalling the async runtime
+        let bounds = tokio::task::spawn_blocking(find_system_settings_window_bounds)
+            .await
+            .ok()
+            .flatten();
+        if let Some(b) = bounds {
+            return Some(b);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        sleep(Duration::from_millis(150)).await;
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn wait_for_settings_window(_timeout_ms: u64) -> Option<(f64, f64, f64, f64)> {
+    None
+}
+
 static AUTO_GRANT_RUNNING: LazyLock<AtomicBool> = LazyLock::new(|| AtomicBool::new(false));
 static AUTO_GRANT_CANCEL: LazyLock<Mutex<Option<CancellationToken>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -193,10 +266,7 @@ async fn auto_grant_one(
             .map_err(|e| format!("Settings-open task failed: {}", e))??;
     }
 
-    if crate::commands::onboarding_guidance::wait_for_settings_window(4000)
-        .await
-        .is_none()
-    {
+    if wait_for_settings_window(4000).await.is_none() {
         return Err("System Settings window did not appear".to_string());
     }
     // Give the pane's SwiftUI content a moment to populate its AX tree.
