@@ -68,7 +68,7 @@
         "minHeight": 300,
         "hiddenTitle": false,
         "resizable": false,
-        "visible": true,
+        "visible": false,
         "skipTaskbar": false,
         "shadow": true,
         "transparent": false,
@@ -157,15 +157,13 @@
     ],
     "resources": [
       "../tauri-plugin-voice-transcription/models/*",
-      "Info.plist",
       "../public/sounds/**/*",
       "resources/ggml-metal.metal"
     ],
     "macOS": {
       "entitlements": "juno.entitlements",
-      "files": {
-        "Info.plist": "Info.plist"
-      }
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "12.3"
     }
   }
 }

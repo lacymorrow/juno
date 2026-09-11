@@ -32,6 +32,45 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      # Apple code signing + notarization.
+      #
+      # A human must add these repository secrets to enable it (Settings →
+      # Secrets and variables → Actions):
+      #   APPLE_CERTIFICATE            base64 of the Developer ID Application .p12
+      #   APPLE_CERTIFICATE_PASSWORD   password for the .p12
+      #   APPLE_SIGNING_IDENTITY       e.g. "Developer ID Application: Name (TEAMID)"
+      #   APPLE_ID                     Apple ID email for notarization
+      #   APPLE_PASSWORD               app-specific password for that Apple ID
+      #   APPLE_TEAM_ID                10-character team ID
+      #
+      # The Tauri CLI treats an APPLE_* env var that is set-but-empty as
+      # configured and then fails the build, so only export the secrets that
+      # actually exist. With no secrets configured this step exports nothing
+      # and the build stays unsigned (current behavior).
+      - name: Configure Apple code signing (no-op until secrets are added)
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -n "${!var}" ]; then
+              {
+                echo "${var}<<JUNO_APPLE_SECRET_EOF"
+                echo "${!var}"
+                echo "JUNO_APPLE_SECRET_EOF"
+              } >> "$GITHUB_ENV"
+            fi
+          done
+          if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "Apple signing secrets found: the app will be signed and notarized."
+          else
+            echo "No Apple signing secrets configured: building unsigned."
+          fi
+
       - name: Build Tauri app (universal macOS)
         uses: tauri-apps/tauri-action@v0
         env:
