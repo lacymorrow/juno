@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BLUR_SETTLE_MS,
@@ -557,6 +557,12 @@ describe("FloatingBar", () => {
   it("does not settle when the press was a click, not a drag", async () => {
     await renderBar();
     await hover(true);
+    // On mount the bar deliberately parks itself in a snap well (the saved
+    // position's nearest well, or the default top-right one) — that is one
+    // intended setPosition, unrelated to any drag. Let it land, then clear it
+    // so the assertion below sees only settle calls caused by the click.
+    await waitFor(() => expect(windowSetPosition).toHaveBeenCalledTimes(1));
+    windowSetPosition.mockClear();
     const mic = screen.getByRole("button", { name: "Talk to Juno" });
 
     fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });

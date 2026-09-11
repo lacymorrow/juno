@@ -56,9 +56,10 @@ describe("ShortcutsSettings", () => {
   it("renders every shortcut name with its chip and no inline descriptions", () => {
     render(<ShortcutsSettings settings={makeSettings()} />);
 
+    // agent_mode and dictation_input moved to the Triggers screen (single
+    // source of truth), so this section renders only the remaining
+    // customizable shortcuts plus the system-managed rows.
     for (const label of [
-      "Agent Mode",
-      "Start Dictation",
       "Stop Current Task",
       "Voice Activation",
       "Cancel Current Operation",
@@ -67,7 +68,9 @@ describe("ShortcutsSettings", () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
 
-    expect(screen.getByText("Option+D")).toBeInTheDocument();
+    // Rows filtered out here must not render their chips either.
+    expect(screen.queryByText("Option+D")).not.toBeInTheDocument();
+    expect(screen.queryByText("Option+Space")).not.toBeInTheDocument();
     expect(screen.getByText("Option+Shift+V")).toBeInTheDocument();
     expect(screen.getByText("Cmd+Comma")).toBeInTheDocument();
 
