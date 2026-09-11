@@ -121,9 +121,9 @@ fn find_system_settings_window_bounds() -> Option<(f64, f64, f64, f64)> {
 }
 
 /// Wait up to `timeout_ms` for the System Settings window to be findable via AX.
-/// Polls every 150ms.
+/// Polls every 150ms. Shared with the auto-grant flow (`commands::auto_grant`).
 #[cfg(target_os = "macos")]
-async fn wait_for_settings_window(timeout_ms: u64) -> Option<(f64, f64, f64, f64)> {
+pub(crate) async fn wait_for_settings_window(timeout_ms: u64) -> Option<(f64, f64, f64, f64)> {
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
     loop {
         // Run the AX call on a blocking thread to avoid stalling the async runtime
@@ -142,7 +142,7 @@ async fn wait_for_settings_window(timeout_ms: u64) -> Option<(f64, f64, f64, f64
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn wait_for_settings_window(_timeout_ms: u64) -> Option<(f64, f64, f64, f64)> {
+pub(crate) async fn wait_for_settings_window(_timeout_ms: u64) -> Option<(f64, f64, f64, f64)> {
     None
 }
 
