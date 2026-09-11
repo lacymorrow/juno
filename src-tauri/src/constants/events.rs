@@ -221,6 +221,8 @@ pub mod permissions {
     pub const GUIDANCE_NEEDED: &str = "permission-guidance-needed";
     /// Emitted when a specific permission flips from denied → granted during polling
     pub const GRANTED: &str = "permission-granted";
+    /// Streamed progress of the post-Accessibility auto-grant run (auto_grant_permissions)
+    pub const AUTO_GRANT_PROGRESS: &str = "permissions-auto-grant-progress";
 }
 
 /// Development tool events
