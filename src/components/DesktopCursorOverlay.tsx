@@ -37,12 +37,6 @@ const PREVIEW_ACTION_LABELS: Record<string, string> = {
   scroll: "scrolling",
 };
 
-// Cached MediaQueryList — avoids creating a new object on every 60fps animation frame.
-const REDUCED_MOTION_MQL =
-  typeof window !== "undefined"
-    ? window.matchMedia?.("(prefers-reduced-motion: reduce)")
-    : null;
-
 // ─── POINT flying cursor ───────────────────────────────────────────────────────
 const FLIGHT_DURATION = 380; // ms — bezier arc from last landed to target
 const LINGER_DURATION = 1600; // ms — display time after landing before hiding
@@ -59,17 +53,6 @@ function bezier(t: number, p0: number, p1: number, p2: number): number {
   const mt = 1 - t;
   return mt * mt * p0 + 2 * mt * t * p1 + t * t * p2;
 }
-
-// ─── Onboarding cursor constants ─────────────────────────────────────────────
-// Accent color (#8B5CF6) matches JunoCursorShape and the app's brand violet.
-const ONBOARDING_ACCENT = "#8B5CF6";
-// Pulsing ring: 24px base radius, 4px amplitude (expressed in CSS scale), 1.2 Hz (833ms period)
-const RING_BASE_RADIUS = 24;
-// RING_AMPLITUDE_PX = 4 is encoded in the CSS keyframe scale factor: 1.17 ≈ (24+4)/24
-const RING_PERIOD_MS = 833;
-// Speech bubble appears 200ms after cursor arrives, text streams at 25ms/char
-const BUBBLE_APPEAR_DELAY_MS = 200;
-const BUBBLE_CHAR_INTERVAL_MS = 25;
 
 // ─── CSS Animations ───────────────────────────────────────────────────────────
 const CURSOR_CSS = `
@@ -151,52 +134,6 @@ const CURSOR_CSS = `
   .juno-preview-active .juno-preview-inner { animation: juno-preview-pulse  0.5s ease-out forwards; }
   .juno-preview-active .juno-preview-dot   { animation: juno-preview-dot    0.5s ease-out forwards; }
   .juno-preview-active .juno-preview-label { animation: juno-preview-label  0.5s ease-out forwards; }
-
-  /* ── Onboarding cursor animations ─────────────────────────────────────── */
-
-  /* Pulsing highlight ring at 1.2Hz (833ms period) */
-  @keyframes onb-ring-pulse {
-    0%, 100% { transform: scale(1);   opacity: 0.9; }
-    50%       { transform: scale(1.17); opacity: 0.55; }
-  }
-  .onb-ring-active {
-    animation: onb-ring-pulse ${RING_PERIOD_MS}ms ease-in-out infinite;
-  }
-
-  /* Bubble fade-in */
-  @keyframes onb-bubble-in {
-    from { opacity: 0; transform: translateY(6px) scale(0.96); }
-    to   { opacity: 1; transform: translateY(0)   scale(1); }
-  }
-  .onb-bubble-visible {
-    animation: onb-bubble-in 0.18s ease-out forwards;
-  }
-
-  /* Celebration: cursor spin */
-  @keyframes onb-celebrate-spin {
-    0%   { transform: rotate(0deg) scale(1); }
-    30%  { transform: rotate(20deg) scale(1.15); }
-    60%  { transform: rotate(-10deg) scale(1.1); }
-    100% { transform: rotate(0deg) scale(1); }
-  }
-  .onb-celebrate-spin {
-    animation: onb-celebrate-spin 0.55s ease-in-out forwards;
-  }
-
-  /* Glow burst ring */
-  @keyframes onb-glow-burst {
-    0%   { transform: scale(0.3); opacity: 1; }
-    100% { transform: scale(2.8); opacity: 0; }
-  }
-  .onb-glow-burst-active {
-    animation: onb-glow-burst 0.6s ease-out forwards;
-  }
-
-  /* Celebration particle */
-  @keyframes onb-particle-fly {
-    0%   { transform: translate(0, 0) scale(1); opacity: 1; }
-    100% { opacity: 0; }
-  }
 `;
 
 // ─── Cursor SVG ───────────────────────────────────────────────────────────────
@@ -336,19 +273,6 @@ export const DesktopCursorOverlay = () => {
   const flyAnimFrameRef = useRef<number | null>(null);
   const flyLingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLandedRef = useRef<{ x: number; y: number } | null>(null);
-
-  // ── Onboarding cursor refs (cursor-animation-frame driven) ─────────────────
-  // All positioned imperatively to avoid 60fps React re-renders.
-  const onbCursorRef = useRef<HTMLDivElement | null>(null);     // cursor sprite
-  const onbRingRef = useRef<HTMLDivElement | null>(null);       // pulsing highlight ring
-  const onbBubbleRef = useRef<HTMLDivElement | null>(null);     // speech bubble container
-  const onbBubbleTextRef = useRef<HTMLSpanElement | null>(null);// streamed text inside bubble
-  const onbGlowRef = useRef<HTMLDivElement | null>(null);       // celebration glow burst ring
-  const onbParticlesRef = useRef<(HTMLDivElement | null)[]>([]); // 6 particle dots
-  const onbBubbleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onbBubbleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Current cursor position — bubble needs this to anchor itself
-  const onbPosRef = useRef<{ x: number; y: number }>({ x: -300, y: -300 });
 
   // ── Slot allocation ────────────────────────────────────────────────────────
   const getOrAssignSlot = (agentId: string, map: SlotMap): number | null => {
@@ -515,9 +439,9 @@ export const DesktopCursorOverlay = () => {
   }, []);
 
   // ── Window setup ──────────────────────────────────────────────────────────
-  // Phase D / LAC-1882: span the union of all connected monitors so the
-  // onboarding cursor can fly to a System Settings window on a non-primary
-  // display. Single-monitor users get the same coverage as before.
+  // Phase D / LAC-1882: span the union of all connected monitors so agent
+  // cursors can render on a non-primary display. Single-monitor users get the
+  // same coverage as before.
   useEffect(() => {
     let mounted = true;
     const setupWindow = async () => {
@@ -584,8 +508,6 @@ export const DesktopCursorOverlay = () => {
       });
       if (flyAnimFrameRef.current !== null) cancelAnimationFrame(flyAnimFrameRef.current);
       if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
-      if (onbBubbleTimerRef.current) clearTimeout(onbBubbleTimerRef.current);
-      if (onbBubbleIntervalRef.current) clearInterval(onbBubbleIntervalRef.current);
       if (previewTimer.current) clearTimeout(previewTimer.current);
     };
   }, []);
@@ -702,168 +624,6 @@ export const DesktopCursorOverlay = () => {
     firePreview(x, y, action);
   });
 
-  // ── Onboarding cursor — cursor-animation-frame at 60fps ───────────────────
-  // Backend emits {x, y, t, style} via animate_cursor_to. We move the onboarding
-  // cursor sprite imperatively so React never re-renders at 60fps.
-  //
-  // Phase D / LAC-1882: under `prefers-reduced-motion: reduce` we honor the
-  // backend's animation by only applying the final frame (`t === 1`). The
-  // cursor effectively teleports to the destination — no Bezier sweep, no
-  // intermediate motion. Backend still emits all frames; we just discard them.
-  useEventListener<{ x: number; y: number; t: number; style: string }>(
-    EVENTS.CURSOR_ANIMATION_FRAME,
-    ({ x, y, t }) => {
-      const reducedMotion = REDUCED_MOTION_MQL?.matches ?? false;
-
-      // Under reduced motion, only the final frame (t=1) lands the cursor.
-      // Skipping intermediate frames also drops the per-event DOM writes.
-      if (reducedMotion && t < 1) {
-        return;
-      }
-
-      onbPosRef.current = { x, y };
-
-      // Cursor sprite
-      if (onbCursorRef.current) {
-        onbCursorRef.current.style.opacity = "1";
-        onbCursorRef.current.style.transform = `translate(${x - HOT_SPOT}px, ${y - HOT_SPOT}px)`;
-      }
-      // Highlight ring follows cursor
-      if (onbRingRef.current) {
-        const r = RING_BASE_RADIUS;
-        onbRingRef.current.style.left = `${x - r}px`;
-        onbRingRef.current.style.top = `${y - r}px`;
-      }
-      // Bubble follows cursor (above-right of cursor tip)
-      if (onbBubbleRef.current) {
-        onbBubbleRef.current.style.left = `${x + 20}px`;
-        onbBubbleRef.current.style.top = `${y - 48}px`;
-      }
-    }
-  );
-
-  // ── Onboarding highlight ring ─────────────────────────────────────────────
-  useEventListener<{ x: number; y: number; radius: number }>(
-    EVENTS.CURSOR_HIGHLIGHT,
-    ({ x, y, radius }) => {
-      const r = radius || RING_BASE_RADIUS;
-      if (!onbRingRef.current) return;
-      const el = onbRingRef.current;
-      el.style.width = `${r * 2}px`;
-      el.style.height = `${r * 2}px`;
-      el.style.left = `${x - r}px`;
-      el.style.top = `${y - r}px`;
-      el.style.opacity = "1";
-      el.classList.remove("onb-ring-active");
-      void el.offsetWidth; // force reflow
-      el.classList.add("onb-ring-active");
-    }
-  );
-
-  // ── Onboarding speech bubble ──────────────────────────────────────────────
-  // Appears BUBBLE_APPEAR_DELAY_MS after the event, then streams text at
-  // BUBBLE_CHAR_INTERVAL_MS per character.
-  useEventListener<{ x: number; y: number; text: string }>(
-    EVENTS.CURSOR_BUBBLE,
-    ({ x, y, text }) => {
-      // Cancel any in-flight bubble timers
-      if (onbBubbleTimerRef.current) clearTimeout(onbBubbleTimerRef.current);
-      if (onbBubbleIntervalRef.current) clearInterval(onbBubbleIntervalRef.current);
-
-      if (onbBubbleTextRef.current) onbBubbleTextRef.current.textContent = "";
-      if (onbBubbleRef.current) {
-        const el = onbBubbleRef.current;
-        el.style.opacity = "0";
-        el.style.left = `${x + 20}px`;
-        el.style.top = `${y - 48}px`;
-        el.classList.remove("onb-bubble-visible");
-      }
-
-      onbBubbleTimerRef.current = setTimeout(() => {
-        if (!onbBubbleRef.current || !onbBubbleTextRef.current) return;
-        onbBubbleRef.current.classList.add("onb-bubble-visible");
-
-        let charIdx = 0;
-        onbBubbleIntervalRef.current = setInterval(() => {
-          if (!onbBubbleTextRef.current) return;
-          if (charIdx >= text.length) {
-            if (onbBubbleIntervalRef.current) clearInterval(onbBubbleIntervalRef.current);
-            return;
-          }
-          onbBubbleTextRef.current.textContent = text.slice(0, ++charIdx);
-        }, BUBBLE_CHAR_INTERVAL_MS);
-      }, BUBBLE_APPEAR_DELAY_MS);
-    }
-  );
-
-  // ── Dismiss cursor overlay ────────────────────────────────────────────────
-  useEventListener<{ animate: boolean }>(EVENTS.CURSOR_DISMISS_OVERLAY, () => {
-    if (onbBubbleTimerRef.current) clearTimeout(onbBubbleTimerRef.current);
-    if (onbBubbleIntervalRef.current) clearInterval(onbBubbleIntervalRef.current);
-
-    // Fade cursor sprite
-    if (onbCursorRef.current) onbCursorRef.current.style.opacity = "0";
-    // Fade ring
-    if (onbRingRef.current) {
-      onbRingRef.current.style.opacity = "0";
-      onbRingRef.current.classList.remove("onb-ring-active");
-    }
-    // Fade bubble
-    if (onbBubbleRef.current) {
-      onbBubbleRef.current.style.opacity = "0";
-      onbBubbleRef.current.classList.remove("onb-bubble-visible");
-    }
-  });
-
-  // ── Celebration micro-animation ───────────────────────────────────────────
-  // Backend (Phase C) can emit this after onboarding complete.
-  // Spin the cursor, fire a glow ring, and shoot 6 particle dots.
-  useEventListener<{ x?: number; y?: number }>("cursor-celebration", (payload) => {
-    const cx = payload?.x ?? onbPosRef.current.x;
-    const cy = payload?.y ?? onbPosRef.current.y;
-
-    // Spin cursor sprite
-    if (onbCursorRef.current) {
-      const el = onbCursorRef.current;
-      el.classList.remove("onb-celebrate-spin");
-      void el.offsetWidth;
-      el.classList.add("onb-celebrate-spin");
-    }
-
-    // Glow burst ring
-    if (onbGlowRef.current) {
-      const el = onbGlowRef.current;
-      const r = 32;
-      el.style.left = `${cx - r}px`;
-      el.style.top = `${cy - r}px`;
-      el.style.width = `${r * 2}px`;
-      el.style.height = `${r * 2}px`;
-      el.style.opacity = "1";
-      el.classList.remove("onb-glow-burst-active");
-      void el.offsetWidth;
-      el.classList.add("onb-glow-burst-active");
-    }
-
-    // Particle dots — 6 directions
-    const ANGLES = [0, 60, 120, 180, 240, 300];
-    onbParticlesRef.current.forEach((el, i) => {
-      if (!el) return;
-      const angle = (ANGLES[i] ?? 0) * (Math.PI / 180);
-      const dist = 48 + Math.random() * 24;
-      const tx = Math.cos(angle) * dist;
-      const ty = Math.sin(angle) * dist;
-      el.style.left = `${cx - 4}px`;
-      el.style.top = `${cy - 4}px`;
-      el.style.opacity = "1";
-      el.style.setProperty("--tx", `${tx}px`);
-      el.style.setProperty("--ty", `${ty}px`);
-      el.style.animation = "none";
-      void el.offsetWidth;
-      el.style.animation = `onb-particle-fly 0.6s ease-out ${i * 40}ms forwards`;
-      el.style.transform = `translate(var(--tx), var(--ty))`;
-    });
-  });
-
   // ── Render: N cursor sprites ───────────────────────────────────────────────
 
   return (
@@ -940,110 +700,6 @@ export const DesktopCursorOverlay = () => {
           </div>
         );
       })}
-
-      {/* ── Onboarding cursor overlay ────────────────────────────────────── */}
-
-      {/* Onboarding cursor sprite — backend moves this via cursor-animation-frame */}
-      <div
-        ref={onbCursorRef}
-        className="juno-cursor juno-cursor--idle"
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          opacity: 0,
-          transform: "translate(-300px, -300px)",
-          pointerEvents: "none",
-          transition: "opacity 0.4s ease",
-        }}
-      >
-        <JunoCursorShape color={ONBOARDING_ACCENT} />
-      </div>
-
-      {/* Pulsing highlight ring — shown by cursor-highlight event */}
-      <div
-        ref={onbRingRef}
-        style={{
-          position: "absolute",
-          borderRadius: "50%",
-          border: `3px solid ${ONBOARDING_ACCENT}`,
-          boxShadow: `0 0 12px 3px ${ONBOARDING_ACCENT}55`,
-          opacity: 0,
-          pointerEvents: "none",
-          width: RING_BASE_RADIUS * 2,
-          height: RING_BASE_RADIUS * 2,
-          top: -300,
-          left: -300,
-          transition: "opacity 0.25s ease",
-        }}
-      />
-
-      {/* Speech bubble — shown by cursor-bubble event */}
-      <div
-        ref={onbBubbleRef}
-        style={{
-          position: "absolute",
-          opacity: 0,
-          top: -300,
-          left: -300,
-          pointerEvents: "none",
-          maxWidth: 240,
-          backgroundColor: "rgba(15, 12, 45, 0.92)",
-          backdropFilter: "blur(10px)",
-          border: `1px solid ${ONBOARDING_ACCENT}55`,
-          borderRadius: 10,
-          padding: "7px 12px",
-          boxShadow: `0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px ${ONBOARDING_ACCENT}22`,
-          // Triangle pointer at bottom-left
-          filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.3))",
-        }}
-      >
-        <span
-          ref={onbBubbleTextRef}
-          style={{
-            color: "#e2e8f0",
-            fontSize: 12,
-            fontWeight: 500,
-            fontFamily: "system-ui, -apple-system, sans-serif",
-            lineHeight: 1.5,
-            whiteSpace: "pre-wrap",
-          }}
-        />
-      </div>
-
-      {/* Celebration glow burst ring */}
-      <div
-        ref={onbGlowRef}
-        style={{
-          position: "absolute",
-          borderRadius: "50%",
-          border: `2px solid ${ONBOARDING_ACCENT}`,
-          backgroundColor: `${ONBOARDING_ACCENT}22`,
-          opacity: 0,
-          pointerEvents: "none",
-          top: -300,
-          left: -300,
-        }}
-      />
-
-      {/* Celebration particle dots — 6 of them */}
-      {Array.from({ length: 6 }, (_, i) => (
-        <div
-          key={`onb-particle-${i}`}
-          ref={(el) => { onbParticlesRef.current[i] = el; }}
-          style={{
-            position: "absolute",
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            backgroundColor: i % 2 === 0 ? ONBOARDING_ACCENT : "#C4B5FD",
-            opacity: 0,
-            pointerEvents: "none",
-            top: -300,
-            left: -300,
-          }}
-        />
-      ))}
 
       {/* POINT teaching cursor — flies to agent-pointed coordinates */}
       <div
