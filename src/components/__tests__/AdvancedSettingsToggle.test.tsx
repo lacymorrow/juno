@@ -133,6 +133,9 @@ describe("visibleCategories", () => {
   it("keeps only non-advanced sections in basic mode", () => {
     expect(visibleCategories(false).map((c) => c.id)).toEqual([
       "general",
+      // Triggers got its own top-level section (how you summon Juno) and is
+      // deliberately part of basic mode, not gated behind the advanced toggle.
+      "triggers",
       "voice",
       "ai",
       "notifications",
@@ -380,7 +383,6 @@ describe("GeneralSettings in basic mode", () => {
     for (const hidden of [
       "Bar appearance",
       "Agent mode",
-      "Trigger mode",
       "Enable Companion Mode",
       "Enable big cursor",
       "Restart onboarding",
@@ -401,9 +403,10 @@ describe("GeneralSettings in basic mode", () => {
       expect(screen.getByText("Bar appearance")).toBeInTheDocument()
     );
     expect(screen.getByText("Launch at login")).toBeInTheDocument();
+    // "Trigger mode" no longer lives here — trigger configuration moved to the
+    // dedicated Triggers section.
     for (const shown of [
       "Agent mode",
-      "Trigger mode",
       "Enable Companion Mode",
       "Enable big cursor",
       "Restart onboarding",

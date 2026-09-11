@@ -1,6 +1,5 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ComponentType } from 'react';
 
 // Mock Tauri API
 vi.mock('@tauri-apps/api/core', () => ({
@@ -63,16 +62,17 @@ vi.mock('@/components/ui/tabs', () => ({
   TabsTrigger: ({ children }: any) => <button data-testid="tabs-trigger">{children}</button>,
 }));
 
-// Dynamic import for the component to test
-let DevToolsPanel: ComponentType;
+// Import statically: vi.mock() calls are hoisted above imports, so the mocks
+// are already in place. The old pattern dynamically imported the component
+// inside beforeEach, which made the FIRST hook pay for cold-transforming
+// DevToolsPanel's large sub-panel dependency graph — on a loaded CI worker
+// that blew the 10s hook timeout. A static import moves that cost to module
+// collection, where it belongs and has no per-hook deadline.
+import DevToolsPanel from '../DevToolsPanel';
 
 describe('DevToolsPanel', () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    
-    // Dynamically import the component after mocks are set up
-    const module = await import('../DevToolsPanel');
-    DevToolsPanel = module.default;
   });
 
   it('should render without crashing', () => {
