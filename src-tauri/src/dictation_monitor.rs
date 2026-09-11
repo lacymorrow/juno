@@ -188,7 +188,7 @@ pub async fn init_dictation_input_monitoring(app_handle: AppHandle) -> Result<()
 
     // Start the monitoring task that checks for held dictation input
     let app_handle_clone = app_handle.clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         dictation_input_monitoring_task(app_handle_clone).await;
     });
 

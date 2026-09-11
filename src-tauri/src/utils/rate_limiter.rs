@@ -217,7 +217,7 @@ impl GlobalRateLimiters {
 
     /// Start periodic cleanup of stale buckets
     pub fn start_cleanup_task(self: Arc<Self>) {
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(300)); // 5 minutes
 
             loop {
