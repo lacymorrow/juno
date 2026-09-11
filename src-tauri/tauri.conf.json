@@ -161,7 +161,9 @@
       "resources/ggml-metal.metal"
     ],
     "macOS": {
-      "entitlements": "juno.entitlements"
+      "entitlements": "juno.entitlements",
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "12.3"
     }
   }
 }
