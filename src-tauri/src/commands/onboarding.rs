@@ -469,7 +469,9 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
             );
         }
 
-        // Open the onboarding window and give it focus
+        // Show the onboarding window and give it focus. The window is declared
+        // "visible": false in tauri.conf.json (so returning users never see it
+        // flash on launch); this is the only place it is made visible at startup.
         if let Err(e) = crate::window_management::open_onboarding_window(app_handle.clone()).await {
             warn!("Failed to open onboarding window: {}", e);
             return Err(format!("Failed to open onboarding window: {}", e));
@@ -481,7 +483,10 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
         // correct value when the main window mounts.
         update_onboarding_phase(&app_handle, OnboardingPhase::Complete, false).await;
 
-        // Hide the onboarding window (it starts visible from tauri.conf.json)
+        // The onboarding window starts hidden ("visible": false in
+        // tauri.conf.json), so it never appeared. Close it to free its webview —
+        // onboarding won't run this launch, and restart_onboarding recreates it
+        // on demand via open_onboarding_window.
         if let Err(e) = crate::window_management::close_onboarding_window(app_handle.clone()).await
         {
             warn!("Failed to close onboarding window: {}", e);
