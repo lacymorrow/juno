@@ -117,8 +117,12 @@ fn classify_shell_risk(input: &Value) -> RiskLevel {
         return RiskLevel::High;
     }
 
-    // Medium: reads/writes files, network calls, etc. — still worth noting
-    RiskLevel::Medium
+    // Default: High. Arbitrary shell execution runs with full user
+    // privileges, so agent bash requires human approval by default; the
+    // agent runner routes High/Critical through the tool-approval flow
+    // (security audit 2026-02-08, item #3). The global
+    // `tool_approval_required` setting continues to apply on top of this.
+    RiskLevel::High
 }
 
 fn classify_computer_use_risk(input: &Value) -> RiskLevel {
@@ -238,6 +242,15 @@ mod tests {
     fn rm_is_high() {
         let r = classify_risk("bash", &json!({"command": "rm old_file.txt"}));
         assert_eq!(r, RiskLevel::High);
+    }
+
+    #[test]
+    fn plain_bash_requires_approval_by_default() {
+        // Any agent shell execution defaults to High risk, so the runner's
+        // approval gate fires even without the global approval flag.
+        let r = classify_risk("bash", &json!({"command": "ls -la"}));
+        assert_eq!(r, RiskLevel::High);
+        assert!(needs_approval(&r));
     }
 
     #[test]

@@ -603,7 +603,6 @@ pub async fn register_desktop_tools(
     let open_file_and_type_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
-            let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<OpenFileAndTypeArgs>(input)
                 .map_err(|e| format!("Failed to parse open_file_and_type input: {}", e))?;
 
@@ -650,17 +649,36 @@ pub async fn register_desktop_tools(
                 }
             }
 
-            // Step 3: Open file with default application (with timeout)
-            let open_command = format!("open '{}'", args.file_path);
-            let open_result = commands::shell::bash_command(
-                app.clone(),
-                state_manager,
-                open_command,
-                Some(15), // Increased timeout for opening (15 seconds)
-                None,
-                Some(true), // Enable debug mode for agent usage
+            // Step 3: Open file with default application (with timeout).
+            // Invoke `open` directly with the path as an argument, never
+            // through a shell, so a malicious file path cannot inject
+            // commands (security audit 2026-02-08, item #1).
+            let file_path_for_open = args.file_path.clone();
+            let open_result: Result<(), String> = match tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                tokio::task::spawn_blocking(move || {
+                    std::process::Command::new("open")
+                        .arg(&file_path_for_open)
+                        .output()
+                }),
             )
-            .await;
+            .await
+            {
+                Ok(Ok(Ok(output))) => {
+                    if output.status.success() {
+                        Ok(())
+                    } else {
+                        Err(format!(
+                            "open command exited with {}: {}",
+                            output.status,
+                            String::from_utf8_lossy(&output.stderr).trim()
+                        ))
+                    }
+                }
+                Ok(Ok(Err(e))) => Err(format!("Failed to run open command: {}", e)),
+                Ok(Err(e)) => Err(format!("open command task failed: {}", e)),
+                Err(_) => Err("Timed out opening file after 15 seconds".to_string()),
+            };
 
             if let Err(e) = open_result {
                 // Fallback: Try to write content directly to file

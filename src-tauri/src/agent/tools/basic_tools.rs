@@ -71,7 +71,8 @@ impl SecurityConfig {
         allowed_extensions.insert("zsh".to_string());
         allowed_extensions.insert("fish".to_string());
         allowed_extensions.insert("xml".to_string());
-        allowed_extensions.insert("env".to_string());
+        // NOTE: "env" is deliberately NOT allowed; .env files hold secrets
+        // (security audit 2026-02-08, item #19)
         allowed_extensions.insert("gitignore".to_string());
         allowed_extensions.insert("dockerfile".to_string());
         allowed_extensions.insert("makefile".to_string());
@@ -106,6 +107,10 @@ impl SecurityConfig {
         allowed_extensions.insert("diff".to_string());
 
         let mut blocked_extensions = HashSet::new();
+        // Secret-bearing files (security audit 2026-02-08, item #19)
+        blocked_extensions.insert("env".to_string());
+        blocked_extensions.insert("pem".to_string());
+        blocked_extensions.insert("key".to_string());
         // Dangerous binary/executable extensions
         blocked_extensions.insert("exe".to_string());
         blocked_extensions.insert("com".to_string());
@@ -238,6 +243,18 @@ mod basic_tools_impl {
 
         let path = PathBuf::from(path_str);
 
+        // Dotenv-style files carry secrets but have no "extension" as far as
+        // Path::extension is concerned (".env", ".env.local"), so block them by
+        // file name in production (security audit 2026-02-08, item #19)
+        if !config.debug_mode {
+            if let Some(name) = path.file_name() {
+                let name = name.to_string_lossy().to_lowercase();
+                if name == ".env" || name.starts_with(".env.") {
+                    return Err("Access to environment secret files is not allowed".to_string());
+                }
+            }
+        }
+
         // Validate file extensions
         if let Some(extension) = path.extension() {
             let ext_str = extension.to_string_lossy().to_lowercase();
@@ -280,27 +297,9 @@ mod basic_tools_impl {
             current_dir.join(&path)
         };
 
-        // Canonicalize path to resolve symlinks and normalize
-        let canonical_path = match full_path.canonicalize() {
-            Ok(p) => p,
-            Err(_) => {
-                // If file doesn't exist yet, use the parent directory
-                if let Some(parent) = full_path.parent() {
-                    match parent.canonicalize() {
-                        Ok(canonical_parent) => {
-                            if let Some(file_name) = full_path.file_name() {
-                                canonical_parent.join(file_name)
-                            } else {
-                                full_path.clone()
-                            }
-                        }
-                        Err(_) => full_path.clone(),
-                    }
-                } else {
-                    full_path.clone()
-                }
-            }
-        };
+        // Canonicalize path to resolve symlinks and normalize (shared helper,
+        // also used by anthropic_computer_use and enhanced_coding_tools)
+        let canonical_path = crate::agent::tools::path_security::canonicalize_lenient(&full_path);
 
         // Enforce workspace boundaries
         if let Some(workspace_root) = &config.workspace_root {
