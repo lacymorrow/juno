@@ -157,15 +157,11 @@
     ],
     "resources": [
       "../tauri-plugin-voice-transcription/models/*",
-      "Info.plist",
       "../public/sounds/**/*",
       "resources/ggml-metal.metal"
     ],
     "macOS": {
-      "entitlements": "juno.entitlements",
-      "files": {
-        "Info.plist": "Info.plist"
-      }
+      "entitlements": "juno.entitlements"
     }
   }
 }
