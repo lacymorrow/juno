@@ -30,6 +30,12 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # Vitest needs no build — run it first so test failures surface fast.
+      # Must be `bun run test` (the vitest script); plain `bun test` invokes
+      # Bun's own runner and false-fails on this suite.
+      - name: Frontend tests (vitest)
+        run: bun run test
+
       # `bun run build` is `tsc && vite build` — gates the typecheck and bundle.
       - name: Build frontend
         run: bun run build
