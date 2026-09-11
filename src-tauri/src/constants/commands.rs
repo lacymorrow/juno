@@ -158,6 +158,13 @@ pub mod cloud {
     pub const GET_CLOUD_CONNECTION_DIAGNOSTICS: &str = "get_cloud_connection_diagnostics";
 }
 
+/// MCP server management command names
+pub mod mcp {
+    /// Explicit user approval for an MCP server to spawn its configured command
+    /// (spawn-approval gate, 2026-09 security audit).
+    pub const APPROVE_MCP_SERVER: &str = "approve_mcp_server";
+}
+
 /// Skill discovery command names for slash-command autocomplete
 pub mod media {
     /// Read a media player's live state (`<NowPlayingCard>`).

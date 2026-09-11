@@ -113,12 +113,12 @@ use crate::commands::{get_triggers, set_triggers};
 
 // Import MCP commands explicitly
 use crate::commands::mcp::{
-    add_mcp_server, apply_mcp_quick_fixes, check_mcp_prerequisites, force_restart_all_mcp_servers,
-    get_mcp_diagnostics, get_mcp_server_statuses, get_mcp_servers, get_mcp_system_diagnostics,
-    get_mcp_tools, initialize_mcp_servers, remove_mcp_server, restart_mcp_server_with_diagnostics,
-    retry_failed_mcp_servers, set_mcp_server_enabled, start_mcp_server, stop_mcp_server,
-    test_mcp_server_connection, toggle_mcp_server, toggle_mcp_tool, troubleshoot_mcp_issues,
-    update_mcp_server,
+    add_mcp_server, apply_mcp_quick_fixes, approve_mcp_server, check_mcp_prerequisites,
+    force_restart_all_mcp_servers, get_mcp_diagnostics, get_mcp_server_statuses, get_mcp_servers,
+    get_mcp_system_diagnostics, get_mcp_tools, initialize_mcp_servers, remove_mcp_server,
+    restart_mcp_server_with_diagnostics, retry_failed_mcp_servers, set_mcp_server_enabled,
+    start_mcp_server, stop_mcp_server, test_mcp_server_connection, toggle_mcp_server,
+    toggle_mcp_tool, troubleshoot_mcp_issues, update_mcp_server,
 };
 
 // Import collaborative AI commands explicitly
@@ -645,6 +645,7 @@ pub fn run() {
             commands::cloud::run_websocket_test_suite,
             // MCP Server Management Commands
             add_mcp_server,
+            approve_mcp_server,
             remove_mcp_server,
             start_mcp_server,
             stop_mcp_server,
