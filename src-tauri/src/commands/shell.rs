@@ -487,11 +487,7 @@ pub(crate) fn validate_command_security(command: &str) -> Result<(), String> {
     }
 
     // Normalize: lowercase + collapse whitespace runs to single spaces
-    let normalized = command
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let normalized = normalize_command(command);
 
     // Check for truly catastrophic patterns
     let catastrophic_patterns = [
@@ -555,9 +551,23 @@ pub(crate) fn validate_command_security(command: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Normalize a shell command for pattern matching: lowercase and collapse
+/// whitespace runs to single spaces so spacing tricks (`rm  -rf   /`) cannot
+/// dodge substring blocklists. Shared with the cloud denied-command check
+/// (security audit 2026-02-08, item #25).
+pub(crate) fn normalize_command(command: &str) -> String {
+    command
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Detect `rm` invocations that combine recursive + force flags (in any
 /// order or split across tokens) with the filesystem root as a target.
-fn is_catastrophic_rm(normalized: &str) -> bool {
+/// Expects input already normalized via [`normalize_command`]. Shared with
+/// the cloud denied-command check (security audit 2026-02-08, item #25).
+pub(crate) fn is_catastrophic_rm(normalized: &str) -> bool {
     let tokens: Vec<&str> = normalized.split(' ').collect();
     for (i, token) in tokens.iter().enumerate() {
         if *token != "rm" {

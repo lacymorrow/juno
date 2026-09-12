@@ -34,7 +34,9 @@ pub struct CloudClient {
     config: CloudConfig,
     app_handle: AppHandle,
     connection_state: Arc<TokioMutex<ConnectionState>>,
-    auth: CloudAuth,
+    /// Behind a mutex so the auth-response handler can store the validated
+    /// credentials (security audit 2026-02-08, item #24)
+    auth: Arc<TokioMutex<CloudAuth>>,
     #[allow(dead_code)]
     security: CloudSecurity,
     command_processor: CommandProcessor,
@@ -60,7 +62,7 @@ impl CloudClient {
             config,
             connection_state: Arc::new(TokioMutex::new(ConnectionState::Disconnected)),
             app_handle,
-            auth,
+            auth: Arc::new(TokioMutex::new(auth)),
             security,
             command_processor,
             command_tx,
@@ -288,7 +290,7 @@ impl CloudClient {
     async fn authenticate(&self, ws_sender: &mut WsSender) -> Result<(), CloudError> {
         info!("Authenticating with cloud server");
 
-        let auth_data = self.auth.create_auth_message()?;
+        let auth_data = self.auth.lock().await.create_auth_message()?;
         let auth_message = WebSocketMessage {
             message_type: MessageType::Auth,
             data: auth_data,
@@ -301,11 +303,11 @@ impl CloudClient {
             .await
             .map_err(|e| CloudError::NetworkError(format!("Failed to send auth message: {}", e)))?;
 
-        // Note: Auth response validation not implemented yet
-        // For now, assume authentication succeeds
-        self.set_connection_state(ConnectionState::Authenticated)
-            .await;
-        info!("Authentication completed");
+        // The connection is NOT authenticated yet: the state stays Connected
+        // until the server's auth response arrives and passes
+        // `validate_auth_response` in `handle_auth_response` (security audit
+        // 2026-02-08, item #24; formerly assumed success here).
+        info!("Authentication request sent; awaiting server auth response");
 
         Ok(())
     }
@@ -405,30 +407,36 @@ impl CloudClient {
             response.success
         );
 
-        if response.success {
-            self.set_connection_state(ConnectionState::Authenticated)
-                .await;
-            // Note: Auth credential storage not implemented yet
-        } else {
-            let error_msg = response
-                .error
-                .unwrap_or_else(|| "Authentication failed".to_string());
-            error!("Authentication failed: {}", error_msg);
-            return Err(CloudError::AuthenticationFailed(error_msg));
-        }
+        // Validate the full response (success flag, token, device id) and
+        // store the resulting credentials. Only a validated response may
+        // transition the connection to Authenticated; anything else is a
+        // connection error (security audit 2026-02-08, item #24).
+        let validation = self.auth.lock().await.validate_auth_response(response);
 
-        Ok(())
+        match validation {
+            Ok(()) => {
+                self.set_connection_state(ConnectionState::Authenticated)
+                    .await;
+                Ok(())
+            }
+            Err(e) => {
+                error!("Authentication failed: {}", e);
+                self.set_connection_state(ConnectionState::Error(e.to_string()))
+                    .await;
+                Err(e)
+            }
+        }
     }
 
     #[allow(dead_code)]
     async fn create_device_status(&self) -> Result<DeviceStatus, CloudError> {
         let _app_state = self.app_handle.state::<crate::state::AppState>();
 
-        let device_id = self
-            .auth
-            .get_credentials()
-            .map(|c| c.device_id.clone())
-            .unwrap_or_else(|| "unknown".to_string());
+        let device_id = {
+            let auth = self.auth.lock().await;
+            auth.get_credentials().map(|c| c.device_id.clone())
+        }
+        .unwrap_or_else(|| "unknown".to_string());
 
         let status = DeviceStatus {
             device_id,
@@ -771,7 +779,7 @@ struct CloudClientTask {
     #[allow(dead_code)]
     config: CloudConfig,
     #[allow(dead_code)]
-    auth: DeviceAuth,
+    auth: Arc<TokioMutex<DeviceAuth>>,
     #[allow(dead_code)]
     command_processor: CloudCommandProcessor,
     #[allow(dead_code)]
