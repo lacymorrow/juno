@@ -633,8 +633,13 @@ impl BrainFactory {
                 let name = tool_name_clone.clone();
 
                 async move {
-                    use crate::commands::safari_tools::execute_safari_tool;
-                    match execute_safari_tool(name, input).await {
+                    // Agent-pipeline dispatch: by the time this executor runs,
+                    // AgentRunner::check_batch_approval has classified the call
+                    // (safari_execute_javascript is High risk) and obtained user
+                    // approval where required. The webview-invokable command
+                    // surface refuses arbitrary JS (audit #15/#20).
+                    use crate::commands::safari_tools::execute_safari_tool_for_agent;
+                    match execute_safari_tool_for_agent(name, input).await {
                         Ok(tool_result) => Ok(tool_result.output),
                         Err(e) => Err(e),
                     }

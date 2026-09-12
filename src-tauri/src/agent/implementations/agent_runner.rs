@@ -466,6 +466,7 @@ where
                     .get("command")
                     .or_else(|| riskiest_tool.input.get("url"))
                     .or_else(|| riskiest_tool.input.get("path"))
+                    .or_else(|| riskiest_tool.input.get("javascript"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("(no details)")
                     .chars()
