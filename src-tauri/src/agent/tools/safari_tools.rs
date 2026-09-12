@@ -88,25 +88,59 @@ fn escape_for_applescript(input: &str) -> String {
     result
 }
 
-/// Validates JavaScript code for basic safety (additional security measure)
+/// Validates JavaScript code for basic safety.
 ///
-/// This provides a basic security check for user-provided JavaScript code
-/// to prevent obvious injection attempts. Not foolproof, but catches common patterns.
+/// ADVISORY ONLY — this is a substring blocklist and is inherently
+/// bypassable: `window["ev"+"al"]` assembles the identifier at runtime and no
+/// string filter can catch that without a real JavaScript parser, which we
+/// deliberately do not attempt here. The actual security control for
+/// arbitrary Safari JS is the approval gate: `safari_execute_javascript` is
+/// classified High in `risk_classifier.rs`, so the agent runner requires
+/// human confirmation before execution, and the webview-invokable command
+/// surface refuses arbitrary JS entirely (security audit 2026-02-08, items
+/// #15/#20). This filter stays as cheap defense-in-depth against careless or
+/// obvious cases; do not extend it toward a parser.
+///
+/// Matching runs on a normalized copy (all whitespace removed, lowercased) so
+/// spacing and case tricks like `eval (`, `EVAL(`, or `innerHTML=` do not
+/// slip past. The `Function` constructor is checked case-sensitively on the
+/// whitespace-stripped text, because lowercasing it would flag every ordinary
+/// `function(` declaration. (Before this normalization, the `Function(` and
+/// `innerHTML =` patterns were dead code: they were compared against
+/// lowercased input while containing uppercase letters, so they never
+/// matched anything.)
 fn validate_javascript_safety(javascript: &str) -> Result<(), AgentError> {
-    // Check for obviously dangerous patterns
+    // Check for excessive length first (prevent DoS)
+    if javascript.len() > 50000 {
+        return Err(AgentError::ToolError(
+            "JavaScript code exceeds maximum allowed length (50KB)".to_string(),
+        ));
+    }
+
+    // Whitespace-stripped copy defeats spacing tricks; the lowercased form
+    // additionally defeats case tricks for the case-insensitive patterns.
+    let stripped: String = javascript.chars().filter(|c| !c.is_whitespace()).collect();
+    let normalized = stripped.to_lowercase();
+
+    // Case-insensitive patterns, written in their normalized form
+    // (lowercase, no internal whitespace).
     let dangerous_patterns = [
         "eval(",
-        "Function(",
+        // Catches prototype-walk escapes like []["constructor"]["constructor"]
+        // and `.constructor` chains. May rarely flag benign code containing
+        // the word — acceptable for an advisory filter.
+        "constructor",
         "document.write(",
-        "innerHTML =",
-        "outerHTML =",
-        "location.href =",
+        "innerhtml=",
+        "outerhtml=",
+        "location.href=",
         "location.replace(",
         "location.assign(",
         "window.open(",
         "fetch(",
-        "XMLHttpRequest",
+        "xmlhttprequest",
         "import(",
+        "importscripts",
         "require(",
         "process.",
         "global.",
@@ -114,11 +148,11 @@ fn validate_javascript_safety(javascript: &str) -> Result<(), AgentError> {
         "__filename",
         "fs.",
         "child_process",
+        "document.cookie",
     ];
 
-    let js_lower = javascript.to_lowercase();
     for pattern in &dangerous_patterns {
-        if js_lower.contains(pattern) {
+        if normalized.contains(pattern) {
             log::warn!(
                 "Potentially dangerous JavaScript pattern detected: {}",
                 pattern
@@ -130,11 +164,21 @@ fn validate_javascript_safety(javascript: &str) -> Result<(), AgentError> {
         }
     }
 
-    // Check for excessive length (prevent DoS)
-    if javascript.len() > 50000 {
-        return Err(AgentError::ToolError(
-            "JavaScript code exceeds maximum allowed length (50KB)".to_string(),
-        ));
+    // Case-sensitive patterns on the whitespace-stripped (but not lowercased)
+    // text: `Function(` catches `new Function(...)` / `window.Function(...)`
+    // without flagging every anonymous `function(` declaration.
+    let case_sensitive_patterns = ["Function("];
+    for pattern in &case_sensitive_patterns {
+        if stripped.contains(pattern) {
+            log::warn!(
+                "Potentially dangerous JavaScript pattern detected: {}",
+                pattern
+            );
+            return Err(AgentError::ToolError(format!(
+                "JavaScript contains potentially dangerous pattern: {}. Use with caution.",
+                pattern
+            )));
+        }
     }
 
     Ok(())
@@ -867,7 +911,7 @@ pub fn get_safari_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "safari_execute_javascript".to_string(),
-            description: "Executes custom JavaScript in the current Safari tab and returns the result. Powerful tool for custom DOM manipulation and data extraction.".to_string(),
+            description: "Executes custom JavaScript in the current Safari tab and returns the result. Powerful tool for custom DOM manipulation and data extraction. High risk: runs arbitrary code in the user's real Safari session, so every call requires user approval.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -979,6 +1023,45 @@ mod tests {
         // Test acceptable length
         let ok_js = "a".repeat(10000);
         assert!(validate_javascript_safety(&ok_js).is_ok());
+    }
+
+    #[test]
+    fn test_javascript_safety_whitespace_and_case_bypasses_closed() {
+        // Spacing tricks used to slip past the raw substring match
+        assert!(validate_javascript_safety("eval ('x')").is_err());
+        assert!(validate_javascript_safety("eval\n('x')").is_err());
+        assert!(validate_javascript_safety("eval\t('x')").is_err());
+        // `innerHTML =` and `Function(` were dead patterns before (uppercase
+        // patterns compared against lowercased input) — both must match now,
+        // with or without spaces around `=`.
+        assert!(validate_javascript_safety("document.body.innerHTML = '<img>'").is_err());
+        assert!(validate_javascript_safety("document.body.innerHTML='<img>'").is_err());
+        assert!(validate_javascript_safety("outerHTML  =  'x'").is_err());
+        assert!(validate_javascript_safety("new Function('alert(1)')()").is_err());
+        assert!(validate_javascript_safety("window.Function('alert(1)')()").is_err());
+        assert!(validate_javascript_safety("location.href = 'https://evil.example'").is_err());
+        // Constructor-chain escape hatch
+        assert!(
+            validate_javascript_safety("[]['constructor']['constructor']('alert(1)')()").is_err()
+        );
+        assert!(validate_javascript_safety("({}).constructor.constructor('alert(1)')()").is_err());
+        // Cookie exfiltration source
+        assert!(validate_javascript_safety("document.cookie").is_err());
+    }
+
+    #[test]
+    fn test_javascript_safety_is_advisory_not_the_control() {
+        // Ordinary anonymous functions must NOT be flagged — only the
+        // case-sensitive `Function(` constructor is.
+        assert!(validate_javascript_safety("(function() { return 1; })()").is_ok());
+        assert!(validate_javascript_safety("[1,2].map(function(x) { return x; })").is_ok());
+
+        // KNOWN LIMITATION, on purpose: identifier concatenation defeats any
+        // substring filter, and we do not attempt a JS parser here. This
+        // payload passing the filter is exactly why safari_execute_javascript
+        // is classified High in risk_classifier.rs and gated behind user
+        // approval — the gate is the control, this filter is advisory.
+        assert!(validate_javascript_safety("window[\"ev\"+\"al\"]('alert(1)')").is_ok());
     }
 
     #[test]

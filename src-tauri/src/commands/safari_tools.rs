@@ -93,16 +93,37 @@ pub async fn safari_list_clickable_elements() -> Result<ToolResult, String> {
     }
 }
 
-/// Executes custom JavaScript in the current Safari tab
+/// Error returned when arbitrary Safari JavaScript is requested through the
+/// webview-invokable command surface.
+///
+/// Any JavaScript running in the webview can call Tauri commands, so an open
+/// `safari_execute_javascript` command would let compromised or injected
+/// frontend code run arbitrary JS in the user's real Safari session while
+/// completely bypassing the agent runner's approval flow. The command layer
+/// has no way to prompt the user (the approval loop lives in
+/// `AgentRunner::check_batch_approval`), and no frontend code path uses this
+/// command, so the honest gate is to refuse it here outright. The agent
+/// pipeline reaches JS execution only through
+/// [`execute_safari_tool_for_agent`], after the risk classifier marks the
+/// call High and the user approves it (security audit 2026-02-08, #15/#20).
+const ARBITRARY_JS_COMMAND_BLOCKED: &str = "safari_execute_javascript is not available as a \
+    direct command: arbitrary JavaScript execution in Safari runs only through the agent \
+    pipeline, where it is classified High risk and requires user approval \
+    (security audit 2026-02-08, items #15/#20)";
+
+/// Executes custom JavaScript in the current Safari tab — BLOCKED at the
+/// command layer.
+///
+/// This command is intentionally a stub that always errors; see
+/// [`ARBITRARY_JS_COMMAND_BLOCKED`] for the rationale. It stays registered so
+/// existing invokers get a clear error instead of a missing-command failure.
 #[command]
 pub async fn safari_execute_javascript(javascript: String) -> Result<ToolResult, String> {
-    match get_safari_tools().execute_javascript(&javascript) {
-        Ok(output) => Ok(ToolResult {
-            call_id: format!("safari_execute_javascript_{}", javascript.len()),
-            output,
-        }),
-        Err(e) => Err(e.to_string()),
-    }
+    log::warn!(
+        "Blocked direct safari_execute_javascript command invocation ({} bytes of JavaScript)",
+        javascript.len()
+    );
+    Err(ARBITRARY_JS_COMMAND_BLOCKED.to_string())
 }
 
 /// Clears the Safari element cache
@@ -117,9 +138,36 @@ pub async fn safari_clear_cache() -> Result<ToolResult, String> {
     }
 }
 
-/// Execute Safari tool with parameters (for agent integration)
+/// Execute Safari tool with parameters — webview-invokable command surface.
+///
+/// Delegates to [`execute_safari_tool_for_agent`] for every tool EXCEPT
+/// arbitrary JavaScript execution, which is refused here because the command
+/// layer bypasses the agent runner's approval flow (see
+/// [`ARBITRARY_JS_COMMAND_BLOCKED`]).
 #[command]
 pub async fn execute_safari_tool(
+    tool_name: String,
+    parameters: Value,
+) -> Result<ToolResult, String> {
+    if tool_name == "safari_execute_javascript" {
+        log::warn!(
+            "Blocked direct execute_safari_tool command invocation for arbitrary JavaScript"
+        );
+        return Err(ARBITRARY_JS_COMMAND_BLOCKED.to_string());
+    }
+    execute_safari_tool_for_agent(tool_name, parameters).await
+}
+
+/// Dispatches a Safari tool invocation coming from the AGENT pipeline.
+///
+/// This is a plain function, not a Tauri command, so it is not reachable from
+/// webview JavaScript. By the time the agent's tool executor calls it,
+/// `AgentRunner::check_batch_approval` has already classified the call
+/// (`safari_execute_javascript` is High risk in `risk_classifier.rs`) and
+/// obtained human approval where required — that gate, not the advisory
+/// substring filter in the tool layer, is the control for arbitrary Safari JS
+/// (security audit 2026-02-08, items #15/#20).
+pub async fn execute_safari_tool_for_agent(
     tool_name: String,
     parameters: Value,
 ) -> Result<ToolResult, String> {
@@ -193,5 +241,54 @@ pub async fn execute_safari_tool(
             output,
         }),
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn direct_safari_execute_javascript_command_is_blocked() {
+        // The webview-invokable command must refuse arbitrary JS regardless
+        // of payload — even trivially harmless code — because approval
+        // happens in the agent runner, which this path bypasses.
+        let result = safari_execute_javascript("1 + 1".to_string()).await;
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("safari_execute_javascript command must always error"),
+        };
+        assert!(err.contains("agent pipeline"), "unexpected error: {}", err);
+        assert!(err.contains("#15/#20"), "unexpected error: {}", err);
+    }
+
+    #[tokio::test]
+    async fn execute_safari_tool_command_blocks_arbitrary_js_branch() {
+        let result = execute_safari_tool(
+            "safari_execute_javascript".to_string(),
+            json!({"javascript": "document.title"}),
+        )
+        .await;
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("execute_safari_tool must refuse the arbitrary-JS branch"),
+        };
+        assert!(err.contains("agent pipeline"), "unexpected error: {}", err);
+    }
+
+    #[tokio::test]
+    async fn agent_dispatch_rejects_unknown_tools() {
+        let result =
+            execute_safari_tool_for_agent("safari_totally_unknown".to_string(), json!({})).await;
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("unknown tool must error"),
+        };
+        assert!(
+            err.contains("Unknown Safari tool"),
+            "unexpected error: {}",
+            err
+        );
     }
 }
