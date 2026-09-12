@@ -12,16 +12,58 @@ use crate::agent::tools::ui_token_selector::{
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{command, State};
+use tauri::{command, AppHandle, State};
+use tauri_plugin_store::StoreExt;
 use tracing::{error, info, warn};
+
+/// Dedicated store file for UI token selection settings. A whole-value write
+/// here cannot clobber other subsystems, unlike the centralized `ToolSettings`
+/// file (see the read-modify-write rule in `settings/mod.rs`).
+const UI_TOKEN_STORE_FILE: &str = "ui_token_selection.json";
+const UI_TOKEN_CONFIG_KEY: &str = "config";
 
 /// Configuration for UI token selection operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UITokenSelectionConfig {
     pub enable_token_selection: bool,
+    /// Target reduction as a fraction in `0.0..=1.0` (0.70 = 70% reduction)
     pub target_reduction_percentage: f64,
     pub enable_multi_monitor_optimization: bool,
     pub enable_performance_tracking: bool,
+}
+
+impl Default for UITokenSelectionConfig {
+    fn default() -> Self {
+        Self {
+            enable_token_selection: true,
+            target_reduction_percentage: 0.70, // 70% reduction target
+            enable_multi_monitor_optimization: true,
+            enable_performance_tracking: true,
+        }
+    }
+}
+
+/// Validate and persist the UI token selection configuration.
+fn persist_ui_token_config(
+    app_handle: &AppHandle,
+    config: &UITokenSelectionConfig,
+) -> Result<(), String> {
+    if !(0.0..=1.0).contains(&config.target_reduction_percentage) {
+        return Err(
+            "Target reduction percentage must be a fraction between 0.0 and 1.0".to_string(),
+        );
+    }
+
+    let store = app_handle
+        .store(UI_TOKEN_STORE_FILE)
+        .map_err(|e| format!("Failed to open UI token selection store: {}", e))?;
+
+    let value = serde_json::to_value(config)
+        .map_err(|e| format!("Failed to serialize UI token selection config: {}", e))?;
+    store.set(UI_TOKEN_CONFIG_KEY, value);
+    store
+        .save()
+        .map_err(|e| format!("Failed to save UI token selection config: {}", e))
 }
 
 /// Result of UI token selection operation
@@ -307,31 +349,28 @@ pub async fn test_multi_monitor_optimization(
 }
 
 /// Resets performance metrics for fresh benchmarking
+///
+/// There is no long-lived performance tracker to reset; trackers are created
+/// per benchmark run. This used to build a fresh tracker, drop it, and report
+/// success anyway. Be honest instead.
 #[command]
 pub async fn reset_performance_metrics(_app_state: State<'_, AppState>) -> Result<String, String> {
-    info!("Resetting UI token selection performance metrics");
-
-    // Create a new tracker instance (which starts fresh)
-    let _performance_tracker = PerformanceTracker::new();
-
-    Ok("Performance metrics reset successfully".to_string())
+    Err(
+        "No persistent performance metrics exist to reset (trackers are per benchmark run)"
+            .to_string(),
+    )
 }
 
 /// Sets/updates UI token selection configuration
 #[command]
 pub async fn set_ui_token_config(
     _app_state: State<'_, AppState>,
+    app_handle: AppHandle,
     config: UITokenSelectionConfig,
 ) -> Result<String, String> {
     info!("Updating UI token selection configuration");
 
-    // Validate configuration
-    if config.target_reduction_percentage < 0.0 || config.target_reduction_percentage > 100.0 {
-        return Err("Target reduction percentage must be between 0 and 100".to_string());
-    }
-
-    // Store configuration (for now we'll just validate and return success)
-    // TODO: Implement persistent configuration storage
+    persist_ui_token_config(&app_handle, &config)?;
 
     Ok("UI token selection configuration updated successfully".to_string())
 }
@@ -340,15 +379,12 @@ pub async fn set_ui_token_config(
 #[command]
 pub async fn update_ui_token_config(
     _app_state: State<'_, AppState>,
+    app_handle: AppHandle,
     config: UITokenSelectionConfig,
 ) -> Result<String, String> {
     info!("Updating UI token selection configuration: {:?}", config);
 
-    // TODO: Store configuration in app state
-    // For now, just validate the configuration
-    if config.target_reduction_percentage < 0.0 || config.target_reduction_percentage > 1.0 {
-        return Err("Target reduction percentage must be between 0.0 and 1.0".to_string());
-    }
+    persist_ui_token_config(&app_handle, &config)?;
 
     Ok("Configuration updated successfully".to_string())
 }
@@ -357,16 +393,24 @@ pub async fn update_ui_token_config(
 #[command]
 pub async fn get_ui_token_config(
     _app_state: State<'_, AppState>,
+    app_handle: AppHandle,
 ) -> Result<UITokenSelectionConfig, String> {
     info!("Retrieving UI token selection configuration");
 
-    // TODO: Retrieve from app state
-    Ok(UITokenSelectionConfig {
-        enable_token_selection: true,
-        target_reduction_percentage: 0.70, // 70% reduction target
-        enable_multi_monitor_optimization: true,
-        enable_performance_tracking: true,
-    })
+    let store = app_handle
+        .store(UI_TOKEN_STORE_FILE)
+        .map_err(|e| format!("Failed to open UI token selection store: {}", e))?;
+
+    match store.get(UI_TOKEN_CONFIG_KEY) {
+        Some(value) => serde_json::from_value(value).or_else(|e| {
+            warn!(
+                "Stored UI token selection config is unreadable, using defaults: {}",
+                e
+            );
+            Ok(UITokenSelectionConfig::default())
+        }),
+        None => Ok(UITokenSelectionConfig::default()),
+    }
 }
 
 #[cfg(test)]

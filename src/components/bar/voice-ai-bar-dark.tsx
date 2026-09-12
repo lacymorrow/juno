@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import AudioVisualizer from "./audio-visualizer";
 import { EVENTS, UI } from "@/lib/constants.generated";
+import { isOneOf } from "@/lib/ui-api";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
@@ -182,16 +183,16 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
   const debouncedResizeWindow = useMemo(
     () => debounce(async (currentUiState: string) => {
       try {
-        const isCompact = [
+        const isCompact = isOneOf(currentUiState, [
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_DICTATION_READY,
-        ].includes(currentUiState as any);
+        ]);
         
-        const needsExpanded = [
+        const needsExpanded = isOneOf(currentUiState, [
           UI.BAR_STATES_INPUT,
           UI.BAR_STATES_EXPANDING,
           UI.BAR_STATES_AGENT_RESPONDING,
-        ].includes(currentUiState as any);
+        ]);
 
         const currentWidth = needsExpanded 
           ? FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH 
@@ -435,9 +436,7 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
         )}
 
         {/* Default/Idle State */}
-        {[UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
-          barState.barState as any
-        ) && (
+        {isOneOf(barState.barState, [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY]) && (
           <div
             className="dark-default-content"
             onClick={handleClick}
@@ -454,14 +453,14 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
         )}
 
         {/* Active States with Visualizer */}
-        {[
+        {isOneOf(barState.barState, [
           UI.BAR_STATES_LISTENING,
           UI.BAR_STATES_TRANSCRIBING,
           UI.BAR_STATES_SPEAKING,
           UI.BAR_STATES_LOADING,
           UI.BAR_STATES_SUBMITTING,
           UI.BAR_STATES_AGENT_RESPONDING,
-        ].includes(barState.barState as any) && (
+        ]) && (
           <div className="dark-active-content">
             <div className="dark-icon-wrapper">{getStateIcon()}</div>
             <AudioVisualizer
@@ -485,9 +484,7 @@ export function VoiceAIBarDark({ className = "" }: { className?: string }) {
         )}
 
         {/* Status States */}
-        {[UI.BAR_STATES_ERROR, UI.BAR_STATES_SUCCESS].includes(
-          barState.barState as any
-        ) && (
+        {isOneOf(barState.barState, [UI.BAR_STATES_ERROR, UI.BAR_STATES_SUCCESS]) && (
           <div className="dark-status-content">
             <div className="dark-icon-wrapper">{getStateIcon()}</div>
             <span className="dark-status-text">{getStateText()}</span>

@@ -44,4 +44,4 @@ Examples of issues we want to know about:
 
 We prefer coordinated disclosure: please give us a reasonable window to ship a fix before publishing details. We will credit reporters in the release notes unless you prefer to remain anonymous.
 
-A historical audit (32 issues from 2026-02-08) is tracked in [SECURITY_AUDIT.md](../SECURITY_AUDIT.md) at the repo root.
+A historical audit (32 issues from 2026-02-08) is tracked in [docs/audits/security-audit-2026-02-08.md](../docs/audits/security-audit-2026-02-08.md), with per-item status annotations from the 2026-09-11 verification pass.

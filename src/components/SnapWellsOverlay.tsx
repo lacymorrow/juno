@@ -11,6 +11,10 @@
  * transparent window spanning the union of every monitor. The bar broadcasts
  * `snap-wells-show` / `snap-wells-hide` events (see FloatingBar); we own only
  * the window show/hide and the dim/hole rendering — no business logic.
+ *
+ * The 2560x1600 @ 0,0 geometry in tauri.conf.json is only a startup fallback
+ * (JSON cannot carry comments): this component resizes/positions the window
+ * to span the live monitor set before every show().
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";

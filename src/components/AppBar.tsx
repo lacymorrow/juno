@@ -9,6 +9,7 @@ import { UI } from "@/lib/constants.generated";
 import {
   useUIElement,
   UIState,
+  isOneOf,
   type UIStateData,
   type UIElementConfig,
 } from "@/lib/ui-api";
@@ -83,11 +84,11 @@ const AudioLevelIndicator = ({
   audioLevel: number;
 }) => {
   if (
-    ![
+    !isOneOf(uiState, [
       UI.BAR_STATES_LISTENING,
       UI.BAR_STATES_TRANSCRIBING,
       UI.BAR_STATES_ALWAYS_LISTENING,
-    ].includes(uiState as any)
+    ])
   ) {
     return null;
   }
@@ -252,18 +253,16 @@ export function AppBar() {
       bgColor = "bg-gradient-to-r from-blue-500/98 to-cyan-600/98";
     }
 
-    const sizeStyles = [UI.BAR_STATES_DEFAULT].includes(
-      (currentState?.uiState || UI.BAR_STATES_DEFAULT) as any
-    )
+    const sizeStyles = isOneOf((currentState?.uiState || UI.BAR_STATES_DEFAULT), [UI.BAR_STATES_DEFAULT])
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
     const hoverEffect = "";
 
-    const clickable = [
+    const clickable = isOneOf((currentState?.uiState || UI.BAR_STATES_DEFAULT), [
       UI.BAR_STATES_DEFAULT,
       UI.BAR_STATES_DICTATION_READY,
-    ].includes((currentState?.uiState || UI.BAR_STATES_DEFAULT) as any)
+    ])
       ? "cursor-pointer"
       : "";
 
@@ -286,15 +285,11 @@ export function AppBar() {
         className={getContainerStyles()}
         style={{ opacity: uiConfig.opacity }}
         onClick={
-          [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
-            (currentState?.uiState || UI.BAR_STATES_DEFAULT) as any
-          )
+          isOneOf((currentState?.uiState || UI.BAR_STATES_DEFAULT), [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY])
             ? handleBarClick
             : undefined
         }
-        disabled={![UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
-          (currentState?.uiState || UI.BAR_STATES_DEFAULT) as any
-        )}
+        disabled={!isOneOf((currentState?.uiState || UI.BAR_STATES_DEFAULT), [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY])}
       >
         {/* Default State */}
         {(currentState?.uiState === UI.BAR_STATES_DEFAULT ||
@@ -354,7 +349,7 @@ export function AppBar() {
         )}
 
         {/* Active States */}
-        {[
+        {isOneOf((currentState?.uiState || UI.BAR_STATES_DEFAULT), [
           UI.BAR_STATES_SUBMITTING,
           UI.BAR_STATES_LOADING,
           UI.BAR_STATES_SPEAKING,
@@ -362,7 +357,7 @@ export function AppBar() {
           UI.BAR_STATES_TRANSCRIBING,
           UI.BAR_STATES_AGENT_RESPONDING,
           UI.BAR_STATES_LISTENING,
-        ].includes((currentState?.uiState || UI.BAR_STATES_DEFAULT) as any) && (
+        ]) && (
           <div
             className="flex items-center justify-between w-full h-full"
                      >

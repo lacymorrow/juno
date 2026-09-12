@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_store::StoreExt;
 use tracing::{debug, info, warn};
 
 use crate::agent::intelligence::{
@@ -9,6 +10,47 @@ use crate::agent::intelligence::{
 use crate::agent::providers::anthropic::ToolChoice;
 use crate::constants::events;
 use crate::state::AppState;
+
+/// Dedicated store file for tool choice intelligence settings. Kept separate
+/// from the centralized `ToolSettings` serialization on purpose (see the
+/// read-modify-write rule in `settings/mod.rs`): this file is owned entirely
+/// by this module, so a whole-value write cannot clobber other subsystems.
+const TOOL_CHOICE_STORE_FILE: &str = "tool_choice.json";
+const TOOL_CHOICE_CONFIG_KEY: &str = "config";
+const TOOL_CHOICE_ENABLED_KEY: &str = "enabled";
+
+/// Read the persisted tool choice configuration, falling back to defaults when
+/// nothing is stored yet (or the stored value fails to parse).
+fn load_stored_config(app_handle: &AppHandle) -> Result<ToolChoiceConfig, String> {
+    let store = app_handle
+        .store(TOOL_CHOICE_STORE_FILE)
+        .map_err(|e| format!("Failed to open tool choice store: {}", e))?;
+
+    match store.get(TOOL_CHOICE_CONFIG_KEY) {
+        Some(value) => serde_json::from_value(value).or_else(|e| {
+            warn!(
+                "Stored tool choice config is unreadable, using defaults: {}",
+                e
+            );
+            Ok(ToolChoiceConfig::default())
+        }),
+        None => Ok(ToolChoiceConfig::default()),
+    }
+}
+
+/// Persist the tool choice configuration.
+fn store_config(app_handle: &AppHandle, config: &ToolChoiceConfig) -> Result<(), String> {
+    let store = app_handle
+        .store(TOOL_CHOICE_STORE_FILE)
+        .map_err(|e| format!("Failed to open tool choice store: {}", e))?;
+
+    let value = serde_json::to_value(config)
+        .map_err(|e| format!("Failed to serialize tool choice config: {}", e))?;
+    store.set(TOOL_CHOICE_CONFIG_KEY, value);
+    store
+        .save()
+        .map_err(|e| format!("Failed to save tool choice config: {}", e))
+}
 
 /// Configuration for tool choice intelligence system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,13 +149,14 @@ impl From<ToolChoiceDecision> for ToolChoiceAnalysis {
 #[tauri::command]
 pub async fn get_tool_choice_config(
     state: State<'_, AppState>,
+    app_handle: AppHandle,
 ) -> Result<ToolChoiceConfig, String> {
     debug!("Getting tool choice configuration");
 
-    // For now, return default config - in future this could be stored in app state
-    let config = ToolChoiceConfig::default();
+    // Persisted settings, defaults when nothing has been saved yet.
+    let config = load_stored_config(&app_handle)?;
 
-    // Update mode based on current app state
+    // The mode always reflects the live app state, not the stored value
     let mode = if state.get_dictation_active().unwrap_or(false) {
         "dictation"
     } else if state.get_always_listening_active().unwrap_or(false) {
@@ -143,8 +186,7 @@ pub async fn set_tool_choice_config(
         return Err("Confidence threshold must be between 0.0 and 1.0".to_string());
     }
 
-    // TODO: Store configuration in app state or persistent storage
-    // For now, we'll just log the update
+    store_config(&app_handle, &config)?;
 
     info!("Tool choice configuration updated successfully");
 
@@ -162,6 +204,7 @@ pub async fn analyze_tool_choice(
     input: String,
     mode: Option<String>,
     state: State<'_, AppState>,
+    app_handle: AppHandle,
 ) -> Result<ToolChoiceAnalysis, String> {
     debug!("Analyzing tool choice for input: '{}'", input);
 
@@ -183,8 +226,9 @@ pub async fn analyze_tool_choice(
         }
     };
 
-    // Create tool choice intelligence system
-    let intelligence = ToolChoiceIntelligence::new(operational_mode);
+    // Create tool choice intelligence system using the persisted configuration
+    let stored_config = load_stored_config(&app_handle)?;
+    let intelligence = ToolChoiceIntelligence::with_config(operational_mode, stored_config.into());
 
     // Build analysis context
     let context = AnalysisContext {
@@ -253,38 +297,14 @@ pub async fn test_tool_choice_patterns(
 }
 
 /// Get tool choice statistics and performance metrics
+///
+/// Statistics collection has never been implemented; this used to return a
+/// hardcoded all-zeros payload that looked like real (empty) telemetry.
+/// Returning an explicit error is honest: callers can distinguish "no data
+/// yet" from "this feature does not exist".
 #[tauri::command]
 pub async fn get_tool_choice_stats() -> Result<serde_json::Value, String> {
-    debug!("Getting tool choice statistics");
-
-    // TODO: Implement actual statistics collection
-    // For now, return mock data
-    let stats = serde_json::json!({
-        "total_analyses": 0,
-        "forced_tool_calls": 0,
-        "confidence_distribution": {
-            "high": 0,
-            "medium": 0,
-            "low": 0
-        },
-        "mode_usage": {
-            "agent": 0,
-            "voice": 0,
-            "dictation": 0,
-            "alwayslistening": 0,
-            "debug": 0
-        },
-        "pattern_matches": {
-            "screenshot": 0,
-            "click": 0,
-            "keyboard": 0,
-            "browser": 0,
-            "file": 0,
-            "desktop": 0
-        }
-    });
-
-    Ok(stats)
+    Err("Tool choice statistics collection is not implemented".to_string())
 }
 
 /// Reset tool choice configuration to defaults
@@ -297,7 +317,8 @@ pub async fn reset_tool_choice_config(
 
     let default_config = ToolChoiceConfig::default();
 
-    // TODO: Clear any stored configuration from app state
+    // Persist the defaults so the reset survives a restart
+    store_config(&app_handle, &default_config)?;
 
     info!("Tool choice configuration reset successfully");
 
@@ -318,7 +339,13 @@ pub async fn set_tool_choice_enabled(
 ) -> Result<(), String> {
     info!("Setting tool choice intelligence enabled: {}", enabled);
 
-    // TODO: Store enabled state in app state
+    let store = app_handle
+        .store(TOOL_CHOICE_STORE_FILE)
+        .map_err(|e| format!("Failed to open tool choice store: {}", e))?;
+    store.set(TOOL_CHOICE_ENABLED_KEY, serde_json::json!(enabled));
+    store
+        .save()
+        .map_err(|e| format!("Failed to save tool choice enabled state: {}", e))?;
 
     // Emit state change event to frontend
     if let Err(e) = app_handle.emit(events::tool_choice::ENABLED_CHANGED, enabled) {
@@ -328,12 +355,20 @@ pub async fn set_tool_choice_enabled(
     Ok(())
 }
 
-/// Get tool choice intelligence enabled state
+/// Get tool choice intelligence enabled state (defaults to enabled when unset)
 #[tauri::command]
-pub async fn get_tool_choice_enabled(_state: State<'_, AppState>) -> Result<bool, String> {
-    // TODO: Get actual enabled state from app state
-    // For now, return true as default
-    Ok(true)
+pub async fn get_tool_choice_enabled(
+    _state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<bool, String> {
+    let store = app_handle
+        .store(TOOL_CHOICE_STORE_FILE)
+        .map_err(|e| format!("Failed to open tool choice store: {}", e))?;
+
+    Ok(store
+        .get(TOOL_CHOICE_ENABLED_KEY)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true))
 }
 
 /// Validate tool choice configuration

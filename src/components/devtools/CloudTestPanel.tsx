@@ -260,10 +260,12 @@ export const CloudTestPanel: React.FC = () => {
       setIsLoading(true);
 
       // Test 1: Basic connection test
-      const basicTest = (await invoke("test_websocket_connection")) as any;
+      const basicTest = await invoke<{ success?: boolean } & Record<string, unknown>>(
+        "test_websocket_connection"
+      );
       setTestResults((prev) => [
         {
-          success: (basicTest as any).success || true,
+          success: basicTest.success || true,
           test: "Quick Test - Basic WebSocket",
           response: basicTest,
           timestamp: Date.now() / 1000,
@@ -284,10 +286,12 @@ export const CloudTestPanel: React.FC = () => {
       ]);
 
       // Test 3: Run test suite
-      const testSuite = (await invoke("run_websocket_test_suite")) as any;
+      const testSuite = await invoke<{ overall_success?: boolean } & Record<string, unknown>>(
+        "run_websocket_test_suite"
+      );
       setTestResults((prev) => [
         {
-          success: (testSuite as any).overall_success || true,
+          success: testSuite.overall_success || true,
           test: "Quick Test - Test Suite",
           response: testSuite,
           timestamp: Date.now() / 1000,

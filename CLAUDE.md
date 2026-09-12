@@ -299,7 +299,7 @@ Test files: `src/components/__tests__/`, `src/test/setup.ts`. Rust tests use inl
 
 ## Security
 
-- `SECURITY_AUDIT.md` — Tracked security vulnerabilities from 2026-02-08 audit (32 issues)
+- `docs/audits/security-audit-2026-02-08.md`: tracked security vulnerabilities from the 2026-02-08 audit (32 issues, with 2026-09-11 status annotations)
 - See audit before making changes to: cloud/, agent/tools/, commands/shell.rs, browser_controller.rs
 
 ## Additional References

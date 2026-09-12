@@ -29,6 +29,7 @@ import {
   useDynamicIslandSize,
 } from "@/components/ui/dynamic-island";
 import { EVENTS, UI } from "@/lib/constants.generated";
+import { isOneOf } from "@/lib/ui-api";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
 
 // === STANDARDIZED UI API TYPES ===
@@ -166,7 +167,7 @@ const AudioLevelIndicator = ({
     UI.BAR_STATES_ALWAYS_LISTENING,
   ];
 
-  if (!validStates.includes(currentUiState as any)) {
+  if (!isOneOf(currentUiState, validStates)) {
     return null;
   }
 
@@ -326,13 +327,13 @@ const FloatingBarContent = () => {
         const currentUiState = barState.barState;
 
         // Define compact states that use small window size
-        const isCompact = [
+        const isCompact = isOneOf(currentUiState, [
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_LISTENING,
           UI.BAR_STATES_DICTATION_READY,
           UI.BAR_STATES_SPEAKING,
           UI.BAR_STATES_TRANSCRIBING,
-        ].includes(currentUiState as any);
+        ]);
         const currentWidth = isCompact ? defaultWidth : EXPANDED_WIDTH;
         const currentHeight = isCompact ? defaultHeight : EXPANDED_HEIGHT;
 
@@ -517,7 +518,7 @@ const FloatingBarContent = () => {
   // === RENDER LOGIC ===
   const currentUiState = barState.barState;
   const compactStates = [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY];
-  const isCompact = compactStates.includes(currentUiState as any);
+  const isCompact = isOneOf(currentUiState, compactStates);
 
   return (
     <>
@@ -547,7 +548,7 @@ const FloatingBarContent = () => {
           UI.BAR_STATES_DICTATING,
           UI.BAR_STATES_AGENT_RESPONDING,
         ];
-        return activeStates.includes(currentUiState as any);
+        return isOneOf(currentUiState, activeStates);
       })() && (
         <DynamicContainer className="flex items-center justify-between w-full h-full px-4">
           <DynamicDiv className="flex items-center gap-3">
@@ -612,7 +613,7 @@ const FloatingBarContent = () => {
           UI.BAR_STATES_SHRINKING,
           UI.BAR_STATES_FINISHING,
         ];
-        return statusStates.includes(currentUiState as any);
+        return isOneOf(currentUiState, statusStates);
       })() && (
         <DynamicContainer className="flex items-center justify-center w-full h-full">
           <DynamicDiv className="flex items-center gap-3">
