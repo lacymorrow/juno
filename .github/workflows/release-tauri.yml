@@ -16,8 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      # The repo pins its toolchain in rust-toolchain.toml. Using @stable here
+      # installed the targets on a toolchain cargo never used: rustup honored
+      # the pin, auto-installed it with only the host target, and the universal
+      # build died at the x86_64 half. @master with no explicit version reads the
+      # pin, so the targets land on the toolchain that actually builds.
+      - name: Install Rust (pinned toolchain)
+        uses: dtolnay/rust-toolchain@master
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
