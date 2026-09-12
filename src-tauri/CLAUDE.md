@@ -430,7 +430,7 @@ let client = Client::builder()
 - All command execution must pass whitelist validation
 - Implement different security levels for development vs production
 - Add comprehensive audit logging for security events
-- See `SECURITY_AUDIT.md` in project root for 32 tracked vulnerabilities (2026-02-08)
+- See `docs/audits/security-audit-2026-02-08.md` for 32 tracked vulnerabilities (2026-02-08, with 2026-09-11 status annotations)
 
 ### Shared Settings: Read-Modify-Write
 `ToolSettings` in `settings/mod.rs` is written by multiple subsystems (ToolConfigManager, mouse settings UI, etc.). When saving, each subsystem MUST:

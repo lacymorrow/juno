@@ -736,16 +736,16 @@ pub struct HardwareInfo {
 }
 
 /// Voice and audio state information
+///
+/// Only fields the backend can actually observe are exposed. Transcription
+/// progress, live audio level, and voice error details are not tracked at
+/// this layer; reporting them as confident `false`/`0.0` placeholders was
+/// misleading, so they were removed rather than faked.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VoiceAudioState {
     pub mode: String, // "dictation", "agent", "idle"
     pub is_listening: bool,
-    pub is_transcribing: bool,
     pub is_speaking: bool,
-    pub current_transcription: Option<String>,
-    pub audio_level: f32,
-    pub has_error: bool,
-    pub error_message: Option<String>,
 }
 
 /// Display information for agent context
@@ -2106,23 +2106,11 @@ async fn get_voice_audio_state_safe(
             "idle".to_string()
         };
 
-        // Get TTS state if available
-        let is_speaking = if let Ok(_tts_provider) = state.get_tts_provider() {
-            // Check if TTS is currently active (this is a simplified check)
-            false // TODO: Implement actual TTS state checking
-        } else {
-            false
-        };
-
         Some(VoiceAudioState {
             mode,
             is_listening: is_dictation_active,
-            is_transcribing: false, // TODO: Get actual transcription state
-            is_speaking,
-            current_transcription: None, // TODO: Get current transcription if available
-            audio_level: 0.0,            // TODO: Get actual audio level
-            has_error: false,            // TODO: Check for voice errors
-            error_message: None,
+            // Real TTS playback state from the global playback flag
+            is_speaking: crate::tts::is_tts_playing(),
         })
     } else {
         log::debug!("No app state available for voice/audio state");

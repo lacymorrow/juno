@@ -442,6 +442,10 @@ export const DesktopCursorOverlay = () => {
   // Phase D / LAC-1882: span the union of all connected monitors so agent
   // cursors can render on a non-primary display. Single-monitor users get the
   // same coverage as before.
+  //
+  // The 2560x1600 @ 0,0 geometry in tauri.conf.json is only a startup
+  // fallback (JSON cannot carry comments): this effect resizes/positions the
+  // window to the real display topology before every show().
   useEffect(() => {
     let mounted = true;
     const setupWindow = async () => {
