@@ -25,13 +25,28 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
         }
         "delete_file" | "remove_file" | "unlink_file" => RiskLevel::High,
 
+        // Arbitrary JavaScript injected into the user's real Safari session.
+        // The substring blocklist in safari_tools.rs (validate_javascript_safety)
+        // is advisory and bypassable — e.g. `window["ev"+"al"]` assembles the
+        // identifier at runtime and no string filter catches that. This High
+        // classification is the actual control: the agent runner routes
+        // High/Critical through the human approval flow, exactly like agent
+        // bash (security audit 2026-02-08, items #15/#20; same pattern as #3).
+        // Parameterized Safari tools (click by cached numeric id, DOM
+        // extraction with a fixed script) stay Low because their injected JS
+        // is compiled from typed inputs, not caller-supplied code.
+        "safari_execute_javascript" => RiskLevel::High,
+
         // Browser navigation to sensitive sites
-        "browser_navigate" | "navigate_to_url" | "open_url" => {
+        "browser_navigate" | "navigate_to_url" | "open_url" | "safari_navigate" => {
             classify_browser_nav_risk(tool_input)
         }
 
-        // Form fill — could submit payments/passwords
-        "browser_fill" | "fill_form" | "type_in_element" | "browser_type" => {
+        // Form fill — could submit payments/passwords. safari_type_text
+        // injects an escaped string literal into a fixed script (not
+        // caller-supplied code), so it is parameterized as JS, but the
+        // *content* can still be sensitive form data.
+        "browser_fill" | "fill_form" | "type_in_element" | "browser_type" | "safari_type_text" => {
             classify_form_fill_risk(tool_input)
         }
 
@@ -282,6 +297,63 @@ mod tests {
     #[test]
     fn no_approval_for_low() {
         assert!(!needs_approval(&RiskLevel::Low));
+    }
+
+    #[test]
+    fn safari_execute_javascript_is_high_and_gated() {
+        // Arbitrary Safari JS defaults to High so the runner's approval gate
+        // fires even without the global approval flag (audit #15/#20). The
+        // input content does not matter — the capability itself is the risk.
+        let r = classify_risk(
+            "safari_execute_javascript",
+            &json!({"javascript": "document.title"}),
+        );
+        assert_eq!(r, RiskLevel::High);
+        assert!(needs_approval(&r));
+
+        // A blocklist bypass payload is still High for the same reason.
+        let r = classify_risk(
+            "safari_execute_javascript",
+            &json!({"javascript": "window[\"ev\"+\"al\"]('x')"}),
+        );
+        assert_eq!(r, RiskLevel::High);
+    }
+
+    #[test]
+    fn parameterized_safari_tools_stay_low() {
+        // These compile fixed scripts from typed inputs (numeric ids), so
+        // they carry no arbitrary-JS risk and stay unprompted.
+        let r = classify_risk("safari_extract_dom", &json!({}));
+        assert_eq!(r, RiskLevel::Low);
+        let r = classify_risk("safari_click_element", &json!({"element_id": 7}));
+        assert_eq!(r, RiskLevel::Low);
+        let r = classify_risk("safari_list_clickable_elements", &json!({}));
+        assert_eq!(r, RiskLevel::Low);
+    }
+
+    #[test]
+    fn safari_navigate_uses_browser_nav_risk() {
+        let r = classify_risk(
+            "safari_navigate",
+            &json!({"url": "https://bank.example.com/transfer"}),
+        );
+        assert_eq!(r, RiskLevel::High);
+        let r = classify_risk("safari_navigate", &json!({"url": "https://example.com"}));
+        assert_eq!(r, RiskLevel::Low);
+    }
+
+    #[test]
+    fn safari_type_text_uses_form_fill_risk() {
+        let r = classify_risk(
+            "safari_type_text",
+            &json!({"element_id": 3, "text": "hunter2", "field": "password"}),
+        );
+        assert_eq!(r, RiskLevel::Critical);
+        let r = classify_risk(
+            "safari_type_text",
+            &json!({"element_id": 3, "text": "hello world"}),
+        );
+        assert_eq!(r, RiskLevel::Low);
     }
 
     #[test]
