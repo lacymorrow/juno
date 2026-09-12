@@ -376,3 +376,8 @@ backend-server/dist/
 backend-server/build/
 
 .hive-mind/
+
+# Code-signing material must never be committed (Developer ID exports)
+*.p12
+*.pfx
+*.cer
