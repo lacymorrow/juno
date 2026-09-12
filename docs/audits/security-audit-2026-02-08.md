@@ -8,6 +8,8 @@
 
 > **Status pass (2026-09-11):** each item below now carries a **Status (2026-09-11)** line
 > recording what the RC verification found and which fix PR closed it (PRs #534, #535, #537).
+> **Status pass (2026-09-12):** the residual items (#7, #24, #25, #27/#12, #28, #30, #31, #32)
+> were closed or dispositioned; those items carry an additional **Status (2026-09-12)** line.
 > The original 2026-02-08 audit text is unchanged; only status annotations were appended.
 > Legend: **Fixed** (verified closed), **Mitigated** (risk reduced, root cause remains),
 > **Partial** (one vector closed, others remain), **Residual** (unchanged, impact noted),
@@ -58,6 +60,7 @@
 - **Issue:** Raw `api_key` included in JSON payload. Exposed in logging, serialization, server-side storage.
 - **Fix:** Remove api_key from payload. Use token-only auth or HMAC signing.
 - **Status (2026-09-11):** **Mitigated in #534.** The cloud settings UI (set-API-key / start-connector / enable flows) was removed and cloud stays disabled by default (LAC-3729), so the channel is unreachable in this release. The auth payload itself still carries the raw `api_key` (`cloud/auth.rs`); token-only auth remains open.
+- **Status (2026-09-12):** **Fixed.** `create_auth_message` no longer sends the API key. The payload carries a non-disclosing proof of possession: a one-way `key_id` (first 8 bytes of SHA-256 of the key, hex) plus an HMAC-SHA256 signature over `device_id | nonce | timestamp` keyed by the API key, verifiable in constant time via the existing `verify_signature` helper. A fresh UUID nonce is generated per auth message. Breaking wire change, acceptable because the hosted backend is down. Unit tests assert the key never appears in the payload and that the proof verifies/fails correctly.
 
 ### 8. Timing-Vulnerable Signature Comparison
 - **File:** `src-tauri/src/cloud/auth.rs:216`
@@ -92,6 +95,7 @@
 - **Issue:** Only blocks `../../../..` (4+ levels). Three levels of traversal enough to reach filesystem root.
 - **Fix:** Canonicalize paths and enforce workspace boundaries in all modes.
 - **Status (2026-09-11):** **Residual.** Debug builds still use the relaxed substring check (`basic_tools.rs` `debug_mode`); the production path now canonicalizes through the shared `path_security` helper introduced in #535.
+- **Status (2026-09-12):** **Fixed with #27.** `basic_tools` now enforces the canonicalize-plus-boundary check against the shared `path_security::default_workspace_roots()` list in all build modes, fails closed when no root resolves, and re-checks the sensitive-file blocklist on the canonical path.
 
 ### 13. Path Traversal in str_replace_tool
 - **File:** `src-tauri/src/agent/tools/anthropic_computer_use.rs:66-88`
@@ -165,12 +169,14 @@
 - **Issue:** Sets state to Authenticated without validating server response.
 - **Fix:** Wait for and validate auth response.
 - **Status (2026-09-11):** **Residual.** `cloud/client.rs` still transitions to `Authenticated` without validating a server response. Impact is limited by cloud being disabled by default and by the fail-closed signature and timestamp checks (#534) on the command path.
+- **Status (2026-09-12):** **Fixed.** `authenticate()` no longer sets `Authenticated` after merely sending the auth message; the state stays `Connected` until the server's auth response arrives. `handle_auth_response` now runs `DeviceAuth::validate_auth_response` (success flag, token, and device id all required; credentials stored on success); a failing response sets the connection state to `Error` and returns `CloudError::AuthenticationFailed`. Validation paths are unit-tested in `cloud/auth.rs`.
 
 ### 25. Cloud Denied Commands Blacklist Easily Bypassed
 - **File:** `src-tauri/src/cloud/config.rs:38-59`
 - **Issue:** Exact substring matching. `rm -r -f /` bypasses `rm -rf` block.
 - **Fix:** Robust command parsing or whitelist model.
 - **Status (2026-09-11):** **Residual.** The substring blacklist is unchanged. Impact reduced by #534: mandatory confirmation for `SystemCommand`/`ConfigUpdate`, real rate limiting, and the disabled-by-default cloud channel.
+- **Status (2026-09-12):** **Fixed.** The cloud denied-command checks (`CloudConfig::is_command_allowed` and `CloudSecurity::validate_command_content`) now reuse the shell validator's normalization (lowercase, collapse whitespace) and its `rm` flag-permutation tokenizer from `commands/shell.rs` (#535), so `rm -r -f /`, `rm --recursive --force /`, `RM  -RF /`, and tab/space variants are all caught. Tests cover the bypass variants in both query text and command parameters. Still a blacklist by design; the #534 confirmation gate remains in front of it.
 
 ### 26. MCP Server Spawns Arbitrary Processes
 - **File:** `src-tauri/src/agent/tools/mcp_integration.rs:248-272`
@@ -187,12 +193,14 @@
 - **Issue:** In Tauri, cwd may be `/` or home, making boundary checks ineffective.
 - **Fix:** Use well-known app-specific directory.
 - **Status (2026-09-11):** **Residual.** Workspace root still defaults to `current_dir()`. Both agent file surfaces now share `path_security.rs` (#535), so this is a one-place fix when picked up.
+- **Status (2026-09-12):** **Fixed.** `path_security::default_workspace_roots()` now resolves roots explicitly and logs the outcome: the cwd is included only when usable as a boundary (not the filesystem root, and writable per `access(2)` W_OK — a packaged app launched from Finder has cwd `/`), and `~/Juno` is always included as the fallback root. `basic_tools::SecurityConfig` consumes the same list and fails closed when it is empty. Tested via `is_usable_workspace_cwd` (rejects `/` and non-writable dirs) and a boundary test using only the `~/Juno`-style root.
 
 ### 28. TOCTOU Race in File Operations
 - **File:** `src-tauri/src/agent/tools/anthropic_computer_use.rs:908-966`
 - **Issue:** Read-modify-write without atomic operations.
 - **Fix:** Use atomic file operations (write-to-temp-then-rename).
 - **Status (2026-09-11):** **Not re-verified** in the 2026-09-11 pass.
+- **Status (2026-09-12):** **Fixed (macOS).** The canonicalize-then-open race is closed at the `path_security` chokepoint: `read_to_string_checked` / `write_checked` / `create_new_checked` open the already-canonical path with `O_NOFOLLOW` (a symlink swapped into the final component fails the open), then re-verify the opened handle's kernel-reported real path (`fcntl` `F_GETPATH`) against the workspace roots before any bytes move; writes truncate only after verification, creates use `O_EXCL`. Wired into `basic_tools` reads, the `str_replace_based_edit_tool` view/replace/create paths, and `smart_create_file`. Residual: on non-macOS builds the handle re-verification is a no-op (no cheap handle-path API); `O_NOFOLLOW` still protects the final component. Symlink-swap races are covered by tests.
 
 ### 29. No URL Validation on `safari_navigate` Command
 - **File:** `src-tauri/src/commands/safari_tools.rs:70`
@@ -205,12 +213,14 @@
 - **Issue:** Accepts empty strings, invalid URLs, non-WebSocket URLs.
 - **Fix:** Call `config.validate()` before applying.
 - **Status (2026-09-11):** **Not re-verified** in the 2026-09-11 pass.
+- **Status (2026-09-12):** **Fixed.** `CloudConfig::validate_server_url` parses with the `url` crate and requires a `wss`/`https` scheme, a non-empty host, and no embedded userinfo; `update_cloud_config` calls it before storing a new URL and runs `config.validate()` on the assembled config before applying. `CloudConfig::validate` and settings import (#31) route through the same helper, so plain `ws://` is no longer accepted anywhere. Unit tests cover schemes, hostless URLs, and userinfo.
 
 ### 31. `import_settings` No Semantic Validation
 - **File:** `src-tauri/src/commands/settings.rs:277-291`
 - **Issue:** No validation of imported settings values, no backup before overwrite.
 - **Fix:** Add semantic validation and backup.
 - **Status (2026-09-11):** **Not re-verified** in the 2026-09-11 pass.
+- **Status (2026-09-12):** **Fixed.** `import_settings` now routes through `parse_and_validate_settings_json`: payloads over 1 MB are rejected, the top-level object may contain only known settings sections (foreign/typo'd files no longer import silently), the payload must parse into the typed `AppSettings` schema, and semantic per-field checks are applied (opacity and sensitivity ranges, trigger/execution mode enums, cloud security level enum, cloud server URL via the #30 validator, voice-transcription sample rate/channels). Unit-tested including round-trip of a default export.
 
 ### 32. Incomplete Sensitive File Blocklist
 - **File:** `src-tauri/src/agent/tools/basic_tools.rs:244-246`
@@ -218,3 +228,4 @@
 - **Fix:** Rely on workspace boundary check instead.
 
 - **Status (2026-09-11):** **Improved by #535** (blocked extensions and dotfile names expanded, canonicalize-plus-boundary enforcement added, which is the fix this item recommends); not exhaustively re-verified.
+- **Status (2026-09-12):** **Fixed.** `path_security::sensitive_path_reason` now blocks, case-insensitively and in all build modes: SSH private keys (`id_rsa`/`id_ed25519`/`id_ecdsa`/`id_dsa` and derivatives) and anything under a `.ssh` or `.gnupg` directory, `.aws/credentials`, `.netrc`/`_netrc`, `.npmrc`, `.pgpass`, `.htpasswd`, `wallet.dat`, the `.env` family, and key-material extensions (`pem`, `key`, `p12`, `pfx`, `jks`, `keystore`, `keychain`, `keychain-db`). Enforced at the shared `resolve_within_roots` chokepoint (covering the editor tool and `smart_create_file`), in `basic_tools` on both the raw and canonical path, and re-checked on the opened handle's real path by the #28 helpers. Matching is precise (exact names/components/extensions), so files like `keystore.rs` are unaffected; tests cover both directions.
