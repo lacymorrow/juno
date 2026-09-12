@@ -109,7 +109,7 @@
 - **File:** `src-tauri/src/agent/tools/safari_tools.rs:86-129`
 - **Issue:** Simple substring matching for blocked patterns. Bypassed via template literals, indirect access, concatenation.
 - **Fix:** Require user confirmation or remove the tool.
-- **Status (2026-09-11):** **Partial (#537).** The `javascript:` navigation path that skipped this validation entirely is closed by the #16 fix. The substring filter itself remains bypassable; the recommended confirmation gate or tool removal is a product decision, still pending.
+- **Status (2026-09-12):** **Gated.** `safari_execute_javascript` is now classified High in `risk_classifier.rs`, so `AgentRunner::check_batch_approval` requires user approval before any arbitrary JS reaches Safari — the same pattern that gates agent bash (#3, PR #535). `validate_javascript_safety` stays as advisory defense-in-depth with its cheap bypasses closed (matching now runs on lowercased, whitespace-stripped text; the previously dead `Function(` / `innerHTML =` patterns match again; constructor chains and `document.cookie` added). Identifier concatenation (`window["ev"+"al"]`) still passes the filter by design — catching it needs a JS parser, and the approval gate, not the filter, is the control. Removing the tool outright remains an open product decision.
 
 ### 16. No URL Protocol Validation for Safari Navigation
 - **File:** `src-tauri/src/agent/tools/safari_tools.rs:544-571`
@@ -139,7 +139,7 @@
 - **File:** `src-tauri/src/commands/safari_tools.rs:94`
 - **Issue:** `safari_execute_javascript` Tauri command has no validation.
 - **Fix:** Add validation, rate limiting, restrict to debug mode.
-- **Status (2026-09-11):** **Partial.** The unvalidated `javascript:` URL route into Safari is closed (#537). `safari_execute_javascript` itself still relies on the bypassable filter from #15 and awaits the same product decision.
+- **Status (2026-09-12):** **Gated.** The webview-invokable surface is closed: the `safari_execute_javascript` command and the arbitrary-JS branch of `execute_safari_tool` now refuse with an explanatory error (no frontend caller existed; the command layer cannot prompt, so refusal is the honest gate). The agent pipeline reaches JS execution only through `execute_safari_tool_for_agent` — a plain function, not a Tauri command — which runs only after the High-risk approval gate from #15. Removing the capability entirely remains an open product decision.
 
 ### 21. Gemini API Key Exposed in URL Query Parameter
 - **File:** `src-tauri/src/agent/providers/gemini.rs:318-321`
