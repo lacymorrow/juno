@@ -31,7 +31,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
@@ -83,7 +83,13 @@ jobs:
             echo "No Apple signing secrets configured: building unsigned."
           fi
 
-      - name: Build Tauri app (universal macOS)
+      # Apple Silicon only. The Parakeet STT engine (parakeet-rs -> ort-sys)
+      # ships prebuilt ONNX Runtime binaries for aarch64 but not x86_64 macOS,
+      # so a universal build fails on the Intel half. Intel Macs lost macOS
+      # feature support with Tahoe; re-add x86_64 only if Parakeet gets
+      # feature-gated to arm64. Intel users on v0.6.0 see no update (the
+      # manifest has no darwin-x86_64 entry), which is the intended behavior.
+      - name: Build Tauri app (Apple Silicon)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -98,4 +104,4 @@ jobs:
             See [CHANGELOG](https://github.com/lacymorrow/juno/blob/main/CHANGELOG.md) for details.
           releaseDraft: false
           prerelease: false
-          args: --target universal-apple-darwin
+          args: --target aarch64-apple-darwin
