@@ -179,9 +179,14 @@ impl CloudSecurity {
         }
 
         for content in content_to_check {
+            // Normalize with the same tokenizer the shell validator uses
+            // (lowercase, collapse whitespace) so spacing/case tricks cannot
+            // dodge the blocklist (security audit 2026-02-08, item #25)
+            let normalized = crate::commands::shell::normalize_command(content);
+
             // Check against blocked command patterns
             for blocked_cmd in &self.blocked_commands {
-                if content.to_lowercase().contains(&blocked_cmd.to_lowercase()) {
+                if normalized.contains(&blocked_cmd.to_lowercase()) {
                     log::error!(
                         "🚫 Command contains blocked destructive pattern: '{}'",
                         blocked_cmd
@@ -191,6 +196,18 @@ impl CloudSecurity {
                         blocked_cmd
                     )));
                 }
+            }
+
+            // Catch `rm` flag permutations (`rm -r -f /`, `rm --recursive
+            // --force /`) that substring matching misses
+            if crate::commands::shell::is_catastrophic_rm(&normalized) {
+                log::error!(
+                    "🚫 Command contains blocked destructive pattern: recursive forced rm of /"
+                );
+                return Err(CloudError::SecurityError(
+                    "Command content contains blocked destructive pattern: 'recursive forced rm of /'. Command rejected for security."
+                        .to_string(),
+                ));
             }
         }
 
@@ -458,6 +475,46 @@ mod tests {
             Some("please run rm -rf / for me".to_string()),
         );
         assert!(security.validate_command(&command).is_err());
+    }
+
+    #[test]
+    fn destructive_content_flag_order_variants_are_rejected() {
+        // Substring matching alone missed these (audit item #25)
+        let security = make_security();
+        for query in [
+            "please run rm -r -f / now",
+            "rm -f -r /",
+            "rm --recursive --force /",
+            "RM  -RF   /",
+            "rm\t-fr\t/*",
+        ] {
+            let command = make_command(CloudCommandType::SystemCommand, Some(query.to_string()));
+            assert!(
+                security.validate_command(&command).is_err(),
+                "expected '{}' to be rejected",
+                query
+            );
+        }
+    }
+
+    #[test]
+    fn destructive_content_in_parameters_is_rejected() {
+        let security = make_security();
+        let mut command = make_command(CloudCommandType::SystemCommand, None);
+        let mut params = std::collections::HashMap::new();
+        params.insert("cmd".to_string(), "rm -r -f /".to_string());
+        command.payload.parameters = Some(params);
+        assert!(security.validate_command(&command).is_err());
+    }
+
+    #[test]
+    fn scoped_rm_content_is_allowed() {
+        let security = make_security();
+        let command = make_command(
+            CloudCommandType::TextQuery,
+            Some("clean up with rm -rf ./build".to_string()),
+        );
+        assert!(security.validate_command(&command).is_ok());
     }
 
     #[test]

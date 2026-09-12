@@ -746,11 +746,18 @@ impl EnhancedCodingToolProvider {
         // Canonicalize and enforce the workspace boundary before writing;
         // this path previously had no validation at all (security audit
         // 2026-02-08, item #14). Allowed roots: the process working
-        // directory and the agent's ~/Juno output directory.
-        let safe_path = crate::agent::tools::path_security::resolve_within_default_roots(file_path)
+        // directory (when usable) and the agent's ~/Juno output directory.
+        let roots = crate::agent::tools::path_security::default_workspace_roots();
+        let safe_path = crate::agent::tools::path_security::resolve_within_roots(file_path, &roots)
             .map_err(AgentError::InputError)?;
 
-        match fs::write(&safe_path, content) {
+        // Write through a boundary-verified handle so a symlink swapped in
+        // after validation cannot redirect the write (audit item #28)
+        match crate::agent::tools::path_security::write_checked(
+            &safe_path,
+            content.as_bytes(),
+            &roots,
+        ) {
             Ok(_) => Ok(json!({
                 "success": true,
                 "file_path": safe_path.to_string_lossy(),

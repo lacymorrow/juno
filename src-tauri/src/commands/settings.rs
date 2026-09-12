@@ -471,7 +471,153 @@ pub async fn export_settings(app_handle: AppHandle) -> Result<String, String> {
         .map_err(|e| format_error(templates::FAILED_TO_ENCODE, actions::SETTINGS_JSON, e))
 }
 
-/// Import settings from JSON string
+/// Maximum accepted size for an imported settings payload. The exported
+/// settings JSON is a few KB; anything near this limit is not a settings
+/// file (security audit 2026-02-08, item #31).
+const MAX_IMPORT_SETTINGS_BYTES: usize = 1_000_000;
+
+/// Parse and validate an imported settings JSON payload
+/// (security audit 2026-02-08, item #31):
+/// - reject oversized payloads,
+/// - reject unknown top-level sections (a typo'd or foreign file should not
+///   silently import as all-defaults),
+/// - parse into the typed [`AppSettings`] struct (serde enforces shape), and
+/// - apply semantic per-field validation on values the UI setters constrain.
+fn parse_and_validate_settings_json(settings_json: &str) -> Result<AppSettings, String> {
+    if settings_json.len() > MAX_IMPORT_SETTINGS_BYTES {
+        return Err(format!(
+            "Settings import rejected: payload is {} bytes, larger than the {} byte limit",
+            settings_json.len(),
+            MAX_IMPORT_SETTINGS_BYTES
+        ));
+    }
+
+    // Known top-level sections of AppSettings; imports with other top-level
+    // keys are not settings exports and are rejected rather than ignored
+    const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
+        "keyboard_shortcuts",
+        "floating_bar",
+        "agent",
+        "providers",
+        "cloud",
+        "audio",
+        "tools",
+        "prompts",
+        "onboarding",
+        "autostart_enabled",
+        "advanced_settings_enabled",
+        "cli",
+        "voice_transcription",
+        "triggers",
+    ];
+
+    let raw: serde_json::Value = serde_json::from_str(settings_json)
+        .map_err(|e| format_error(templates::FAILED_TO_PARSE, actions::SETTINGS_JSON, e))?;
+
+    let object = raw
+        .as_object()
+        .ok_or_else(|| "Settings import rejected: payload is not a JSON object".to_string())?;
+
+    for key in object.keys() {
+        if !KNOWN_TOP_LEVEL_KEYS.contains(&key.as_str()) {
+            return Err(format!(
+                "Settings import rejected: unknown top-level section '{}'",
+                key
+            ));
+        }
+    }
+
+    let settings: AppSettings = serde_json::from_value(raw)
+        .map_err(|e| format_error(templates::FAILED_TO_PARSE, actions::SETTINGS_JSON, e))?;
+
+    validate_imported_settings(&settings)?;
+
+    Ok(settings)
+}
+
+/// Semantic validation of imported settings values, mirroring the
+/// constraints the settings UI applies before saving (audit item #31).
+fn validate_imported_settings(settings: &AppSettings) -> Result<(), String> {
+    // Floating bar
+    let opacity = settings.floating_bar.opacity;
+    if !(0.0..=1.0).contains(&opacity) || opacity.is_nan() {
+        return Err(format!(
+            "Settings import rejected: floating_bar.opacity {} is outside 0.0..=1.0",
+            opacity
+        ));
+    }
+
+    // Agent modes
+    if !matches!(settings.agent.trigger_mode.as_str(), "tap" | "hold") {
+        return Err(format!(
+            "Settings import rejected: agent.trigger_mode '{}' is not 'tap' or 'hold'",
+            settings.agent.trigger_mode
+        ));
+    }
+    if !matches!(settings.agent.execution_mode.as_str(), "single" | "multi") {
+        return Err(format!(
+            "Settings import rejected: agent.execution_mode '{}' is not 'single' or 'multi'",
+            settings.agent.execution_mode
+        ));
+    }
+
+    // Audio
+    if !matches!(
+        settings.audio.dictation_trigger_mode.as_str(),
+        "tap" | "hold"
+    ) {
+        return Err(format!(
+            "Settings import rejected: audio.dictation_trigger_mode '{}' is not 'tap' or 'hold'",
+            settings.audio.dictation_trigger_mode
+        ));
+    }
+    let sensitivity = settings.audio.always_listening_sensitivity;
+    if !(0.0..=1.0).contains(&sensitivity) || sensitivity.is_nan() {
+        return Err(format!(
+            "Settings import rejected: audio.always_listening_sensitivity {} is outside 0.0..=1.0",
+            sensitivity
+        ));
+    }
+
+    // Cloud: same URL and security-level rules the cloud settings surface
+    // enforces (audit items #30/#31)
+    if !settings.cloud.server_url.trim().is_empty() {
+        crate::cloud::config::CloudConfig::validate_server_url(&settings.cloud.server_url)
+            .map_err(|e| format!("Settings import rejected: cloud.server_url invalid: {}", e))?;
+    }
+    if !matches!(
+        settings.cloud.security_level.as_str(),
+        "low" | "medium" | "high"
+    ) {
+        return Err(format!(
+            "Settings import rejected: cloud.security_level '{}' is not low/medium/high",
+            settings.cloud.security_level
+        ));
+    }
+
+    // Voice transcription
+    if !(8_000..=192_000).contains(&settings.voice_transcription.sample_rate) {
+        return Err(format!(
+            "Settings import rejected: voice_transcription.sample_rate {} is outside 8000..=192000",
+            settings.voice_transcription.sample_rate
+        ));
+    }
+    if !(1..=2).contains(&settings.voice_transcription.channels) {
+        return Err(format!(
+            "Settings import rejected: voice_transcription.channels {} is not 1 or 2",
+            settings.voice_transcription.channels
+        ));
+    }
+
+    Ok(())
+}
+
+/// Import settings from JSON string.
+///
+/// The payload is size-capped, must contain only known settings sections,
+/// must parse into the typed settings schema, and must pass the same
+/// per-field validation the settings UI applies
+/// (security audit 2026-02-08, item #31).
 #[command]
 pub async fn import_settings(app_handle: AppHandle, settings_json: String) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
@@ -482,8 +628,7 @@ pub async fn import_settings(app_handle: AppHandle, settings_json: String) -> Re
         )
     })?;
 
-    let settings: AppSettings = serde_json::from_str(&settings_json)
-        .map_err(|e| format_error(templates::FAILED_TO_PARSE, actions::SETTINGS_JSON, e))?;
+    let settings = parse_and_validate_settings_json(&settings_json)?;
 
     settings_manager
         .save_all_settings(&settings)
@@ -491,4 +636,77 @@ pub async fn import_settings(app_handle: AppHandle, settings_json: String) -> Re
         .map_err(|e| format_error(templates::FAILED_TO_SAVE, actions::SETTINGS, e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_settings_json() -> String {
+        serde_json::to_string(&AppSettings::default())
+            .unwrap_or_else(|e| panic!("default settings must serialize: {}", e))
+    }
+
+    #[test]
+    fn valid_export_round_trips() {
+        let json = valid_settings_json();
+        assert!(
+            parse_and_validate_settings_json(&json).is_ok(),
+            "a default settings export must import cleanly"
+        );
+    }
+
+    #[test]
+    fn oversized_payload_rejected() {
+        let padding = " ".repeat(MAX_IMPORT_SETTINGS_BYTES);
+        let json = format!("{}{}", valid_settings_json(), padding);
+        assert!(parse_and_validate_settings_json(&json).is_err());
+    }
+
+    #[test]
+    fn non_object_and_garbage_rejected() {
+        assert!(parse_and_validate_settings_json("[]").is_err());
+        assert!(parse_and_validate_settings_json("\"hi\"").is_err());
+        assert!(parse_and_validate_settings_json("not json at all").is_err());
+    }
+
+    #[test]
+    fn unknown_top_level_key_rejected() {
+        let mut value: serde_json::Value = serde_json::from_str(&valid_settings_json())
+            .unwrap_or_else(|e| panic!("parse failed: {}", e));
+        value["totally_unknown_section"] = serde_json::json!({"a": 1});
+        let json = value.to_string();
+        assert!(parse_and_validate_settings_json(&json).is_err());
+    }
+
+    #[test]
+    fn out_of_range_values_rejected() {
+        let mut value: serde_json::Value = serde_json::from_str(&valid_settings_json())
+            .unwrap_or_else(|e| panic!("parse failed: {}", e));
+
+        let mut bad = value.clone();
+        bad["floating_bar"]["opacity"] = serde_json::json!(4.2);
+        assert!(parse_and_validate_settings_json(&bad.to_string()).is_err());
+
+        let mut bad = value.clone();
+        bad["agent"]["trigger_mode"] = serde_json::json!("yolo");
+        assert!(parse_and_validate_settings_json(&bad.to_string()).is_err());
+
+        let mut bad = value.clone();
+        bad["cloud"]["security_level"] = serde_json::json!("off");
+        assert!(parse_and_validate_settings_json(&bad.to_string()).is_err());
+
+        let mut bad = value.clone();
+        bad["voice_transcription"]["sample_rate"] = serde_json::json!(1);
+        assert!(parse_and_validate_settings_json(&bad.to_string()).is_err());
+
+        // Cloud server URL must be a secure, well-formed URL (#30)
+        bad = value.clone();
+        bad["cloud"]["server_url"] = serde_json::json!("javascript:alert(1)");
+        assert!(parse_and_validate_settings_json(&bad.to_string()).is_err());
+
+        // And the original value still passes
+        value["floating_bar"]["opacity"] = serde_json::json!(0.8);
+        assert!(parse_and_validate_settings_json(&value.to_string()).is_ok());
+    }
 }

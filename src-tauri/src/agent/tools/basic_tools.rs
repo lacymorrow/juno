@@ -33,8 +33,12 @@ pub struct SecurityConfig {
     pub allowed_extensions: HashSet<String>,
     /// Blocked file extensions for reading
     pub blocked_extensions: HashSet<String>,
-    /// Workspace directory restriction (if set, only allow access within)
-    pub workspace_root: Option<PathBuf>,
+    /// Workspace boundary roots: access is only allowed inside one of these.
+    /// Resolved via `path_security::default_workspace_roots()`, which
+    /// excludes an unusable cwd (`/`, non-writable — e.g. a packaged app
+    /// launched from Finder) and always includes `~/Juno` (security audit
+    /// 2026-02-08, items #12/#27). An empty list fails closed.
+    pub workspace_roots: Vec<PathBuf>,
     /// Enable debug mode (relaxed security for development)
     pub debug_mode: bool,
 }
@@ -152,14 +156,15 @@ impl SecurityConfig {
         blocked_extensions.insert("pkg".to_string());
         blocked_extensions.insert("run".to_string());
 
-        // Get workspace root from current directory
-        let workspace_root = std::env::current_dir().ok();
+        // Explicit workspace root resolution: usable cwd (not `/`, writable)
+        // plus ~/Juno. See path_security::default_workspace_roots (#12/#27).
+        let workspace_roots = crate::agent::tools::path_security::default_workspace_roots();
 
         Self {
             max_file_size: 10 * 1024 * 1024, // 10MB for production
             allowed_extensions,
             blocked_extensions,
-            workspace_root,
+            workspace_roots,
             debug_mode: cfg!(debug_assertions),
         }
     }
@@ -243,16 +248,16 @@ mod basic_tools_impl {
 
         let path = PathBuf::from(path_str);
 
-        // Dotenv-style files carry secrets but have no "extension" as far as
-        // Path::extension is concerned (".env", ".env.local"), so block them by
-        // file name in production (security audit 2026-02-08, item #19)
-        if !config.debug_mode {
-            if let Some(name) = path.file_name() {
-                let name = name.to_string_lossy().to_lowercase();
-                if name == ".env" || name.starts_with(".env.") {
-                    return Err("Access to environment secret files is not allowed".to_string());
-                }
-            }
+        // Block sensitive credential/key files by name, directory, and
+        // extension in ALL build modes: SSH keys and ~/.ssh, AWS credentials,
+        // .netrc/.npmrc, keychains, wallets/keystores, *.p12/*.pfx, and the
+        // dotenv family (security audit 2026-02-08, items #19/#32). Checked
+        // again on the canonical path below in case traversal hides the name.
+        if let Some(reason) = crate::agent::tools::path_security::sensitive_path_reason(&path) {
+            return Err(format!(
+                "Access denied: sensitive file is blocked ({})",
+                reason
+            ));
         }
 
         // Validate file extensions
@@ -301,14 +306,38 @@ mod basic_tools_impl {
         // also used by anthropic_computer_use and enhanced_coding_tools)
         let canonical_path = crate::agent::tools::path_security::canonicalize_lenient(&full_path);
 
-        // Enforce workspace boundaries
-        if let Some(workspace_root) = &config.workspace_root {
-            if !canonical_path.starts_with(workspace_root) {
-                return Err(format!(
-                    "Access denied: Path is outside the workspace boundary. Workspace: {}",
-                    workspace_root.display()
-                ));
-            }
+        // Re-check the sensitive-file blocklist on the canonical path so a
+        // symlink or traversal cannot hide a blocked name (#32)
+        if let Some(reason) =
+            crate::agent::tools::path_security::sensitive_path_reason(&canonical_path)
+        {
+            return Err(format!(
+                "Access denied: sensitive file is blocked ({})",
+                reason
+            ));
+        }
+
+        // Enforce workspace boundaries. An empty root list fails closed:
+        // without a boundary, every path would be "inside" (#12/#27).
+        if config.workspace_roots.is_empty() {
+            return Err(
+                "Access denied: No workspace boundary is available for file access".to_string(),
+            );
+        }
+        let allowed = config.workspace_roots.iter().any(|root| {
+            let canonical_root = crate::agent::tools::path_security::canonicalize_lenient(root);
+            canonical_path.starts_with(&canonical_root)
+        });
+        if !allowed {
+            return Err(format!(
+                "Access denied: Path is outside the workspace boundary. Workspace: {}",
+                config
+                    .workspace_roots
+                    .iter()
+                    .map(|r| r.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
 
         // Only check file size if file exists
@@ -394,8 +423,14 @@ mod basic_tools_impl {
 
         log::info!("✅ File access approved: {:?}", validated_path);
 
-        // Attempt to read file
-        match fs::read_to_string(&validated_path) {
+        // Attempt to read file through a boundary-verified handle: the file
+        // is opened with O_NOFOLLOW and the open handle's real path is
+        // re-checked against the workspace roots, closing the
+        // canonicalize-then-open TOCTOU gap (security audit item #28)
+        match crate::agent::tools::path_security::read_to_string_checked(
+            &validated_path,
+            &config.workspace_roots,
+        ) {
             Ok(content) => {
                 log::info!("📄 File read successful: {} characters", content.len());
                 Ok(json!({

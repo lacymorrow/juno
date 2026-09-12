@@ -182,21 +182,49 @@ impl CloudConfig {
         Ok(())
     }
 
+    /// Validate a cloud server URL: parsed with the `url` crate, secure
+    /// schemes only (`wss` or `https`), a real host, and no embedded
+    /// userinfo (security audit 2026-02-08, item #30).
+    pub fn validate_server_url(raw: &str) -> Result<(), CloudError> {
+        if raw.trim().is_empty() {
+            return Err(CloudError::ConfigError(
+                "Server URL cannot be empty".to_string(),
+            ));
+        }
+
+        let parsed = url::Url::parse(raw)
+            .map_err(|e| CloudError::ConfigError(format!("Invalid server URL: {}", e)))?;
+
+        match parsed.scheme() {
+            "wss" | "https" => {}
+            other => {
+                return Err(CloudError::ConfigError(format!(
+                    "Server URL scheme '{}' is not allowed; only wss:// or https:// are accepted",
+                    other
+                )));
+            }
+        }
+
+        if parsed.host_str().map(str::is_empty).unwrap_or(true) {
+            return Err(CloudError::ConfigError(
+                "Server URL must include a host".to_string(),
+            ));
+        }
+
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err(CloudError::ConfigError(
+                "Server URL must not contain embedded credentials".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), CloudError> {
         if self.enabled {
             // API key is optional for initial connection - backend handles device registration
-            if self.server_url.is_empty() {
-                return Err(CloudError::ConfigError(
-                    "Server URL cannot be empty".to_string(),
-                ));
-            }
-
-            if !self.server_url.starts_with("ws://") && !self.server_url.starts_with("wss://") {
-                return Err(CloudError::ConfigError(
-                    "Server URL must be a WebSocket URL (ws:// or wss://)".to_string(),
-                ));
-            }
+            Self::validate_server_url(&self.server_url)?;
 
             // Validate production URL format
             if self.server_url == PRODUCTION_WS_URL {
@@ -262,19 +290,21 @@ impl CloudConfig {
         self.save_to_centralized_settings(settings_manager).await
     }
 
-    /// Check if a command is allowed - now maximally permissive with optimized string matching
+    /// Check if a command is allowed.
+    ///
+    /// The command is normalized (lowercased, whitespace runs collapsed) via
+    /// the same tokenizer the shell validator uses before matching the denied
+    /// patterns, so case/spacing tricks and `rm` flag permutations
+    /// (`rm -r -f /`, `rm --recursive --force /`) cannot dodge the blocklist
+    /// (security audit 2026-02-08, item #25).
     pub fn is_command_allowed(&self, command: &str) -> bool {
-        // First check if it's in the denied list (only truly destructive commands)
-        // Use static slice for faster iteration
-        for &denied_cmd in DENIED_COMMANDS.iter() {
-            if command.contains(denied_cmd) {
-                log::warn!(
-                    "🚫 Command '{}' blocked due to destructive pattern: '{}'",
-                    command,
-                    denied_cmd
-                );
-                return false;
-            }
+        if let Some(denied_cmd) = Self::matched_denied_pattern(command) {
+            log::warn!(
+                "🚫 Command '{}' blocked due to destructive pattern: '{}'",
+                command,
+                denied_cmd
+            );
+            return false;
         }
 
         // All security levels now behave the same - maximally permissive
@@ -289,11 +319,26 @@ impl CloudConfig {
     /// Check if a command is considered safe - now almost everything is safe
     #[allow(dead_code)]
     fn is_safe_command(&self, command: &str) -> bool {
-        // Check against denied list - if not denied, it's safe
-        // Use static slice for faster iteration
-        !DENIED_COMMANDS
-            .iter()
-            .any(|&denied| command.contains(denied))
+        Self::matched_denied_pattern(command).is_none()
+    }
+
+    /// Return the denied pattern the command matches, if any, after
+    /// normalization. Shares the shell validator's normalization and `rm`
+    /// flag-permutation tokenizer (security audit 2026-02-08, item #25).
+    fn matched_denied_pattern(command: &str) -> Option<String> {
+        let normalized = crate::commands::shell::normalize_command(command);
+
+        for &denied_cmd in DENIED_COMMANDS.iter() {
+            if normalized.contains(denied_cmd) {
+                return Some(denied_cmd.to_string());
+            }
+        }
+
+        if crate::commands::shell::is_catastrophic_rm(&normalized) {
+            return Some("recursive forced rm of /".to_string());
+        }
+
+        None
     }
 
     /// Get the corresponding API URL for the WebSocket URL
@@ -403,5 +448,67 @@ mod tests {
         };
         let config = CloudConfig::from_centralized_settings(&settings);
         assert!(matches!(config.security_level, SecurityLevel::High));
+    }
+
+    // --- Denied-command matching is normalized, not raw substring (#25) ---
+
+    #[test]
+    fn denied_exact_patterns_blocked() {
+        let config = CloudConfig::default();
+        assert!(!config.is_command_allowed("rm -rf /"));
+        assert!(!config.is_command_allowed("sudo rm -rf /"));
+        assert!(!config.is_command_allowed("dd if=/dev/zero of=/dev/sda"));
+    }
+
+    #[test]
+    fn denied_rm_flag_permutations_blocked() {
+        let config = CloudConfig::default();
+        assert!(!config.is_command_allowed("rm -r -f /"));
+        assert!(!config.is_command_allowed("rm -f -r /"));
+        assert!(!config.is_command_allowed("rm -fr /"));
+        assert!(!config.is_command_allowed("rm --recursive --force /"));
+        assert!(!config.is_command_allowed("rm -Rf /*"));
+    }
+
+    #[test]
+    fn denied_case_and_whitespace_variants_blocked() {
+        let config = CloudConfig::default();
+        assert!(!config.is_command_allowed("RM -RF /"));
+        assert!(!config.is_command_allowed("rm  -rf   /"));
+        assert!(!config.is_command_allowed("rm\t-r\t-f\t/"));
+        assert!(!config.is_command_allowed("SHUTDOWN now"));
+    }
+
+    #[test]
+    fn benign_commands_still_allowed() {
+        let config = CloudConfig::default();
+        assert!(config.is_command_allowed("ls -la"));
+        assert!(config.is_command_allowed("git status"));
+        assert!(config.is_command_allowed("rm -rf ./build"));
+    }
+
+    // --- Server URL validation (#30) ---
+
+    #[test]
+    fn server_url_accepts_wss_and_https() {
+        assert!(CloudConfig::validate_server_url(PRODUCTION_WS_URL).is_ok());
+        assert!(CloudConfig::validate_server_url("https://example.com/api").is_ok());
+    }
+
+    #[test]
+    fn server_url_rejects_insecure_and_non_web_schemes() {
+        assert!(CloudConfig::validate_server_url("ws://example.com/ws").is_err());
+        assert!(CloudConfig::validate_server_url("http://example.com/ws").is_err());
+        assert!(CloudConfig::validate_server_url("file:///etc/passwd").is_err());
+        assert!(CloudConfig::validate_server_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn server_url_rejects_empty_hostless_and_userinfo() {
+        assert!(CloudConfig::validate_server_url("").is_err());
+        assert!(CloudConfig::validate_server_url("   ").is_err());
+        assert!(CloudConfig::validate_server_url("not a url").is_err());
+        assert!(CloudConfig::validate_server_url("wss://user:pass@example.com/ws").is_err());
+        assert!(CloudConfig::validate_server_url("wss://user@example.com/ws").is_err());
     }
 }
