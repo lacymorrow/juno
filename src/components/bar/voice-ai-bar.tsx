@@ -33,6 +33,7 @@ import Marquee from "react-fast-marquee";
 import AudioVisualizer from "./audio-visualizer";
 
 import { EVENTS, UI } from "@/lib/constants.generated";
+import { isOneOf } from "@/lib/ui-api";
 import type {
   VoiceAIBarProps,
   ContentType,
@@ -265,10 +266,10 @@ export function VoiceAIBar({
         // Window instance not needed; resize handled by custom hook
         const currentUiState = barState.barState;
 
-        const isCompact = [
+        const isCompact = isOneOf(currentUiState, [
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_DICTATION_READY,
-        ].includes(currentUiState as any);
+        ]);
         const targetWidth = (isCompact ? defaultWidth : EXPANDED_WIDTH) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
         const targetHeight = (isCompact ? defaultHeight : EXPANDED_HEIGHT) + FLOATING_BAR_DIMENSIONS.SHADOW_PADDING;
 
@@ -990,13 +991,13 @@ const styles = \`
 
         {/* Audio Visualizer - Replaces the old waveform animation */}
         {/* Audio Visualizer + Status Text - Show both together */}
-        {![
+        {!isOneOf(barState.barState, [
           UI.BAR_STATES_INPUT,
           UI.BAR_STATES_AGENT_RESPONDING,
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_ERROR,
           UI.BAR_STATES_SUCCESS,
-        ].includes(barState.barState as any) && (
+        ]) && (
           <div className="visualizer-status-container">
             {/* Audio Visualizer */}
             <div className="audio-visualizer-wrapper">
@@ -1084,9 +1085,7 @@ const styles = \`
             onMouseEnter={() => setIsIdleHovered(true)}
             onMouseLeave={() => setIsIdleHovered(false)}
             onClick={
-              [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
-                barState.barState as any
-              )
+              isOneOf(barState.barState, [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY])
                 ? handleClick
                 : undefined
             }
@@ -1096,9 +1095,7 @@ const styles = \`
             onKeyDown={(e) => {
               if (
                 (e.key === "Enter" || e.key === " ") &&
-                [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
-                  barState.barState as any
-                )
+                isOneOf(barState.barState, [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY])
               ) {
                 e.preventDefault();
                 handleClick();
@@ -1144,18 +1141,18 @@ const styles = \`
           </div>
         )}
 
-        {![
+        {!isOneOf(barState.barState, [
           UI.BAR_STATES_DEFAULT,
           UI.BAR_STATES_INPUT,
           UI.BAR_STATES_AGENT_RESPONDING,
-        ].includes(barState.barState as any) && (
+        ]) && (
           <button
             onClick={toggleListening}
             className="glass-mic-btn"
-            disabled={[
+            disabled={isOneOf(barState.barState, [
               UI.BAR_STATES_LOADING,
               UI.BAR_STATES_SUBMITTING,
-            ].includes(barState.barState as any)}
+            ])}
           >
             <div className="icon-container">{getStateIcon()}</div>
           </button>

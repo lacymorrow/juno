@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { VoiceStatusIndicator } from "../VoiceStatusIndicator";
 import { useDragWindow } from "@/hooks/useDragWindow";
 import { EVENTS, UI } from "@/lib/constants.generated";
+import { isOneOf } from "@/lib/ui-api";
 
 // === STANDARDIZED UI API TYPES ===
 
@@ -133,11 +134,11 @@ const AudioLevelIndicator = ({
   audioLevel: number;
 }) => {
   if (
-    ![
+    !isOneOf(uiState, [
       UI.BAR_STATES_LISTENING,
       UI.BAR_STATES_TRANSCRIBING,
       UI.BAR_STATES_ALWAYS_LISTENING,
-    ].includes(uiState as any)
+    ])
   ) {
     return null;
   }
@@ -337,16 +338,14 @@ export function AppBar() {
       bgColor = "bg-gradient-to-r from-blue-500/98 to-cyan-600/98";
     }
 
-    const sizeStyles = [UI.BAR_STATES_DEFAULT].includes(
-      (barState.barState || UI.BAR_STATES_DEFAULT) as any
-    )
+    const sizeStyles = isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [UI.BAR_STATES_DEFAULT])
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
-    const clickable = [
+    const clickable = isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [
       UI.BAR_STATES_DEFAULT,
       UI.BAR_STATES_DICTATION_READY,
-    ].includes((barState.barState || UI.BAR_STATES_DEFAULT) as any)
+    ])
       ? "cursor-pointer"
       : "";
 
@@ -368,15 +367,11 @@ export function AppBar() {
         className={getContainerStyles()}
         style={{ opacity: uiConfig.opacity }}
         onClick={
-          [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
-            (barState.barState || UI.BAR_STATES_DEFAULT) as any
-          )
+          isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY])
             ? handleBarClick
             : undefined
         }
-        disabled={![UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY].includes(
-          (barState.barState || UI.BAR_STATES_DEFAULT) as any
-        )}
+        disabled={!isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY])}
       >
         {/* Default State */}
         {(barState.barState === UI.BAR_STATES_DEFAULT ||
@@ -436,7 +431,7 @@ export function AppBar() {
         )}
 
         {/* Active States */}
-        {[
+        {isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [
           UI.BAR_STATES_SUBMITTING,
           UI.BAR_STATES_LOADING,
           UI.BAR_STATES_SPEAKING,
@@ -444,7 +439,7 @@ export function AppBar() {
           UI.BAR_STATES_TRANSCRIBING,
           UI.BAR_STATES_AGENT_RESPONDING,
           UI.BAR_STATES_LISTENING,
-        ].includes((barState.barState || UI.BAR_STATES_DEFAULT) as any) && (
+        ]) && (
           <div
             className="flex items-center justify-between w-full h-full"
                      >

@@ -33,6 +33,23 @@ export type UIState =
 
 export type VoiceMode = "idle" | "agent" | "dictation";
 
+/**
+ * Type-safe `Array.prototype.includes` for literal-union values.
+ *
+ * `[UI.BAR_STATES_DEFAULT].includes(state)` fails to compile because the
+ * array's inferred element type is narrower than the `UIState` union, so
+ * call sites used to erase the type with `state as any`. This helper unifies
+ * the value and array element types into one union instead of erasing them.
+ * Deliberately not a type predicate: the bar state is backend-driven, and
+ * control-flow narrowing on it would fight the render-time checks.
+ */
+export function isOneOf<T extends string>(
+    value: T | null | undefined,
+    values: readonly T[]
+): boolean {
+    return value != null && values.includes(value);
+}
+
 export type AgentStatus = "idle" | "working" | "responding" | "finished" | "failed" | "cancelled" | "offline";
 
 // === Configuration Types ===
