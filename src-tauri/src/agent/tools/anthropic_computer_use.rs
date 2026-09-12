@@ -2061,9 +2061,11 @@ pub async fn execute_str_replace_tool(
                 let start_line = start as usize;
                 let end_line = end.map(|e| e as usize);
 
-                // Read file content
-                let content = handle_anthropic_result!(fs::read_to_string(&file_path)
-                    .map_err(|e| format!("Failed to read file '{}': {}", path, e)));
+                // Read file content through a boundary-verified handle (#28)
+                let roots = crate::agent::tools::path_security::default_workspace_roots();
+                let content = handle_anthropic_result!(
+                    crate::agent::tools::path_security::read_to_string_checked(&file_path, &roots)
+                );
 
                 let range_content =
                     handle_anthropic_result!(extract_line_range(&content, start_line, end_line));
@@ -2073,9 +2075,11 @@ pub async fn execute_str_replace_tool(
                     "view_range": [start_line, end_line.unwrap_or(content.lines().count())]
                 }))
             } else {
-                // Read entire file
-                let content = handle_anthropic_result!(fs::read_to_string(&file_path)
-                    .map_err(|e| format!("Failed to read file '{}': {}", path, e)));
+                // Read entire file through a boundary-verified handle (#28)
+                let roots = crate::agent::tools::path_security::default_workspace_roots();
+                let content = handle_anthropic_result!(
+                    crate::agent::tools::path_security::read_to_string_checked(&file_path, &roots)
+                );
 
                 let numbered_content = add_line_numbers(&content);
 
@@ -2106,9 +2110,11 @@ pub async fn execute_str_replace_tool(
             let file_path = handle_anthropic_result!(validate_file_path(path, &config));
             handle_anthropic_result!(validate_file_size(&file_path, &config));
 
-            // Read file content
-            let content = handle_anthropic_result!(fs::read_to_string(&file_path)
-                .map_err(|e| format!("Failed to read file '{}': {}", path, e)));
+            // Read file content through a boundary-verified handle (#28)
+            let roots = crate::agent::tools::path_security::default_workspace_roots();
+            let content = handle_anthropic_result!(
+                crate::agent::tools::path_security::read_to_string_checked(&file_path, &roots)
+            );
 
             // Check if old_str exists in file
             if !content.contains(old_str) {
@@ -2133,9 +2139,14 @@ pub async fn execute_str_replace_tool(
             // Perform replacement with normalized replacement text
             let new_content = content.replace(old_str, &normalized_new_str);
 
-            // Write back to file
-            handle_anthropic_result!(fs::write(&file_path, &new_content)
-                .map_err(|e| format!("Failed to write file '{}': {}", path, e)));
+            // Write back through a boundary-verified handle: the handle's
+            // real path is re-checked before truncation, closing the
+            // canonicalize-then-open TOCTOU gap (#28)
+            handle_anthropic_result!(crate::agent::tools::path_security::write_checked(
+                &file_path,
+                new_content.as_bytes(),
+                &roots
+            ));
 
             Ok(json!({
                 "success": true,
@@ -2169,9 +2180,14 @@ pub async fn execute_str_replace_tool(
                     .map_err(|e| format!("Failed to create directories for '{}': {}", path, e)));
             }
 
-            // Write file
-            handle_anthropic_result!(fs::write(&file_path, file_content)
-                .map_err(|e| format!("Failed to create file '{}': {}", path, e)));
+            // Write file through a boundary-verified handle; create_new
+            // (O_EXCL) never follows a swapped symlink (#28)
+            let roots = crate::agent::tools::path_security::default_workspace_roots();
+            handle_anthropic_result!(crate::agent::tools::path_security::create_new_checked(
+                &file_path,
+                file_content.as_bytes(),
+                &roots
+            ));
 
             Ok(json!({
                 "success": true,

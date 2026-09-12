@@ -68,6 +68,9 @@ pub async fn update_cloud_config(
     config.enabled = enabled;
 
     if let Some(url) = server_url {
+        // Only secure, well-formed URLs (wss/https, real host, no embedded
+        // credentials) may be stored (security audit 2026-02-08, item #30)
+        crate::cloud::config::CloudConfig::validate_server_url(&url).map_err(|e| e.to_string())?;
         config.server_url = url;
     }
 
@@ -91,6 +94,10 @@ pub async fn update_cloud_config(
     if let Some(auto) = auto_connect {
         config.auto_connect = auto;
     }
+
+    // Validate the assembled configuration before applying it
+    // (security audit 2026-02-08, item #30)
+    config.validate().map_err(|e| e.to_string())?;
 
     // Apply the configuration
     app_state.update_cloud_config(config, &app_handle).await?;
