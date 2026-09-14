@@ -1,11 +1,29 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ChatMessage } from "@/types/chat";
-import { LIMITS } from "@/lib/constants.generated";
+import type { ChatMessage, ResponseExportInput } from "@/types/chat";
+import { COMMANDS, LIMITS } from "@/lib/constants.generated";
+
+/** How long the copy button shows its check before turning back into the copy glyph. */
+const COPIED_CHECK_MS = 1500;
+
+/** Where the share sheet drops down from: the Share button's box in CSS px, relative to the web view. */
+export interface ShareAnchor {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
 
 export function useConversation() {
     const [conversation, setConversation] = useState<ChatMessage[]>([]);
     const [query, setQuery] = useState("");
+    const copiedResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (copiedResetTimer.current) clearTimeout(copiedResetTimer.current);
+        };
+    }, []);
 
     // Conversation pruning function with memory optimization
     const pruneConversationIfNeeded = useCallback((messages: ChatMessage[]): ChatMessage[] => {
@@ -84,53 +102,35 @@ export function useConversation() {
         setConversationWithPruning(prev => [...prev, assistantMessage]);
     }, [setConversationWithPruning]);
 
-    // Copy response handler with enhanced feedback
+    // Copy a response through the native pasteboard (navigator.clipboard is
+    // refused in the floating bar, which is never the key window). The button
+    // shows a check for a moment on success; a failure gets one system line
+    // since there is nothing else to show.
     const handleCopyResponse = useCallback(
-        async (content: string, messageIndex: number, onCopyingStateChange: (id: string | null) => void) => {
-            const messageId = `copy-${messageIndex}`;
-            onCopyingStateChange(messageId);
-
+        async (response: ResponseExportInput, messageIndex: number, onCopiedChange: (id: string | null) => void) => {
             try {
-                await navigator.clipboard.writeText(content);
-                console.log("✅ Copied to clipboard successfully");
-                addSystemMessage("✅ Response copied to clipboard");
+                await invoke(COMMANDS.AGENT_COPY_AGENT_RESPONSE, { response });
             } catch (error) {
-                console.error("❌ Failed to copy to clipboard:", error);
-                addSystemMessage(`❌ Failed to copy to clipboard: ${error}`);
-            } finally {
-                // Clear loading state after a brief delay for visual feedback
-                setTimeout(() => onCopyingStateChange(null), 1000);
+                console.error("Failed to copy to clipboard:", error);
+                addSystemMessage(`Couldn't copy the response: ${error}`);
+                return;
             }
+            onCopiedChange(`copy-${messageIndex}`);
+            if (copiedResetTimer.current) clearTimeout(copiedResetTimer.current);
+            copiedResetTimer.current = setTimeout(() => onCopiedChange(null), COPIED_CHECK_MS);
         },
         [addSystemMessage]
     );
 
-    // Save response handler with enhanced feedback
-    const handleSaveResponse = useCallback(
-        async (
-            content: string,
-            format: "html" | "markdown",
-            messageIndex: number,
-            onSavingStateChange: (id: string | null) => void
-        ) => {
-            const messageId = `save-${format}-${messageIndex}`;
-            onSavingStateChange(messageId);
-
+    // Open the native share sheet for a response, dropping down from the
+    // Share button. Saving as Markdown/HTML lives inside the sheet.
+    const handleShareResponse = useCallback(
+        async (response: ResponseExportInput, anchor: ShareAnchor) => {
             try {
-                console.log(`💾 Saving response as ${format.toUpperCase()}...`);
-                const filePath = await invoke("save_agent_response", {
-                    content,
-                    format,
-                    suggested_filename: `agent_response_${Date.now()}`,
-                });
-                console.log(`✅ Response saved to: ${filePath}`);
-                addSystemMessage(`✅ Response saved as ${format.toUpperCase()} to: ${filePath}`);
+                await invoke(COMMANDS.AGENT_SHARE_AGENT_RESPONSE, { response, anchor });
             } catch (error) {
-                console.error(`❌ Failed to save response as ${format}:`, error);
-                addSystemMessage(`❌ Failed to save response as ${format.toUpperCase()}: ${error}`);
-            } finally {
-                // Clear loading state after a brief delay for visual feedback
-                setTimeout(() => onSavingStateChange(null), 1000);
+                console.error("Failed to open the share sheet:", error);
+                addSystemMessage(`Couldn't open the share sheet: ${error}`);
             }
         },
         [addSystemMessage]
@@ -160,7 +160,7 @@ export function useConversation() {
 
         // Enhanced operations
         handleCopyResponse,
-        handleSaveResponse,
+        handleShareResponse,
 
         // Utilities
         pruneConversationIfNeeded,

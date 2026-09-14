@@ -54,6 +54,8 @@ pub mod agent {
     pub const SET_AGENT_MODE: &str = "set_agent_mode";
     pub const GET_AGENT_TRIGGER_MODE: &str = "get_agent_trigger_mode";
     pub const SET_AGENT_TRIGGER_MODE: &str = "set_agent_trigger_mode";
+    pub const SHARE_AGENT_RESPONSE: &str = "share_agent_response";
+    pub const COPY_AGENT_RESPONSE: &str = "copy_agent_response";
 }
 
 /// Provider-related command names
