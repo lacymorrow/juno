@@ -237,6 +237,18 @@ const AUTOMATABLE: Array<"screen_recording" | "input_monitoring"> = [
   "input_monitoring",
 ];
 
+/**
+ * After an auto-grant run, raise the microphone prompt only when nothing is
+ * left for the user in the rows above it: every automatable permission is
+ * granted and the microphone itself is not. A failed row is the active manual
+ * row at that point; stacking the mic prompt on it would show two asks at once.
+ * Exported for tests.
+ */
+export function shouldAutoPromptMicrophone(state: PermissionsState): boolean {
+  if (state.microphone.granted) return false;
+  return AUTOMATABLE.every((k) => state[k].granted);
+}
+
 // Row copy for each backend auto-grant stage (permissions-auto-grant-progress).
 const AUTO_STAGE_COPY: Record<string, string> = {
   opening_settings: "Opening System Settings…",
@@ -1168,15 +1180,17 @@ export default function OnboardingFlow({
     }
   );
 
-  // Hand the checklist back after a successful run: re-seed to the first still
-  // pending row and raise the microphone prompt once so the last grant is a
-  // single Allow click. Anything that failed auto-grant simply becomes the
-  // active manual row again.
+  // Hand the checklist back after the run: re-seed to the first still pending
+  // row. Only when every automatable permission landed do we also raise the
+  // microphone prompt once, so the last grant is a single Allow click. If
+  // anything failed, that row is now the active manual row (it comes before
+  // the microphone in the checklist) and raising the mic prompt on top of it
+  // would put two asks on screen at once — so we don't.
   useEffect(() => {
     if (autoGrantMode !== "finished" || !permissionsState) return;
     setPermIndex(firstPendingIndex(permissionsState));
     if (
-      !permissionsState.microphone.granted &&
+      shouldAutoPromptMicrophone(permissionsState) &&
       !micAutoPromptedRef.current &&
       !attemptedPerms.has("microphone")
     ) {
@@ -1475,10 +1489,14 @@ export default function OnboardingFlow({
       className="fixed inset-0 z-50 flex items-center justify-center bg-background"
       style={{ fontFamily: SF_FONT, WebkitFontSmoothing: "antialiased" } as CSSProperties}
     >
-      <div className="max-h-[90vh] w-full max-w-[520px] overflow-y-auto px-8 py-10">
+      {/* The onboarding window is a fixed 440×700 and cannot be resized, so the
+          column may use its full height; anything that overflows scrolls, but
+          every step is laid out to fit without it (the auto-grant offer's
+          "I'll do it myself" link was below the fold at 90vh). */}
+      <div className="max-h-full w-full max-w-[520px] overflow-y-auto px-8 py-8">
         {/* Progress: a macOS-style page control. Only the current page is dark. */}
         <div
-          className="mb-12 flex justify-center gap-2"
+          className={`${inActivePermFlow ? "mb-8" : "mb-12"} flex justify-center gap-2`}
           role="progressbar"
           aria-valuenow={currentStep + 1}
           aria-valuemax={onboardingSteps.length}
@@ -1506,8 +1524,10 @@ export default function OnboardingFlow({
             {/* Icon (null for shortcut/cancel — floating bar is above) */}
             {step.icon && <div className="mb-7 flex justify-center">{step.icon}</div>}
 
-            {/* Content */}
-            <div className="mb-10 space-y-3">
+            {/* Content. The bottom margin separates it from the footer; while
+                the permission checklist owns the primary action the footer is
+                hidden, so the margin goes too. */}
+            <div className={`${inActivePermFlow ? "" : "mb-10"} space-y-3`}>
               {/*
                 aria-live="polite" + role="status" lets screen readers
                 announce each onboarding step's title when the user advances.
@@ -1701,7 +1721,7 @@ export default function OnboardingFlow({
 
               {/* Guided permission checklist */}
               {step.id === "permissions" && (
-                <div className="pt-4">
+                <div className="pt-2">
                   {permissionsError && (
                     <p className="mb-3 text-[12px] text-red-600 dark:text-red-400">
                       {permissionsError}
@@ -1752,8 +1772,8 @@ export default function OnboardingFlow({
                         ))}
                       </div>
                       {autoGrantMode === "offer" && (
-                        <div className="mt-5 flex flex-col items-center gap-3">
-                          <p className="text-[12px] text-muted-foreground">
+                        <div className="mt-4 flex flex-col items-center gap-2">
+                          <p className="text-[12px] leading-[1.4] text-muted-foreground">
                             Juno can use Accessibility to switch the rest on for you.
                           </p>
                           <button onClick={startAutoGrant} className={BTN_PRIMARY}>
@@ -1768,7 +1788,7 @@ export default function OnboardingFlow({
                         </div>
                       )}
                       {autoGrantMode === "running" && (
-                        <div className="mt-5 flex flex-col items-center gap-2">
+                        <div className="mt-4 flex flex-col items-center gap-2">
                           <p className="text-[12px] text-muted-foreground">
                             Juno is switching these on in System Settings.
                           </p>

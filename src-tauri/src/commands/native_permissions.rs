@@ -258,95 +258,39 @@ impl NativePermissionChecker {
         }
     }
 
-    /// Check input monitoring permission using system events - NO admin privileges required
+    /// Check Input Monitoring through IOKit's `IOHIDCheckAccess` — the real
+    /// TCC `ListenEvent` state for this process, no database reads, no
+    /// AppleScript (which tests Automation, a different permission). Only an
+    /// explicit `Granted` counts; `Unknown` (never asked, so no row in the pane
+    /// yet) and `Denied` both report false.
     pub fn check_input_monitoring_permission() -> Result<bool, String> {
-        #[cfg(target_os = "macos")]
-        {
-            // The most reliable way to check input monitoring permission is to try
-            // using the tauri-plugin-global-shortcut which requires these permissions.
-            // If we can successfully test registering a global shortcut, we have permission.
+        use crate::platform::input_monitoring::{
+            check_input_monitoring_access, InputMonitoringAccess,
+        };
 
-            // Alternative approach: Try to check if IOHIDRequestTypeListenEvent is accessible
-            // This uses IOKit to check the actual permission state
-
-            use std::process::Command;
-
-            // First, try using sqlite3 to check TCC database (works without admin on user's own TCC)
-            match Command::new("sqlite3")
-                .arg(format!("{}/Library/Application Support/com.apple.TCC/TCC.db", std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string())))
-                .arg("SELECT allowed FROM access WHERE service='kTCCServiceListenEvent' AND client='com.juno.app' OR client LIKE '%juno%';")
-                .output()
-            {
-                Ok(output) => {
-                    if output.status.success() {
-                        let result = String::from_utf8_lossy(&output.stdout);
-                        if result.trim() == "1" {
-                            debug!("Input monitoring permission granted (TCC check)");
-                            return Ok(true);
-                        } else if result.trim() == "0" {
-                            debug!("Input monitoring permission denied (TCC check)");
-                            return Ok(false);
-                        }
-                    }
-                    // If sqlite3 failed or returned nothing, fall through to next method
-                }
-                Err(_) => {
-                    // sqlite3 not available or failed, try alternative method
-                }
-            }
-
-            // Alternative: Use a non-destructive System Events query to test input monitoring.
-            // IMPORTANT: Do NOT use `key code` — that literally types a character into the
-            // focused application.  Instead, ask System Events for the process list, which
-            // still requires the ListenEvent (input monitoring) entitlement but is read-only.
-            match Command::new("osascript")
-                .args([
-                    "-e",
-                    "try
-                         tell application \"System Events\"
-                             get name of first process
-                         end tell
-                         return \"true\"
-                     on error
-                         return \"false\"
-                     end try",
-                ])
-                .output()
-            {
-                Ok(output) => {
-                    if output.status.success() {
-                        let result = String::from_utf8_lossy(&output.stdout);
-                        let has_permission = result.trim() == "true";
-                        debug!(
-                            "Input monitoring permission status (AppleScript test): {}",
-                            has_permission
-                        );
-                        return Ok(has_permission);
-                    }
-                }
-                Err(_) => {
-                    // AppleScript test failed
-                }
-            }
-
-            // If all tests fail or are inconclusive, we assume permission is not granted
-            // but we don't fail - we just report false to avoid blocking the app
-            debug!(
-                "Unable to definitively check input monitoring permission, assuming not granted"
-            );
-            Ok(false)
+        let access = check_input_monitoring_access();
+        if access == InputMonitoringAccess::Unknown {
+            debug!("Input monitoring permission unknown: Juno has not requested it yet");
         }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            Ok(true)
-        }
+        Ok(access.is_granted())
     }
 
-    /// Request input monitoring permission - NO admin privileges required
+    /// Request Input Monitoring. `IOHIDRequestAccess` runs FIRST because it is
+    /// what makes macOS create Juno's row in the Input Monitoring pane (and
+    /// shows the system consent alert on the first call); opening the pane
+    /// before that leaves the user, or the auto-grant walker, staring at a list
+    /// with nothing to switch.
     pub fn request_input_monitoring_permission() -> Result<(), String> {
         #[cfg(target_os = "macos")]
         {
+            use crate::platform::input_monitoring::request_input_monitoring_access;
+
+            info!("Requesting input monitoring permission via IOHIDRequestAccess");
+            if request_input_monitoring_access() {
+                info!("Input monitoring permission already granted");
+                return Ok(());
+            }
+
             info!("Opening input monitoring privacy settings");
 
             // Open input monitoring settings to let user grant permission manually

@@ -158,6 +158,10 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
     // Update timestamp before attempting initialization
     *last_init = now;
 
+    // Silent check: `auto_open_settings = false`, and the SDK never passes
+    // `show_prompt = true` from this constructor, so no native Accessibility
+    // alert and no Settings window can come from startup. Onboarding owns the
+    // prompt; startup only learns whether the engine is usable.
     let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, false);
     let result = match desktop_instance_result {
         Ok(instance) => {
@@ -184,7 +188,6 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
                 || error_str.contains("denied")
             {
                 info!("Permission-related error detected - the app's permission flow will guide you through setup");
-                info!("System Settings may have opened automatically to grant permissions");
 
                 // Update permission cache with failure
                 if let Ok(mut perm_cache) = PERMISSION_CACHE.lock() {
