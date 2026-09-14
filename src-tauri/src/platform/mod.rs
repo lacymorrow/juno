@@ -11,6 +11,8 @@ pub mod macos;
 /// Input Monitoring (TCC ListenEvent) check + request over IOKit; stubs elsewhere.
 pub mod input_monitoring;
 pub mod mouse_button_monitor;
+/// Native share sheet (NSSharingServicePicker) for agent responses; stub elsewhere.
+pub mod share_sheet;
 /// Passive stop-key (Escape) observer — macOS implementation plus stubs elsewhere.
 pub mod stop_key_monitor; // Passive mouse-button trigger observer
 

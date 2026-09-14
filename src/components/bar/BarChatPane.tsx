@@ -1,16 +1,17 @@
-import { Plus, X } from "lucide-react";
+import { Plus, Settings, SquareArrowOutUpRight, X } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { ChatContainerV2 } from "@/components/chat/ChatContainerV2";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage, ResponseExportInput } from "@/types/chat";
+import type { ShareAnchor } from "@/hooks/useConversation";
 import { cn } from "@/lib/utils";
 
 interface BarChatPaneProps {
   messages: ChatMessage[];
   isProcessing: boolean;
   height: number;
-  copyingMessageId: string | null;
-  savingMessageId: string | null;
-  onCopyResponse: (content: string, index: number) => void;
-  onSaveResponse: (content: string, format: "html" | "markdown", index: number) => void;
+  copiedMessageId: string | null;
+  onCopyResponse: (response: ResponseExportInput, index: number) => void;
+  onShareResponse: (response: ResponseExportInput, anchor: ShareAnchor) => void;
   onApprovalUpdate: (toolId: string, state: "approved" | "denied") => void;
   onContinuationUpdate: (requestId: string, state: "stopped" | "continued") => void;
   onDismiss: () => void;
@@ -18,6 +19,22 @@ interface BarChatPaneProps {
 }
 
 const noopPromptSelect = () => {};
+
+const headerButton =
+  "flex size-6 items-center justify-center rounded-full text-white/35 transition-colors hover:bg-white/[0.08] hover:text-white/80";
+
+/** The full-size chat window; it shows this same conversation. */
+const openInWindow = () => {
+  invoke("open_main_window").catch((err) =>
+    console.error("Failed to open the main window:", err),
+  );
+};
+
+const openSettings = () => {
+  invoke("open_settings_window").catch((err) =>
+    console.error("Failed to open settings:", err),
+  );
+};
 
 /**
  * The conversation, docked under the floating bar.
@@ -34,10 +51,9 @@ export function BarChatPane({
   messages,
   isProcessing,
   height,
-  copyingMessageId,
-  savingMessageId,
+  copiedMessageId,
   onCopyResponse,
-  onSaveResponse,
+  onShareResponse,
   onApprovalUpdate,
   onContinuationUpdate,
   onDismiss,
@@ -67,29 +83,47 @@ export function BarChatPane({
             onClick={onNewChat}
             aria-label="New chat"
             title="New chat"
-            className="flex size-6 items-center justify-center rounded-full text-white/35 transition-colors hover:bg-white/[0.08] hover:text-white/80"
+            className={headerButton}
           >
             <Plus className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={openInWindow}
+            aria-label="Open in window"
+            title="Open in window"
+            className={headerButton}
+          >
+            <SquareArrowOutUpRight className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={openSettings}
+            aria-label="Settings"
+            title="Settings"
+            className={headerButton}
+          >
+            <Settings className="size-3.5" />
           </button>
           <button
             type="button"
             onClick={onDismiss}
             aria-label="Dismiss conversation"
             title="Dismiss (Esc)"
-            className="flex size-6 items-center justify-center rounded-full text-white/35 transition-colors hover:bg-white/[0.08] hover:text-white/80"
+            className={headerButton}
           >
             <X className="size-3.5" />
           </button>
         </div>
       </header>
 
-      <div data-no-drag className="flex min-h-0 flex-1 cursor-auto flex-col">
+      {/* select-text undoes the bar root's select-none so replies read like any Mac text */}
+      <div data-no-drag className="flex min-h-0 flex-1 cursor-auto select-text flex-col">
         <ChatContainerV2
           conversation={messages}
-          copyingMessageId={copyingMessageId}
-          savingMessageId={savingMessageId}
+          copiedMessageId={copiedMessageId}
           onCopyResponse={onCopyResponse}
-          onSaveResponse={onSaveResponse}
+          onShareResponse={onShareResponse}
           onExamplePromptSelect={noopPromptSelect}
           onApprovalUpdate={onApprovalUpdate}
           onContinuationUpdate={onContinuationUpdate}

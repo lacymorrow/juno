@@ -1,3 +1,4 @@
+import type { ResponseExportInput } from "@/types/chat";
 import { useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useConversation } from "@/hooks/useConversation";
@@ -22,8 +23,7 @@ const noop = () => {};
 export function useBarConversation() {
   const conversation = useConversation();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
-  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   useBackendEvents({
     addSystemMessage: conversation.addSystemMessage,
@@ -37,15 +37,9 @@ export function useBarConversation() {
   });
 
   const handleCopyResponse = useCallback(
-    (content: string, messageIndex: number) =>
-      conversation.handleCopyResponse(content, messageIndex, setCopyingMessageId),
+    (response: ResponseExportInput, messageIndex: number) =>
+      conversation.handleCopyResponse(response, messageIndex, setCopiedMessageId),
     [conversation.handleCopyResponse],
-  );
-
-  const handleSaveResponse = useCallback(
-    (content: string, format: "html" | "markdown", messageIndex: number) =>
-      conversation.handleSaveResponse(content, format, messageIndex, setSavingMessageId),
-    [conversation.handleSaveResponse],
   );
 
   const handleApprovalUpdate = useCallback(
@@ -86,10 +80,9 @@ export function useBarConversation() {
     messages: conversation.conversation,
     isProcessing,
     startNewChat: conversation.startNewChat,
-    copyingMessageId,
-    savingMessageId,
+    copiedMessageId,
     handleCopyResponse,
-    handleSaveResponse,
+    handleShareResponse: conversation.handleShareResponse,
     handleApprovalUpdate,
     handleContinuationUpdate,
     stop,

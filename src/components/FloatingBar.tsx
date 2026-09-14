@@ -22,7 +22,7 @@ import {
   PhysicalPosition,
 } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { Mic, Square, Type } from "lucide-react";
+import { MessageSquare, Mic, Square, Type } from "lucide-react";
 
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
@@ -512,9 +512,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // mouse-moved into an inactive window's webview, so CSS :hover never fires
   // while another app is active; the native tracking area forwards the
   // cursor position and we light the button under it ourselves.
-  const [hoveredButton, setHoveredButton] = useState<"mic" | "type" | null>(null);
+  const [hoveredButton, setHoveredButton] = useState<"mic" | "type" | "chat" | null>(null);
   const micRef = useRef<HTMLButtonElement>(null);
   const typeRef = useRef<HTMLButtonElement>(null);
+  const chatRef = useRef<HTMLButtonElement>(null);
   const moveFrameRef = useRef<number | null>(null);
 
   const onMouseEnterWindow = useCallback(() => {
@@ -561,7 +562,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         if (r.width === 0 && r.height === 0) return false;
         return pointInRect(x, y, r);
       };
-      setHoveredButton(hit(micRef) ? "mic" : hit(typeRef) ? "type" : null);
+      setHoveredButton(
+        hit(micRef) ? "mic" : hit(typeRef) ? "type" : hit(chatRef) ? "chat" : null,
+      );
     });
   }, []);
 
@@ -617,6 +620,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const paneOpen = chat.messages.length > 0 && !paneDismissed;
 
   const dismissPane = useCallback(() => setPaneDismissed(true), []);
+  const reopenPane = useCallback(() => setPaneDismissed(false), []);
+  // A conversation the person closed and can come back to.
+  const hasDismissedChat = chat.messages.length > 0 && paneDismissed;
   const startNewChat = useCallback(() => {
     chat.startNewChat();
     setPaneDismissed(false);
@@ -1245,10 +1251,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         messages={chat.messages}
         isProcessing={isWorking}
         height={FLOATING_BAR_DIMENSIONS.PANE_HEIGHT}
-        copyingMessageId={chat.copyingMessageId}
-        savingMessageId={chat.savingMessageId}
+        copiedMessageId={chat.copiedMessageId}
         onCopyResponse={chat.handleCopyResponse}
-        onSaveResponse={chat.handleSaveResponse}
+        onShareResponse={chat.handleShareResponse}
         onApprovalUpdate={chat.handleApprovalUpdate}
         onContinuationUpdate={chat.handleContinuationUpdate}
         onDismiss={dismissPane}
@@ -1343,6 +1348,19 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             >
               <Type className="size-3.5" />
             </button>
+            {hasDismissedChat && (
+              <button
+                ref={chatRef}
+                type="button"
+                onClick={reopenPane}
+                aria-label="Reopen chat"
+                title="Reopen chat"
+                data-phover={hoveredButton === "chat" ? "" : undefined}
+                className={cn(pillButton, hoveredButton === "chat" && "bg-white/[0.12] text-white")}
+              >
+                <MessageSquare className="size-3.5" />
+              </button>
+            )}
           </div>
         ) : showInput ? (
           <form

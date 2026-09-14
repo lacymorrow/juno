@@ -1,6 +1,14 @@
 // Canonical ChatMessage type — single source of truth for the chat conversation model.
 // All consumers import from here.
 
+/** What copy, share and save start from: one assistant reply plus the question it answered. */
+export type ResponseExportInput = {
+  question?: string;
+  content: string;
+  spoken: string[];
+  timestamp?: number;
+};
+
 export type ChatMessage = {
   role:
     | "user"

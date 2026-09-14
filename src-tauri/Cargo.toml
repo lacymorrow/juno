@@ -30,6 +30,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 computer-use-ai-sdk = { path = "./mcp-server-os-level" }
+# Native clipboard for the chat Copy button (already in the graph via the SDK)
+arboard = "3.4.1"
 dotenvy = "0.15"
 reqwest = { version = "0.12.5", features = ["json", "stream"] }
 tokio = { version = "1", features = ["full", "sync"] }
