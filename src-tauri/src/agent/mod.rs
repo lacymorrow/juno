@@ -11,6 +11,7 @@ pub mod structs;
 pub mod tool_logger;
 pub mod tools;
 pub mod traits; // Tool choice intelligence system
+pub mod tts_tags; // Shared <TTS> extraction used by every provider
 
 // Re-export commonly used items
 pub use core::*;

@@ -765,6 +765,26 @@ where
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     }
+
+    /// Safety net for brains that leave `<TTS>` blocks in their final text
+    /// instead of extracting them while streaming (OpenAI, Gemini, rig, the
+    /// Anthropic non-streaming path). Speaks each block through the normal TTS
+    /// path and returns the display text. Streaming brains already stripped
+    /// the tags, so for them this is a no-op and nothing is spoken twice.
+    fn speak_and_strip_tts(&self, text: String) -> String {
+        if !crate::agent::tts_tags::contains_tts_tags(&text) {
+            return text;
+        }
+        let (display, spoken) = crate::agent::tts_tags::split_tts_tags(&text);
+        for block in spoken {
+            log::info!("Speaking TTS block left in final response: '{}'", block);
+            crate::agent::tool_logger::process_tts_content_immediately(
+                (*self.app_handle).clone(),
+                block,
+            );
+        }
+        display
+    }
 }
 
 #[async_trait]
@@ -928,13 +948,14 @@ where
             // Handle agent action
             match action {
                 AgentAction::Finish(text) => {
-                    log::info!("Agent finished with text response: \"{}\"", text);
+                    let final_response = self.speak_and_strip_tts(text);
+                    log::info!("Agent finished with text response: \"{}\"", final_response);
                     self.transition_state(AgentState::Finished).await;
-                    let final_response = text;
                     return Ok(final_response);
                 }
 
                 AgentAction::RespondToUser(text) => {
+                    let text = self.speak_and_strip_tts(text);
                     log::info!("Agent intermediate response: {}", text);
                     // Add the assistant's response to memory
                     {

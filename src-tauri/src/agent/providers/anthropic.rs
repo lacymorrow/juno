@@ -567,10 +567,8 @@ impl AnthropicBrain {
         let mut tool_calls = Vec::new();
         let mut stop_reason = String::new();
 
-        // TTS XML parsing state
-        let mut tts_buffer = String::new();
-        let mut in_tts_tag = false;
-        let mut tts_content = String::new();
+        // TTS XML parsing state (shared parser, see agent::tts_tags)
+        let mut tts_stream = crate::agent::tts_tags::TtsTagStream::new();
 
         // Thinking XML parsing state (for <thinking> tags in text output)
         let mut thinking_buffer = String::new();
@@ -749,13 +747,14 @@ impl AnthropicBrain {
                                                 }
 
                                                 // Then process TTS XML tags from the remaining text
-                                                let (display_text, extracted_tts_list) = self
-                                                    .process_text_with_tts_extraction(
-                                                        &text_without_thinking,
-                                                        &mut tts_buffer,
-                                                        &mut in_tts_tag,
-                                                        &mut tts_content,
+                                                let (display_text, extracted_tts_list) =
+                                                    tts_stream.push(&text_without_thinking);
+                                                for spoken in &extracted_tts_list {
+                                                    log::info!(
+                                                        "Extracted TTS content during streaming: '{}'",
+                                                        spoken
                                                     );
+                                                }
 
                                                 // Emit chunks when we have display text OR TTS content.
                                                 // We delay stream_start until after thinking messages for proper ordering,
@@ -966,35 +965,22 @@ impl AnthropicBrain {
             thinking_buffer.clear();
         }
 
-        // CRITICAL FIX: Handle any remaining TTS state at end of stream
-        if in_tts_tag || !tts_buffer.is_empty() {
-            log::debug!(
-                "Stream ended with remaining TTS state: in_tts_tag={}, buffer='{}'",
-                in_tts_tag,
-                tts_buffer
+        // Flush any TTS state left at end of stream: an unterminated block is
+        // still spoken, and a partial tag held in the buffer is shown as text.
+        let (tail_display, tail_spoken) = tts_stream.finish();
+        if !tail_spoken.is_empty() {
+            log::warn!(
+                "Stream ended inside a <TTS> block; speaking the partial content: {:?}",
+                tail_spoken
             );
-
-            // If we're in the middle of a TTS tag, extract what we have as TTS content
-            if in_tts_tag && !tts_content.trim().is_empty() {
-                log::info!(
-                    "⚠️  FALLBACK: Extracting incomplete TTS content at stream end: '{}'",
-                    tts_content
-                );
-                log::warn!("TTS was processed at stream end instead of immediately during streaming. This indicates the TTS tags may have been split across chunks.");
-                on_text_chunk(String::new(), vec![tts_content.clone()]);
-            }
-
-            // If there's remaining buffer content outside TTS tags, add it to accumulated text
-            if !in_tts_tag && !tts_buffer.trim().is_empty() {
-                log::debug!(
-                    "Adding remaining buffer content to accumulated text: '{}'",
-                    tts_buffer
-                );
-                accumulated_text.push_str(&tts_buffer);
-            }
-
-            // Clear the buffer to prevent leakage
-            tts_buffer.clear();
+            on_text_chunk(String::new(), tail_spoken);
+        }
+        if !tail_display.trim().is_empty() {
+            log::debug!(
+                "Adding remaining buffer content to accumulated text: '{}'",
+                tail_display
+            );
+            accumulated_text.push_str(&tail_display);
         }
 
         Ok((
@@ -1153,149 +1139,6 @@ impl AnthropicBrain {
             "</thinking",
         ];
         partial_tags.iter().any(|&tag| s.eq_ignore_ascii_case(tag))
-    }
-
-    /// Process text chunk to extract TTS XML tags and return display text + extracted TTS content
-    ///
-    /// This function handles:
-    /// - Proper buffer management to avoid character duplication/loss
-    /// - Partial XML tags split across streaming chunks
-    /// - Multiple TTS blocks within a single chunk
-    /// - Complete tag removal to prevent leakage
-    fn process_text_with_tts_extraction(
-        &self,
-        text_chunk: &str,
-        tts_buffer: &mut String,
-        in_tts_tag: &mut bool,
-        tts_content: &mut String,
-    ) -> (String, Vec<String>) {
-        let mut display_text = String::new();
-        let mut extracted_tts_list = Vec::new();
-
-        // Add new text to buffer for processing
-        tts_buffer.push_str(text_chunk);
-
-        let mut chars_to_consume = 0;
-        let buffer_chars: Vec<char> = tts_buffer.chars().collect();
-        let mut i = 0;
-
-        while i < buffer_chars.len() {
-            // Check for potential tag boundaries - need at least 5 chars for "<TTS>" or 6 for "</TTS>"
-            let remaining_len = buffer_chars.len() - i;
-            let remaining_str: String = buffer_chars[i..].iter().collect();
-
-            if !*in_tts_tag {
-                // Outside TTS tag - look for opening tag
-                if remaining_str.starts_with("<TTS>") {
-                    // Found complete opening tag
-                    *in_tts_tag = true;
-                    i += 5; // Skip "<TTS>"
-                    chars_to_consume = i;
-                    continue;
-                } else if remaining_len < 5 && self.could_be_partial_opening_tag(&remaining_str) {
-                    // Potential partial opening tag at end of buffer - stop processing here
-                    // CRITICAL FIX: Ensure we mark chars_to_consume correctly to not lose display text
-                    break;
-                } else {
-                    // Regular character outside TTS - add to display
-                    display_text.push(buffer_chars[i]);
-                    i += 1;
-                    chars_to_consume = i;
-                }
-            } else {
-                // Inside TTS tag - look for closing tag
-                if remaining_str.starts_with("</TTS>") {
-                    // Found complete closing tag
-                    if !tts_content.trim().is_empty() {
-                        extracted_tts_list.push(tts_content.clone());
-                        log::info!(
-                            "✅ IMMEDIATE: Extracted TTS content during streaming: '{}'",
-                            tts_content
-                        );
-                    }
-
-                    // Reset TTS state for next potential block
-                    *in_tts_tag = false;
-                    tts_content.clear();
-                    i += 6; // Skip "</TTS>"
-                    chars_to_consume = i;
-                    continue;
-                } else if remaining_len < 6 && self.could_be_partial_closing_tag(&remaining_str) {
-                    // Potential partial closing tag at end of buffer — wait for the
-                    // next chunk so we can match the complete "</TTS>" tag.
-                    // We must NOT extract TTS content early here because the remaining
-                    // tag characters (e.g. "TS>") would leak into the next chunk's
-                    // display text once in_tts_tag is set to false.
-                    break;
-                } else {
-                    // Content inside TTS tag - add to TTS content only (not to display)
-                    tts_content.push(buffer_chars[i]);
-                    i += 1;
-                    chars_to_consume = i;
-                }
-            }
-        }
-
-        // CRITICAL FIX: Enhanced buffer management
-        // Remove processed characters from buffer, keeping any unprocessed remainder
-        if chars_to_consume > 0 && chars_to_consume <= buffer_chars.len() {
-            *tts_buffer = buffer_chars[chars_to_consume..].iter().collect();
-        }
-
-        // CRITICAL FIX: Validate that no TTS tags remain in display_text
-        // This should never happen if processing is correct
-        if display_text.contains("<TTS>") || display_text.contains("</TTS>") {
-            log::error!(
-                "CRITICAL BUG: TTS tags found in display_text during streaming processing!"
-            );
-            log::error!("Display text: '{}'", display_text);
-            log::error!(
-                "Buffer state - in_tts_tag: {}, tts_content: '{}'",
-                *in_tts_tag,
-                tts_content
-            );
-            log::error!("This indicates a bug in the streaming TTS processing logic");
-
-            // Emergency cleanup to prevent tag leakage
-            display_text = display_text.replace("<TTS>", "").replace("</TTS>", "");
-        }
-
-        (display_text, extracted_tts_list)
-    }
-
-    /// Check if a string could be the beginning of a partial "<TTS>" tag
-    fn could_be_partial_opening_tag(&self, s: &str) -> bool {
-        if s.is_empty() {
-            return false;
-        }
-        let partial_tags = ["<", "<T", "<TT", "<TTS"];
-        partial_tags.contains(&s)
-    }
-
-    /// Check if a string could be the beginning of a partial "</TTS>" tag
-    fn could_be_partial_closing_tag(&self, s: &str) -> bool {
-        if s.is_empty() {
-            return false;
-        }
-        let partial_tags = ["<", "</", "</T", "</TT", "</TTS"];
-        partial_tags.contains(&s)
-    }
-
-    /// Strip TTS XML tags from text, removing them completely (content was already processed for TTS)
-    fn strip_tts_tags(&self, text: &str) -> String {
-        // CRITICAL FIX: Remove TTS tags completely - content was already processed for immediate TTS
-        // We don't want TTS content appearing in the final display text
-        match Regex::new(r"<TTS>.*?</TTS>") {
-            Ok(tts_regex) => tts_regex
-                .replace_all(text, "")
-                .to_string()
-                .trim()
-                .to_string(),
-            Err(e) => {
-                tracing::warn!("Failed to compile TTS regex: {}", e);
-                text.to_string()
-            }
-        }
     }
 
     /// Strip thinking XML tags from text, removing them completely (content was already emitted as thinking events)
@@ -1894,16 +1737,15 @@ impl AgentBrain for AnthropicBrain {
                 accumulated_text = self.strip_thinking_tags(&accumulated_text);
             }
 
-            // TTS tags should now be completely removed during streaming processing
-            // If any remain, it indicates a bug in our improved processing logic
-            if accumulated_text.contains("<TTS>") || accumulated_text.contains("</TTS>") {
-                log::error!("CRITICAL BUG: TTS tags found in final accumulated text after improved processing!");
-                log::error!("This should never happen with the fixed streaming logic");
-                log::error!("Accumulated text: '{}'", accumulated_text);
-
-                // Emergency fallback - but this indicates a serious bug
-                accumulated_text = self.strip_tts_tags(&accumulated_text);
-                log::error!("Emergency TTS cleanup applied");
+            // TTS tags are removed during streaming. If any remain it is a parser
+            // bug; strip them so the chat never shows raw markup.
+            if crate::agent::tts_tags::contains_tts_tags(&accumulated_text) {
+                log::error!(
+                    "TTS tags survived streaming extraction, stripping them: '{}'",
+                    accumulated_text
+                );
+                let (display, _) = crate::agent::tts_tags::split_tts_tags(&accumulated_text);
+                accumulated_text = display;
             }
 
             let final_display_text = accumulated_text;

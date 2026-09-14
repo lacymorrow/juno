@@ -459,9 +459,13 @@ impl ClaudeCliBrain {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
 
+        // Display text with <TTS> blocks removed; what the UI has been shown.
         let mut accumulated_text = String::new();
         let mut previous_char_count: usize = 0;
         let mut final_result: Option<String> = None;
+        // Shared <TTS> extraction so the CLI speaks like the API provider.
+        let mut tts_stream = crate::agent::tts_tags::TtsTagStream::new();
+        let mut spoken_blocks: Vec<String> = Vec::new();
 
         loop {
             match lines.next_line().await {
@@ -495,19 +499,26 @@ impl ClaudeCliBrain {
                                     // Compute delta using char offsets (safe for multi-byte UTF-8)
                                     let delta: String =
                                         text.chars().skip(previous_char_count).collect();
-
-                                    if !delta.is_empty() {
-                                        if let Some(ref handle) = app_handle {
-                                            crate::agent::tool_logger::emit_streaming_text_chunk(
-                                                handle,
-                                                delta,
-                                                Some(msg_id.to_string()),
-                                                None,
-                                            );
-                                        }
-                                    }
                                     previous_char_count = char_count;
-                                    accumulated_text = text;
+
+                                    // Split the spoken channel out of the delta
+                                    let (display_delta, tts_blocks) = tts_stream.push(&delta);
+                                    for spoken in &tts_blocks {
+                                        info!(
+                                            "Extracted TTS content from Claude CLI: '{}'",
+                                            spoken
+                                        );
+                                    }
+                                    accumulated_text.push_str(&display_delta);
+                                    if let Some(ref handle) = app_handle {
+                                        Self::emit_chunk_with_tts(
+                                            handle,
+                                            display_delta,
+                                            msg_id,
+                                            &tts_blocks,
+                                        );
+                                    }
+                                    spoken_blocks.extend(tts_blocks);
                                 }
                             }
                         }
@@ -550,7 +561,67 @@ impl ClaudeCliBrain {
             }
         }
 
+        // Flush the parser: a partial tag becomes display text, an unterminated
+        // block is still spoken.
+        let (tail_display, tail_spoken) = tts_stream.finish();
+        if !tail_display.is_empty() || !tail_spoken.is_empty() {
+            accumulated_text.push_str(&tail_display);
+            if let Some(ref handle) = app_handle {
+                Self::emit_chunk_with_tts(handle, tail_display, msg_id, &tail_spoken);
+            }
+            spoken_blocks.extend(tail_spoken);
+        }
+
+        // The `result` event carries the raw final text, tags included. Strip
+        // it for display and speak any block the assistant events did not
+        // already cover (older CLI builds emit no assistant events).
+        let final_result = final_result.map(|raw| {
+            let (display, blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
+            let unspoken: Vec<String> = blocks
+                .into_iter()
+                .filter(|b| !spoken_blocks.contains(b))
+                .collect();
+            if !unspoken.is_empty() {
+                info!(
+                    "Speaking {} TTS block(s) found only in the Claude CLI result",
+                    unspoken.len()
+                );
+                if let Some(ref handle) = app_handle {
+                    Self::emit_chunk_with_tts(handle, String::new(), msg_id, &unspoken);
+                }
+            }
+            display
+        });
+
         Ok((accumulated_text, final_result))
+    }
+
+    /// Emit one display chunk plus every spoken block. The first block rides on
+    /// the text chunk; extra blocks go out as TTS-only chunks, matching the
+    /// Anthropic provider's event shape.
+    fn emit_chunk_with_tts(
+        handle: &tauri::AppHandle,
+        display: String,
+        msg_id: &str,
+        tts_blocks: &[String],
+    ) {
+        if display.is_empty() && tts_blocks.is_empty() {
+            return;
+        }
+        crate::agent::tool_logger::emit_streaming_text_chunk(
+            handle,
+            display,
+            Some(msg_id.to_string()),
+            tts_blocks.first().cloned(),
+        );
+        for spoken in tts_blocks.iter().skip(1) {
+            crate::agent::tool_logger::emit_streaming_text_chunk(
+                handle,
+                String::new(),
+                Some(msg_id.to_string()),
+                Some(spoken.clone()),
+            );
+        }
     }
 }
 
