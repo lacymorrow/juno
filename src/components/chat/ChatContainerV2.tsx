@@ -6,7 +6,8 @@ import {
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import { ChatMessageComponent } from "@/components/ChatMessageV2";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage, ResponseExportInput } from "@/types/chat";
+import type { ShareAnchor } from "@/hooks/useConversation";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
 import { cn } from "@/lib/utils";
 
@@ -57,14 +58,9 @@ function formatFullTimestamp(timestamp: number): string {
 
 interface ChatContainerProps {
   conversation: ChatMessage[];
-  copyingMessageId: string | null;
-  savingMessageId: string | null;
-  onCopyResponse: (content: string, messageIndex: number) => void;
-  onSaveResponse: (
-    content: string,
-    format: "html" | "markdown",
-    messageIndex: number
-  ) => void;
+  copiedMessageId: string | null;
+  onCopyResponse: (response: ResponseExportInput, messageIndex: number) => void;
+  onShareResponse: (response: ResponseExportInput, anchor: ShareAnchor) => void;
   onExamplePromptSelect: (prompt: string) => void;
   onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
   onContinuationUpdate?: (requestId: string, state: "stopped" | "continued") => void;
@@ -76,10 +72,9 @@ interface ChatContainerProps {
 
 export const ChatContainerV2 = React.memo(function ChatContainerV2({
   conversation,
-  copyingMessageId,
-  savingMessageId,
+  copiedMessageId,
   onCopyResponse,
-  onSaveResponse,
+  onShareResponse,
   onExamplePromptSelect,
   onApprovalUpdate,
   onContinuationUpdate,
@@ -92,6 +87,14 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
       conversation.map((msg, index) => {
         const previousMsg = index > 0 ? conversation[index - 1] : null;
         const showTimestamp = shouldShowTimestamp(msg, previousMsg);
+        // The question a reply answers: the nearest user message before it.
+        const question =
+          msg.role === "assistant"
+            ? conversation
+                .slice(0, index)
+                .reverse()
+                .find((m) => m.role === "user")?.content
+            : undefined;
 
         return (
           <div key={`msg-container-${index}-${msg.timestamp || Date.now()}`}>
@@ -110,10 +113,10 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
             <ChatMessageComponent
               msg={msg}
               index={index}
-              copyingMessageId={copyingMessageId}
-              savingMessageId={savingMessageId}
+              question={question}
+              copiedMessageId={copiedMessageId}
               onCopyResponse={onCopyResponse}
-              onSaveResponse={onSaveResponse}
+              onShareResponse={onShareResponse}
               onApprovalUpdate={onApprovalUpdate}
               onContinuationUpdate={onContinuationUpdate}
             />
@@ -122,10 +125,9 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
       }),
     [
       conversation,
-      copyingMessageId,
-      savingMessageId,
+      copiedMessageId,
       onCopyResponse,
-      onSaveResponse,
+      onShareResponse,
       onApprovalUpdate,
       onContinuationUpdate,
     ]

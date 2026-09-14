@@ -491,6 +491,8 @@ export const COMMANDS = {
   AGENT_SET_AGENT_MODE: 'set_agent_mode',
   AGENT_GET_AGENT_TRIGGER_MODE: 'get_agent_trigger_mode',
   AGENT_SET_AGENT_TRIGGER_MODE: 'set_agent_trigger_mode',
+  AGENT_SHARE_AGENT_RESPONSE: 'share_agent_response',
+  AGENT_COPY_AGENT_RESPONSE: 'copy_agent_response',
   PROVIDERS_GET_PROVIDERS: 'get_providers',
   PROVIDERS_GET_ACTIVE_PROVIDER: 'get_active_provider',
   PROVIDERS_SET_ACTIVE_PROVIDER: 'set_active_provider',

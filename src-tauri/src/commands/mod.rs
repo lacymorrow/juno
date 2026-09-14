@@ -105,7 +105,9 @@ pub use self::enhanced_visual_reasoning_commands::{
     VisualReasoningState,
 };
 pub use self::error_recovery::*;
-pub use self::filesystem::{get_file_content, list_files, save_agent_response, set_file_content};
+pub use self::filesystem::{
+    copy_agent_response, get_file_content, list_files, set_file_content, share_agent_response,
+};
 // Floating bar functionality fully migrated to ui_commands.rs - no longer needed
 pub use self::auto_grant::*;
 pub use self::mcp::*;

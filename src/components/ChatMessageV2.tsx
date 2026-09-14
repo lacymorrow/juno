@@ -31,9 +31,9 @@ import {
 } from "@/components/ai-elements/confirmation";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
-  Code,
+  Check,
   Copy,
-  FileText,
+  Share,
   Volume2,
   ChevronDown,
   ChevronRight,
@@ -52,7 +52,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { UI } from "@/lib/constants.generated";
 
 export type { ChatMessage } from "@/types/chat";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage, ResponseExportInput } from "@/types/chat";
+import type { ShareAnchor } from "@/hooks/useConversation";
 
 const ACTION_VERB: Record<string, string> = {
   left_click: "Clicked",
@@ -78,14 +79,11 @@ function formatAxActionTitle(msg: ChatMessage): string | undefined {
 interface ChatMessageProps {
   msg: ChatMessage;
   index: number;
-  copyingMessageId: string | null;
-  savingMessageId: string | null;
-  onCopyResponse: (content: string, index: number) => void;
-  onSaveResponse: (
-    content: string,
-    format: "html" | "markdown",
-    index: number
-  ) => void;
+  /** The user message this reply answers; titles the exported document. */
+  question?: string;
+  copiedMessageId: string | null;
+  onCopyResponse: (response: ResponseExportInput, index: number) => void;
+  onShareResponse: (response: ResponseExportInput, anchor: ShareAnchor) => void;
   onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
   onContinuationUpdate?: (requestId: string, state: "stopped" | "continued") => void;
 }
@@ -353,13 +351,21 @@ function ApprovalCountdown({
 export function ChatMessageComponent({
   msg,
   index,
-  copyingMessageId,
-  savingMessageId,
+  question,
+  copiedMessageId,
   onCopyResponse,
-  onSaveResponse,
+  onShareResponse,
   onApprovalUpdate,
   onContinuationUpdate,
 }: ChatMessageProps) {
+  const copied = copiedMessageId === `copy-${index}`;
+  const exportInput = (): ResponseExportInput => ({
+    question,
+    content: msg.content,
+    spoken: msg.tts_metadata?.tts_parts ?? [],
+    timestamp: msg.timestamp,
+  });
+
   // Inline tool approval handlers — visual feedback via Confirmation component
   const handleApprove = useCallback(async (toolId: string) => {
     try {
@@ -569,43 +575,33 @@ export function ChatMessageComponent({
         msg.content &&
         msg.content.trim() !== "" &&
         !msg.isStreaming && (
-          <MessageToolbar className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <MessageToolbar className="opacity-40 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100">
             <MessageActions>
               <MessageAction
-                tooltip="Copy response"
-                onClick={() => onCopyResponse(msg.content, index)}
-                disabled={copyingMessageId === `copy-${index}`}
+                tooltip={copied ? "Copied" : "Copy"}
+                onClick={() => onCopyResponse(exportInput(), index)}
                 className="h-7 w-7"
               >
-                {copyingMessageId === `copy-${index}` ? (
-                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                {copied ? (
+                  <Check size={14} />
                 ) : (
                   <Copy size={14} />
                 )}
               </MessageAction>
               <MessageAction
-                tooltip="Save as HTML"
-                onClick={() => onSaveResponse(msg.content, "html", index)}
-                disabled={savingMessageId === `save-html-${index}`}
+                tooltip="Share"
+                onClick={(event) => {
+                  const box = event.currentTarget.getBoundingClientRect();
+                  onShareResponse(exportInput(), {
+                    x: box.left,
+                    y: box.top,
+                    width: box.width,
+                    height: box.height,
+                  });
+                }}
                 className="h-7 w-7"
               >
-                {savingMessageId === `save-html-${index}` ? (
-                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Code size={14} />
-                )}
-              </MessageAction>
-              <MessageAction
-                tooltip="Save as Markdown"
-                onClick={() => onSaveResponse(msg.content, "markdown", index)}
-                disabled={savingMessageId === `save-markdown-${index}`}
-                className="h-7 w-7"
-              >
-                {savingMessageId === `save-markdown-${index}` ? (
-                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <FileText size={14} />
-                )}
+                <Share size={14} />
               </MessageAction>
             </MessageActions>
           </MessageToolbar>

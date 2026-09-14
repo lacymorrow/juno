@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback } from "react";
 import type { AppView } from "@/components/AppHeader";
 import type { ModalType, FeedbackData, UpdateInfo } from "@/components/ModalSystem";
 
@@ -17,9 +17,8 @@ export interface AppState {
     updateInfo: UpdateInfo | null;
     isCheckingUpdate: boolean;
 
-    // Copy/save operations
-    copyingMessageId: string | null;
-    savingMessageId: string | null;
+    // Which assistant message just got copied (its button shows a check)
+    copiedMessageId: string | null;
 
     // Voice/Agent state
     isAgentModeActive: boolean;
@@ -56,19 +55,8 @@ export function useAppState() {
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
     const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
 
-    // Copy and save operation state
-    const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
-    const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
-    const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-
-    // Clean up pending timers on unmount
-    useEffect(() => {
-        return () => {
-            for (const timer of pendingTimers.current) {
-                clearTimeout(timer);
-            }
-        };
-    }, []);
+    // Copy feedback state (the reset timer lives in useConversation)
+    const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
     // Voice/Agent state
     const [isAgentModeActive, setIsAgentModeActive] = useState(false);
@@ -96,14 +84,6 @@ export function useAppState() {
         setFeedbackData(prev => ({ ...prev, ...data }));
     }, []);
 
-    const resetCopyingState = useCallback(() => {
-        pendingTimers.current.push(setTimeout(() => setCopyingMessageId(null), 1000));
-    }, []);
-
-    const resetSavingState = useCallback(() => {
-        pendingTimers.current.push(setTimeout(() => setSavingMessageId(null), 1000));
-    }, []);
-
     return {
         // State
         currentView,
@@ -114,8 +94,7 @@ export function useAppState() {
         feedbackData,
         updateInfo,
         isCheckingUpdate,
-        copyingMessageId,
-        savingMessageId,
+        copiedMessageId,
         isAgentModeActive,
         isDictationActive,
         dictationState,
@@ -134,10 +113,7 @@ export function useAppState() {
         handleFeedbackDataChange,
         setUpdateInfo,
         setIsCheckingUpdate,
-        setCopyingMessageId,
-        setSavingMessageId,
-        resetCopyingState,
-        resetSavingState,
+        setCopiedMessageId,
         setIsAgentModeActive,
         setIsDictationActive,
         setDictationState,

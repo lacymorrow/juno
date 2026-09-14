@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import { COMMANDS, EVENTS } from "@/lib/constants.generated";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 
 import { AppHeader } from "@/components/AppHeader";
 import DevToolsPanel from "@/components/DevToolsPanel";
@@ -372,27 +372,14 @@ function App() {
 
   // Copy response handler
   const handleCopyResponse = useCallback(
-    (content: string, messageIndex: number) => {
+    (response: ResponseExportInput, messageIndex: number) => {
       conversation.handleCopyResponse(
-        content,
+        response,
         messageIndex,
-        appState.setCopyingMessageId,
+        appState.setCopiedMessageId,
       );
     },
-    [conversation.handleCopyResponse, appState.setCopyingMessageId],
-  );
-
-  // Save response handler
-  const handleSaveResponse = useCallback(
-    (content: string, format: "html" | "markdown", messageIndex: number) => {
-      conversation.handleSaveResponse(
-        content,
-        format,
-        messageIndex,
-        appState.setSavingMessageId,
-      );
-    },
-    [conversation.handleSaveResponse, appState.setSavingMessageId],
+    [conversation.handleCopyResponse, appState.setCopiedMessageId],
   );
 
   // Inline tool approval handler — updates message approval_state in conversation
@@ -446,10 +433,9 @@ function App() {
                   <div className="flex flex-col h-full">
                     <ChatContainer
                       conversation={conversation.conversation}
-                      copyingMessageId={appState.copyingMessageId}
-                      savingMessageId={appState.savingMessageId}
+                      copiedMessageId={appState.copiedMessageId}
                       onCopyResponse={handleCopyResponse}
-                      onSaveResponse={handleSaveResponse}
+                      onShareResponse={conversation.handleShareResponse}
                       onExamplePromptSelect={handleExamplePromptSelect}
                       onApprovalUpdate={handleApprovalUpdate}
                       onContinuationUpdate={handleContinuationUpdate}
