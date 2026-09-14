@@ -42,6 +42,7 @@ const AUTO_HIDE_MS = 8000;
 // How often we re-check the cursor to brighten the nearest well.
 const HIGHLIGHT_POLL_MS = 80;
 
+/** The bar's size in logical pixels; each well scales it for its own display. */
 type ShowPayload = { windowWidth: number; windowHeight: number };
 
 // A rendered hole: overlay-local CSS rect plus the well's physical centre (used
@@ -168,13 +169,13 @@ export const SnapWellsOverlay = () => {
             w,
             monitorRects,
             { x: bounds.originX, y: bounds.originY },
-            { width: windowWidth, height: windowHeight },
+            { width: w.width, height: w.height },
           );
           return {
-            key: `${w.monitorIndex}-${w.row}-${w.col}-${i}`,
+            key: `${w.monitorIndex}-${w.fy}-${w.fx}-${i}`,
             rect,
-            centerPhysX: w.x + windowWidth / 2,
-            centerPhysY: w.y + windowHeight / 2,
+            centerPhysX: w.x + w.width / 2,
+            centerPhysY: w.y + w.height / 2,
           };
         });
 

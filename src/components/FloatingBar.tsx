@@ -32,10 +32,12 @@ import { EVENTS, UI } from "@/lib/constants.generated";
 import {
   computeWells,
   nearestWell,
+  wellForSlot,
   easeOutCubic,
+  SLOT,
+  type MonitorRect,
   type Well,
-  type WellCol,
-  type WellRow,
+  type WellSlot,
 } from "@/lib/snapWells";
 import { AgentRosterStrip } from "./AgentRosterStrip";
 import { BarChatPane } from "./bar/BarChatPane";
@@ -421,6 +423,31 @@ function statusLabel(state: UIState, data: BarStateData): string | null {
       return null;
   }
 }
+
+/** Tauri monitors as the plain rects the well math takes. */
+const toMonitorRects = (
+  mons: Array<{
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+    scaleFactor: number;
+  }>,
+): MonitorRect[] =>
+  mons.map((m) => ({
+    position: { x: m.position.x, y: m.position.y },
+    size: { width: m.size.width, height: m.size.height },
+    scaleFactor: m.scaleFactor,
+  }));
+
+/**
+ * The window's size in logical pixels. Wells are computed from this, never
+ * from the physical size, because the physical footprint changes with the
+ * display's pixel density and a well computed for the wrong one lands the
+ * bar off the far edge of a Retina screen.
+ */
+const logicalWindowSize = async (win: ReturnType<typeof getCurrentWindow>) => {
+  const [size, scale] = await Promise.all([win.outerSize(), win.scaleFactor()]);
+  return { windowWidth: size.width / scale, windowHeight: size.height / scale };
+};
 
 const pillButton =
   "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/[0.12] hover:text-white";
@@ -937,21 +964,14 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       try {
         const win = getCurrentWindow();
         const saved = await invoke<{ x: number; y: number } | null>("get_bar_position");
-        const [size, pos, mons] = await Promise.all([
-          win.outerSize(),
+        const [logical, pos, mons] = await Promise.all([
+          logicalWindowSize(win),
           win.outerPosition(),
           availableMonitors(),
         ]);
         if (cancelled || !mons.length) return;
 
-        const wells = computeWells(
-          mons.map((m) => ({
-            position: { x: m.position.x, y: m.position.y },
-            size: { width: m.size.width, height: m.size.height },
-            scaleFactor: m.scaleFactor,
-          })),
-          { windowWidth: size.width, windowHeight: size.height, includeCenter: true },
-        );
+        const wells = computeWells(toMonitorRects(mons), { ...logical, includeCenter: true });
         if (!wells.length) return;
 
         let target: Well | null = saved ? nearestWell(saved, wells) : null;
@@ -965,15 +985,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               pos.y < m.position.y + m.size.height,
           );
           const mon = monIndex >= 0 ? monIndex : 0;
-          target =
-            wells.find((w) => w.monitorIndex === mon && w.col === "right" && w.row === "top") ??
-            wells.find((w) => w.col === "right" && w.row === "top") ??
-            wells[0];
+          target = wellForSlot(SLOT.topRight, mon, wells) ?? wells[0];
         }
         if (cancelled || !target) return;
 
         await win.setPosition(new PhysicalPosition(target.x, target.y));
-        currentSlotRef.current = { col: target.col, row: target.row };
+        currentSlotRef.current = { fx: target.fx, fy: target.fy };
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
         } catch {
@@ -1034,7 +1051,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const snapAnimatingRef = useRef(false);
   // The drag-well slot the bar currently occupies (col/row), so it can re-home
   // to the same slot on another display when the cursor moves there.
-  const currentSlotRef = useRef<{ col: WellCol; row: WellRow } | null>(null);
+  const currentSlotRef = useRef<WellSlot | null>(null);
   // Whether the snap-well drop indicator overlay is currently shown, so we
   // hide it exactly once on release regardless of which settle path fires.
   const snapOverlayShownRef = useRef(false);
@@ -1055,25 +1072,18 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     snapArmedRef.current = false;
     try {
       const win = getCurrentWindow();
-      const [pos, size, monitors] = await Promise.all([
+      const [pos, logical, monitors] = await Promise.all([
         win.outerPosition(),
-        win.outerSize(),
+        logicalWindowSize(win),
         availableMonitors(),
       ]);
       if (!monitors.length) return;
-      const wells = computeWells(
-        monitors.map((m) => ({
-          position: { x: m.position.x, y: m.position.y },
-          size: { width: m.size.width, height: m.size.height },
-          scaleFactor: m.scaleFactor,
-        })),
-        { windowWidth: size.width, windowHeight: size.height, includeCenter: true },
-      );
+      const wells = computeWells(toMonitorRects(monitors), { ...logical, includeCenter: true });
       const target = nearestWell({ x: pos.x, y: pos.y }, wells);
       if (!target) return;
       snapAnimatingRef.current = true;
       await animateWindowTo(win, { x: pos.x, y: pos.y }, { x: target.x, y: target.y });
-      currentSlotRef.current = { col: target.col, row: target.row };
+      currentSlotRef.current = { fx: target.fx, fy: target.fy };
       // Remember where it landed so the bar reopens here next launch, and
       // re-derive the growth direction since the dock may have changed.
       try {
@@ -1110,31 +1120,26 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         py < m.position.y + m.size.height;
       try {
         const win = getCurrentWindow();
-        const [size, pos, mons] = await Promise.all([
-          win.outerSize(),
+        const [logical, pos, mons] = await Promise.all([
+          logicalWindowSize(win),
           win.outerPosition(),
           availableMonitors(),
         ]);
         if (!mons.length) return;
         const targetIdx = mons.findIndex((m) => contains(m, x, y));
         if (targetIdx < 0) return;
-        // Already on the cursor's display — nothing to do.
+        // Already on the cursor's display: nothing to do.
         const barIdx = mons.findIndex((m) => contains(m, pos.x, pos.y));
         if (barIdx === targetIdx) return;
-        const wells = computeWells(
-          mons.map((m) => ({
-            position: { x: m.position.x, y: m.position.y },
-            size: { width: m.size.width, height: m.size.height },
-            scaleFactor: m.scaleFactor,
-          })),
-          { windowWidth: size.width, windowHeight: size.height, includeCenter: true },
-        );
-        const target = wells.find(
-          (w) => w.monitorIndex === targetIdx && w.col === slot.col && w.row === slot.row,
-        );
+        const wells = computeWells(toMonitorRects(mons), { ...logical, includeCenter: true });
+        // The same place on the new display: same corner, same padding, its
+        // own size and pixel density, so centre stays centre and a corner
+        // stays a corner instead of the old physical coordinates landing
+        // somewhere else (or off-screen) on a display of a different shape.
+        const target = wellForSlot(slot, targetIdx, wells);
         if (!target) return;
         await win.setPosition(new PhysicalPosition(target.x, target.y));
-        currentSlotRef.current = { col: target.col, row: target.row };
+        currentSlotRef.current = { fx: target.fx, fy: target.fy };
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
         } catch {
@@ -1189,14 +1194,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     // Show the snap-well drop indicator overlay for the length of the drag.
     if (!snapOverlayShownRef.current) {
       snapOverlayShownRef.current = true;
-      win
-        .outerSize()
-        .then((size) =>
-          emit("snap-wells-show", {
-            windowWidth: size.width,
-            windowHeight: size.height,
-          }),
-        )
+      logicalWindowSize(win)
+        .then((logical) => emit("snap-wells-show", logical))
         .catch((error) =>
           console.debug("FloatingBar: snap-wells-show failed:", error),
         );
