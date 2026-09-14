@@ -445,10 +445,16 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
 
     #[cfg(target_os = "macos")]
     {
-        // On macOS, we need Input Monitoring permissions for global shortcuts
-        // But for now, we'll proceed with registration and handle errors gracefully
-        // TODO: Implement proper IOHIDRequestAccess() check in the future
-        info!("macOS detected - proceeding with shortcut registration (permission check disabled for now)");
+        // Carbon hot keys (what the global-shortcut plugin registers) work
+        // without Input Monitoring, so this never blocks registration. It is a
+        // real IOKit read (`IOHIDCheckAccess`), logged so a "my shortcut does
+        // nothing" report can be matched against the actual TCC state. Never
+        // request here: prompting belongs to onboarding.
+        let access = crate::platform::input_monitoring::check_input_monitoring_access();
+        info!(
+            "macOS detected - Input Monitoring is {:?}; proceeding with shortcut registration",
+            access
+        );
     }
 
     // Unregister existing shortcuts with error handling

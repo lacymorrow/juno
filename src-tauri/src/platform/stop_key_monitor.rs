@@ -7,7 +7,12 @@
 //! * `addGlobalMonitorForEventsMatchingMask:` sees presses delivered to other
 //!   applications. AppKit only reports key events to a global monitor when the
 //!   process is trusted for Accessibility (or Input Monitoring) — the same
-//!   permission Juno already needs for computer use.
+//!   permission Juno already needs for computer use. Adding a global *key*
+//!   monitor from an untrusted process also makes macOS raise its own
+//!   "Accessibility Access" alert, so the global monitor is only added once
+//!   Accessibility is granted (it would deliver nothing before that anyway).
+//!   Onboarding installs this monitor before its window opens; without the
+//!   gate, the system alert beat the onboarding window to the screen.
 //! * `addLocalMonitorForEventsMatchingMask:` sees presses delivered to Juno's
 //!   own windows. The handler returns the event untouched, so the web view and
 //!   any HTML dropdown still receive it.
@@ -15,7 +20,8 @@
 //! Neither monitor can consume the event, so every other app that cares about
 //! Escape keeps receiving it exactly as before. The monitor is installed only
 //! while Juno has something to stop (see `EscapeKeyCoordinator`) and removed
-//! when idle.
+//! when idle. When Accessibility lands while the monitor is up (the 1Hz
+//! permissions poller notices), `ensure_global` adds the global half.
 //!
 //! Everything that touches AppKit runs on the main thread via
 //! `AppHandle::run_on_main_thread`; the callbacks hand the press off to the
@@ -61,14 +67,48 @@ mod imp {
 
     /// Monitor tokens handed back by AppKit. Only ever touched on the main
     /// thread; the `Send` impl exists so they can live in a `static` Mutex.
+    /// `global` stays `nil` until Accessibility is granted (see module docs).
     struct Monitors {
         global: id,
         local: id,
+        key_code: u16,
     }
     unsafe impl Send for Monitors {}
 
     static MONITORS: Mutex<Option<Monitors>> = Mutex::new(None);
     static INSTALLED: AtomicBool = AtomicBool::new(false);
+
+    /// Whether adding the global key monitor is safe right now: only when the
+    /// process is already trusted for Accessibility. Untrusted, the call is
+    /// useless (AppKit delivers nothing) and it makes macOS raise the native
+    /// Accessibility alert on Juno's behalf.
+    fn accessibility_trusted() -> bool {
+        match crate::commands::native_permissions::NativePermissionChecker::check_accessibility_permission() {
+            Ok(true) => true,
+            Ok(false) => false,
+            Err(e) => {
+                warn!("[StopKeyMonitor] Could not verify Accessibility permission: {}", e);
+                false
+            }
+        }
+    }
+
+    /// Add the global monitor for `key_code`. Main thread only.
+    ///
+    /// SAFETY: must be called on the main thread; the block is a heap copy
+    /// that AppKit retains for the lifetime of the monitor.
+    unsafe fn add_global_monitor(app: &AppHandle, key_code: u16) -> id {
+        let app_global = app.clone();
+        let global_block = ConcreteBlock::new(move |event: id| {
+            on_event(&app_global, event, key_code);
+        })
+        .copy();
+        msg_send![
+            class!(NSEvent),
+            addGlobalMonitorForEventsMatchingMask: KEY_EVENT_MASK
+            handler: &*global_block as *const _ as *const c_void
+        ]
+    }
 
     fn on_event(app: &AppHandle, event: id, target: u16) {
         if event == nil {
@@ -102,16 +142,17 @@ mod imp {
     /// are logged and leave `is_installed()` false.
     pub fn install(app: &AppHandle, key_code: u16) -> Result<(), String> {
         if INSTALLED.load(Ordering::SeqCst) {
-            debug!("[StopKeyMonitor] Already installed, nothing to do");
-            return Ok(());
+            debug!("[StopKeyMonitor] Already installed; checking the global half");
+            // A monitor installed before Accessibility was granted is local
+            // only; a later install (an agent run) is the moment to complete it.
+            return ensure_global(app);
         }
 
-        match crate::commands::native_permissions::NativePermissionChecker::check_accessibility_permission() {
-            Ok(true) => {}
-            Ok(false) => warn!(
-                "[StopKeyMonitor] Accessibility permission is NOT granted — the stop key will only be seen while a Juno window is focused. Grant Accessibility in System Settings > Privacy & Security."
-            ),
-            Err(e) => warn!("[StopKeyMonitor] Could not verify Accessibility permission: {}", e),
+        let trusted = accessibility_trusted();
+        if !trusted {
+            info!(
+                "[StopKeyMonitor] Accessibility not granted yet — installing the local monitor only; the global one is added when Accessibility lands"
+            );
         }
 
         let app_for_main = app.clone();
@@ -125,12 +166,6 @@ mod imp {
                 return;
             }
 
-            let app_global = app_for_main.clone();
-            let global_block = ConcreteBlock::new(move |event: id| {
-                on_event(&app_global, event, key_code);
-            })
-            .copy();
-
             let app_local = app_for_main.clone();
             let local_block = ConcreteBlock::new(move |event: id| -> id {
                 on_event(&app_local, event, key_code);
@@ -142,11 +177,11 @@ mod imp {
             // SAFETY: called on the main thread; the blocks are heap copies
             // that AppKit retains for the lifetime of the monitor.
             let (global, local): (id, id) = unsafe {
-                let global: id = msg_send![
-                    class!(NSEvent),
-                    addGlobalMonitorForEventsMatchingMask: KEY_EVENT_MASK
-                    handler: &*global_block as *const _ as *const c_void
-                ];
+                let global: id = if trusted {
+                    add_global_monitor(&app_for_main, key_code)
+                } else {
+                    nil
+                };
                 let local: id = msg_send![
                     class!(NSEvent),
                     addLocalMonitorForEventsMatchingMask: KEY_EVENT_MASK
@@ -159,11 +194,15 @@ mod imp {
                 error!("[StopKeyMonitor] AppKit refused both NSEvent monitors — stop key will not be observed");
                 return;
             }
-            if global == nil {
+            if global == nil && trusted {
                 warn!("[StopKeyMonitor] Global NSEvent monitor unavailable — stop key only observed while Juno is focused");
             }
 
-            *guard = Some(Monitors { global, local });
+            *guard = Some(Monitors {
+                global,
+                local,
+                key_code,
+            });
             INSTALLED.store(true, Ordering::SeqCst);
             info!(
                 "[StopKeyMonitor] Passive stop-key monitor installed (key code {}, global={}, local={})",
@@ -173,6 +212,52 @@ mod imp {
             );
         })
         .map_err(|e| format!("Failed to dispatch stop-key monitor install to main thread: {}", e))
+    }
+
+    /// Add the global half of an installed monitor once Accessibility is
+    /// granted. No-op when nothing is installed, the global monitor already
+    /// exists, or the process is still untrusted.
+    pub fn ensure_global(app: &AppHandle) -> Result<(), String> {
+        if !INSTALLED.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let needs_global = match MONITORS.lock() {
+            Ok(g) => g.as_ref().map(|m| m.global == nil).unwrap_or(false),
+            Err(poisoned) => poisoned
+                .into_inner()
+                .as_ref()
+                .map(|m| m.global == nil)
+                .unwrap_or(false),
+        };
+        if !needs_global || !accessibility_trusted() {
+            return Ok(());
+        }
+
+        let app_for_main = app.clone();
+        app.run_on_main_thread(move || {
+            let mut guard = match MONITORS.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let Some(monitors) = guard.as_mut() else {
+                return;
+            };
+            if monitors.global != nil {
+                return;
+            }
+            // SAFETY: main thread (run_on_main_thread), see add_global_monitor.
+            let global = unsafe { add_global_monitor(&app_for_main, monitors.key_code) };
+            if global == nil {
+                warn!("[StopKeyMonitor] Global NSEvent monitor unavailable — stop key only observed while Juno is focused");
+                return;
+            }
+            monitors.global = global;
+            info!(
+                "[StopKeyMonitor] Global stop-key monitor added now that Accessibility is granted (key code {})",
+                monitors.key_code
+            );
+        })
+        .map_err(|e| format!("Failed to dispatch stop-key monitor upgrade to main thread: {}", e))
     }
 
     /// Remove the monitors. Idempotent; safe to call when nothing is installed.
@@ -227,6 +312,10 @@ mod imp {
         Ok(())
     }
 
+    pub fn ensure_global(_app: &AppHandle) -> Result<(), String> {
+        Ok(())
+    }
+
     pub fn is_installed() -> bool {
         false
     }
@@ -235,6 +324,13 @@ mod imp {
 /// Install the passive monitor for `key_code` (macOS virtual key code, 53 = Escape).
 pub fn install(app: &AppHandle, key_code: u16) -> Result<(), String> {
     imp::install(app, key_code)
+}
+
+/// Complete an installed monitor with its global half once Accessibility is
+/// granted. Called when the permissions poller sees the grant land; safe to
+/// call any time.
+pub fn ensure_global(app: &AppHandle) -> Result<(), String> {
+    imp::ensure_global(app)
 }
 
 /// Remove the passive monitor if present.

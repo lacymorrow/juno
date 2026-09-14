@@ -604,6 +604,13 @@ fn emit_granted_if_flipped(
 ) {
     if !was_granted && now_granted {
         info!("Permission flipped to granted: {}", permission_type);
+        // The stop-key monitor skips its global half while untrusted (adding
+        // it would raise the system Accessibility alert); complete it now.
+        if permission_type == "accessibility" {
+            if let Err(e) = crate::platform::stop_key_monitor::ensure_global(app) {
+                warn!("Could not add the global stop-key monitor: {}", e);
+            }
+        }
         if let Err(e) = app.emit(
             events::permissions::GRANTED,
             serde_json::json!({ "permission_type": permission_type }),

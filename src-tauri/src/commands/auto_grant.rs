@@ -3,13 +3,17 @@
 //! Once the user flips Accessibility on (the one toggle macOS requires a human
 //! to perform), Juno can drive System Settings itself. For each remaining
 //! automatable permission (Screen Recording, Input Monitoring) we:
-//!   1. open the exact Settings pane via deep link (no osascript, no admin),
-//!   2. wait for the System Settings window to be reachable over AX,
-//!   3. walk the AX tree to Juno's own row and flip its toggle — AXPress first
-//!      (no cursor movement), then AXValue, then an element click as fallbacks,
-//!   4. dismiss the "quit and reopen" sheet with "Later" so onboarding keeps
+//!   1. make the native request (`CGRequestScreenCaptureAccess` /
+//!      `IOHIDRequestAccess`) so macOS creates Juno's row in the pane at all,
+//!   2. open the exact Settings pane via deep link (no osascript, no admin),
+//!   3. wait for the System Settings window to be reachable over AX,
+//!   4. walk the AX tree collecting every switch that names Juno (a stale row
+//!      from an older build can sit next to the real one), press the OFF ones
+//!      one at a time — AXPress first (no cursor movement), then AXValue, then
+//!      an element click as fallbacks,
+//!   5. dismiss the "quit and reopen" sheet with "Later" so onboarding keeps
 //!      running, and
-//!   5. confirm through the native TCC check before moving on.
+//!   6. confirm through the native TCC check after each press before moving on.
 //!
 //! Microphone is deliberately NOT automated: TCC consent dialogs ignore
 //! synthetic input by design, so the native one-click prompt is the honest
@@ -259,6 +263,34 @@ async fn auto_grant_one(
     }
 
     emit_progress(app, Some(perm), "opening_settings", None);
+
+    // Register Juno's row BEFORE opening the pane. macOS only lists an app
+    // under Screen Recording once it has called CGRequestScreenCaptureAccess,
+    // and under Input Monitoring once it has called IOHIDRequestAccess (or
+    // created an event tap). A fresh install that skips this step has no row
+    // at all, and the AX walk then either finds nothing or, worse, finds a
+    // stale "Juno" row left behind by an older build, already on, and reports
+    // success for a grant that never happened (seen on hardware, 0.7.0). The
+    // native call may also raise a system alert; that is fine, the walk
+    // targets System Settings, a different process.
+    {
+        let p = perm.to_string();
+        let registered = tokio::task::spawn_blocking(move || register_permission_row(&p))
+            .await
+            .map_err(|e| format!("Register-row task failed: {}", e))?;
+        debug!(
+            "[auto-grant] {} native request before pane open → granted={}",
+            perm, registered
+        );
+        if registered {
+            // The system alert itself granted it (or a prior grant landed).
+            crate::commands::permissions::invalidate_permissions_cache();
+            if is_granted(app, perm).await.unwrap_or(false) {
+                return Ok(true);
+            }
+        }
+    }
+
     {
         let p = perm.to_string();
         tokio::task::spawn_blocking(move || open_settings_pane(&p))
@@ -276,66 +308,200 @@ async fn auto_grant_one(
     // The AX walk matches on the app's exact display name — never a substring
     // — so another app's switch can't be flipped by accident.
     let app_name = app.package_info().name.clone();
-    let mut flipped = false;
+    let mut toggles: Vec<AppToggle> = Vec::new();
     for attempt in 1..=3u8 {
         if token.is_cancelled() {
             return Ok(false);
         }
         let name = app_name.clone();
-        match tokio::task::spawn_blocking(move || flip_app_toggle(&name)).await {
-            Ok(Ok(outcome)) => {
+        match tokio::task::spawn_blocking(move || find_app_toggles(&name)).await {
+            Ok(Ok(found)) if !found.is_empty() => {
                 info!(
-                    "[auto-grant] {} toggle attempt {} → {:?}",
-                    perm, attempt, outcome
+                    "[auto-grant] {} attempt {}: {} '{}' switch(es) in the pane: {:?}",
+                    perm,
+                    attempt,
+                    found.len(),
+                    app_name,
+                    found
+                        .iter()
+                        .map(|t| (t.label.as_str(), t.value.as_deref()))
+                        .collect::<Vec<_>>()
                 );
-                flipped = true;
+                toggles = found;
                 break;
             }
-            Ok(Err(e)) => {
+            Ok(Ok(_)) => {
                 debug!(
-                    "[auto-grant] {} toggle attempt {} failed: {}",
-                    perm, attempt, e
+                    "[auto-grant] {} attempt {}: no '{}' switch yet",
+                    perm, attempt, app_name
                 );
+                sleep(Duration::from_millis(800)).await;
+            }
+            Ok(Err(e)) => {
+                debug!("[auto-grant] {} attempt {} failed: {}", perm, attempt, e);
                 sleep(Duration::from_millis(800)).await;
             }
             Err(e) => return Err(format!("Toggle task failed: {}", e)),
         }
     }
-    if !flipped {
-        return Err("Couldn't find the Juno toggle in System Settings".to_string());
+    if toggles.is_empty() {
+        return Err(format!(
+            "Couldn't find the {} switch in System Settings",
+            app_name
+        ));
     }
 
-    // macOS follows the flip with a "quit and reopen" sheet. Press "Later" so
-    // onboarding keeps running — Juno offers its own relaunch when setup ends.
-    sleep(Duration::from_millis(700)).await;
-    let dismissed = tokio::task::spawn_blocking(dismiss_quit_reopen_sheet)
-        .await
-        .unwrap_or(false);
-    debug!(
-        "[auto-grant] quit-and-reopen sheet dismissed: {}",
-        dismissed
-    );
-
-    emit_progress(app, Some(perm), "confirming", None);
-    // Confirm through TCC itself, not the UI — the toggle can render flipped
-    // before the grant actually lands.
-    let deadline = Instant::now() + Duration::from_secs(12);
-    loop {
+    // OFF switches first: a stale row from an older build can sit there
+    // already on, and pressing an ON switch would revoke, not grant.
+    let rows: Vec<(String, Option<String>)> = toggles
+        .iter()
+        .map(|t| (t.label.clone(), t.value.clone()))
+        .collect();
+    let order = pick_toggle_candidates(&rows, &app_name);
+    let mut pressed = 0usize;
+    for idx in order {
         if token.is_cancelled() {
             return Ok(false);
         }
+        let Some(toggle) = toggles.get(idx) else {
+            continue;
+        };
+        if toggle_is_on(toggle.value.as_deref()) {
+            // AlreadyOn is informational only. It never means "granted": if TCC
+            // agreed we would not be here. Leave it alone and try the next one.
+            info!(
+                "[auto-grant] {} candidate {} → {:?} (skipping: pressing would switch it off)",
+                perm,
+                idx,
+                FlipOutcome::AlreadyOn
+            );
+            continue;
+        }
+
+        let element = toggle.element.clone();
+        match tokio::task::spawn_blocking(move || press_toggle(&element)).await {
+            Ok(Ok(outcome)) => {
+                info!("[auto-grant] {} candidate {} → {:?}", perm, idx, outcome);
+                pressed += 1;
+            }
+            Ok(Err(e)) => {
+                warn!(
+                    "[auto-grant] {} candidate {} could not be pressed: {}",
+                    perm, idx, e
+                );
+                continue;
+            }
+            Err(e) => return Err(format!("Toggle task failed: {}", e)),
+        }
+
+        // macOS follows the flip with a "quit and reopen" sheet. Press "Later"
+        // so onboarding keeps running — Juno offers its own relaunch when
+        // setup ends.
+        sleep(Duration::from_millis(700)).await;
+        let dismissed = tokio::task::spawn_blocking(dismiss_quit_reopen_sheet)
+            .await
+            .unwrap_or(false);
+        debug!(
+            "[auto-grant] quit-and-reopen sheet dismissed: {}",
+            dismissed
+        );
+
+        emit_progress(app, Some(perm), "confirming", None);
+        // Confirm through TCC itself, not the UI — the toggle can render
+        // flipped before the grant actually lands. A short window per
+        // candidate: if this switch was the wrong row, move on to the next.
+        match confirm_granted(app, perm, token, Duration::from_secs(5)).await {
+            Confirm::Granted => return Ok(true),
+            Confirm::Cancelled => return Ok(false),
+            Confirm::Timeout => debug!(
+                "[auto-grant] {} candidate {} flipped but TCC still says denied",
+                perm, idx
+            ),
+        }
+    }
+
+    if pressed == 0 {
+        return Err(format!(
+            "Every {} switch in the pane was already on, but macOS still reports the permission denied — the row for this build is missing",
+            app_name
+        ));
+    }
+    Err(format!(
+        "Switched {} {} row(s) on but macOS hasn't registered the grant — it may need a restart",
+        pressed, app_name
+    ))
+}
+
+enum Confirm {
+    Granted,
+    Timeout,
+    Cancelled,
+}
+
+/// Poll TCC (never the UI) for up to `window` after a press.
+async fn confirm_granted(
+    app: &AppHandle,
+    perm: &str,
+    token: &CancellationToken,
+    window: Duration,
+) -> Confirm {
+    let deadline = Instant::now() + window;
+    loop {
+        if token.is_cancelled() {
+            return Confirm::Cancelled;
+        }
         crate::commands::permissions::invalidate_permissions_cache();
         if is_granted(app, perm).await.unwrap_or(false) {
-            return Ok(true);
+            return Confirm::Granted;
         }
         if Instant::now() >= deadline {
-            return Err(
-                "The switch flipped but macOS hasn't registered the grant — it may need a restart"
-                    .to_string(),
-            );
+            return Confirm::Timeout;
         }
         sleep(Duration::from_millis(500)).await;
     }
+}
+
+/// AXValue "1" means the switch renders on.
+fn toggle_is_on(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+/// Strip whitespace and a trailing ".app" so "Juno", " juno " and "Juno.app"
+/// all name the same app. LaunchServices labels a row "Juno.app" when it
+/// holds a stale registration for the bundle.
+fn normalize_app_label(label: &str) -> String {
+    let trimmed = label.trim();
+    let lower = trimmed.to_lowercase();
+    match lower.strip_suffix(".app") {
+        Some(stem) => stem.trim_end().to_string(),
+        None => lower,
+    }
+}
+
+/// Exact-name match, case-insensitive, trimmed, ".app" suffix tolerated on
+/// either side. Never a substring match — "Junosuite" must not count.
+fn label_names_app(label: &str, app_name: &str) -> bool {
+    let want = normalize_app_label(app_name);
+    !want.is_empty() && normalize_app_label(label) == want
+}
+
+/// Given the `(label, AXValue)` of every toggle found in the pane, return the
+/// indices that belong to this app, OFF switches first (in pane order), then
+/// ON ones. Pure so the selection rules are unit-tested without AX.
+pub(crate) fn pick_toggle_candidates(
+    rows: &[(String, Option<String>)],
+    app_name: &str,
+) -> Vec<usize> {
+    let matching: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, (label, _))| label_names_app(label, app_name))
+        .map(|(i, _)| i)
+        .collect();
+    let (on, off): (Vec<usize>, Vec<usize>) = matching
+        .into_iter()
+        .partition(|&i| toggle_is_on(rows[i].1.as_deref()));
+    off.into_iter().chain(on).collect()
 }
 
 async fn is_granted(app: &AppHandle, perm: &str) -> Result<bool, String> {
@@ -363,10 +529,39 @@ fn refocus_onboarding_window(app: &AppHandle) {
 #[derive(Debug)]
 #[allow(dead_code)] // variants are informational (logged); not all constructed on non-macOS
 enum FlipOutcome {
+    /// The switch already rendered on. Never a success signal on its own.
     AlreadyOn,
     Pressed,
     ValueSet,
     Clicked,
+}
+
+/// One switch in the pane that carries this app's name, with the label and
+/// AXValue snapshot the selection logic runs on.
+struct AppToggle {
+    label: String,
+    value: Option<String>,
+    element: computer_use_ai_sdk::UIElement,
+}
+
+/// Make macOS create this app's row in the pane for `perm` (see the comment
+/// at the call site). Returns whether the permission is granted right after
+/// the request. Accessibility and Microphone are never registered here.
+#[cfg(target_os = "macos")]
+fn register_permission_row(perm: &str) -> bool {
+    match perm {
+        "screen_recording" => {
+            computer_use_ai_sdk::platforms::macos::permissions::request_screen_recording_permission(
+            )
+        }
+        "input_monitoring" => crate::platform::input_monitoring::request_input_monitoring_access(),
+        _ => false,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn register_permission_row(_perm: &str) -> bool {
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -379,14 +574,18 @@ fn open_settings_pane(_perm: &str) -> Result<(), String> {
     Err("Auto-grant is only available on macOS".to_string())
 }
 
-/// Find this app's row toggle in the frontmost System Settings pane and switch
-/// it on. Prefers AXPress on the AXCheckBox/AXSwitch element (no cursor
-/// movement, no focus theft), falling back to setting AXValue, then to an
-/// element click. `app_name` is the app's exact display name; matching is
-/// exact (case-insensitive) — a substring match could press a different app's
-/// switch, which would be a consent violation.
+/// Collect EVERY toggle in the frontmost System Settings pane whose row names
+/// this app, in pane order. The pane can hold more than one: a fresh install
+/// next to a stale row left by an older build (labelled "Juno" or "Juno.app"),
+/// and the stale one is often already on. Returning the first match let the
+/// walker pick that stale row and call it done (hardware run, 0.7.0), so the
+/// caller now decides which switch to press from the full list.
+///
+/// `app_name` is the app's exact display name; matching is exact
+/// (case-insensitive, ".app" tolerated) — a substring match could press a
+/// different app's switch, which would be a consent violation.
 #[cfg(target_os = "macos")]
-fn flip_app_toggle(app_name: &str) -> Result<FlipOutcome, String> {
+fn find_app_toggles(app_name: &str) -> Result<Vec<AppToggle>, String> {
     use computer_use_ai_sdk::{Desktop, UIElement};
 
     // Background apps + don't activate — same as the guidance flow, the AX
@@ -402,45 +601,79 @@ fn flip_app_toggle(app_name: &str) -> Result<FlipOutcome, String> {
         r.contains("checkbox") || r.contains("switch")
     }
 
-    fn names_this_app(elem: &UIElement, app_name: &str) -> bool {
+    /// The text on this element that names the app, if any.
+    fn app_name_on(elem: &UIElement, app_name: &str) -> Option<String> {
         let attrs = elem.attributes();
-        let is_exact = |s: &str| s.trim().eq_ignore_ascii_case(app_name);
-        attrs.label.as_deref().map(is_exact).unwrap_or(false)
-            || attrs.value.as_deref().map(is_exact).unwrap_or(false)
+        [attrs.label, attrs.value]
+            .into_iter()
+            .flatten()
+            .find(|s| label_names_app(s, app_name))
     }
 
-    /// Depth-limited DFS for the toggle belonging to this app's row. On modern
-    /// System Settings the switch itself carries the app name as its AX label,
-    /// so the direct match usually hits; the sibling scan covers older layouts
-    /// where a text cell carries the name and the switch sits beside it.
-    fn walk(elem: &UIElement, app_name: &str, depth: usize, max_depth: usize) -> Option<UIElement> {
-        if depth > max_depth {
-            return None;
+    /// Two AX handles to the same switch hash alike (the SDK's stable id
+    /// ignores position), so identity is the on-screen rect instead: two
+    /// distinct switches never share one. Pressing a duplicate would flip the
+    /// row straight back off.
+    fn identity(elem: &UIElement) -> String {
+        match elem.bounds() {
+            Ok((x, y, w, h)) => format!(
+                "{}:{}:{}:{}",
+                x.round() as i64,
+                y.round() as i64,
+                w.round() as i64,
+                h.round() as i64
+            ),
+            Err(_) => elem.id().unwrap_or_default(),
         }
-        if names_this_app(elem, app_name) {
-            if is_toggle_role(&elem.role()) {
-                return Some(elem.clone());
-            }
-            if let Ok(Some(parent)) = elem.parent() {
-                if let Some(t) = toggle_among_children(&parent) {
-                    return Some(t);
-                }
-                // One level further up: row → cell → text layouts.
-                if let Ok(Some(grandparent)) = parent.parent() {
-                    if let Some(t) = toggle_among_children(&grandparent) {
-                        return Some(t);
-                    }
+    }
+
+    /// Depth-limited DFS collecting the toggle belonging to every row that
+    /// names this app. On modern System Settings the switch itself carries the
+    /// app name as its AX label, so the direct match usually hits; the sibling
+    /// scan covers older layouts where a text cell carries the name and the
+    /// switch sits beside it.
+    fn walk(
+        elem: &UIElement,
+        app_name: &str,
+        depth: usize,
+        max_depth: usize,
+        out: &mut Vec<AppToggle>,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        if depth > max_depth {
+            return;
+        }
+        if let Some(label) = app_name_on(elem, app_name) {
+            let toggle = if is_toggle_role(&elem.role()) {
+                Some(elem.clone())
+            } else if let Ok(Some(parent)) = elem.parent() {
+                // One level further up covers row → cell → text layouts.
+                toggle_among_children(&parent).or_else(|| {
+                    parent
+                        .parent()
+                        .ok()
+                        .flatten()
+                        .and_then(|gp| toggle_among_children(&gp))
+                })
+            } else {
+                None
+            };
+            if let Some(toggle) = toggle {
+                if seen.insert(identity(&toggle)) {
+                    let value = toggle.attributes().value;
+                    out.push(AppToggle {
+                        label,
+                        value,
+                        element: toggle,
+                    });
                 }
             }
         }
         if let Ok(children) = elem.children() {
             for child in children {
-                if let Some(t) = walk(&child, app_name, depth + 1, max_depth) {
-                    return Some(t);
-                }
+                walk(&child, app_name, depth + 1, max_depth, out, seen);
             }
         }
-        None
     }
 
     fn toggle_among_children(parent: &UIElement) -> Option<UIElement> {
@@ -460,16 +693,22 @@ fn flip_app_toggle(app_name: &str) -> Result<FlipOutcome, String> {
         None
     }
 
-    let toggle = walk(&settings, app_name, 0, 14)
-        .ok_or_else(|| format!("No {} toggle found in the current pane", app_name))?;
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    walk(&settings, app_name, 0, 14, &mut out, &mut seen);
+    Ok(out)
+}
 
-    // AXValue "1" means the switch already shows on — pressing again would
-    // switch the permission OFF. Report and let the TCC confirmation loop
-    // decide whether the grant actually registered.
-    if toggle.attributes().value.as_deref() == Some("1") {
-        return Ok(FlipOutcome::AlreadyOn);
-    }
+#[cfg(not(target_os = "macos"))]
+fn find_app_toggles(_app_name: &str) -> Result<Vec<AppToggle>, String> {
+    Err("Auto-grant is only available on macOS".to_string())
+}
 
+/// Switch one OFF toggle on. Prefers AXPress (no cursor movement, no focus
+/// theft), falling back to setting AXValue, then to an element click. The
+/// caller has already ruled out switches that render on.
+#[cfg(target_os = "macos")]
+fn press_toggle(toggle: &computer_use_ai_sdk::UIElement) -> Result<FlipOutcome, String> {
     if toggle.perform_action("AXPress").is_ok() {
         return Ok(FlipOutcome::Pressed);
     }
@@ -483,7 +722,7 @@ fn flip_app_toggle(app_name: &str) -> Result<FlipOutcome, String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn flip_app_toggle(_app_name: &str) -> Result<FlipOutcome, String> {
+fn press_toggle(_toggle: &computer_use_ai_sdk::UIElement) -> Result<FlipOutcome, String> {
     Err("Auto-grant is only available on macOS".to_string())
 }
 
@@ -559,5 +798,96 @@ mod tests {
     fn filter_automatable_empty_for_non_automatable() {
         let input = vec!["microphone".to_string(), "accessibility".to_string()];
         assert!(filter_automatable(&input).is_empty());
+    }
+
+    // ── pick_toggle_candidates ──────────────────────────────────────────────
+
+    fn row(label: &str, value: Option<&str>) -> (String, Option<String>) {
+        (label.to_string(), value.map(str::to_string))
+    }
+
+    #[test]
+    fn stale_on_row_sorts_after_the_fresh_off_row() {
+        // The 0.7.0 hardware layout: two stale rows already on, then the row
+        // the fresh install just registered, off.
+        let rows = vec![
+            row("juno", Some("1")),
+            row("Juno.app", Some("1")),
+            row("Google Chrome", Some("0")),
+            row("Juno", Some("0")),
+        ];
+        assert_eq!(pick_toggle_candidates(&rows, "Juno"), vec![3, 0, 1]);
+    }
+
+    #[test]
+    fn off_first_then_on_preserving_pane_order_within_each_group() {
+        let rows = vec![
+            row("Juno", Some("1")),
+            row("Juno", Some("0")),
+            row("Juno", None),
+            row("Juno", Some("1")),
+            row("Juno", Some("0")),
+        ];
+        // None counts as off (not rendered on).
+        assert_eq!(pick_toggle_candidates(&rows, "Juno"), vec![1, 2, 4, 0, 3]);
+    }
+
+    #[test]
+    fn dot_app_suffix_and_whitespace_and_case_all_match() {
+        let rows = vec![
+            row("  Juno  ", Some("0")),
+            row("JUNO.APP", Some("0")),
+            row("juno.app ", Some("0")),
+        ];
+        assert_eq!(pick_toggle_candidates(&rows, "Juno"), vec![0, 1, 2]);
+        // The app name itself may carry ".app" too.
+        assert_eq!(pick_toggle_candidates(&rows, "Juno.app"), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn substrings_and_lookalikes_never_match() {
+        let rows = vec![
+            row("Junosuite", Some("0")),
+            row("Juno Helper", Some("0")),
+            row("MyJuno", Some("0")),
+            row("Juno.app.bak", Some("0")),
+            row("Jun", Some("0")),
+            row("", Some("0")),
+        ];
+        assert!(pick_toggle_candidates(&rows, "Juno").is_empty());
+    }
+
+    #[test]
+    fn no_rows_or_empty_app_name_yields_nothing() {
+        assert!(pick_toggle_candidates(&[], "Juno").is_empty());
+        let rows = vec![row("Juno", Some("0")), row("", Some("0"))];
+        assert!(pick_toggle_candidates(&rows, "").is_empty());
+        assert!(pick_toggle_candidates(&rows, ".app").is_empty());
+    }
+
+    #[test]
+    fn only_on_rows_are_still_returned_so_the_caller_can_report_them() {
+        let rows = vec![row("Juno", Some("1")), row("Juno.app", Some("1"))];
+        assert_eq!(pick_toggle_candidates(&rows, "Juno"), vec![0, 1]);
+    }
+
+    #[test]
+    fn label_matching_is_exact_after_normalisation() {
+        assert!(label_names_app("Juno", "Juno"));
+        assert!(label_names_app("juno", "JUNO"));
+        assert!(label_names_app("Juno.app", "Juno"));
+        assert!(label_names_app("Juno", "Juno.app"));
+        assert!(label_names_app(" Juno .app", "Juno"));
+        assert!(!label_names_app("Juno2", "Juno"));
+        assert!(!label_names_app("Juno", "Jun"));
+        assert!(!label_names_app("Ju", "Juno"));
+    }
+
+    #[test]
+    fn toggle_value_semantics() {
+        assert!(toggle_is_on(Some("1")));
+        assert!(!toggle_is_on(Some("0")));
+        assert!(!toggle_is_on(Some("")));
+        assert!(!toggle_is_on(None));
     }
 }

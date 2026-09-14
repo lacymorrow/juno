@@ -8,6 +8,8 @@ pub mod cursor_follow; // Keep the bar on the display the cursor is on
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+/// Input Monitoring (TCC ListenEvent) check + request over IOKit; stubs elsewhere.
+pub mod input_monitoring;
 pub mod mouse_button_monitor;
 /// Passive stop-key (Escape) observer — macOS implementation plus stubs elsewhere.
 pub mod stop_key_monitor; // Passive mouse-button trigger observer
