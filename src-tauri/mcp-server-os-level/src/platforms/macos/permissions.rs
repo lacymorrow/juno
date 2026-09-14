@@ -54,7 +54,24 @@ pub fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, Automa
     }
 }
 
-/// Enhanced permission checking that automatically opens system settings when denied
+/// The `PermissionDenied` text for a silent (`show_prompt == false`) check.
+/// Only claims System Settings was opened when it actually was: the app's
+/// startup engine init runs this path with both flags off, and the old
+/// unconditional text sent people looking for a window that never appeared.
+pub fn accessibility_denied_message(auto_open_settings: bool) -> String {
+    if auto_open_settings {
+        "Accessibility permissions not granted. System Settings has been opened for you to grant permissions.".to_string()
+    } else {
+        "Accessibility permissions not granted. Grant access in System Settings > Privacy & Security > Accessibility.".to_string()
+    }
+}
+
+/// Enhanced permission checking that can open System Settings when denied.
+///
+/// `show_prompt == false` is fully silent: no system alert, and no Settings
+/// window unless `auto_open_settings` is set. `Desktop::new_with_auto_redirect`
+/// always passes `show_prompt = false`, so engine creation never raises the
+/// native Accessibility alert — prompting belongs to the app's onboarding.
 pub fn check_accessibility_permissions_with_auto_redirect(
     show_prompt: bool,
     auto_open_settings: bool,
@@ -94,7 +111,7 @@ pub fn check_accessibility_permissions_with_auto_redirect(
 
             if !show_prompt {
                 Err(AutomationError::PermissionDenied(
-                    "Accessibility permissions not granted. System Settings has been opened for you to grant permissions.".to_string(),
+                    accessibility_denied_message(auto_open_settings),
                 ))
             } else {
                 debug!("accessibility permissions prompt displayed");
@@ -321,6 +338,14 @@ mod tests {
         if let Ok(mut guard) = super::SCREEN_RECORDING_REQUEST_OVERRIDE.lock() {
             guard.take();
         }
+    }
+
+    #[test]
+    fn silent_denied_message_only_claims_settings_opened_when_it_was() {
+        assert!(accessibility_denied_message(true).contains("has been opened"));
+        let silent = accessibility_denied_message(false);
+        assert!(!silent.contains("has been opened"));
+        assert!(silent.contains("Accessibility"));
     }
 
     #[test]
