@@ -71,6 +71,7 @@ vi.mock("@tauri-apps/api/window", () => ({
     setPosition: windowSetPosition,
     outerPosition: async () => ({ ...outerPos }),
     outerSize: async () => ({ width: 164, height: 66 }),
+    scaleFactor: async () => 1,
   }),
   availableMonitors: async () => monitors.value,
   PhysicalPosition: class {
