@@ -16,8 +16,8 @@ import { toast } from "sonner";
  *
  * The settings window shows a trimmed "basic" set by default. Sections and
  * fields opt into the advanced tier with a single `advanced` marker
- * (`SettingsCategory.advanced`, `<SettingsSection advanced>`,
- * `<SettingsField advanced>`, or the `<AdvancedOnly>` wrapper); this context
+ * (`SettingsCategory.advanced`, `<SettingsGroup advanced>`,
+ * `<SettingsRow advanced>`, or the `<AdvancedOnly>` wrapper); this context
  * is the one place that decides whether they render.
  *
  * The flag is a real backend setting (`advanced_settings_enabled` in the
