@@ -13,8 +13,6 @@ export { default as AutomationsSettings } from './sections/AutomationsSettings';
 
 // Export shared components
 export { default as ShortcutInput } from './ShortcutInput';
-export { SettingsSection } from './SettingsSection';
-export { SettingsField } from './SettingsField';
 export {
   AdvancedSettingsProvider,
   AdvancedOnly,

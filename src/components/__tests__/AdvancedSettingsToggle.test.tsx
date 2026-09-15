@@ -20,8 +20,7 @@ import {
   GET_ADVANCED_SETTINGS_ENABLED,
   SET_ADVANCED_SETTINGS_ENABLED,
 } from "../settings/AdvancedSettingsContext";
-import { SettingsSection } from "../settings/SettingsSection";
-import { SettingsField } from "../settings/SettingsField";
+import { SettingsGroup, SettingsRow } from "../settings/ui";
 import GeneralSettings from "../settings/sections/GeneralSettings";
 
 // Mock Tauri APIs the way the other component tests do
@@ -305,20 +304,22 @@ describe("advanced markers on fields and sections", () => {
   function Fixture() {
     return (
       <AdvancedSettingsProvider>
-        <SettingsSection title="Always shown">
-          <SettingsField label="Basic field">
+        <SettingsGroup title="Always shown">
+          <SettingsRow label="Basic field">
             <input aria-label="basic" />
-          </SettingsField>
-          <SettingsField label="Tuning field" advanced>
+          </SettingsRow>
+          <SettingsRow label="Tuning field" advanced>
             <input aria-label="tuning" />
-          </SettingsField>
+          </SettingsRow>
           <AdvancedOnly>
             <p>wrapped block</p>
           </AdvancedOnly>
-        </SettingsSection>
-        <SettingsSection title="Power section" advanced>
-          <p>power content</p>
-        </SettingsSection>
+        </SettingsGroup>
+        <SettingsGroup title="Power section" advanced>
+          <SettingsRow label="Power row">
+            <p>power content</p>
+          </SettingsRow>
+        </SettingsGroup>
       </AdvancedSettingsProvider>
     );
   }
@@ -350,11 +351,11 @@ describe("advanced markers on fields and sections", () => {
 
   it("shows everything when rendered outside a provider", () => {
     render(
-      <SettingsSection title="Loose section" advanced>
-        <SettingsField label="Loose field" advanced>
+      <SettingsGroup title="Loose section" advanced>
+        <SettingsRow label="Loose field" advanced>
           <input aria-label="loose" />
-        </SettingsField>
-      </SettingsSection>
+        </SettingsRow>
+      </SettingsGroup>
     );
     expect(screen.getByText("Loose section")).toBeInTheDocument();
     expect(screen.getByText("Loose field")).toBeInTheDocument();
@@ -383,7 +384,6 @@ describe("GeneralSettings in basic mode", () => {
     for (const hidden of [
       "Bar appearance",
       "Agent mode",
-      "Enable Companion Mode",
       "Enable big cursor",
       "Restart onboarding",
     ]) {
@@ -403,11 +403,12 @@ describe("GeneralSettings in basic mode", () => {
       expect(screen.getByText("Bar appearance")).toBeInTheDocument()
     );
     expect(screen.getByText("Launch at login")).toBeInTheDocument();
+    // Companion Mode has a single owner in Tools; two copies could disagree.
+    expect(screen.queryByText("Enable Companion Mode")).not.toBeInTheDocument();
     // "Trigger mode" no longer lives here — trigger configuration moved to the
     // dedicated Triggers section.
     for (const shown of [
       "Agent mode",
-      "Enable Companion Mode",
       "Enable big cursor",
       "Restart onboarding",
     ]) {
