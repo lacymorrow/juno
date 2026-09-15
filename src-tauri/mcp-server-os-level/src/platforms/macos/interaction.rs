@@ -2434,6 +2434,7 @@ pub(crate) fn frontmost_app_pid() -> Option<i32> {
 fn focus_to_restore(
     captured_pid: Option<i32>,
     current_frontmost: Option<i32>,
+    target_pid: i32,
     redirect_succeeded: bool,
 ) -> Option<i32> {
     if !redirect_succeeded {
@@ -2443,6 +2444,11 @@ fn focus_to_restore(
     }
     let captured = captured_pid?;
     match current_frontmost {
+        // Reading the target as frontmost means the redirect moved it there.
+        // Handing focus "back" to the app the agent was typing into is the one
+        // outcome this guard exists to prevent, so fall through to the captured
+        // app instead.
+        Some(now) if now == target_pid => Some(captured),
         // The user switched apps while the agent was typing. Their keystrokes
         // belong in the app in front of them now, not in the one they left.
         Some(now) if now != captured => Some(now),
@@ -2464,6 +2470,8 @@ fn focus_to_restore(
 pub(crate) struct BackgroundKeyboardFocus {
     /// The app the user was in when the takeover began, if focus was moved.
     captured_pid: Option<i32>,
+    /// The app the agent typed into. Focus must never be left here.
+    target_pid: i32,
     redirected: bool,
 }
 
@@ -2477,6 +2485,7 @@ impl BackgroundKeyboardFocus {
         if captured_pid == Some(target_pid) {
             return Self {
                 captured_pid: None,
+                target_pid,
                 redirected: false,
             };
         }
@@ -2484,6 +2493,7 @@ impl BackgroundKeyboardFocus {
         let redirected = activate_without_raise(target_pid);
         Self {
             captured_pid,
+            target_pid,
             redirected,
         }
     }
@@ -2491,8 +2501,12 @@ impl BackgroundKeyboardFocus {
 
 impl Drop for BackgroundKeyboardFocus {
     fn drop(&mut self) {
-        if let Some(pid) = focus_to_restore(self.captured_pid, frontmost_app_pid(), self.redirected)
-        {
+        if let Some(pid) = focus_to_restore(
+            self.captured_pid,
+            frontmost_app_pid(),
+            self.target_pid,
+            self.redirected,
+        ) {
             debug!("Handing input focus back to PID {}", pid);
             activate_without_raise(pid);
         }
@@ -3111,20 +3125,23 @@ mod tests {
     fn a_failed_redirect_restores_nothing() {
         // Focus never moved, so handing it to anyone would be an unprompted move.
         assert_eq!(
-            focus_to_restore(Some(USER_APP), Some(USER_APP), false),
+            focus_to_restore(Some(USER_APP), Some(USER_APP), AGENT_TARGET, false),
             None
         );
     }
 
     #[test]
     fn nothing_is_restored_when_the_previous_owner_was_unknown() {
-        assert_eq!(focus_to_restore(None, Some(USER_APP), true), None);
+        assert_eq!(
+            focus_to_restore(None, Some(USER_APP), AGENT_TARGET, true),
+            None
+        );
     }
 
     #[test]
     fn focus_goes_back_to_the_app_it_was_taken_from() {
         assert_eq!(
-            focus_to_restore(Some(USER_APP), Some(USER_APP), true),
+            focus_to_restore(Some(USER_APP), Some(USER_APP), AGENT_TARGET, true),
             Some(USER_APP)
         );
     }
@@ -3132,23 +3149,42 @@ mod tests {
     #[test]
     fn a_user_who_switched_apps_keeps_typing_where_they_are_looking() {
         assert_eq!(
-            focus_to_restore(Some(USER_APP), Some(SOMEWHERE_ELSE), true),
+            focus_to_restore(Some(USER_APP), Some(SOMEWHERE_ELSE), AGENT_TARGET, true),
             Some(SOMEWHERE_ELSE)
         );
     }
 
     #[test]
     fn an_unreadable_frontmost_app_falls_back_to_the_captured_one() {
-        assert_eq!(focus_to_restore(Some(USER_APP), None, true), Some(USER_APP));
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), None, AGENT_TARGET, true),
+            Some(USER_APP)
+        );
     }
 
     #[test]
     fn the_agents_target_is_never_left_holding_focus() {
-        for frontmost in [Some(USER_APP), Some(SOMEWHERE_ELSE), None] {
+        // Including the case the old test missed: the redirect itself moved the
+        // frontmost app to the agent's target, so "hand it back to whoever is in
+        // front now" would hand it to the agent.
+        for frontmost in [
+            Some(USER_APP),
+            Some(SOMEWHERE_ELSE),
+            Some(AGENT_TARGET),
+            None,
+        ] {
             assert_ne!(
-                focus_to_restore(Some(USER_APP), frontmost, true),
+                focus_to_restore(Some(USER_APP), frontmost, AGENT_TARGET, true),
                 Some(AGENT_TARGET)
             );
         }
+    }
+
+    #[test]
+    fn a_redirect_that_moved_the_frontmost_app_still_returns_the_user() {
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), Some(AGENT_TARGET), AGENT_TARGET, true),
+            Some(USER_APP)
+        );
     }
 }
