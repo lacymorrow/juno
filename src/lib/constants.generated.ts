@@ -481,6 +481,7 @@ export const COMMANDS = {
   SETTINGS_SET_AUTOSTART_ENABLED: 'set_autostart_enabled',
   SETTINGS_GET_ADVANCED_SETTINGS_ENABLED: 'get_advanced_settings_enabled',
   SETTINGS_SET_ADVANCED_SETTINGS_ENABLED: 'set_advanced_settings_enabled',
+  CORE_GET_DEMO_INFO: 'get_demo_info',
   CORE_GET_DEBUG_MODE: 'get_debug_mode',
   CORE_SET_DEBUG_MODE: 'set_debug_mode',
   CORE_GET_PERFORMANCE_MONITORING: 'get_performance_monitoring',

@@ -292,18 +292,20 @@ impl AnthropicBrain {
     }
 
     /// Creates a new AnthropicBrain from a CentralizedProviderConfig struct.
-    /// Falls back to the ANTHROPIC_API_KEY env var if the config has no api_key
-    /// (e.g., when keys come from a .env file rather than the Tauri Store).
+    /// The key comes from the settings store, then the ANTHROPIC_API_KEY env
+    /// var (a .env file rather than the Tauri Store), then the key baked into
+    /// a demo build. The person's own key always wins.
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
-        let api_key = config
-            .api_key
-            .clone()
-            .or_else(|| env::var("ANTHROPIC_API_KEY").ok())
-            .ok_or_else(|| {
-                AgentError::ConfigurationError(
-                    "Anthropic API key not found in settings or ANTHROPIC_API_KEY env var".into(),
-                )
-            })?;
+        let api_key = crate::demo::resolve_api_key(
+            config.api_key.clone(),
+            env::var("ANTHROPIC_API_KEY").ok(),
+            crate::demo::api_key(),
+        )
+        .ok_or_else(|| {
+            AgentError::ConfigurationError(
+                "Anthropic API key not found in settings or ANTHROPIC_API_KEY env var".into(),
+            )
+        })?;
         Self::new(
             api_key,
             config.model.clone(),

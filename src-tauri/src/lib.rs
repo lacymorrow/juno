@@ -32,6 +32,7 @@ pub mod commands;
 pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
 pub mod cursor_scale;
+pub mod demo; // Golden demo builds that carry their own Anthropic key
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription
@@ -459,6 +460,7 @@ pub fn run() {
             get_provider_settings,
             update_provider_api_key,
             check_api_keys_available,
+            crate::demo::get_demo_info,
             update_provider_model,
             update_provider_max_tokens,
             update_provider_temperature,

@@ -36,6 +36,7 @@ pub mod settings {
 
 /// Core system command names
 pub mod core {
+    pub const GET_DEMO_INFO: &str = "get_demo_info";
     pub const GET_DEBUG_MODE: &str = "get_debug_mode";
     pub const SET_DEBUG_MODE: &str = "set_debug_mode";
     pub const GET_PERFORMANCE_MONITORING: &str = "get_performance_monitoring";
