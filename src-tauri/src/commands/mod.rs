@@ -93,11 +93,11 @@ pub use self::cloud_test::*;
 pub use self::collaborative_ai_commands::*;
 pub use self::config_file::*;
 pub use self::debug_tools::*; // Re-export debug tool commands
-pub use self::dock_icon::{get_dock_icon_visible, set_dock_icon_visible};
 pub use self::dictation_state_manager::{
     force_reset_dictation_state, get_dictation_comprehensive_status, transition_dictation_state,
     update_dictation_component_state,
 };
+pub use self::dock_icon::{get_dock_icon_visible, set_dock_icon_visible};
 // Exports from dev2 branch - preserving existing functionality
 // Note: Specific exports from element, keyboard, text_editor, window modules
 // are not publicly re-exported as they don't have pub visibility

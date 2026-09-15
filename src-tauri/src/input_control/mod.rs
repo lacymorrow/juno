@@ -319,6 +319,12 @@ pub async fn request_physical_cursor(
         "target_app": request.target_app,
         "timeout_seconds": CONSENT_TIMEOUT_SECONDS,
     });
+    // A notification as well as the in-app prompt: a run started by the
+    // scheduler or the cloud has no conversation on screen, so the pane the
+    // prompt lives in may not be open at all. Without this the agent would
+    // wait out the whole timeout asking nobody.
+    notify_consent_request(app_handle, &request);
+
     if let Err(e) = app_handle.emit(events::input_control::REQUEST, payload) {
         // With no UI listening there is nobody to answer, so refuse rather than
         // wait out the full timeout holding the agent up.
@@ -369,6 +375,25 @@ pub async fn request_physical_cursor(
         request.target_app.as_deref(),
         offer_when_done,
     ))
+}
+
+/// Tell the person Juno is waiting on them, in case nothing is on screen.
+fn notify_consent_request(app_handle: &AppHandle, request: &PhysicalCursorRequest) {
+    use tauri_plugin_notification::NotificationExt;
+
+    let body = match request.target_app.as_deref() {
+        Some(app_name) => format!("Juno wants to {} in {}.", request.reason, app_name),
+        None => format!("Juno wants to {}.", request.reason),
+    };
+    if let Err(e) = app_handle
+        .notification()
+        .builder()
+        .title("Juno needs your mouse")
+        .body(body)
+        .show()
+    {
+        warn!("Failed to show the input control notification: {}", e);
+    }
 }
 
 async fn wait_for_decision(request_id: &str) -> Option<InputControlDecision> {

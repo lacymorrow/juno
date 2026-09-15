@@ -233,7 +233,11 @@ mod tests {
         record_attempt(&mut history, start + Duration::from_secs(1), REOPEN_WINDOW);
         // Two minutes later the earlier burst is history; this is a fresh one.
         assert_eq!(
-            record_attempt(&mut history, start + Duration::from_secs(120), REOPEN_WINDOW),
+            record_attempt(
+                &mut history,
+                start + Duration::from_secs(120),
+                REOPEN_WINDOW
+            ),
             1
         );
     }
