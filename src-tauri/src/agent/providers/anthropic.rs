@@ -317,7 +317,16 @@ impl AnthropicBrain {
     fn format_anthropic_http_error_for_user(
         status: reqwest::StatusCode,
         error_body: &str,
+        using_demo_key: bool,
     ) -> String {
+        // A demo build's key is not the person's, so API-shaped advice about it
+        // is useless to them. Tell them the demo ended and where to go next.
+        if using_demo_key {
+            if let Some(message) = crate::demo::ended_message(status.as_u16(), error_body) {
+                return message.to_string();
+            }
+        }
+
         let trimmed = error_body.trim();
 
         // Prefer extracting a clean, user-facing message from Anthropic's structured error JSON.
@@ -1691,7 +1700,11 @@ impl AgentBrain for AnthropicBrain {
                 error_body
             );
             return Err(AgentError::LlmError(
-                Self::format_anthropic_http_error_for_user(status, &error_body),
+                Self::format_anthropic_http_error_for_user(
+                    status,
+                    &error_body,
+                    crate::demo::is_demo_key(&self.api_key),
+                ),
             ));
         }
 

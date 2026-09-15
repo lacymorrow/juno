@@ -50,6 +50,31 @@ pub fn get_demo_info() -> DemoInfo {
     info()
 }
 
+/// True when this is the key compiled into a demo build, so the app can
+/// explain a dead demo in the person's own terms instead of the API's.
+pub fn is_demo_key(key: &str) -> bool {
+    api_key().is_some_and(|demo| demo == key)
+}
+
+/// What to say when a demo build's key stops working. The person never typed
+/// a key, so "invalid x-api-key" tells them nothing they can act on. `None`
+/// for anything that is not the demo ending, which keeps the normal error.
+pub fn ended_message(status: u16, error_body: &str) -> Option<&'static str> {
+    // Revoked, disabled, or rotated out from under this build.
+    if status == 401 || status == 403 {
+        return Some(
+            "This demo of Juno has ended. Add your own API key in Settings to keep going.",
+        );
+    }
+    // Anthropic reports an empty balance as a 400, not a 402.
+    if status == 400 && error_body.contains("credit balance") {
+        return Some(
+            "This demo of Juno has used up its credit. Add your own API key in Settings to keep going.",
+        );
+    }
+    None
+}
+
 /// Where an Anthropic key comes from, in order. The person's own key always
 /// wins: a demo build they later add a key to stops spending the demo budget.
 pub fn resolve_api_key(
@@ -99,6 +124,29 @@ mod tests {
             resolve_api_key(Some(String::new()), Some(String::new()), None),
             None
         );
+    }
+
+    #[test]
+    fn a_dead_demo_says_what_to_do_about_it() {
+        let revoked = ended_message(401, r#"{"error":{"message":"invalid x-api-key"}}"#);
+        assert!(revoked.is_some_and(|m| m.contains("Settings")));
+        assert!(ended_message(403, "").is_some());
+        assert!(ended_message(400, "Your credit balance is too low").is_some());
+    }
+
+    #[test]
+    fn an_ordinary_failure_keeps_the_ordinary_message() {
+        // Transient and request-shape errors are not the demo ending, so the
+        // real API message survives.
+        assert_eq!(ended_message(429, "rate limited"), None);
+        assert_eq!(ended_message(500, ""), None);
+        assert_eq!(ended_message(400, "max_tokens is too large"), None);
+    }
+
+    #[test]
+    fn nothing_is_the_demo_key_in_a_normal_build() {
+        assert!(!is_demo_key("sk-ant-demo"));
+        assert!(!is_demo_key(""));
     }
 
     #[test]
