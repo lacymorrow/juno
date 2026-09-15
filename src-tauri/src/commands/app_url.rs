@@ -152,6 +152,20 @@ pub async fn open_application(
             return Ok(());
         }
 
+        // Background mode: the agent acts on the app where it is. Shelling out to
+        // `open -a` here exists only to bring an already-running app forward,
+        // which is the focus theft background mode is there to prevent.
+        if crate::input_control::background_mode_enabled(&app_handle).await {
+            if debug_config.log_operations {
+                info!(
+                    "[APP] App '{}' already running; leaving it in place (background mode)",
+                    app_name
+                );
+            }
+            debug_op.complete(Some(&app_handle), true);
+            return Ok(());
+        }
+
         if debug_config.log_operations {
             info!(
                 "[APP] App '{}' already running, focusing instead of launching",

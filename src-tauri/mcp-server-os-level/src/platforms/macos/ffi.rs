@@ -10,7 +10,6 @@ extern "C" {
 
     /// Convert a PID to a ProcessSerialNumber (deprecated since 10.9 but still present
     /// in macOS 13-15; used only by the SLPSPostEventRecordTo focus-without-raise path).
-    #[allow(dead_code)]
     pub(crate) fn GetProcessForPID(pid: libc::pid_t, psn: *mut ProcessSerialNumber) -> i32;
 }
 
@@ -39,6 +38,14 @@ extern "C" {
     /// Public API since macOS 10.11. Declared here because the core-graphics crate
     /// does not expose this function.
     pub(crate) fn CGEventPostToPid(pid: libc::pid_t, event: *mut ::std::os::raw::c_void);
+
+    /// Set the location an event reports to the app that receives it. Declared
+    /// here because the core-graphics crate exposes only the getter, and a
+    /// scroll posted to a process still has to say where it happened.
+    pub(crate) fn CGEventSetLocation(
+        event: *mut ::std::os::raw::c_void,
+        location: core_graphics::geometry::CGPoint,
+    );
 }
 
 // Add these extern "C" declarations if not already present

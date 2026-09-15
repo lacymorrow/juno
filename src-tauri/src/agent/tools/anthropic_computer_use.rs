@@ -9,10 +9,6 @@ use crate::utils::permission_validator::{validate_permission, RequiredPermission
 // Removed unused import - BashResult is handled differently now
 // Keep the tool versioning from errors branch (enhanced functionality)
 use super::tool_versioning::{ToolVersionConfig, ToolVersionManager};
-// Keep the mouse command imports from main branch (proper command usage)
-use crate::commands::mouse::{
-    double_click, left_click, left_click_drag, middle_click, right_click, triple_click,
-};
 use crate::state::AgentCursorState;
 use crate::utils::coordinate_validation::{
     validate_coordinate_pair, validate_coordinate_parameter, CoordinateValidationError,
@@ -283,6 +279,52 @@ fn get_frontmost_app_name() -> Option<String> {
 #[cfg(not(target_os = "macos"))]
 fn get_frontmost_app_name() -> Option<String> {
     None
+}
+
+/// Localized name of a running application, by pid.
+///
+/// In background mode the app the agent is working on is deliberately not the
+/// frontmost one, so anything shown to the user about the target has to be
+/// resolved from the process the agent actually reached.
+#[cfg(target_os = "macos")]
+fn app_name_for_pid(pid: i32) -> Option<String> {
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let running_app_class = class!(NSRunningApplication);
+        let app: *mut objc::runtime::Object =
+            msg_send![running_app_class, runningApplicationWithProcessIdentifier: pid];
+        if app.is_null() {
+            return None;
+        }
+
+        let name_obj: *mut objc::runtime::Object = msg_send![app, localizedName];
+        if name_obj.is_null() {
+            return None;
+        }
+
+        let bytes: *const std::os::raw::c_char = msg_send![name_obj, UTF8String];
+        let len: usize = msg_send![name_obj, lengthOfBytesUsingEncoding:NS_UTF8_STRING_ENCODING];
+        if bytes.is_null() || len == 0 {
+            return None;
+        }
+
+        let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
+        std::str::from_utf8(bytes_slice).ok().map(|s| s.to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn app_name_for_pid(_pid: i32) -> Option<String> {
+    None
+}
+
+/// The app a consent prompt should name: the one the agent has been acting on,
+/// falling back to the frontmost app when nothing has been targeted yet.
+fn consent_target_app(fallback: Option<&str>) -> Option<String> {
+    computer_use_ai_sdk::background::target_pid()
+        .and_then(app_name_for_pid)
+        .or_else(|| fallback.map(|s| s.to_string()))
 }
 
 /// Logs when the agent targets a notable app (Juno itself, system prefs, etc.).
@@ -560,6 +602,97 @@ fn emit_ax_grounding_audit(
         &payload,
     ) {
         tracing::debug!("Failed to emit AX grounding audit: {}", e);
+    }
+}
+
+// --- Background-first input ---
+
+/// Run one input step, preferring the background route and asking before taking
+/// the cursor.
+///
+/// `attempt` is handed `allow_physical`. It returns `Ok(None)` to say "this can
+/// only be done by driving the shared pointer". When background mode is off the
+/// closure is called once with the physical tier already unlocked, so behaviour
+/// is exactly what it was before background mode existed.
+async fn run_background_first<F>(
+    app_handle: &tauri::AppHandle,
+    action: &str,
+    target_app: Option<&str>,
+    attempt: F,
+) -> Result<computer_use_ai_sdk::InputOutcome, String>
+where
+    F: Fn(bool) -> Result<Option<computer_use_ai_sdk::InputOutcome>, String>,
+{
+    use crate::input_control::{commands::describe_request, request_physical_cursor};
+
+    let background = crate::input_control::background_mode_enabled(app_handle).await;
+
+    if !background {
+        return attempt(true)?.ok_or_else(|| {
+            format!(
+                "'{}' could not be performed even with the physical cursor",
+                action
+            )
+        });
+    }
+
+    if let Some(outcome) = attempt(false)? {
+        tracing::info!(
+            "✨ Background {} via {} ({})",
+            action,
+            outcome.method,
+            outcome.tier.as_str()
+        );
+        return Ok(outcome);
+    }
+
+    let named_app = consent_target_app(target_app);
+    let request = describe_request(action, named_app.as_deref());
+    let grant = request_physical_cursor(app_handle, request)
+        .await
+        .map_err(|denied| denied.agent_message(action))?;
+
+    // The grant announces the takeover for as long as it lives, so it is held
+    // across the retry and dropped the moment the step is done.
+    let result = attempt(true);
+    drop(grant);
+
+    result?.ok_or_else(|| {
+        format!(
+            "'{}' could not be performed even with the physical cursor",
+            action
+        )
+    })
+}
+
+/// Add the tier that carried an action to a tool response, so the agent (and the
+/// audit trail) can see whether the user's cursor was involved.
+fn with_input_tier(mut response: Value, outcome: &computer_use_ai_sdk::InputOutcome) -> Value {
+    response["input_tier"] = json!(outcome.tier.as_str());
+    response["input_method"] = json!(outcome.method);
+    response
+}
+
+/// Show the on-screen click marker for an action that no longer routes through
+/// `commands::mouse`, so the background path looks the same to the user as the
+/// physical one did.
+fn emit_click_visualization(app_handle: &tauri::AppHandle, x: f64, y: f64, color: &str) {
+    if let Err(e) = app_handle.emit(
+        crate::constants::events::ui::CLICK_VISUALIZATION,
+        (x, y, color),
+    ) {
+        tracing::debug!("Failed to emit click visualization: {}", e);
+    }
+}
+
+/// Show the on-screen keystroke marker, for the same reason.
+fn emit_key_visualization(app_handle: &tauri::AppHandle, key: &str, modifier: Option<&str>) {
+    let payload = json!({ "key": key, "modifier": modifier });
+    if let Err(e) = app_handle.emit(
+        crate::constants::events::ui::KEY_PRESS_VISUALIZATION,
+        payload,
+    ) {
+        tracing::debug!("Failed to emit key press visualization: {}", e);
     }
 }
 
@@ -1208,43 +1341,36 @@ pub async fn execute_computer_tool(
                     };
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
+                    let mut outcome = None;
                     if !ax_result.used_ax_click {
                         // Physical fallback — serialize with other sessions' input.
                         let _guard = state_manager.input_arbiter().acquire(session_id).await;
-                        // Tier 2-4: process-targeted injection (SkyLight → CGEventPostToPid → HID-restore)
-                        // Bypasses AX; works on canvas, games, Chromium web content, and non-AX apps.
-                        let click_method = state_manager.desktop.left_click_no_warp(
-                            screen_x,
-                            screen_y,
-                            modifier.as_deref(),
-                        );
-                        match click_method {
-                            Ok(method) => {
-                                tracing::info!(
-                                    "✨ No-warp click at ({:.0}, {:.0}) via {}",
-                                    screen_x,
-                                    screen_y,
-                                    method
-                                );
-                            }
-                            Err(_) => {
-                                // left_click_no_warp always has HID-restore as last resort;
-                                // reaching here means desktop is unavailable.
-                                handle_anthropic_result!(left_click(
-                                    app_handle.clone(),
-                                    state_manager,
-                                    screen_x,
-                                    screen_y,
-                                    modifier.clone()
-                                )
-                                .await
-                                .map_err(|e| format!("Left click failed: {}", e)));
-                            }
-                        }
+                        // Process-targeted injection (SkyLight → CGEventPostToPid) bypasses AX
+                        // and works on canvas, games, Chromium web content and non-AX apps.
+                        // Only if that fails does the shared cursor come into it.
+                        outcome = Some(handle_anthropic_result!(
+                            run_background_first(
+                                app_handle,
+                                action,
+                                target_app.as_deref(),
+                                |allow_physical| {
+                                    state_manager.desktop.left_click_no_warp(
+                                        screen_x,
+                                        screen_y,
+                                        modifier.as_deref(),
+                                        allow_physical,
+                                    )
+                                },
+                            )
+                            .await
+                        ));
                     }
 
                     let mut response =
                         json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
+                    if let Some(outcome) = &outcome {
+                        response = with_input_tier(response, outcome);
+                    }
                     if let Some(role) = &ax_result.role {
                         response["ax_role"] = json!(role);
                     }
@@ -1275,38 +1401,32 @@ pub async fn execute_computer_tool(
                     };
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
+                    let mut outcome = None;
                     if !ax_result.used_ax_click {
                         // Physical fallback — serialize with other sessions' input.
                         let _guard = state_manager.input_arbiter().acquire(session_id).await;
-                        // Tier 2-4: process-targeted injection, no cursor warp
-                        let click_method = state_manager
-                            .desktop
-                            .right_click_no_warp(screen_x, screen_y);
-                        match click_method {
-                            Ok(method) => {
-                                tracing::info!(
-                                    "✨ No-warp right-click at ({:.0}, {:.0}) via {}",
-                                    screen_x,
-                                    screen_y,
-                                    method
-                                );
-                            }
-                            Err(_) => {
-                                handle_anthropic_result!(right_click(
-                                    app_handle.clone(),
-                                    state_manager,
-                                    screen_x,
-                                    screen_y,
-                                    modifier.clone()
-                                )
-                                .await
-                                .map_err(|e| format!("Right click failed: {}", e)));
-                            }
-                        }
+                        outcome = Some(handle_anthropic_result!(
+                            run_background_first(
+                                app_handle,
+                                action,
+                                target_app.as_deref(),
+                                |allow_physical| {
+                                    state_manager.desktop.right_click_no_warp(
+                                        screen_x,
+                                        screen_y,
+                                        allow_physical,
+                                    )
+                                },
+                            )
+                            .await
+                        ));
                     }
 
                     let mut response =
                         json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
+                    if let Some(outcome) = &outcome {
+                        response = with_input_tier(response, outcome);
+                    }
                     if let Some(role) = &ax_result.role {
                         response["ax_role"] = json!(role);
                     }
@@ -1326,20 +1446,25 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(middle_click(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                        modifier.clone()
-                    )
-                    .await
-                    .map_err(|e| format!("Middle click failed: {}", e)));
+                    emit_click_visualization(app_handle, screen_x, screen_y, "#FFFF00");
+                    let outcome = handle_anthropic_result!(
+                        run_background_first(
+                            app_handle,
+                            action,
+                            target_app.as_deref(),
+                            |allow_physical| {
+                                state_manager.desktop.middle_click_no_warp(
+                                    screen_x,
+                                    screen_y,
+                                    modifier.as_deref(),
+                                    allow_physical,
+                                )
+                            },
+                        )
+                        .await
+                    );
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    Ok(with_input_tier(json!({ "success": true }), &outcome))
                 }
                 "double_click" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
@@ -1363,40 +1488,33 @@ pub async fn execute_computer_tool(
                     };
                     emit_ax_grounding_audit(app_handle, action, screen_x, screen_y, &ax_result);
 
+                    let mut outcome = None;
                     if !ax_result.used_ax_click {
                         // Physical fallback — serialize with other sessions' input.
                         let _guard = state_manager.input_arbiter().acquire(session_id).await;
-                        // Tier 2-4: process-targeted double-click, no cursor warp
-                        let click_method = state_manager.desktop.double_click_no_warp(
-                            screen_x,
-                            screen_y,
-                            modifier.as_deref(),
-                        );
-                        match click_method {
-                            Ok(method) => {
-                                tracing::info!(
-                                    "✨ No-warp double-click at ({:.0}, {:.0}) via {}",
-                                    screen_x,
-                                    screen_y,
-                                    method
-                                );
-                            }
-                            Err(_) => {
-                                handle_anthropic_result!(double_click(
-                                    app_handle.clone(),
-                                    state_manager,
-                                    screen_x,
-                                    screen_y,
-                                    modifier.clone()
-                                )
-                                .await
-                                .map_err(|e| format!("Double click failed: {}", e)));
-                            }
-                        }
+                        outcome = Some(handle_anthropic_result!(
+                            run_background_first(
+                                app_handle,
+                                action,
+                                target_app.as_deref(),
+                                |allow_physical| {
+                                    state_manager.desktop.double_click_no_warp(
+                                        screen_x,
+                                        screen_y,
+                                        modifier.as_deref(),
+                                        allow_physical,
+                                    )
+                                },
+                            )
+                            .await
+                        ));
                     }
 
                     let mut response =
                         json!({ "success": true, "ax_grounded": ax_result.used_ax_click });
+                    if let Some(outcome) = &outcome {
+                        response = with_input_tier(response, outcome);
+                    }
                     if let Some(role) = &ax_result.role {
                         response["ax_role"] = json!(role);
                     }
@@ -1416,20 +1534,25 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(triple_click(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y,
-                        modifier.clone()
-                    )
-                    .await
-                    .map_err(|e| format!("Triple click failed: {}", e)));
+                    emit_click_visualization(app_handle, screen_x, screen_y, "#800080");
+                    let outcome = handle_anthropic_result!(
+                        run_background_first(
+                            app_handle,
+                            action,
+                            target_app.as_deref(),
+                            |allow_physical| {
+                                state_manager.desktop.triple_click_no_warp(
+                                    screen_x,
+                                    screen_y,
+                                    modifier.as_deref(),
+                                    allow_physical,
+                                )
+                            },
+                        )
+                        .await
+                    );
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    Ok(with_input_tier(json!({ "success": true }), &outcome))
                 }
                 "left_click_drag" => {
                     // Proper Anthropic Computer Use API specification compliance
@@ -1495,21 +1618,25 @@ pub async fn execute_computer_tool(
                             (start_x, start_y, end_x, end_y)
                         };
 
-                    // Use proper mouse command which includes focus, visualization, debug logging, and validation
-                    handle_anthropic_result!(left_click_drag(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_start_x,
-                        screen_start_y,
-                        screen_end_x,
-                        screen_end_y
-                    )
-                    .await
-                    .map_err(|e| format!("Left click drag failed: {}", e)));
+                    let outcome = handle_anthropic_result!(
+                        run_background_first(
+                            app_handle,
+                            action,
+                            target_app.as_deref(),
+                            |allow_physical| {
+                                state_manager.desktop.left_click_drag_no_warp(
+                                    screen_start_x,
+                                    screen_start_y,
+                                    screen_end_x,
+                                    screen_end_y,
+                                    allow_physical,
+                                )
+                            },
+                        )
+                        .await
+                    );
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    Ok(with_input_tier(json!({ "success": true }), &outcome))
                 }
                 "mouse_move" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
@@ -1522,19 +1649,31 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Use proper mouse command which includes debug logging and validation
-                    handle_anthropic_result!(crate::commands::mouse::mouse_move(
-                        app_handle.clone(),
-                        state_manager,
-                        screen_x,
-                        screen_y
-                    )
-                    .await
-                    .map_err(|e| format!("Mouse move failed: {}", e)));
+                    // A move has no effect on the target app on its own: it only
+                    // says where the agent is looking. In background mode that is
+                    // Juno's own cursor, drawn by the overlay from the preview and
+                    // agent-cursor events already emitted for this action, and the
+                    // user's pointer is left exactly where they put it.
+                    if crate::input_control::background_mode_enabled(app_handle).await {
+                        Ok(json!({
+                            "success": true,
+                            "input_tier": computer_use_ai_sdk::InputTier::Accessibility.as_str(),
+                            "virtual_cursor_only": true
+                        }))
+                    } else {
+                        handle_anthropic_result!(crate::commands::mouse::mouse_move(
+                            app_handle.clone(),
+                            state_manager,
+                            screen_x,
+                            screen_y
+                        )
+                        .await
+                        .map_err(|e| format!("Mouse move failed: {}", e)));
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                        Ok(json!({
+                            "success": true
+                        }))
+                    }
                 }
                 "left_mouse_down" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
@@ -1547,19 +1686,23 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Use proper mouse command which includes debug logging and validation
-                    handle_anthropic_result!(crate::commands::mouse::left_mouse_down(
-                        app_handle.clone(),
-                        state_manager,
-                        Some(screen_x),
-                        Some(screen_y)
-                    )
-                    .await
-                    .map_err(|e| format!("Left mouse down failed: {}", e)));
+                    let outcome = handle_anthropic_result!(
+                        run_background_first(
+                            app_handle,
+                            action,
+                            target_app.as_deref(),
+                            |allow_physical| {
+                                state_manager.desktop.left_mouse_down_no_warp(
+                                    screen_x,
+                                    screen_y,
+                                    allow_physical,
+                                )
+                            },
+                        )
+                        .await
+                    );
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    Ok(with_input_tier(json!({ "success": true }), &outcome))
                 }
                 "left_mouse_up" => {
                     // Strict coordinate validation per Anthropic Computer Use API specification
@@ -1572,19 +1715,23 @@ pub async fn execute_computer_tool(
                     // Transform coordinates from scaled screenshot to screen coordinates
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-                    // Use proper mouse command to ensure main window focus, click visualization, debug logging, etc.
-                    handle_anthropic_result!(crate::commands::mouse::left_mouse_up(
-                        app_handle.clone(),
-                        state_manager,
-                        Some(screen_x),
-                        Some(screen_y)
-                    )
-                    .await
-                    .map_err(|e| format!("Left mouse up failed: {}", e)));
+                    let outcome = handle_anthropic_result!(
+                        run_background_first(
+                            app_handle,
+                            action,
+                            target_app.as_deref(),
+                            |allow_physical| {
+                                state_manager.desktop.left_mouse_up_no_warp(
+                                    screen_x,
+                                    screen_y,
+                                    allow_physical,
+                                )
+                            },
+                        )
+                        .await
+                    );
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    Ok(with_input_tier(json!({ "success": true }), &outcome))
                 }
                 _ => unreachable!("Mouse action already matched in outer pattern"),
             }
@@ -1611,18 +1758,26 @@ pub async fn execute_computer_tool(
                         }
                     };
 
-                    handle_anthropic_result!(crate::commands::keyboard::press_key(
-                        key.to_string(),
-                        None, // modifier
-                        app_handle.clone(),
-                        state_manager,
-                    )
-                    .await
-                    .map_err(|e| format!("Key press failed: {}", e)));
+                    emit_key_visualization(app_handle, key, None);
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    // Keyboard events posted to a process are only routed there
+                    // once the WindowServer's input focus has been pointed at it
+                    // without raising it, which is what the no-warp path does.
+                    let outcome = handle_anthropic_result!(
+                        run_background_first(
+                            app_handle,
+                            action,
+                            target_app.as_deref(),
+                            |allow_physical| {
+                                state_manager
+                                    .desktop
+                                    .press_key_no_warp(key, None, allow_physical)
+                            },
+                        )
+                        .await
+                    );
+
+                    Ok(with_input_tier(json!({ "success": true }), &outcome))
                 }
                 "hold_key" => {
                     // Support both 'key' and 'text' parameters for backward compatibility
@@ -1648,18 +1803,28 @@ pub async fn execute_computer_tool(
                         }
                     };
 
-                    handle_anthropic_result!(crate::commands::keyboard::hold_key(
-                        key.to_string(),
-                        Some(duration_ms),
-                        app_handle.clone(),
-                        state_manager,
-                    )
-                    .await
-                    .map_err(|e| format!("Hold key failed: {}", e)));
+                    emit_key_visualization(
+                        app_handle,
+                        &format!("Hold: {}", key),
+                        Some(&format!("{}ms", duration_ms)),
+                    );
+                    let outcome = handle_anthropic_result!(
+                        run_background_first(
+                            app_handle,
+                            action,
+                            target_app.as_deref(),
+                            |allow_physical| {
+                                state_manager.desktop.hold_key_no_warp(
+                                    key,
+                                    Some(duration_ms),
+                                    allow_physical,
+                                )
+                            },
+                        )
+                        .await
+                    );
 
-                    Ok(json!({
-                        "success": true
-                    }))
+                    Ok(with_input_tier(json!({ "success": true }), &outcome))
                 }
                 "type" => {
                     let text = match input["text"].as_str() {
@@ -1675,23 +1840,43 @@ pub async fn execute_computer_tool(
                     // directly (no cursor movement, no clipboard). Falls back to global
                     // keyboard simulation (clipboard paste) when AX isn't supported.
                     let typed_via_ax = try_ax_type_focused(app_handle, text);
+                    let mut outcome = None;
                     if !typed_via_ax {
-                        // Physical fallback (clipboard + CGEvent paste) —
-                        // serialize with other sessions' input.
+                        // Fallback is clipboard + Cmd+V. In background mode the
+                        // paste is posted to the process the agent is working on
+                        // after pointing input focus at it without raising it, so
+                        // it cannot land in whatever app the user is looking at.
                         let _guard = state_manager.input_arbiter().acquire(session_id).await;
-                        handle_anthropic_result!(crate::commands::keyboard::type_text(
-                            text.to_string(),
-                            app_handle.clone(),
-                            state_manager,
-                        )
-                        .await
-                        .map_err(|e| format!("Type text failed: {}", e)));
+                        let preview: String = text
+                            .chars()
+                            .take(
+                                crate::constants::ui::text_display::MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH,
+                            )
+                            .collect();
+                        emit_key_visualization(app_handle, &format!("Type: {}", preview), None);
+                        outcome = Some(handle_anthropic_result!(
+                            run_background_first(
+                                app_handle,
+                                action,
+                                target_app.as_deref(),
+                                |allow_physical| {
+                                    state_manager
+                                        .desktop
+                                        .type_text_no_warp(text, allow_physical)
+                                },
+                            )
+                            .await
+                        ));
                     }
 
-                    Ok(json!({
+                    let mut response = json!({
                         "success": true,
                         "ax_grounded": typed_via_ax
-                    }))
+                    });
+                    if let Some(outcome) = &outcome {
+                        response = with_input_tier(response, outcome);
+                    }
+                    Ok(response)
                 }
                 _ => unreachable!("Keyboard action already matched in outer pattern"),
             }
@@ -1724,20 +1909,37 @@ pub async fn execute_computer_tool(
             // Transform coordinates from scaled screenshot to screen coordinates
             let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
-            handle_anthropic_result!(crate::commands::window::scroll_window(
-                scroll_direction.to_string(),
-                scroll_amount as f64,
-                Some(screen_x),
-                Some(screen_y),
-                app_handle.clone(),
-                state_manager,
-            )
-            .await
-            .map_err(|e| format!("Scroll failed: {}", e)));
+            // Modifiers ride on `text` for scroll the same way they do for clicks.
+            let scroll_modifier = input["text"]
+                .as_str()
+                .filter(|t| {
+                    matches!(
+                        *t,
+                        "shift" | "ctrl" | "alt" | "super" | "command" | "cmd" | "meta" | "option"
+                    )
+                })
+                .map(|m| m.to_string());
 
-            Ok(json!({
-                "success": true
-            }))
+            let outcome = handle_anthropic_result!(
+                run_background_first(
+                    app_handle,
+                    action,
+                    target_app.as_deref(),
+                    |allow_physical| {
+                        state_manager.desktop.scroll_no_warp(
+                            screen_x,
+                            screen_y,
+                            scroll_direction,
+                            scroll_amount as f64,
+                            scroll_modifier.as_deref(),
+                            allow_physical,
+                        )
+                    },
+                )
+                .await
+            );
+
+            Ok(with_input_tier(json!({ "success": true }), &outcome))
         }
         "zoom" => {
             // Zoom action (computer_20251124): inspect a specific screen region at native resolution

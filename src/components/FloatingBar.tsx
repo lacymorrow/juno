@@ -27,8 +27,10 @@ import { MessageSquare, Mic, Square, Type } from "lucide-react";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
+import { useEventListener } from "@/hooks/useEventListener";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI } from "@/lib/constants.generated";
+import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
 import {
   computeWells,
   nearestWell,
@@ -254,13 +256,17 @@ export function pickLayout({
   inputOpen,
   paneOpen,
   rosterVisible,
+  driving = false,
 }: {
   state: string;
   hovered: boolean;
   inputOpen: boolean;
   paneOpen: boolean;
   rosterVisible: boolean;
+  /** Juno holds the physical cursor; the bar has to say so in words. */
+  driving?: boolean;
 }): BarLayout {
+  if (driving) return "full";
   if (paneOpen || rosterVisible || inputOpen || INPUT_STATES.includes(state)) return "full";
   if (VOICE_STATES.includes(state)) return "voice";
   if (IDLE_STATES.includes(state)) return hovered ? "hover" : "compact";
@@ -309,8 +315,35 @@ const BAR_KEYFRAMES = `
 // === STATUS DOT ===
 // One dot; state is communicated through motion and colour, not icons.
 
-function StatusDot({ state, audioLevel }: { state: UIState; audioLevel: number }) {
+/** macOS system blue, the only accent the bar uses. */
+const SYSTEM_BLUE = "#0A84FF";
+
+function StatusDot({
+  state,
+  audioLevel,
+  driving = false,
+}: {
+  state: UIState;
+  audioLevel: number;
+  driving?: boolean;
+}) {
   const dot = "size-[7px] shrink-0 rounded-full";
+
+  // Juno has the physical cursor. That outranks every other status: the same
+  // travelling motion as working, in system blue, so it reads as Juno moving
+  // the pointer rather than as a fault.
+  if (driving) {
+    return (
+      <div
+        data-testid="floating-bar-driving-dot"
+        className={cn(dot)}
+        style={{
+          backgroundColor: SYSTEM_BLUE,
+          animation: "fbar-orbit 1.1s ease-in-out infinite",
+        }}
+      />
+    );
+  }
 
   switch (state) {
     case UI.BAR_STATES_LISTENING:
@@ -646,6 +679,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   const paneOpen = chat.messages.length > 0 && !paneDismissed;
 
+  // A question about taking the mouse belongs on screen. If the person had
+  // closed the conversation, bring it back so the prompt is where they are
+  // looking; the window is only shown, never focused.
+  useEventListener(EVENTS.INPUT_CONTROL_REQUEST, () => setPaneDismissed(false));
+
   const dismissPane = useCallback(() => setPaneDismissed(true), []);
   const reopenPane = useCallback(() => setPaneDismissed(false), []);
   // A conversation the person closed and can come back to.
@@ -854,6 +892,18 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const isVoice = VOICE_STATES.includes(currentUiState);
   const isWorking = WORKING_STATES.includes(currentUiState) || chat.isProcessing;
 
+  // === JUNO IS DRIVING ===
+  //
+  // Juno normally works without touching the pointer. While it holds the real
+  // cursor the bar says so in plain words and clears the moment it lets go.
+  // The Rust side enlarges the system cursor at the same time; this is the
+  // other half of that signal.
+  const [driving, setDriving] = useState<InputControlStatePayload | null>(null);
+  useEventListener<InputControlStatePayload>(EVENTS.INPUT_CONTROL_STATE, (payload) => {
+    setDriving(payload?.active ? payload : null);
+  });
+  const isDriving = driving !== null;
+
   // Parallel agent sessions (LAC-1432): the roster strip appears below the
   // bar when 2+ agents run, so the window grows to make room for it.
   const { sessions: agentSessions, focusSession } = useAgentSessions();
@@ -865,6 +915,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     inputOpen,
     paneOpen,
     rosterVisible: showRosterStrip,
+    driving: isDriving,
   });
 
   useEffect(() => {
@@ -875,8 +926,13 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // input states, and between turns with the pane open so a follow-up is one
   // click away. Voice and working states show status instead.
   const showInput =
-    !isWorking && !isVoice && (inputOpen || isInputState || (paneOpen && isIdle));
-  const label = statusLabel(currentUiState, barState);
+    !isDriving &&
+    !isWorking &&
+    !isVoice &&
+    (inputOpen || isInputState || (paneOpen && isIdle));
+  const label = driving
+    ? drivingLabel(driving)
+    : statusLabel(currentUiState, barState);
 
   // Once the input is up, put the caret in it. After a turn ends with the
   // pane open, refocus only if this window is still the one the user is in:
@@ -1300,9 +1356,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         data-testid="floating-bar"
         data-state={currentUiState}
         data-layout={layout}
+        data-driving={isDriving ? "" : undefined}
         className={cn(
           "relative flex shrink-0 items-center rounded-full",
           "border border-white/10 bg-neutral-950/90 text-white backdrop-blur-xl",
+          // Juno has the pointer: a hairline in system blue, nothing louder.
+          isDriving && "border-[#0A84FF]/70",
           "transition-[width,height,padding] duration-200 ease-out",
           layout === "compact" ? "shadow-lg" : "shadow-2xl",
           // Idle layouts centre their single child so the compact dot and the
@@ -1317,7 +1376,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             that carry real status (voice, working, input). Hover shows only
             the buttons, so nothing shifts sideways when the pill grows. */}
         {layout !== "hover" && (
-          <StatusDot state={currentUiState} audioLevel={barState.audioLevel} />
+          <StatusDot
+            state={currentUiState}
+            audioLevel={barState.audioLevel}
+            driving={isDriving}
+          />
         )}
 
         {layout === "compact" ? null : layout === "hover" ? (
@@ -1397,11 +1460,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             <span
               className={cn(
                 "min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em]",
-                currentUiState === UI.BAR_STATES_ERROR ? "text-[#e8866a]/80" : "text-white/55",
+                isDriving
+                  ? "text-white/80"
+                  : currentUiState === UI.BAR_STATES_ERROR
+                    ? "text-[#e8866a]/80"
+                    : "text-white/55",
               )}
               data-testid="floating-bar-status"
             >
-              {label ?? "Ask Juno"}
+              {isDriving ? `Juno is ${label}` : (label ?? "Ask Juno")}
             </span>
             {isVoice && <AudioLevelBars audioLevel={barState.audioLevel} />}
             {isVoice && currentUiState !== UI.BAR_STATES_ALWAYS_LISTENING && (

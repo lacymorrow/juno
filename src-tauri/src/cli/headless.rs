@@ -866,7 +866,9 @@ impl HeadlessRuntime {
         desktop: &mut Option<computer_use_ai_sdk::Desktop>,
     ) -> Result<&computer_use_ai_sdk::Desktop, JunoError> {
         if desktop.is_none() {
-            *desktop = Some(computer_use_ai_sdk::Desktop::new(false, true).map_err(|e| {
+            // Headless runs act on other apps; activating them would be both
+            // pointless and disruptive, and menu-bar apps have to be visible.
+            *desktop = Some(computer_use_ai_sdk::Desktop::new(true, false).map_err(|e| {
                 JunoError::ApplicationError(format!("Failed to initialize Desktop: {e}"))
             })?);
         }
