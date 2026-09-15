@@ -32,8 +32,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [bigCursorEnabled, setBigCursorEnabled] = useState(true);
   const [bigCursorScale, setBigCursorScale] = useState(3.0);
   const [bigCursorLoading, setBigCursorLoading] = useState(false);
-  const [companionMode, setCompanionMode] = useState(false);
-  const [companionModeLoading, setCompanionModeLoading] = useState(false);
   const [systemCursorSize, setSystemCursorSize] = useState(1.0);
 
   // Load auto-launch status and onboarding info on component mount
@@ -70,9 +68,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         const cursorScale = await invoke<number>("get_big_cursor_scale");
         setBigCursorScale(cursorScale);
 
-        // Load companion mode
-        const companionEnabled = await invoke<boolean>("get_companion_mode");
-        setCompanionMode(companionEnabled);
         const sysSize = await invoke<number>("get_system_cursor_size");
         setSystemCursorSize(sysSize);
       } catch (error) {
@@ -217,20 +212,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  const handleCompanionModeChange = async (enabled: boolean) => {
-    if (companionModeLoading) return;
-    setCompanionModeLoading(true);
-    try {
-      await invoke("set_companion_mode", { enabled });
-      setCompanionMode(enabled);
-    } catch (error) {
-      console.error("Failed to update companion mode:", error);
-      toast.error("Failed to update companion mode");
-    } finally {
-      setCompanionModeLoading(false);
-    }
-  };
-
 
   return (
     <div className="space-y-6">
@@ -285,25 +266,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
               <SelectItem value="single">Single Agent</SelectItem>
             </SelectContent>
           </Select>
-        </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup
-        title="Companion Mode"
-        advanced
-        footer='Observe-only mode: Juno watches your screen and advises without clicking, typing, or taking any actions. Ask things like "What does this error mean?" — Juno describes and advises but never acts.'
-      >
-        <SettingsRow
-          htmlFor="companion-mode"
-          label="Enable Companion Mode"
-          description="Juno advises but never controls the computer"
-        >
-          <Switch
-            id="companion-mode"
-            checked={companionMode}
-            onCheckedChange={handleCompanionModeChange}
-            disabled={companionModeLoading}
-          />
         </SettingsRow>
       </SettingsGroup>
 

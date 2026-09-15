@@ -1,3 +1,14 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
@@ -264,28 +275,41 @@ export default function AdvancedSettings({
           label="Reset all settings"
           description="Reset all settings to their default values"
           below={
-            <Button
-              variant="destructive"
-              onClick={async () => {
-                if (
-                  confirm(
-                    "Are you sure you want to reset all settings? This action cannot be undone."
-                  )
-                ) {
-                  try {
-                    await invoke(COMMANDS.SETTINGS_RESET_SETTINGS);
-                    await settings.loadAllSettings();
-                    toast.success("All settings have been reset to defaults");
-                  } catch (error) {
-                    toast.error("Failed to reset settings");
-                  }
-                }
-              }}
-              className="w-full"
-            >
-              <RotateCcw className="w-4 h-4 mr-2" />
-              Reset All Settings
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="w-full">
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Reset All Settings
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Reset all settings?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Every setting goes back to its default, including your
+                    API keys, your shortcuts and your AI provider choice. You
+                    will have to set Juno up again. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={async () => {
+                      try {
+                        await invoke(COMMANDS.SETTINGS_RESET_SETTINGS);
+                        await settings.loadAllSettings();
+                        toast.success("All settings have been reset to defaults");
+                      } catch (error) {
+                        console.error("Failed to reset settings:", error);
+                        toast.error("Failed to reset settings");
+                      }
+                    }}
+                  >
+                    Reset
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           }
         />
       </SettingsGroup>

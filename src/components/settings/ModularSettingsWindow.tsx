@@ -59,7 +59,7 @@ export const settingsCategories: MacCategory[] = [
     icon: <Settings className="h-3.5 w-3.5" />,
     tile: "bg-[#8E8E93]",
     description: "Basic app settings and preferences",
-    keywords: "startup launch login sound onboarding companion cursor agent mode",
+    keywords: "startup launch login sound onboarding cursor agent mode",
   },
   {
     id: "triggers",
@@ -101,7 +101,7 @@ export const settingsCategories: MacCategory[] = [
     tile: "bg-[#FF9500]",
     description: "Enable and disable agent tools",
     advanced: true,
-    keywords: "tools capabilities categories enable disable permissions",
+    keywords: "tools capabilities categories enable disable permissions companion observe",
   },
   {
     id: "automations",
