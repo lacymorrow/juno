@@ -9,6 +9,7 @@ import { ChatMessageComponent } from "@/components/ChatMessageV2";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 import type { ShareAnchor } from "@/hooks/useConversation";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
+import { InputControlNotices } from "@/components/input-control/InputControlNotices";
 import { cn } from "@/lib/utils";
 
 // Helper function to determine if timestamp should be shown (similar to Slack/Apple Messages)
@@ -134,28 +135,33 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   );
 
   return (
-    <Conversation className={cn("flex-1 min-h-0", className)}>
-      {conversation.length === 0 ? (
-        <ConversationEmptyState>
-          <div className="flex flex-col items-center justify-center space-y-6 py-12">
-            <div className="space-y-2 text-center">
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                What can I help you with?
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Desktop automation, web browsing, file management, and more.
-              </p>
-            </div>
+    // The conversation scrolls; the background-mode notices sit under it, so a
+    // question about taking the mouse never scrolls out of sight.
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Conversation className={cn("flex-1 min-h-0", className)}>
+        {conversation.length === 0 ? (
+          <ConversationEmptyState>
+            <div className="flex flex-col items-center justify-center space-y-6 py-12">
+              <div className="space-y-2 text-center">
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                  What can I help you with?
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  Desktop automation, web browsing, file management, and more.
+                </p>
+              </div>
 
-            <ExamplePrompts onPromptSelect={onExamplePromptSelect} />
-          </div>
-        </ConversationEmptyState>
-      ) : (
-        <ConversationContent className={cn("gap-6 px-6 py-4", contentClassName)}>
-          {messageList}
-        </ConversationContent>
-      )}
-      <ConversationScrollButton />
-    </Conversation>
+              <ExamplePrompts onPromptSelect={onExamplePromptSelect} />
+            </div>
+          </ConversationEmptyState>
+        ) : (
+          <ConversationContent className={cn("gap-6 px-6 py-4", contentClassName)}>
+            {messageList}
+          </ConversationContent>
+        )}
+        <ConversationScrollButton />
+      </Conversation>
+      <InputControlNotices />
+    </div>
   );
 });

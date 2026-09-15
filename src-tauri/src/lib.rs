@@ -520,6 +520,10 @@ pub fn run() {
             get_companion_mode,
             set_companion_mode,
 
+            // Dock icon / menu-bar-only mode
+            commands::dock_icon::get_dock_icon_visible,
+            commands::dock_icon::set_dock_icon_visible,
+
             // Sound Commands
             play_sound_by_type,
             play_sound_file,
@@ -873,6 +877,9 @@ pub fn run() {
             // Manage the SettingsManager state
             app.manage(settings_manager);
 
+            // --- Dock icon: honour the saved menu-bar-only preference ---
+            commands::dock_icon::apply_saved_dock_icon_policy(&app_handle);
+
             // --- Initialize Whisper Download State ---
             app.manage(std::sync::Arc::new(std::sync::Mutex::new(
                 crate::commands::whisper_model::WhisperDownloadState::new(),
@@ -1073,6 +1080,10 @@ pub fn run() {
                                 let _ = window.set_focus();
                             }
                         }
+                        // In menu-bar-only mode this click is usually someone
+                        // hunting for an app they cannot see. Count it, and
+                        // say where Juno went.
+                        commands::dock_icon::handle_reopen(app_handle);
                     }
                     tauri::RunEvent::ExitRequested { .. } => {
                         // Restore cursor scale on app exit — prevents stuck big cursor
