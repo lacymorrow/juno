@@ -802,6 +802,7 @@ pub fn run() {
             commands::tray_commands::set_tray_icon_always_listening,
             commands::tray_commands::set_tray_icon_processing,
             commands::tray_commands::set_tray_icon_error,
+            commands::tray_commands::set_tray_icon_paused,
             commands::tray_commands::update_tray_icon_from_state,
             commands::tray_commands::test_all_tray_icon_states,
             commands::tray_commands::get_current_tray_icon_state,
