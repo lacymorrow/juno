@@ -25,6 +25,7 @@
     "core:window:allow-is-fullscreen",
     "opener:default",
     "notification:default",
+    "process:allow-exit",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",

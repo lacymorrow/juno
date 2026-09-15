@@ -29,6 +29,7 @@ pub mod config_file;
 pub mod conversations; // Conversation history: list/load/delete/new past chats
 pub mod debug_tools;
 pub mod dictation_state_manager;
+pub mod dock_icon; // Dock icon visibility and menu-bar-only mode recovery
 pub mod element;
 pub mod enhanced_visual_reasoning_commands;
 pub mod error_recovery;
@@ -92,6 +93,7 @@ pub use self::cloud_test::*;
 pub use self::collaborative_ai_commands::*;
 pub use self::config_file::*;
 pub use self::debug_tools::*; // Re-export debug tool commands
+pub use self::dock_icon::{get_dock_icon_visible, set_dock_icon_visible};
 pub use self::dictation_state_manager::{
     force_reset_dictation_state, get_dictation_comprehensive_status, transition_dictation_state,
     update_dictation_component_state,
