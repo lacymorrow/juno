@@ -990,7 +990,7 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
     };
 
     if let Some(pid) = target_pid {
-        prepare_background_keyboard_target(pid);
+        let _focus = prepare_background_keyboard_target(pid);
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, true)?;
         thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, false)?;
@@ -1108,7 +1108,7 @@ fn paste_text(text: &str, target_pid: Option<i32>) -> Result<(), AutomationError
     let cmd_flag = MODIFIER_COMMAND;
 
     if let Some(pid) = target_pid {
-        prepare_background_keyboard_target(pid);
+        let _focus = prepare_background_keyboard_target(pid);
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, true)?;
         thread::sleep(Duration::from_millis(PASTE_KEY_GAP_MS));
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, false)?;
@@ -1153,6 +1153,8 @@ pub(crate) fn type_text_no_warp(
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
     if let Some(pid) = background::target_pid() {
+        // `paste_text` holds the input-focus guard for the duration of the
+        // paste, so focus is handed back here without a second guard.
         paste_text(text, Some(pid))?;
         return Ok(Some(InputOutcome::process_targeted(post_method_label())));
     }
@@ -2395,14 +2397,117 @@ pub(crate) fn note_background_target(pid: i32) {
     background::remember_target_pid(pid);
 }
 
+/// The process the user is looking at right now, by NSWorkspace's reckoning.
+///
+/// There is no public way to read the WindowServer's input-focus owner, and the
+/// frontmost application is the practical proxy for it: SLPS focus redirection
+/// does not change it, so it still names the app the user believes they are
+/// typing into.
+pub(crate) fn frontmost_app_pid() -> Option<i32> {
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let workspace_class = class!(NSWorkspace);
+        let shared_workspace: *mut objc::runtime::Object =
+            msg_send![workspace_class, sharedWorkspace];
+        if shared_workspace.is_null() {
+            return None;
+        }
+        let frontmost_app: *mut objc::runtime::Object =
+            msg_send![shared_workspace, frontmostApplication];
+        if frontmost_app.is_null() {
+            return None;
+        }
+        let pid: i32 = msg_send![frontmost_app, processIdentifier];
+        if pid > 0 {
+            Some(pid)
+        } else {
+            None
+        }
+    }
+}
+
+/// Which process should be holding input focus once a keyboard takeover ends.
+///
+/// `None` means leave focus alone. Kept pure and separate from the guard so the
+/// rules can be checked without a WindowServer.
+fn focus_to_restore(
+    captured_pid: Option<i32>,
+    current_frontmost: Option<i32>,
+    redirect_succeeded: bool,
+) -> Option<i32> {
+    if !redirect_succeeded {
+        // Focus was never moved, so there is nothing to put back, and claiming
+        // otherwise would hand focus to an app that never had it.
+        return None;
+    }
+    let captured = captured_pid?;
+    match current_frontmost {
+        // The user switched apps while the agent was typing. Their keystrokes
+        // belong in the app in front of them now, not in the one they left.
+        Some(now) if now != captured => Some(now),
+        // Frontmost is unreadable; the app we took focus from is the best guess.
+        _ => Some(captured),
+    }
+}
+
+/// Holds the WindowServer's input focus on a background process for as long as
+/// the agent is typing into it, and hands it back on drop.
+///
+/// SLPS focus redirection is not symmetric with ordinary activation: nothing
+/// restores the previous focus owner when the posted events stop, so without
+/// this the user's next keystrokes land in the app the agent was typing into,
+/// silently, with no window raised and no cursor moved. The restore here is
+/// load bearing, not redundant. Drop rather than an explicit call so an early
+/// return, an error or a panic unwind cannot skip it.
+#[must_use = "input focus stays redirected until this guard is dropped"]
+pub(crate) struct BackgroundKeyboardFocus {
+    /// The app the user was in when the takeover began, if focus was moved.
+    captured_pid: Option<i32>,
+    redirected: bool,
+}
+
+impl BackgroundKeyboardFocus {
+    /// Point input focus at `target_pid` for the life of the guard.
+    ///
+    /// Costs nothing when the target is already the app the user is in: there is
+    /// no focus to move and so none to give back.
+    fn take(target_pid: i32) -> Self {
+        let captured_pid = frontmost_app_pid();
+        if captured_pid == Some(target_pid) {
+            return Self {
+                captured_pid: None,
+                redirected: false,
+            };
+        }
+
+        let redirected = activate_without_raise(target_pid);
+        Self {
+            captured_pid,
+            redirected,
+        }
+    }
+}
+
+impl Drop for BackgroundKeyboardFocus {
+    fn drop(&mut self) {
+        if let Some(pid) = focus_to_restore(self.captured_pid, frontmost_app_pid(), self.redirected)
+        {
+            debug!("Handing input focus back to PID {}", pid);
+            activate_without_raise(pid);
+        }
+    }
+}
+
 /// Point the WindowServer's input focus at `pid` without raising its windows,
 /// which is what keyboard events posted to a process need in order to be routed
 /// there rather than to the frontmost app.
 ///
-/// This does take keyboard focus, so it belongs only on paths that actually type.
-pub(crate) fn prepare_background_keyboard_target(pid: i32) {
+/// Hold the returned guard for exactly as long as the keystrokes are being
+/// posted; dropping it gives the user their keyboard back.
+pub(crate) fn prepare_background_keyboard_target(pid: i32) -> BackgroundKeyboardFocus {
     note_background_target(pid);
-    activate_without_raise(pid);
+    BackgroundKeyboardFocus::take(pid)
 }
 
 // ── No-warp input ────────────────────────────────────────────────────────────
@@ -2744,7 +2849,7 @@ pub(crate) fn hold_key_no_warp(
         return Ok(Some(InputOutcome::physical_cursor("HID")));
     };
 
-    prepare_background_keyboard_target(pid);
+    let _focus = prepare_background_keyboard_target(pid);
     post_key_event_with_flags_to_pid(pid, keycode, flags, true)?;
     if let Some(ms) = duration_ms {
         thread::sleep(Duration::from_millis(ms));
@@ -2779,7 +2884,7 @@ pub(crate) fn release_key_no_warp(
         return Ok(Some(InputOutcome::physical_cursor("HID")));
     };
 
-    prepare_background_keyboard_target(pid);
+    let _focus = prepare_background_keyboard_target(pid);
     post_key_event_with_flags_to_pid(pid, keycode, flags, false)?;
     Ok(Some(InputOutcome::process_targeted(post_method_label())))
 }
@@ -2792,7 +2897,7 @@ fn key_event_no_warp(
     physical: &dyn Fn() -> Result<(), AutomationError>,
 ) -> Result<Option<InputOutcome>, AutomationError> {
     if let Some(pid) = background::target_pid() {
-        prepare_background_keyboard_target(pid);
+        let _focus = prepare_background_keyboard_target(pid);
         let posted = post_key_event_with_flags_to_pid(pid, keycode, flags, true).and_then(|_| {
             thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
             post_key_event_with_flags_to_pid(pid, keycode, flags, false)
@@ -2992,4 +3097,58 @@ fn left_click_no_warp_inner(
     }
     click_result?;
     Ok(Some(InputOutcome::physical_cursor("HID-with-restore")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::focus_to_restore;
+
+    const USER_APP: i32 = 101;
+    const AGENT_TARGET: i32 = 202;
+    const SOMEWHERE_ELSE: i32 = 303;
+
+    #[test]
+    fn a_failed_redirect_restores_nothing() {
+        // Focus never moved, so handing it to anyone would be an unprompted move.
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), Some(USER_APP), false),
+            None
+        );
+    }
+
+    #[test]
+    fn nothing_is_restored_when_the_previous_owner_was_unknown() {
+        assert_eq!(focus_to_restore(None, Some(USER_APP), true), None);
+    }
+
+    #[test]
+    fn focus_goes_back_to_the_app_it_was_taken_from() {
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), Some(USER_APP), true),
+            Some(USER_APP)
+        );
+    }
+
+    #[test]
+    fn a_user_who_switched_apps_keeps_typing_where_they_are_looking() {
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), Some(SOMEWHERE_ELSE), true),
+            Some(SOMEWHERE_ELSE)
+        );
+    }
+
+    #[test]
+    fn an_unreadable_frontmost_app_falls_back_to_the_captured_one() {
+        assert_eq!(focus_to_restore(Some(USER_APP), None, true), Some(USER_APP));
+    }
+
+    #[test]
+    fn the_agents_target_is_never_left_holding_focus() {
+        for frontmost in [Some(USER_APP), Some(SOMEWHERE_ELSE), None] {
+            assert_ne!(
+                focus_to_restore(Some(USER_APP), frontmost, true),
+                Some(AGENT_TARGET)
+            );
+        }
+    }
 }
