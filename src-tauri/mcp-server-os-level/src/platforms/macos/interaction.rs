@@ -6,7 +6,9 @@ use super::element::MacOSUIElement;
 use super::ffi;
 use super::memory_safety::get_pooled_event_source;
 use super::wrappers::ThreadSafeAXUIElement;
+use crate::background;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
+use crate::input_tier::InputOutcome;
 use crate::{AutomationError, ClickResult};
 use accessibility::{AXAttribute, AXUIElement};
 use accessibility_sys::{AXUIElementRef, AXUIElementSetAttributeValue};
@@ -122,6 +124,19 @@ pub(crate) fn click_auto(element: &MacOSUIElement) -> Result<ClickResult, Automa
             || app_name.contains("vivaldi")
             || app_name.contains("microsoft edge")
         {
+            // Browsers ignore AXPress on web content, so the click has to be a real
+            // event. In background mode that event goes to the browser process
+            // (with the Chromium activation primer) instead of the HID tap, which
+            // leaves the user's cursor and frontmost app alone.
+            if background::is_background_mode() {
+                match click_element_no_warp(element) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => debug!(
+                        "browser detected, no-warp click unavailable ({:?}), using mouse simulation",
+                        e
+                    ),
+                }
+            }
             debug!("browser detected, using mouse simulation directly");
             return click_mouse_simulation(element);
         }
@@ -244,15 +259,91 @@ pub(crate) fn click_mouse_simulation(
     }
 }
 
+/// Click an element's centre without warping the cursor, for elements that do
+/// not answer AXPress (browser web content being the common case).
+///
+/// The element's own process is preferred over a hit-test of its centre point:
+/// the centre may be covered by another window, and the caller reached this
+/// element through the accessibility tree, so its owner is the intended target.
+pub(crate) fn click_element_no_warp(
+    element: &MacOSUIElement,
+) -> Result<ClickResult, AutomationError> {
+    let (x, y, width, height) = element.bounds()?;
+    let center_x = x + width / 2.0;
+    let center_y = y + height / 2.0;
+
+    let pid_override = element_pid(element);
+    let outcome = left_click_no_warp_inner(
+        center_x,
+        center_y,
+        CGEventType::LeftMouseDown,
+        CGEventType::LeftMouseUp,
+        CGMouseButton::Left,
+        None,
+        1,
+        pid_override,
+        false,
+    )?
+    .ok_or_else(|| {
+        AutomationError::PlatformError(
+            "No-warp click needs the physical cursor for this element".to_string(),
+        )
+    })?;
+
+    Ok(ClickResult {
+        method: outcome.method.to_string(),
+        coordinates: Some((center_x, center_y)),
+        details: format!(
+            "Posted click to the target process at ({:.1}, {:.1}) via {}",
+            center_x, center_y, outcome.method
+        ),
+    })
+}
+
+/// The process that owns an accessibility element, if it can be determined.
+pub(crate) fn element_pid(element: &MacOSUIElement) -> Option<i32> {
+    let mut pid: libc::pid_t = 0;
+    let err = unsafe {
+        accessibility_sys::AXUIElementGetPid(
+            element.element.0.as_concrete_TypeRef() as AXUIElementRef,
+            &mut pid,
+        )
+    };
+    if err == 0 && pid > 0 {
+        Some(pid)
+    } else {
+        None
+    }
+}
+
 pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
-    let raise_attr = AXAttribute::new(&CFString::new("AXRaise"));
-    if element
-        .element
-        .0
-        .perform_action(raise_attr.as_CFString())
-        .is_ok()
-    {
-        debug!("Successfully raised element");
+    // In background mode the point is to leave the user's window order alone, so
+    // AXRaise is skipped and a miss is reported rather than papered over with a
+    // coordinate click that would pull the app forward.
+    let background = background::is_background_mode();
+
+    let raised = if background {
+        // Keep the app's accessibility tree awake first: Chromium and Electron
+        // suspend AX on occluded windows, which would make the focus set below
+        // fail for exactly the apps that need it most.
+        if let Some(pid) = element_pid(element) {
+            note_background_target(pid);
+        }
+        true
+    } else {
+        let raise_attr = AXAttribute::new(&CFString::new("AXRaise"));
+        let ok = element
+            .element
+            .0
+            .perform_action(raise_attr.as_CFString())
+            .is_ok();
+        if ok {
+            debug!("Successfully raised element");
+        }
+        ok
+    };
+
+    if raised {
         if let Some(app) = get_application(element) {
             unsafe {
                 let app_ref = app.element.0.as_concrete_TypeRef();
@@ -274,6 +365,13 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
             }
         }
     }
+
+    if background {
+        return Err(AutomationError::PlatformError(
+            "Could not focus the element without raising its window".to_string(),
+        ));
+    }
+
     debug!("Raise action failed or app not found, attempting focus via click");
     click_auto(element).map(|_result| {
         debug!("Focus achieved via click method: {}", _result.method);
@@ -804,6 +902,12 @@ impl Drop for ClipboardGuard {
 pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), AutomationError> {
     match focus(element) {
         Ok(_) => debug!("Successfully focused element for typing"),
+        Err(e) if background::is_background_mode() => {
+            // A coordinate click here would raise the window and steal focus,
+            // which is the whole thing background mode exists to avoid. AXValue
+            // below often succeeds without focus, so carry on without clicking.
+            debug!("Focus failed before typing in background mode: {:?}", e);
+        }
         Err(e) => {
             warn!("Focus failed before typing, attempting anyway: {:?}", e);
             // Attempting to click as a fallback focus mechanism
@@ -877,23 +981,43 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
     let key_code_v = KEY_V; // Assuming KEY_V is defined in constants
     let cmd_flag = MODIFIER_COMMAND; // Assuming MODIFIER_COMMAND is defined
 
-    // Press Cmd+V
-    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code_v, true).map_err(|_| {
-        AutomationError::PlatformError("Failed to create key down event for paste".to_string())
-    })?;
-    key_down.set_flags(cmd_flag);
-    key_down.post(CGEventTapLocation::HID);
-    thread::sleep(Duration::from_millis(50));
+    // In background mode the paste goes to the element's own process, otherwise a
+    // Cmd+V on the HID tap would land in whatever app the user is looking at.
+    let target_pid = if background::is_background_mode() {
+        element_pid(element)
+    } else {
+        None
+    };
 
-    // Release Cmd+V
-    let key_up = CGEvent::new_keyboard_event(source, key_code_v, false).map_err(|_| {
-        AutomationError::PlatformError("Failed to create key up event for paste".to_string())
-    })?;
-    key_up.set_flags(cmd_flag);
-    key_up.post(CGEventTapLocation::HID);
-    thread::sleep(Duration::from_millis(50));
+    if let Some(pid) = target_pid {
+        let _focus = prepare_background_keyboard_target(pid);
+        post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, true)?;
+        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
+        post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, false)?;
+        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
+        debug!("Posted Cmd+V paste to PID {}", pid);
+    } else {
+        // Press Cmd+V
+        let key_down =
+            CGEvent::new_keyboard_event(source.clone(), key_code_v, true).map_err(|_| {
+                AutomationError::PlatformError(
+                    "Failed to create key down event for paste".to_string(),
+                )
+            })?;
+        key_down.set_flags(cmd_flag);
+        key_down.post(CGEventTapLocation::HID);
+        thread::sleep(Duration::from_millis(50));
 
-    debug!("Successfully simulated Cmd+V paste.");
+        // Release Cmd+V
+        let key_up = CGEvent::new_keyboard_event(source, key_code_v, false).map_err(|_| {
+            AutomationError::PlatformError("Failed to create key up event for paste".to_string())
+        })?;
+        key_up.set_flags(cmd_flag);
+        key_up.post(CGEventTapLocation::HID);
+        thread::sleep(Duration::from_millis(50));
+
+        debug!("Successfully simulated Cmd+V paste.");
+    }
 
     // Clipboard restored by ClipboardGuard automatically
     Ok(())
@@ -935,7 +1059,18 @@ fn restore_clipboard_later(original: Option<String>, pasted: String) {
 }
 
 pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
-    debug!("Typing text globally via clipboard paste: {}", text);
+    // "Global" means the frontmost app. Dictation types where the user is
+    // looking, so this path must stay on the HID tap even in background mode.
+    paste_text(text, None)
+}
+
+/// Put `text` on the clipboard and paste it with Cmd+V.
+///
+/// `target_pid` decides where the paste lands: `Some(pid)` posts it to that
+/// process after pointing input focus at it without raising it, `None` sends it
+/// through the HID tap to whatever application is frontmost.
+fn paste_text(text: &str, target_pid: Option<i32>) -> Result<(), AutomationError> {
+    debug!("Typing text via clipboard paste: {}", text);
 
     let original = NativeClipboard::new().and_then(|c| c.read()).ok();
 
@@ -972,28 +1107,64 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
     let key_code_v = KEY_V;
     let cmd_flag = MODIFIER_COMMAND;
 
-    // Press Cmd+V
-    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code_v, true).map_err(|_| {
-        AutomationError::PlatformError(
-            "Failed to create key down event for global paste".to_string(),
-        )
-    })?;
-    key_down.set_flags(cmd_flag);
-    key_down.post(CGEventTapLocation::HID);
-    thread::sleep(Duration::from_millis(PASTE_KEY_GAP_MS));
+    if let Some(pid) = target_pid {
+        let _focus = prepare_background_keyboard_target(pid);
+        post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, true)?;
+        thread::sleep(Duration::from_millis(PASTE_KEY_GAP_MS));
+        post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, false)?;
+        debug!("Posted Cmd+V paste to PID {}", pid);
+    } else {
+        // Press Cmd+V
+        let key_down =
+            CGEvent::new_keyboard_event(source.clone(), key_code_v, true).map_err(|_| {
+                AutomationError::PlatformError(
+                    "Failed to create key down event for global paste".to_string(),
+                )
+            })?;
+        key_down.set_flags(cmd_flag);
+        key_down.post(CGEventTapLocation::HID);
+        thread::sleep(Duration::from_millis(PASTE_KEY_GAP_MS));
 
-    // Release Cmd+V
-    let key_up = CGEvent::new_keyboard_event(source, key_code_v, false).map_err(|_| {
-        AutomationError::PlatformError("Failed to create key up event for global paste".to_string())
-    })?;
-    key_up.set_flags(cmd_flag);
-    key_up.post(CGEventTapLocation::HID);
+        // Release Cmd+V
+        let key_up = CGEvent::new_keyboard_event(source, key_code_v, false).map_err(|_| {
+            AutomationError::PlatformError(
+                "Failed to create key up event for global paste".to_string(),
+            )
+        })?;
+        key_up.set_flags(cmd_flag);
+        key_up.post(CGEventTapLocation::HID);
 
-    debug!("Successfully simulated global Cmd+V paste.");
+        debug!("Successfully simulated global Cmd+V paste.");
+    }
 
     // Restore the previous clipboard on a timer, off the hot path.
     restore_clipboard_later(original, text.to_string());
     Ok(())
+}
+
+/// Type text into the process the agent is working on, without disturbing the
+/// user's frontmost app.
+///
+/// Returns `Ok(None)` when there is no such process yet (the agent has not
+/// clicked into anything) and `allow_physical` forbids falling back to the HID
+/// tap, which would paste into whatever the user is looking at.
+pub(crate) fn type_text_no_warp(
+    text: &str,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    if let Some(pid) = background::target_pid() {
+        // `paste_text` holds the input-focus guard for the duration of the
+        // paste, so focus is handed back here without a second guard.
+        paste_text(text, Some(pid))?;
+        return Ok(Some(InputOutcome::process_targeted(post_method_label())));
+    }
+
+    if !allow_physical {
+        return Ok(None);
+    }
+
+    paste_text(text, None)?;
+    Ok(Some(InputOutcome::physical_cursor("HID")))
 }
 
 pub(crate) fn get_key_code(key: &str) -> Result<u16, AutomationError> {
@@ -1258,17 +1429,30 @@ pub(crate) fn scroll(
         }
     };
 
-    // First create a move event to position mouse
-    let move_event = CGEvent::new_mouse_event(
-        source.clone(), // Clone here to avoid move
-        CGEventType::MouseMoved,
-        CGPoint::new(center_x, center_y),
-        CGMouseButton::Left,
-    )
-    .map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
+    // Positioning the real cursor over the element is only needed when the scroll
+    // event travels through the HID tap; a process-targeted scroll carries its own
+    // location, so in background mode the user's pointer stays put.
+    let target_pid = if background::is_background_mode() {
+        element_pid(element)
+    } else {
+        None
+    };
 
-    move_event.post(CGEventTapLocation::HID);
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    if target_pid.is_none() {
+        // First create a move event to position mouse
+        let move_event = CGEvent::new_mouse_event(
+            source.clone(), // Clone here to avoid move
+            CGEventType::MouseMoved,
+            CGPoint::new(center_x, center_y),
+            CGMouseButton::Left,
+        )
+        .map_err(|_| {
+            AutomationError::PlatformError("Failed to create mouse move event".to_string())
+        })?;
+
+        move_event.post(CGEventTapLocation::HID);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 
     // Create a scroll event manually since new_scroll_wheel_event is not available
     let scroll_event =
@@ -1292,7 +1476,13 @@ pub(crate) fn scroll(
     scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_1, scroll_y as i64);
     scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_2, scroll_x as i64);
 
-    scroll_event.post(CGEventTapLocation::HID);
+    match target_pid {
+        Some(pid) => {
+            set_event_location(&scroll_event, CGPoint::new(center_x, center_y));
+            post_cg_event_to_pid(pid, &scroll_event);
+        }
+        None => scroll_event.post(CGEventTapLocation::HID),
+    }
 
     Ok(())
 }
@@ -1848,16 +2038,11 @@ static SKYLIGHT_FN: OnceLock<Option<SLEventPostToPidFn>> = OnceLock::new();
 // remote observation capability to Chromium/Electron so they do not suspend their
 // AX tree when windows are backgrounded or occluded.
 
-// Phase 4 infrastructure — staged for the focus-without-raise feature.
-// Loaded but not yet wired into callers; suppress dead_code until integration lands.
-#[allow(dead_code)]
 type SLPSPostEventRecordToFn =
     unsafe extern "C" fn(*mut ffi::ProcessSerialNumber, *mut c_void) -> i32;
 
-#[allow(dead_code)]
 static SLPS_POST_EVENT_FN: OnceLock<Option<SLPSPostEventRecordToFn>> = OnceLock::new();
 
-#[allow(dead_code)]
 fn get_slps_post_event_record_to() -> Option<SLPSPostEventRecordToFn> {
     *SLPS_POST_EVENT_FN.get_or_init(|| {
         let path = b"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight\0";
@@ -1885,7 +2070,6 @@ fn get_slps_post_event_record_to() -> Option<SLPSPostEventRecordToFn> {
 
 // _AXObserverAddNotificationAndCheckRemote:
 // (AXObserverRef, AXUIElementRef, CFStringRef, void* refcon, Boolean* isRemote) -> AXError
-#[allow(dead_code)]
 type AXObserverCheckRemoteFn = unsafe extern "C" fn(
     *mut c_void,   // AXObserverRef
     *const c_void, // AXUIElementRef
@@ -1894,13 +2078,11 @@ type AXObserverCheckRemoteFn = unsafe extern "C" fn(
     *mut bool,     // is_remote (out)
 ) -> i32;
 
-#[allow(dead_code)]
 static AX_REMOTE_OBSERVER_FN: OnceLock<Option<AXObserverCheckRemoteFn>> = OnceLock::new();
 
 /// Attempt to load `_AXObserverAddNotificationAndCheckRemote` from HIServices.
 /// Returns the function pointer if available. Used to signal remote observation
 /// capability so Chromium/Electron do not suspend AX for backgrounded windows.
-#[allow(dead_code)]
 pub(crate) fn get_ax_observer_check_remote() -> Option<AXObserverCheckRemoteFn> {
     *AX_REMOTE_OBSERVER_FN.get_or_init(|| {
         let path = b"/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices\0";
@@ -1936,7 +2118,6 @@ pub(crate) fn get_ax_observer_check_remote() -> Option<AXObserverCheckRemoteFn> 
 /// Returns `true` if focus was successfully redirected, `false` on graceful fallback.
 /// In the fallback case `CGEventPostToPid` (Phase 3) still delivers mouse events;
 /// only keyboard routing to background apps is degraded.
-#[allow(dead_code)]
 pub(crate) fn activate_without_raise(pid: i32) -> bool {
     if let Some(slps_fn) = get_slps_post_event_record_to() {
         let mut psn = ffi::ProcessSerialNumber::default();
@@ -2075,19 +2256,295 @@ pub(crate) fn post_key_event_to_pid(
     Ok(())
 }
 
+/// Post a key event carrying modifier flags directly to a process.
+pub(crate) fn post_key_event_with_flags_to_pid(
+    pid: i32,
+    keycode: u16,
+    flags: CGEventFlags,
+    key_down: bool,
+) -> Result<(), AutomationError> {
+    let source = get_pooled_event_source().map_err(|e| {
+        AutomationError::PlatformError(format!(
+            "Failed to create event source for PID-targeted key event: {}",
+            e
+        ))
+    })?;
+
+    let event = CGEvent::new_keyboard_event(source, keycode, key_down).map_err(|_| {
+        AutomationError::PlatformError(
+            "Failed to create key event for PID-targeted injection".to_string(),
+        )
+    })?;
+
+    if !flags.is_empty() {
+        event.set_flags(flags);
+    }
+
+    post_cg_event_to_pid(pid, &event);
+    Ok(())
+}
+
+// ── Remote accessibility observation ─────────────────────────────────────────
+//
+// Chromium and Electron suspend their accessibility tree for windows that are
+// backgrounded or occluded, which is precisely the state background mode leaves
+// them in. Registering a notification through
+// `_AXObserverAddNotificationAndCheckRemote` tells them a remote client is
+// watching, so the tree stays live and the AX-first path keeps working.
+
+/// Processes already told that Juno is observing them remotely.
+static REMOTE_AX_OBSERVED_PIDS: OnceLock<std::sync::Mutex<HashMap<i32, bool>>> = OnceLock::new();
+
+/// Observer callback required by `AXObserverCreate`. It never fires: the observer
+/// is deliberately not attached to a run loop source because the registration
+/// itself, not the notifications, is what keeps Chromium's tree awake.
+unsafe extern "C" fn noop_ax_observer_callback(
+    _observer: accessibility_sys::AXObserverRef,
+    _element: AXUIElementRef,
+    _notification: CFStringRef,
+    _refcon: *mut c_void,
+) {
+}
+
+/// Tell `pid` that Juno observes it remotely so it does not suspend AX while
+/// its windows are in the background. Safe to call repeatedly; the work happens
+/// once per process.
+pub(crate) fn ensure_remote_ax_observation(pid: i32) {
+    if pid <= 0 {
+        return;
+    }
+
+    let registry = REMOTE_AX_OBSERVED_PIDS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    {
+        let Ok(seen) = registry.lock() else {
+            // A poisoned lock here is not worth failing an input action over.
+            return;
+        };
+        if seen.contains_key(&pid) {
+            return;
+        }
+    }
+
+    let Some(add_remote) = get_ax_observer_check_remote() else {
+        if let Ok(mut seen) = registry.lock() {
+            // Record the attempt so the symbol lookup is not retried per click.
+            seen.insert(pid, false);
+        }
+        return;
+    };
+
+    let mut observer: accessibility_sys::AXObserverRef = std::ptr::null_mut();
+    let create_err = unsafe {
+        accessibility_sys::AXObserverCreate(pid, noop_ax_observer_callback, &mut observer)
+    };
+    if create_err != 0 || observer.is_null() {
+        debug!(
+            "AXObserverCreate failed (err={}) for PID {}, remote AX observation skipped",
+            create_err, pid
+        );
+        if let Ok(mut seen) = registry.lock() {
+            seen.insert(pid, false);
+        }
+        return;
+    }
+
+    let app_element = AXUIElement::application(pid);
+    let notification = CFString::new("AXFocusedUIElementChanged");
+    let mut is_remote = false;
+    let add_err = unsafe {
+        add_remote(
+            observer as *mut c_void,
+            app_element.as_concrete_TypeRef() as *const c_void,
+            notification.as_concrete_TypeRef() as *const c_void,
+            std::ptr::null_mut(),
+            &mut is_remote as *mut bool,
+        )
+    };
+
+    // The observer is intentionally kept alive for the life of the process: it is
+    // the live registration that keeps the target's AX tree from being suspended.
+    if add_err == 0 {
+        debug!(
+            "Remote AX observation registered for PID {} (remote={})",
+            pid, is_remote
+        );
+    } else {
+        debug!(
+            "Remote AX observation failed (err={}) for PID {}",
+            add_err, pid
+        );
+    }
+
+    if let Ok(mut seen) = registry.lock() {
+        seen.insert(pid, add_err == 0);
+    }
+}
+
+/// Note that the agent is working on `pid`: keep its accessibility tree awake and
+/// remember it as the target for later steps that carry no coordinate.
+///
+/// Deliberately does not touch input focus. Mouse events already reach background
+/// processes on their own, and redirecting focus on every click would pull the
+/// keyboard away from whatever the user is typing into.
+///
+/// A no-op when background mode is off, so turning the setting off leaves every
+/// input path behaving exactly as it did before background mode existed.
+pub(crate) fn note_background_target(pid: i32) {
+    if !background::is_background_mode() {
+        return;
+    }
+    ensure_remote_ax_observation(pid);
+    background::remember_target_pid(pid);
+}
+
+/// The process the user is looking at right now, by NSWorkspace's reckoning.
+///
+/// There is no public way to read the WindowServer's input-focus owner, and the
+/// frontmost application is the practical proxy for it: SLPS focus redirection
+/// does not change it, so it still names the app the user believes they are
+/// typing into.
+pub(crate) fn frontmost_app_pid() -> Option<i32> {
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let workspace_class = class!(NSWorkspace);
+        let shared_workspace: *mut objc::runtime::Object =
+            msg_send![workspace_class, sharedWorkspace];
+        if shared_workspace.is_null() {
+            return None;
+        }
+        let frontmost_app: *mut objc::runtime::Object =
+            msg_send![shared_workspace, frontmostApplication];
+        if frontmost_app.is_null() {
+            return None;
+        }
+        let pid: i32 = msg_send![frontmost_app, processIdentifier];
+        if pid > 0 {
+            Some(pid)
+        } else {
+            None
+        }
+    }
+}
+
+/// Which process should be holding input focus once a keyboard takeover ends.
+///
+/// `None` means leave focus alone. Kept pure and separate from the guard so the
+/// rules can be checked without a WindowServer.
+fn focus_to_restore(
+    captured_pid: Option<i32>,
+    current_frontmost: Option<i32>,
+    target_pid: i32,
+    redirect_succeeded: bool,
+) -> Option<i32> {
+    if !redirect_succeeded {
+        // Focus was never moved, so there is nothing to put back, and claiming
+        // otherwise would hand focus to an app that never had it.
+        return None;
+    }
+    let captured = captured_pid?;
+    match current_frontmost {
+        // Reading the target as frontmost means the redirect moved it there.
+        // Handing focus "back" to the app the agent was typing into is the one
+        // outcome this guard exists to prevent, so fall through to the captured
+        // app instead.
+        Some(now) if now == target_pid => Some(captured),
+        // The user switched apps while the agent was typing. Their keystrokes
+        // belong in the app in front of them now, not in the one they left.
+        Some(now) if now != captured => Some(now),
+        // Frontmost is unreadable; the app we took focus from is the best guess.
+        _ => Some(captured),
+    }
+}
+
+/// Holds the WindowServer's input focus on a background process for as long as
+/// the agent is typing into it, and hands it back on drop.
+///
+/// SLPS focus redirection is not symmetric with ordinary activation: nothing
+/// restores the previous focus owner when the posted events stop, so without
+/// this the user's next keystrokes land in the app the agent was typing into,
+/// silently, with no window raised and no cursor moved. The restore here is
+/// load bearing, not redundant. Drop rather than an explicit call so an early
+/// return, an error or a panic unwind cannot skip it.
+#[must_use = "input focus stays redirected until this guard is dropped"]
+pub(crate) struct BackgroundKeyboardFocus {
+    /// The app the user was in when the takeover began, if focus was moved.
+    captured_pid: Option<i32>,
+    /// The app the agent typed into. Focus must never be left here.
+    target_pid: i32,
+    redirected: bool,
+}
+
+impl BackgroundKeyboardFocus {
+    /// Point input focus at `target_pid` for the life of the guard.
+    ///
+    /// Costs nothing when the target is already the app the user is in: there is
+    /// no focus to move and so none to give back.
+    fn take(target_pid: i32) -> Self {
+        let captured_pid = frontmost_app_pid();
+        if captured_pid == Some(target_pid) {
+            return Self {
+                captured_pid: None,
+                target_pid,
+                redirected: false,
+            };
+        }
+
+        let redirected = activate_without_raise(target_pid);
+        Self {
+            captured_pid,
+            target_pid,
+            redirected,
+        }
+    }
+}
+
+impl Drop for BackgroundKeyboardFocus {
+    fn drop(&mut self) {
+        if let Some(pid) = focus_to_restore(
+            self.captured_pid,
+            frontmost_app_pid(),
+            self.target_pid,
+            self.redirected,
+        ) {
+            debug!("Handing input focus back to PID {}", pid);
+            activate_without_raise(pid);
+        }
+    }
+}
+
+/// Point the WindowServer's input focus at `pid` without raising its windows,
+/// which is what keyboard events posted to a process need in order to be routed
+/// there rather than to the frontmost app.
+///
+/// Hold the returned guard for exactly as long as the keystrokes are being
+/// posted; dropping it gives the user their keyboard back.
+pub(crate) fn prepare_background_keyboard_target(pid: i32) -> BackgroundKeyboardFocus {
+    note_background_target(pid);
+    BackgroundKeyboardFocus::take(pid)
+}
+
+// ── No-warp input ────────────────────────────────────────────────────────────
+//
+// Every function below takes `allow_physical`. When it is false the function
+// returns `Ok(None)` instead of quietly falling back to the HID tap, so the
+// caller can ask the user before Juno takes the pointer out of their hand.
+
 /// Perform a left click at screen coordinates without warping the system cursor.
 ///
 /// Tiered fallback chain:
 /// 1. SLEventPostToPid via SkyLight — stamps WindowServer trust (Chromium compat)
 /// 2. CGEventPostToPid — public macOS API, cursor stays in place
-/// 3. CGEventPost(HID) with cursor save/restore — last resort, minimal warp window
+/// 3. CGEventPost(HID) with cursor save/restore, only when `allow_physical`
 ///
-/// Returns a string label of the method used. Never panics.
+/// `Ok(None)` means the click can only be delivered by tier 3 and consent for it
+/// has not been given. Never panics.
 pub(crate) fn left_click_no_warp(
     x: f64,
     y: f64,
     modifiers: Option<CGEventFlags>,
-) -> Result<&'static str, AutomationError> {
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
     left_click_no_warp_inner(
         x,
         y,
@@ -2097,11 +2554,16 @@ pub(crate) fn left_click_no_warp(
         modifiers,
         1,
         None,
+        allow_physical,
     )
 }
 
 /// Perform a right click at screen coordinates without warping the system cursor.
-pub(crate) fn right_click_no_warp(x: f64, y: f64) -> Result<&'static str, AutomationError> {
+pub(crate) fn right_click_no_warp(
+    x: f64,
+    y: f64,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
     left_click_no_warp_inner(
         x,
         y,
@@ -2111,6 +2573,27 @@ pub(crate) fn right_click_no_warp(x: f64, y: f64) -> Result<&'static str, Automa
         None,
         1,
         None,
+        allow_physical,
+    )
+}
+
+/// Perform a middle click at screen coordinates without warping the system cursor.
+pub(crate) fn middle_click_no_warp(
+    x: f64,
+    y: f64,
+    modifiers: Option<CGEventFlags>,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    left_click_no_warp_inner(
+        x,
+        y,
+        CGEventType::OtherMouseDown,
+        CGEventType::OtherMouseUp,
+        CGMouseButton::Center,
+        modifiers,
+        1,
+        None,
+        allow_physical,
     )
 }
 
@@ -2119,35 +2602,393 @@ pub(crate) fn double_click_no_warp(
     x: f64,
     y: f64,
     modifiers: Option<CGEventFlags>,
-) -> Result<&'static str, AutomationError> {
-    // Resolve the target PID once — get_pid_at_screen_point calls CGWindowListCopyWindowInfo
-    // which is an expensive kernel syscall; no need to repeat it for both click steps.
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    repeated_click_no_warp(x, y, modifiers, 2, allow_physical)
+}
+
+/// Perform a triple click at screen coordinates without warping the system cursor.
+pub(crate) fn triple_click_no_warp(
+    x: f64,
+    y: f64,
+    modifiers: Option<CGEventFlags>,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    repeated_click_no_warp(x, y, modifiers, 3, allow_physical)
+}
+
+/// Shared body for double and triple clicks.
+///
+/// The PID is resolved once and threaded through every step: `get_pid_at_screen_point`
+/// calls `CGWindowListCopyWindowInfo`, an expensive syscall that must not run per click.
+fn repeated_click_no_warp(
+    x: f64,
+    y: f64,
+    modifiers: Option<CGEventFlags>,
+    clicks: i64,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
     let pid = get_pid_at_screen_point(x, y);
-    left_click_no_warp_inner(
+    let mut last = None;
+    for click_state in 1..=clicks {
+        if click_state > 1 {
+            thread::sleep(Duration::from_millis(50));
+        }
+        match left_click_no_warp_inner(
+            x,
+            y,
+            CGEventType::LeftMouseDown,
+            CGEventType::LeftMouseUp,
+            CGMouseButton::Left,
+            modifiers,
+            click_state,
+            pid,
+            allow_physical,
+        )? {
+            Some(outcome) => last = Some(outcome),
+            // Bailing on the first step keeps a half-finished gesture from
+            // reaching the app, which would register as an ordinary click.
+            None => return Ok(None),
+        }
+    }
+    Ok(last)
+}
+
+/// Press the left mouse button at a point without warping the system cursor.
+pub(crate) fn left_mouse_down_no_warp(
+    x: f64,
+    y: f64,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    single_mouse_event_no_warp(
         x,
         y,
         CGEventType::LeftMouseDown,
-        CGEventType::LeftMouseUp,
         CGMouseButton::Left,
-        modifiers,
-        1,
-        pid,
-    )?;
-    thread::sleep(Duration::from_millis(50));
-    // Second click with click-state=2
-    left_click_no_warp_inner(
-        x,
-        y,
-        CGEventType::LeftMouseDown,
-        CGEventType::LeftMouseUp,
-        CGMouseButton::Left,
-        modifiers,
-        2,
-        pid,
+        allow_physical,
+        &|| left_mouse_down(x, y, None),
     )
 }
 
-#[allow(clippy::too_many_arguments)] // PID is passed pre-resolved to avoid double-syscall in double_click_no_warp
+/// Release the left mouse button at a point without warping the system cursor.
+pub(crate) fn left_mouse_up_no_warp(
+    x: f64,
+    y: f64,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    single_mouse_event_no_warp(
+        x,
+        y,
+        CGEventType::LeftMouseUp,
+        CGMouseButton::Left,
+        allow_physical,
+        &|| left_mouse_up(x, y, None),
+    )
+}
+
+/// Post one mouse event to the process under `(x, y)`, or fall back to the
+/// physical tap when that is allowed.
+fn single_mouse_event_no_warp(
+    x: f64,
+    y: f64,
+    event_type: CGEventType,
+    button: CGMouseButton,
+    allow_physical: bool,
+    physical: &dyn Fn() -> Result<(), AutomationError>,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    if let Some(pid) = get_pid_at_screen_point(x, y) {
+        note_background_target(pid);
+        if post_mouse_event_to_pid(pid, event_type, CGPoint::new(x, y), button, None).is_ok() {
+            return Ok(Some(InputOutcome::process_targeted(post_method_label())));
+        }
+        debug!(
+            "Process-targeted mouse event failed for PID {}, physical allowed: {}",
+            pid, allow_physical
+        );
+    }
+
+    if !allow_physical {
+        return Ok(None);
+    }
+
+    // Capture the error before restoring so a failure never strands the user's
+    // cursor where the agent left it.
+    let saved_pos = get_cursor_position().ok();
+    let result = physical();
+    if let Some((sx, sy)) = saved_pos {
+        thread::sleep(Duration::from_millis(MOUSE_EVENT_DELAY_MS));
+        let _ = mouse_move(sx, sy);
+    }
+    result?;
+    Ok(Some(InputOutcome::physical_cursor("HID-with-restore")))
+}
+
+/// Drag from one point to another without warping the system cursor.
+///
+/// The PID is resolved once from the drag's start point and reused for the
+/// whole gesture: a drag that changed target mid-way would be nonsense anyway,
+/// and re-resolving costs a `CGWindowListCopyWindowInfo` per step.
+pub(crate) fn left_click_drag_no_warp(
+    start_x: f64,
+    start_y: f64,
+    end_x: f64,
+    end_y: f64,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    if let Some(pid) = get_pid_at_screen_point(start_x, start_y) {
+        note_background_target(pid);
+        let start = CGPoint::new(start_x, start_y);
+        let end = CGPoint::new(end_x, end_y);
+        let posted = post_mouse_event_to_pid(
+            pid,
+            CGEventType::LeftMouseDown,
+            start,
+            CGMouseButton::Left,
+            None,
+        )
+        .and_then(|_| {
+            thread::sleep(Duration::from_millis(DRAG_HOLD_DELAY_MS));
+            post_mouse_event_to_pid(
+                pid,
+                CGEventType::LeftMouseDragged,
+                end,
+                CGMouseButton::Left,
+                None,
+            )
+        })
+        .and_then(|_| {
+            thread::sleep(Duration::from_millis(DRAG_HOLD_DELAY_MS));
+            post_mouse_event_to_pid(
+                pid,
+                CGEventType::LeftMouseUp,
+                end,
+                CGMouseButton::Left,
+                None,
+            )
+        });
+
+        if posted.is_ok() {
+            return Ok(Some(InputOutcome::process_targeted(post_method_label())));
+        }
+        debug!("Process-targeted drag failed for PID {}", pid);
+    }
+
+    if !allow_physical {
+        return Ok(None);
+    }
+
+    let saved_pos = get_cursor_position().ok();
+    let result = left_click_drag(start_x, start_y, end_x, end_y);
+    if let Some((sx, sy)) = saved_pos {
+        thread::sleep(Duration::from_millis(MOUSE_EVENT_DELAY_MS));
+        let _ = mouse_move(sx, sy);
+    }
+    result?;
+    Ok(Some(InputOutcome::physical_cursor("HID-with-restore")))
+}
+
+/// Scroll at a point without moving the real cursor there first.
+pub(crate) fn scroll_no_warp(
+    x: f64,
+    y: f64,
+    direction: &str,
+    amount: f64,
+    modifiers: Option<CGEventFlags>,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    if let Some(pid) = get_pid_at_screen_point(x, y) {
+        note_background_target(pid);
+        match build_scroll_event(direction, amount, modifiers) {
+            Ok(event) => {
+                set_event_location(&event, CGPoint::new(x, y));
+                post_cg_event_to_pid(pid, &event);
+                return Ok(Some(InputOutcome::process_targeted(post_method_label())));
+            }
+            Err(e) => {
+                // An invalid direction is the caller's bug, not a missing
+                // capability, so it must not silently become a physical scroll.
+                if matches!(e, AutomationError::InvalidArgument(_)) {
+                    return Err(e);
+                }
+                debug!(
+                    "Process-targeted scroll unavailable for PID {}: {:?}",
+                    pid, e
+                );
+            }
+        }
+    }
+
+    if !allow_physical {
+        return Ok(None);
+    }
+
+    let saved_pos = get_cursor_position().ok();
+    let result = scroll_with_modifiers(x, y, direction, amount, modifiers);
+    if let Some((sx, sy)) = saved_pos {
+        thread::sleep(Duration::from_millis(MOUSE_EVENT_DELAY_MS));
+        let _ = mouse_move(sx, sy);
+    }
+    result?;
+    Ok(Some(InputOutcome::physical_cursor("HID-with-restore")))
+}
+
+/// Send a key down/up pair to the app the agent is working on, without changing
+/// which application the user is looking at.
+///
+/// `activate_without_raise` is the difference between clicks working in the
+/// background and the agent working in the background: without the SkyLight PSN
+/// call, `CGEventPostToPid` keyboard events are routed to the frontmost app.
+pub(crate) fn press_key_no_warp(
+    keycode: u16,
+    flags: CGEventFlags,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    key_event_no_warp(keycode, flags, allow_physical, &|| {
+        press_key_with_modifier(keycode, flags)
+    })
+}
+
+/// Hold a key down for `duration_ms` against the background target.
+pub(crate) fn hold_key_no_warp(
+    keycode: u16,
+    flags: CGEventFlags,
+    duration_ms: Option<u64>,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    let Some(pid) = background::target_pid() else {
+        if !allow_physical {
+            return Ok(None);
+        }
+        hold_key(keycode, flags, duration_ms)?;
+        return Ok(Some(InputOutcome::physical_cursor("HID")));
+    };
+
+    let _focus = prepare_background_keyboard_target(pid);
+    post_key_event_with_flags_to_pid(pid, keycode, flags, true)?;
+    if let Some(ms) = duration_ms {
+        thread::sleep(Duration::from_millis(ms));
+        post_key_event_with_flags_to_pid(pid, keycode, flags, false)?;
+    }
+    Ok(Some(InputOutcome::process_targeted(post_method_label())))
+}
+
+/// Release a key against the background target.
+pub(crate) fn release_key_no_warp(
+    keycode: u16,
+    flags: CGEventFlags,
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    let Some(pid) = background::target_pid() else {
+        if !allow_physical {
+            return Ok(None);
+        }
+        let source = get_pooled_event_source().map_err(|e| {
+            AutomationError::PlatformError(format!(
+                "Failed to create event source for key release: {}",
+                e
+            ))
+        })?;
+        let key_up = CGEvent::new_keyboard_event(source, keycode, false).map_err(|_| {
+            AutomationError::PlatformError("Failed to create key up event".to_string())
+        })?;
+        if !flags.is_empty() {
+            key_up.set_flags(flags);
+        }
+        key_up.post(CGEventTapLocation::HID);
+        return Ok(Some(InputOutcome::physical_cursor("HID")));
+    };
+
+    let _focus = prepare_background_keyboard_target(pid);
+    post_key_event_with_flags_to_pid(pid, keycode, flags, false)?;
+    Ok(Some(InputOutcome::process_targeted(post_method_label())))
+}
+
+/// Shared body for the single-shot key paths.
+fn key_event_no_warp(
+    keycode: u16,
+    flags: CGEventFlags,
+    allow_physical: bool,
+    physical: &dyn Fn() -> Result<(), AutomationError>,
+) -> Result<Option<InputOutcome>, AutomationError> {
+    if let Some(pid) = background::target_pid() {
+        let _focus = prepare_background_keyboard_target(pid);
+        let posted = post_key_event_with_flags_to_pid(pid, keycode, flags, true).and_then(|_| {
+            thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
+            post_key_event_with_flags_to_pid(pid, keycode, flags, false)
+        });
+        if posted.is_ok() {
+            return Ok(Some(InputOutcome::process_targeted(post_method_label())));
+        }
+        debug!("Process-targeted key event failed for PID {}", pid);
+    }
+
+    if !allow_physical {
+        return Ok(None);
+    }
+
+    physical()?;
+    Ok(Some(InputOutcome::physical_cursor("HID")))
+}
+
+/// Tell an event where it happened, for events the core-graphics crate builds
+/// without a location (scroll wheel events in particular).
+fn set_event_location(event: &CGEvent, location: CGPoint) {
+    let event_ptr = ForeignType::as_ptr(event) as *mut c_void;
+    unsafe { ffi::CGEventSetLocation(event_ptr, location) };
+}
+
+/// Which process-targeting API is actually in use, for logs and audit payloads.
+fn post_method_label() -> &'static str {
+    if get_sl_event_post_to_pid().is_some() {
+        "SkyLight/SLEventPostToPid"
+    } else {
+        "CGEventPostToPid"
+    }
+}
+
+/// Build a line-scroll CGEvent with the given direction, amount and modifiers.
+fn build_scroll_event(
+    direction: &str,
+    amount: f64,
+    modifiers: Option<CGEventFlags>,
+) -> Result<CGEvent, AutomationError> {
+    // Scale the amount so a scroll of 1 is perceptible, matching the HID path.
+    let scroll_units = (amount * 3.0).round() as i32;
+    let (wheel_count, line_count) = match direction.to_lowercase().as_str() {
+        "up" => (0, -scroll_units),
+        "down" => (0, scroll_units),
+        "left" => (scroll_units, 0),
+        "right" => (-scroll_units, 0),
+        _ => {
+            return Err(AutomationError::InvalidArgument(format!(
+                "Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'.",
+                direction
+            )))
+        }
+    };
+
+    let source = get_pooled_event_source().map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for scrolling".to_string())
+    })?;
+    let scroll_event = CGEvent::new(source)
+        .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
+
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
+    const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll, not pixel scroll
+
+    scroll_event.set_type(CGEventType::ScrollWheel);
+    if let Some(flags) = modifiers {
+        scroll_event.set_flags(flags);
+    }
+    scroll_event.set_integer_value_field(120, SCROLL_WHEEL_EVENT_LINE_SCROLL);
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_1, line_count as i64);
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_2, wheel_count as i64);
+
+    Ok(scroll_event)
+}
+
+#[allow(clippy::too_many_arguments)] // PID is passed pre-resolved to avoid a syscall per click step
 fn left_click_no_warp_inner(
     x: f64,
     y: f64,
@@ -2157,7 +2998,8 @@ fn left_click_no_warp_inner(
     modifiers: Option<CGEventFlags>,
     click_state: i64,
     pid_override: Option<i32>,
-) -> Result<&'static str, AutomationError> {
+    allow_physical: bool,
+) -> Result<Option<InputOutcome>, AutomationError> {
     let point = CGPoint::new(x, y);
 
     // Use pre-resolved PID when provided (e.g. from double_click_no_warp) to avoid
@@ -2167,6 +3009,7 @@ fn left_click_no_warp_inner(
             "No-warp click: targeting PID {} at ({:.0}, {:.0})",
             pid, x, y
         );
+        note_background_target(pid);
 
         // Chromium primer: a decoy mouse-down/up at (-1, -1) advances Chromium's
         // internal user-activation gate without hitting any real UI element.
@@ -2233,30 +3076,33 @@ fn left_click_no_warp_inner(
         };
 
         if post_pair().is_ok() {
-            let method = if get_sl_event_post_to_pid().is_some() {
-                "SkyLight/SLEventPostToPid"
-            } else {
-                "CGEventPostToPid"
-            };
+            let method = post_method_label();
             debug!("No-warp click via {} to PID {}", method, pid);
-            return Ok(method);
+            return Ok(Some(InputOutcome::process_targeted(method)));
         }
 
         debug!(
-            "Process-targeted click failed for PID {}, falling back to HID",
-            pid
+            "Process-targeted click failed for PID {}, physical allowed: {}",
+            pid, allow_physical
         );
     } else {
-        debug!(
-            "No-warp click: no window PID found at ({:.0}, {:.0}), using HID",
-            x, y
-        );
+        debug!("No-warp click: no window PID found at ({:.0}, {:.0})", x, y);
+    }
+
+    if !allow_physical {
+        return Ok(None);
     }
 
     // Last resort: HID with cursor save/restore to minimize warp window.
     // Capture the error BEFORE restoring — ?-operator would skip restoration on failure.
     let saved_pos = get_cursor_position().ok();
-    let click_result = left_click(x, y, modifiers);
+    // Match the button that was requested: falling through to left_click here
+    // would silently turn a right click into a left one.
+    let click_result = match button {
+        CGMouseButton::Right => right_click(x, y),
+        CGMouseButton::Center => middle_click(x, y),
+        _ => left_click(x, y, modifiers),
+    };
     if let Some((sx, sy)) = saved_pos {
         // Wait the full event-processing window before warping back, matching the
         // delay used for process-targeted clicks (MOUSE_EVENT_DELAY_MS).
@@ -2264,5 +3110,81 @@ fn left_click_no_warp_inner(
         let _ = mouse_move(sx, sy);
     }
     click_result?;
-    Ok("HID-with-restore")
+    Ok(Some(InputOutcome::physical_cursor("HID-with-restore")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::focus_to_restore;
+
+    const USER_APP: i32 = 101;
+    const AGENT_TARGET: i32 = 202;
+    const SOMEWHERE_ELSE: i32 = 303;
+
+    #[test]
+    fn a_failed_redirect_restores_nothing() {
+        // Focus never moved, so handing it to anyone would be an unprompted move.
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), Some(USER_APP), AGENT_TARGET, false),
+            None
+        );
+    }
+
+    #[test]
+    fn nothing_is_restored_when_the_previous_owner_was_unknown() {
+        assert_eq!(
+            focus_to_restore(None, Some(USER_APP), AGENT_TARGET, true),
+            None
+        );
+    }
+
+    #[test]
+    fn focus_goes_back_to_the_app_it_was_taken_from() {
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), Some(USER_APP), AGENT_TARGET, true),
+            Some(USER_APP)
+        );
+    }
+
+    #[test]
+    fn a_user_who_switched_apps_keeps_typing_where_they_are_looking() {
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), Some(SOMEWHERE_ELSE), AGENT_TARGET, true),
+            Some(SOMEWHERE_ELSE)
+        );
+    }
+
+    #[test]
+    fn an_unreadable_frontmost_app_falls_back_to_the_captured_one() {
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), None, AGENT_TARGET, true),
+            Some(USER_APP)
+        );
+    }
+
+    #[test]
+    fn the_agents_target_is_never_left_holding_focus() {
+        // Including the case the old test missed: the redirect itself moved the
+        // frontmost app to the agent's target, so "hand it back to whoever is in
+        // front now" would hand it to the agent.
+        for frontmost in [
+            Some(USER_APP),
+            Some(SOMEWHERE_ELSE),
+            Some(AGENT_TARGET),
+            None,
+        ] {
+            assert_ne!(
+                focus_to_restore(Some(USER_APP), frontmost, AGENT_TARGET, true),
+                Some(AGENT_TARGET)
+            );
+        }
+    }
+
+    #[test]
+    fn a_redirect_that_moved_the_frontmost_app_still_returns_the_user() {
+        assert_eq!(
+            focus_to_restore(Some(USER_APP), Some(AGENT_TARGET), AGENT_TARGET, true),
+            Some(USER_APP)
+        );
+    }
 }

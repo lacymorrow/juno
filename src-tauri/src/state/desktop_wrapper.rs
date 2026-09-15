@@ -1,5 +1,9 @@
-use computer_use_ai_sdk::Desktop;
+use computer_use_ai_sdk::{Desktop, InputOutcome};
 use std::sync::Arc;
+
+/// Shown whenever the accessibility engine never came up. Kept in one place so
+/// the guidance the user reads is identical from every entry point.
+const DESKTOP_UNAVAILABLE: &str = "Desktop automation is not available. Please grant accessibility permissions and restart the app.";
 
 #[derive(Clone)]
 pub struct DesktopWrapper {
@@ -126,23 +130,52 @@ impl DesktopWrapper {
     }
 
     /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
+    ///
+    /// Every `*_no_warp` method here returns `Ok(None)` when the step can only be
+    /// done by driving the physical cursor and `allow_physical` said not to.
     pub fn left_click_no_warp(
         &self,
         x: f64,
         y: f64,
         modifiers: Option<&str>,
-    ) -> Result<&'static str, String> {
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
         match &self.desktop {
-            Some(desktop) => desktop.left_click_no_warp(x, y, modifiers).map_err(|e| e.to_string()),
-            None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
+            Some(desktop) => desktop
+                .left_click_no_warp(x, y, modifiers, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
         }
     }
 
     /// Right-click without warping the cursor.
-    pub fn right_click_no_warp(&self, x: f64, y: f64) -> Result<&'static str, String> {
+    pub fn right_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
         match &self.desktop {
-            Some(desktop) => desktop.right_click_no_warp(x, y).map_err(|e| e.to_string()),
-            None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
+            Some(desktop) => desktop
+                .right_click_no_warp(x, y, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Middle-click without warping the cursor.
+    pub fn middle_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .middle_click_no_warp(x, y, modifiers, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
         }
     }
 
@@ -152,10 +185,152 @@ impl DesktopWrapper {
         x: f64,
         y: f64,
         modifiers: Option<&str>,
-    ) -> Result<&'static str, String> {
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
         match &self.desktop {
-            Some(desktop) => desktop.double_click_no_warp(x, y, modifiers).map_err(|e| e.to_string()),
-            None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
+            Some(desktop) => desktop
+                .double_click_no_warp(x, y, modifiers, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Triple-click without warping the cursor.
+    pub fn triple_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .triple_click_no_warp(x, y, modifiers, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Press the left button without warping the cursor.
+    pub fn left_mouse_down_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .left_mouse_down_no_warp(x, y, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Release the left button without warping the cursor.
+    pub fn left_mouse_up_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .left_mouse_up_no_warp(x, y, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Drag without warping the cursor.
+    pub fn left_click_drag_no_warp(
+        &self,
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .left_click_drag_no_warp(start_x, start_y, end_x, end_y, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Scroll at a point without moving the real cursor there first.
+    pub fn scroll_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        direction: &str,
+        amount: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .scroll_no_warp(x, y, direction, amount, modifiers, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Press a key against the process the agent is working on.
+    pub fn press_key_no_warp(
+        &self,
+        key_name: &str,
+        modifier: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .press_key_no_warp(key_name, modifier, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Hold a key against the background target.
+    pub fn hold_key_no_warp(
+        &self,
+        key: &str,
+        duration_ms: Option<u64>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .hold_key_no_warp(key, duration_ms, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Type text into the process the agent is working on.
+    pub fn type_text_no_warp(
+        &self,
+        text: &str,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .type_text_no_warp(text, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
+        }
+    }
+
+    /// Release a key against the background target.
+    pub fn release_key_no_warp(
+        &self,
+        key: &str,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, String> {
+        match &self.desktop {
+            Some(desktop) => desktop
+                .release_key_no_warp(key, allow_physical)
+                .map_err(|e| e.to_string()),
+            None => Err(DESKTOP_UNAVAILABLE.to_string()),
         }
     }
 

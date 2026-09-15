@@ -3,10 +3,10 @@
 use crate::commands::debug_utils::{
     log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
 };
+use crate::constants::events;
 use crate::constants::mouse::movement;
-use crate::constants::{events, timeouts};
 use crate::state::AppState;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tracing::{error, info};
 // Import constants to replace magic numbers
 
@@ -98,22 +98,6 @@ fn create_click_visualization(app: &AppHandle, x: f64, y: f64, color: &str) -> R
     // Send an event to the frontend to display a visual indicator
     app.emit(events::ui::CLICK_VISUALIZATION, (x, y, color))
         .map_err(|e| format!("Failed to emit click visualization event: {}", e))?;
-    Ok(())
-}
-
-// Helper function to ensure the main window has focus for mouse operations
-async fn ensure_main_window_focus(app: &AppHandle) -> Result<(), String> {
-    if let Some(main_window) = app.get_webview_window("main") {
-        if let Err(e) = main_window.set_focus() {
-            error!("Failed to focus main window before mouse operation: {}", e);
-            // Don't fail the operation, just log the warning
-        }
-        // Small delay to ensure focus is established
-        tokio::time::sleep(tokio::time::Duration::from_millis(
-            timeouts::MOUSE_MICRO_DELAY_MS,
-        ))
-        .await;
-    }
     Ok(())
 }
 
@@ -380,9 +364,6 @@ pub(crate) async fn left_click(
         x, y, modifier
     );
 
-    // Ensure main window has focus before performing mouse action
-    ensure_main_window_focus(&app).await?;
-
     create_click_visualization(&app, x, y, "#FF0000")?; // Red for left click
 
     match state.desktop.left_click(x, y, modifier.as_deref()) {
@@ -597,9 +578,6 @@ pub(crate) async fn middle_click(
         x, y, modifier
     );
 
-    // Ensure main window has focus before performing mouse action
-    ensure_main_window_focus(&app).await?;
-
     create_click_visualization(&app, x, y, "#FFFF00")?; // Yellow for middle click
 
     match state.desktop.middle_click(x, y, modifier.as_deref()) {
@@ -658,9 +636,6 @@ pub(crate) async fn double_click(
         x, y, modifier
     );
 
-    // Ensure main window has focus before performing mouse action
-    ensure_main_window_focus(&app).await?;
-
     create_click_visualization(&app, x, y, "#FFA500")?; // Orange for double click
 
     match state.desktop.double_click(x, y, modifier.as_deref()) {
@@ -718,9 +693,6 @@ pub(crate) async fn triple_click(
         "Executing triple_click at screen coordinates ({}, {}) Modifier: {:?}",
         x, y, modifier
     );
-
-    // Ensure main window has focus before performing mouse action
-    ensure_main_window_focus(&app).await?;
 
     create_click_visualization(&app, x, y, "#800080")?; // Purple for triple click
 

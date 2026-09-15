@@ -19,6 +19,9 @@ pub mod store_keys {
     pub const ONBOARDING: &str = "onboarding";
     pub const AUTOSTART_ENABLED: &str = "autostart_enabled";
     pub const ADVANCED_SETTINGS_ENABLED: &str = "advanced_settings_enabled";
+    pub const BACKGROUND_MODE: &str = "background_mode";
+    pub const MOUSE_CONTROL: &str = "mouse_control";
+    pub const DOCK_ICON_VISIBLE: &str = "dock_icon_visible";
     pub const CLI: &str = "cli";
     pub const VOICE_TRANSCRIPTION: &str = "voice_transcription";
     pub const TRIGGERS: &str = "triggers";
@@ -142,6 +145,24 @@ pub mod defaults {
     pub const ONBOARDING_COMPLETED: bool = false;
     pub const BIG_CURSOR_ENABLED: bool = true;
     pub const BIG_CURSOR_SCALE: f32 = 3.0;
+    /// The agent works without taking the cursor or the frontmost app from the
+    /// user. On by default: a person can keep typing while Juno works.
+    pub const BACKGROUND_MODE: bool = true;
+    /// Ask before driving the physical mouse; the other value is "always".
+    pub const MOUSE_CONTROL: &str = "ask";
+    pub const MOUSE_CONTROL_ALWAYS: &str = "always";
+    /// Juno starts as a normal Dock app; the menu-bar-only mode is opt-in.
+    pub const DOCK_ICON_VISIBLE: bool = true;
+
+    pub fn background_mode() -> bool {
+        BACKGROUND_MODE
+    }
+    pub fn mouse_control() -> String {
+        MOUSE_CONTROL.to_string()
+    }
+    pub fn dock_icon_visible() -> bool {
+        DOCK_ICON_VISIBLE
+    }
 
     pub fn advanced_settings_enabled() -> bool {
         ADVANCED_SETTINGS_ENABLED

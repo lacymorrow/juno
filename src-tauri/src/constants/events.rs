@@ -215,6 +215,29 @@ pub mod always_listening {
 }
 
 /// Permission events
+/// Background operation: when Juno must drive the physical mouse or keyboard,
+/// it asks first, says while it is happening, and offers to stop asking.
+/// NOTE: no curly braces in doc comments inside these modules. The TS constant
+/// generator matches a module body with `[^}]+`, so a brace in a comment cuts
+/// the module short and silently drops the constants after it.
+pub mod input_control {
+    /// Juno needs the physical cursor for a step it cannot do in the
+    /// background. Payload fields: request_id, tool, reason, target_app.
+    pub const REQUEST: &str = "input-control-request";
+    /// Juno is, or is no longer, driving the physical cursor.
+    /// Payload fields: active, tool, target_app.
+    pub const STATE: &str = "input-control-state";
+    /// After a granted takeover finishes, offer to stop asking every time.
+    /// No payload.
+    pub const OFFER: &str = "input-control-offer";
+}
+
+/// The user tried to open Juno while it was already running (menu-bar mode).
+/// Payload field: count.
+pub mod app_lifecycle {
+    pub const REOPEN_ATTEMPT: &str = "app-reopen-attempt";
+}
+
 pub mod permissions {
     pub const CHANGED: &str = "permissions-changed";
     pub const RESTART_REQUIRED: &str = "permissions-restart-required";

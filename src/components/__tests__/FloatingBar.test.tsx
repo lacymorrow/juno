@@ -272,6 +272,60 @@ describe("pickLayout", () => {
     expect(pickLayout({ ...base, state: "default", paneOpen: true })).toBe("full");
     expect(pickLayout({ ...base, state: "default", rosterVisible: true })).toBe("full");
   });
+
+  it("goes full while Juno holds the pointer, so the bar can say so in words", () => {
+    expect(pickLayout({ ...base, state: "default", driving: true })).toBe("full");
+    expect(pickLayout({ ...base, state: "default", hovered: true, driving: true })).toBe(
+      "full",
+    );
+  });
+});
+
+describe("FloatingBar while Juno is driving", () => {
+  const driving = (active: boolean, targetApp?: string) =>
+    fire("input-control-state", { active, tool: "computer", target_app: targetApp });
+
+  it("says which app Juno has the pointer in", async () => {
+    await renderBar();
+    await driving(true, "Safari");
+
+    expect(bar()).toHaveAttribute("data-driving", "");
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent(
+      "Juno is using the mouse in Safari",
+    );
+    expect(screen.getByTestId("floating-bar-driving-dot")).toBeInTheDocument();
+  });
+
+  it("still says it plainly when no app was named", async () => {
+    await renderBar();
+    await driving(true);
+
+    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent(
+      "Juno is using the mouse",
+    );
+  });
+
+  it("clears the moment Juno gives the pointer back", async () => {
+    await renderBar();
+    await driving(true, "Safari");
+    await driving(false);
+
+    expect(bar()).not.toHaveAttribute("data-driving");
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+    expect(screen.queryByTestId("floating-bar-driving-dot")).not.toBeInTheDocument();
+  });
+
+  it("keeps the text input out of the way while the pointer is taken", async () => {
+    await renderBar();
+    await openInput();
+    await driving(true, "Safari");
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent(
+      "Juno is using the mouse in Safari",
+    );
+  });
 });
 
 describe("FloatingBar", () => {

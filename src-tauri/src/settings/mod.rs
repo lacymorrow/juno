@@ -97,6 +97,24 @@ pub struct AgentSettings {
     /// Companion/observe-only mode — agent sees screen but never takes actions
     #[serde(default)]
     pub companion_mode: bool,
+    /// Work in the background: prefer accessibility actions and events posted
+    /// straight to the target process, so the agent never takes the real
+    /// cursor or the frontmost app away from the user. Falls back to driving
+    /// the physical cursor only with the user's consent (`mouse_control`).
+    #[serde(default = "defaults::background_mode")]
+    pub background_mode: bool,
+    /// Permission to drive the physical mouse and keyboard when nothing else
+    /// can do the job: "ask" (default, one prompt per run) or "always".
+    #[serde(default = "defaults::mouse_control")]
+    pub mouse_control: String,
+    /// The user dismissed the "let Juno take the mouse without asking" offer
+    /// with "don't show this again"; keep asking per run, stop offering.
+    #[serde(default)]
+    pub mouse_control_prompt_dismissed: bool,
+    /// Show Juno in the Dock and the app switcher. Off makes it a menu-bar
+    /// (accessory) app that never becomes the frontmost application.
+    #[serde(default = "defaults::dock_icon_visible")]
+    pub dock_icon_visible: bool,
 }
 
 /// AI provider configurations
@@ -371,6 +389,10 @@ impl Default for AgentSettings {
             big_cursor_enabled: defaults::BIG_CURSOR_ENABLED,
             big_cursor_scale: defaults::BIG_CURSOR_SCALE,
             companion_mode: false,
+            background_mode: defaults::BACKGROUND_MODE,
+            mouse_control: defaults::MOUSE_CONTROL.to_string(),
+            mouse_control_prompt_dismissed: false,
+            dock_icon_visible: defaults::DOCK_ICON_VISIBLE,
         }
     }
 }

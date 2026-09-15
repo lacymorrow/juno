@@ -162,7 +162,10 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
     // `show_prompt = true` from this constructor, so no native Accessibility
     // alert and no Settings window can come from startup. Onboarding owns the
     // prompt; startup only learns whether the engine is usable.
-    let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, false);
+    // Background-friendly engine: `use_background_apps = true` so menu-bar and
+    // background-only apps are visible to the agent, `activate_app = false` so
+    // reading an app's accessibility tree never pulls it in front of the user.
+    let desktop_instance_result = Desktop::new_with_auto_redirect(true, false, false);
     let result = match desktop_instance_result {
         Ok(instance) => {
             info!("Desktop Automation Engine initialized successfully with auto-redirect disabled");

@@ -23,7 +23,7 @@ pub(crate) async fn capture_element_screenshot_command(
 ) -> Result<String, String> {
     println!("[DEV_TOOL] Capturing focused element screenshot using NSWorkspace method...");
 
-    let focused_element = match get_focused_element_ns_workspace(false, true) {
+    let focused_element = match get_focused_element_ns_workspace(true, false) {
         Ok(el) => el,
         Err(e) => {
             let err_msg = format!("Failed to get focused element (NSWorkspace): {}", e);
@@ -112,7 +112,7 @@ pub(crate) async fn get_focused_element_info(
     info!("Executing get_focused_element_info");
 
     #[cfg(target_os = "macos")]
-    let result = get_focused_element_ns_workspace(false, true);
+    let result = get_focused_element_ns_workspace(true, false);
 
     #[cfg(not(target_os = "macos"))]
     let result: Result<computer_use_ai_sdk::UIElement, AutomationError> =

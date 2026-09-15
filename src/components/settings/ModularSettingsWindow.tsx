@@ -144,7 +144,8 @@ export const settingsCategories: MacCategory[] = [
     tile: "bg-[#48484A]",
     description: "System settings and reset options",
     advanced: true,
-    keywords: "reset developer logs debug data storage",
+    keywords:
+      "reset developer logs debug data storage background dock menu bar mouse control",
   },
 ];
 
@@ -204,6 +205,9 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   // Network
   { sectionId: "network", rowId: "mcp-json-config", label: "Server Configuration (JSON)", keywords: "mcp json server configuration endpoints" },
   // Advanced
+  { sectionId: "advanced", rowId: "background-mode", label: "Work in the background", keywords: "background quiet no interruption cursor focus other apps" },
+  { sectionId: "advanced", rowId: "mouse-control", label: "Mouse control", keywords: "mouse pointer cursor permission ask always takeover control" },
+  { sectionId: "advanced", rowId: "dock-icon-visible", label: "Show in Dock", keywords: "dock icon menu bar menubar hide accessory app switcher missing disappeared" },
   { sectionId: "advanced", rowId: "debug-mode", label: "Debug Mode", keywords: "debug logs verbose developer" },
   { sectionId: "advanced", rowId: "performance-monitoring", label: "Performance Monitoring", keywords: "performance monitoring metrics profiling" },
   { sectionId: "advanced", rowId: "reset-all-settings", label: "Reset all settings", keywords: "reset factory defaults erase wipe" },
