@@ -117,6 +117,18 @@ pub mod permissions {
     pub const CANCEL_AUTO_GRANT: &str = "cancel_auto_grant";
 }
 
+/// Background operation and the consent it needs
+pub mod input_control {
+    pub const RESPOND_TO_REQUEST: &str = "respond_to_input_control";
+    pub const GET_MOUSE_CONTROL: &str = "get_mouse_control";
+    pub const SET_MOUSE_CONTROL: &str = "set_mouse_control";
+    pub const DISMISS_PROMPT: &str = "dismiss_mouse_control_prompt";
+    pub const GET_BACKGROUND_MODE: &str = "get_background_mode";
+    pub const SET_BACKGROUND_MODE: &str = "set_background_mode";
+    pub const GET_DOCK_ICON_VISIBLE: &str = "get_dock_icon_visible";
+    pub const SET_DOCK_ICON_VISIBLE: &str = "set_dock_icon_visible";
+}
+
 /// Utility command names
 pub mod utils {
     pub const WAIT: &str = "wait";
