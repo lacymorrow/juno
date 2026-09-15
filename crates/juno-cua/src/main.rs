@@ -230,7 +230,8 @@ enum Commands {
 }
 
 fn init_desktop() -> Result<Desktop> {
-    Desktop::new(false, true)
+    // Background-friendly: see menu-bar apps, never activate the app being read.
+    Desktop::new(true, false)
         .context("Failed to initialize Desktop engine. Check accessibility permissions.")
 }
 

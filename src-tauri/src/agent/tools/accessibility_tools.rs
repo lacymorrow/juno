@@ -50,7 +50,8 @@ impl AccessibilityTools {
 
         if desktop_guard.is_none() {
             debug!("Initializing Desktop accessibility system");
-            match Desktop::new_with_auto_redirect(true, true, false) {
+            // Reading the tree must not activate the app being read.
+            match Desktop::new_with_auto_redirect(true, false, false) {
                 Ok(desktop) => {
                     *desktop_guard = Some(desktop);
                     info!("Desktop accessibility system initialized successfully");

@@ -1,4 +1,5 @@
 use crate::element::UIElement;
+use crate::input_tier::InputOutcome;
 use crate::{AutomationError, ElementTreeNode, Selector};
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -108,21 +109,52 @@ pub trait AccessibilityEngine: Send + Sync + Any {
     fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError>;
 
     /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
+    ///
+    /// `allow_physical` gates the last tier, the one that moves the pointer the
+    /// user is holding. With it false, `Ok(None)` means "this step can only be
+    /// done with the physical cursor", which is the caller's cue to ask.
     /// Default impl falls back to `left_click` for platforms that don't support process-targeted events.
     fn left_click_no_warp(
         &self,
         x: f64,
         y: f64,
         modifiers: Option<&str>,
-    ) -> Result<&'static str, AutomationError> {
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
         self.left_click(x, y, modifiers)?;
-        Ok("HID-default")
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
     }
 
     /// Right-click without warping the cursor. Default falls back to `right_click`.
-    fn right_click_no_warp(&self, x: f64, y: f64) -> Result<&'static str, AutomationError> {
+    fn right_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
         self.right_click(x, y, None)?;
-        Ok("HID-default")
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Middle-click without warping the cursor. Default falls back to `middle_click`.
+    fn middle_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.middle_click(x, y, modifiers)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
     }
 
     /// Double-click without warping the cursor. Default falls back to `double_click`.
@@ -131,9 +163,146 @@ pub trait AccessibilityEngine: Send + Sync + Any {
         x: f64,
         y: f64,
         modifiers: Option<&str>,
-    ) -> Result<&'static str, AutomationError> {
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
         self.double_click(x, y, modifiers)?;
-        Ok("HID-default")
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Triple-click without warping the cursor. Default falls back to `triple_click`.
+    fn triple_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.triple_click(x, y, modifiers)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Press the left button without warping the cursor.
+    fn left_mouse_down_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.left_mouse_down(x, y)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Release the left button without warping the cursor.
+    fn left_mouse_up_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.left_mouse_up(x, y)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Drag without warping the cursor. Default falls back to `left_click_drag`.
+    fn left_click_drag_no_warp(
+        &self,
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.left_click_drag(start_x, start_y, end_x, end_y)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Scroll at a point without moving the real cursor there first.
+    fn scroll_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        direction: &str,
+        amount: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        let _ = modifiers;
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.scroll_at_position(x, y, direction, amount)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Press a key against the process the agent is working on, without changing
+    /// which application is frontmost.
+    fn press_key_no_warp(
+        &self,
+        key_name: &str,
+        modifier: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.press_key(key_name, modifier)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Hold a key against the background target.
+    fn hold_key_no_warp(
+        &self,
+        key: &str,
+        duration_ms: Option<u64>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.hold_key(key, duration_ms)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Type text into the process the agent is working on, rather than into
+    /// whatever application happens to be frontmost.
+    fn type_text_no_warp(
+        &self,
+        text: &str,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.type_text(text)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
+    }
+
+    /// Release a key against the background target.
+    fn release_key_no_warp(
+        &self,
+        key: &str,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        if !allow_physical {
+            return Ok(None);
+        }
+        self.release_key(key)?;
+        Ok(Some(InputOutcome::physical_cursor("HID-default")))
     }
 
     /// Post a mouse event directly to a process by PID without moving the cursor.

@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Import necessary external crates and standard library items
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Listener, Manager};
 use tauri_plugin_global_shortcut::Shortcut; // Global shortcuts
 use tracing::{error, info, warn};
 
@@ -36,6 +36,7 @@ pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription
 pub mod export; // A response as a document: copy, share sheet, Save as Markdown/HTML
+pub mod input_control; // Background operation and consent for taking the physical cursor
 pub mod integration; // Application integration patterns, component coordination, and event listeners
 pub mod menu; // Menu management for app and tray menus
 pub mod persistent_memory; // Cross-session persistent user memory
@@ -567,6 +568,13 @@ pub fn run() {
             deny_tool_execution,
             get_pending_tool_approvals,
             clear_pending_tool_approvals,
+            // Background operation and physical-cursor consent
+            input_control::commands::respond_to_input_control,
+            input_control::commands::get_mouse_control,
+            input_control::commands::set_mouse_control,
+            input_control::commands::dismiss_mouse_control_prompt,
+            input_control::commands::get_background_mode,
+            input_control::commands::set_background_mode,
             // UI Token Selection Commands
             initialize_ui_token_selection,
             test_ui_token_selection,
@@ -872,6 +880,21 @@ pub fn run() {
 
             // Manage the SettingsManager state
             app.manage(settings_manager);
+
+            // --- Background mode ---
+            // The persisted setting is the source of truth. Mirror it into the
+            // input layer now, and again whenever agent settings change, so the
+            // click path can read it without an async settings load.
+            let background_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::input_control::sync_background_mode(&background_app_handle).await;
+            });
+            app_handle.listen_any(
+                crate::constants::settings::events::AGENT_SETTINGS_CHANGED,
+                |_| {
+                    crate::input_control::invalidate_background_mode_cache();
+                },
+            );
 
             // --- Initialize Whisper Download State ---
             app.manage(std::sync::Arc::new(std::sync::Mutex::new(

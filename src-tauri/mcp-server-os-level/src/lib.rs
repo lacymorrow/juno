@@ -16,8 +16,10 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 // Make element module public
+pub mod background;
 pub mod element;
 mod errors;
+pub mod input_tier;
 mod locator;
 pub mod platforms;
 mod selector;
@@ -28,6 +30,7 @@ mod tests;
 // We still re-export it for convenience
 pub use element::{ElementTreeNode, UIElement, UIElementAttributes};
 pub use errors::AutomationError;
+pub use input_tier::{InputOutcome, InputTier};
 pub use locator::Locator;
 pub use selector::Selector;
 
@@ -243,19 +246,40 @@ impl Desktop {
     }
 
     /// Click without warping the system cursor — tiered: SkyLight → CGEventPostToPid → HID-restore.
-    /// Returns the name of the method that succeeded.
+    ///
+    /// `allow_physical` gates the last tier. `Ok(None)` means the step needs the
+    /// physical cursor and consent for it has not been given.
     pub fn left_click_no_warp(
         &self,
         x: f64,
         y: f64,
         modifiers: Option<&str>,
-    ) -> Result<&'static str, AutomationError> {
-        self.engine.left_click_no_warp(x, y, modifiers)
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine
+            .left_click_no_warp(x, y, modifiers, allow_physical)
     }
 
     /// Right-click without warping the cursor.
-    pub fn right_click_no_warp(&self, x: f64, y: f64) -> Result<&'static str, AutomationError> {
-        self.engine.right_click_no_warp(x, y)
+    pub fn right_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine.right_click_no_warp(x, y, allow_physical)
+    }
+
+    /// Middle-click without warping the cursor.
+    pub fn middle_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine
+            .middle_click_no_warp(x, y, modifiers, allow_physical)
     }
 
     /// Double-click without warping the cursor.
@@ -264,8 +288,109 @@ impl Desktop {
         x: f64,
         y: f64,
         modifiers: Option<&str>,
-    ) -> Result<&'static str, AutomationError> {
-        self.engine.double_click_no_warp(x, y, modifiers)
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine
+            .double_click_no_warp(x, y, modifiers, allow_physical)
+    }
+
+    /// Triple-click without warping the cursor.
+    pub fn triple_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine
+            .triple_click_no_warp(x, y, modifiers, allow_physical)
+    }
+
+    /// Press the left button without warping the cursor.
+    pub fn left_mouse_down_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine.left_mouse_down_no_warp(x, y, allow_physical)
+    }
+
+    /// Release the left button without warping the cursor.
+    pub fn left_mouse_up_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine.left_mouse_up_no_warp(x, y, allow_physical)
+    }
+
+    /// Drag without warping the cursor.
+    pub fn left_click_drag_no_warp(
+        &self,
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine
+            .left_click_drag_no_warp(start_x, start_y, end_x, end_y, allow_physical)
+    }
+
+    /// Scroll at a point without moving the real cursor there first.
+    pub fn scroll_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        direction: &str,
+        amount: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine
+            .scroll_no_warp(x, y, direction, amount, modifiers, allow_physical)
+    }
+
+    /// Press a key against the process the agent is working on.
+    pub fn press_key_no_warp(
+        &self,
+        key_name: &str,
+        modifier: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine
+            .press_key_no_warp(key_name, modifier, allow_physical)
+    }
+
+    /// Hold a key against the background target.
+    pub fn hold_key_no_warp(
+        &self,
+        key: &str,
+        duration_ms: Option<u64>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine
+            .hold_key_no_warp(key, duration_ms, allow_physical)
+    }
+
+    /// Release a key against the background target.
+    pub fn release_key_no_warp(
+        &self,
+        key: &str,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine.release_key_no_warp(key, allow_physical)
+    }
+
+    /// Type text into the process the agent is working on.
+    pub fn type_text_no_warp(
+        &self,
+        text: &str,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        self.engine.type_text_no_warp(text, allow_physical)
     }
 
     /// Post a mouse event directly to a specific process by PID without moving the cursor.

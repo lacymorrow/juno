@@ -5,6 +5,7 @@ use super::utils::{
     element_contains_text, get_running_application_pids, map_generic_role_to_macos_roles,
 };
 use super::wrappers::ThreadSafeAXUIElement;
+use crate::input_tier::InputOutcome;
 use crate::platforms::tree_search::{
     ElementFinderWithWindows, ElementsCollectorWithWindows, TreeWalkerWithWindows,
 };
@@ -87,7 +88,10 @@ impl MacOSEngine {
         &self,
         app_name: Option<&str>,
     ) -> Result<(), AutomationError> {
-        if !self.activate_app {
+        // Activating the target app just to read its tree is exactly the kind of
+        // focus theft background mode exists to prevent; the AX APIs read fine
+        // without it.
+        if !self.activate_app || crate::background::is_background_mode() {
             return Ok(());
         }
 
@@ -608,6 +612,52 @@ fn parse_modifiers(modifier_str: Option<&str>) -> CGEventFlags {
         // Add other modifiers like CAPSLOCK if needed (e.g., CGEventFlags::CGEventFlagAlphaShift)
     }
     flags
+}
+
+/// Parse a modifier string, collapsing "no modifiers" to `None` so callers do
+/// not have to distinguish an empty flag set from an absent one.
+fn optional_flags(modifiers: Option<&str>) -> Option<CGEventFlags> {
+    let flags = parse_modifiers(modifiers);
+    if flags.is_empty() {
+        None
+    } else {
+        Some(flags)
+    }
+}
+
+/// Split a key spec such as "cmd+shift+a" into its keycode and modifier flags.
+/// A bare key name yields empty flags.
+fn split_key_with_modifiers(key: &str) -> Result<(u16, CGEventFlags), AutomationError> {
+    let mut actual_key_name = key;
+    let mut flags = CGEventFlags::empty();
+
+    if key.contains('+') {
+        let parts: Vec<&str> = key.split('+').collect();
+        actual_key_name = parts.last().unwrap_or(&key);
+        for part in &parts[..parts.len() - 1] {
+            let modifier_flag = match part.to_lowercase().as_str() {
+                "command" | "cmd" => CGEventFlags::CGEventFlagCommand,
+                "shift" => CGEventFlags::CGEventFlagShift,
+                "option" | "alt" => CGEventFlags::CGEventFlagAlternate,
+                "control" | "ctrl" => CGEventFlags::CGEventFlagControl,
+                "fn" => CGEventFlags::CGEventFlagSecondaryFn,
+                _ => {
+                    return Err(AutomationError::InvalidArgument(format!(
+                        "Unknown modifier: {}. Use standard modifier names.",
+                        part
+                    )))
+                }
+            };
+            flags |= modifier_flag;
+        }
+    }
+
+    let key_code = match key_name_to_keycode(actual_key_name) {
+        Some(code) => code,
+        None => interaction::get_key_code(actual_key_name)?,
+    };
+
+    Ok((key_code, flags))
 }
 
 // Helper function to post keyboard events
@@ -1538,70 +1588,13 @@ impl AccessibilityEngine for MacOSEngine {
 
     fn hold_key(&self, key: &str, duration_ms: Option<u64>) -> Result<(), AutomationError> {
         debug!("holding key {} for {:?}ms", key, duration_ms);
-
-        let mut actual_key_name = key;
-        let mut flags = CGEventFlags::empty();
-
-        if key.contains('+') {
-            let parts: Vec<&str> = key.split('+').collect();
-            actual_key_name = parts.last().unwrap_or(&key); // Get the last part as the key
-            for part in &parts[..parts.len() - 1] {
-                let modifier_flag = match part.to_lowercase().as_str() {
-                    "command" | "cmd" => CGEventFlags::CGEventFlagCommand,
-                    "shift" => CGEventFlags::CGEventFlagShift,
-                    "option" | "alt" => CGEventFlags::CGEventFlagAlternate,
-                    "control" | "ctrl" => CGEventFlags::CGEventFlagControl,
-                    "fn" => CGEventFlags::CGEventFlagSecondaryFn,
-                    _ => {
-                        return Err(AutomationError::InvalidArgument(format!(
-                            "Unknown modifier: {}. Use standard modifier names.",
-                            part
-                        )))
-                    }
-                };
-                flags |= modifier_flag;
-            }
-        }
-
-        let key_code = match key_name_to_keycode(actual_key_name) {
-            Some(code) => code,
-            None => interaction::get_key_code(actual_key_name)?,
-        };
-
+        let (key_code, flags) = split_key_with_modifiers(key)?;
         interaction::hold_key(key_code, flags, duration_ms)
     }
 
     fn release_key(&self, key: &str) -> Result<(), AutomationError> {
         debug!("releasing key {}", key);
-
-        let mut actual_key_name = key;
-        let mut flags = CGEventFlags::empty();
-
-        if key.contains('+') {
-            let parts: Vec<&str> = key.split('+').collect();
-            actual_key_name = parts.last().unwrap_or(&key);
-            for part in &parts[..parts.len() - 1] {
-                let modifier_flag = match part.to_lowercase().as_str() {
-                    "command" | "cmd" => CGEventFlags::CGEventFlagCommand,
-                    "shift" => CGEventFlags::CGEventFlagShift,
-                    "option" | "alt" => CGEventFlags::CGEventFlagAlternate,
-                    "control" | "ctrl" => CGEventFlags::CGEventFlagControl,
-                    "fn" => CGEventFlags::CGEventFlagSecondaryFn,
-                    _ => {
-                        return Err(AutomationError::InvalidArgument(format!(
-                            "Unknown modifier: {}. Use standard modifier names.",
-                            part
-                        )))
-                    }
-                };
-                flags |= modifier_flag;
-            }
-        }
-
-        let key_code = match key_name_to_keycode(actual_key_name) {
-            Some(code) => code,
-            None => interaction::get_key_code(actual_key_name)?,
-        };
+        let (key_code, flags) = split_key_with_modifiers(key)?;
 
         let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
             AutomationError::PlatformError(
@@ -1610,10 +1603,7 @@ impl AccessibilityEngine for MacOSEngine {
         })?;
 
         let key_up = CGEvent::new_keyboard_event(source, key_code, false).map_err(|_| {
-            AutomationError::PlatformError(format!(
-                "Failed to create key up event for {}",
-                actual_key_name
-            ))
+            AutomationError::PlatformError(format!("Failed to create key up event for {}", key))
         })?;
 
         if flags != CGEventFlags::empty() {
@@ -2327,18 +2317,28 @@ impl AccessibilityEngine for MacOSEngine {
         x: f64,
         y: f64,
         modifiers: Option<&str>,
-    ) -> Result<&'static str, AutomationError> {
-        let flags = modifiers.map(|m| parse_modifiers(Some(m)));
-        let flags_opt = if flags.is_none_or(|f| f.is_empty()) {
-            None
-        } else {
-            flags
-        };
-        interaction::left_click_no_warp(x, y, flags_opt)
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::left_click_no_warp(x, y, optional_flags(modifiers), allow_physical)
     }
 
-    fn right_click_no_warp(&self, x: f64, y: f64) -> Result<&'static str, AutomationError> {
-        interaction::right_click_no_warp(x, y)
+    fn right_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::right_click_no_warp(x, y, allow_physical)
+    }
+
+    fn middle_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::middle_click_no_warp(x, y, optional_flags(modifiers), allow_physical)
     }
 
     fn double_click_no_warp(
@@ -2346,14 +2346,120 @@ impl AccessibilityEngine for MacOSEngine {
         x: f64,
         y: f64,
         modifiers: Option<&str>,
-    ) -> Result<&'static str, AutomationError> {
-        let flags = modifiers.map(|m| parse_modifiers(Some(m)));
-        let flags_opt = if flags.is_none_or(|f| f.is_empty()) {
-            None
-        } else {
-            flags
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::double_click_no_warp(x, y, optional_flags(modifiers), allow_physical)
+    }
+
+    fn triple_click_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::triple_click_no_warp(x, y, optional_flags(modifiers), allow_physical)
+    }
+
+    fn left_mouse_down_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::left_mouse_down_no_warp(x, y, allow_physical)
+    }
+
+    fn left_mouse_up_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::left_mouse_up_no_warp(x, y, allow_physical)
+    }
+
+    fn left_click_drag_no_warp(
+        &self,
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::left_click_drag_no_warp(start_x, start_y, end_x, end_y, allow_physical)
+    }
+
+    fn scroll_no_warp(
+        &self,
+        x: f64,
+        y: f64,
+        direction: &str,
+        amount: f64,
+        modifiers: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::scroll_no_warp(
+            x,
+            y,
+            direction,
+            amount,
+            optional_flags(modifiers),
+            allow_physical,
+        )
+    }
+
+    fn press_key_no_warp(
+        &self,
+        key_name: &str,
+        modifier: Option<&str>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        // Combinations arrive as a single string ("cmd+shift+a"); the parser owns
+        // that grammar, so route through it rather than re-splitting here.
+        if key_name.contains('+') {
+            let (key_code, flags) = interaction::parse_key_combination(key_name)?;
+            return interaction::press_key_no_warp(key_code, flags, allow_physical);
+        }
+
+        let key_code = match key_name_to_keycode(key_name) {
+            Some(code) => code,
+            None => interaction::get_key_code(key_name)?,
         };
-        interaction::double_click_no_warp(x, y, flags_opt)
+        let flags = match modifier {
+            Some(name) => super::constants::modifier_name_to_flags(name).ok_or_else(|| {
+                AutomationError::InvalidArgument(format!("Invalid modifier name: {}", name))
+            })?,
+            None => CGEventFlags::empty(),
+        };
+        interaction::press_key_no_warp(key_code, flags, allow_physical)
+    }
+
+    fn hold_key_no_warp(
+        &self,
+        key: &str,
+        duration_ms: Option<u64>,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        let (key_code, flags) = split_key_with_modifiers(key)?;
+        interaction::hold_key_no_warp(key_code, flags, duration_ms, allow_physical)
+    }
+
+    fn release_key_no_warp(
+        &self,
+        key: &str,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        let (key_code, flags) = split_key_with_modifiers(key)?;
+        interaction::release_key_no_warp(key_code, flags, allow_physical)
+    }
+
+    fn type_text_no_warp(
+        &self,
+        text: &str,
+        allow_physical: bool,
+    ) -> Result<Option<InputOutcome>, AutomationError> {
+        interaction::type_text_no_warp(text, allow_physical)
     }
 
     fn post_mouse_event_to_pid(
