@@ -339,7 +339,17 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
         // Small delay to ensure window setup is complete
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        // Only show — never steal focus. Overlays must not activate Juno.
+        // If setup is on screen, stay off it. The bar is always on top, so
+        // showing it here would cover the setup window, and it has nothing to
+        // offer someone who has not finished setting up. It goes up when
+        // onboarding closes instead.
+        if crate::window_management::onboarding_is_open(&window.app_handle().clone()) {
+            crate::window_management::mark_bar_withheld_for_onboarding();
+            info!("Floating bar held back while onboarding is on screen");
+            return;
+        }
+
+        // Only show, never steal focus. Overlays must not activate Juno.
         if let Err(e) = window.show() {
             warn!(
                 "{}",

@@ -332,7 +332,7 @@ pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
 pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
     let bar_was_visible = WindowManager::is_window_visible(&app, window_labels::FLOATING_BAR);
     if bar_was_visible {
-        BAR_HIDDEN_FOR_ONBOARDING.store(true, std::sync::atomic::Ordering::SeqCst);
+        mark_bar_withheld_for_onboarding();
         if let Err(e) = WindowManager::hide_window(&app, window_labels::FLOATING_BAR).await {
             // Not worth failing setup over; the bar merely sits in the way.
             warn!("Could not hide the floating bar for onboarding: {}", e);
@@ -355,10 +355,26 @@ pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
     result
 }
 
-/// Whether onboarding hid the floating bar, so closing it only restores a bar
-/// that was actually there to begin with.
+/// Whether onboarding is holding the floating bar back, so closing it only
+/// restores a bar that was actually going to be there.
 static BAR_HIDDEN_FOR_ONBOARDING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+
+/// True while the setup assistant is on screen.
+pub fn onboarding_is_open(app: &AppHandle) -> bool {
+    WindowManager::is_window_visible(app, window_labels::ONBOARDING)
+}
+
+/// Record that the bar is being held back for onboarding, so it is put on
+/// screen when setup finishes.
+///
+/// The bar is shown on a short timer at startup, which can land either side of
+/// onboarding opening. Hiding it on open alone loses that race: the timer fires
+/// afterwards and puts it straight back over the setup window. So the show path
+/// checks too, and both routes mark it withheld.
+pub fn mark_bar_withheld_for_onboarding() {
+    BAR_HIDDEN_FOR_ONBOARDING.store(true, std::sync::atomic::Ordering::SeqCst);
+}
 
 /// Open/recreate the main window
 #[tauri::command]
