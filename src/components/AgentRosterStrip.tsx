@@ -73,11 +73,11 @@ export function AgentRosterStrip({ sessions, onFocus, className }: AgentRosterSt
 			aria-label="Running agents"
 		>
 			{visible.map((session) => {
-				const label = `Switch to ${session.agent_name} — ${STATUS_LABELS[session.status]}`;
+				const label = `Switch to ${session.agent_name}, ${STATUS_LABELS[session.status]}`;
 				const tooltip =
 					session.status === "running" && session.current_action
-						? `${session.agent_name} — ${session.current_action}`
-						: `${session.agent_name} — ${STATUS_LABELS[session.status]}`;
+						? `${session.agent_name}: ${session.current_action}`
+						: `${session.agent_name}: ${STATUS_LABELS[session.status]}`;
 				return (
 					<div key={session.id} className="relative">
 						{hoveredId === session.id && (

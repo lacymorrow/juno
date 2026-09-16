@@ -31,7 +31,7 @@ export default function ShortcutsSettings({ settings }: SettingsSectionProps) {
     const descriptions: { [key: string]: string } = {
       stop_current_task: "Stop the current AI task or operation",
       open_settings: "Open the settings window",
-      voice_activation: "Toggle voice recording from anywhere — no Juno window required",
+      voice_activation: "Start and stop voice recording from any app. Juno does not need to be open.",
     };
     return descriptions[shortcutName] || "";
   };

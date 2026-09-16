@@ -29,7 +29,7 @@ class ResizeObserverStub {
 }
 
 const VOICE_DESCRIPTION =
-  "Toggle voice recording from anywhere — no Juno window required";
+  "Start and stop voice recording from any app. Juno does not need to be open.";
 
 function makeSettings(overrides: Record<string, unknown> = {}) {
   return {

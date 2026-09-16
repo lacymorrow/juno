@@ -705,7 +705,7 @@ function MouseCapture({
       </span>
       <span className="text-[11px] text-muted-foreground">
         {current
-          ? `Current: ${mouseLabel(current.button)} — press Esc to cancel`
+          ? `Current: ${mouseLabel(current.button)}. Press Esc to cancel.`
           : "Left, right, middle, or a side button. Press Esc to cancel."}
       </span>
     </div>
