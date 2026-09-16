@@ -36,11 +36,18 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
 
-    let app_submenu = SubmenuBuilder::new(app, "Juno")
+    let mut app_submenu = SubmenuBuilder::new(app, "Juno")
         .about(Some(about_metadata))
-        .separator()
-        .item(&check_updates_menu_item)
-        .separator()
+        .separator();
+
+    // A demo build must never update itself. The public build carries no demo
+    // key, so an update would drop the person back at "Connect Your AI" with
+    // nothing to connect. Take the affordance away rather than let it fail.
+    if !crate::demo::is_demo_build() {
+        app_submenu = app_submenu.item(&check_updates_menu_item).separator();
+    }
+
+    let app_submenu = app_submenu
         .item(&settings_menu_item)
         .separator()
         .services()
@@ -215,6 +222,13 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         // Juno Menu — About is handled natively via PredefinedMenuItem::about()
         constants::app_menu_ids::CHECK_FOR_UPDATES => {
             info!("[Menu] Check for Updates menu item clicked");
+            // The item is not built in a demo build, but a keyboard accelerator
+            // or a restored menu could still reach here. Updating away from the
+            // demo key is never what the person wanted.
+            if crate::demo::is_demo_build() {
+                info!("[Menu] Ignoring update check: this is a demo build");
+                return;
+            }
             if let Err(e) = app_handle.emit(constants::events::menu::UPDATE_CHECK_REQUESTED, ()) {
                 error!(
                     "{} {}",
