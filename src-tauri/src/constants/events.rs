@@ -240,7 +240,6 @@ pub mod app_lifecycle {
 
 pub mod permissions {
     pub const CHANGED: &str = "permissions-changed";
-    pub const RESTART_REQUIRED: &str = "permissions-restart-required";
     pub const GUIDANCE_NEEDED: &str = "permission-guidance-needed";
     /// Emitted when a specific permission flips from denied → granted during polling
     pub const GRANTED: &str = "permission-granted";

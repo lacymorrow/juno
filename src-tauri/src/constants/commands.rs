@@ -118,6 +118,10 @@ pub mod permissions {
     pub const CANCEL_AUTO_GRANT: &str = "cancel_auto_grant";
     /// Opens the exact Privacy pane for one permission, so nobody has to hunt
     pub const OPEN_SYSTEM_SETTINGS: &str = "open_system_settings_enhanced";
+    /// Which granted permissions are waiting on a restart before Juno can use them
+    pub const AWAITING_RELAUNCH: &str = "permissions_awaiting_relaunch";
+    /// Restart Juno so a granted permission takes effect
+    pub const RESTART_AFTER_PERMISSIONS: &str = "restart_app_after_permissions";
 }
 
 /// Background operation and the consent it needs

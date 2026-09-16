@@ -496,6 +496,7 @@ pub fn run() {
             restart_app_after_permissions,
             prompt_app_restart_after_permissions,
             check_restart_needed_after_permissions,
+            permissions_awaiting_relaunch,
             handle_restart_after_permissions,
             // QA Test Commands from mouse.rs
 

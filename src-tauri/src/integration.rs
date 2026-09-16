@@ -757,7 +757,10 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
     // Ask for the microphone before reaching for it. Without this the plugin
     // returns a denial as a string that ends up in a log file, the bar never
     // changes, and pressing the mic button looks like nothing happening at all.
-    if let Err(message) = crate::permission_gate::require(
+    // Always answers, however many times the mic is pressed: this only runs
+    // because a person pressed something, and the silent version of this is
+    // exactly the bug.
+    if let Err(message) = crate::permission_gate::require_for_user(
         app_handle,
         crate::permission_gate::Capability::Microphone,
         "listening",

@@ -26,6 +26,45 @@ pub struct NativePermissionChecker;
 
 impl NativePermissionChecker {
     /// Check microphone permission using the voice-transcription plugin's TCC API
+    /// True only when macOS has actually refused this app the microphone.
+    ///
+    /// "Not granted" and "refused" are different states, and only the second
+    /// one sticks: macOS answers from a decision it already gave, so a process
+    /// that was denied keeps hearing denied until it restarts, while one that
+    /// has never asked sees the first grant immediately. Setup uses this to
+    /// decide whether it owes the person a restart, so treating the two alike
+    /// would demand a pointless relaunch of everyone on a fresh machine.
+    pub fn microphone_explicitly_denied() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use tauri_plugin_voice_transcription::mic_permissions;
+            matches!(
+                mic_permissions::check_microphone_permission(),
+                mic_permissions::MicrophonePermissionStatus::Denied
+            )
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    /// True only when macOS has actually refused this app input monitoring.
+    /// See `microphone_explicitly_denied` for why the distinction matters.
+    pub fn input_monitoring_explicitly_denied() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            matches!(
+                crate::platform::input_monitoring::check_input_monitoring_access(),
+                crate::platform::input_monitoring::InputMonitoringAccess::Denied
+            )
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
     pub fn check_microphone_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {

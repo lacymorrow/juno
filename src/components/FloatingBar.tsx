@@ -693,6 +693,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // looking; the window is only shown, never focused.
   useEventListener(EVENTS.INPUT_CONTROL_REQUEST, () => setPaneShown(true));
 
+  // A permission Juno needs is asked for on a card inside the pane. Pressing
+  // the mic from the idle pill left that card with nowhere to render, so the
+  // button did nothing visible at all. Open the pane so the question is where
+  // the person is already looking.
+  useEventListener(EVENTS.PERMISSIONS_NEEDED, () => setPaneShown(true));
+
   const dismissPane = useCallback(() => setPaneShown(false), []);
   const reopenPane = useCallback(() => setPaneShown(true), []);
 

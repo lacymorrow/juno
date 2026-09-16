@@ -257,10 +257,16 @@ pub async fn request_microphone_permission_native() -> Result<bool, String> {
             Ok(false) => {
                 let already_shown = MICROPHONE_DIALOG_SHOWN.swap(true, Ordering::AcqRel);
                 if already_shown {
-                    info!("Microphone dialog already shown this launch — opening System Settings directly");
+                    info!("Microphone dialog already shown this launch, opening System Settings directly");
                     let _ = Command::new("open")
                         .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
                         .status();
+                    // Only an explicit refusal pins this process. If macOS has
+                    // never been asked, the grant they are about to make will
+                    // be visible straight away and no restart is owed.
+                    if NativePermissionChecker::microphone_explicitly_denied() {
+                        note_relaunch_pending("microphone");
+                    }
                     Ok(false)
                 } else {
                     info!("Requesting microphone permissions with native dialog (first time this launch)");
@@ -269,7 +275,12 @@ pub async fn request_microphone_permission_native() -> Result<bool, String> {
                             if granted {
                                 info!("Microphone permissions granted by user");
                             } else {
-                                info!("Microphone permissions denied by user");
+                                info!("Microphone not granted");
+                                // A refusal now is one macOS will keep giving
+                                // this process; an undetermined answer is not.
+                                if NativePermissionChecker::microphone_explicitly_denied() {
+                                    note_relaunch_pending("microphone");
+                                }
                             }
                             Ok(granted)
                         }
@@ -388,10 +399,13 @@ pub async fn request_input_monitoring_permission_native() -> Result<bool, String
             Ok(false) => {
                 let already_shown = INPUT_MONITORING_DIALOG_SHOWN.swap(true, Ordering::AcqRel);
                 if already_shown {
-                    info!("Input monitoring dialog already shown this launch — opening System Settings directly");
+                    info!("Input monitoring dialog already shown this launch, opening System Settings directly");
                     let _ = Command::new("open")
                         .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
                         .status();
+                    if NativePermissionChecker::input_monitoring_explicitly_denied() {
+                        note_relaunch_pending("input_monitoring");
+                    }
                     Ok(false)
                 } else {
                     info!("Requesting input monitoring permissions with native prompt (first time this launch)");
@@ -407,7 +421,11 @@ pub async fn request_input_monitoring_permission_native() -> Result<bool, String
                                     if granted {
                                         info!("Input monitoring permissions now granted");
                                     } else {
-                                        info!("Input monitoring permissions still not granted - user needs to manually enable in System Settings");
+                                        info!("Input monitoring not granted");
+                                        if NativePermissionChecker::input_monitoring_explicitly_denied()
+                                        {
+                                            note_relaunch_pending("input_monitoring");
+                                        }
                                     }
                                     Ok(granted)
                                 }
@@ -594,6 +612,10 @@ fn emit_granted_if_flipped(
 ) {
     if !was_granted && now_granted {
         info!("Permission flipped to granted: {}", permission_type);
+        // Seeing the flip at all is proof this process is not stuck with an
+        // old answer, so whatever we recorded earlier is moot: no restart is
+        // owed for this one.
+        clear_relaunch_pending(permission_type);
         // The stop-key monitor skips its global half while untrusted (adding
         // it would raise the system Accessibility alert); complete it now.
         if permission_type == "accessibility" {
@@ -662,12 +684,90 @@ pub async fn prompt_app_restart_after_permissions(app: AppHandle) -> Result<Stri
     }
 }
 
-/// Check if app restart is needed after permission changes
+/// Permissions whose grant a running process does not see until it restarts,
+/// *once it has already been refused one*.
+///
+/// The restart is not about the permission, it is about the refusal. macOS
+/// answers a process from a cached decision, and only a decision it already
+/// gave can be cached. An app that has never asked has nothing cached, so the
+/// first grant is visible immediately and no restart is owed. An app that was
+/// explicitly denied keeps hearing "denied" for the life of the process,
+/// however many times the person flips the switch, which is why that case ends
+/// in a "quit and reopen" sheet.
+///
+/// So callers must only record a pending relaunch on an explicit denial, never
+/// on "not granted yet".
+///
+/// Accessibility is deliberately absent. Auto-grant drives System Settings in
+/// this same process the moment Accessibility is granted, which only works
+/// because that one takes effect live.
+const NEEDS_RELAUNCH: [&str; 3] = ["screen_recording", "input_monitoring", "microphone"];
+
+/// Permissions granted during this launch that the process cannot act on yet.
+static RELAUNCH_PENDING: std::sync::LazyLock<Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
+/// Record that Juno has sent someone to grant this, and will not see the
+/// result until it restarts.
+///
+/// Called when Juno *acts*, not when it observes a flip. That distinction is
+/// the whole point: for Microphone and Input Monitoring the running process
+/// never sees the flip, which is exactly why they need a relaunch. A ledger
+/// written from the observation would stay empty for the two permissions it
+/// exists to cover.
+pub fn note_relaunch_pending(permission_type: &str) {
+    note_grant_needing_relaunch(permission_type)
+}
+
+/// Record a grant that will not take effect until Juno restarts.
+pub fn note_grant_needing_relaunch(permission_type: &str) {
+    if !NEEDS_RELAUNCH.contains(&permission_type) {
+        return;
+    }
+    if let Ok(mut pending) = RELAUNCH_PENDING.lock() {
+        pending.insert(permission_type.to_string());
+        info!(
+            "{} is granted but needs a relaunch before Juno can use it",
+            permission_type
+        );
+    }
+}
+
+/// Forget a pending relaunch, because the grant turned out to be visible.
+pub fn clear_relaunch_pending(permission_type: &str) {
+    if let Ok(mut pending) = RELAUNCH_PENDING.lock() {
+        if pending.remove(permission_type) {
+            info!(
+                "{} became visible without a restart after all",
+                permission_type
+            );
+        }
+    }
+}
+
+/// Which granted permissions are waiting on a restart, for the UI to name them.
+#[tauri::command]
+pub async fn permissions_awaiting_relaunch() -> Result<Vec<String>, String> {
+    let pending = RELAUNCH_PENDING
+        .lock()
+        .map_err(|_| "Relaunch ledger lock poisoned".to_string())?;
+    let mut names: Vec<String> = pending.iter().cloned().collect();
+    names.sort();
+    Ok(names)
+}
+
+/// Whether a restart is needed for something Juno sent the person to grant.
+///
+/// Used to return a flat `false` with a comment claiming the app detects
+/// permission changes dynamically. That is true for Accessibility and false
+/// for the other three, which is why granting Microphone mid-setup left its
+/// row grey for the rest of the run.
 #[tauri::command]
 pub async fn check_restart_needed_after_permissions() -> Result<bool, String> {
-    // For most permissions, restart is not needed
-    // The app can detect permission changes dynamically
-    Ok(false)
+    Ok(RELAUNCH_PENDING
+        .lock()
+        .map(|pending| !pending.is_empty())
+        .unwrap_or(false))
 }
 
 /// Handle restart logic after permissions are granted
