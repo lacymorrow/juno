@@ -344,6 +344,9 @@ async fn auto_grant_one(
     // native call may also raise a system alert; that is fine, the walk
     // targets System Settings, a different process.
     {
+        // This raises the native alert, which is not always-on-top. The bar is,
+        // so it has to stand down or the prompt arrives behind it.
+        crate::commands::permissions::step_aside_for_prompt(app);
         let p = perm.to_string();
         let registered = guarded(token, NATIVE_REQUEST_LIMIT, move || {
             register_permission_row(&p)

@@ -189,7 +189,10 @@ pub async fn get_permissions_state(app: AppHandle) -> Result<PermissionsState, S
 /// First call: triggers the native OS dialog (AXIsProcessTrustedWithOptions).
 /// Subsequent calls: opens System Settings directly (dialog already shown this launch).
 #[tauri::command]
-pub async fn request_accessibility_permission_native() -> Result<bool, String> {
+pub async fn request_accessibility_permission_native(app: AppHandle) -> Result<bool, String> {
+    // Juno is about to send them somewhere to answer a prompt, and the
+    // bar floats above ordinary windows. Get out of the way first.
+    step_aside_for_prompt(&app);
     info!("Requesting accessibility permissions using native APIs");
 
     #[cfg(target_os = "macos")]
@@ -244,7 +247,10 @@ pub async fn request_accessibility_permission_native() -> Result<bool, String> {
 /// First call: triggers the native TCC dialog.
 /// Subsequent calls: opens System Settings directly (dialog already shown this launch).
 #[tauri::command]
-pub async fn request_microphone_permission_native() -> Result<bool, String> {
+pub async fn request_microphone_permission_native(app: AppHandle) -> Result<bool, String> {
+    // Juno is about to send them somewhere to answer a prompt, and the
+    // bar floats above ordinary windows. Get out of the way first.
+    step_aside_for_prompt(&app);
     info!("Requesting microphone permissions using native APIs");
 
     #[cfg(target_os = "macos")]
@@ -311,7 +317,10 @@ pub async fn request_microphone_permission_native() -> Result<bool, String> {
 /// First call: triggers the native OS dialog (CGRequestScreenCaptureAccess).
 /// Subsequent calls: opens System Settings directly (dialog already shown this launch).
 #[tauri::command]
-pub async fn request_screen_recording_permission_native() -> Result<bool, String> {
+pub async fn request_screen_recording_permission_native(app: AppHandle) -> Result<bool, String> {
+    // Juno is about to send them somewhere to answer a prompt, and the
+    // bar floats above ordinary windows. Get out of the way first.
+    step_aside_for_prompt(&app);
     info!("Requesting screen recording permissions using native APIs");
 
     #[cfg(target_os = "macos")]
@@ -386,7 +395,10 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
 /// First call: triggers the native OS prompt.
 /// Subsequent calls: opens System Settings directly (dialog already shown this launch).
 #[tauri::command]
-pub async fn request_input_monitoring_permission_native() -> Result<bool, String> {
+pub async fn request_input_monitoring_permission_native(app: AppHandle) -> Result<bool, String> {
+    // Juno is about to send them somewhere to answer a prompt, and the
+    // bar floats above ordinary windows. Get out of the way first.
+    step_aside_for_prompt(&app);
     info!("Requesting input monitoring permissions using native APIs");
 
     #[cfg(target_os = "macos")]
@@ -616,6 +628,8 @@ fn emit_granted_if_flipped(
         // old answer, so whatever we recorded earlier is moot: no restart is
         // owed for this one.
         clear_relaunch_pending(permission_type);
+        // Whatever prompt was up has been answered.
+        restore_bar_after_prompt(app);
         // The stop-key monitor skips its global half while untrusted (adding
         // it would raise the system Accessibility alert); complete it now.
         if permission_type == "accessibility" {
@@ -736,6 +750,35 @@ pub fn note_grant_needing_relaunch(permission_type: &str) {
             permission_type
         );
     }
+}
+
+/// How long a permission prompt might reasonably sit on screen unanswered.
+const PROMPT_GRACE: Duration = Duration::from_secs(90);
+
+/// Step the floating bar out of the way while a permission prompt is expected.
+///
+/// The bar is always on top, and the alerts macOS raises on Juno's behalf are
+/// not: a screen-recording prompt appeared *behind* the bar, unreadable and
+/// unclickable, asking for a permission the person could not grant because
+/// Juno was sitting on the button. Lowering the bar's window level for the
+/// duration is the only thing that reliably keeps it out of the way, since the
+/// prompt's own level is the system's business and not ours to predict.
+///
+/// Restored on a timer rather than on an answer, because there is no event for
+/// "the person dismissed a system alert". The permissions poller also restores
+/// it early the moment the grant lands.
+pub fn step_aside_for_prompt(app: &AppHandle) {
+    crate::platform::macos::set_bar_floating(app, false);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(PROMPT_GRACE).await;
+        crate::platform::macos::set_bar_floating(&app, true);
+    });
+}
+
+/// Put the bar back above other windows now that the prompt is answered.
+pub fn restore_bar_after_prompt(app: &AppHandle) {
+    crate::platform::macos::set_bar_floating(app, true);
 }
 
 /// Forget a pending relaunch, because the grant turned out to be visible.
