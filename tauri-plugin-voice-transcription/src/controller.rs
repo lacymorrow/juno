@@ -41,7 +41,12 @@ fn sinc_resampling_params() -> SincInterpolationParameters {
 }
 
 enum AudioThreadMessage {
+    /// Finish: transcribe what was captured and emit the result.
     Stop,
+    /// Throw it away: stop recording without transcribing and without
+    /// emitting a result. "Stop" always finalised and submitted, so there was
+    /// no way to change your mind mid-sentence.
+    Discard,
 }
 
 pub struct VoiceController {
@@ -574,6 +579,21 @@ impl VoiceController {
 
                     break;
                 }
+                Ok(AudioThreadMessage::Discard) => {
+                    info!(
+                        "[AudioThread] Discard message received; dropping {} samples unheard.",
+                        raw_full_session_audio.len()
+                    );
+                    // No transcription, no FINAL_RESULT: emitting one is what
+                    // submits the query downstream, and this path exists
+                    // precisely so nothing is submitted.
+                    let _ = app_handle.emit(
+                        constants::voice_transcription::AUDIO_LEVEL,
+                        serde_json::json!({ "level": 0.0_f32 }),
+                    );
+                    let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+                    break;
+                }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     info!("[AudioThread] Control channel disconnected.");
@@ -759,6 +779,16 @@ impl VoiceController {
     }
 
     pub fn stop_dictation(&mut self) -> Result<bool> {
+        self.end_dictation(AudioThreadMessage::Stop)
+    }
+
+    /// Stop listening and throw the audio away, so nothing is transcribed and
+    /// nothing is submitted.
+    pub fn cancel_dictation(&mut self) -> Result<bool> {
+        self.end_dictation(AudioThreadMessage::Discard)
+    }
+
+    fn end_dictation(&mut self, message: AudioThreadMessage) -> Result<bool> {
         if !self.is_dictating {
             return Ok(false);
         }
@@ -766,7 +796,7 @@ impl VoiceController {
         self.is_dictating = false;
 
         if let Some((thread_handle, control_tx)) = self.audio_thread.take() {
-            let _ = control_tx.send(AudioThreadMessage::Stop);
+            let _ = control_tx.send(message);
 
             match thread_handle.join() {
                 Ok(_) => {

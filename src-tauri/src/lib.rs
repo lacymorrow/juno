@@ -714,6 +714,7 @@ pub fn run() {
             window_management::open_settings_window,
             window_management::close_settings_window,
             window_management::open_main_window,
+            window_management::close_main_window,
             window_management::open_onboarding_window,
             window_management::close_onboarding_window,
             window_management::open_desktop_cursor_overlay,
@@ -1104,6 +1105,7 @@ pub fn run() {
                                 let _ = window.show();
                                 let _ = window.unminimize();
                                 let _ = window.set_focus();
+                                window_management::announce_main_window(app_handle, true);
                             }
                         }
                         // In menu-bar-only mode this click is usually someone

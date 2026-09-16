@@ -86,16 +86,65 @@ fn find_system_settings_window_bounds() -> Option<(f64, f64, f64, f64)> {
     None
 }
 
+/// How long any single accessibility step may take before the run gives up.
+const AX_STEP_LIMIT: Duration = Duration::from_secs(3);
+/// The native permission requests raise a system alert, so they get longer.
+const NATIVE_REQUEST_LIMIT: Duration = Duration::from_secs(15);
+/// A whole run, however many permissions it is working through.
+const RUN_LIMIT: Duration = Duration::from_secs(90);
+
+/// Why a step stopped early.
+#[derive(Debug)]
+enum StepHalt {
+    Cancelled,
+    TimedOut,
+}
+
+/// Run one blocking accessibility step without letting it take setup with it.
+///
+/// Every step here talks synchronously to System Settings over the
+/// accessibility API, and System Settings does not answer while it is showing
+/// a modal sheet, which this very flow causes it to do. Awaiting one of these
+/// unguarded is what froze setup: Stop could not interrupt it because
+/// cancellation was only checked between steps, the run guard never dropped,
+/// and the flag stayed "already running" for the life of the process.
+///
+/// A blocking task cannot be killed, so a timeout abandons the thread rather
+/// than stopping it. That is the point. The run ends, the guard drops, the
+/// setup window comes back, and the orphaned thread finishes into nothing.
+async fn guarded<T, F>(
+    token: &CancellationToken,
+    limit: Duration,
+    work: F,
+) -> Result<Result<T, tokio::task::JoinError>, StepHalt>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::select! {
+        biased;
+        _ = token.cancelled() => Err(StepHalt::Cancelled),
+        outcome = tokio::time::timeout(limit, tokio::task::spawn_blocking(work)) => {
+            outcome.map_err(|_| StepHalt::TimedOut)
+        }
+    }
+}
+
 /// Wait up to `timeout_ms` for the System Settings window to be findable via AX.
 /// Polls every 150ms.
 #[cfg(target_os = "macos")]
-async fn wait_for_settings_window(timeout_ms: u64) -> Option<(f64, f64, f64, f64)> {
+async fn wait_for_settings_window(
+    timeout_ms: u64,
+    token: &CancellationToken,
+) -> Option<(f64, f64, f64, f64)> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     loop {
-        // Run the AX call on a blocking thread to avoid stalling the async runtime
-        let bounds = tokio::task::spawn_blocking(find_system_settings_window_bounds)
+        // Run the AX call on a blocking thread to avoid stalling the async
+        // runtime, and give up on it rather than waiting forever.
+        let bounds = guarded(token, AX_STEP_LIMIT, find_system_settings_window_bounds)
             .await
             .ok()
+            .and_then(|joined| joined.ok())
             .flatten();
         if let Some(b) = bounds {
             return Some(b);
@@ -184,7 +233,24 @@ pub async fn auto_grant_permissions(
         // machinery panics, so the feature can never wedge in "already
         // running" for the rest of the app's lifetime.
         let _reset_on_exit = RunGuard;
-        run_auto_grant(app, targets, token).await;
+        // A whole-run deadline on top of the per-step ones. Belt and braces:
+        // whatever happens inside, the guard drops and setup is usable again.
+        let app_for_timeout = app.clone();
+        if tokio::time::timeout(RUN_LIMIT, run_auto_grant(app, targets, token))
+            .await
+            .is_err()
+        {
+            warn!("[auto-grant] Run exceeded {:?}; giving up", RUN_LIMIT);
+            emit_progress(
+                &app_for_timeout,
+                None,
+                "failed",
+                Some(
+                    "Setting these up took too long. You can switch them on yourself.".to_string(),
+                ),
+            );
+            refocus_onboarding_window(&app_for_timeout);
+        }
     });
 
     Ok(())
@@ -275,9 +341,12 @@ async fn auto_grant_one(
     // targets System Settings, a different process.
     {
         let p = perm.to_string();
-        let registered = tokio::task::spawn_blocking(move || register_permission_row(&p))
-            .await
-            .map_err(|e| format!("Register-row task failed: {}", e))?;
+        let registered = guarded(token, NATIVE_REQUEST_LIMIT, move || {
+            register_permission_row(&p)
+        })
+        .await
+        .map_err(|halt| format!("Register-row step stopped: {:?}", halt))?
+        .map_err(|e| format!("Register-row task failed: {}", e))?;
         debug!(
             "[auto-grant] {} native request before pane open → granted={}",
             perm, registered
@@ -293,12 +362,13 @@ async fn auto_grant_one(
 
     {
         let p = perm.to_string();
-        tokio::task::spawn_blocking(move || open_settings_pane(&p))
+        guarded(token, AX_STEP_LIMIT, move || open_settings_pane(&p))
             .await
+            .map_err(|halt| format!("Settings-open step stopped: {:?}", halt))?
             .map_err(|e| format!("Settings-open task failed: {}", e))??;
     }
 
-    if wait_for_settings_window(4000).await.is_none() {
+    if wait_for_settings_window(4000, token).await.is_none() {
         return Err("System Settings window did not appear".to_string());
     }
     // Give the pane's SwiftUI content a moment to populate its AX tree.
@@ -314,7 +384,13 @@ async fn auto_grant_one(
             return Ok(false);
         }
         let name = app_name.clone();
-        match tokio::task::spawn_blocking(move || find_app_toggles(&name)).await {
+        let walked = match guarded(token, AX_STEP_LIMIT, move || find_app_toggles(&name)).await {
+            Ok(joined) => joined,
+            // Timed out walking the tree, almost certainly behind a modal
+            // sheet. Stop the run rather than stack up orphaned threads.
+            Err(halt) => return Err(format!("Reading the Settings pane stopped: {:?}", halt)),
+        };
+        match walked {
             Ok(Ok(found)) if !found.is_empty() => {
                 info!(
                     "[auto-grant] {} attempt {}: {} '{}' switch(es) in the pane: {:?}",
@@ -379,7 +455,12 @@ async fn auto_grant_one(
         }
 
         let element = toggle.element.clone();
-        match tokio::task::spawn_blocking(move || press_toggle(&element)).await {
+        let pressed_result =
+            match guarded(token, AX_STEP_LIMIT, move || press_toggle(&element)).await {
+                Ok(joined) => joined,
+                Err(halt) => return Err(format!("Flipping the switch stopped: {:?}", halt)),
+            };
+        match pressed_result {
             Ok(Ok(outcome)) => {
                 info!("[auto-grant] {} candidate {} → {:?}", perm, idx, outcome);
                 pressed += 1;
@@ -398,8 +479,10 @@ async fn auto_grant_one(
         // so onboarding keeps running — Juno offers its own relaunch when
         // setup ends.
         sleep(Duration::from_millis(700)).await;
-        let dismissed = tokio::task::spawn_blocking(dismiss_quit_reopen_sheet)
+        let dismissed = guarded(token, AX_STEP_LIMIT, dismiss_quit_reopen_sheet)
             .await
+            .ok()
+            .and_then(|joined| joined.ok())
             .unwrap_or(false);
         debug!(
             "[auto-grant] quit-and-reopen sheet dismissed: {}",

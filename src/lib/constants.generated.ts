@@ -161,6 +161,8 @@ export const EVENTS = {
   BAR_TOGGLE_PANE: 'bar-toggle-pane',
   BAR_DISMISS_PANE: 'bar-dismiss-pane',
   BAR_CURSOR_DISPLAY_CHANGED: 'bar-cursor-display-changed',
+  BAR_MAIN_WINDOW_OPENED: 'bar-main-window-opened',
+  BAR_MAIN_WINDOW_CLOSED: 'bar-main-window-closed',
   TOOLS_USAGE: 'tool-usage',
   TOOLS_APPROVAL_REQUEST: 'tool-approval-request',
   TOOLS_COMMAND_EXECUTION_START: 'command-execution-start',

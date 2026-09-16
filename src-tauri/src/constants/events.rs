@@ -323,6 +323,11 @@ pub mod bar {
     /// The cursor moved to a different display; payload carries the cursor's
     /// physical `x`/`y` so the bar re-homes to the same drag-well slot there.
     pub const CURSOR_DISPLAY_CHANGED: &str = "bar-cursor-display-changed";
+    /// The full-size chat window is now on screen. The bar shows the same
+    /// conversation, so it collapses to the idle pill and stays out of the way.
+    pub const MAIN_WINDOW_OPENED: &str = "bar-main-window-opened";
+    /// The full-size chat window went away. The bar takes the conversation back.
+    pub const MAIN_WINDOW_CLOSED: &str = "bar-main-window-closed";
 }
 
 /// Tool and command execution events

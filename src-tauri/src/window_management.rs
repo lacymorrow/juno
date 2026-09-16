@@ -376,10 +376,51 @@ pub fn mark_bar_withheld_for_onboarding() {
     BAR_HIDDEN_FOR_ONBOARDING.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// Open/recreate the main window
+/// Open the full-size chat window, and get the bar out of its way.
+///
+/// The bar and this window show the same conversation, so having both up is
+/// the same thing twice. The bar collapses to its idle pill rather than
+/// hiding, which keeps the hotkey and the mic reachable while the big window
+/// is up.
 #[tauri::command]
 pub async fn open_main_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::create_or_show_window(&app, WindowConfig::main()).await
+    WindowManager::create_or_show_window(&app, WindowConfig::main()).await?;
+    announce_main_window(&app, true);
+    Ok(())
+}
+
+/// Put the full-size chat window away and give the conversation back to the bar.
+///
+/// Hides rather than closes: the webview keeps its React state, its scroll
+/// position, and the audio element that plays TTS for the whole app.
+#[tauri::command]
+pub async fn close_main_window(app: AppHandle) -> Result<(), String> {
+    WindowManager::hide_window(&app, window_labels::MAIN).await?;
+    announce_main_window(&app, false);
+    Ok(())
+}
+
+/// Tell the bar what the full-size window is doing.
+///
+/// Every route that shows the main window goes through here (the bar's button,
+/// a Dock click, the tray, the reopen handler), because coordination that lives
+/// in only one of them leaves the other three showing two copies of the same
+/// conversation.
+pub fn announce_main_window(app: &AppHandle, open: bool) {
+    if open {
+        // The bar already knows how to put its pane away.
+        if let Err(e) = app.emit(constants::events::bar::DISMISS_PANE, ()) {
+            warn!("Could not tell the bar to dismiss its pane: {}", e);
+        }
+    }
+    let event = if open {
+        constants::events::bar::MAIN_WINDOW_OPENED
+    } else {
+        constants::events::bar::MAIN_WINDOW_CLOSED
+    };
+    if let Err(e) = app.emit(event, ()) {
+        warn!("Could not announce the main window state: {}", e);
+    }
 }
 
 /// Open the desktop cursor overlay window

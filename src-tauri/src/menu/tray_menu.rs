@@ -677,13 +677,15 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
                 let is_visible = window.is_visible().unwrap_or(false);
                 let is_focused = window.is_focused().unwrap_or(false);
                 if is_visible && is_focused {
-                    // Window is visible and focused — hide it (toggle behavior)
+                    // Visible and focused, so this click means hide it.
                     let _ = window.hide();
+                    crate::window_management::announce_main_window(app_handle, false);
                 } else {
-                    // Window is hidden or not focused — show and focus it
+                    // Hidden or behind something, so bring it up.
                     let _ = window.show();
                     let _ = window.unminimize();
                     let _ = window.set_focus();
+                    crate::window_management::announce_main_window(app_handle, true);
                 }
             }
         }

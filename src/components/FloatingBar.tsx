@@ -22,7 +22,7 @@ import {
   PhysicalPosition,
 } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { MessageSquare, Mic, Square, Type } from "lucide-react";
+import { ArrowUp, MessageSquare, Mic, Square, Type, X } from "lucide-react";
 
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
@@ -485,6 +485,10 @@ const logicalWindowSize = async (win: ReturnType<typeof getCurrentWindow>) => {
 const pillButton =
   "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/[0.12] hover:text-white";
 
+/** The smaller controls that sit inside the text input and the voice row. */
+const inputControlButton =
+  "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/55 transition-colors hover:bg-white/[0.16] hover:text-white";
+
 // === MAIN COMPONENT ===
 
 export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
@@ -665,32 +669,49 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   const chat = useBarConversation();
 
-  // The pane opens on the first message and reopens whenever a new user
-  // message arrives after a dismissal; "New chat" clears everything.
-  const [paneDismissed, setPaneDismissed] = useState(false);
+  // Whether the pane is up is its own answer, not something inferred from the
+  // message count. It used to be `messages.length > 0 && !dismissed`, which
+  // meant "New chat" emptied the conversation and the pane vanished under the
+  // person who had just asked for one.
+  const [paneShown, setPaneShown] = useState(false);
+  // The full-size chat window shows this same conversation. While it is up the
+  // pane stays down rather than saying everything twice.
+  const [mainWindowOpen, setMainWindowOpen] = useState(false);
   const userMessageCount = chat.messages.filter((m) => m.role === "user").length;
   const seenUserMessagesRef = useRef(0);
   useEffect(() => {
     if (userMessageCount > seenUserMessagesRef.current) {
-      setPaneDismissed(false);
+      setPaneShown(true);
     }
     seenUserMessagesRef.current = userMessageCount;
   }, [userMessageCount]);
 
-  const paneOpen = chat.messages.length > 0 && !paneDismissed;
+  const paneOpen = paneShown && !mainWindowOpen;
 
   // A question about taking the mouse belongs on screen. If the person had
   // closed the conversation, bring it back so the prompt is where they are
   // looking; the window is only shown, never focused.
-  useEventListener(EVENTS.INPUT_CONTROL_REQUEST, () => setPaneDismissed(false));
+  useEventListener(EVENTS.INPUT_CONTROL_REQUEST, () => setPaneShown(true));
 
-  const dismissPane = useCallback(() => setPaneDismissed(true), []);
-  const reopenPane = useCallback(() => setPaneDismissed(false), []);
-  // A conversation the person closed and can come back to.
-  const hasDismissedChat = chat.messages.length > 0 && paneDismissed;
+  const dismissPane = useCallback(() => setPaneShown(false), []);
+  const reopenPane = useCallback(() => setPaneShown(true), []);
+
+  // The full-size window taking over, and handing back.
+  useEventListener(EVENTS.BAR_MAIN_WINDOW_OPENED, () => setMainWindowOpen(true));
+  useEventListener(EVENTS.BAR_MAIN_WINDOW_CLOSED, () => setMainWindowOpen(false));
+
+  // The text input is local until submit, so there is no per-keystroke IPC.
+  const [inputOpen, setInputOpen] = useState(false);
+
+  // Starting a new chat means wanting to type, so the pane stays up, empty,
+  // with the caret in it. Rotating the backend conversation matters too: the
+  // bar used to clear the screen while the agent kept appending to the same
+  // conversation and memory buffer.
   const startNewChat = useCallback(() => {
+    void invoke("new_conversation").catch(() => {});
     chat.startNewChat();
-    setPaneDismissed(false);
+    setPaneShown(true);
+    setInputOpen(true);
   }, [chat.startNewChat]);
 
   // Arm the global Escape monitor only while the pane is open, so Escape can
@@ -715,7 +736,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     void (async () => {
       const dismiss = await listen(EVENTS.BAR_DISMISS_PANE, () => dismissPane());
       const toggle = await listen(EVENTS.BAR_TOGGLE_PANE, () =>
-        setPaneDismissed((d) => !d),
+        setPaneShown((shown) => !shown),
       );
       if (active) {
         unlisteners.push(dismiss, toggle);
@@ -765,8 +786,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       .catch((error) => console.debug("FloatingBar: window activation failed:", error));
   }, []);
 
-  // The text input is local until submit — no per-keystroke IPC.
-  const [inputOpen, setInputOpen] = useState(false);
   const [localInputValue, setLocalInputValue] = useState("");
   const localInputValueRef = useRef("");
   localInputValueRef.current = localInputValue;
@@ -788,6 +807,14 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     setLocalInputValue("");
   }, []);
 
+  /** The X in the input: drop what was typed and go back to the idle pill. */
+  const abandonInput = useCallback(() => {
+    closeInput();
+    // Without this the input reopens immediately, because an open pane keeps
+    // the composer up. Closing the pane is what "back to the pill" means.
+    setPaneShown(false);
+  }, [closeInput]);
+
   /** The mic button: a spoken query to the agent (same path as the hotkey). */
   const startTalking = useCallback(async () => {
     try {
@@ -797,6 +824,13 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
   }, []);
 
+  /** The mic inside the text input: drop the draft and start listening. */
+  const switchToTalking = useCallback(() => {
+    closeInput();
+    void startTalking();
+  }, [closeInput, startTalking]);
+
+  /** Send what was said. This is what the old "Stop" button actually did. */
   const stopTalking = useCallback(async () => {
     try {
       await invoke("agent_voice", { action: "stop" });
@@ -804,6 +838,21 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       console.error("❌ FloatingBar: failed to stop listening:", error);
     }
   }, []);
+
+  /** Stop listening and throw it away. Nothing is transcribed, nothing sent. */
+  const cancelTalking = useCallback(async () => {
+    try {
+      await invoke("agent_voice", { action: "cancel" });
+    } catch (error) {
+      console.error("❌ FloatingBar: failed to cancel listening:", error);
+    }
+  }, []);
+
+  /** Changed their mind about talking: drop the audio and open the input. */
+  const switchToTyping = useCallback(async () => {
+    await cancelTalking();
+    openInput();
+  }, [cancelTalking, openInput]);
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -1410,19 +1459,20 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             >
               <Type className="size-3.5" />
             </button>
-            {hasDismissedChat && (
-              <button
-                ref={chatRef}
-                type="button"
-                onClick={reopenPane}
-                aria-label="Reopen chat"
-                title="Reopen chat"
-                data-phover={hoveredButton === "chat" ? "" : undefined}
-                className={cn(pillButton, hoveredButton === "chat" && "bg-white/[0.12] text-white")}
-              >
-                <MessageSquare className="size-3.5" />
-              </button>
-            )}
+            {/* Always offered. This used to appear only when a conversation
+                had been dismissed, so after "New chat" emptied the history
+                there was no way back into the pane at all. */}
+            <button
+              ref={chatRef}
+              type="button"
+              onClick={reopenPane}
+              aria-label="Open chat"
+              title="Open chat"
+              data-phover={hoveredButton === "chat" ? "" : undefined}
+              className={cn(pillButton, hoveredButton === "chat" && "bg-white/[0.12] text-white")}
+            >
+              <MessageSquare className="size-3.5" />
+            </button>
           </div>
         ) : showInput ? (
           <form
@@ -1445,15 +1495,42 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                 "text-[13px] tracking-[-0.01em] text-white/90 placeholder:text-white/30",
               )}
             />
-            <span
-              className={cn(
-                "shrink-0 select-none text-[11px] tracking-[0.04em] text-white/30 transition-opacity duration-200",
-                localInputValue.trim() ? "opacity-100" : "opacity-0",
-              )}
-              aria-hidden="true"
-            >
-              return
-            </span>
+            {/* Typing used to be Enter or nothing: no way to send by hand, no
+                way to reach the mic, and no way out but Escape. */}
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={switchToTalking}
+                aria-label="Switch to dictation"
+                title="Switch to dictation"
+                className={inputControlButton}
+              >
+                <Mic className="size-3" />
+              </button>
+              <button
+                type="submit"
+                aria-label="Send"
+                title="Send"
+                disabled={!localInputValue.trim()}
+                className={cn(
+                  inputControlButton,
+                  localInputValue.trim()
+                    ? "bg-white/[0.16] text-white"
+                    : "cursor-default opacity-40",
+                )}
+              >
+                <ArrowUp className="size-3" />
+              </button>
+              <button
+                type="button"
+                onClick={abandonInput}
+                aria-label="Close without sending"
+                title="Close without sending"
+                className={inputControlButton}
+              >
+                <X className="size-3" />
+              </button>
+            </div>
           </form>
         ) : (
           <>
@@ -1471,23 +1548,46 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               {isDriving ? `Juno is ${label}` : (label ?? "Ask Juno")}
             </span>
             {isVoice && <AudioLevelBars audioLevel={barState.audioLevel} />}
+            {/* Three answers, not one. The single "Stop" here finalised the
+                audio and submitted it, so the only way to abandon a sentence
+                was to say it and then stop the agent. */}
             {isVoice && currentUiState !== UI.BAR_STATES_ALWAYS_LISTENING && (
-              <button
-                type="button"
-                onClick={stopTalking}
-                aria-label="Stop listening"
-                title="Stop listening"
-                className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/[0.08] text-white/60 transition-colors hover:bg-white/[0.16] hover:text-white"
-              >
-                <Square className="size-2.5 fill-current" />
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => void stopTalking()}
+                  aria-label="Send"
+                  title="Send"
+                  className={cn(inputControlButton, "bg-white/[0.16] text-white")}
+                >
+                  <ArrowUp className="size-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void switchToTyping()}
+                  aria-label="Type instead"
+                  title="Type instead"
+                  className={inputControlButton}
+                >
+                  <Type className="size-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void cancelTalking()}
+                  aria-label="Cancel without sending"
+                  title="Cancel without sending"
+                  className={inputControlButton}
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
             )}
             {isWorking && (
               <button
                 type="button"
                 onClick={() => void chat.stop()}
-                aria-label="Stop"
-                title="Stop (Esc)"
+                aria-label="Stop Juno"
+                title="Stop Juno (Esc)"
                 className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/[0.08] text-white/60 transition-colors hover:bg-white/[0.16] hover:text-white"
               >
                 <Square className="size-2.5 fill-current" />

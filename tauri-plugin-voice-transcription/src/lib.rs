@@ -33,6 +33,7 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             commands::start_dictation,
             commands::stop_dictation,
+            commands::cancel_dictation,
             commands::toggle_dictation,
             commands::get_dictation_status,
             commands::get_initialization_status,

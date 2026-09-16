@@ -48,13 +48,19 @@ interface PermissionStatus {
   instructions: string;
 }
 
-// Complete permissions state interface (snake_case)
+// Complete permissions state interface (snake_case).
+// A second hand-maintained copy of this drifted once already: it was missing
+// `everything_granted`, which is exactly the field that decides whether this
+// step still has anything to show.
 interface PermissionsState {
   accessibility: PermissionStatus;
   screen_recording: PermissionStatus;
   microphone: PermissionStatus;
   input_monitoring: PermissionStatus;
+  /** Accessibility and Screen Recording only. */
   all_granted: boolean;
+  /** Every permission, the optional two included. */
+  everything_granted?: boolean;
   app_name: string;
 }
 
@@ -665,6 +671,9 @@ export default function OnboardingFlow({
 
   // API key state
   const [apiKeysAvailable, setApiKeysAvailable] = useState(false);
+  // The step list changes shape once these land, so resuming before then would
+  // jump to a position that means something different a moment later.
+  const [stepsSettled, setStepsSettled] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [detectedProvider, setDetectedProvider] = useState<{
     id: string;
@@ -835,8 +844,12 @@ export default function OnboardingFlow({
         }
         return payload;
       });
+      // Whether setup still has something to offer, which is not the same
+      // question as whether Juno can act. Keyed off every permission, so the
+      // optional two do not become unreachable the moment the required two land.
+      const nothingLeftToOffer = payload.everything_granted ?? payload.all_granted;
       setActualPermissionsGranted((prev) =>
-        prev === payload.all_granted ? prev : payload.all_granted
+        prev === nothingLeftToOffer ? prev : nothingLeftToOffer
       );
     }
   );
@@ -849,7 +862,8 @@ export default function OnboardingFlow({
         COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS
       );
       setPermissionsState(result);
-      setActualPermissionsGranted(result.all_granted);
+      const nothingLeftToOffer = result.everything_granted ?? result.all_granted;
+      setActualPermissionsGranted(nothingLeftToOffer);
       return result.all_granted;
     } catch (error) {
       console.warn("Failed to check permissions status:", error);
@@ -999,6 +1013,9 @@ export default function OnboardingFlow({
           }
         } catch (error) {
           console.warn("Failed to check API keys availability:", error);
+        } finally {
+          // Settled either way: a failed check still stops the list moving.
+          if (mounted) setStepsSettled(true);
         }
         if (!mounted) return;
 
@@ -1243,9 +1260,15 @@ export default function OnboardingFlow({
   // we find a phase that maps to a step in the current `onboardingSteps` list,
   // jump there. The step list can differ between sessions (e.g. permissions
   // already granted now), so a missing match just means we start at step 0.
+  //
+  // This has to wait for `stepsSettled`. It used to run on the first render,
+  // resolve "permissions" to index 2 of the full list, and set that index. The
+  // list then shrank as the checks came back, and index 2 became the final
+  // step, so a force quit during setup resumed straight to "You're all set"
+  // with permissions still ungranted and no way back to them.
   const resumeAttemptedRef = useRef(false);
   useEffect(() => {
-    if (resumeAttemptedRef.current) return;
+    if (!stepsSettled || resumeAttemptedRef.current) return;
     resumeAttemptedRef.current = true;
     (async () => {
       try {
@@ -1263,7 +1286,7 @@ export default function OnboardingFlow({
     })();
     // Only run after steps are known and on initial mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onboardingSteps]);
+  }, [onboardingSteps, stepsSettled]);
 
   // ── Analytics: onboarding_permission_granted on permission flip ─────────────
   // Also detects revocation of a previously-granted required permission and
@@ -1470,7 +1493,10 @@ export default function OnboardingFlow({
     return null;
   }
 
-  const step = onboardingSteps[currentStep];
+  // The list can shrink underneath a resumed index. Rendering `step.id` on
+  // undefined throws and takes the whole setup window with it, so clamp.
+  const step =
+    onboardingSteps[currentStep] ?? onboardingSteps[onboardingSteps.length - 1];
 
   // Checklist position.
   const permSubFlowComplete = permIndex >= PERMISSION_FLOW.length;

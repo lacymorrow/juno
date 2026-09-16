@@ -86,6 +86,9 @@ export interface PermissionsState {
   screen_recording: AppPermissionStatus;
   microphone: AppPermissionStatus;
   input_monitoring: AppPermissionStatus;
+  /** Accessibility and Screen Recording only. */
   all_granted: boolean;
+  /** Every permission, the optional two included. */
+  everything_granted?: boolean;
   app_name: string;
 }

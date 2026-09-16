@@ -26,13 +26,21 @@ use crate::constants::events;
 /// How long to stay quiet about a capability after asking about it once.
 const ASK_AGAIN_AFTER: Duration = Duration::from_secs(300);
 
-/// The permissions Juno reaches for mid-task. Microphone and Input Monitoring
-/// are not here: they gate features the person starts deliberately, so they are
-/// asked for by the feature itself.
+/// The permissions Juno reaches for mid-task.
+///
+/// Microphone earns its place here even though the person starts dictation
+/// deliberately. The theory was that a feature you invoke on purpose can ask
+/// for its own permission, but the mic path did not ask: a denial returned a
+/// string that reached a log file and nothing else, so pressing the mic button
+/// did nothing at all, with no explanation anywhere on screen.
+///
+/// Input Monitoring is still absent: it only affects whether a global shortcut
+/// reaches Juno, which fails in a way the person can see and work around.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
     Accessibility,
     ScreenRecording,
+    Microphone,
 }
 
 impl Capability {
@@ -41,6 +49,7 @@ impl Capability {
         match self {
             Self::Accessibility => "accessibility",
             Self::ScreenRecording => "screen_recording",
+            Self::Microphone => "microphone",
         }
     }
 
@@ -49,6 +58,7 @@ impl Capability {
         match self {
             Self::Accessibility => "Juno can do that once Accessibility is on",
             Self::ScreenRecording => "Juno can see your screen once Screen Recording is on",
+            Self::Microphone => "Juno can listen once Microphone is on",
         }
     }
 
@@ -62,6 +72,11 @@ impl Capability {
             Self::ScreenRecording => {
                 "Screen Recording is how Juno sees what is in front of you. It is one \
                  switch in System Settings, and you can turn it back off whenever you like."
+            }
+            Self::Microphone => {
+                "Microphone is how Juno hears you, so you can talk instead of typing. It \
+                 is one switch in System Settings, and you can turn it back off whenever \
+                 you like."
             }
         }
     }
@@ -79,6 +94,7 @@ impl Capability {
             match self {
                 Self::Accessibility => "Accessibility",
                 Self::ScreenRecording => "Screen Recording",
+                Self::Microphone => "Microphone",
             }
         )
     }
@@ -164,6 +180,7 @@ async fn is_granted(app_handle: &AppHandle, capability: Capability) -> bool {
         Ok(state) => match capability {
             Capability::Accessibility => state.accessibility.granted,
             Capability::ScreenRecording => state.screen_recording.granted,
+            Capability::Microphone => state.microphone.granted,
         },
         Err(e) => {
             // If the check itself fails, let the action try. The OS is the real
@@ -222,7 +239,11 @@ mod tests {
 
     #[test]
     fn the_copy_offers_something_rather_than_demanding_it() {
-        for capability in [Capability::Accessibility, Capability::ScreenRecording] {
+        for capability in [
+            Capability::Accessibility,
+            Capability::ScreenRecording,
+            Capability::Microphone,
+        ] {
             // "Juno can ..." not "Juno needs ...": the title is an offer.
             assert!(capability.title().starts_with("Juno can "));
             // Every ask promises it is reversible, because that is what makes

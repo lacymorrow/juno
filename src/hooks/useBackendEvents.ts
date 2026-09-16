@@ -47,6 +47,7 @@ type StreamingTextEvent = {
 
 type StreamStartEvent = {
 	message_id: string;
+	notice?: boolean; // app guidance rather than a reply; see ChatMessage.notice
 };
 
 type StreamEndEvent = {
@@ -54,6 +55,7 @@ type StreamEndEvent = {
 	complete_text: string;
 	agent_state?: string; // "Finished", "Failed", "Cancelled", "Offline"
 	is_jsx?: boolean; // true if content contains JSX components to render
+	notice?: boolean; // app guidance rather than a reply; see ChatMessage.notice
 };
 
 type DictationStateChangeEvent = {
@@ -378,7 +380,7 @@ export function useBackendEvents({
 		EVENTS.STREAMING_STREAM_START,
 		(payload) => {
 			console.log("Stream started:", payload);
-			const { message_id } = payload;
+			const { message_id, notice } = payload;
 
 			const streamingMessage: ChatMessage = {
 				role: "assistant",
@@ -386,6 +388,7 @@ export function useBackendEvents({
 				timestamp: Date.now(),
 				isStreaming: true,
 				messageId: message_id,
+				notice,
 			};
 
 			setConversationWithPruning((prev) => [...prev, streamingMessage]);
@@ -431,7 +434,7 @@ export function useBackendEvents({
 		EVENTS.STREAMING_STREAM_END,
 		(payload) => {
 			console.log("Stream ended:", payload);
-			const { message_id, complete_text, agent_state, is_jsx } = payload;
+			const { message_id, complete_text, agent_state, is_jsx, notice } = payload;
 
 			setConversationWithPruning((prev) =>
 				prev.map((msg) => {
@@ -441,9 +444,11 @@ export function useBackendEvents({
 							content: complete_text,
 							isStreaming: false,
 							agent_state,
-							// Preserve frontend JSX detection — backend can upgrade to true
-						// but never downgrade (prevents flash if backend payload omits is_jsx)
+							// Preserve frontend JSX detection. The backend can upgrade to
+						// true but never downgrade (prevents a flash if the payload
+						// omits is_jsx).
 						isJsx: is_jsx || msg.isJsx || false,
+						notice: notice || msg.notice,
 						};
 					}
 					return msg;

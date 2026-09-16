@@ -300,12 +300,15 @@ pub async fn on_agent_input_released_with_mode(
 /// The floating bar's mic button. Drives the same event pipeline the agent
 /// hotkey does (`agent-transcription-start` / `-stop`), so a spoken query from
 /// the bar is transcribed and handed to the agent exactly like a hotkey one.
-/// `start` opens the microphone; `stop` closes it and processes what was said.
+/// `start` opens the microphone, `stop` closes it and sends what was said, and
+/// `cancel` closes it and throws what was said away. The bar only ever had the
+/// first two, which is why its one control said "Stop" and submitted.
 #[tauri::command]
 pub async fn agent_voice(app: AppHandle, action: String) -> Result<(), String> {
     let event = match action.as_str() {
         "start" => events::agent::TRANSCRIPTION_START,
         "stop" => events::agent::TRANSCRIPTION_STOP,
+        "cancel" => events::agent::CANCEL,
         other => return Err(format!("unknown agent_voice action: {other}")),
     };
     info!("[AgentMonitor] agent_voice({action}) from the bar");
