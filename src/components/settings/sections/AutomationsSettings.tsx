@@ -49,7 +49,7 @@ const emptyForm: AutomationForm = {
 };
 
 const formatTime = (unixSeconds?: number | null) =>
-  unixSeconds ? new Date(unixSeconds * 1000).toLocaleString() : "—";
+  unixSeconds ? new Date(unixSeconds * 1000).toLocaleString() : "not yet";
 
 export default function AutomationsSettings() {
   const [automations, setAutomations] = useState<ScheduledAutomation[]>([]);
@@ -236,7 +236,7 @@ export default function AutomationsSettings() {
                   <span className="block">
                     {automation.natural_language || automation.cron}
                     {" · next run "}
-                    {automation.enabled ? formatTime(automation.next_run_at) : "—"}
+                    {automation.enabled ? formatTime(automation.next_run_at) : "paused"}
                     {automation.last_run_at
                       ? ` · last run ${formatTime(automation.last_run_at)}`
                       : ""}

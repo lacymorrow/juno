@@ -233,7 +233,8 @@ impl BrainFactory {
                 let provider_id = provider.id();
                 let is_available = match provider {
                     Provider::Anthropic => {
-                        env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty())
+                        crate::demo::is_demo_build()
+                            || env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty())
                             || config
                                 .as_ref()
                                 .and_then(|c| c.get_provider_settings(provider_id))

@@ -754,6 +754,34 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY_MS: u64 = 150;
 
+    // Ask for the microphone before reaching for it. Without this the plugin
+    // returns a denial as a string that ends up in a log file, the bar never
+    // changes, and pressing the mic button looks like nothing happening at all.
+    if let Err(message) = crate::permission_gate::require(
+        app_handle,
+        crate::permission_gate::Capability::Microphone,
+        "listening",
+    )
+    .await
+    {
+        info!("[Agent Mode] Not starting dictation: {}", message);
+        crate::agent_monitor::force_reset_agent_input_state().await;
+        if let Err(e) = utils::synchronize_component_state(
+            app_handle,
+            "agent",
+            false,
+            Some(constants::events::agent::ACTIVE),
+        )
+        .await
+        {
+            error!(
+                "[Agent Mode] Failed to reset agent state after permission stop: {}",
+                e
+            );
+        }
+        return;
+    }
+
     // Capture the generation at the time this handler was dispatched.
     // If a cancel event fires while we're doing async work (permission checks, etc.),
     // the generation will change and we'll know to abort before starting dictation.
@@ -1039,10 +1067,12 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
         .unregister_escape_user(app_handle, "agent_transcription")
         .await;
 
-    // Cancel agent mode using voice transcription
+    // Cancel means cancel. This used to call stop_dictation, which finalises
+    // the audio and emits a final result, which downstream submits the query.
+    // Everything named "cancel" in this stack sent what the person said.
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
         Some(controller_state) => {
-            match tauri_plugin_voice_transcription::commands::stop_dictation(
+            match tauri_plugin_voice_transcription::commands::cancel_dictation(
                 app_handle.clone(),
                 controller_state,
             )
@@ -1050,6 +1080,10 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
             {
                 Ok(_) => {
                     info!("[Agent Mode] Cancelled agent transcription successfully");
+                    // Put the bar back to rest; nothing is being processed.
+                    // No query: the bar goes back to rest rather than to
+                    // a processing state for something that will never arrive.
+                    crate::commands::ui_commands::handle_dictation_finished(app_handle, None).await;
 
                     // Use synchronize_component_state to update UI manager AND emit event
                     if let Err(e) = utils::synchronize_component_state(

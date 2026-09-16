@@ -406,9 +406,31 @@ describe("FloatingBar", () => {
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("listening");
     expect(lastResize()).toEqual({ width: 252, height: 66, anchorY: 33 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop listening" }));
+    // "Stop" used to be the only control and it submitted what you had said.
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await act(async () => {});
     expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "stop" });
+  });
+
+  it("can abandon a sentence without sending it", async () => {
+    await renderBar();
+    setBarState({ barState: "listening", audioLevel: 0.6 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel without sending" }));
+    await act(async () => {});
+
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "cancel" });
+    expect(invoke).not.toHaveBeenCalledWith("agent_voice", { action: "stop" });
+  });
+
+  it("can switch from talking to typing without sending", async () => {
+    await renderBar();
+    setBarState({ barState: "listening", audioLevel: 0.6 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Type instead" }));
+    await act(async () => {});
+
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "cancel" });
   });
 
   it("shows a processing state, not the listening look, once the mic closes", async () => {
@@ -422,8 +444,8 @@ describe("FloatingBar", () => {
     expect(bar()).toHaveAttribute("data-layout", "full");
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("transcribing");
     // A processing state has a Stop control, and no live audio bars.
-    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Stop listening" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop Juno" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 
   it("lights the pill button under the forwarded cursor, even with Juno inactive", async () => {
@@ -463,7 +485,7 @@ describe("FloatingBar", () => {
     setBarState({ barState: "always_listening", isAlwaysListening: true });
 
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("always listening");
-    expect(screen.queryByRole("button", { name: "Stop listening" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 
   it("opens the input focused on a type click, activating the window and telling the backend", async () => {
@@ -726,7 +748,7 @@ describe("FloatingBar", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("working");
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop Juno" }));
     expect(invoke).toHaveBeenCalledWith("stop_all_operations");
   });
 
@@ -766,19 +788,32 @@ describe("FloatingBar", () => {
     expect(screen.getByText("Second")).toBeInTheDocument();
   });
 
-  it("clears the conversation and closes the pane on New chat", async () => {
+  it("clears the conversation but stays open and ready to type on New chat", async () => {
     await renderBar();
 
     submitUserMessage("Hello");
     streamAssistant("m1", "Hi.");
     fire("agent-active", false);
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await act(async () => {});
 
-    expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
+    // The pane used to vanish here, leaving no control anywhere to bring it
+    // back: asking for a new chat closed the chat.
+    expect(screen.getByTestId("bar-chat-pane")).toBeInTheDocument();
+    expect(screen.queryByText("Hello")).not.toBeInTheDocument();
+    // And the backend gets a fresh conversation, so the agent stops appending
+    // to the old one behind an apparently empty pane.
+    expect(invoke).toHaveBeenCalledWith("new_conversation");
 
     submitUserMessage("Again");
-    expect(screen.queryByText("Hello")).not.toBeInTheDocument();
     expect(screen.getByText("Again")).toBeInTheDocument();
+  });
+
+  it("always offers a way into the chat from the idle bar", async () => {
+    await renderBar();
+    // With no conversation at all, hovering the pill still offers the chat.
+    fireEvent.mouseEnter(bar());
+    expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
   });
 
   it("hands an open input over to a voice turn that starts from the hotkey", async () => {

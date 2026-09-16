@@ -1,6 +1,7 @@
 const COMMANDS: &[&str] = &[
     "start_dictation",
     "stop_dictation",
+    "cancel_dictation",
     "toggle_dictation",
     "get_dictation_status",
     "get_initialization_status",

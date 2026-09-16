@@ -134,13 +134,8 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
         );
     }
 
-    // Show the main window now that onboarding is done
-    if let Err(e) = crate::window_management::open_main_window(app.clone()).await {
-        warn!(
-            "Failed to show main window after onboarding completion: {}",
-            e
-        );
-    }
+    // Setup ends at the floating bar, not in a full-size window nobody asked
+    // for. close_onboarding_window puts the bar back on screen.
 
     Ok(())
 }
@@ -182,10 +177,7 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
         warn!("Failed to clear onboarding active state on skip: {}", e);
     }
 
-    // Show the main window now that onboarding is done (skipped)
-    if let Err(e) = crate::window_management::open_main_window(app.clone()).await {
-        warn!("Failed to show main window after onboarding skip: {}", e);
-    }
+    // Skipping setup lands in the same place finishing it does: the bar.
 
     Ok(())
 }
@@ -243,6 +235,8 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
                 instructions: "Grant input monitoring permission during onboarding".to_string(),
             },
             all_granted: false,
+
+            everything_granted: false,
             app_name: app.package_info().name.clone(),
         })
         .await;
@@ -468,10 +462,10 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
             warn!("Failed to close onboarding window: {}", e);
         }
 
-        // Show the main window now that we know onboarding is done
-        if let Err(e) = crate::window_management::open_main_window(app_handle.clone()).await {
-            warn!("Failed to open main window: {}", e);
-        }
+        // The main window deliberately stays hidden. Juno lives in the floating
+        // bar; the big chat window is somewhere you go, opened from the bar,
+        // not something that greets you at login. Its webview is still created
+        // from tauri.conf.json, so it keeps owning TTS playback while hidden.
     }
 
     Ok(())
@@ -513,12 +507,17 @@ pub async fn get_onboarding_state() -> Result<OnboardingStateInfo, String> {
 
 /// Stream an onboarding message through the standard agent-text-stream pipeline
 /// so it renders naturally in the chat UI.
+///
+/// Marked `notice`, because it is guidance the app wrote about itself, not an
+/// answer to a question. Without that the UI cannot tell it from a real reply
+/// and offers to copy and share it, which nobody wants to do with "Setup
+/// complete. Welcome to Juno!".
 fn emit_onboarding_message(app: &AppHandle, message: &str) {
     let message_id = Uuid::new_v4().to_string();
 
     if let Err(e) = app.emit(
         events::streaming::STREAM_START,
-        serde_json::json!({ "message_id": message_id }),
+        serde_json::json!({ "message_id": message_id, "notice": true }),
     ) {
         warn!("Failed to emit stream start: {}", e);
     }
@@ -540,7 +539,8 @@ fn emit_onboarding_message(app: &AppHandle, message: &str) {
         serde_json::json!({
             "message_id": message_id,
             "complete_text": message,
-            "is_jsx": false
+            "is_jsx": false,
+            "notice": true
         }),
     ) {
         warn!("Failed to emit stream end: {}", e);

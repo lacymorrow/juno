@@ -161,6 +161,7 @@ pub fn handle_reopen(app: &AppHandle) {
             let _ = window.show();
             let _ = window.unminimize();
             let _ = window.set_focus();
+            crate::window_management::announce_main_window(&app, true);
         }
 
         announce_reopen_attempt(&app, count);

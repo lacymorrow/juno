@@ -254,6 +254,12 @@ pub(crate) async fn check_api_keys_available(app_handle: tauri::AppHandle) -> Re
         }
     }
 
+    // A demo build carries its own key, so the onboarding key step is moot.
+    if crate::demo::is_demo_build() {
+        info!("Demo build: an Anthropic key is compiled in");
+        return Ok(true);
+    }
+
     // Fallback: check environment variables (loaded from .env files at startup)
     let env_keys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
 

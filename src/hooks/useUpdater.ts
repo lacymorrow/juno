@@ -27,7 +27,7 @@ export function useUpdater() {
 
   const installUpdate = useCallback(async () => {
     const update = pendingUpdate.current;
-    if (!update) throw new Error("No pending update — call checkForUpdates first");
+    if (!update) throw new Error("No pending update. Check for updates first.");
     await update.downloadAndInstall();
     await relaunch();
   }, []);

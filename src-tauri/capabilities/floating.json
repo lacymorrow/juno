@@ -42,6 +42,7 @@
     "voice-transcription:allow-toggle-dictation",
     "voice-transcription:allow-start-dictation",
     "voice-transcription:allow-stop-dictation",
+    "voice-transcription:allow-cancel-dictation",
     "voice-transcription:allow-get-dictation-status",
     "voice-transcription:allow-transcribe-file",
     "voice-transcription:allow-set-model-path",

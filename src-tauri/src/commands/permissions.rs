@@ -57,7 +57,14 @@ pub struct PermissionsState {
     pub screen_recording: PermissionStatus,
     pub microphone: PermissionStatus,
     pub input_monitoring: PermissionStatus,
+    /// Accessibility and Screen Recording only. Gates whether Juno can act at
+    /// all, so it deliberately ignores the optional two.
     pub all_granted: bool,
+    /// Every permission, optional ones included. Setup uses this to decide
+    /// whether it still has anything to offer: `all_granted` dropped the whole
+    /// step the moment the required two landed, which made Microphone and
+    /// Input Monitoring unreachable from onboarding forever.
+    pub everything_granted: bool,
     pub app_name: String,
 }
 
@@ -115,6 +122,7 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
 
     // Only consider REQUIRED permissions for all_granted status
     let all_granted = accessibility.granted && screen_recording.granted;
+    let everything_granted = all_granted && microphone.granted && input_monitoring.granted;
 
     let permissions_state = PermissionsState {
         accessibility,
@@ -122,6 +130,7 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
         microphone,
         input_monitoring,
         all_granted,
+        everything_granted,
         app_name,
     };
 
@@ -879,6 +888,8 @@ mod tests {
                 instructions: String::new(),
             },
             all_granted: true,
+
+            everything_granted: true,
             app_name: "test".to_string(),
         };
 
@@ -974,6 +985,7 @@ mod tests {
             microphone,
             input_monitoring,
             all_granted,
+            everything_granted: all_granted,
             app_name: "test".to_string(),
         };
 

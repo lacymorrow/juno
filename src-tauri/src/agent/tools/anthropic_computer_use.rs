@@ -625,6 +625,16 @@ where
 {
     use crate::input_control::{commands::describe_request, request_physical_cursor};
 
+    // Every input step funnels through here, so this is the one place that has
+    // to notice Accessibility is missing. Onboarding no longer demands it, so
+    // the first time Juno reaches for it may well be right now.
+    crate::permission_gate::require(
+        app_handle,
+        crate::permission_gate::Capability::Accessibility,
+        action,
+    )
+    .await?;
+
     let background = crate::input_control::background_mode_enabled(app_handle).await;
 
     if !background {
