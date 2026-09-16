@@ -40,6 +40,7 @@ pub mod export; // A response as a document: copy, share sheet, Save as Markdown
 pub mod input_control; // Background operation and consent for taking the physical cursor
 pub mod integration; // Application integration patterns, component coordination, and event listeners
 pub mod menu; // Menu management for app and tray menus
+pub mod permission_gate; // Asking for a macOS permission at the moment it is needed
 pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
 pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)

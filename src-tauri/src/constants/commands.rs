@@ -116,6 +116,8 @@ pub mod permissions {
     pub const TEST_MICROPHONE_FUNCTIONALITY: &str = "test_microphone_functionality";
     pub const AUTO_GRANT_PERMISSIONS: &str = "auto_grant_permissions";
     pub const CANCEL_AUTO_GRANT: &str = "cancel_auto_grant";
+    /// Opens the exact Privacy pane for one permission, so nobody has to hunt
+    pub const OPEN_SYSTEM_SETTINGS: &str = "open_system_settings_enhanced";
 }
 
 /// Background operation and the consent it needs

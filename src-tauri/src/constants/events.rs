@@ -244,6 +244,9 @@ pub mod permissions {
     pub const GUIDANCE_NEEDED: &str = "permission-guidance-needed";
     /// Emitted when a specific permission flips from denied → granted during polling
     pub const GRANTED: &str = "permission-granted";
+    /// Emitted the moment Juno actually reaches for a permission it does not
+    /// have, so the ask arrives with a reason attached instead of during setup
+    pub const NEEDED: &str = "permission-needed";
     /// Streamed progress of the post-Accessibility auto-grant run (auto_grant_permissions)
     pub const AUTO_GRANT_PROGRESS: &str = "permissions-auto-grant-progress";
 }

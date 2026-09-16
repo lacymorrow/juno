@@ -342,9 +342,9 @@ const getOnboardingSteps = (
     : [
         {
           id: "permissions",
-          title: "Grant Access",
+          title: "What Juno can do",
           description:
-            "macOS asks before an app can control your Mac. Juno will open the right settings pane for each one.",
+            "Juno already works. Turn these on whenever you want it to reach outside this window, now or later, and you can turn them back off any time.",
           icon: null, // The permission checklist is the content here.
           action: "Continue",
         },
@@ -596,11 +596,13 @@ function PermissionRow({
           </span>
         ) : active ? (
           <>
-            {!def.required && (
-              <button onClick={onSkip} className={LINK_QUIET}>
-                Skip
-              </button>
-            )}
+            {/* Every row can be passed over, including the two Juno leans on
+                most. Onboarding is not the moment to make someone trade
+                Accessibility for a promise; the ask returns when Juno actually
+                reaches for it, with the reason attached. */}
+            <button onClick={onSkip} className={LINK_QUIET}>
+              Later
+            </button>
             <button
               onClick={onRequest}
               disabled={isRequesting}
@@ -854,15 +856,6 @@ export default function OnboardingFlow({
       setPermissionsError(error as string);
       return false;
     }
-  };
-
-  // Check if required permissions (accessibility + screen recording) are granted
-  const areRequiredPermissionsGranted = (): boolean => {
-    if (!permissionsState) return false;
-    return (
-      permissionsState.accessibility.granted &&
-      permissionsState.screen_recording.granted
-    );
   };
 
   // Request a single permission. First call triggers the native prompt (when
@@ -1343,10 +1336,10 @@ export default function OnboardingFlow({
 
   const handleNext = useCallback(async () => {
     const currentStepData = onboardingSteps[currentStep];
-    // Block navigation from permissions step if required permissions not granted
-    if (currentStepData?.id === "permissions" && !areRequiredPermissionsGranted()) {
-      return;
-    }
+    // Nothing here blocks. Onboarding used to refuse to continue until
+    // Accessibility and Screen Recording were granted, which asked for the two
+    // most alarming switches macOS has before Juno had done anything worth
+    // trusting it with. The ask now happens at the moment Juno needs one.
     // While the permission checklist is still active, the footer Continue is
     // intentionally not rendered. The global Enter handler must not advance
     // either, or it would silently skip the optional rows the moment the
@@ -1410,6 +1403,17 @@ export default function OnboardingFlow({
     }
   };
 
+  // Leave the whole permissions checklist and carry on with setup. The footer
+  // is hidden while a row is active, so this is the only way out of that state,
+  // and "later" has to lead somewhere.
+  const skipPermissionsStep = () => {
+    recordEvent("onboarding_permission_skipped", { permission: "step:permissions" });
+    setPermIndex(PERMISSION_FLOW.length);
+    if (currentStep < onboardingSteps.length - 1) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
   const handleSkipStep = () => {
     // Skip just the current step and move to the next one
     const currentStepData = onboardingSteps[currentStep];
@@ -1440,10 +1444,12 @@ export default function OnboardingFlow({
     }
   };
 
-  // Skip a single optional permission within the checklist.
+  // Pass over a single permission in the checklist. Any of them, including the
+  // two Juno leans on: refusing to let someone move past Accessibility here is
+  // what turned setup into a toll gate.
   const skipCurrentPermission = () => {
     const active = PERMISSION_FLOW[permIndex];
-    if (!active || active.required) return;
+    if (!active) return;
     recordEvent("onboarding_permission_skipped", { permission: active.stateKey });
     setPermIndex((i) => nextPendingIndex(i, permissionsState));
   };
@@ -1475,14 +1481,12 @@ export default function OnboardingFlow({
   // Determine if continue button should be disabled
   // Role step is intentionally optional — no guard here; handleNext saves only when a role is selected
   const isContinueDisabled =
-    (step.id === "permissions" && !areRequiredPermissionsGranted()) ||
     (step.id === "api-key" && !detectedProvider && !cliSelected) ||
     (step.id === "api-key" && apiKeySaving);
 
-  // Determine if skip should be hidden (permissions step with required perms not granted)
-  const isSkipHidden =
-    currentStep === onboardingSteps.length - 1 ||
-    (step.id === "permissions" && !areRequiredPermissionsGranted());
+  // Skip stays available on the permissions step however little is granted:
+  // "later" has to be a real answer, not a dead link.
+  const isSkipHidden = currentStep === onboardingSteps.length - 1;
 
   return (
     <div
@@ -1797,10 +1801,19 @@ export default function OnboardingFlow({
                           </button>
                         </div>
                       )}
-                      {permSubFlowComplete && (
+                      {permSubFlowComplete ? (
                         <p className="mt-3 text-[12px] text-muted-foreground">
                           You can change these anytime in System Settings.
                         </p>
+                      ) : (
+                        // The footer is hidden while a row owns the primary
+                        // action, so the way out lives here. Without it, "later"
+                        // means abandoning the app.
+                        <div className="mt-4 flex justify-center">
+                          <button onClick={skipPermissionsStep} className={LINK_QUIET}>
+                            I'll do this later
+                          </button>
+                        </div>
                       )}
                     </>
                   )}
