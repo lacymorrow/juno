@@ -26,8 +26,6 @@ use tokio_util::sync::CancellationToken;
 
 static SCREEN_RECORDING_DIALOG_SHOWN: std::sync::LazyLock<AtomicBool> =
     std::sync::LazyLock::new(|| AtomicBool::new(false));
-static ACCESSIBILITY_DIALOG_SHOWN: std::sync::LazyLock<AtomicBool> =
-    std::sync::LazyLock::new(|| AtomicBool::new(false));
 static MICROPHONE_DIALOG_SHOWN: std::sync::LazyLock<AtomicBool> =
     std::sync::LazyLock::new(|| AtomicBool::new(false));
 static INPUT_MONITORING_DIALOG_SHOWN: std::sync::LazyLock<AtomicBool> =
@@ -202,44 +200,27 @@ pub async fn request_accessibility_permission_native() -> Result<bool, String> {
                 Ok(true)
             }
             Ok(false) => {
-                let already_shown = ACCESSIBILITY_DIALOG_SHOWN.swap(true, Ordering::AcqRel);
-                if already_shown {
-                    info!("Accessibility dialog already shown this launch — opening System Settings directly");
-                    let _ = Command::new("open")
-                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
-                        .status();
-                    Ok(false)
-                } else {
-                    info!("Requesting accessibility permissions with native prompt (first time this launch)");
-                    match NativePermissionChecker::request_accessibility_permission() {
-                        Ok(()) => {
-                            info!("Accessibility permission request triggered successfully");
-                            tokio::time::sleep(tokio::time::Duration::from_millis(
-                                timeouts::PERMISSION_CHECK_DELAY_MS,
-                            ))
-                            .await;
-                            match NativePermissionChecker::check_accessibility_permission() {
-                                Ok(granted) => {
-                                    if granted {
-                                        info!("Accessibility permissions now granted");
-                                    } else {
-                                        info!("Accessibility permissions still not granted - user needs to manually enable in System Settings");
-                                    }
-                                    Ok(granted)
-                                }
-                                Err(e) => {
-                                    error!("Error checking accessibility permissions after request: {}", e);
-                                    Ok(false)
-                                }
+                // One destination, every time. There used to be a first-call
+                // branch that raised the system alert and a later branch that
+                // opened the pane; since the alert's only real button opened
+                // the same pane, the split bought nothing but a second window.
+                match NativePermissionChecker::request_accessibility_permission() {
+                    Ok(()) => {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            timeouts::PERMISSION_CHECK_DELAY_MS,
+                        ))
+                        .await;
+                        match NativePermissionChecker::check_accessibility_permission() {
+                            Ok(granted) => Ok(granted),
+                            Err(e) => {
+                                error!("Error re-checking accessibility permissions: {}", e);
+                                Ok(false)
                             }
                         }
-                        Err(e) => {
-                            error!("Error requesting accessibility permissions: {}", e);
-                            Err(format!(
-                                "Failed to request accessibility permissions: {}",
-                                e
-                            ))
-                        }
+                    }
+                    Err(e) => {
+                        error!("Error opening the Accessibility pane: {}", e);
+                        Err(format!("Failed to open accessibility settings: {}", e))
                     }
                 }
             }
