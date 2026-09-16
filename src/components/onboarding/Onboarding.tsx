@@ -52,6 +52,14 @@ interface PermissionStatus {
 // A second hand-maintained copy of this drifted once already: it was missing
 // `everything_granted`, which is exactly the field that decides whether this
 // step still has anything to show.
+/** Only the parts of a Trigger this screen round-trips; the rest is preserved. */
+interface TriggerShape {
+  method: string;
+  target: string;
+  binding: unknown;
+  [key: string]: unknown;
+}
+
 interface PermissionsState {
   accessibility: PermissionStatus;
   screen_recording: PermissionStatus;
@@ -738,6 +746,12 @@ export default function OnboardingFlow({
   // run dismisses with Later so setup can continue. Nobody ever mentioned it
   // again, so Screen Recording looked switched on and behaved switched off.
   const [awaitingRelaunch, setAwaitingRelaunch] = useState<string[]>([]);
+  // Whether this keyboard actually has the globe key, learned by someone
+  // pressing it rather than by interrogating the hardware. "Does this machine
+  // have an Fn key" has no single answer once a second keyboard is plugged in,
+  // and a press proves the key reaches Juno, which no capability check can.
+  const [fnOffered, setFnOffered] = useState(false);
+  const [fnSaveError, setFnSaveError] = useState<string | null>(null);
   // The microphone prompt is raised automatically once, right after a
   // successful auto-grant run — one Allow click finishes everything.
   const micAutoPromptedRef = useRef(false);
@@ -879,6 +893,29 @@ export default function OnboardingFlow({
       );
     }
   );
+
+  const adoptFnAsTalkKey = useCallback(async () => {
+    setFnSaveError(null);
+    try {
+      const triggers = await invoke<TriggerShape[]>(COMMANDS.TRIGGERS_GET_TRIGGERS);
+      const next = triggers.map((trigger) =>
+        trigger.method === "push_to_talk" && trigger.target === "dictation"
+          ? { ...trigger, binding: { kind: "modifier" as const, key: "fn" as const } }
+          : trigger
+      );
+      await invoke(COMMANDS.TRIGGERS_SET_TRIGGERS, { triggers: next });
+      if (mountedRef.current) setFnOffered(true);
+    } catch (error) {
+      console.error("[Onboarding] could not switch to the globe key:", error);
+      if (mountedRef.current) {
+        setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
+      }
+    }
+  }, []);
+
+  useEventListener<{ key: string }>(EVENTS.TRIGGERS_KEY_CAPTURED, (payload) => {
+    if (payload?.key === "fn") void adoptFnAsTalkKey();
+  });
 
   const refreshRelaunchPending = useCallback(async () => {
     try {
@@ -1553,6 +1590,20 @@ export default function OnboardingFlow({
     return null;
   }
 
+  // Listen for the globe key only while the last screen is up, and stop as
+  // soon as it is not. Outside this moment a press means "talk to Juno", not
+  // "choose a key", and the monitor must not swallow that.
+  const onFinalStep = currentStep === onboardingSteps.length - 1;
+  useEffect(() => {
+    if (!onFinalStep) return;
+    void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: true }).catch((error) =>
+      console.debug("[Onboarding] could not listen for the globe key:", error)
+    );
+    return () => {
+      void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: false }).catch(() => {});
+    };
+  }, [onFinalStep]);
+
   // Only on the last screen: interrupting setup halfway to restart would lose
   // the thread, and the remaining steps work fine without these.
   const needsRelaunch =
@@ -1682,6 +1733,21 @@ export default function OnboardingFlow({
                             ? "That summons Juno from anywhere."
                             : "Try it. This summons Juno from anywhere."}
                         </p>
+                        {/* Offered by invitation rather than by detection: if
+                            this keyboard has a globe key, pressing it proves
+                            it, and if it does not, nothing happens and the
+                            shortcut above keeps working. Either way nobody has
+                            to answer a question about their hardware. */}
+                        <p className="mt-3 text-[12px] leading-snug text-muted-foreground">
+                          {fnOffered
+                            ? "Using the globe key to talk. You can change this in Settings."
+                            : "Prefer to hold one key? Press the globe key now to use that instead."}
+                        </p>
+                        {fnSaveError && (
+                          <p className="mt-1 text-[12px] text-destructive" role="alert">
+                            {fnSaveError}
+                          </p>
+                        )}
                       </motion.div>
                     ) : (
                       <motion.div

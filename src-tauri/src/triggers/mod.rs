@@ -55,6 +55,9 @@ pub enum ModifierKey {
 }
 
 impl ModifierKey {
+    /// Every key setup listens for while asking someone to press theirs.
+    pub const ALL: [ModifierKey; 1] = [ModifierKey::Fn];
+
     /// The macOS virtual key code reported on `NSEventTypeFlagsChanged`.
     pub fn key_code(self) -> u16 {
         match self {

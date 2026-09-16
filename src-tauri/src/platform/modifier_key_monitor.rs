@@ -70,6 +70,9 @@ mod imp {
     static MONITORS: Mutex<Option<Monitors>> = Mutex::new(None);
     static INSTALLED: AtomicBool = AtomicBool::new(false);
     static BINDINGS: Mutex<Vec<ModifierBinding>> = Mutex::new(Vec::new());
+    /// While setup is asking someone to press their key, report what arrives
+    /// instead of acting on it.
+    static CAPTURING: AtomicBool = AtomicBool::new(false);
 
     /// Whether adding the global monitor is safe right now.
     fn accessibility_trusted() -> bool {
@@ -108,6 +111,27 @@ mod imp {
             let flags: usize = msg_send![event, modifierFlags];
             (key_code, flags)
         };
+
+        // Setup is asking which key to use. Report the press and act on
+        // nothing: this is someone choosing a binding, not using one.
+        if CAPTURING.load(Ordering::SeqCst) {
+            for key in super::ModifierKey::ALL {
+                if modifier_edge(key_code, flags, key) == Some(true) {
+                    debug!("[ModifierKeyMonitor] Captured {} for binding", key.label());
+                    if let Err(e) = tauri::Emitter::emit(
+                        app,
+                        crate::constants::events::triggers::KEY_CAPTURED,
+                        serde_json::json!({ "key": key }),
+                    ) {
+                        warn!(
+                            "[ModifierKeyMonitor] Could not report the captured key: {}",
+                            e
+                        );
+                    }
+                }
+            }
+            return;
+        }
 
         // Copy out the matching triggers, then release the lock before routing.
         let matches: Vec<(bool, super::TriggerMethod, super::TriggerTarget)> = {
@@ -152,7 +176,11 @@ mod imp {
                 "[ModifierKeyMonitor] Accessibility not granted yet; installing the local monitor only, so the key works while Juno is focused. ensure_global adds the rest when it lands."
             );
         }
+        install(app, trusted)
+    }
 
+    /// Put the monitors up. Idempotent; `global` is skipped when untrusted.
+    fn install(app: &AppHandle, trusted: bool) -> Result<(), String> {
         let app_for_main = app.clone();
         app.run_on_main_thread(move || {
             let mut guard = match MONITORS.lock() {
@@ -206,6 +234,29 @@ mod imp {
                 e
             )
         })
+    }
+
+    /// Listen for a bare modifier so setup can ask someone to press theirs.
+    ///
+    /// The monitors go up even with no binding configured, because the whole
+    /// point is to find out whether this keyboard has the key at all. The
+    /// local half is enough: setup's own window is focused while it asks, and
+    /// Accessibility may well not be granted yet.
+    pub fn set_capture(app: &AppHandle, active: bool) -> Result<(), String> {
+        CAPTURING.store(active, Ordering::SeqCst);
+        if active {
+            return install(app, accessibility_trusted());
+        }
+        // Keep the monitors only if a real binding still needs them.
+        let still_bound = match BINDINGS.lock() {
+            Ok(g) => !g.is_empty(),
+            Err(poisoned) => !poisoned.into_inner().is_empty(),
+        };
+        if still_bound {
+            Ok(())
+        } else {
+            remove(app)
+        }
     }
 
     /// Add the global half once Accessibility lands, without disturbing the
@@ -289,6 +340,10 @@ mod imp {
         Ok(())
     }
 
+    pub fn set_capture(_app: &AppHandle, _active: bool) -> Result<(), String> {
+        Ok(())
+    }
+
     pub fn remove(_app: &AppHandle) -> Result<(), String> {
         Ok(())
     }
@@ -303,6 +358,12 @@ pub fn sync(app: &AppHandle, bindings: Vec<ModifierBinding>) -> Result<(), Strin
 /// Add the global half once Accessibility is granted.
 pub fn ensure_global(app: &AppHandle) -> Result<(), String> {
     imp::ensure_global(app)
+}
+
+/// Listen for a bare modifier key and report it instead of acting on it, so
+/// setup can ask someone to press theirs rather than guess at their hardware.
+pub fn set_capture(app: &AppHandle, active: bool) -> Result<(), String> {
+    imp::set_capture(app, active)
 }
 
 /// Tear the monitor down.

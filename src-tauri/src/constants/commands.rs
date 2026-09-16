@@ -124,6 +124,14 @@ pub mod permissions {
     pub const RESTART_AFTER_PERMISSIONS: &str = "restart_app_after_permissions";
 }
 
+/// Activation triggers
+pub mod triggers {
+    pub const GET_TRIGGERS: &str = "get_triggers";
+    pub const SET_TRIGGERS: &str = "set_triggers";
+    /// Listen for a bare modifier key while setup asks someone to press theirs
+    pub const SET_TRIGGER_CAPTURE: &str = "set_trigger_capture";
+}
+
 /// Background operation and the consent it needs
 pub mod input_control {
     pub const RESPOND_TO_REQUEST: &str = "respond_to_input_control";

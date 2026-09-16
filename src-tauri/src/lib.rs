@@ -113,7 +113,7 @@ use crate::commands::{
     reset_keyboard_shortcuts, set_keyboard_shortcut, set_keyboard_shortcuts,
     validate_keyboard_shortcut,
 };
-use crate::commands::{get_triggers, set_triggers};
+use crate::commands::{get_triggers, set_trigger_capture, set_triggers};
 
 // Import MCP commands explicitly
 use crate::commands::mcp::{
@@ -618,6 +618,7 @@ pub fn run() {
             reset_keyboard_shortcuts,
             get_triggers,
             set_triggers,
+            set_trigger_capture,
             validate_keyboard_shortcut,
             get_shortcut_suggestions,
             get_shortcut_best_practices,

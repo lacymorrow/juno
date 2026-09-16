@@ -329,6 +329,14 @@ pub mod bar {
     pub const MAIN_WINDOW_CLOSED: &str = "bar-main-window-closed";
 }
 
+/// Trigger binding events
+pub mod triggers {
+    /// A bare modifier key was pressed while setup was listening for one, so
+    /// the person can choose it by pressing it rather than being told whether
+    /// their keyboard has it. Payload carries the key name.
+    pub const KEY_CAPTURED: &str = "trigger-key-captured";
+}
+
 /// Tool and command execution events
 pub mod tools {
     pub const USAGE: &str = "tool-usage";

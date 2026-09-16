@@ -19,6 +19,18 @@ pub async fn get_triggers(app_state: State<'_, AppState>) -> Result<Vec<Trigger>
 }
 
 /// Replace the activation triggers: validate, store in memory, persist, and
+/// Listen for a bare modifier key so setup can ask someone to press theirs.
+///
+/// While this is on, pressing Fn reports the key rather than starting
+/// dictation: the person is choosing a binding, not using one. Setup asks
+/// instead of interrogating the hardware, because "does this machine have an
+/// Fn key" has no single answer once a second keyboard is plugged in, and the
+/// press proves the key actually reaches Juno, which no capability check can.
+#[tauri::command]
+pub async fn set_trigger_capture(app: tauri::AppHandle, active: bool) -> Result<(), String> {
+    crate::platform::modifier_key_monitor::set_capture(&app, active)
+}
+
 /// re-register global shortcuts / voice. Returns the normalized list, or an
 /// error string the UI shows inline on the offending row.
 #[tauri::command]
