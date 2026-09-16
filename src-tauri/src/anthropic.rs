@@ -491,9 +491,9 @@ async fn finish_session_terminal_state(
     {
         let agent_name = handle.session().agent_name().to_string();
         let (title, level) = if terminal_status == AgentSessionStatus::Finished {
-            (format!("{} — Complete", agent_name), "success")
+            (format!("{} finished", agent_name), "success")
         } else {
-            (format!("{} — Failed", agent_name), "error")
+            (format!("{} could not finish", agent_name), "error")
         };
         let data = crate::commands::notifications::NotificationData {
             title,

@@ -323,22 +323,104 @@ pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
     WindowManager::hide_window(&app, window_labels::SETTINGS).await
 }
 
-/// Open the native onboarding window
+/// Open the native onboarding window.
+///
+/// The floating bar is always on top, so during setup it sits over the
+/// onboarding window and covers the copy. It also has nothing to offer someone
+/// who has not finished setting up, so it waits until they have.
 #[tauri::command]
 pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
+    let bar_was_visible = WindowManager::is_window_visible(&app, window_labels::FLOATING_BAR);
+    if bar_was_visible {
+        mark_bar_withheld_for_onboarding();
+        if let Err(e) = WindowManager::hide_window(&app, window_labels::FLOATING_BAR).await {
+            // Not worth failing setup over; the bar merely sits in the way.
+            warn!("Could not hide the floating bar for onboarding: {}", e);
+        }
+    }
     WindowManager::create_or_show_window(&app, WindowConfig::onboarding()).await
 }
 
-/// Close the native onboarding window
+/// Close the native onboarding window, putting the bar back if we took it away.
 #[tauri::command]
 pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::close_window(&app, window_labels::ONBOARDING).await
+    let result = WindowManager::close_window(&app, window_labels::ONBOARDING).await;
+    if BAR_HIDDEN_FOR_ONBOARDING.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) {
+            if let Err(e) = bar.show() {
+                warn!("Could not restore the floating bar after onboarding: {}", e);
+            }
+        }
+    }
+    result
 }
 
-/// Open/recreate the main window
+/// Whether onboarding is holding the floating bar back, so closing it only
+/// restores a bar that was actually going to be there.
+static BAR_HIDDEN_FOR_ONBOARDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// True while the setup assistant is on screen.
+pub fn onboarding_is_open(app: &AppHandle) -> bool {
+    WindowManager::is_window_visible(app, window_labels::ONBOARDING)
+}
+
+/// Record that the bar is being held back for onboarding, so it is put on
+/// screen when setup finishes.
+///
+/// The bar is shown on a short timer at startup, which can land either side of
+/// onboarding opening. Hiding it on open alone loses that race: the timer fires
+/// afterwards and puts it straight back over the setup window. So the show path
+/// checks too, and both routes mark it withheld.
+pub fn mark_bar_withheld_for_onboarding() {
+    BAR_HIDDEN_FOR_ONBOARDING.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Open the full-size chat window, and get the bar out of its way.
+///
+/// The bar and this window show the same conversation, so having both up is
+/// the same thing twice. The bar collapses to its idle pill rather than
+/// hiding, which keeps the hotkey and the mic reachable while the big window
+/// is up.
 #[tauri::command]
 pub async fn open_main_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::create_or_show_window(&app, WindowConfig::main()).await
+    WindowManager::create_or_show_window(&app, WindowConfig::main()).await?;
+    announce_main_window(&app, true);
+    Ok(())
+}
+
+/// Put the full-size chat window away and give the conversation back to the bar.
+///
+/// Hides rather than closes: the webview keeps its React state, its scroll
+/// position, and the audio element that plays TTS for the whole app.
+#[tauri::command]
+pub async fn close_main_window(app: AppHandle) -> Result<(), String> {
+    WindowManager::hide_window(&app, window_labels::MAIN).await?;
+    announce_main_window(&app, false);
+    Ok(())
+}
+
+/// Tell the bar what the full-size window is doing.
+///
+/// Every route that shows the main window goes through here (the bar's button,
+/// a Dock click, the tray, the reopen handler), because coordination that lives
+/// in only one of them leaves the other three showing two copies of the same
+/// conversation.
+pub fn announce_main_window(app: &AppHandle, open: bool) {
+    if open {
+        // The bar already knows how to put its pane away.
+        if let Err(e) = app.emit(constants::events::bar::DISMISS_PANE, ()) {
+            warn!("Could not tell the bar to dismiss its pane: {}", e);
+        }
+    }
+    let event = if open {
+        constants::events::bar::MAIN_WINDOW_OPENED
+    } else {
+        constants::events::bar::MAIN_WINDOW_CLOSED
+    };
+    if let Err(e) = app.emit(event, ()) {
+        warn!("Could not announce the main window state: {}", e);
+    }
 }
 
 /// Open the desktop cursor overlay window

@@ -97,8 +97,8 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
       setCompanionMode(enabled);
       toast.success(
         enabled
-          ? "Companion mode enabled — agent will observe without acting"
-          : "Companion mode disabled — agent can take actions"
+          ? "Companion mode on. Juno will watch and answer, but not act."
+          : "Companion mode off. Juno can act on your Mac again."
       );
     } catch (error) {
       console.error("Failed to toggle companion mode:", error);
@@ -255,7 +255,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
         <SettingsRow
           htmlFor="companion-mode"
           label="Enable Companion Mode"
-          description="Agent observes your screen and answers questions — no clicking, typing, or automation"
+          description="Juno watches your screen and answers questions. It will not click, type, or automate anything."
           below={
             companionMode && (
               <div className="rounded-lg border border-border bg-muted p-3">

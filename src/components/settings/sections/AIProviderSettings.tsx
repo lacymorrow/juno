@@ -31,12 +31,33 @@ import { Textarea } from "@/components/ui/textarea";
 import { Save, Check, CheckCircle } from "lucide-react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
-import { useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS } from "@/lib/constants.generated";
 
+/** What a demo build carries, from the backend. */
+interface DemoInfo {
+  is_demo: boolean;
+  cohort: string | null;
+}
+
 export default function AIProviderSettings({ settings }: SettingsSectionProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const [demo, setDemo] = useState<DemoInfo | null>(null);
+
+  // A demo build answers with its own key, so say so rather than letting the
+  // person wonder why Juno works without one.
+  useEffect(() => {
+    let mounted = true;
+    invoke<DemoInfo>(COMMANDS.CORE_GET_DEMO_INFO)
+      .then((info) => {
+        if (mounted) setDemo(info);
+      })
+      .catch((error) => console.debug("Demo info unavailable:", error));
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const currentProvider = settings.providers?.find(
     (p) => p.id === settings.activeProvider
@@ -101,6 +122,24 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
+      {demo?.is_demo && (
+        <SettingsGroup
+          title="Demo access"
+          footer={
+            demo.cohort
+              ? `This is a demo copy of Juno (${demo.cohort}). Adding your own key below switches Juno to it.`
+              : "This is a demo copy of Juno. Adding your own key below switches Juno to it."
+          }
+        >
+          <SettingsRow
+            label="Anthropic"
+            description="Included with this build, so you can try Juno without an account"
+          >
+            <Badge variant="secondary">Included</Badge>
+          </SettingsRow>
+        </SettingsGroup>
+      )}
+
       <SettingsGroup
         title="Provider Selection"
         advanced

@@ -1,5 +1,6 @@
 import {
   MixedContentRenderer,
+  splitMixedContent,
 } from "@/components/ui/mixed-content-renderer";
 import {
   Message,
@@ -348,6 +349,33 @@ function ApprovalCountdown({
   );
 }
 
+export 
+/** Spoken markers never reach the page, but export.rs documents content that still carries them. */
+const TTS_BLOCK = /<TTS>[\s\S]*?<\/TTS>/g;
+
+/**
+ * Whether this message is worth offering to copy or share.
+ *
+ * Copy and Share export a reply as a document, so they only earn their place
+ * when there is a reply to export. Three things that look like replies are not:
+ * a notice the app wrote about itself during onboarding, a turn that spoke its
+ * answer and left nothing on screen, and a run whose only visible output is a
+ * collapsed "Why I did it this way". Offering to export those is how the
+ * toolbar ended up on almost every row.
+ */
+export function isWorthExporting(msg: ChatMessage): boolean {
+  if (msg.role !== "assistant" || msg.isStreaming || msg.notice) return false;
+  const content = msg.content?.replace(TTS_BLOCK, "").trim();
+  if (!content) return false;
+  // Prose and generated components both carry words into the export; a why
+  // block on its own does not.
+  return splitMixedContent(content, false).some(
+    (segment) =>
+      (segment.type === "text" || segment.type === "jsx") &&
+      segment.content.trim() !== ""
+  );
+}
+
 export function ChatMessageComponent({
   msg,
   index,
@@ -570,11 +598,8 @@ export function ChatMessageComponent({
         )}
       </MessageContent>
 
-      {/* Action toolbar for assistant messages */}
-      {msg.role === "assistant" &&
-        msg.content &&
-        msg.content.trim() !== "" &&
-        !msg.isStreaming && (
+      {/* Action toolbar, only where there is something worth keeping */}
+      {isWorthExporting(msg) && (
           <MessageToolbar className="opacity-40 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100">
             <MessageActions>
               <MessageAction

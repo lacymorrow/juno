@@ -32,6 +32,7 @@ pub mod commands;
 pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
 pub mod cursor_scale;
+pub mod demo; // Golden demo builds that carry their own Anthropic key
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription
@@ -39,6 +40,7 @@ pub mod export; // A response as a document: copy, share sheet, Save as Markdown
 pub mod input_control; // Background operation and consent for taking the physical cursor
 pub mod integration; // Application integration patterns, component coordination, and event listeners
 pub mod menu; // Menu management for app and tray menus
+pub mod permission_gate; // Asking for a macOS permission at the moment it is needed
 pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
 pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
@@ -459,6 +461,7 @@ pub fn run() {
             get_provider_settings,
             update_provider_api_key,
             check_api_keys_available,
+            crate::demo::get_demo_info,
             update_provider_model,
             update_provider_max_tokens,
             update_provider_temperature,
@@ -711,6 +714,7 @@ pub fn run() {
             window_management::open_settings_window,
             window_management::close_settings_window,
             window_management::open_main_window,
+            window_management::close_main_window,
             window_management::open_onboarding_window,
             window_management::close_onboarding_window,
             window_management::open_desktop_cursor_overlay,
@@ -1102,6 +1106,7 @@ pub fn run() {
                                 let _ = window.show();
                                 let _ = window.unminimize();
                                 let _ = window.set_focus();
+                                window_management::announce_main_window(app_handle, true);
                             }
                         }
                         // In menu-bar-only mode this click is usually someone

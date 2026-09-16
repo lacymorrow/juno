@@ -159,7 +159,7 @@ pub fn validate_cron_interval(expr: &str) -> Result<(), String> {
     for pair in runs.windows(2) {
         if pair[1].saturating_sub(pair[0]) < MIN_INTERVAL_SECS {
             return Err(format!(
-                "Schedule fires too frequently — the minimum interval between runs is {} seconds",
+                "That schedule runs too often. Runs need to be at least {} seconds apart.",
                 MIN_INTERVAL_SECS
             ));
         }

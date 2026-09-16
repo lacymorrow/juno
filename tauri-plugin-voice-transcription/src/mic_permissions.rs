@@ -80,7 +80,12 @@ pub fn check_microphone_permission() -> MicrophonePermissionStatus {
                     status
                 );
                 PERMISSION_GRANTED.store(false, Ordering::SeqCst);
-                PERMISSION_CACHED.store(true, Ordering::SeqCst);
+                // Deliberately not cached. A denial is not permanent: the
+                // person can grant Microphone in System Settings a second
+                // later. Caching it meant the very next check kept answering
+                // "denied" for the life of the process, so dictation stayed
+                // broken until Juno was relaunched, long after the switch was
+                // flipped. A grant is safe to cache; a refusal is not.
                 MicrophonePermissionStatus::Denied
             }
             0 => {
@@ -166,7 +171,8 @@ pub async fn request_microphone_permission() -> Result<MicrophonePermissionStatu
             } else {
                 info!("Microphone permission denied by user (AVCaptureDevice)");
                 PERMISSION_GRANTED.store(false, Ordering::SeqCst);
-                PERMISSION_CACHED.store(true, Ordering::SeqCst);
+                // Not cached, for the same reason as above: they can change
+                // their mind in System Settings without restarting Juno.
                 MicrophonePermissionStatus::Denied
             };
             if let Ok(mut res) = result_for_block.lock() {

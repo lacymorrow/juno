@@ -262,8 +262,8 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
           description={
             selectedModel
               ? selectedModel.downloaded
-                ? `Active — ${selectedModel.size_mb} MB`
-                : `Not downloaded yet — ${selectedModel.size_mb} MB`
+                ? `Active, ${selectedModel.size_mb} MB`
+                : `Not downloaded yet, ${selectedModel.size_mb} MB`
               : undefined
           }
         >
@@ -289,7 +289,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
                 >
                   {model.display_name}
                   {model.is_default ? " (Recommended)" : ""}
-                  {!model.downloaded ? " — not downloaded" : ""}
+                  {!model.downloaded ? ", not downloaded" : ""}
                 </SelectItem>
               ))}
             </SelectContent>

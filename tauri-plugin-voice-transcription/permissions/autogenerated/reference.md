@@ -10,6 +10,32 @@
 <tr>
 <td>
 
+`voice-transcription:allow-cancel-dictation`
+
+</td>
+<td>
+
+Enables the cancel_dictation command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`voice-transcription:deny-cancel-dictation`
+
+</td>
+<td>
+
+Denies the cancel_dictation command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `voice-transcription:allow-check-microphone-permission`
 
 </td>

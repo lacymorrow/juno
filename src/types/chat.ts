@@ -19,6 +19,12 @@ export type ChatMessage = {
     | "thinking";
   content: string;
   isJsx?: boolean;
+  /**
+   * Guidance the app wrote about itself (onboarding, status), not an answer to
+   * anything. It reads like a reply, so without this flag the UI offers to copy
+   * and share "Setup complete. Welcome to Juno!".
+   */
+  notice?: boolean;
   screenshot_base64?: string;
   tool_name?: string;
   tool_args?: any;

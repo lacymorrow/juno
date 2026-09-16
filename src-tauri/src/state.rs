@@ -2344,6 +2344,8 @@ mod tests {
             microphone: mock_permissions[2].clone(),
             input_monitoring: mock_permissions[3].clone(),
             all_granted: false,
+
+            everything_granted: false,
             app_name: "TestApp".to_string(),
         };
 

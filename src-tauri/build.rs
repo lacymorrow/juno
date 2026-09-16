@@ -1,6 +1,12 @@
 fn main() {
     tauri_build::build();
 
+    // A demo build bakes its key in with option_env!, which cargo cannot see
+    // as an input on its own. Without these, flipping between a demo build and
+    // a normal one reuses the cached crate and ships the wrong thing.
+    println!("cargo:rerun-if-env-changed=JUNO_DEMO_ANTHROPIC_KEY");
+    println!("cargo:rerun-if-env-changed=JUNO_DEMO_COHORT");
+
     // Note: Icon copying is no longer needed since we use embedded icon data
     // This eliminates file system dependencies and debug folder complexity
 

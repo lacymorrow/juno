@@ -75,7 +75,7 @@ export function AppHeader({
               {serverStatus === "connected"
                 ? "Backend connected"
                 : serverStatus === "error"
-                ? "Backend connection error — check logs"
+                ? "Backend is not responding. Check the logs."
                 : "Connecting to backend..."}
             </TooltipContent>
           </Tooltip>

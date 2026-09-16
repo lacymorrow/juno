@@ -157,6 +157,47 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
     Ok(())
 }
 
+/// Stop listening and throw the audio away.
+///
+/// `stop_dictation` always finalises and emits a result, which downstream
+/// becomes a submitted query. There was no way to change your mind mid
+/// sentence: the only control on screen said "Stop" and sent what you had
+/// said. This is the one that does not.
+#[tauri::command]
+pub async fn cancel_dictation<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    controller: State<'_, Arc<Mutex<VoiceController>>>,
+) -> Result<bool, Error> {
+    info!("[Plugin] cancel_dictation command called");
+
+    let mut voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            info!("[Plugin] VoiceController is busy; cancel will land when the lock frees");
+            return Ok(false);
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            error!("[Plugin] VoiceController mutex is poisoned: {}", e);
+            return Err(Error::LockError(format!(
+                "VoiceController mutex is poisoned: {}",
+                e
+            )));
+        }
+    };
+
+    let result = voice_controller.cancel_dictation()?;
+
+    if result {
+        app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STOPPED, ())
+            .map_err(|e| {
+                Error::EventError(format!("Failed to emit dictation-stopped event: {}", e))
+            })?;
+    }
+
+    info!("[Plugin] Dictation cancelled: {}", result);
+    Ok(result)
+}
+
 #[tauri::command]
 pub async fn stop_dictation<R: tauri::Runtime>(
     app: AppHandle<R>,

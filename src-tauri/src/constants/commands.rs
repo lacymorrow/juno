@@ -36,6 +36,7 @@ pub mod settings {
 
 /// Core system command names
 pub mod core {
+    pub const GET_DEMO_INFO: &str = "get_demo_info";
     pub const GET_DEBUG_MODE: &str = "get_debug_mode";
     pub const SET_DEBUG_MODE: &str = "set_debug_mode";
     pub const GET_PERFORMANCE_MONITORING: &str = "get_performance_monitoring";
@@ -115,6 +116,8 @@ pub mod permissions {
     pub const TEST_MICROPHONE_FUNCTIONALITY: &str = "test_microphone_functionality";
     pub const AUTO_GRANT_PERMISSIONS: &str = "auto_grant_permissions";
     pub const CANCEL_AUTO_GRANT: &str = "cancel_auto_grant";
+    /// Opens the exact Privacy pane for one permission, so nobody has to hunt
+    pub const OPEN_SYSTEM_SETTINGS: &str = "open_system_settings_enhanced";
 }
 
 /// Background operation and the consent it needs

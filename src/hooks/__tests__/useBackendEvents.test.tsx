@@ -36,7 +36,7 @@ function renderBackendEvents() {
   return { setIsProcessing, setConversationWithPruning };
 }
 
-describe("useBackendEvents — unified submission state", () => {
+describe("useBackendEvents: unified submission state", () => {
   beforeEach(() => {
     handlers.clear();
   });

@@ -292,18 +292,20 @@ impl AnthropicBrain {
     }
 
     /// Creates a new AnthropicBrain from a CentralizedProviderConfig struct.
-    /// Falls back to the ANTHROPIC_API_KEY env var if the config has no api_key
-    /// (e.g., when keys come from a .env file rather than the Tauri Store).
+    /// The key comes from the settings store, then the ANTHROPIC_API_KEY env
+    /// var (a .env file rather than the Tauri Store), then the key baked into
+    /// a demo build. The person's own key always wins.
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
-        let api_key = config
-            .api_key
-            .clone()
-            .or_else(|| env::var("ANTHROPIC_API_KEY").ok())
-            .ok_or_else(|| {
-                AgentError::ConfigurationError(
-                    "Anthropic API key not found in settings or ANTHROPIC_API_KEY env var".into(),
-                )
-            })?;
+        let api_key = crate::demo::resolve_api_key(
+            config.api_key.clone(),
+            env::var("ANTHROPIC_API_KEY").ok(),
+            crate::demo::api_key(),
+        )
+        .ok_or_else(|| {
+            AgentError::ConfigurationError(
+                "Anthropic API key not found in settings or ANTHROPIC_API_KEY env var".into(),
+            )
+        })?;
         Self::new(
             api_key,
             config.model.clone(),
@@ -315,7 +317,16 @@ impl AnthropicBrain {
     fn format_anthropic_http_error_for_user(
         status: reqwest::StatusCode,
         error_body: &str,
+        using_demo_key: bool,
     ) -> String {
+        // A demo build's key is not the person's, so API-shaped advice about it
+        // is useless to them. Tell them the demo ended and where to go next.
+        if using_demo_key {
+            if let Some(message) = crate::demo::ended_message(status.as_u16(), error_body) {
+                return message.to_string();
+            }
+        }
+
         let trimmed = error_body.trim();
 
         // Prefer extracting a clean, user-facing message from Anthropic's structured error JSON.
@@ -1689,7 +1700,11 @@ impl AgentBrain for AnthropicBrain {
                 error_body
             );
             return Err(AgentError::LlmError(
-                Self::format_anthropic_http_error_for_user(status, &error_body),
+                Self::format_anthropic_http_error_for_user(
+                    status,
+                    &error_body,
+                    crate::demo::is_demo_key(&self.api_key),
+                ),
             ));
         }
 

@@ -279,7 +279,7 @@ export function NowPlayingCard({
             {state.artist && (
               <div className="text-xs text-muted-foreground truncate">
                 {state.artist}
-                {state.album ? ` — ${state.album}` : ""}
+                {state.album ? ` · ${state.album}` : ""}
               </div>
             )}
             {progress != null && (

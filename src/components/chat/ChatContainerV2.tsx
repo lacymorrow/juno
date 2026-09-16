@@ -10,6 +10,7 @@ import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 import type { ShareAnchor } from "@/hooks/useConversation";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
 import { InputControlNotices } from "@/components/input-control/InputControlNotices";
+import { PermissionNotice } from "@/components/permissions/PermissionNotice";
 import { cn } from "@/lib/utils";
 
 // Helper function to determine if timestamp should be shown (similar to Slack/Apple Messages)
@@ -162,6 +163,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
         <ConversationScrollButton />
       </Conversation>
       <InputControlNotices />
+      <PermissionNotice />
     </div>
   );
 });

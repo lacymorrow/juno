@@ -151,12 +151,14 @@ pub mod permission_validator {
                         "Tool '{}' requires accessibility permissions but desktop is not available",
                         tool_name
                     );
-                    return Err(AgentError::PermissionDenied(format!(
-                        "Tool '{}' requires {} but they are not granted. {}",
-                        tool_name,
-                        required.description(),
-                        required.instructions()
-                    )));
+                    // Put the ask on screen where the person can act on it. The
+                    // agent gets a message that says so, rather than a second
+                    // set of instructions it would read out on top of ours.
+                    let capability = crate::permission_gate::Capability::Accessibility;
+                    crate::permission_gate::ask(app_handle, capability, tool_name);
+                    return Err(AgentError::PermissionDenied(
+                        capability.agent_message(tool_name),
+                    ));
                 }
             }
             RequiredPermission::ScreenRecording => {
@@ -165,12 +167,11 @@ pub mod permission_validator {
                     Ok(permissions) => {
                         if !permissions.screen_recording.granted {
                             warn!("Tool '{}' requires screen recording permissions but they are not granted", tool_name);
-                            return Err(AgentError::PermissionDenied(format!(
-                                "Tool '{}' requires {} but they are not granted. {}",
-                                tool_name,
-                                required.description(),
-                                required.instructions()
-                            )));
+                            let capability = crate::permission_gate::Capability::ScreenRecording;
+                            crate::permission_gate::ask(app_handle, capability, tool_name);
+                            return Err(AgentError::PermissionDenied(
+                                capability.agent_message(tool_name),
+                            ));
                         }
                     }
                     Err(e) => {
