@@ -191,11 +191,12 @@ export function useBackendEvents({
 				const status: ServerStatus = await invoke("check_server_status");
 				if (status.backend_running) {
 					setServerStatus("connected");
-					if (status.desktop_available) {
-						addSystemMessage("Connected. Enter your query below.");
-					} else {
-						addSystemMessage("Connected. Desktop automation requires accessibility permissions — grant them in System Settings > Privacy & Security > Accessibility.");
-					}
+					// The same greeting either way. Someone who has not granted
+					// Accessibility chose that, and opening every session by
+					// telling them to go to System Settings is the nagging the
+					// just-in-time ask exists to replace. Juno asks when it
+					// actually reaches for it, with the reason attached.
+					addSystemMessage("Connected. Enter your query below.");
 				} else {
 					setServerStatus("error");
 					addSystemMessage("Backend is not responding. Please check logs.");

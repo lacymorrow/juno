@@ -323,17 +323,42 @@ pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
     WindowManager::hide_window(&app, window_labels::SETTINGS).await
 }
 
-/// Open the native onboarding window
+/// Open the native onboarding window.
+///
+/// The floating bar is always on top, so during setup it sits over the
+/// onboarding window and covers the copy. It also has nothing to offer someone
+/// who has not finished setting up, so it waits until they have.
 #[tauri::command]
 pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
+    let bar_was_visible = WindowManager::is_window_visible(&app, window_labels::FLOATING_BAR);
+    if bar_was_visible {
+        BAR_HIDDEN_FOR_ONBOARDING.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Err(e) = WindowManager::hide_window(&app, window_labels::FLOATING_BAR).await {
+            // Not worth failing setup over; the bar merely sits in the way.
+            warn!("Could not hide the floating bar for onboarding: {}", e);
+        }
+    }
     WindowManager::create_or_show_window(&app, WindowConfig::onboarding()).await
 }
 
-/// Close the native onboarding window
+/// Close the native onboarding window, putting the bar back if we took it away.
 #[tauri::command]
 pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::close_window(&app, window_labels::ONBOARDING).await
+    let result = WindowManager::close_window(&app, window_labels::ONBOARDING).await;
+    if BAR_HIDDEN_FOR_ONBOARDING.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) {
+            if let Err(e) = bar.show() {
+                warn!("Could not restore the floating bar after onboarding: {}", e);
+            }
+        }
+    }
+    result
 }
+
+/// Whether onboarding hid the floating bar, so closing it only restores a bar
+/// that was actually there to begin with.
+static BAR_HIDDEN_FOR_ONBOARDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Open/recreate the main window
 #[tauri::command]

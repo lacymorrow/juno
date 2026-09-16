@@ -579,7 +579,7 @@ function PermissionRow({
         {active && waiting && !granted && (
           <p className="mt-1.5 flex items-center gap-1.5 text-[12px] text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-            Waiting — switch Juno on in System Settings and this updates automatically.
+            Waiting. Switch Juno on in System Settings and this updates automatically.
           </p>
         )}
         {autoStage && !granted && (
@@ -1569,7 +1569,7 @@ export default function OnboardingFlow({
                         <p className="text-[13px] text-muted-foreground">
                           {shortcutPressed
                             ? "That summons Juno from anywhere."
-                            : "Try it — this summons Juno from anywhere."}
+                            : "Try it. This summons Juno from anywhere."}
                         </p>
                       </motion.div>
                     ) : (
@@ -1631,7 +1631,7 @@ export default function OnboardingFlow({
                           )}
                         </div>
                         <p className="mt-0.5 text-[12px] text-muted-foreground">
-                          No API key needed — uses Claude Code CLI authentication.
+                          No API key needed. Uses Claude Code CLI authentication.
                         </p>
                         <div className="mt-1.5 text-[12px]">
                           {cliChecking ? (
@@ -1646,7 +1646,7 @@ export default function OnboardingFlow({
                             </span>
                           ) : cliAvailable ? (
                             <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                              <AlertCircle className="h-3 w-3" /> Installed but not signed in — run{" "}
+                              <AlertCircle className="h-3 w-3" /> Installed but not signed in. Run{" "}
                               <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">claude login</code>
                             </span>
                           ) : (
@@ -1656,7 +1656,7 @@ export default function OnboardingFlow({
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
                             >
-                              <ExternalLink className="h-3 w-3" /> Not installed — get Claude Code
+                              <ExternalLink className="h-3 w-3" /> Not installed. Get Claude Code
                             </a>
                           )}
                         </div>
@@ -1704,7 +1704,7 @@ export default function OnboardingFlow({
                       <span className="text-red-600 dark:text-red-400">Couldn't save: {apiKeyError}</span>
                     ) : apiKeySaved ? (
                       <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                        <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> Saved — {detectedProvider?.name} is your active provider
+                        <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> Saved. {detectedProvider?.name} is your active provider
                       </span>
                     ) : detectedProvider ? (
                       <span className="inline-flex items-center gap-1.5 text-muted-foreground">
