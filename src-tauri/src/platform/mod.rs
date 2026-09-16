@@ -10,6 +10,7 @@ pub mod macos;
 
 /// Input Monitoring (TCC ListenEvent) check + request over IOKit; stubs elsewhere.
 pub mod input_monitoring;
+pub mod modifier_key_monitor;
 pub mod mouse_button_monitor;
 /// Native share sheet (NSSharingServicePicker) for agent responses; stub elsewhere.
 pub mod share_sheet;

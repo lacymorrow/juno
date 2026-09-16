@@ -622,6 +622,11 @@ fn emit_granted_if_flipped(
             if let Err(e) = crate::platform::stop_key_monitor::ensure_global(app) {
                 warn!("Could not add the global stop-key monitor: {}", e);
             }
+            // Same for a bare-modifier trigger such as Fn: its global half
+            // waits for this grant so macOS never raises its own alert.
+            if let Err(e) = crate::platform::modifier_key_monitor::ensure_global(app) {
+                warn!("Could not add the global modifier-key monitor: {}", e);
+            }
         }
         if let Err(e) = app.emit(
             events::permissions::GRANTED,
