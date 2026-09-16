@@ -94,7 +94,7 @@ interface UIInteractionEvent {
 
 // === LAYOUT ===
 
-export type BarLayout = "compact" | "hover" | "voice" | "full";
+export type BarLayout = "compact" | "hover" | "voice" | "status" | "full";
 
 /**
  * Pill size per layout plus the transparent padding around it (room for the
@@ -112,7 +112,12 @@ export const BAR_LAYOUTS: Record<
 > = {
   compact: { width: 56, height: 16, band: 34, pad: 16 },
   hover: { width: 132, height: 34, band: 34, pad: 16 },
-  voice: { width: 220, height: 34, band: 34, pad: 16 },
+  // Voice and status share a width and a band on purpose. Listening used to
+  // open a 220px bar and then, the instant the mic closed, a 419px one, for a
+  // status word and a stop button. The extra 200px held nothing, and the jump
+  // happened mid-sentence, every time.
+  voice: { width: 260, height: 34, band: 34, pad: 16 },
+  status: { width: 260, height: 34, band: 34, pad: 16 },
   full: { width: 419, height: 44, band: 44, pad: 24 },
 };
 
@@ -270,8 +275,10 @@ export function pickLayout({
   if (paneOpen || rosterVisible || inputOpen || INPUT_STATES.includes(state)) return "full";
   if (VOICE_STATES.includes(state)) return "voice";
   if (IDLE_STATES.includes(state)) return hovered ? "hover" : "compact";
-  // Working, error, success, speaking: room for a label and a control.
-  return "full";
+  // Working, error, success, speaking: a label and one control, which is the
+  // same room listening needs, so the bar does not lurch wider the moment
+  // someone stops talking.
+  return "status";
 }
 
 // Purpose-built motions for the status dot; injected once into <head>.
@@ -309,6 +316,12 @@ const BAR_KEYFRAMES = `
 @keyframes fbar-reveal {
   0%   { opacity: 0; transform: scale(0.85); }
   100% { opacity: 1; transform: scale(1); }
+}
+
+/* One guard for every animation the bar injects, rather than a check at each
+   call site: Reduce Motion is a system setting, not a per-component choice. */
+@media (prefers-reduced-motion: reduce) {
+  [class*="fbar-"], [style*="fbar-"] { animation: none !important; }
 }
 `;
 
@@ -1356,7 +1369,14 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // above it (docked in the bottom half, growing up); only the margin side and
   // the render order flip, so build each once and place them by `growUp`.
   const chatPaneNode = paneOpen ? (
-    <div className={cn("shrink-0", growUp ? "mb-2" : "mt-2")}>
+    <div
+      className={cn("shrink-0", growUp ? "mb-2" : "mt-2")}
+      // The same conversation lives in the full-size window, so handing it
+      // over should read as a handover. Without this the pane blinked out of
+      // existence the instant that window opened, and blinked back when it
+      // closed, with nothing connecting the two.
+      style={{ animation: "fbar-reveal 0.18s ease-out both" }}
+    >
       <BarChatPane
         messages={chat.messages}
         isProcessing={isWorking}
@@ -1390,8 +1410,14 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       onMouseMove={onRootMouseMove}
       onMouseUp={onRootMouseUp}
       onClickCapture={onRootClickCapture}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      // Through the same verified path the native tracking area uses. These
+      // used to set `hovered` directly, which is the flicker: growing the
+      // window under a resting cursor fires a DOM mouseleave with no
+      // re-enter, so the pill collapsed the instant it opened, re-triggered
+      // enter, and oscillated. The native path already debounces a leave and
+      // checks where the cursor actually is; bypassing it here undid that.
+      onMouseEnter={onMouseEnterWindow}
+      onMouseLeave={onMouseLeaveWindow}
     >
       {/* Docked in the bottom half: the pane and roster open ABOVE the pill so
           the window grows upward and nothing runs off the bottom. The pill
