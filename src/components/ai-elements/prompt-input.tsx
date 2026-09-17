@@ -63,13 +63,13 @@ import {
   XIcon,
 } from "lucide-react";
 import { nanoid } from "nanoid";
+import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import {
   Children,
   createContext,
   useCallback,
   useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -923,27 +923,15 @@ export const PromptInputTextarea = ({
   const handleCompositionEnd = useCallback(() => setIsComposing(false), []);
   const handleCompositionStart = useCallback(() => setIsComposing(true), []);
 
-  // Grow with the text, in JavaScript, because `field-sizing: content` is a
-  // Chromium feature and this app runs in WKWebView, where it silently does
-  // nothing. The CSS stays as progressive enhancement for anywhere that does
-  // support it; this is what actually makes the box grow on macOS. Without it
-  // a long message scrolls inside a fixed 4rem box instead of the composer
-  // opening up to hold it.
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const resize = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    // Measure from empty: scrollHeight never shrinks on its own.
-    el.style.height = "auto";
-    const max = MAX_COMPOSER_HEIGHT_PX;
-    const next = Math.min(el.scrollHeight, max);
-    el.style.height = `${next}px`;
-    // Only scroll once it has stopped growing, so the caret stays visible.
-    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
-  }, []);
-
-  const value = controller ? controller.textInput.value : props.value;
-  useLayoutEffect(resize, [resize, value]);
+  // Grow with the text. Shared with the floating bar's pill, so the two
+  // composers cannot drift apart.
+  const currentValue = String(
+    (controller ? controller.textInput.value : props.value) ?? ""
+  );
+  const composer = useAutoGrowTextarea({
+    value: currentValue,
+    maxHeightPx: MAX_COMPOSER_HEIGHT_PX,
+  });
 
   const controlledProps = controller
     ? {
@@ -959,10 +947,7 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
-      ref={(node: HTMLTextAreaElement | null) => {
-        textareaRef.current = node;
-        resize();
-      }}
+      ref={composer.attach}
       className={cn("field-sizing-content max-h-48 min-h-16", className)}
       name="message"
       onCompositionEnd={handleCompositionEnd}

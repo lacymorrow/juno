@@ -114,6 +114,17 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
             let payload_str = event.payload();
             match serde_json::from_str::<serde_json::Value>(payload_str) {
                 Ok(payload_json) => {
+                    // Images ride in the same payload, so a pasted picture
+                    // reaches the model with the sentence it belongs to.
+                    let images: Option<Vec<String>> = payload_json
+                        .get("images")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .filter(|v: &Vec<String>| !v.is_empty());
                     if let Some(query_value) = payload_json.get("query") {
                         if let Some(query_text) = query_value.as_str() {
                             let trimmed_query = query_text.trim();
@@ -138,6 +149,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 // Submit the query to the agent system
                                 let query_result = crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
+                                    images.clone(),
                                     app_state,
                                     app_handle_clone.clone()
                                 ).await;
@@ -201,6 +213,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                 // Submit the query to the agent system
                                 let query_result = crate::anthropic::submit_query(
                                     trimmed_query.to_string(),
+                                    None,
                                     app_state,
                                     app_handle_clone.clone()
                                 ).await;
@@ -525,6 +538,7 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
                                 // Submit the query to the agent system
                                 if let Err(e) = crate::anthropic::submit_query(
                                     trimmed_text.to_string(),
+                                    None,
                                     app_state,
                                     app_handle.clone(),
                                 )

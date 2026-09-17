@@ -168,7 +168,7 @@ pub async fn submit_orchestrated_query(
 
     if !use_orchestrator {
         // Fall back to the existing single-agent system
-        crate::anthropic::submit_query(trimmed_query.to_string(), state, app_handle).await?;
+        crate::anthropic::submit_query(trimmed_query.to_string(), None, state, app_handle).await?;
         return Ok(format!("Query processed: {}", trimmed_query));
     }
 

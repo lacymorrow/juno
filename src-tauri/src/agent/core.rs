@@ -87,6 +87,35 @@ pub struct Message {
     // Optional name field, as seen in some APIs
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>, // Often used for the tool name in Tool Role messages
+    /// Images the person attached to this turn, as data URLs.
+    ///
+    /// They live on the message rather than travelling beside the query,
+    /// because "here is a screenshot" and then "now look at this other thing"
+    /// only works if the picture is still in the conversation two turns later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<String>>,
+}
+
+impl Message {
+    /// A plain message with no tool calls, name, or attachments.
+    pub fn new(role: Role, content: impl Into<String>) -> Self {
+        Self {
+            role,
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+            images: None,
+        }
+    }
+
+    /// A message from the person, carrying whatever they attached to it.
+    pub fn from_user(content: impl Into<String>, images: Option<Vec<String>>) -> Self {
+        Self {
+            images: images.filter(|i| !i.is_empty()),
+            ..Self::new(Role::User, content)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

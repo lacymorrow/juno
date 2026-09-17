@@ -25,11 +25,12 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, MessageSquare, Mic, Square, Type, X } from "lucide-react";
 
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useEventListener } from "@/hooks/useEventListener";
 import { cn } from "@/lib/utils";
-import { EVENTS, UI } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS, UI } from "@/lib/constants.generated";
 import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
 import {
   computeWells,
@@ -156,23 +157,33 @@ export function floatingBarWindowSize({
   layout,
   paneOpen,
   rosterVisible,
+  composerGrowth = 0,
 }: {
   layout: BarLayout;
   paneOpen: boolean;
   rosterVisible: boolean;
+  /** Extra height the typed text needs beyond a single line. */
+  composerGrowth?: number;
 }) {
   const l = BAR_LAYOUTS[layout];
   const d = FLOATING_BAR_DIMENSIONS;
+  // The window is sized to its contents, so a pill that grows without telling
+  // the window would simply be clipped by it.
+  const band = l.band + Math.max(0, composerGrowth);
   return {
     width: l.width + 2 * l.pad,
     height:
-      l.band +
+      band +
       2 * l.pad +
       (rosterVisible ? d.ROSTER_STRIP_HEIGHT : 0) +
       (paneOpen ? d.PANE_GAP + d.PANE_HEIGHT : 0),
-    anchorY: l.pad + l.band / 2,
+    anchorY: l.pad + band / 2,
   };
 }
+
+/** One line of the bar's composer, and the most it may grow to. */
+export const BAR_COMPOSER_LINE_PX = 18;
+export const BAR_COMPOSER_MAX_PX = 96;
 
 /** Settle animation: min/max duration, and the travel below which it's skipped. */
 export const SNAP_MIN_MS = 160;
@@ -721,6 +732,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   // The text input is local until submit, so there is no per-keystroke IPC.
   const [inputOpen, setInputOpen] = useState(false);
+  const [composerGrowth, setComposerGrowth] = useState(0);
 
   // Starting a new chat means wanting to type, so the pane stays up, empty,
   // with the caret in it. Rotating the backend conversation matters too: the
@@ -808,7 +820,21 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const [localInputValue, setLocalInputValue] = useState("");
   const localInputValueRef = useRef("");
   localInputValueRef.current = localInputValue;
-  const inputRef = useRef<HTMLInputElement>(null);
+  // A textarea, not an input: the pill starts one line tall and grows with
+  // what is typed, the same way the full composer does. A single-line input
+  // cannot hold a newline at all, so Shift+Enter had nothing to insert.
+  const composer = useAutoGrowTextarea({
+    value: localInputValue,
+    maxHeightPx: BAR_COMPOSER_MAX_PX,
+    minHeightPx: BAR_COMPOSER_LINE_PX,
+  });
+  const inputRef = composer.ref;
+  // Only what exceeds a single line counts as growth; the band already holds
+  // the first line.
+  useEffect(() => {
+    const grown = Math.max(0, composer.height - BAR_COMPOSER_LINE_PX);
+    setComposerGrowth((prev) => (prev === grown ? prev : grown));
+  }, [composer.height]);
 
   useEffect(() => {
     setLocalInputValue(barState.inputValue);
@@ -873,18 +899,50 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     openInput();
   }, [cancelTalking, openInput]);
 
+  // Pictures pasted into the pill, as data URLs, alongside the typed text.
+  const [pastedImages, setPastedImages] = useState<string[]>([]);
+
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
       const trimmedValue = localInputValue.trim();
-      if (!trimmedValue) return;
-      await sendInteraction(
-        createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: trimmedValue }),
-      );
+      // A picture on its own is a message: "what is this?".
+      if (!trimmedValue && pastedImages.length === 0) return;
+      if (pastedImages.length > 0) {
+        // The bar-state interaction carries only a string, so an attachment
+        // goes straight to the agent rather than being quietly dropped.
+        await invoke(COMMANDS.AGENT_DISPATCH_QUERY, {
+          query: trimmedValue,
+          images: pastedImages,
+        }).catch((error) => console.error("FloatingBar: submit failed:", error));
+      } else {
+        await sendInteraction(
+          createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: trimmedValue }),
+        );
+      }
       setLocalInputValue("");
+      setPastedImages([]);
     },
-    [localInputValue, sendInteraction, createInteraction],
+    [localInputValue, pastedImages, sendInteraction, createInteraction],
   );
+
+  /** Read pasted images off the clipboard as data URLs. */
+  const handlePaste = useCallback((event: React.ClipboardEvent) => {
+    const files = Array.from(event.clipboardData?.items ?? [])
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (files.length === 0) return;
+    event.preventDefault();
+    for (const file of files) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = reader.result;
+        if (typeof url === "string") setPastedImages((prev) => [...prev, url]);
+      };
+      reader.readAsDataURL(file);
+    }
+  }, []);
 
   const handleFocus = useCallback(async () => {
     await sendInteraction(createInteraction(UI.INTERACTION_TYPES_FOCUS, { isFocused: true }));
@@ -1141,7 +1199,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const lastWindowRef = useRef<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
-    const next = floatingBarWindowSize({ layout, paneOpen, rosterVisible: showRosterStrip });
+    const next = floatingBarWindowSize({
+      layout,
+      paneOpen,
+      rosterVisible: showRosterStrip,
+      composerGrowth,
+    });
     const prev = lastWindowRef.current;
     lastWindowRef.current = { width: next.width, height: next.height };
     // growUp is only sent when set, so the downward path's resize config (and
@@ -1160,7 +1223,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
     const t = setTimeout(apply, SHRINK_DELAY_MS);
     return () => clearTimeout(t);
-  }, [layout, paneOpen, showRosterStrip, growUp, resizeWindowIfChanged]);
+  }, [layout, paneOpen, showRosterStrip, growUp, composerGrowth, resizeWindowIfChanged]);
 
   // === DRAG ANYWHERE, SNAP INTO A WELL ===
   //
@@ -1509,22 +1572,36 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         ) : showInput ? (
           <form
             onSubmit={handleSubmit}
-            className="flex min-w-0 flex-1 items-center gap-3"
+            className={cn(
+              "flex min-w-0 flex-1 gap-3",
+              // Centre while it is one line; once it grows, keep the controls
+              // by the first line rather than drifting to the middle.
+              composerGrowth > 0 ? "items-start pt-1" : "items-center",
+            )}
             style={{ animation: "fbar-content-in 0.2s ease-out both" }}
           >
-            <input
-              ref={inputRef}
-              type="text"
+            <textarea
+              ref={composer.attach}
+              rows={1}
               value={localInputValue}
               onChange={(e) => setLocalInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter sends, Shift+Enter makes a line. A textarea would
+                // otherwise insert a newline on both.
+                if (isSendKey(e)) {
+                  e.preventDefault();
+                  void handleSubmit(e as unknown as FormEvent);
+                }
+              }}
+              onPaste={handlePaste}
               onMouseDown={activateWindow}
               onFocus={handleFocus}
               onBlur={handleInputBlur}
               placeholder={paneOpen ? "Follow up…" : "Ask Juno"}
               aria-label="Ask Juno"
               className={cn(
-                "min-w-0 flex-1 cursor-text border-none bg-transparent outline-none",
-                "text-[13px] tracking-[-0.01em] text-white/90 placeholder:text-white/30",
+                "min-w-0 flex-1 resize-none cursor-text border-none bg-transparent outline-none",
+                "text-[13px] leading-[18px] tracking-[-0.01em] text-white/90 placeholder:text-white/30",
               )}
             />
             {/* Typing used to be Enter or nothing: no way to send by hand, no

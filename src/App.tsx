@@ -96,15 +96,20 @@ function App() {
   // runs the agent. Voice, the bar, and agent-rendered components enter the
   // same pipeline, so every source behaves identically.
   const handleSubmit = useCallback(
-    async (text: string) => {
+    async (text: string, images?: string[]) => {
       const query = text.trim();
-      if (!appState.canSubmit || !query) return;
+      // An image on its own is a message: "what is this?".
+      const hasImages = Boolean(images && images.length > 0);
+      if (!appState.canSubmit || (!query && !hasImages)) return;
 
       console.log("🚀 Submitting query:", query);
       conversation.setQuery("");
 
       try {
-        await invoke(COMMANDS.AGENT_DISPATCH_QUERY, { query });
+        await invoke(COMMANDS.AGENT_DISPATCH_QUERY, {
+          query,
+          images: hasImages ? images : null,
+        });
       } catch (error) {
         console.error("❌ Failed to submit query:", error);
         conversation.addSystemMessage(`Failed to submit query: ${error}`);
