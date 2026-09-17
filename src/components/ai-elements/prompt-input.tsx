@@ -69,6 +69,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -827,6 +828,9 @@ export const PromptInputBody = ({
   <div className={cn("contents", className)} {...props} />
 );
 
+/** Matches `max-h-48`; past this the composer scrolls instead of growing. */
+const MAX_COMPOSER_HEIGHT_PX = 192;
+
 export type PromptInputTextareaProps = ComponentProps<
   typeof InputGroupTextarea
 >;
@@ -919,6 +923,28 @@ export const PromptInputTextarea = ({
   const handleCompositionEnd = useCallback(() => setIsComposing(false), []);
   const handleCompositionStart = useCallback(() => setIsComposing(true), []);
 
+  // Grow with the text, in JavaScript, because `field-sizing: content` is a
+  // Chromium feature and this app runs in WKWebView, where it silently does
+  // nothing. The CSS stays as progressive enhancement for anywhere that does
+  // support it; this is what actually makes the box grow on macOS. Without it
+  // a long message scrolls inside a fixed 4rem box instead of the composer
+  // opening up to hold it.
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const resize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    // Measure from empty: scrollHeight never shrinks on its own.
+    el.style.height = "auto";
+    const max = MAX_COMPOSER_HEIGHT_PX;
+    const next = Math.min(el.scrollHeight, max);
+    el.style.height = `${next}px`;
+    // Only scroll once it has stopped growing, so the caret stays visible.
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+  }, []);
+
+  const value = controller ? controller.textInput.value : props.value;
+  useLayoutEffect(resize, [resize, value]);
+
   const controlledProps = controller
     ? {
         onChange: (e: ChangeEvent<HTMLTextAreaElement>) => {
@@ -933,6 +959,10 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
+      ref={(node: HTMLTextAreaElement | null) => {
+        textareaRef.current = node;
+        resize();
+      }}
       className={cn("field-sizing-content max-h-48 min-h-16", className)}
       name="message"
       onCompositionEnd={handleCompositionEnd}
