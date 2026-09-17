@@ -54,7 +54,6 @@ pub mod tools;
 pub mod triggers; // Unified activation model (methods x targets)
 pub mod tts;
 pub mod utils;
-pub mod voice_control;
 pub mod window_management; // Window operations, state management, and positioning
 
 // Tray icon data is now handled by the menu::tray_menu module
@@ -797,10 +796,7 @@ pub fn run() {
             // Core Commands
             cancel_agent_execution,
             get_system_context,
-            get_agent_execution_progress,
             set_agent_execution_progress,
-            set_debug_mode,
-            get_debug_mode,
             // Tray Icon Commands
             commands::tray_commands::set_tray_icon_default,
             commands::tray_commands::set_tray_icon_agent_active,
@@ -1114,6 +1110,21 @@ pub fn run() {
                         // hunting for an app they cannot see. Count it, and
                         // say where Juno went.
                         commands::dock_icon::handle_reopen(app_handle);
+                    }
+                    // The red X on the chat window means "put it away", not
+                    // "destroy it". Destroying loses its React state and the
+                    // audio element that plays TTS for the whole app, and it
+                    // skips the handover that gives the bar its pane back.
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event: tauri::WindowEvent::CloseRequested { api, .. },
+                        ..
+                    } if label == constants::window_labels::MAIN => {
+                        api.prevent_close();
+                        if let Some(window) = app_handle.get_webview_window(&label) {
+                            let _ = window.hide();
+                        }
+                        window_management::announce_main_window(app_handle, false);
                     }
                     tauri::RunEvent::ExitRequested { .. } => {
                         // Restore cursor scale on app exit — prevents stuck big cursor

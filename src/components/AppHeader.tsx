@@ -7,11 +7,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { COMMANDS } from "@/lib/constants.generated";
 import { isDevelopment } from "@/lib";
 import {
   ArrowLeft,
   History,
   MessageSquarePlus,
+  Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -121,6 +123,23 @@ export function AppHeader({
             className="h-7 w-7 p-0"
           >
             <ArrowLeft size={14} />
+          </Button>
+        )}
+        {/* Back to the bar. The conversation is the same one either way, so
+            this is putting the big window away, not closing anything. */}
+        {currentView === "chat" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              void invoke(COMMANDS.WINDOWS_CLOSE_MAIN_WINDOW).catch((error) =>
+                console.error("AppHeader: could not return to the bar:", error)
+              );
+            }}
+            title="Back to the bar"
+            className="h-7 w-7 p-0"
+          >
+            <Minimize2 size={14} />
           </Button>
         )}
         {/* Settings Button */}

@@ -1,9 +1,6 @@
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
-
-use crate::state::CancelReceiver;
 
 // --- Structs ---
 
@@ -170,68 +167,12 @@ pub enum AgentAction {
     Think, // Continue the thinking loop if more work needed (e.g., after tool execution)
 }
 
-// --- Traits ---
-
-/// Manages the agent's memory (conversation history).
-#[async_trait]
-pub trait MemoryManager: Send + Sync {
-    /// Adds a message to the memory.
-    async fn add_message(&mut self, message: Message) -> Result<(), AgentError>;
-
-    /// Retrieves all messages from memory.
-    async fn get_messages(&self) -> Result<Vec<Message>, AgentError>;
-
-    /// Retrieves the last N messages.
-    async fn get_last_n_messages(&self, n: usize) -> Result<Vec<Message>, AgentError>;
-
-    /// Clears the agent's memory.
-    async fn clear_memory(&mut self) -> Result<(), AgentError>;
-
-    // Potential future additions:
-    // async fn summarize_memory(&self) -> Result<String, AgentError>;
-    // async fn prune_memory(&mut self, max_tokens: usize) -> Result<(), AgentError>;
-}
-
-/// Provides and executes tools available to the agent.
-#[async_trait]
-pub trait ToolProvider: Send + Sync {
-    /// Lists all tools currently available.
-    async fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError>;
-
-    /// Executes a specific tool call.
-    async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError>;
-}
-
-/// Represents the agent's "brain" - responsible for deciding the next action.
-#[async_trait]
-pub trait AgentBrain: Send + Sync {
-    /// Takes the current memory and available tools, returns the next action.
-    async fn decide_next_action(
-        &self,
-        messages: &[Message],
-        available_tools: &[ToolDefinition],
-    ) -> Result<AgentAction, AgentError>;
-}
-
-/// Defines the main runnable interface for an agent.
-/// This ties together the brain, memory, and tools.
-#[async_trait]
-pub trait AgentRunnable: Send + Sync {
-    /// Runs the agent loop with an initial prompt.
-    async fn run(
-        &mut self,
-        initial_prompt: String,
-        cancel_rx: CancelReceiver,
-    ) -> Result<String, AgentError>;
-
-    /// Executes a single step of the agent loop.
-    async fn step(&mut self, cancel_rx: CancelReceiver) -> Result<AgentAction, AgentError>;
-
-    // Maybe add methods for pausing, resuming, stopping?
-    // async fn pause(&mut self) -> Result<(), AgentError>;
-    // async fn resume(&mut self) -> Result<(), AgentError>;
-    // async fn stop(&mut self) -> Result<(), AgentError>;
-}
+// The traits that used to sit here were a second, poorer declaration of the
+// four in agent/traits.rs, which every implementor and caller actually imports.
+// traits.rs is a strict superset: it also has clean_orphaned_tool_calls and its
+// siblings, execute_batch_tools, supports_streaming, decide_next_action_streaming
+// and the whole StreamingAgentBrain trait. Nothing resolved through the copies
+// here, so they were deleted rather than merged.
 
 #[cfg(test)]
 mod tests {

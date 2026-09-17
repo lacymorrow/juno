@@ -124,6 +124,12 @@ pub mod permissions {
     pub const RESTART_AFTER_PERMISSIONS: &str = "restart_app_after_permissions";
 }
 
+/// Window management
+pub mod windows {
+    /// Put the full-size chat window away and give the bar the conversation back
+    pub const CLOSE_MAIN_WINDOW: &str = "close_main_window";
+}
+
 /// Activation triggers
 pub mod triggers {
     pub const GET_TRIGGERS: &str = "get_triggers";

@@ -541,6 +541,7 @@ export const COMMANDS = {
   PERMISSIONS_OPEN_SYSTEM_SETTINGS: 'open_system_settings_enhanced',
   PERMISSIONS_AWAITING_RELAUNCH: 'permissions_awaiting_relaunch',
   PERMISSIONS_RESTART_AFTER_PERMISSIONS: 'restart_app_after_permissions',
+  WINDOWS_CLOSE_MAIN_WINDOW: 'close_main_window',
   TRIGGERS_GET_TRIGGERS: 'get_triggers',
   TRIGGERS_SET_TRIGGERS: 'set_triggers',
   TRIGGERS_SET_TRIGGER_CAPTURE: 'set_trigger_capture',
