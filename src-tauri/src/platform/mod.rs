@@ -8,6 +8,7 @@ pub mod cursor_follow; // Keep the bar on the display the cursor is on
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+pub mod file_panels;
 /// Input Monitoring (TCC ListenEvent) check + request over IOKit; stubs elsewhere.
 pub mod input_monitoring;
 pub mod modifier_key_monitor;

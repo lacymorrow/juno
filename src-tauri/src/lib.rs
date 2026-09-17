@@ -716,6 +716,8 @@ pub fn run() {
             window_management::close_settings_window,
             window_management::open_main_window,
             window_management::close_main_window,
+            platform::file_panels::save_chat_export,
+            platform::file_panels::load_chat_import,
             window_management::open_onboarding_window,
             window_management::close_onboarding_window,
             window_management::open_desktop_cursor_overlay,
