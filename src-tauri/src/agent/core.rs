@@ -232,3 +232,150 @@ pub trait AgentRunnable: Send + Sync {
     // async fn resume(&mut self) -> Result<(), AgentError>;
     // async fn stop(&mut self) -> Result<(), AgentError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // These came from agent/structs.rs, a duplicate of this file that nothing
+    // imported. It carried the only tests these types had; this file had none.
+    // The types were identical apart from variants and fields this one has and
+    // that one lacked, so the tests moved here rather than going in the bin
+    // with their copy.
+
+    #[test]
+    fn an_error_reads_as_a_sentence() {
+        assert_eq!(
+            AgentError::LlmError("Connection failed".to_string()).to_string(),
+            "LLM communication error: Connection failed"
+        );
+        assert_eq!(
+            AgentError::MaxStepsReached.to_string(),
+            "Maximum steps reached"
+        );
+        assert_eq!(AgentError::Terminated.to_string(), "Agent terminated");
+    }
+
+    #[test]
+    fn errors_compare_on_their_contents() {
+        let one = AgentError::LlmError("test".to_string());
+        assert_eq!(one, AgentError::LlmError("test".to_string()));
+        assert_ne!(one, AgentError::LlmError("different".to_string()));
+        assert_ne!(one, AgentError::MaxStepsReached);
+    }
+
+    #[test]
+    fn a_role_survives_a_round_trip() {
+        let serialized = serde_json::to_string(&Role::User).expect("serialize");
+        assert_eq!(serialized, "\"User\"");
+        let back: Role = serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(back, Role::User);
+    }
+
+    #[test]
+    fn a_plain_message_carries_nothing_extra() {
+        let message = Message::new(Role::User, "Hello");
+        assert_eq!(message.role, Role::User);
+        assert_eq!(message.content, "Hello");
+        assert!(message.tool_calls.is_none());
+        assert!(message.images.is_none());
+    }
+
+    #[test]
+    fn a_user_message_keeps_what_was_attached_to_it() {
+        let with = Message::from_user(
+            "look at this",
+            Some(vec!["data:image/png;base64,AAA".into()]),
+        );
+        assert_eq!(with.images.as_deref().map(<[String]>::len), Some(1));
+        // An empty list is the same as nothing attached, so the provider is
+        // never handed a turn with an empty image array.
+        let without = Message::from_user("hello", Some(vec![]));
+        assert!(without.images.is_none());
+        assert!(Message::from_user("hello", None).images.is_none());
+    }
+
+    #[test]
+    fn a_message_can_carry_tool_calls() {
+        let tool_call = ToolCall {
+            id: "call_123".to_string(),
+            name: "get_weather".to_string(),
+            input: json!({ "location": "New York" }),
+        };
+        let mut message = Message::new(Role::Assistant, "I'll check the weather for you");
+        message.tool_calls = Some(vec![tool_call.clone()]);
+
+        let calls = message.tool_calls.as_ref().expect("tool calls");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0], tool_call);
+    }
+
+    #[test]
+    fn a_tool_call_survives_a_round_trip() {
+        let tool_call = ToolCall {
+            id: "call_123".to_string(),
+            name: "test_tool".to_string(),
+            input: json!({ "param1": "value1", "param2": 42 }),
+        };
+        let serialized = serde_json::to_string(&tool_call).expect("serialize");
+        let back: ToolCall = serde_json::from_str(&serialized).expect("deserialize");
+
+        assert_eq!(back, tool_call);
+        assert_eq!(back.input["param1"], "value1");
+        assert_eq!(back.input["param2"], 42);
+    }
+
+    #[test]
+    fn a_tool_result_keeps_its_call_id_and_output() {
+        let result = ToolResult {
+            call_id: "call_123".to_string(),
+            output: json!({ "success": true, "data": "test result" }),
+        };
+        assert_eq!(result.call_id, "call_123");
+        assert_eq!(result.output["success"], true);
+        assert_eq!(result.output["data"], "test result");
+    }
+
+    #[test]
+    fn a_tool_definition_holds_its_schema() {
+        let definition = ToolDefinition {
+            name: "test_tool".to_string(),
+            description: "A test tool for validation".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "param1": { "type": "string" },
+                    "param2": { "type": "number" }
+                },
+                "required": ["param1"]
+            }),
+            api_type: None,
+            beta_flag: None,
+        };
+        assert_eq!(definition.name, "test_tool");
+        assert!(definition.input_schema["properties"].is_object());
+        assert!(definition.input_schema["required"].is_array());
+    }
+
+    #[test]
+    fn a_failed_state_carries_its_reason() {
+        assert_eq!(AgentState::Idle, AgentState::Idle);
+        match AgentState::Failed("Test error".to_string()) {
+            AgentState::Failed(message) => assert_eq!(message, "Test error"),
+            other => panic!("Expected Failed state, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_state_survives_a_round_trip() {
+        let serialized = serde_json::to_string(&AgentState::Thinking).expect("serialize");
+        let back: AgentState = serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(back, AgentState::Thinking);
+
+        let failed = AgentState::Failed("Error message".to_string());
+        let serialized = serde_json::to_string(&failed).expect("serialize");
+        let back: AgentState = serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(back, failed);
+    }
+}
