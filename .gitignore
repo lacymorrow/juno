@@ -357,6 +357,14 @@ lhci/
 *.key
 *.crt
 *.cert
+*.p12
+*.pfx
+*.mobileprovision
+# Signing identities are sometimes kept base64'd so they can be pasted into a
+# CI secret. That strips the extension the rules above catch, which left a
+# Developer ID p12 sitting untracked and unignored in the repo root.
+*-signing.b64
+*signing*.b64
 
 # =============================================================================
 # Project Specific
