@@ -52,9 +52,24 @@ fi
 # manifest next to it so the artifact stays identifiable after it is moved,
 # renamed, or mailed to someone.
 name_artifacts() {
-  local product="$1" dmg_dir="src-tauri/target/release/bundle/dmg"
-  local built name target
-  built="$(find "$dmg_dir" -maxdepth 1 -name '*.dmg' -newermt '-30 minutes' 2>/dev/null | head -1)"
+  local product="$1"
+  local built name target dmg_dir=""
+  # This is a cargo workspace, so the target directory sits at the workspace
+  # root, not under src-tauri. Looking only in src-tauri meant the rename and
+  # the manifest silently never ran and every DMG kept its default name. Both
+  # are checked because the layout depends on where the workspace is declared.
+  local candidate
+  for candidate in "target/release/bundle/dmg" "src-tauri/target/release/bundle/dmg"; do
+    if [[ -d "$candidate" ]]; then
+      dmg_dir="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$dmg_dir" ]]; then
+    echo "tauri-build: no bundle/dmg directory found, skipping naming" >&2
+    return 0
+  fi
+  built="$(find "$dmg_dir" -maxdepth 1 -name '*.dmg' -newermt '-60 minutes' 2>/dev/null | head -1)"
   if [[ -z "$built" ]]; then
     echo "tauri-build: no DMG found in $dmg_dir, skipping naming" >&2
     return 0
@@ -89,6 +104,21 @@ JSON
   fi
 }
 
+# Tauri has been seen returning non-zero after writing both bundles (the DMG
+# step detaches a disk image and is flaky about its exit code). Naming the
+# artifact is still worth doing, and the original status is still reported, so
+# a real failure is never silently turned into a success.
+run_build() {
+  local product="$1"; shift
+  local rc=0
+  "$@" || rc=$?
+  name_artifacts "$product"
+  if [[ $rc -ne 0 ]]; then
+    echo "tauri-build: tauri exited $rc; check whether the bundle above is usable" >&2
+  fi
+  return $rc
+}
+
 args=()
 for arg in "$@"; do
   if [[ "$arg" == "--demo" ]]; then
@@ -103,8 +133,14 @@ set -- ${args[@]+"${args[@]}"}
 # a stale target dir or a stray export is exactly how that would happen.
 assert_no_key_in_binary() {
   local binary
-  binary=$(find src-tauri/target -maxdepth 4 -type f -perm -111 -name juno -newermt '-10 minutes' 2>/dev/null | head -1)
-  [[ -z "$binary" ]] && return 0
+  # The workspace target directory is at the repo root. Searching only
+  # src-tauri/target found nothing, returned "no binary, fine", and so this
+  # check passed without ever reading a byte of the thing it guards.
+  binary=$(find target src-tauri/target -maxdepth 4 -type f -perm -111 -name juno -newermt '-60 minutes' 2>/dev/null | head -1)
+  if [[ -z "$binary" ]]; then
+    echo "tauri-build: WARNING, no built binary found to scan for key material" >&2
+    return 0
+  fi
   if strings "$binary" 2>/dev/null | grep -q 'sk-ant-'; then
     echo "tauri-build: FAILED, an Anthropic key is present in a non-demo binary: $binary" >&2
     exit 1
@@ -129,9 +165,8 @@ MSG
   export JUNO_DEMO_COHORT="${JUNO_DEMO_COHORT:-}"
   echo "tauri-build: demo build, key ${JUNO_DEMO_ANTHROPIC_KEY:0:7}... (${#JUNO_DEMO_ANTHROPIC_KEY} chars)${JUNO_DEMO_COHORT:+, cohort $JUNO_DEMO_COHORT}" >&2
   echo "tauri-build: ${version} build ${build_number} ${commit} on ${branch}" >&2
-  bunx tauri build --config '{"productName":"Juno Demo","identifier":"com.juno.desktop.demo","bundle":{"createUpdaterArtifacts":false}}' "$@"
-  name_artifacts "Juno-Demo"
-  exit 0
+  run_build "Juno-Demo" bunx tauri build --config '{"productName":"Juno Demo","identifier":"com.juno.desktop.demo","bundle":{"createUpdaterArtifacts":false}}' "$@"
+  exit $?
 fi
 
 # Not a demo build: make sure nothing exported a demo key into this one.
@@ -144,9 +179,8 @@ echo "tauri-build: ${version} build ${build_number} ${commit} on ${branch}" >&2
 
 if [[ "${JUNO_UNSIGNED_BUILD:-}" == "1" ]]; then
   echo "tauri-build: JUNO_UNSIGNED_BUILD=1, building without updater artifacts" >&2
-  bunx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' "$@"
-  name_artifacts "Juno"
-  exit 0
+  run_build "Juno" bunx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' "$@"
+  exit $?
 fi
 
 if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
@@ -169,5 +203,4 @@ if [[ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD+x}" && ! -t 0 ]]; then
   exit 1
 fi
 
-bunx tauri build "$@"
-name_artifacts "Juno"
+run_build "Juno" bunx tauri build "$@"
