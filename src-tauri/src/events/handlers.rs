@@ -174,9 +174,13 @@ async fn handle_voice_transcription_final_result(app_handle: AppHandle, payload_
         payload_str
     );
 
-    // Check if Dictation Mode is active to determine processing mode
+    // Route on what the session was started for, not on whether one is still
+    // running. Reading `dictation_active` here always saw false, because the
+    // transcript is produced by stopping the session that would have set it,
+    // so every dictation was submitted to the agent instead of being typed.
     let app_state = app_handle.state::<state::AppState>();
-    let is_dictation_active = app_state.get_dictation_active().unwrap_or(false);
+    let is_dictation_active =
+        app_state.take_dictation_session() || app_state.get_dictation_active().unwrap_or(false);
 
     // Extract text from payload
     let extracted_text = match serde_json::from_str::<serde_json::Value>(payload_str) {
@@ -385,6 +389,12 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, _pa
 }
 
 async fn handle_voice_transcription_error(app_handle: AppHandle) {
+    // A failed session produces no transcript, so nothing would consume the
+    // dictation latch. Left set, it would misroute the *next* session's result.
+    app_handle
+        .state::<crate::state::AppState>()
+        .take_dictation_session();
+
     // Play voice error sound automatically when transcription fails
     let state = app_handle.state::<crate::state::AppState>();
     if let Err(e) = crate::commands::sound::play_voice_error_sound(app_handle.clone(), state).await
@@ -398,6 +408,12 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
     let app_state = app_handle.state::<state::AppState>();
     if let Err(e) = app_state.set_dictation_active(true) {
         warn!("Failed to set dictation active state: {}", e);
+    }
+    // And latch the intent, which has to outlive the flag above: the transcript
+    // is delivered after the session stops, when `dictation_active` is already
+    // false again.
+    if let Err(e) = app_state.begin_dictation_session() {
+        warn!("Failed to record the dictation session: {}", e);
     }
 
     // Pause always listening mode if it's active
