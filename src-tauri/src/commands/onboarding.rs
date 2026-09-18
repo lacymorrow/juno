@@ -134,6 +134,13 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
         );
     }
 
+    // And the same for the bare-modifier capture the last screen asks for. It
+    // swallows the globe key so a press reads as "use this key" instead of
+    // firing dictation, and the setup window is destroyed a moment from now,
+    // so the frontend's own withdrawal is racing its teardown. Ending it here,
+    // beside the flag it is a twin of, is what makes the key work afterwards.
+    stop_listening_for_a_binding(&app);
+
     // Setup ends at the floating bar, not in a full-size window nobody asked
     // for. close_onboarding_window puts the bar back on screen.
 
@@ -176,6 +183,10 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
     if let Err(e) = set_onboarding_active(app.clone(), false).await {
         warn!("Failed to clear onboarding active state on skip: {}", e);
     }
+
+    // Skipping leaves the last screen the same way finishing it does, so the
+    // capture request has to be withdrawn here too. See `complete_onboarding`.
+    stop_listening_for_a_binding(&app);
 
     // Skipping setup lands in the same place finishing it does: the bar.
 
@@ -376,6 +387,21 @@ pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), S
         active, was_active
     );
     Ok(())
+}
+
+/// Stop the bare-modifier monitor reporting presses instead of firing them.
+///
+/// The twin of clearing `onboarding_active`: both are latches setup turns on
+/// and something has to turn off. This one is worse if it sticks, because it
+/// does not merely suppress the key, it swallows it, so the globe key goes
+/// dead everywhere until Juno is quit.
+fn stop_listening_for_a_binding(app: &AppHandle) {
+    if let Err(e) = crate::platform::modifier_key_monitor::set_capture(app, false) {
+        warn!(
+            "[Onboarding] Failed to stop listening for a modifier binding: {}",
+            e
+        );
+    }
 }
 
 #[derive(serde::Serialize)]

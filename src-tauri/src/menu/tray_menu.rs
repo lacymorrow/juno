@@ -31,6 +31,7 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
         .replacen("{}", &error.to_string(), 1)
 }
 use crate::state::AppState;
+use crate::window_management::{active_chat_surface, ChatSurface};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{
@@ -108,12 +109,17 @@ impl TrayIconState {
     }
 
     /// Time between frames for animated states.
+    ///
+    /// Every interval is a whole number of display frames at both 60 Hz and
+    /// 120 Hz, so a frame always goes up on the same phase of the refresh
+    /// cycle. An interval that lands between two refreshes walks across them
+    /// and the spacing visibly alternates, which reads as a stutter.
     fn frame_interval(self) -> Duration {
         match self {
             TrayIconState::Recording => Duration::from_millis(100),
-            TrayIconState::Transcribing => Duration::from_millis(140),
+            TrayIconState::Transcribing => Duration::from_millis(150),
             TrayIconState::Agent => Duration::from_millis(500),
-            _ => Duration::from_millis(0),
+            _ => Duration::ZERO,
         }
     }
 
@@ -140,6 +146,11 @@ impl TrayIconState {
 pub struct TrayIconManager {
     tray_icon: Option<TrayIcon<tauri::Wry>>,
     status_item: Option<MenuItem<tauri::Wry>>,
+    /// The chat row, kept so its text can follow what is on screen.
+    chat_toggle_item: Option<MenuItem<tauri::Wry>>,
+    /// The surface the chat row is currently offering to act on, read as the
+    /// pointer reached the icon. Taken by the click it was read for.
+    pending_chat_surface: Option<ChatSurface>,
     current_state: TrayIconState,
     /// Bumped on every state change. A running animation loop stops as soon as
     /// it sees a generation other than the one it was started with.
@@ -152,6 +163,8 @@ impl TrayIconManager {
         Self {
             tray_icon: None,
             status_item: None,
+            chat_toggle_item: None,
+            pending_chat_surface: None,
             current_state: TrayIconState::Idle,
             animation_generation: 0,
         }
@@ -182,15 +195,7 @@ impl TrayIconManager {
 
         let frames = new_state.frames();
         let first = frames.first().ok_or("tray icon state has no frames")?;
-        tray_icon.set_icon(Some(load_tray_icon_from_data(first)?))?;
-        // Setting an icon clears template mode, so it has to be re-asserted
-        // every time. Without this only the very first icon adapts to the menu
-        // bar: every state change after it renders as flat black, which is
-        // invisible against a dark menu bar.
-        #[cfg(target_os = "macos")]
-        if let Err(e) = tray_icon.set_icon_as_template(true) {
-            warn!("Tray icon could not be kept as a template image: {e}");
-        }
+        apply_tray_frame(tray_icon, load_tray_icon_from_data(first)?)?;
         tray_icon.set_tooltip(Some(new_state.tooltip()))?;
         if let Some(item) = &self.status_item {
             item.set_text(new_state.label())?;
@@ -216,9 +221,53 @@ impl TrayIconManager {
         self.status_item = Some(item);
     }
 
+    /// Set the menu row that shows or hides the chat
+    pub fn set_chat_toggle_item(&mut self, item: MenuItem<tauri::Wry>) {
+        self.chat_toggle_item = Some(item);
+    }
+
     /// Get the current tray icon state
     pub fn current_state(&self) -> &TrayIconState {
         &self.current_state
+    }
+}
+
+/// Put one frame on the menu bar, icon and template flag together.
+///
+/// Setting an icon clears template mode, so the flag has to travel with every
+/// icon. It has to travel *with* it, though, not after it: `set_icon` and
+/// `set_icon_as_template` are two separate hops to the main thread, and each
+/// one assigns the button image, so AppKit can draw the untinted black pixels
+/// in between. That half-drawn frame is the flicker, and at ten frames a
+/// second it reads as the icon flashing. The combined call assigns the image
+/// once, already marked as a template. On Windows and Linux, where there is no
+/// such flag, it falls through to a plain `set_icon`.
+fn apply_tray_frame(tray_icon: &TrayIcon<tauri::Wry>, image: TauriImage<'_>) -> tauri::Result<()> {
+    tray_icon.set_icon_with_as_template(Some(image), true)
+}
+
+/// One frame decoded to raw RGBA, so a running animation never has to touch a
+/// PNG decoder again.
+struct DecodedFrame {
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+impl DecodedFrame {
+    fn decode(icon_data: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        let loaded_image = image::load_from_memory(icon_data)?;
+        let width = loaded_image.width();
+        let height = loaded_image.height();
+        Ok(Self {
+            rgba: loaded_image.to_rgba8().into_raw(),
+            width,
+            height,
+        })
+    }
+
+    fn image(&self) -> TauriImage<'_> {
+        TauriImage::new(&self.rgba, self.width, self.height)
     }
 }
 
@@ -226,43 +275,60 @@ impl TrayIconManager {
 /// generation. Frame 0 is already showing when this starts.
 fn spawn_animation(tray_icon: TrayIcon<tauri::Wry>, state: TrayIconState, generation: u64) {
     tauri::async_runtime::spawn(async move {
-        let frames = state.frames();
         let interval = state.frame_interval();
-        let mut index = 1usize;
-        loop {
-            tokio::time::sleep(interval).await;
+        if interval.is_zero() {
+            return;
+        }
 
-            let still_current = {
-                let manager = get_tray_icon_manager().await;
-                let guard = manager.lock().await;
-                guard.animation_generation == generation
-            };
-            if !still_current {
-                break;
-            }
-
-            let Some(frame) = frames.get(index) else {
-                index = 0;
-                continue;
-            };
-            let image = match load_tray_icon_from_data(frame) {
-                Ok(image) => image,
+        // Decode every frame up front. Decoding inside the loop put a variable
+        // slice of work between the tick and the icon going up, so the frames
+        // reached the menu bar unevenly even though the sleep was constant.
+        let mut frames = Vec::with_capacity(state.frames().len());
+        for (index, data) in state.frames().iter().enumerate() {
+            match DecodedFrame::decode(data) {
+                Ok(frame) => frames.push(frame),
                 Err(e) => {
                     warn!("Tray animation frame {index} for {state:?} failed to decode: {e}");
-                    break;
+                    return;
                 }
+            }
+        }
+        if frames.len() < 2 {
+            return;
+        }
+
+        // A fixed-rate ticker rather than sleep-then-work, so the lock wait and
+        // the hop to the main thread are absorbed by the interval instead of
+        // being added to it. A late tick is delayed rather than fired at once:
+        // catching up in a burst would put two frames on the menu bar back to
+        // back, which is the double redraw this is meant to avoid.
+        let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        let mut index = 1usize;
+        loop {
+            ticker.tick().await;
+
+            let Some(frame) = frames.get(index) else {
+                break;
             };
-            if let Err(e) = tray_icon.set_icon(Some(image)) {
+
+            // Check the generation and draw under the same lock the state
+            // change holds. Checking and then releasing let a loop that was
+            // already past its check paint a stale frame on top of the icon the
+            // new state had just put up, so every transition out of an animated
+            // state could show one frame of the old shape.
+            let manager = get_tray_icon_manager().await;
+            let guard = manager.lock().await;
+            if guard.animation_generation != generation {
+                break;
+            }
+            if let Err(e) = apply_tray_frame(&tray_icon, frame.image()) {
                 warn!("Tray animation frame {index} for {state:?} failed to apply: {e}");
                 break;
             }
-            // Every frame, for the same reason as above: an animating state
-            // would otherwise flip to flat black on its second frame.
-            #[cfg(target_os = "macos")]
-            if let Err(e) = tray_icon.set_icon_as_template(true) {
-                warn!("Tray animation frame {index} could not be kept as a template: {e}");
-                break;
-            }
+            drop(guard);
+
             index = (index + 1) % frames.len();
         }
     });
@@ -295,19 +361,69 @@ pub async fn current_tray_icon_state() -> TrayIconState {
 fn load_tray_icon_from_data(
     icon_data: &[u8],
 ) -> Result<TauriImage<'static>, Box<dyn std::error::Error>> {
-    let loaded_image = image::load_from_memory(icon_data)?;
-    let width = loaded_image.width();
-    let height = loaded_image.height();
-    let rgba_image = loaded_image.to_rgba8();
-    let bytes = rgba_image.into_raw();
-    let img = TauriImage::new_owned(bytes, width, height);
-    Ok(img)
+    let frame = DecodedFrame::decode(icon_data)?;
+    Ok(TauriImage::new_owned(frame.rgba, frame.width, frame.height))
 }
 
-/// The tray menu plus the disabled first row that shows the state word
+/// The tray menu plus the two rows whose text changes: the disabled first row
+/// that shows the state word, and the chat row that says what it will do.
 pub struct TrayMenu {
     pub menu: tauri::menu::Menu<tauri::Wry>,
     pub status_item: MenuItem<tauri::Wry>,
+    pub chat_toggle_item: MenuItem<tauri::Wry>,
+}
+
+/// What the chat row should say about the surface it is going to act on.
+///
+/// The pane case stays a single "Show/Hide" on purpose. Rust knows whether the
+/// full-size window is up, because Rust is what puts it up, but whether the
+/// bar's pane is open or collapsed to the idle pill is the bar's own state and
+/// is not reported back here. Naming a direction we cannot know would be a
+/// label that is wrong half the time, which is the thing being fixed.
+fn chat_toggle_label(surface: ChatSurface) -> &'static str {
+    match surface {
+        ChatSurface::MainWindow { frontmost: true } => "Hide Chat",
+        ChatSurface::MainWindow { frontmost: false } => "Bring Chat to Front",
+        ChatSurface::BarPane => "Show/Hide Chat",
+    }
+}
+
+/// Read what is on screen, say so in the chat row, and remember the answer for
+/// the click that is probably coming.
+///
+/// Reading and acting are deliberately separated. Opening a menu puts AppKit
+/// into its own tracking loop, and whether the chat window still counts as the
+/// focused one while that loop runs is not something to bet the behaviour on.
+/// What matters is which window was in front of the person when they reached
+/// for the menu bar, and that is this moment, so it is taken once here and used
+/// by whatever they click. It also means the row cannot promise one thing and
+/// then do another.
+async fn refresh_chat_toggle_label(app: &AppHandle) {
+    let surface = active_chat_surface(app);
+    let manager = get_tray_icon_manager().await;
+    let mut guard = manager.lock().await;
+    guard.pending_chat_surface = Some(surface);
+    if let Some(item) = &guard.chat_toggle_item {
+        if let Err(e) = item.set_text(chat_toggle_label(surface)) {
+            warn!("Could not update the tray chat row: {e}");
+        }
+    }
+}
+
+/// Act on the chat surface the row is currently offering.
+///
+/// Falls back to reading it now if nothing has been read yet, so a click that
+/// arrives without the pointer ever having been seen still does something
+/// sensible.
+async fn toggle_chat_from_tray(app: &AppHandle) {
+    let surface = {
+        let manager = get_tray_icon_manager().await;
+        let mut guard = manager.lock().await;
+        guard.pending_chat_surface.take()
+    };
+    let surface = surface.unwrap_or_else(|| active_chat_surface(app));
+    crate::window_management::toggle_chat_surface(app, surface).await;
+    refresh_chat_toggle_label(app).await;
 }
 
 /// Get keyboard shortcuts from app state
@@ -346,8 +462,9 @@ pub fn create_state_aware_tray_menu(
         .enabled(false)
         .build(app)?;
 
-    // Build menu items with proper accelerators
-    let show_hide_item = MenuItemBuilder::new("Show/Hide Chat")
+    // The chat row says what it will do to whichever surface is active, so it
+    // is built with the answer for right now and kept up to date from there.
+    let show_hide_item = MenuItemBuilder::new(chat_toggle_label(active_chat_surface(app)))
         .id(tray_menu_ids::SHOW_HIDE)
         .build(app)?;
 
@@ -417,6 +534,7 @@ pub fn create_state_aware_tray_menu(
     Ok(TrayMenu {
         menu: tray_menu,
         status_item,
+        chat_toggle_item: show_hide_item,
     })
 }
 
@@ -427,6 +545,7 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
     let TrayMenu {
         menu: tray_menu,
         status_item,
+        chat_toggle_item,
     } = create_state_aware_tray_menu(app)?;
 
     // Load the idle frame. Template mode lets macOS tint it for the menu bar.
@@ -451,6 +570,8 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         let mut manager_guard = manager.lock().await;
         manager_guard.set_tray_icon(tray_icon);
         manager_guard.set_status_item(status_item);
+        manager_guard.set_chat_toggle_item(chat_toggle_item);
+        drop(manager_guard);
 
         // Start monitoring app state for tray icon updates
         setup_state_monitoring(&app_handle).await;
@@ -458,6 +579,19 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
 
     info!("✅ System tray icon setup completed with dynamic state support");
     Ok(())
+}
+
+/// Read an "is this subsystem active" event payload.
+///
+/// `None` means the payload was not a bool. These events used to be ignored
+/// when that happened, which is how the icon got stranded: a stop path emitted
+/// `agent-active` with an empty payload, the parse failed, and the handler
+/// returned without touching the icon, so the menu bar kept animating an agent
+/// that had finished. An unreadable payload still says something happened, so
+/// every caller treats `None` the way it treats `false`: go and read the real
+/// state rather than drop the event.
+fn payload_is_active(payload: &str) -> Option<bool> {
+    serde_json::from_str::<bool>(payload).ok()
 }
 
 /// Setup state monitoring to automatically update tray icon based on app state
@@ -473,14 +607,11 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
             let app_handle = app_handle.clone();
             let event = event.clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(is_active) = serde_json::from_str::<bool>(event.payload()) {
-                    let new_state = if is_active {
-                        TrayIconState::Agent
-                    } else {
-                        determine_current_state(&app_handle).await
-                    };
-                    update_tray_icon_state(new_state).await;
-                }
+                let new_state = match payload_is_active(event.payload()) {
+                    Some(true) => TrayIconState::Agent,
+                    _ => determine_current_state(&app_handle).await,
+                };
+                update_tray_icon_state(new_state).await;
             });
         }
     });
@@ -492,14 +623,11 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
             let app_handle = app_handle.clone();
             let event = event.clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(is_active) = serde_json::from_str::<bool>(event.payload()) {
-                    let new_state = if is_active {
-                        TrayIconState::Recording
-                    } else {
-                        determine_current_state(&app_handle).await
-                    };
-                    update_tray_icon_state(new_state).await;
-                }
+                let new_state = match payload_is_active(event.payload()) {
+                    Some(true) => TrayIconState::Recording,
+                    _ => determine_current_state(&app_handle).await,
+                };
+                update_tray_icon_state(new_state).await;
             });
         }
     });
@@ -575,14 +703,11 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
             let app_handle = app_handle.clone();
             let event = event.clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(is_active) = serde_json::from_str::<bool>(event.payload()) {
-                    if is_active {
-                        update_tray_icon_state(TrayIconState::Armed).await;
-                    } else {
-                        let new_state = determine_current_state(&app_handle).await;
-                        update_tray_icon_state(new_state).await;
-                    }
-                }
+                let new_state = match payload_is_active(event.payload()) {
+                    Some(true) => TrayIconState::Armed,
+                    _ => determine_current_state(&app_handle).await,
+                };
+                update_tray_icon_state(new_state).await;
             });
         }
     });
@@ -643,6 +768,26 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
             });
         }
     });
+
+    // The chat row's text follows the full-size window. Both of these events
+    // come from `announce_main_window`, which every route that shows or hides
+    // that window goes through, so listening here covers the bar's button, a
+    // Dock click, the red X and the tray itself without knowing about any of
+    // them.
+    for event_name in [
+        crate::constants::events::bar::MAIN_WINDOW_OPENED,
+        crate::constants::events::bar::MAIN_WINDOW_CLOSED,
+    ] {
+        let _ = app_handle.listen(event_name, {
+            let app_handle = app_handle_clone.clone();
+            move |_event| {
+                let app_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    refresh_chat_toggle_label(&app_handle).await;
+                });
+            }
+        });
+    }
 
     info!("✅ Tray icon state monitoring setup completed");
 }
@@ -747,22 +892,14 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
     match event_id {
         tray_menu_ids::SHOW_HIDE => {
             info!("[TrayMenu] Show/Hide Chat menu item clicked");
-            // The floating bar is the app's surface now; make sure it is visible,
-            // then toggle its chat pane so this reopens a dismissed conversation
-            // (or hides it again).
-            let label = crate::constants::ui::window_labels::FLOATING_BAR;
-            if let Some(window) = app_handle.get_webview_window(label) {
-                if !window.is_visible().unwrap_or(false) {
-                    let _ = window.show();
-                }
-            }
-            if let Err(e) = app_handle.emit(events::bar::TOGGLE_PANE, ()) {
-                error!(
-                    "{} {}",
-                    prefixes::TRAY_MENU,
-                    format_error(templates::FAILED_TO_EMIT, "toggle chat pane", e)
-                );
-            }
+            // Act on whichever chat surface is up, rather than always on the
+            // full-size window. Which one that is, and what to do with it, is
+            // resolved in one place so this row and a click on the icon cannot
+            // come to different answers.
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                toggle_chat_from_tray(&app_handle).await;
+            });
         }
         tray_menu_ids::NEW_CHAT => {
             info!("[TrayMenu] New Chat menu item clicked");
@@ -830,22 +967,13 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
             ..
         } => {
             info!("[TrayIcon] Left click detected on tray icon");
-            // Show/focus the main window when tray icon is left-clicked
-            if let Some(window) = app_handle.get_webview_window("main") {
-                let is_visible = window.is_visible().unwrap_or(false);
-                let is_focused = window.is_focused().unwrap_or(false);
-                if is_visible && is_focused {
-                    // Visible and focused, so this click means hide it.
-                    let _ = window.hide();
-                    crate::window_management::announce_main_window(app_handle, false);
-                } else {
-                    // Hidden or behind something, so bring it up.
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                    crate::window_management::announce_main_window(app_handle, true);
-                }
-            }
+            // The same thing the menu row does. This used to reach past the
+            // pane straight to the full-size window, so the icon and the row
+            // under it did two different things to two different surfaces.
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                toggle_chat_from_tray(&app_handle).await;
+            });
         }
         tauri::tray::TrayIconEvent::Click {
             button: MouseButton::Right,
@@ -854,6 +982,17 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
         } => {
             info!("[TrayIcon] Right click detected on tray icon");
             // Right click behavior is handled by menu system
+        }
+        // The pointer has to cross the icon before it can open the menu, so
+        // this is the last moment the chat row can be brought up to date. The
+        // window events cover every change Juno makes; this covers the one
+        // change it is never told about, the person clicking another app and
+        // leaving the chat window behind it.
+        tauri::tray::TrayIconEvent::Enter { .. } => {
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                refresh_chat_toggle_label(&app_handle).await;
+            });
         }
         _ => {
             // Handle other tray icon events if needed

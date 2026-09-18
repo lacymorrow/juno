@@ -5,9 +5,10 @@
 //! shortcut / trigger-mode / wake-word fields are derived from it so existing
 //! runtime consumers keep working (see [`crate::triggers::derive_legacy`]).
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Listener, Manager, State};
 use tracing::{error, info, warn};
 
+use crate::constants::events;
 use crate::settings::manager::SettingsManager;
 use crate::state::{self, AppState};
 use crate::triggers::{self, Trigger};
@@ -50,15 +51,23 @@ pub async fn set_triggers(
                 .to_string(),
         );
     }
-    let normalized = triggers::dedupe_by_key(triggers);
+    let mut normalized = triggers::dedupe_by_key(triggers);
 
-    // Bindings owned by the non-activation utility shortcuts are off-limits.
-    let ks = app_state.get_keyboard_shortcuts()?;
+    // A row with no binding cannot fire, so it must not come back claiming to
+    // be on. This runs before validate, so the returned list is what the UI
+    // renders and the switch reflects what the trigger can actually do.
+    triggers::disable_unbound(&mut normalized);
+
+    // Escape and Cmd+Comma are still live and still off-limits, so a trigger
+    // cannot steal them. They are read from the constants because they are no
+    // longer settings. Voice activation used to be reserved here too and is
+    // not any more: it was retired outright, so its old combo is free for a
+    // real trigger to claim.
     let reserved = vec![
-        ks.stop_current_task.clone(),
-        ks.open_settings.clone(),
-        ks.voice_activation.clone(),
+        crate::constants::settings::defaults::STOP_CURRENT_TASK.to_string(),
+        crate::constants::settings::defaults::OPEN_SETTINGS.to_string(),
     ];
+    let ks = app_state.get_keyboard_shortcuts()?;
     triggers::validate(&normalized, &reserved)?;
 
     // 1. In-memory source of truth.
@@ -104,6 +113,18 @@ pub async fn apply_stored_voice_triggers(app: &AppHandle) {
         warn!("[Triggers] Could not clear the stale listening flag: {}", e);
     }
 
+    // Arm the retry before the first attempt, never after, so the speech
+    // engine cannot become ready in the gap and go unnoticed.
+    watch_for_engine_ready(app);
+
+    reapply_voice_triggers(app).await;
+}
+
+/// Read the stored triggers and drive the listener from them.
+///
+/// Kept separate from [`apply_voice_triggers`] so the engine-ready watcher can
+/// call it without the two forming a cycle.
+async fn reapply_voice_triggers(app: &AppHandle) {
     let triggers = match app.state::<AppState>().get_triggers() {
         Ok(t) => t,
         Err(e) => {
@@ -111,7 +132,30 @@ pub async fn apply_stored_voice_triggers(app: &AppHandle) {
             return;
         }
     };
-    apply_voice_triggers(app, &triggers).await;
+    let app_state = app.state::<AppState>();
+    sync_voice_listener(app, &app_state, &triggers).await;
+}
+
+/// Apply the voice triggers again once the speech engine has finished loading.
+///
+/// The STT model is loaded on a background task because it can be over a
+/// gigabyte, so at the moment startup restores the triggers the engine is
+/// usually still loading and the controller refuses to start with "STT engine
+/// not initialized". Nothing retried, so on every launch an enabled wake
+/// phrase listened for nothing: voice chat did not work at all. The plugin
+/// announces the engine, so wait for it and apply the triggers again.
+fn watch_for_engine_ready(app: &AppHandle) {
+    static ARMED: std::sync::Once = std::sync::Once::new();
+    ARMED.call_once(|| {
+        let app_for_listener = app.clone();
+        app.listen(events::voice_trigger::ENGINE_READY, move |_| {
+            let app = app_for_listener.clone();
+            tauri::async_runtime::spawn(async move {
+                info!("[Triggers] Speech engine ready, applying voice triggers");
+                reapply_voice_triggers(&app).await;
+            });
+        });
+    });
 }
 
 async fn clear_stale_listening_flag(app: &AppHandle) -> Result<(), String> {
@@ -147,6 +191,7 @@ async fn sync_voice_listener(
             // "already inactive" is returned as Ok; a real error is worth noting.
             error!("[Triggers] Failed to stop always-listening: {}", e);
         }
+        emit_listening_state(app, false, &voice_phrases);
         return;
     }
 
@@ -156,17 +201,59 @@ async fn sync_voice_listener(
     )
     .await
     {
+        // Usually "STT engine not initialized" during startup. The engine-ready
+        // watcher will apply these triggers again, so this is not the end of it.
         error!("[Triggers] Failed to start always-listening: {}", e);
+        emit_listening_state(app, false, &voice_phrases);
         return;
     }
     if let Err(e) = crate::commands::always_listening::set_always_listening_wake_words(
-        voice_phrases,
+        voice_phrases.clone(),
         app.clone(),
         app_state.clone(),
     )
     .await
     {
         error!("[Triggers] Failed to set wake words: {}", e);
+    }
+    emit_listening_state(app, true, &voice_phrases);
+}
+
+/// Tell the UI whether the wake-phrase engine is actually armed.
+///
+/// The bar draws an idle dot either way, so it only needs to know the colour.
+/// This is emitted from the outcome of the start, not from the intent, because
+/// a dot that says "listening" while the engine failed to start is worse than
+/// no dot at all.
+/// Announce the engine's state after something other than a trigger save moved
+/// it, such as the bar's pause control or the coordinated stop.
+///
+/// The bar decides whether its dot is lit from `voice-trigger-listening` alone.
+/// That event used to be emitted only by `sync_voice_listener`, so a runtime
+/// pause changed the engine without saying so and the dot had to be inferred
+/// from a second event. One event carries the whole contract instead: the
+/// phrases come from the stored triggers, which is what the engine would be
+/// listening for, and `listening` is the outcome the caller actually observed.
+pub(crate) fn emit_listening_outcome(app: &AppHandle, listening: bool) {
+    let phrases = match app.state::<AppState>().get_triggers() {
+        Ok(t) => triggers::voice_phrases_for(&t),
+        Err(e) => {
+            warn!("[Triggers] Could not read triggers to report listening: {e}");
+            Vec::new()
+        }
+    };
+    emit_listening_state(app, listening, &phrases);
+}
+
+fn emit_listening_state(app: &AppHandle, listening: bool, phrases: &[String]) {
+    if let Err(e) = app.emit(
+        events::voice_trigger::LISTENING,
+        serde_json::json!({
+            "listening": listening,
+            "phrases": phrases,
+        }),
+    ) {
+        error!("[Triggers] Failed to emit voice-trigger-listening: {}", e);
     }
 }
 

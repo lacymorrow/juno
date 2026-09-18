@@ -6,7 +6,7 @@
 //! never interferes with the centralized settings serialization.
 
 use serde::{Deserialize, Serialize};
-use tauri::{command, AppHandle};
+use tauri::{command, AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 
 const BAR_POSITION_STORE_FILE: &str = "bar_position.json";
@@ -50,6 +50,36 @@ pub async fn set_bar_position(app_handle: AppHandle, x: i32, y: i32) -> Result<(
         .map_err(|e| format!("Failed to save bar position: {}", e))?;
 
     Ok(())
+}
+
+/// Put the floating bar on screen, now that it knows where it belongs.
+///
+/// The window is created hidden at the frame in `tauri.conf.json`, which is a
+/// placeholder: the bar only learns its real spot (the well it was left in last
+/// launch, or the default one for this display) once the webview has mounted
+/// and asked. Showing it before that meant it appeared at the placeholder frame
+/// and then moved, which is the jump people saw while the app finished loading.
+/// The bar calls this itself once its first frame is set, so the first thing on
+/// screen is already the right one.
+///
+/// Safe to call more than once: showing a visible window does nothing, and the
+/// onboarding hold is re-checked on every call. The setup assistant is always
+/// on top of the bar in the stacking order but has nothing to say to it, so a
+/// bar that would land on top of onboarding is withheld and put up when setup
+/// closes instead.
+#[command]
+pub async fn show_bar_when_ready(app_handle: AppHandle) -> Result<(), String> {
+    if crate::window_management::onboarding_is_open(&app_handle) {
+        crate::window_management::mark_bar_withheld_for_onboarding();
+        return Ok(());
+    }
+
+    let window = app_handle
+        .get_webview_window(crate::constants::ui::window_labels::FLOATING_BAR)
+        .ok_or("floating-bar window not found")?;
+    window
+        .show()
+        .map_err(|e| format!("Failed to show the floating bar: {}", e))
 }
 
 /// Move + resize the floating bar atomically so a compact<->hover transition

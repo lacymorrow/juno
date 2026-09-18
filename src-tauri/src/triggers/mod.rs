@@ -376,9 +376,27 @@ pub fn derive_legacy(
 /// - A key/mouse trigger that is enabled must actually have a binding.
 /// - An enabled voice trigger must have a non-blank phrase.
 ///
-/// `reserved` are binding descriptions already owned by non-trigger shortcuts
-/// (stop, open-settings, voice-activation); an enabled keyboard trigger may not
-/// collide with one.
+/// `reserved` are binding descriptions already owned by the two fixed utility
+/// shortcuts (Escape to stop, Cmd+Comma to open settings); an enabled keyboard
+/// trigger may not collide with one.
+/// Turn off any key or mouse trigger that has no binding recorded yet.
+///
+/// A freshly added row is allowed to persist unconfigured, so the work of
+/// adding it is not lost while someone goes to find the key they want. What is
+/// not allowed is for that row to claim it is on. An enabled trigger with no
+/// binding can never fire, so its switch was telling the person something that
+/// could not become true: the row said "on" and the key did nothing, forever.
+/// The row survives, the switch tells the truth, and binding a key is what
+/// turns it on.
+pub fn disable_unbound(triggers: &mut [Trigger]) {
+    for t in triggers.iter_mut() {
+        let needs_binding = matches!(t.method, TriggerMethod::PushToTalk | TriggerMethod::Toggle);
+        if needs_binding && t.enabled && t.binding.is_none() {
+            t.enabled = false;
+        }
+    }
+}
+
 pub fn validate(triggers: &[Trigger], reserved: &[String]) -> Result<(), String> {
     use std::collections::HashSet;
     let mut seen_bindings: HashSet<String> = HashSet::new();
@@ -483,6 +501,50 @@ mod tests {
     }
 
     #[test]
+    fn disable_unbound_turns_off_a_key_trigger_with_no_binding() {
+        let mut ts = vec![
+            Trigger {
+                method: TriggerMethod::PushToTalk,
+                target: TriggerTarget::Dictation,
+                binding: None,
+                phrase: None,
+                require_hey_prefix: false,
+                enabled: true,
+            },
+            Trigger {
+                method: TriggerMethod::Toggle,
+                target: TriggerTarget::Agent,
+                binding: Some(Binding::Keyboard {
+                    shortcut: "Option+Space".to_string(),
+                }),
+                phrase: None,
+                require_hey_prefix: false,
+                enabled: true,
+            },
+        ];
+        disable_unbound(&mut ts);
+        assert!(!ts[0].enabled, "an unbound key trigger must not read as on");
+        assert!(ts[1].enabled, "a bound trigger is left alone");
+        assert_eq!(ts.len(), 2, "the unconfigured row still persists");
+    }
+
+    #[test]
+    fn disable_unbound_leaves_a_voice_trigger_alone() {
+        // Voice is armed by its phrase, not by a binding, so a null binding is
+        // its normal resting state and says nothing about whether it can fire.
+        let mut ts = vec![Trigger {
+            method: TriggerMethod::Voice,
+            target: TriggerTarget::Agent,
+            binding: None,
+            phrase: Some("juno".to_string()),
+            require_hey_prefix: false,
+            enabled: true,
+        }];
+        disable_unbound(&mut ts);
+        assert!(ts[0].enabled);
+    }
+
+    #[test]
     fn validate_rejects_reserved_binding() {
         let ts = vec![Trigger {
             method: TriggerMethod::Toggle,
@@ -495,6 +557,44 @@ mod tests {
             enabled: true,
         }];
         assert!(validate(&ts, &["Escape".to_string()]).is_err());
+    }
+
+    #[test]
+    fn validate_frees_the_retired_voice_activation_combo() {
+        // Voice activation used to reserve Option+Shift+V. It was retired, so
+        // the reserved list is Escape and Cmd+Comma only and a real trigger
+        // can claim the combo it used to sit on.
+        let ts = vec![Trigger {
+            method: TriggerMethod::Toggle,
+            target: TriggerTarget::Agent,
+            binding: Some(Binding::Keyboard {
+                shortcut: "Option+Shift+V".to_string(),
+            }),
+            phrase: None,
+            require_hey_prefix: false,
+            enabled: true,
+        }];
+        let reserved = vec!["Escape".to_string(), "Cmd+Comma".to_string()];
+        assert!(validate(&ts, &reserved).is_ok());
+    }
+
+    #[test]
+    fn validate_still_protects_the_fixed_utility_shortcuts() {
+        let mk = |combo: &str| {
+            vec![Trigger {
+                method: TriggerMethod::Toggle,
+                target: TriggerTarget::Agent,
+                binding: Some(Binding::Keyboard {
+                    shortcut: combo.to_string(),
+                }),
+                phrase: None,
+                require_hey_prefix: false,
+                enabled: true,
+            }]
+        };
+        let reserved = vec!["Escape".to_string(), "Cmd+Comma".to_string()];
+        assert!(validate(&mk("Escape"), &reserved).is_err());
+        assert!(validate(&mk("Cmd+Comma"), &reserved).is_err());
     }
 
     #[test]

@@ -104,6 +104,8 @@ export const EVENTS = {
   MENU_EDIT_SELECT_ALL: 'menu-edit-select-all',
   TTS_AUDIO_READY: 'tts-audio-ready',
   TTS_STOP_REQUESTED: 'tts-stop-requested',
+  VOICE_TRIGGER_LISTENING: 'voice-trigger-listening',
+  VOICE_TRIGGER_ENGINE_READY: 'voice-engine-ready',
   ALWAYS_LISTENING_MODE_CHANGED: 'always-listening-mode-changed',
   ALWAYS_LISTENING_WAKE_WORD_DETECTED: 'always-listening:wake-word-detected',
   ALWAYS_LISTENING_TOGGLE_DICTATION_REQUEST: 'toggle-dictation-request',
@@ -177,7 +179,6 @@ export const EVENTS = {
   SHORTCUTS_AGENT_MODE: 'shortcut-agent-mode',
   SHORTCUTS_DICTATION_INPUT: 'shortcut-dictation-input',
   SHORTCUTS_ESCAPE_KEY: 'shortcut-escape-key',
-  SHORTCUTS_VOICE_ACTIVATION: 'shortcut-voice-activation',
   SCHEDULER_AUTOMATIONS_CHANGED: 'scheduled-automations-changed',
   SCHEDULER_AUTOMATION_FIRED: 'scheduled-automation-fired',
   PLUGIN_VOICE_TRANSCRIPTION_DICTATION_STARTED: 'plugin:voice-transcription:dictation-started',
@@ -895,7 +896,6 @@ export const KEYBOARD_SHORTCUTS = {
   DICTATION_INPUT: isMac ? 'Option+Space' : 'Alt+Space',
   STOP_CURRENT_TASK: 'Escape',
   OPEN_SETTINGS: isMac ? 'Cmd+Comma' : 'Ctrl+Comma',
-  VOICE_ACTIVATION: isMac ? 'Option+Shift+V' : 'Alt+Shift+V',
 } as const;
 
 export const SETTINGS = {
@@ -920,7 +920,6 @@ export const SETTINGS = {
   KEYBOARD_KEYS_DICTATION_INPUT: 'dictation_input',
   KEYBOARD_KEYS_STOP_CURRENT_TASK: 'stop_current_task',
   KEYBOARD_KEYS_OPEN_SETTINGS: 'open_settings',
-  KEYBOARD_KEYS_VOICE_ACTIVATION: 'voice_activation',
   ONBOARDING_KEYS_COMPLETED: 'completed',
   ONBOARDING_KEYS_COMPLETED_AT: 'completed_at',
   ONBOARDING_KEYS_SKIPPED: 'skipped',
