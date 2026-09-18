@@ -63,6 +63,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { nanoid } from "nanoid";
+import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import {
   Children,
   createContext,
@@ -827,6 +828,9 @@ export const PromptInputBody = ({
   <div className={cn("contents", className)} {...props} />
 );
 
+/** Matches `max-h-48`; past this the composer scrolls instead of growing. */
+const MAX_COMPOSER_HEIGHT_PX = 192;
+
 export type PromptInputTextareaProps = ComponentProps<
   typeof InputGroupTextarea
 >;
@@ -919,6 +923,16 @@ export const PromptInputTextarea = ({
   const handleCompositionEnd = useCallback(() => setIsComposing(false), []);
   const handleCompositionStart = useCallback(() => setIsComposing(true), []);
 
+  // Grow with the text. Shared with the floating bar's pill, so the two
+  // composers cannot drift apart.
+  const currentValue = String(
+    (controller ? controller.textInput.value : props.value) ?? ""
+  );
+  const composer = useAutoGrowTextarea({
+    value: currentValue,
+    maxHeightPx: MAX_COMPOSER_HEIGHT_PX,
+  });
+
   const controlledProps = controller
     ? {
         onChange: (e: ChangeEvent<HTMLTextAreaElement>) => {
@@ -933,6 +947,7 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
+      ref={composer.attach}
       className={cn("field-sizing-content max-h-48 min-h-16", className)}
       name="message"
       onCompositionEnd={handleCompositionEnd}

@@ -240,7 +240,6 @@ pub mod app_lifecycle {
 
 pub mod permissions {
     pub const CHANGED: &str = "permissions-changed";
-    pub const RESTART_REQUIRED: &str = "permissions-restart-required";
     pub const GUIDANCE_NEEDED: &str = "permission-guidance-needed";
     /// Emitted when a specific permission flips from denied → granted during polling
     pub const GRANTED: &str = "permission-granted";
@@ -330,6 +329,14 @@ pub mod bar {
     pub const MAIN_WINDOW_CLOSED: &str = "bar-main-window-closed";
 }
 
+/// Trigger binding events
+pub mod triggers {
+    /// A bare modifier key was pressed while setup was listening for one, so
+    /// the person can choose it by pressing it rather than being told whether
+    /// their keyboard has it. Payload carries the key name.
+    pub const KEY_CAPTURED: &str = "trigger-key-captured";
+}
+
 /// Tool and command execution events
 pub mod tools {
     pub const USAGE: &str = "tool-usage";
@@ -370,13 +377,6 @@ pub mod shortcuts {
     pub const DICTATION_INPUT: &str = "shortcut-dictation-input";
     pub const ESCAPE_KEY: &str = "shortcut-escape-key";
     pub const VOICE_ACTIVATION: &str = "shortcut-voice-activation";
-}
-
-/// Tool choice events
-pub mod tool_choice {
-    pub const CONFIG_CHANGED: &str = "tool-choice-config-changed";
-    pub const CONFIG_RESET: &str = "tool-choice-config-reset";
-    pub const ENABLED_CHANGED: &str = "tool-choice-enabled-changed";
 }
 
 /// Scheduled automation events (user-facing cron schedules)

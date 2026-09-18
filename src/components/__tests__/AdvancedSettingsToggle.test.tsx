@@ -87,14 +87,19 @@ function mockBackend(advancedPersisted: boolean) {
         return null;
       case "ui_get_bar_config":
         return { bar_appearance: "floating" };
-      case "get_big_cursor_enabled":
-        return true;
-      case "get_big_cursor_scale":
-        return 3;
       case "get_companion_mode":
         return false;
-      case "get_system_cursor_size":
-        return 1;
+      case "get_build_info":
+        return {
+          version: "0.7.0",
+          build: "2174",
+          commit: "a19b4631",
+          branch: "main",
+          built_at: "2026-09-17T14:00:00Z",
+          dirty: false,
+          demo: false,
+          cohort: null,
+        };
       default:
         return undefined;
     }
@@ -407,11 +412,11 @@ describe("GeneralSettings in basic mode", () => {
     expect(screen.queryByText("Enable Companion Mode")).not.toBeInTheDocument();
     // "Trigger mode" no longer lives here — trigger configuration moved to the
     // dedicated Triggers section.
-    for (const shown of [
-      "Agent mode",
-      "Enable big cursor",
-      "Restart onboarding",
-    ]) {
+    // Pointer scaling is gone: it wrote a global accessibility preference that
+    // outlived the app, so a crash left the pointer enlarged for good. The
+    // cursor overlay says the agent is driving instead.
+    expect(screen.queryByText("Enable big cursor")).not.toBeInTheDocument();
+    for (const shown of ["Agent mode", "Restart onboarding"]) {
       // Card titles and field labels can repeat the same text.
       expect(screen.getAllByText(shown).length).toBeGreaterThan(0);
     }

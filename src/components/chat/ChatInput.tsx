@@ -36,7 +36,7 @@ interface ChatInputProps {
   isProcessing: boolean;
   canSubmit: boolean;
   onQueryChange: (value: string) => void;
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string, images?: string[]) => void;
   onStop: () => void;
   placeholder?: string;
 }
@@ -131,8 +131,14 @@ export const ChatInput = React.memo(function ChatInput({
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
       const text = message.text.trim();
-      if (!text) return;
-      onSubmit(text);
+      // Images used to be collected into chips here and then dropped on the
+      // floor: `message.files` was right there and never read, so pasting a
+      // screenshot looked like it worked and sent nothing.
+      const images = message.files
+        .map((file) => file.url)
+        .filter((url): url is string => typeof url === "string" && url.startsWith("data:"));
+      if (!text && images.length === 0) return;
+      onSubmit(text, images);
     },
     [onSubmit]
   );

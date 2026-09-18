@@ -49,8 +49,6 @@ pub mod agent_keys {
     pub const TRIGGER_MODE: &str = "trigger_mode";
     pub const MODE: &str = "mode";
     pub const EXECUTION_MODE: &str = "execution_mode";
-    pub const BIG_CURSOR_ENABLED: &str = "big_cursor_enabled";
-    pub const BIG_CURSOR_SCALE: &str = "big_cursor_scale";
 }
 
 /// Cloud setting keys
@@ -123,8 +121,6 @@ pub mod validation {
     pub const MAX_MAX_TOKENS: u32 = 100000;
     pub const MIN_HEARTBEAT_INTERVAL: u64 = 10; // seconds
     pub const MAX_HEARTBEAT_INTERVAL: u64 = 300; // seconds
-    pub const MIN_BIG_CURSOR_SCALE: f32 = 1.5;
-    pub const MAX_BIG_CURSOR_SCALE: f32 = 10.0;
 }
 
 /// Default values for settings
@@ -143,8 +139,6 @@ pub mod defaults {
     /// The settings window shows the trimmed "basic" set until the user opts in.
     pub const ADVANCED_SETTINGS_ENABLED: bool = false;
     pub const ONBOARDING_COMPLETED: bool = false;
-    pub const BIG_CURSOR_ENABLED: bool = true;
-    pub const BIG_CURSOR_SCALE: f32 = 3.0;
     /// The agent works without taking the cursor or the frontmost app from the
     /// user. On by default: a person can keep typing while Juno works.
     pub const BACKGROUND_MODE: bool = true;
@@ -167,17 +161,11 @@ pub mod defaults {
     pub fn advanced_settings_enabled() -> bool {
         ADVANCED_SETTINGS_ENABLED
     }
-    pub fn big_cursor_enabled() -> bool {
-        BIG_CURSOR_ENABLED
-    }
     /// The floating bar follows the cursor to whichever display it is on, so the
     /// user never hunts for it. On by default; older stores lack the key.
     pub const FOLLOW_CURSOR_DISPLAY: bool = true;
     pub fn follow_cursor_display() -> bool {
         FOLLOW_CURSOR_DISPLAY
-    }
-    pub fn big_cursor_scale() -> f32 {
-        BIG_CURSOR_SCALE
     }
 
     // Default keyboard shortcuts (cross-platform)

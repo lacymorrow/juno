@@ -250,6 +250,10 @@ pub async fn auto_grant_permissions(
                 ),
             );
             refocus_onboarding_window(&app_for_timeout);
+            // Every run ends with a terminal event, always. Without this the
+            // checklist stays in its "running" state for good, which greys out
+            // every row and leaves a spinner that never stops.
+            emit_progress(&app_for_timeout, None, "done", None);
         }
     });
 
@@ -340,6 +344,9 @@ async fn auto_grant_one(
     // native call may also raise a system alert; that is fine, the walk
     // targets System Settings, a different process.
     {
+        // This raises the native alert, which is not always-on-top. The bar is,
+        // so it has to stand down or the prompt arrives behind it.
+        crate::commands::permissions::step_aside_for_prompt(app);
         let p = perm.to_string();
         let registered = guarded(token, NATIVE_REQUEST_LIMIT, move || {
             register_permission_row(&p)
@@ -358,6 +365,24 @@ async fn auto_grant_one(
                 return Ok(true);
             }
         }
+    }
+
+    // The previous permission's flip raises a "quit and reopen" sheet, and
+    // System Settings answers no accessibility call while one is up. If the
+    // dismissal after that flip did not land, every step below times out and
+    // this permission fails for a reason that has nothing to do with it. That
+    // is the likeliest explanation for Screen Recording succeeding and Input
+    // Monitoring failing immediately after it.
+    let cleared = guarded(token, AX_STEP_LIMIT, dismiss_quit_reopen_sheet)
+        .await
+        .ok()
+        .and_then(|joined| joined.ok())
+        .unwrap_or(false);
+    if cleared {
+        debug!(
+            "[auto-grant] cleared a leftover sheet before starting {}",
+            perm
+        );
     }
 
     {
@@ -509,8 +534,12 @@ async fn auto_grant_one(
             app_name
         ));
     }
+    // The switch is on. macOS simply will not tell this process about it until
+    // Juno restarts, which is the normal case for Input Monitoring rather than
+    // a failure. Record it so setup can offer the restart, and say so plainly.
+    crate::commands::permissions::note_relaunch_pending(perm);
     Err(format!(
-        "Switched {} {} row(s) on but macOS hasn't registered the grant — it may need a restart",
+        "Switched {} {} row(s) on. macOS will not report it to Juno until Juno restarts.",
         pressed, app_name
     ))
 }

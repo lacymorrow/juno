@@ -52,6 +52,14 @@ interface PermissionStatus {
 // A second hand-maintained copy of this drifted once already: it was missing
 // `everything_granted`, which is exactly the field that decides whether this
 // step still has anything to show.
+/** Only the parts of a Trigger this screen round-trips; the rest is preserved. */
+interface TriggerShape {
+  method: string;
+  target: string;
+  binding: unknown;
+  [key: string]: unknown;
+}
+
 interface PermissionsState {
   accessibility: PermissionStatus;
   screen_recording: PermissionStatus;
@@ -254,6 +262,21 @@ export function shouldAutoPromptMicrophone(state: PermissionsState): boolean {
   if (state.microphone.granted) return false;
   return AUTOMATABLE.every((k) => state[k].granted);
 }
+
+/** Display names for the run-level narration. */
+const PERMISSION_TITLES: Record<string, string> = {
+  accessibility: "Accessibility",
+  screen_recording: "Screen Recording",
+  microphone: "Microphone",
+  input_monitoring: "Input Monitoring",
+};
+
+/** Verb per stage, for the line that stays up for the whole run. */
+const AUTO_STAGE_NARRATION: Record<string, string> = {
+  opening_settings: "Opening System Settings for",
+  toggling: "Switching on",
+  confirming: "Checking",
+};
 
 // Row copy for each backend auto-grant stage (permissions-auto-grant-progress).
 const AUTO_STAGE_COPY: Record<string, string> = {
@@ -712,6 +735,23 @@ export default function OnboardingFlow({
     perm: string | null;
     stage: string;
   } | null>(null);
+  // What the run is doing, kept for the whole run rather than cleared between
+  // permissions. The per-row stage above blanks on every "granted" and only
+  // ever renders on one row, so for long stretches (up to four seconds waiting
+  // for the Settings window, plus retries) the screen said nothing at all
+  // while Juno worked behind System Settings.
+  const [autoGrantNarration, setAutoGrantNarration] = useState<string | null>(null);
+  // Permissions granted this launch that Juno cannot act on until it restarts.
+  // macOS says so itself with a "quit and reopen" sheet, which the auto-grant
+  // run dismisses with Later so setup can continue. Nobody ever mentioned it
+  // again, so Screen Recording looked switched on and behaved switched off.
+  const [awaitingRelaunch, setAwaitingRelaunch] = useState<string[]>([]);
+  // Whether this keyboard actually has the globe key, learned by someone
+  // pressing it rather than by interrogating the hardware. "Does this machine
+  // have an Fn key" has no single answer once a second keyboard is plugged in,
+  // and a press proves the key reaches Juno, which no capability check can.
+  const [fnOffered, setFnOffered] = useState(false);
+  const [fnSaveError, setFnSaveError] = useState<string | null>(null);
   // The microphone prompt is raised automatically once, right after a
   // successful auto-grant run — one Allow click finishes everything.
   const micAutoPromptedRef = useRef(false);
@@ -854,6 +894,38 @@ export default function OnboardingFlow({
     }
   );
 
+  const adoptFnAsTalkKey = useCallback(async () => {
+    setFnSaveError(null);
+    try {
+      const triggers = await invoke<TriggerShape[]>(COMMANDS.TRIGGERS_GET_TRIGGERS);
+      const next = triggers.map((trigger) =>
+        trigger.method === "push_to_talk" && trigger.target === "dictation"
+          ? { ...trigger, binding: { kind: "modifier" as const, key: "fn" as const } }
+          : trigger
+      );
+      await invoke(COMMANDS.TRIGGERS_SET_TRIGGERS, { triggers: next });
+      if (mountedRef.current) setFnOffered(true);
+    } catch (error) {
+      console.error("[Onboarding] could not switch to the globe key:", error);
+      if (mountedRef.current) {
+        setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
+      }
+    }
+  }, []);
+
+  useEventListener<{ key: string }>(EVENTS.TRIGGERS_KEY_CAPTURED, (payload) => {
+    if (payload?.key === "fn") void adoptFnAsTalkKey();
+  });
+
+  const refreshRelaunchPending = useCallback(async () => {
+    try {
+      const pending = await invoke<string[]>(COMMANDS.PERMISSIONS_AWAITING_RELAUNCH);
+      if (mountedRef.current) setAwaitingRelaunch(pending);
+    } catch (error) {
+      console.debug("[Onboarding] relaunch check failed:", error);
+    }
+  }, []);
+
   // Function to check current permissions status
   const checkPermissionsStatus = async () => {
     try {
@@ -864,6 +936,7 @@ export default function OnboardingFlow({
       setPermissionsState(result);
       const nothingLeftToOffer = result.everything_granted ?? result.all_granted;
       setActualPermissionsGranted(nothingLeftToOffer);
+      void refreshRelaunchPending();
       return result.all_granted;
     } catch (error) {
       console.warn("Failed to check permissions status:", error);
@@ -1162,30 +1235,54 @@ export default function OnboardingFlow({
     EVENTS.PERMISSIONS_AUTO_GRANT_PROGRESS,
     (payload) => {
       if (!mountedRef.current) return;
+      const named = PERMISSION_TITLES[payload.permission_type ?? ""] ?? null;
       switch (payload.stage) {
         case "done":
           recordEvent("onboarding_auto_grant_finished");
           setAutoGrantStage(null);
+          setAutoGrantNarration(null);
           setAutoGrantMode("finished");
           break;
         case "cancelled":
           recordEvent("onboarding_auto_grant_cancelled");
           setAutoGrantStage(null);
+          setAutoGrantNarration(null);
           setAutoGrantMode("manual");
           break;
         case "failed":
-          // Not fatal — the run continues to the next permission, and the
-          // failed row falls back to the manual guided flow afterwards.
+          // Not fatal: the run continues to the next permission, and the
+          // failed row falls back to the manual guided flow afterwards. Say
+          // which one and why, rather than filing it to analytics in silence.
           recordEvent("onboarding_auto_grant_failed", {
             permission: payload.permission_type,
           });
           setAutoGrantStage(null);
+          setAutoGrantNarration(
+            payload.message ??
+              (named
+                ? `Could not switch ${named} on. You can do it yourself below.`
+                : "Could not finish. You can switch these on yourself below.")
+          );
+          // A failure with no permission named is the whole run giving up. It
+          // used to leave the checklist in its "running" state for good, which
+          // greys out every row, hides every button, and spins forever. Hand
+          // the list back to the person.
+          if (!payload.permission_type) {
+            setAutoGrantMode("manual");
+            setPermIndex(firstPendingIndex(permissionsState));
+          }
           break;
         case "granted":
           setAutoGrantStage(null);
+          setAutoGrantNarration(named ? `${named} is on.` : "Done.");
           break;
         default:
           setAutoGrantStage({ perm: payload.permission_type, stage: payload.stage });
+          setAutoGrantNarration(
+            named
+              ? `${AUTO_STAGE_NARRATION[payload.stage] ?? "Working on"} ${named}…`
+              : "Working…"
+          );
       }
     }
   );
@@ -1493,6 +1590,45 @@ export default function OnboardingFlow({
     return null;
   }
 
+  // Listen for the globe key only while the last screen is up, and stop as
+  // soon as it is not. Outside this moment a press means "talk to Juno", not
+  // "choose a key", and the monitor must not swallow that.
+  const onFinalStep = currentStep === onboardingSteps.length - 1;
+  useEffect(() => {
+    if (!onFinalStep) return;
+    void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: true }).catch((error) =>
+      console.debug("[Onboarding] could not listen for the globe key:", error)
+    );
+    return () => {
+      void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: false }).catch(() => {});
+    };
+  }, [onFinalStep]);
+
+  // Only on the last screen: interrupting setup halfway to restart would lose
+  // the thread, and the remaining steps work fine without these.
+  const needsRelaunch =
+    awaitingRelaunch.length > 0 && currentStep === onboardingSteps.length - 1;
+  const relaunchNames = awaitingRelaunch
+    .map((key) => PERMISSION_TITLES[key] ?? key)
+    .join(" and ");
+
+  const handleRelaunch = async () => {
+    // Record completion first: a restart must not reopen setup.
+    try {
+      await onComplete();
+    } catch (error) {
+      console.warn("[Onboarding] could not record completion before restart:", error);
+    }
+    try {
+      await invoke(COMMANDS.PERMISSIONS_RESTART_AFTER_PERMISSIONS);
+    } catch (error) {
+      console.error("[Onboarding] restart failed:", error);
+      setPermissionsError(
+        "Juno could not restart itself. Quit and open it again to finish."
+      );
+    }
+  };
+
   // The list can shrink underneath a resumed index. Rendering `step.id` on
   // undefined throws and takes the whole setup window with it, so clamp.
   const step =
@@ -1597,6 +1733,21 @@ export default function OnboardingFlow({
                             ? "That summons Juno from anywhere."
                             : "Try it. This summons Juno from anywhere."}
                         </p>
+                        {/* Offered by invitation rather than by detection: if
+                            this keyboard has a globe key, pressing it proves
+                            it, and if it does not, nothing happens and the
+                            shortcut above keeps working. Either way nobody has
+                            to answer a question about their hardware. */}
+                        <p className="mt-3 text-[12px] leading-snug text-muted-foreground">
+                          {fnOffered
+                            ? "Using the globe key to talk. You can change this in Settings."
+                            : "Prefer to hold one key? Press the globe key now to use that instead."}
+                        </p>
+                        {fnSaveError && (
+                          <p className="mt-1 text-[12px] text-destructive" role="alert">
+                            {fnSaveError}
+                          </p>
+                        )}
                       </motion.div>
                     ) : (
                       <motion.div
@@ -1819,13 +1970,22 @@ export default function OnboardingFlow({
                       )}
                       {autoGrantMode === "running" && (
                         <div className="mt-4 flex flex-col items-center gap-2">
-                          <p className="text-[12px] text-muted-foreground">
-                            Juno is switching these on in System Settings.
+                          <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                            {autoGrantNarration ?? "Juno is switching these on in System Settings."}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground/70">
+                            System Settings will come to the front while this happens.
                           </p>
                           <button onClick={stopAutoGrant} className={LINK_QUIET}>
                             Stop
                           </button>
                         </div>
+                      )}
+                      {autoGrantMode === "manual" && autoGrantNarration && (
+                        <p className="mt-3 text-[12px] text-muted-foreground" role="status">
+                          {autoGrantNarration}
+                        </p>
                       )}
                       {permSubFlowComplete ? (
                         <p className="mt-3 text-[12px] text-muted-foreground">
@@ -1851,13 +2011,23 @@ export default function OnboardingFlow({
                 Hidden while the permission checklist owns the primary action. */}
             {!inActivePermFlow && (
               <div className="flex flex-col items-center gap-3">
+                {/* Some grants only take hold after a restart, and macOS
+                    already offered one that Juno declined on the person's
+                    behalf so setup could finish. This is Juno paying that
+                    back, at the one moment a restart costs nothing. */}
+                {needsRelaunch && (
+                  <p className="max-w-[320px] text-center text-[12px] leading-snug text-muted-foreground">
+                    {relaunchNames} {awaitingRelaunch.length > 1 ? "need" : "needs"} a
+                    restart before Juno can use {awaitingRelaunch.length > 1 ? "them" : "it"}.
+                  </p>
+                )}
                 <button
-                  onClick={handleNext}
+                  onClick={needsRelaunch ? handleRelaunch : handleNext}
                   disabled={isContinueDisabled}
                   className={`${BTN_PRIMARY} ${isContinueDisabled ? "cursor-not-allowed" : ""}`}
-                  aria-label={step.action}
+                  aria-label={needsRelaunch ? "Restart Juno" : step.action}
                 >
-                  {step.action}
+                  {needsRelaunch ? "Restart Juno" : step.action}
                 </button>
 
                 {!isSkipHidden && (

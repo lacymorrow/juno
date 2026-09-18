@@ -873,6 +873,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
+                images: None,
             },
             Message {
                 role: Role::Assistant,
@@ -880,6 +881,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
+                images: None,
             },
             Message {
                 role: Role::User,
@@ -887,6 +889,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
+                images: None,
             },
         ];
         assert_eq!(ClaudeCliBrain::extract_query(&messages), "second question");
@@ -900,6 +903,7 @@ mod tests {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            images: None,
         }];
         assert_eq!(ClaudeCliBrain::extract_query(&messages), "Hello");
     }

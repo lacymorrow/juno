@@ -1,3 +1,27 @@
+//! # Checkpointing and rollback for agent runs (PARKED, NOT WIRED)
+//!
+//! Nothing calls into this module. It was kept deliberately when the other two
+//! dead subsystems around it were deleted (tool-choice intelligence and UI
+//! token selection, removed 2026-09-17), because unlike those it describes a
+//! capability Juno genuinely lacks rather than one it already has a better
+//! version of: an agent that takes a wrong action partway through a run cannot
+//! currently be rewound. For a computer-use agent that is worth keeping.
+//!
+//! What "not wired" means concretely:
+//!   - `DefaultAgentRunner` never constructs a recovery manager, so no
+//!     checkpoint is ever taken and there is nothing to roll back to.
+//!   - The twelve commands in commands/error_recovery.rs are registered in
+//!     lib.rs and have no caller, in Rust or in the frontend.
+//!   - Its only internal calls are this module and those commands calling
+//!     each other, which is a closed loop with no entry point.
+//!
+//! To actually use it, the agent loop would have to checkpoint around each
+//! tool batch in `agent/implementations/agent_runner.rs`, and something would
+//! have to decide when a rollback is warranted. Neither exists yet.
+//!
+//! If you are reading this because it is still dead a year later: that is the
+//! answer. Delete it.
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;

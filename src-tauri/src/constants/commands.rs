@@ -118,6 +118,24 @@ pub mod permissions {
     pub const CANCEL_AUTO_GRANT: &str = "cancel_auto_grant";
     /// Opens the exact Privacy pane for one permission, so nobody has to hunt
     pub const OPEN_SYSTEM_SETTINGS: &str = "open_system_settings_enhanced";
+    /// Which granted permissions are waiting on a restart before Juno can use them
+    pub const AWAITING_RELAUNCH: &str = "permissions_awaiting_relaunch";
+    /// Restart Juno so a granted permission takes effect
+    pub const RESTART_AFTER_PERMISSIONS: &str = "restart_app_after_permissions";
+}
+
+/// Window management
+pub mod windows {
+    /// Put the full-size chat window away and give the bar the conversation back
+    pub const CLOSE_MAIN_WINDOW: &str = "close_main_window";
+}
+
+/// Activation triggers
+pub mod triggers {
+    pub const GET_TRIGGERS: &str = "get_triggers";
+    pub const SET_TRIGGERS: &str = "set_triggers";
+    /// Listen for a bare modifier key while setup asks someone to press theirs
+    pub const SET_TRIGGER_CAPTURE: &str = "set_trigger_capture";
 }
 
 /// Background operation and the consent it needs

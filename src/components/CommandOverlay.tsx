@@ -24,6 +24,9 @@ interface CommandEndPayload {
   duration?: number;
 }
 
+/** Only the last few are ever rendered; there is no reason to hold more. */
+const MAX_TRACKED_COMMANDS = 20;
+
 export default function CommandOverlay() {
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [isVisible, setIsVisible] = useState(false);
@@ -41,7 +44,10 @@ export default function CommandOverlay() {
         timestamp,
         status: "executing",
       };
-      setCommands((prev) => [...prev, newCommand]);
+      // Keep only what can actually be shown. The list is rendered with
+      // `.slice(-5)` but never pruned, so it grew for the whole session while
+      // only the last five were ever visible.
+      setCommands((prev) => [...prev, newCommand].slice(-MAX_TRACKED_COMMANDS));
       setIsVisible(true);
       setTimeout(() => setIsVisible(false), 5000);
     }

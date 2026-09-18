@@ -62,6 +62,45 @@ pub fn apply_macos_setup(app_handle: &AppHandle) {
     }
 }
 
+/// `NSFloatingWindowLevel`: above ordinary windows, below system alerts.
+#[cfg(target_os = "macos")]
+const BAR_LEVEL_FLOATING: i64 = 3;
+
+/// `NSNormalWindowLevel`: in the ordinary stack, so a dialog can cover it.
+#[cfg(target_os = "macos")]
+const BAR_LEVEL_NORMAL: i64 = 0;
+
+/// Put the bar back in the ordinary window stack, or return it to floating.
+///
+/// Even floating is too high for one case: the permission alerts macOS raises
+/// on Juno's own behalf can sit at ordinary level, so an always-on-top bar
+/// covers the very dialog Juno just asked for. While a prompt is expected,
+/// the bar gets out of the way.
+#[cfg(target_os = "macos")]
+pub fn set_bar_floating(app_handle: &AppHandle, floating: bool) {
+    let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) else {
+        return;
+    };
+    let Ok(ns_window_ptr) = window.ns_window() else {
+        return;
+    };
+    let level = if floating {
+        BAR_LEVEL_FLOATING
+    } else {
+        BAR_LEVEL_NORMAL
+    };
+    let addr = ns_window_ptr as usize;
+    if let Err(e) = app_handle.run_on_main_thread(move || unsafe {
+        let ns_window = addr as cocoa_id;
+        ns_window.setLevel_(level);
+    }) {
+        warn!("Could not change the floating bar's window level: {}", e);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_bar_floating(_app_handle: &AppHandle, _floating: bool) {}
+
 /// Setup macOS-specific styling and behavior for the floating bar window
 #[cfg(target_os = "macos")]
 fn setup_floating_bar_window(app_handle: &AppHandle) {
@@ -73,8 +112,13 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
             Ok(ns_window_ptr) => {
                 let ns_window = ns_window_ptr as cocoa_id;
                 unsafe {
-                    // Keep window floating above others
-                    ns_window.setLevel_(5);
+                    // NSFloatingWindowLevel. This used to be 5, which put the
+                    // bar above system alerts: a screen-recording prompt came
+                    // up *behind* it, unreadable and unclickable. Floating is
+                    // the documented level for an accessory window, above
+                    // ordinary windows and below anything the system needs to
+                    // put in front of a person.
+                    ns_window.setLevel_(BAR_LEVEL_FLOATING);
                     ns_window.setOpaque_(NO);
                     ns_window.setHasShadow_(NO);
                     // Visible across all spaces, full-screen apps, and Cmd+` cycle excluded
