@@ -5,8 +5,8 @@
 //! shortcut / trigger-mode / wake-word fields are derived from it so existing
 //! runtime consumers keep working (see [`crate::triggers::derive_legacy`]).
 
-use tauri::{AppHandle, State};
-use tracing::{error, info};
+use tauri::{AppHandle, Manager, State};
+use tracing::{error, info, warn};
 
 use crate::settings::manager::SettingsManager;
 use crate::state::{self, AppState};
@@ -76,10 +76,55 @@ pub async fn set_triggers(
     }
 
     // 5. Drive the always-listening engine from the voice triggers.
-    sync_voice_listener(&app, &app_state, &normalized).await;
+    apply_voice_triggers(&app, &normalized).await;
 
     info!("[Triggers] Saved {} trigger(s)", normalized.len());
     Ok(normalized)
+}
+
+/// Turn the voice triggers on or off to match `triggers`.
+///
+/// Called on save and again at startup. A keyboard trigger is re-registered
+/// every launch by `update_global_shortcuts`; voice had no equivalent, so an
+/// enabled wake phrase worked until the app was quit and then silently never
+/// listened again. Voice is a trigger method like any other and is activated
+/// on the same schedule as the rest.
+pub async fn apply_voice_triggers(app: &AppHandle, triggers: &[Trigger]) {
+    let app_state = app.state::<AppState>();
+    sync_voice_listener(app, &app_state, triggers).await;
+}
+
+/// Activate the voice triggers already in state. Startup entry point.
+pub async fn apply_stored_voice_triggers(app: &AppHandle) {
+    // Nothing is listening in a process that has just started, whatever the
+    // last run left on disk. Saying so first matters: the start path treats a
+    // true flag as "already running" and returns without starting anything, so
+    // a stale true from a previous session would keep the engine off forever.
+    if let Err(e) = clear_stale_listening_flag(app).await {
+        warn!("[Triggers] Could not clear the stale listening flag: {}", e);
+    }
+
+    let triggers = match app.state::<AppState>().get_triggers() {
+        Ok(t) => t,
+        Err(e) => {
+            error!("[Triggers] Could not read triggers to start voice: {}", e);
+            return;
+        }
+    };
+    apply_voice_triggers(app, &triggers).await;
+}
+
+async fn clear_stale_listening_flag(app: &AppHandle) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let mut audio = settings_manager.get_audio_settings().await?;
+    if !audio.always_listening_active {
+        return Ok(());
+    }
+    audio.always_listening_active = false;
+    settings_manager.set_audio_settings(&audio).await?;
+    let _ = app.state::<AppState>().set_always_listening_active(false);
+    Ok(())
 }
 
 /// Start or stop the always-listening engine to match the voice triggers, and
@@ -90,11 +135,7 @@ async fn sync_voice_listener(
     app_state: &State<'_, AppState>,
     triggers: &[Trigger],
 ) {
-    let voice_phrases: Vec<String> = triggers
-        .iter()
-        .filter(|t| t.enabled && t.is_voice())
-        .flat_map(|t| t.voice_phrases())
-        .collect();
+    let voice_phrases = triggers::voice_phrases_for(triggers);
 
     if voice_phrases.is_empty() {
         if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
@@ -190,7 +231,11 @@ async fn persist(app: &AppHandle, triggers: &[Trigger]) -> Result<(), String> {
     all.keyboard_shortcuts.dictation_input = dictation_combo;
     all.agent.trigger_mode = agent_mode;
     all.audio.dictation_trigger_mode = dictation_mode;
-    all.audio.always_listening_active = always_listening;
+    // `always_listening_active` is owned by the engine, not derived here.
+    // Writing the desired value first meant `start_always_listening_mode` read
+    // its own "already active" early-return and returned success without ever
+    // starting the controller, so a saved voice trigger never listened.
+    let _ = always_listening;
     all.audio.always_listening_wake_words = wake_words;
     all.triggers = triggers.to_vec();
 

@@ -183,6 +183,11 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
         );
     }
 
+    // And the voice triggers, which are activated the same way and on the same
+    // schedule. Only the key, mouse and modifier bindings were restored above;
+    // a wake phrase worked until the app was quit and then never listened again.
+    crate::commands::triggers::apply_stored_voice_triggers(&app_handle).await;
+
     // Initialize dictation input monitoring system
     if let Err(e) =
         crate::dictation_monitor::init_dictation_input_monitoring(app_handle.clone()).await

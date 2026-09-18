@@ -167,6 +167,20 @@ impl Trigger {
     }
 }
 
+/// Every phrase the always-listening engine should be listening for.
+///
+/// This is the whole rule for whether voice is on: if it yields nothing, the
+/// engine is stopped; otherwise it runs with these as its wake words. Voice is
+/// a trigger method like push-to-talk, so the answer comes from the trigger
+/// list and nowhere else.
+pub fn voice_phrases_for(triggers: &[Trigger]) -> Vec<String> {
+    triggers
+        .iter()
+        .filter(|t| t.enabled && t.is_voice())
+        .flat_map(|t| t.voice_phrases())
+        .collect()
+}
+
 /// The default trigger set for a fresh install: mirrors Juno's historical
 /// defaults so the app is never left with no way to be summoned.
 /// - Toggle -> Agent on `Option+D` (was `agent_mode`, agent trigger `tap`)
@@ -404,6 +418,49 @@ pub fn validate(triggers: &[Trigger], reserved: &[String]) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn voice(phrase: &str, target: TriggerTarget, enabled: bool) -> Trigger {
+        Trigger {
+            method: TriggerMethod::Voice,
+            target,
+            binding: None,
+            phrase: Some(phrase.to_string()),
+            require_hey_prefix: false,
+            enabled,
+        }
+    }
+
+    #[test]
+    fn an_enabled_voice_trigger_is_what_turns_listening_on() {
+        let t = vec![voice("juno", TriggerTarget::Agent, true)];
+        assert_eq!(voice_phrases_for(&t), vec!["juno", "hey juno"]);
+    }
+
+    #[test]
+    fn a_disabled_voice_trigger_listens_for_nothing() {
+        // Nothing to listen for means the engine is stopped, so the switch on
+        // the row is the whole control.
+        let t = vec![voice("juno", TriggerTarget::Agent, false)];
+        assert!(voice_phrases_for(&t).is_empty());
+    }
+
+    #[test]
+    fn key_triggers_do_not_turn_listening_on() {
+        let t = default_triggers("Option+Space", "Option+D");
+        assert!(voice_phrases_for(&t).is_empty());
+    }
+
+    #[test]
+    fn voice_can_target_dictation_as_well_as_the_agent() {
+        // Voice is a method, not a feature of one target.
+        let t = vec![
+            voice("juno", TriggerTarget::Agent, true),
+            voice("transcribe", TriggerTarget::Dictation, true),
+        ];
+        let phrases = voice_phrases_for(&t);
+        assert!(phrases.contains(&"juno".to_string()));
+        assert!(phrases.contains(&"transcribe".to_string()));
+    }
 
     #[test]
     fn validate_rejects_duplicate_bindings() {
