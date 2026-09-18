@@ -531,9 +531,11 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
 async fn handle_dictation_cancel(app_handle: AppHandle) {
     info!("[Event] Cancelling dictation");
 
-    // Stop dictation forcefully
+    // Cancel means cancel, the same way it does on the agent path. This used
+    // to call stop_dictation, which finalises the audio and emits a final
+    // result, so asking to cancel dictation typed what you had just said.
     if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-        let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+        let _ = tauri_plugin_voice_transcription::commands::cancel_dictation(
             app_handle.clone(),
             controller_state,
         )

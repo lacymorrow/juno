@@ -36,6 +36,16 @@ import { useDictationStateEvents } from "@/hooks/useDictationStateEvents";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useUpdater } from "@/hooks/useUpdater";
 
+/**
+ * One id per recurring notice. Sonner replaces a toast that reuses an id, so a
+ * repeated backend event updates the card in place instead of piling up a
+ * column of identical ones.
+ */
+const TOAST_IDS = {
+  agentMode: "agent-mode",
+  dictationReset: "dictation-reset",
+} as const;
+
 function App() {
   // Initialize custom hooks
   const appState = useAppState();
@@ -198,19 +208,38 @@ function App() {
     handleUpdateCheck,
   });
 
-  // Shortcut events integration
+  // Shortcut events integration.
+  //
+  // The handlers below take no dependency on `appState` itself: `useAppState`
+  // hands back a fresh object every render, and `useShortcutEvents` keys its
+  // Tauri subscription on the handler identity, so depending on it tears the
+  // listener down and re-registers it on every render. Setters are stable, and
+  // the current agent-mode flag is read from a ref.
+  const { setIsAgentModeActive, setDictationState, setIsDictationActive } =
+    appState;
+  const isAgentModeActiveRef = useRef(false);
+
   useShortcutEvents({
     onAgentModeShortcut: useCallback(
       (payload: any) => {
         console.log("Agent mode shortcut event received:", payload);
         if (payload.state === "pressed" && !payload.test_mode) {
-          appState.setIsAgentModeActive(true);
-          toast.info("Agent mode activated");
+          // The press edge can arrive more than once for a single key gesture:
+          // the backend emits one event per enabled trigger bound to the combo,
+          // and macOS repeats the key while it is held. Treat activation as
+          // idempotent so a held key does not narrate itself, and give the toast
+          // a fixed id so any repeat that slips through replaces the card rather
+          // than stacking another one.
+          if (isAgentModeActiveRef.current) return;
+          isAgentModeActiveRef.current = true;
+          setIsAgentModeActive(true);
+          toast.info("Agent mode activated", { id: TOAST_IDS.agentMode });
         } else if (payload.state === "released") {
-          appState.setIsAgentModeActive(false);
+          isAgentModeActiveRef.current = false;
+          setIsAgentModeActive(false);
         }
       },
-      [appState],
+      [setIsAgentModeActive],
     ),
     onDictationInputShortcut: useCallback((payload: any) => {
       console.log("Dictation input shortcut event received:", payload);
@@ -228,25 +257,27 @@ function App() {
     onStateChanged: useCallback(
       (event: any) => {
         console.log("Dictation state changed:", event);
-        appState.setDictationState(event.new_state);
+        setDictationState(event.new_state);
 
         // Update UI based on dictation state changes
         if (event.new_state === "active") {
-          appState.setIsDictationActive(true);
+          setIsDictationActive(true);
         } else if (event.new_state === "idle") {
-          appState.setIsDictationActive(false);
+          setIsDictationActive(false);
         }
       },
-      [appState],
+      [setDictationState, setIsDictationActive],
     ),
     onForceReset: useCallback(
       (reason: any) => {
         console.log("Dictation force reset:", reason);
-        appState.setDictationState("idle");
-        appState.setIsDictationActive(false);
-        toast.error(`Dictation reset: ${reason}`);
+        setDictationState("idle");
+        setIsDictationActive(false);
+        toast.error(`Dictation reset: ${reason}`, {
+          id: TOAST_IDS.dictationReset,
+        });
       },
-      [appState],
+      [setDictationState, setIsDictationActive],
     ),
     onInputChanged: useCallback((state: any) => {
       console.log("Dictation input state changed:", state);

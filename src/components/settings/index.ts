@@ -6,7 +6,6 @@ export { default as SecuritySettings } from './sections/SecuritySettings';
 export { default as AdvancedSettings } from './sections/AdvancedSettings';
 export { default as NotificationSettings } from './sections/NotificationSettings';
 export { default as NetworkSettings } from './sections/NetworkSettings';
-export { default as ShortcutsSettings } from './sections/ShortcutsSettings';
 export { default as ToolsSettings } from './sections/ToolsSettings';
 export { default as TriggersSettings } from './sections/TriggersSettings';
 export { default as AutomationsSettings } from './sections/AutomationsSettings';

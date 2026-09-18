@@ -2,7 +2,7 @@
 
 use crate::settings::manager::SettingsManager;
 use crate::state::{AppState, KeyboardShortcuts};
-use serde_json;
+
 use tauri::{AppHandle, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tracing::{error, info, warn};
@@ -15,133 +15,6 @@ pub async fn get_keyboard_shortcuts(
     state
         .get_keyboard_shortcuts()
         .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))
-}
-
-/// Update a specific keyboard shortcut
-#[tauri::command]
-pub async fn set_keyboard_shortcut(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    shortcut_name: String,
-    shortcut_value: String,
-) -> Result<(), String> {
-    // Validate the shortcut format
-    validate_shortcut_format(&shortcut_value)?;
-
-    // Get current shortcuts for conflict checking
-    let current_shortcuts = state
-        .get_keyboard_shortcuts()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
-
-    // Check for conflicts (excluding the current shortcut being edited)
-    check_shortcut_conflicts(&shortcut_value, &current_shortcuts, Some(&shortcut_name))?;
-
-    // Get current shortcuts and update the specific one
-    let mut shortcuts = state
-        .get_keyboard_shortcuts()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
-
-    match shortcut_name.as_str() {
-        "agent_mode" => shortcuts.agent_mode = shortcut_value.clone(),
-        "dictation_input" => shortcuts.dictation_input = shortcut_value.clone(),
-        "stop_current_task" => shortcuts.stop_current_task = shortcut_value.clone(),
-        "voice_activation" => shortcuts.voice_activation = shortcut_value.clone(),
-        "open_settings" => return Err("The settings shortcut cannot be changed".to_string()),
-        _ => return Err(format!("Unknown shortcut name: {}", shortcut_name)),
-    }
-
-    // Update the shortcut in state
-    state
-        .set_keyboard_shortcuts(shortcuts)
-        .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))?;
-
-    // Save to centralized settings
-    save_shortcuts_to_centralized_settings(&app, &state).await?;
-
-    // Re-register global shortcuts with new values
-    update_global_shortcuts(&app, &state).await?;
-
-    info!(
-        "Updated keyboard shortcut '{}' to '{}'",
-        shortcut_name, shortcut_value
-    );
-    Ok(())
-}
-
-/// Update multiple keyboard shortcuts at once
-#[tauri::command]
-pub async fn set_keyboard_shortcuts(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    shortcuts: KeyboardShortcuts,
-) -> Result<(), String> {
-    // Validate all shortcuts
-    validate_shortcut_format(&shortcuts.agent_mode)?;
-    validate_shortcut_format(&shortcuts.dictation_input)?;
-    validate_shortcut_format(&shortcuts.stop_current_task)?;
-    validate_shortcut_format(&shortcuts.open_settings)?;
-    validate_shortcut_format(&shortcuts.voice_activation)?;
-
-    // Check for internal conflicts within the new shortcuts
-    let shortcut_pairs = [
-        ("agent_mode", &shortcuts.agent_mode),
-        ("dictation_input", &shortcuts.dictation_input),
-        ("stop_current_task", &shortcuts.stop_current_task),
-        ("open_settings", &shortcuts.open_settings),
-        ("voice_activation", &shortcuts.voice_activation),
-    ];
-
-    for (i, (name1, shortcut1)) in shortcut_pairs.iter().enumerate() {
-        for (name2, shortcut2) in shortcut_pairs.iter().skip(i + 1) {
-            if shortcut1.to_lowercase().replace(" ", "")
-                == shortcut2.to_lowercase().replace(" ", "")
-            {
-                return Err(format!(
-                    "Shortcuts '{}' and '{}' cannot have the same value: '{}'",
-                    get_shortcut_display_name_for_validation(name1),
-                    get_shortcut_display_name_for_validation(name2),
-                    shortcut1
-                ));
-            }
-        }
-    }
-
-    // Update state
-    state
-        .set_keyboard_shortcuts(shortcuts.clone())
-        .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))?;
-
-    // Save to centralized settings
-    save_shortcuts_to_centralized_settings(&app, &state).await?;
-
-    // Re-register global shortcuts
-    update_global_shortcuts(&app, &state).await?;
-
-    info!("Updated all keyboard shortcuts");
-    Ok(())
-}
-
-/// Reset keyboard shortcuts to defaults
-#[tauri::command]
-pub async fn reset_keyboard_shortcuts(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let default_shortcuts = KeyboardShortcuts::default();
-
-    // Update state
-    state
-        .set_keyboard_shortcuts(default_shortcuts.clone())
-        .map_err(|e| format!("Failed to set keyboard shortcuts: {}", e))?;
-
-    // Save to centralized settings
-    save_shortcuts_to_centralized_settings(&app, &state).await?;
-
-    // Re-register global shortcuts
-    update_global_shortcuts(&app, &state).await?;
-
-    info!("Reset keyboard shortcuts to defaults");
-    Ok(())
 }
 
 /// Load keyboard shortcuts from centralized settings
@@ -176,53 +49,21 @@ pub async fn load_shortcuts_from_centralized_settings(
     Ok(())
 }
 
-/// Save keyboard shortcuts to centralized settings
-async fn save_shortcuts_to_centralized_settings(
-    app: &AppHandle,
-    state: &AppState,
-) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app.clone())
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-
-    let state_shortcuts = state
-        .get_keyboard_shortcuts()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
-
-    // Convert from state::KeyboardShortcuts to settings::KeyboardShortcuts
-    let settings_shortcuts = convert_state_to_settings_shortcuts(&state_shortcuts);
-
-    settings_manager
-        .set_keyboard_shortcuts(&settings_shortcuts)
-        .await
-        .map_err(|e| format!("Failed to save shortcuts to centralized settings: {}", e))?;
-
-    info!("Saved keyboard shortcuts to centralized settings");
-    Ok(())
-}
-
-/// Convert from settings::KeyboardShortcuts to state::KeyboardShortcuts
+/// Convert from settings::KeyboardShortcuts to state::KeyboardShortcuts.
+///
+/// The stop and settings combos are taken from the constants, not from the
+/// store. They are no longer configurable, so a value written by an older
+/// build (or by hand) must not be able to move Escape or Cmd+Comma: reading
+/// the constant here is what makes "not configurable" true rather than merely
+/// hidden.
 fn convert_settings_to_state_shortcuts(
     settings: &crate::settings::KeyboardShortcuts,
 ) -> crate::state::KeyboardShortcuts {
     crate::state::KeyboardShortcuts {
         agent_mode: settings.agent_mode.clone(),
         dictation_input: settings.dictation_input.clone(),
-        stop_current_task: settings.stop_current_task.clone(),
-        open_settings: settings.open_settings.clone(),
-        voice_activation: settings.voice_activation.clone(),
-    }
-}
-
-/// Convert from state::KeyboardShortcuts to settings::KeyboardShortcuts
-fn convert_state_to_settings_shortcuts(
-    state: &crate::state::KeyboardShortcuts,
-) -> crate::settings::KeyboardShortcuts {
-    crate::settings::KeyboardShortcuts {
-        agent_mode: state.agent_mode.clone(),
-        dictation_input: state.dictation_input.clone(),
-        stop_current_task: state.stop_current_task.clone(),
-        open_settings: state.open_settings.clone(),
-        voice_activation: state.voice_activation.clone(),
+        stop_current_task: crate::constants::settings::defaults::STOP_CURRENT_TASK.to_string(),
+        open_settings: crate::constants::settings::defaults::OPEN_SETTINGS.to_string(),
     }
 }
 
@@ -403,7 +244,6 @@ fn check_shortcut_conflicts(
         ("dictation_input", &current_shortcuts.dictation_input),
         ("stop_current_task", &current_shortcuts.stop_current_task),
         ("open_settings", &current_shortcuts.open_settings),
-        ("voice_activation", &current_shortcuts.voice_activation),
     ];
 
     for (key, existing_shortcut) in &shortcuts_to_check {
@@ -433,7 +273,6 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
         "dictation_input" => "Dictation Input",
         "stop_current_task" => "Stop Current Task",
         "open_settings" => "Open Settings",
-        "voice_activation" => "Voice Activation",
         _ => shortcut_name,
     }
 }
@@ -464,10 +303,6 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
             e
         );
     }
-
-    let shortcuts = state
-        .get_keyboard_shortcuts()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
 
     // Import parse_shortcut_string from lib.rs
     use crate::parse_shortcut_string;
@@ -525,25 +360,8 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
         error!("Failed to sync modifier-key monitor: {}", e);
     }
 
-    // Register the voice activation shortcut with error handling
-    if let Some(shortcut) = parse_shortcut_string(&shortcuts.voice_activation) {
-        match app.global_shortcut().register(shortcut) {
-            Ok(()) => {
-                info!(
-                    "✅ Successfully registered voice activation shortcut: {}",
-                    shortcuts.voice_activation
-                );
-            }
-            Err(e) => {
-                error!("❌ Failed to register voice activation shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.voice_activation, e);
-            }
-        }
-    } else {
-        warn!(
-            "Failed to parse voice activation shortcut: {}",
-            shortcuts.voice_activation
-        );
-    }
+    // There is no voice-activation shortcut any more. A voice trigger being
+    // enabled is the on switch, so there was never anything to toggle.
 
     // NOTE: Escape key is now registered dynamically only when needed
     // This prevents capturing it when there's nothing to cancel
@@ -590,197 +408,28 @@ pub async fn validate_keyboard_shortcut(
     Ok("Valid shortcut".to_string())
 }
 
-/// Get smart shortcut suggestions based on platform and context
-#[tauri::command]
-pub async fn get_shortcut_suggestions(
-    shortcut_name: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
-    let is_macos = cfg!(target_os = "macos");
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::constants::settings::defaults;
 
-    // Get current shortcuts to avoid suggesting conflicts
-    let current_shortcuts = state
-        .get_keyboard_shortcuts()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
-
-    let mut suggestions = Vec::new();
-
-    match shortcut_name.as_str() {
-        "agent_mode" => {
-            if is_macos {
-                suggestions.extend([
-                    "Option+D".to_string(),
-                    "Option+A".to_string(),
-                    "Cmd+Option+A".to_string(),
-                    "Option+J".to_string(),
-                    "F5".to_string(),
-                    "F6".to_string(),
-                    "Cmd+Shift+A".to_string(),
-                ]);
-            } else {
-                suggestions.extend([
-                    "Alt+D".to_string(),
-                    "Alt+A".to_string(),
-                    "Ctrl+Alt+A".to_string(),
-                    "Alt+J".to_string(),
-                    "F5".to_string(),
-                    "F6".to_string(),
-                    "Ctrl+Shift+A".to_string(),
-                ]);
-            }
-        }
-        "dictation_input" => {
-            if is_macos {
-                suggestions.extend([
-                    "Option+Space".to_string(),
-                    "Option+V".to_string(),
-                    "Cmd+Option+V".to_string(),
-                    "Option+M".to_string(),
-                    "F7".to_string(),
-                    "F8".to_string(),
-                    "Cmd+Shift+V".to_string(),
-                ]);
-            } else {
-                suggestions.extend([
-                    "Alt+Space".to_string(),
-                    "Alt+V".to_string(),
-                    "Ctrl+Alt+V".to_string(),
-                    "Alt+M".to_string(),
-                    "F7".to_string(),
-                    "F8".to_string(),
-                    "Ctrl+Shift+V".to_string(),
-                ]);
-            }
-        }
-        "stop_current_task" => {
-            suggestions.extend([
-                "Escape".to_string(),
-                "F12".to_string(),
-                "Ctrl+Shift+Escape".to_string(),
-            ]);
-            if is_macos {
-                suggestions.push("Cmd+.".to_string());
-            } else {
-                suggestions.push("Ctrl+Break".to_string());
-            }
-        }
-        "voice_activation" => {
-            if is_macos {
-                suggestions.extend([
-                    "Option+Shift+V".to_string(),
-                    "Option+Shift+M".to_string(),
-                    "Option+F5".to_string(),
-                    "Ctrl+Option+V".to_string(),
-                    "Option+Shift+R".to_string(),
-                ]);
-            } else {
-                suggestions.extend([
-                    "Alt+Shift+V".to_string(),
-                    "Alt+Shift+M".to_string(),
-                    "Alt+F5".to_string(),
-                    "Ctrl+Alt+V".to_string(),
-                    "Alt+Shift+R".to_string(),
-                ]);
-            }
-        }
-        _ => {
-            // Generic suggestions for unknown shortcut types
-            if is_macos {
-                suggestions.extend([
-                    "Option+F1".to_string(),
-                    "Option+F2".to_string(),
-                    "Cmd+Option+F1".to_string(),
-                    "Cmd+Shift+F1".to_string(),
-                ]);
-            } else {
-                suggestions.extend([
-                    "Alt+F1".to_string(),
-                    "Alt+F2".to_string(),
-                    "Ctrl+Alt+F1".to_string(),
-                    "Ctrl+Shift+F1".to_string(),
-                ]);
-            }
-        }
+    #[test]
+    fn stored_stop_and_settings_combos_are_ignored() {
+        // Someone upgrading from a build where these were editable may have a
+        // custom pair on disk. They are constants now, so the store must not
+        // be able to move Escape or Cmd+Comma.
+        let stored = crate::settings::KeyboardShortcuts {
+            agent_mode: "Option+D".to_string(),
+            dictation_input: "Option+Space".to_string(),
+            stop_current_task: "Cmd+Escape".to_string(),
+            open_settings: "Option+K".to_string(),
+        };
+        let live = convert_settings_to_state_shortcuts(&stored);
+        assert_eq!(live.stop_current_task, defaults::STOP_CURRENT_TASK);
+        assert_eq!(live.open_settings, defaults::OPEN_SETTINGS);
+        // The activation combos still come from the store, because those are
+        // derived from the triggers the person actually configured.
+        assert_eq!(live.agent_mode, "Option+D");
+        assert_eq!(live.dictation_input, "Option+Space");
     }
-
-    // Filter out suggestions that conflict with current shortcuts
-    let current_values: Vec<String> = vec![
-        current_shortcuts.agent_mode.clone(),
-        current_shortcuts.dictation_input.clone(),
-        current_shortcuts.stop_current_task.clone(),
-        current_shortcuts.open_settings.clone(),
-        current_shortcuts.voice_activation.clone(),
-    ];
-
-    suggestions.retain(|suggestion| {
-        let normalized_suggestion = suggestion.to_lowercase().replace(" ", "");
-        !current_values
-            .iter()
-            .any(|current| current.to_lowercase().replace(" ", "") == normalized_suggestion)
-    });
-
-    // Validate each suggestion and keep only valid ones
-    let mut valid_suggestions = Vec::new();
-    for suggestion in suggestions {
-        if validate_shortcut_format(&suggestion).is_ok() {
-            valid_suggestions.push(suggestion);
-        }
-    }
-
-    // Limit to top 5 suggestions
-    valid_suggestions.truncate(5);
-
-    Ok(valid_suggestions)
-}
-
-/// Get platform-specific shortcut recommendations and best practices
-#[tauri::command]
-pub async fn get_shortcut_best_practices() -> Result<serde_json::Value, String> {
-    let is_macos = cfg!(target_os = "macos");
-
-    let best_practices = serde_json::json!({
-        "platform": if is_macos { "macOS" } else { "Windows/Linux" },
-        "recommendations": {
-            "modifiers": {
-                "primary": if is_macos { "Cmd" } else { "Ctrl" },
-                "secondary": if is_macos { "Option" } else { "Alt" },
-                "tertiary": "Shift"
-            },
-            "avoid": [
-                "Single letters without modifiers",
-                "Common system shortcuts",
-                "More than 3 modifiers",
-                if is_macos { "Ctrl+C, Ctrl+V (use Cmd instead)" } else { "Cmd+C, Cmd+V (use Ctrl instead)" }
-            ],
-            "good_choices": [
-                if is_macos { "Option + Letter" } else { "Alt + Letter" },
-                "Function keys (F1-F12)",
-                if is_macos { "Cmd + Option + Letter" } else { "Ctrl + Alt + Letter" },
-                "Function keys with modifiers"
-            ],
-            "examples": {
-                "excellent": [
-                    if is_macos { "Option+D" } else { "Alt+D" },
-                    "F5",
-                    if is_macos { "Cmd+Option+Space" } else { "Ctrl+Alt+Space" }
-                ],
-                "good": [
-                    if is_macos { "Cmd+Shift+F1" } else { "Ctrl+Shift+F1" },
-                    if is_macos { "Option+Enter" } else { "Alt+Enter" }
-                ],
-                "avoid": [
-                    "A", "Ctrl+C", "Cmd+Tab", "Alt+Tab", "Space"
-                ]
-            }
-        },
-        "tips": [
-            "Test shortcuts in different applications to ensure they work globally",
-            "Use function keys for frequently used actions",
-            "Combine modifiers with less common keys for reliability",
-            "Consider ergonomics - avoid hard-to-reach key combinations",
-            "Keep shortcuts memorable and logical for your workflow"
-        ]
-    });
-
-    Ok(best_practices)
 }

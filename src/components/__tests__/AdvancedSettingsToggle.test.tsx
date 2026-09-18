@@ -66,7 +66,6 @@ vi.mock("../settings/index", () => {
     AutomationsSettings: stub("automations"),
     NetworkSettings: stub("network"),
     SecuritySettings: stub("security"),
-    ShortcutsSettings: stub("shortcuts"),
     AdvancedSettings: stub("advanced"),
   };
 });
@@ -112,7 +111,6 @@ const BASIC_SECTIONS = [
   "AI Provider",
   "Notifications",
   "Security & Privacy",
-  "Keyboard Shortcuts",
 ];
 const ADVANCED_SECTIONS = ["Tools", "Automations", "Network", "Advanced"];
 
@@ -144,7 +142,6 @@ describe("visibleCategories", () => {
       "ai",
       "notifications",
       "security",
-      "shortcuts",
     ]);
   });
 
@@ -179,7 +176,8 @@ describe("searchCategories", () => {
   });
 
   it("is case-insensitive", () => {
-    expect(searchCategories(all, "KEYBOARD").map((c) => c.id)).toEqual(["shortcuts"]);
+    // The Keyboard Shortcuts pane is gone; Triggers carries its search terms.
+    expect(searchCategories(all, "KEYBOARD").map((c) => c.id)).toEqual(["triggers"]);
   });
 });
 

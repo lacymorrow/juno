@@ -19,8 +19,22 @@ import {
   RotateCcw,
   Grid3X3,
   Settings,
+  ChevronRight,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { isDevelopment } from "@/lib";
+import { cn } from "@/lib/utils";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+
+interface ExamplePrompt {
+  icon: LucideIcon;
+  title: string;
+  prompt: string;
+}
 
 interface ExamplePromptsProps {
   onPromptSelect: (prompt: string) => void;
@@ -30,6 +44,9 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
   onPromptSelect,
 }) => {
   const [isDevMode, setIsDevMode] = useState(false);
+  // Closed on every mount so the pane always opens on the real empty state.
+  // The dev commands are a workbench, not the first thing anyone should read.
+  const [devCommandsOpen, setDevCommandsOpen] = useState(false);
 
   useEffect(() => {
     const checkDevMode = async () => {
@@ -44,7 +61,7 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
     checkDevMode();
   }, []);
 
-  const productionPrompts = [
+  const productionPrompts: ExamplePrompt[] = [
     {
       icon: Globe,
       title: "Browse Web",
@@ -77,7 +94,7 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
     },
   ];
 
-  const developmentPrompts = [
+  const developmentPrompts: ExamplePrompt[] = [
     {
       icon: Mouse,
       title: "Mouse Square",
@@ -188,31 +205,50 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
     },
   ];
 
-  const prompts = isDevMode ? developmentPrompts : productionPrompts;
+  const renderPrompts = (prompts: ExamplePrompt[]) => (
+    <div className="flex flex-wrap justify-center gap-2">
+      {prompts.map((example, index) => (
+        <button
+          key={index}
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs bg-secondary/50 hover:bg-secondary border border-border/40 text-foreground/80 hover:text-foreground transition-colors cursor-pointer"
+          onClick={() => onPromptSelect(example.prompt)}
+        >
+          <example.icon size={12} className="opacity-60 flex-shrink-0" />
+          <span>{example.title}</span>
+        </button>
+      ))}
+    </div>
+  );
 
   return (
-    <div className="w-full max-w-lg mx-auto">
+    <div className="w-full max-w-lg mx-auto space-y-3">
+      {/* Development builds used to swap these out entirely, which meant nobody
+          working on Juno ever saw the empty state a real user gets. */}
+      {renderPrompts(productionPrompts)}
+
       {isDevMode && (
-        <div className="text-xs text-amber-600 dark:text-amber-400 mb-3 text-center font-medium">
-          Development Test Commands
-        </div>
-      )}
-      <div className="flex flex-wrap justify-center gap-2">
-        {prompts.map((example, index) => (
-          <button
-            key={index}
-            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs bg-secondary/50 hover:bg-secondary border border-border/40 text-foreground/80 hover:text-foreground transition-colors cursor-pointer"
-            onClick={() => onPromptSelect(example.prompt)}
-          >
-            <example.icon size={12} className="opacity-60 flex-shrink-0" />
-            <span>{example.title}</span>
-          </button>
-        ))}
-      </div>
-      {isDevMode && (
-        <div className="text-xs text-muted-foreground text-center mt-3">
-          Click any command to test agent capabilities
-        </div>
+        <Collapsible open={devCommandsOpen} onOpenChange={setDevCommandsOpen}>
+          <CollapsibleTrigger className="mx-auto flex w-fit items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px]">
+            <ChevronRight
+              size={12}
+              className={cn(
+                "opacity-60 transition-transform",
+                devCommandsOpen && "rotate-90"
+              )}
+            />
+            <span>Development test commands</span>
+            <span className="opacity-50 tabular-nums">
+              {developmentPrompts.length}
+            </span>
+          </CollapsibleTrigger>
+          {/* Capped and scrolled in its own box: expanding a developer list must
+              never push the conversation it introduces out of the pane. */}
+          <CollapsibleContent>
+            <div className="mt-2 max-h-40 overflow-y-auto overscroll-contain rounded-md border border-border/40 p-2">
+              {renderPrompts(developmentPrompts)}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </div>
   );

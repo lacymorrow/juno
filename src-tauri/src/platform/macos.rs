@@ -371,17 +371,37 @@ fn setup_desktop_cursor_overlay_window(app_handle: &AppHandle) {
     }
 }
 
+/// How long the bar is given to place itself before it is shown regardless.
+///
+/// Long enough that the webview wins the race on any machine that is not in
+/// trouble, short enough that a bar which never reports in is still on screen
+/// while the person is looking for it.
+#[cfg(target_os = "macos")]
+const BAR_SHOW_FALLBACK_MS: u64 = 2500;
+
 /// Show the floating bar without stealing application focus.
 ///
 /// Overlay windows must never call set_focus()/makeKeyAndOrderFront: — that
 /// triggers [NSApp activateIgnoringOtherApps:YES] which yanks keyboard focus
 /// away from whatever app the user is currently in.  orderFront: (via show())
 /// makes the window visible without changing the active application.
+///
+/// This is now only the safety net. The bar is created hidden at the
+/// placeholder frame in `tauri.conf.json` and does not know its real spot (the
+/// well it was left in last launch) until the webview has mounted and asked for
+/// it, so it puts itself on screen through `show_bar_when_ready` once its first
+/// frame is set. Showing it on a short timer here is what made it appear at the
+/// placeholder frame and then visibly jump into place a moment later. A webview
+/// that never gets that far still gets a bar, just a late one.
 #[cfg(target_os = "macos")]
 fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
     tauri::async_runtime::spawn(async move {
-        // Small delay to ensure window setup is complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(BAR_SHOW_FALLBACK_MS)).await;
+
+        // The normal path already won: leave it alone.
+        if window.is_visible().unwrap_or(false) {
+            return;
+        }
 
         // If setup is on screen, stay off it. The bar is always on top, so
         // showing it here would cover the setup window, and it has nothing to
@@ -400,7 +420,7 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
                 format_error(templates::FAILED_TO_PROCESS, "show floating bar window", e)
             );
         } else {
-            info!("Floating bar window shown successfully (no focus steal)");
+            info!("Floating bar shown by the startup fallback (no focus steal)");
         }
     });
 }

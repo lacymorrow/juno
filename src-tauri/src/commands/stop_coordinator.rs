@@ -313,6 +313,20 @@ impl StopCoordinator {
             self.unregister_operation(&escape_op_id).await;
         }
 
+        // 9. Re-arm the wake phrase.
+        //
+        // Step 4 stops the always-listening engine, which is the only thing
+        // that can abort an utterance already being captured after a wake
+        // phrase landed. That part is right. What is wrong is leaving it off:
+        // an enabled voice trigger is a standing intent, so cancelling one
+        // sentence must not silently revoke the wake phrase for the rest of
+        // the run. Re-applying from the stored triggers puts it back exactly
+        // as startup would, and re-emits the listening outcome so the bar's
+        // dot follows. If no voice trigger is enabled this stops at the first
+        // check and costs nothing.
+        crate::commands::triggers::apply_stored_voice_triggers(app_handle).await;
+        cleanup_results.push("Voice triggers re-armed".to_string());
+
         let result_summary = format!(
             "Coordinated cleanup completed: [{}]",
             cleanup_results.join(", ")
@@ -329,8 +343,8 @@ impl StopCoordinator {
             ("always-listening-mode-changed", false),
         ];
 
-        for (event_name, _value) in events.iter() {
-            self.emit_event(app_handle, event_name);
+        for (event_name, active) in events.iter() {
+            self.emit_event(app_handle, event_name, *active);
         }
     }
 
@@ -344,8 +358,15 @@ impl StopCoordinator {
         }
     }
 
-    fn emit_event(&self, app_handle: &AppHandle, event_name: &str) {
-        if let Err(e) = app_handle.emit(event_name, ()) {
+    /// Announce that one subsystem is no longer active.
+    ///
+    /// The payload has to be the boolean. Listeners read these events as a
+    /// bool, and an empty payload is not `false` to them, it is a value they
+    /// cannot parse, so they drop the event and keep showing whatever they
+    /// were showing. That is how the menu bar kept animating the agent icon
+    /// after a stop: the event arrived and said nothing.
+    fn emit_event(&self, app_handle: &AppHandle, event_name: &str, active: bool) {
+        if let Err(e) = app_handle.emit(event_name, active) {
             warn!(
                 "{} {}",
                 STOP_COORDINATOR_PREFIX,

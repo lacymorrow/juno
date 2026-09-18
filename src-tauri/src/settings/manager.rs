@@ -6,6 +6,7 @@
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_store::StoreExt;
+use tracing::warn;
 
 use crate::constants::settings::{defaults, events, store_keys, validation, SETTINGS_STORE_FILE};
 use crate::settings::{
@@ -611,13 +612,17 @@ impl SettingsManager {
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<KeyboardShortcuts, String> {
-        match store
+        let mut shortcuts: KeyboardShortcuts = store
             .get(store_keys::KEYBOARD_SHORTCUTS)
             .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(shortcuts) => Ok(shortcuts),
-            None => Ok(KeyboardShortcuts::default()),
-        }
+            .unwrap_or_default();
+        // Escape and Cmd+Comma stopped being settings. Normalizing them on
+        // read, rather than trusting the store, is what stops a custom value
+        // written by an older build from outliving the decision, and the next
+        // save writes the normalized pair back.
+        shortcuts.stop_current_task = defaults::STOP_CURRENT_TASK.to_string();
+        shortcuts.open_settings = defaults::OPEN_SETTINGS.to_string();
+        Ok(shortcuts)
     }
 
     fn get_floating_bar_settings_from_store(
@@ -696,9 +701,25 @@ impl SettingsManager {
         agent: &AgentSettings,
         audio: &AudioSettings,
     ) -> Vec<crate::triggers::Trigger> {
-        let stored: Option<Vec<crate::triggers::Trigger>> = store
-            .get(store_keys::TRIGGERS)
-            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        let stored: Option<Vec<crate::triggers::Trigger>> =
+            store.get(store_keys::TRIGGERS).and_then(|v| {
+                match serde_json::from_value::<Vec<crate::triggers::Trigger>>(v.clone()) {
+                    Ok(triggers) => Some(triggers),
+                    Err(e) => {
+                        // One unreadable trigger discards the whole saved list
+                        // and rebuilds a keyboard-only one from the legacy
+                        // fields, so a binding the legacy fields cannot express
+                        // (Fn, a mouse button) just disappears. Silently, until
+                        // now: say so, because "my key stopped working after an
+                        // update" is otherwise unanswerable.
+                        warn!(
+                            "[Settings] Stored triggers could not be read ({}); falling back to the legacy fields, which will drop any non-keyboard binding",
+                            e
+                        );
+                        None
+                    }
+                }
+            });
 
         match stored {
             Some(triggers) if !triggers.is_empty() => crate::triggers::dedupe_by_key(triggers),

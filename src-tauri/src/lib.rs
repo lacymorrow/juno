@@ -108,11 +108,7 @@ use crate::commands::{
 };
 
 // Import keyboard shortcuts commands explicitly
-use crate::commands::{
-    get_keyboard_shortcuts, get_shortcut_best_practices, get_shortcut_suggestions,
-    reset_keyboard_shortcuts, set_keyboard_shortcut, set_keyboard_shortcuts,
-    validate_keyboard_shortcut,
-};
+use crate::commands::{get_keyboard_shortcuts, validate_keyboard_shortcut};
 use crate::commands::{get_triggers, set_trigger_capture, set_triggers};
 
 // Import MCP commands explicitly
@@ -595,17 +591,13 @@ pub fn run() {
             ui_set_panel_click_through,
             ui_set_panel_level,
             dispatch_query,
-            // Keyboard Shortcuts Commands
+            // Keyboard shortcuts are read-only now: Escape and Cmd+Comma are
+            // fixed, and activation lives in the triggers matrix.
             get_keyboard_shortcuts,
-            set_keyboard_shortcut,
-            set_keyboard_shortcuts,
-            reset_keyboard_shortcuts,
             get_triggers,
             set_triggers,
             set_trigger_capture,
             validate_keyboard_shortcut,
-            get_shortcut_suggestions,
-            get_shortcut_best_practices,
             commands::conversations::list_conversations,
             commands::conversations::get_current_conversation_id,
             commands::conversations::load_conversation,
@@ -760,6 +752,7 @@ pub fn run() {
             commands::bar_position::get_bar_position,
             commands::bar_position::set_bar_position,
             commands::bar_position::set_bar_frame,
+            commands::bar_position::show_bar_when_ready,
             // Notification Commands
             // Scheduled automation commands (user-facing cron schedules)
             commands::skills::list_available_skills,

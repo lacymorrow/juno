@@ -42,13 +42,33 @@ export function useAutoGrowTextarea({
 
   useLayoutEffect(measure, [measure, value]);
 
-  /** Attach to the textarea; measures as soon as it exists. */
+  /**
+   * Attach to the textarea; measures as soon as it exists.
+   *
+   * Detaching resets the measured height, which is the whole fix for a composer
+   * that opened several lines tall with nothing typed in it. The bar's composer
+   * unmounts whenever the bar leaves its input (a voice state taking over, a
+   * query going out), and a measurement cannot run against an element that is
+   * gone, so the last tall height it had was still the answer when an empty
+   * composer came back: the pill and its window were sized for text that was no
+   * longer there, until the first keystroke re-measured and collapsed it to one
+   * line. A composer that is not on screen has no height, so say so.
+   *
+   * On the way in the one-line height is written before the measurement rather
+   * than after it, so even a first paint that beats the measurement is already
+   * the right size instead of whatever `rows` happened to give.
+   */
   const attach = useCallback(
     (node: HTMLTextAreaElement | null) => {
       ref.current = node;
+      if (!node) {
+        setHeight(minHeightPx ?? 0);
+        return;
+      }
+      if (minHeightPx !== undefined) node.style.height = `${minHeightPx}px`;
       measure();
     },
-    [measure]
+    [measure, minHeightPx]
   );
 
   return { ref, attach, height, measure };

@@ -2,7 +2,7 @@ import OnboardingFlow from "@/components/onboarding/Onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
-import { WINDOW_LABELS } from "@/lib/constants.generated";
+import { COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { getPermissionsStatus } from "@/lib/permissions-service";
 
 export default function OnboardingWindow() {
@@ -88,7 +88,23 @@ export default function OnboardingWindow() {
     checkInitialData();
   }, []);
 
+  // Stop the backend listening for the globe key before this window goes away.
+  //
+  // The last setup screen asks it to listen so a press can be read as "use
+  // this key". Closing the window destroys the webview, so an unmount cleanup
+  // is racing its own teardown: if the request is never withdrawn, the monitor
+  // keeps swallowing Fn as a key being chosen and the key does nothing for the
+  // rest of the run. Awaited here, where the window is still alive.
+  const stopListeningForGlobeKey = async () => {
+    try {
+      await invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: false });
+    } catch (error) {
+      console.warn("Failed to stop listening for the globe key:", error);
+    }
+  };
+
   const handleOnboardingComplete = async () => {
+    await stopListeningForGlobeKey();
     try {
       // Use backend command to mark onboarding as completed
       await invoke("complete_onboarding");
@@ -114,6 +130,7 @@ export default function OnboardingWindow() {
   };
 
   const handleOnboardingSkip = async () => {
+    await stopListeningForGlobeKey();
     try {
       // Use backend command to skip onboarding (still marks as completed)
       await invoke("skip_onboarding");

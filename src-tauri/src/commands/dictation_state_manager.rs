@@ -299,7 +299,13 @@ impl DictationStateManager {
             Some(controller_state) => {
                 let stop_result = tokio::time::timeout(
                     std::time::Duration::from_secs(3),
-                    tauri_plugin_voice_transcription::commands::stop_dictation(
+                    // Cancel, not stop. This is reached from the coordinated
+                    // stop, which runs when someone pressed Escape or the Stop
+                    // control, and stop_dictation finalises the audio and emits
+                    // a final result that downstream types out. Asking to stop
+                    // would type the sentence being abandoned. Same defect as
+                    // handle_dictation_cancel had, one layer further down.
+                    tauri_plugin_voice_transcription::commands::cancel_dictation(
                         app_handle.clone(),
                         controller_state
                     )

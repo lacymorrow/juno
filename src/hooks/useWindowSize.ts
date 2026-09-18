@@ -21,6 +21,18 @@ interface WindowSizeConfig {
    * downward growth.
    */
   growUp?: boolean;
+  /**
+   * Where the window's top-left belongs at this size, in physical pixels: the
+   * snap well the bar is sitting in, recomputed for the new footprint.
+   *
+   * A well anchors a window to a screen edge, not to its own top-left, so the
+   * top-right well holds the *right* edge on the inset and a wider window has
+   * to start further left to stay in it. When this is given it replaces both
+   * the centre-stable X and the `anchorY` maths, because the well already says
+   * where every edge goes. Omitted for a bar that is not in a well (mid-drag,
+   * or before the first placement), which keeps the anchored behaviour below.
+   */
+  well?: { x: number; y: number };
 }
 
 // Cache last applied sizes per window to avoid redundant resizes
@@ -83,15 +95,20 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
   const size = await appWindow.outerSize();       // PhysicalSize
 
   const dx = physNextW - size.width;
-  const newX = dx !== 0 ? Math.round(pos.x - dx / 2) : pos.x;
+  // A well is an absolute answer for this exact footprint, so it wins over
+  // both the centre-stable X and the anchored Y: the bar grows away from the
+  // screen edge it is docked to and shrinks straight back onto it.
+  const newX = next.well ? next.well.x : dx !== 0 ? Math.round(pos.x - dx / 2) : pos.x;
 
   const prevAnchor = lastAnchorByLabel.get(appWindow.label);
-  const anchoredY = anchoredTop(
-    pos.y,
-    prevAnchor,
-    { physH: physNextH, anchor: next.anchorY, growUp: next.growUp },
-    scaleFactor,
-  );
+  const anchoredY = next.well
+    ? next.well.y
+    : anchoredTop(
+        pos.y,
+        prevAnchor,
+        { physH: physNextH, anchor: next.anchorY, growUp: next.growUp },
+        scaleFactor,
+      );
   if (next.anchorY !== undefined) {
     lastAnchorByLabel.set(appWindow.label, {
       physH: physNextH,

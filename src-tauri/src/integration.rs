@@ -444,8 +444,17 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
             // Update floating bar to indicate activation is starting.
             commands::ui_commands::handle_always_listening_change(&app_handle_clone, true).await;
 
-            // Emit event to UI to show wake word was detected
-            if let Err(e) = app_handle_clone.emit(events::always_listening::WAKE_WORD_DETECTED, ()) {
+            // Tell the UI the phrase was heard. The payload carries the phrase
+            // and the resolved target, because "a wake phrase was heard" and
+            // "the engine is armed" are two different things to draw and the
+            // bar was previously given the same signal for both.
+            if let Err(e) = app_handle_clone.emit(
+                events::always_listening::WAKE_WORD_DETECTED,
+                serde_json::json!({
+                    "phrase": matched_phrase,
+                    "target": target,
+                }),
+            ) {
                 error!("{} Failed to emit wake-word-detected event: {}", prefixes::ALWAYS_LISTENING, e);
             }
 
@@ -1097,6 +1106,15 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
             {
                 Ok(_) => {
                     info!("[Agent Mode] Cancelled agent transcription successfully");
+                    // Retract the input monitor's intent, not just the audio.
+                    // Cancelling stopped the recording but left AGENT_INPUT_STATE
+                    // believing a hold was still in progress, so releasing a
+                    // still-held push-to-talk key saw "started and past the
+                    // threshold" and emitted a stop, which finalised and
+                    // submitted the session that had just been cancelled. The
+                    // two failure branches below already reset it; the success
+                    // path is the one that needed it most.
+                    crate::agent_monitor::force_reset_agent_input_state().await;
                     // Put the bar back to rest; nothing is being processed.
                     // No query: the bar goes back to rest rather than to
                     // a processing state for something that will never arrive.

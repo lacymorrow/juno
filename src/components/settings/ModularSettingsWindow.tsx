@@ -9,7 +9,6 @@ import {
   Bell,
   Brain,
   CalendarClock,
-  Keyboard,
   Mic,
   Network,
   Search,
@@ -29,7 +28,6 @@ import {
   AutomationsSettings,
   NetworkSettings,
   NotificationSettings,
-  ShortcutsSettings,
   ToolsSettings,
   TriggersSettings,
 } from "./index";
@@ -67,8 +65,10 @@ export const settingsCategories: MacCategory[] = [
     icon: <Zap className="h-3.5 w-3.5" />,
     tile: "bg-[#00C7BE]",
     description: "How you summon Juno",
+    // Carries the retired Keyboard Shortcuts pane's search terms: this is
+    // where every binding lives now, so searching for one must land here.
     keywords:
-      "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase agent dictation",
+      "trigger activation summon hotkey hotkeys keybindings keyboard shortcut shortcuts keys mouse button voice push to talk toggle wake word phrase agent dictation",
   },
   {
     id: "voice",
@@ -128,14 +128,6 @@ export const settingsCategories: MacCategory[] = [
     tile: "bg-[#34C759]",
     description: "Permissions and security settings",
     keywords: "permissions privacy accessibility screen recording camera microphone approvals",
-  },
-  {
-    id: "shortcuts",
-    name: "Keyboard Shortcuts",
-    icon: <Keyboard className="h-3.5 w-3.5" />,
-    tile: "bg-[#64748B]",
-    description: "Customize keyboard shortcuts",
-    keywords: "hotkeys keybindings shortcut keys trigger",
   },
   {
     id: "advanced",
@@ -330,8 +322,6 @@ function SettingsWindowContent() {
         return <NetworkSettings settings={settings} />;
       case "security":
         return <SecuritySettings />;
-      case "shortcuts":
-        return <ShortcutsSettings settings={settings} />;
       case "advanced":
         return <AdvancedSettings settings={settings} />;
       default:

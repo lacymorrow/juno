@@ -898,13 +898,52 @@ export default function OnboardingFlow({
     setFnSaveError(null);
     try {
       const triggers = await invoke<TriggerShape[]>(COMMANDS.TRIGGERS_GET_TRIGGERS);
-      const next = triggers.map((trigger) =>
-        trigger.method === "push_to_talk" && trigger.target === "dictation"
-          ? { ...trigger, binding: { kind: "modifier" as const, key: "fn" as const } }
+      const fnBinding = { kind: "modifier" as const, key: "fn" as const };
+      const isTalkTrigger = (trigger: TriggerShape) =>
+        trigger.method === "push_to_talk" && trigger.target === "dictation";
+      // Also switched on, because a trigger that is off is never registered:
+      // pressing the key to adopt it and then finding it does nothing is worse
+      // than not offering it at all.
+      let next: TriggerShape[] = triggers.map((trigger) =>
+        isTalkTrigger(trigger)
+          ? { ...trigger, binding: fnBinding, enabled: true }
           : trigger
       );
-      await invoke(COMMANDS.TRIGGERS_SET_TRIGGERS, { triggers: next });
-      if (mountedRef.current) setFnOffered(true);
+      // Nothing to hold means nothing to hold a key for. A store that has no
+      // hold-to-talk trigger (it was deleted, or the dictation trigger is a
+      // tap) used to accept this silently and the screen said the globe key
+      // was in use while nothing was bound to it.
+      if (!next.some(isTalkTrigger)) {
+        next = [
+          ...next,
+          {
+            method: "push_to_talk",
+            target: "dictation",
+            binding: fnBinding,
+            phrase: null,
+            require_hey_prefix: false,
+            enabled: true,
+          },
+        ];
+      }
+      const saved = await invoke<TriggerShape[]>(COMMANDS.TRIGGERS_SET_TRIGGERS, {
+        triggers: next,
+      });
+      // Believe the list that came back, not the one we sent: the backend
+      // normalizes and can reject.
+      const adopted = saved.some(
+        (trigger) =>
+          isTalkTrigger(trigger) &&
+          (trigger.binding as { kind?: string; key?: string } | null)?.kind ===
+            "modifier" &&
+          (trigger.binding as { kind?: string; key?: string } | null)?.key === "fn"
+      );
+      if (!mountedRef.current) return;
+      if (adopted) {
+        setFnOffered(true);
+      } else {
+        setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
+      }
     } catch (error) {
       console.error("[Onboarding] could not switch to the globe key:", error);
       if (mountedRef.current) {
@@ -1586,23 +1625,32 @@ export default function OnboardingFlow({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleNext]);
 
-  if (isComplete) {
-    return null;
-  }
-
   // Listen for the globe key only while the last screen is up, and stop as
   // soon as it is not. Outside this moment a press means "talk to Juno", not
   // "choose a key", and the monitor must not swallow that.
+  //
+  // This sits above the `isComplete` early return on purpose. Below it, the
+  // hook disappeared from the render on the one transition that matters,
+  // every exit from the last screen sets `isComplete` first, so React threw on
+  // the changed hook count instead of running this cleanup. Capture stayed on
+  // in the backend and the globe key did nothing, anywhere, until Juno was
+  // quit. `isComplete` is a dependency rather than an early bail so finishing
+  // withdraws the request the same way leaving the step does.
   const onFinalStep = currentStep === onboardingSteps.length - 1;
+  const wantsCapture = onFinalStep && !isComplete;
   useEffect(() => {
-    if (!onFinalStep) return;
+    if (!wantsCapture) return;
     void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: true }).catch((error) =>
       console.debug("[Onboarding] could not listen for the globe key:", error)
     );
     return () => {
       void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: false }).catch(() => {});
     };
-  }, [onFinalStep]);
+  }, [wantsCapture]);
+
+  if (isComplete) {
+    return null;
+  }
 
   // Only on the last screen: interrupting setup halfway to restart would lose
   // the thread, and the remaining steps work fine without these.
@@ -1743,6 +1791,16 @@ export default function OnboardingFlow({
                             ? "Using the globe key to talk. You can change this in Settings."
                             : "Prefer to hold one key? Press the globe key now to use that instead."}
                         </p>
+                        {/* Said once it is actually in use, not before: macOS
+                            gives the globe key its own job by default, so
+                            without this the emoji picker opens every time you
+                            talk to Juno and the key looks broken. */}
+                        {fnOffered && (
+                          <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+                            If the emoji picker opens too, set System Settings,
+                            Keyboard, "Press globe key to" to "Do Nothing".
+                          </p>
+                        )}
                         {fnSaveError && (
                           <p className="mt-1 text-[12px] text-destructive" role="alert">
                             {fnSaveError}

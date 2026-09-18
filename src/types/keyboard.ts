@@ -1,11 +1,12 @@
 // Types for keyboard shortcuts configuration
 
+// Read-only. Bindings are configured on the Triggers screen; these two are
+// fixed constants in Rust and are exposed only so screens can display them.
 export interface KeyboardShortcuts {
-    agent_mode: string;        // Default: Alt+D (Option+D on macOS)
-    dictation_input: string;   // Default: Alt+Space (Option+Space on macOS)
-    stop_current_task: string; // Default: Escape
-    open_settings: string;     // Default: Cmd+, (Ctrl+, on non-macOS)
-    voice_activation: string;  // Default: Option+Shift+V — always-on global voice shortcut
+    agent_mode: string;        // Derived from the agent trigger
+    dictation_input: string;   // Derived from the dictation trigger
+    stop_current_task: string; // Always Escape
+    open_settings: string;     // Always Cmd+, (Ctrl+, on non-macOS)
 }
 
 // Types for agent trigger mode configuration
