@@ -183,6 +183,14 @@ impl TrayIconManager {
         let frames = new_state.frames();
         let first = frames.first().ok_or("tray icon state has no frames")?;
         tray_icon.set_icon(Some(load_tray_icon_from_data(first)?))?;
+        // Setting an icon clears template mode, so it has to be re-asserted
+        // every time. Without this only the very first icon adapts to the menu
+        // bar: every state change after it renders as flat black, which is
+        // invisible against a dark menu bar.
+        #[cfg(target_os = "macos")]
+        if let Err(e) = tray_icon.set_icon_as_template(true) {
+            warn!("Tray icon could not be kept as a template image: {e}");
+        }
         tray_icon.set_tooltip(Some(new_state.tooltip()))?;
         if let Some(item) = &self.status_item {
             item.set_text(new_state.label())?;
@@ -246,6 +254,13 @@ fn spawn_animation(tray_icon: TrayIcon<tauri::Wry>, state: TrayIconState, genera
             };
             if let Err(e) = tray_icon.set_icon(Some(image)) {
                 warn!("Tray animation frame {index} for {state:?} failed to apply: {e}");
+                break;
+            }
+            // Every frame, for the same reason as above: an animating state
+            // would otherwise flip to flat black on its second frame.
+            #[cfg(target_os = "macos")]
+            if let Err(e) = tray_icon.set_icon_as_template(true) {
+                warn!("Tray animation frame {index} could not be kept as a template: {e}");
                 break;
             }
             index = (index + 1) % frames.len();
