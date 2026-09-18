@@ -787,6 +787,7 @@ impl AdvancedMemoryManager {
                 tool_calls: None,
                 tool_call_id: None,
                 name: Some("memory_summary".to_string()),
+                images: None,
             });
         }
 
@@ -841,6 +842,7 @@ impl AdvancedMemoryManager {
                 tool_calls: None,
                 tool_call_id: None,
                 name: Some("session_context".to_string()),
+                images: None,
             };
 
             let mut messages = self.messages.write().await;

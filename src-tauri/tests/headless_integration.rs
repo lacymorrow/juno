@@ -69,13 +69,7 @@ async fn test_memory_manager_headless() {
     let initial_messages = memory.get_messages().await.expect("should get messages");
     let initial_count = initial_messages.len();
 
-    let msg = Message {
-        role: Role::User,
-        content: "Hello from headless test".to_string(),
-        tool_calls: None,
-        tool_call_id: None,
-        name: None,
-    };
+    let msg = Message::new(Role::User, "Hello from headless test");
     memory.add_message(msg).await.expect("should add message");
 
     let messages = memory.get_messages().await.expect("should get messages");

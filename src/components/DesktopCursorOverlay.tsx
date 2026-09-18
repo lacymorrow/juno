@@ -12,9 +12,12 @@ type CursorState = "idle" | "moving" | "clicking" | "thinking";
 
 // Maximum number of simultaneous agent cursors rendered.
 const MAX_AGENT_SLOTS = 8;
-const TRAIL_COUNT = 5;
-// Hot-spot matches cx/cy of the tip circle in JunoCursorShape (SVG viewBox coords).
-const HOT_SPOT = 5;
+// The ring is drawn around the real pointer, so it is centred on the point
+// rather than hung off a hot-spot the way an arrow sprite would be.
+const RING_SIZE = 44;
+const HOT_SPOT = RING_SIZE / 2;
+/** Matches agent_session_colors::SLOT_0 in the Rust palette. */
+const DEFAULT_RING_COLOR = "#3B82F6";
 const CURSOR_FADE_DELAY_MS = 1500;
 const CLICK_ANIM_DURATION_MS = 700;
 
@@ -62,38 +65,33 @@ const CURSOR_CSS = `
     transition: opacity 0.35s ease;
   }
 
-  .juno-cursor--idle svg {
-    animation: juno-breathe 3s ease-in-out infinite;
-    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
-  }
-
+  /* The ring sits around the real pointer, so its only jobs are to say
+     "not you" and to say when something happened. Opacity carries the
+     first, a single scale step carries the second. */
   .juno-cursor--thinking svg {
-    animation: juno-wobble 0.55s ease-in-out infinite;
+    animation: juno-ring-wait 1.8s ease-in-out infinite;
     transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
   }
 
   .juno-cursor--clicking svg {
-    animation: juno-recoil 0.22s ease-out;
+    animation: juno-ring-press 0.22s ease-out;
     transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
   }
 
-  @keyframes juno-breathe {
-    0%, 100% { opacity: 0.72; transform: scale(1); }
-    50%       { opacity: 0.96; transform: scale(1.05); }
+  @keyframes juno-ring-wait {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1; }
   }
 
-  @keyframes juno-wobble {
-    0%, 100% { transform: rotate(0deg)   translateX(0px); }
-    20%      { transform: rotate(-5deg)  translateX(-1.5px); }
-    40%      { transform: rotate(4deg)   translateX(1.5px); }
-    60%      { transform: rotate(-3deg)  translateX(-1px); }
-    80%      { transform: rotate(2.5deg) translateX(0.8px); }
+  @keyframes juno-ring-press {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(0.86); }
+    100% { transform: scale(1); }
   }
 
-  @keyframes juno-recoil {
-    0%   { transform: scale(1)    rotate(0deg); }
-    30%  { transform: scale(0.83) rotate(-7deg); }
-    100% { transform: scale(1)    rotate(0deg); }
+  @media (prefers-reduced-motion: reduce) {
+    .juno-cursor--thinking svg,
+    .juno-cursor--clicking svg { animation: none; }
   }
 
   @keyframes juno-ripple {
@@ -136,69 +134,49 @@ const CURSOR_CSS = `
   .juno-preview-active .juno-preview-label { animation: juno-preview-label  0.5s ease-out forwards; }
 `;
 
-// ─── Cursor SVG ───────────────────────────────────────────────────────────────
-// Arrow cursor: hot-spot at (5, 5). `color` controls the gradient stop.
-const JunoCursorShape = ({ color = "#8B5CF6" }: { color?: string }) => {
-  const gradId = `juno-body-${color.replace("#", "")}`;
-  return (
-    <svg
-      width="36"
-      height="44"
-      viewBox="0 0 36 44"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      style={{ display: "block" }}
-      aria-hidden="true"
-    >
-      <defs>
-        <filter id="juno-glow" x="-65%" y="-55%" width="230%" height="210%">
-          <feGaussianBlur stdDeviation="2.5" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-        <linearGradient
-          id={gradId}
-          x1="5" y1="5" x2="30" y2="42"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop offset="0%" stopColor={color} stopOpacity="0.95" />
-          <stop offset="100%" stopColor="rgba(12, 8, 55, 0.92)" />
-        </linearGradient>
-      </defs>
-
-      {/* Drop shadow */}
-      <path
-        d="M5 5 L5 34 L13 25 L17.5 37 L22 35 L17.5 23 L30 23 Z"
-        fill="rgba(0,0,0,0.32)"
-        transform="translate(1.5, 1.5)"
-      />
-      {/* Arrow body */}
-      <path
-        d="M5 5 L5 34 L13 25 L17.5 37 L22 35 L17.5 23 L30 23 Z"
-        fill={`url(#${gradId})`}
-        stroke={color}
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        filter="url(#juno-glow)"
-        strokeOpacity="0.88"
-      />
-      {/* Hot-spot glow ring */}
-      <circle cx="5" cy="5" r="4.5" fill={color} fillOpacity="0.45" filter="url(#juno-glow)" />
-      <circle cx="5" cy="5" r="2" fill="white" />
-    </svg>
-  );
-};
+// ─── Cursor ring ──────────────────────────────────────────────────────────────
+// A ring drawn around the person's real pointer, centred on the point.
+//
+// This used to be a second arrow in a purple gradient with a blur filter,
+// which put two pointers on screen and looked nothing like the rest of the
+// app. Flat, one stroke, system-blue by default: it says "Juno is moving this"
+// without competing with what is underneath it.
+const JunoCursorRing = ({ color = DEFAULT_RING_COLOR }: { color?: string }) => (
+  <svg
+    width={RING_SIZE}
+    height={RING_SIZE}
+    viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    style={{ display: "block" }}
+    aria-hidden="true"
+  >
+    {/* A hairline of dark under the ring keeps it legible on a light
+        background without resorting to a glow. */}
+    <circle
+      cx={HOT_SPOT}
+      cy={HOT_SPOT}
+      r={HOT_SPOT - 3}
+      stroke="rgba(0,0,0,0.28)"
+      strokeWidth="3.5"
+    />
+    <circle
+      cx={HOT_SPOT}
+      cy={HOT_SPOT}
+      r={HOT_SPOT - 3}
+      stroke={color}
+      strokeWidth="2"
+      fill={`${color}14`}
+    />
+  </svg>
+);
 
 // ─── Per-slot cursor refs ─────────────────────────────────────────────────────
 interface SlotRefs {
   cursor: HTMLDivElement | null;
-  trails: (HTMLDivElement | null)[];
   ripples: (HTMLDivElement | null)[];
   hideTimer: ReturnType<typeof setTimeout> | null;
   clickTimer: ReturnType<typeof setTimeout> | null;
-  trailBuffer: { x: number; y: number }[];
   state: CursorState;
   nextRippleIdx: number;
 }
@@ -243,11 +221,9 @@ export const DesktopCursorOverlay = () => {
   const slots = useRef<SlotRefs[]>(
     Array.from({ length: MAX_AGENT_SLOTS }, () => ({
       cursor: null,
-      trails: Array<null>(TRAIL_COUNT).fill(null),
       ripples: Array<null>(5).fill(null),
       hideTimer: null,
       clickTimer: null,
-      trailBuffer: [],
       state: "idle" as CursorState,
       nextRippleIdx: 0,
     }))
@@ -299,22 +275,8 @@ export const DesktopCursorOverlay = () => {
 
   const moveSlotTo = (slot: SlotRefs, x: number, y: number) => {
     if (!slot.cursor) return;
+    // Centred on the point, because the ring surrounds the real pointer.
     slot.cursor.style.transform = `translate(${x - HOT_SPOT}px, ${y - HOT_SPOT}px)`;
-
-    slot.trailBuffer.push({ x, y });
-    if (slot.trailBuffer.length > TRAIL_COUNT) slot.trailBuffer.shift();
-
-    const isMoving = slot.state === "moving";
-    slot.trails.forEach((el, i) => {
-      if (!el) return;
-      const pos = slot.trailBuffer[slot.trailBuffer.length - 1 - i];
-      if (pos && isMoving) {
-        el.style.transform = `translate(${pos.x - 4}px, ${pos.y - 4}px)`;
-        el.style.opacity = String(((TRAIL_COUNT - i) / TRAIL_COUNT) * 0.22);
-      } else {
-        el.style.opacity = "0";
-      }
-    });
   };
 
   const revealSlot = (slot: SlotRefs) => {
@@ -326,8 +288,6 @@ export const DesktopCursorOverlay = () => {
     if (slot.hideTimer) clearTimeout(slot.hideTimer);
     slot.hideTimer = setTimeout(() => {
       if (slot.cursor) slot.cursor.style.opacity = "0";
-      slot.trailBuffer = [];
-      slot.trails.forEach((el) => { if (el) el.style.opacity = "0"; });
     }, delayMs);
   };
 
@@ -551,8 +511,6 @@ export const DesktopCursorOverlay = () => {
 
     const slot = slots.current[slotIdx];
     if (slot.cursor) slot.cursor.style.opacity = "0";
-    slot.trailBuffer = [];
-    slot.trails.forEach((el) => { if (el) el.style.opacity = "0"; });
     if (slot.hideTimer) { clearTimeout(slot.hideTimer); slot.hideTimer = null; }
     if (slot.clickTimer) { clearTimeout(slot.clickTimer); slot.clickTimer = null; }
     slotColors.current[slotIdx] = null;
@@ -644,31 +602,10 @@ export const DesktopCursorOverlay = () => {
 
       {Array.from({ length: MAX_AGENT_SLOTS }, (_, slotIdx) => {
         // Derive color: check slotColors ref first, fall back to palette
-        const color = slotColors.current[slotIdx] ?? "#8B5CF6";
+        const color = slotColors.current[slotIdx] ?? DEFAULT_RING_COLOR;
 
         return (
           <div key={`cursor-slot-${slotIdx}`}>
-            {/* Motion trail dots */}
-            {Array.from({ length: TRAIL_COUNT }, (__, i) => (
-              <div
-                key={`trail-${slotIdx}-${i}`}
-                ref={(el) => { slots.current[slotIdx].trails[i] = el; }}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: `${color}a6`,
-                  opacity: 0,
-                  transform: "translate(-200px, -200px)",
-                  pointerEvents: "none",
-                  willChange: "transform, opacity",
-                }}
-              />
-            ))}
-
             {/* Click ripple pool */}
             {Array.from({ length: 5 }, (__, i) => (
               <div
@@ -699,7 +636,7 @@ export const DesktopCursorOverlay = () => {
                 pointerEvents: "none",
               }}
             >
-              <JunoCursorShape color={color} />
+              <JunoCursorRing color={color} />
             </div>
           </div>
         );

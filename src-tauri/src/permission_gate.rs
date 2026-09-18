@@ -135,7 +135,21 @@ pub fn clear_ask_history() {
 /// end from its own checks, and an ask the person can act on beats a sentence
 /// of instructions buried in a tool error.
 pub fn ask(app_handle: &AppHandle, capability: Capability, action: &str) {
-    if !may_ask(capability, Instant::now()) {
+    ask_inner(app_handle, capability, action, false)
+}
+
+/// Ask because a person just pressed something, and say so every time.
+///
+/// The rate limit exists to stop a tool loop nagging. Someone pressing the mic
+/// button again is not a loop, it is a person asking again because nothing
+/// happened the first time, and answering that with silence is the bug this
+/// whole path exists to fix.
+pub fn ask_now(app_handle: &AppHandle, capability: Capability, action: &str) {
+    ask_inner(app_handle, capability, action, true)
+}
+
+fn ask_inner(app_handle: &AppHandle, capability: Capability, action: &str, user_asked: bool) {
+    if !user_asked && !may_ask(capability, Instant::now()) {
         tracing::debug!(
             "Not asking again for {} so soon (wanted it for '{}')",
             capability.key(),
@@ -166,10 +180,28 @@ pub async fn require(
     capability: Capability,
     action: &str,
 ) -> Result<(), String> {
+    require_inner(app_handle, capability, action, false).await
+}
+
+/// The same gate for something a person just pressed, which always answers.
+pub async fn require_for_user(
+    app_handle: &AppHandle,
+    capability: Capability,
+    action: &str,
+) -> Result<(), String> {
+    require_inner(app_handle, capability, action, true).await
+}
+
+async fn require_inner(
+    app_handle: &AppHandle,
+    capability: Capability,
+    action: &str,
+    user_asked: bool,
+) -> Result<(), String> {
     if is_granted(app_handle, capability).await {
         return Ok(());
     }
-    ask(app_handle, capability, action);
+    ask_inner(app_handle, capability, action, user_asked);
     Err(capability.agent_message(action))
 }
 
@@ -194,6 +226,17 @@ async fn is_granted(app_handle: &AppHandle, capability: Capability) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_person_pressing_again_is_always_answered() {
+        // The rate limit is for tool loops, not for someone pressing the mic a
+        // second time because the first press appeared to do nothing.
+        clear_ask_history();
+        let now = Instant::now();
+        assert!(may_ask(Capability::Microphone, now));
+        assert!(!may_ask(Capability::Microphone, now));
+        // ask_now skips the check entirely, which is what the bar calls.
+    }
 
     #[test]
     fn the_same_ask_does_not_repeat_immediately() {

@@ -13,7 +13,6 @@ import FileOperations from "./devtools/FileOperations";
 import KeyboardOperations from "./devtools/KeyboardOperations";
 import MouseOperations from "./devtools/MouseOperations";
 import ScreenshotOperations from "./devtools/ScreenshotOperations";
-import SelfImprovementPanel from "./devtools/SelfImprovementPanel";
 import SystemContextDebug from "./devtools/SystemContextDebug";
 import { ToolDebugPanel } from "./devtools/ToolDebugPanel";
 import VisualizationSettings from "./devtools/VisualizationSettings";
@@ -284,11 +283,6 @@ const DevToolsPanel: React.FC = () => {
           </div>
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold">Self Improvement</h2>
-          <Separator className="my-2" />
-          <SelfImprovementPanel />
-        </div>
       </div>
     </ScrollArea>
   );

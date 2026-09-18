@@ -25,11 +25,12 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, MessageSquare, Mic, Square, Type, X } from "lucide-react";
 
 import { useWindowSize } from "@/hooks/useWindowSize";
+import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useEventListener } from "@/hooks/useEventListener";
 import { cn } from "@/lib/utils";
-import { EVENTS, UI } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS, UI } from "@/lib/constants.generated";
 import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
 import {
   computeWells,
@@ -94,7 +95,7 @@ interface UIInteractionEvent {
 
 // === LAYOUT ===
 
-export type BarLayout = "compact" | "hover" | "voice" | "full";
+export type BarLayout = "compact" | "hover" | "voice" | "status" | "full";
 
 /**
  * Pill size per layout plus the transparent padding around it (room for the
@@ -112,7 +113,12 @@ export const BAR_LAYOUTS: Record<
 > = {
   compact: { width: 56, height: 16, band: 34, pad: 16 },
   hover: { width: 132, height: 34, band: 34, pad: 16 },
-  voice: { width: 220, height: 34, band: 34, pad: 16 },
+  // Voice and status share a width and a band on purpose. Listening used to
+  // open a 220px bar and then, the instant the mic closed, a 419px one, for a
+  // status word and a stop button. The extra 200px held nothing, and the jump
+  // happened mid-sentence, every time.
+  voice: { width: 260, height: 34, band: 34, pad: 16 },
+  status: { width: 260, height: 34, band: 34, pad: 16 },
   full: { width: 419, height: 44, band: 44, pad: 24 },
 };
 
@@ -151,23 +157,33 @@ export function floatingBarWindowSize({
   layout,
   paneOpen,
   rosterVisible,
+  composerGrowth = 0,
 }: {
   layout: BarLayout;
   paneOpen: boolean;
   rosterVisible: boolean;
+  /** Extra height the typed text needs beyond a single line. */
+  composerGrowth?: number;
 }) {
   const l = BAR_LAYOUTS[layout];
   const d = FLOATING_BAR_DIMENSIONS;
+  // The window is sized to its contents, so a pill that grows without telling
+  // the window would simply be clipped by it.
+  const band = l.band + Math.max(0, composerGrowth);
   return {
     width: l.width + 2 * l.pad,
     height:
-      l.band +
+      band +
       2 * l.pad +
       (rosterVisible ? d.ROSTER_STRIP_HEIGHT : 0) +
       (paneOpen ? d.PANE_GAP + d.PANE_HEIGHT : 0),
-    anchorY: l.pad + l.band / 2,
+    anchorY: l.pad + band / 2,
   };
 }
+
+/** One line of the bar's composer, and the most it may grow to. */
+export const BAR_COMPOSER_LINE_PX = 18;
+export const BAR_COMPOSER_MAX_PX = 96;
 
 /** Settle animation: min/max duration, and the travel below which it's skipped. */
 export const SNAP_MIN_MS = 160;
@@ -270,8 +286,10 @@ export function pickLayout({
   if (paneOpen || rosterVisible || inputOpen || INPUT_STATES.includes(state)) return "full";
   if (VOICE_STATES.includes(state)) return "voice";
   if (IDLE_STATES.includes(state)) return hovered ? "hover" : "compact";
-  // Working, error, success, speaking: room for a label and a control.
-  return "full";
+  // Working, error, success, speaking: a label and one control, which is the
+  // same room listening needs, so the bar does not lurch wider the moment
+  // someone stops talking.
+  return "status";
 }
 
 // Purpose-built motions for the status dot; injected once into <head>.
@@ -309,6 +327,12 @@ const BAR_KEYFRAMES = `
 @keyframes fbar-reveal {
   0%   { opacity: 0; transform: scale(0.85); }
   100% { opacity: 1; transform: scale(1); }
+}
+
+/* One guard for every animation the bar injects, rather than a check at each
+   call site: Reduce Motion is a system setting, not a per-component choice. */
+@media (prefers-reduced-motion: reduce) {
+  [class*="fbar-"], [style*="fbar-"] { animation: none !important; }
 }
 `;
 
@@ -693,6 +717,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // looking; the window is only shown, never focused.
   useEventListener(EVENTS.INPUT_CONTROL_REQUEST, () => setPaneShown(true));
 
+  // A permission Juno needs is asked for on a card inside the pane. Pressing
+  // the mic from the idle pill left that card with nowhere to render, so the
+  // button did nothing visible at all. Open the pane so the question is where
+  // the person is already looking.
+  useEventListener(EVENTS.PERMISSIONS_NEEDED, () => setPaneShown(true));
+
   const dismissPane = useCallback(() => setPaneShown(false), []);
   const reopenPane = useCallback(() => setPaneShown(true), []);
 
@@ -702,6 +732,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   // The text input is local until submit, so there is no per-keystroke IPC.
   const [inputOpen, setInputOpen] = useState(false);
+  const [composerGrowth, setComposerGrowth] = useState(0);
 
   // Starting a new chat means wanting to type, so the pane stays up, empty,
   // with the caret in it. Rotating the backend conversation matters too: the
@@ -789,7 +820,21 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const [localInputValue, setLocalInputValue] = useState("");
   const localInputValueRef = useRef("");
   localInputValueRef.current = localInputValue;
-  const inputRef = useRef<HTMLInputElement>(null);
+  // A textarea, not an input: the pill starts one line tall and grows with
+  // what is typed, the same way the full composer does. A single-line input
+  // cannot hold a newline at all, so Shift+Enter had nothing to insert.
+  const composer = useAutoGrowTextarea({
+    value: localInputValue,
+    maxHeightPx: BAR_COMPOSER_MAX_PX,
+    minHeightPx: BAR_COMPOSER_LINE_PX,
+  });
+  const inputRef = composer.ref;
+  // Only what exceeds a single line counts as growth; the band already holds
+  // the first line.
+  useEffect(() => {
+    const grown = Math.max(0, composer.height - BAR_COMPOSER_LINE_PX);
+    setComposerGrowth((prev) => (prev === grown ? prev : grown));
+  }, [composer.height]);
 
   useEffect(() => {
     setLocalInputValue(barState.inputValue);
@@ -854,18 +899,50 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     openInput();
   }, [cancelTalking, openInput]);
 
+  // Pictures pasted into the pill, as data URLs, alongside the typed text.
+  const [pastedImages, setPastedImages] = useState<string[]>([]);
+
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
       const trimmedValue = localInputValue.trim();
-      if (!trimmedValue) return;
-      await sendInteraction(
-        createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: trimmedValue }),
-      );
+      // A picture on its own is a message: "what is this?".
+      if (!trimmedValue && pastedImages.length === 0) return;
+      if (pastedImages.length > 0) {
+        // The bar-state interaction carries only a string, so an attachment
+        // goes straight to the agent rather than being quietly dropped.
+        await invoke(COMMANDS.AGENT_DISPATCH_QUERY, {
+          query: trimmedValue,
+          images: pastedImages,
+        }).catch((error) => console.error("FloatingBar: submit failed:", error));
+      } else {
+        await sendInteraction(
+          createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: trimmedValue }),
+        );
+      }
       setLocalInputValue("");
+      setPastedImages([]);
     },
-    [localInputValue, sendInteraction, createInteraction],
+    [localInputValue, pastedImages, sendInteraction, createInteraction],
   );
+
+  /** Read pasted images off the clipboard as data URLs. */
+  const handlePaste = useCallback((event: React.ClipboardEvent) => {
+    const files = Array.from(event.clipboardData?.items ?? [])
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (files.length === 0) return;
+    event.preventDefault();
+    for (const file of files) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = reader.result;
+        if (typeof url === "string") setPastedImages((prev) => [...prev, url]);
+      };
+      reader.readAsDataURL(file);
+    }
+  }, []);
 
   const handleFocus = useCallback(async () => {
     await sendInteraction(createInteraction(UI.INTERACTION_TYPES_FOCUS, { isFocused: true }));
@@ -1122,7 +1199,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const lastWindowRef = useRef<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
-    const next = floatingBarWindowSize({ layout, paneOpen, rosterVisible: showRosterStrip });
+    const next = floatingBarWindowSize({
+      layout,
+      paneOpen,
+      rosterVisible: showRosterStrip,
+      composerGrowth,
+    });
     const prev = lastWindowRef.current;
     lastWindowRef.current = { width: next.width, height: next.height };
     // growUp is only sent when set, so the downward path's resize config (and
@@ -1141,7 +1223,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
     const t = setTimeout(apply, SHRINK_DELAY_MS);
     return () => clearTimeout(t);
-  }, [layout, paneOpen, showRosterStrip, growUp, resizeWindowIfChanged]);
+  }, [layout, paneOpen, showRosterStrip, growUp, composerGrowth, resizeWindowIfChanged]);
 
   // === DRAG ANYWHERE, SNAP INTO A WELL ===
   //
@@ -1350,7 +1432,14 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // above it (docked in the bottom half, growing up); only the margin side and
   // the render order flip, so build each once and place them by `growUp`.
   const chatPaneNode = paneOpen ? (
-    <div className={cn("shrink-0", growUp ? "mb-2" : "mt-2")}>
+    <div
+      className={cn("shrink-0", growUp ? "mb-2" : "mt-2")}
+      // The same conversation lives in the full-size window, so handing it
+      // over should read as a handover. Without this the pane blinked out of
+      // existence the instant that window opened, and blinked back when it
+      // closed, with nothing connecting the two.
+      style={{ animation: "fbar-reveal 0.18s ease-out both" }}
+    >
       <BarChatPane
         messages={chat.messages}
         isProcessing={isWorking}
@@ -1384,8 +1473,14 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       onMouseMove={onRootMouseMove}
       onMouseUp={onRootMouseUp}
       onClickCapture={onRootClickCapture}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      // Through the same verified path the native tracking area uses. These
+      // used to set `hovered` directly, which is the flicker: growing the
+      // window under a resting cursor fires a DOM mouseleave with no
+      // re-enter, so the pill collapsed the instant it opened, re-triggered
+      // enter, and oscillated. The native path already debounces a leave and
+      // checks where the cursor actually is; bypassing it here undid that.
+      onMouseEnter={onMouseEnterWindow}
+      onMouseLeave={onMouseLeaveWindow}
     >
       {/* Docked in the bottom half: the pane and roster open ABOVE the pill so
           the window grows upward and nothing runs off the bottom. The pill
@@ -1477,22 +1572,36 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         ) : showInput ? (
           <form
             onSubmit={handleSubmit}
-            className="flex min-w-0 flex-1 items-center gap-3"
+            className={cn(
+              "flex min-w-0 flex-1 gap-3",
+              // Centre while it is one line; once it grows, keep the controls
+              // by the first line rather than drifting to the middle.
+              composerGrowth > 0 ? "items-start pt-1" : "items-center",
+            )}
             style={{ animation: "fbar-content-in 0.2s ease-out both" }}
           >
-            <input
-              ref={inputRef}
-              type="text"
+            <textarea
+              ref={composer.attach}
+              rows={1}
               value={localInputValue}
               onChange={(e) => setLocalInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter sends, Shift+Enter makes a line. A textarea would
+                // otherwise insert a newline on both.
+                if (isSendKey(e)) {
+                  e.preventDefault();
+                  void handleSubmit(e as unknown as FormEvent);
+                }
+              }}
+              onPaste={handlePaste}
               onMouseDown={activateWindow}
               onFocus={handleFocus}
               onBlur={handleInputBlur}
               placeholder={paneOpen ? "Follow up…" : "Ask Juno"}
               aria-label="Ask Juno"
               className={cn(
-                "min-w-0 flex-1 cursor-text border-none bg-transparent outline-none",
-                "text-[13px] tracking-[-0.01em] text-white/90 placeholder:text-white/30",
+                "min-w-0 flex-1 resize-none cursor-text border-none bg-transparent outline-none",
+                "text-[13px] leading-[18px] tracking-[-0.01em] text-white/90 placeholder:text-white/30",
               )}
             />
             {/* Typing used to be Enter or nothing: no way to send by hand, no
@@ -1547,6 +1656,17 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             >
               {isDriving ? `Juno is ${label}` : (label ?? "Ask Juno")}
             </span>
+            {/* Watching the pointer move on its own, the question is how to
+                make it stop. The stop-key monitor in Rust has always taken
+                Escape; nothing ever said so. */}
+            {isDriving && (
+              <kbd
+                className="shrink-0 rounded border border-white/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/55"
+                data-testid="floating-bar-stop-hint"
+              >
+                esc to stop
+              </kbd>
+            )}
             {isVoice && <AudioLevelBars audioLevel={barState.audioLevel} />}
             {/* Three answers, not one. The single "Stop" here finalised the
                 audio and submitted it, so the only way to abandon a sentence

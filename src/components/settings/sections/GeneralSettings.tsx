@@ -11,8 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
-import { Slider } from "@/components/ui/slider";
-import { RotateCcw } from "lucide-react";
+import { Check, Copy, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { UI } from "@/lib/constants.generated";
 import type { FloatingBarConfig } from "@/types/bar-config";
@@ -29,10 +28,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [barAppearanceLoading, setBarAppearanceLoading] = useState(false);
   const [followCursorDisplay, setFollowCursorDisplay] = useState(true);
   const [followCursorLoading, setFollowCursorLoading] = useState(false);
-  const [bigCursorEnabled, setBigCursorEnabled] = useState(true);
-  const [bigCursorScale, setBigCursorScale] = useState(3.0);
-  const [bigCursorLoading, setBigCursorLoading] = useState(false);
-  const [systemCursorSize, setSystemCursorSize] = useState(1.0);
 
   // Load auto-launch status and onboarding info on component mount
   useEffect(() => {
@@ -61,15 +56,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         if (typeof barSettings?.follow_cursor_display === "boolean") {
           setFollowCursorDisplay(barSettings.follow_cursor_display);
         }
-
-        // Load big cursor settings
-        const cursorEnabled = await invoke<boolean>("get_big_cursor_enabled");
-        setBigCursorEnabled(cursorEnabled);
-        const cursorScale = await invoke<number>("get_big_cursor_scale");
-        setBigCursorScale(cursorScale);
-
-        const sysSize = await invoke<number>("get_system_cursor_size");
-        setSystemCursorSize(sysSize);
       } catch (error) {
         console.error("Failed to load initial data:", error);
         // Default to false if unable to determine status
@@ -180,37 +166,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  const handleBigCursorEnabledChange = async (enabled: boolean) => {
-    if (bigCursorLoading) return;
-    setBigCursorLoading(true);
-    try {
-      await invoke("set_big_cursor_enabled", { enabled });
-      setBigCursorEnabled(enabled);
-      if (!enabled) {
-        const sysSize = await invoke<number>("get_system_cursor_size");
-        setSystemCursorSize(sysSize);
-      }
-    } catch (error) {
-      console.error("Failed to update big cursor setting:", error);
-      toast.error("Failed to update big cursor setting");
-    } finally {
-      setBigCursorLoading(false);
-    }
-  };
-
-  const handleBigCursorScaleChange = (value: number[]) => {
-    setBigCursorScale(value[0]);
-  };
-
-  const handleBigCursorScaleCommit = async (value: number[]) => {
-    const scale = value[0];
-    try {
-      await invoke("set_big_cursor_scale", { scale });
-    } catch (error) {
-      console.error("Failed to persist big cursor scale:", error);
-      toast.error("Failed to update cursor scale");
-    }
-  };
 
 
   return (
@@ -267,102 +222,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
             </SelectContent>
           </Select>
         </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup title="Big Cursor" advanced>
-        {systemCursorSize > 1.0 && (
-          <SettingsRow
-            label="Cursor is currently enlarged"
-            description={`Scaled to ${systemCursorSize.toFixed(1)}x`}
-          >
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                try {
-                  await invoke("test_cursor_restore");
-                  const sysSize = await invoke<number>("get_system_cursor_size");
-                  setSystemCursorSize(sysSize);
-                  toast.success("Cursor restored to normal");
-                } catch (e) {
-                  toast.error("Failed to restore cursor");
-                }
-              }}
-            >
-              Reset to Normal
-            </Button>
-          </SettingsRow>
-        )}
-        <SettingsRow
-          htmlFor="big-cursor-enabled"
-          label="Enable big cursor"
-          description="Enlarge the system cursor while the agent controls your computer, so it is easy to track"
-        >
-          <Switch
-            id="big-cursor-enabled"
-            checked={bigCursorEnabled}
-            onCheckedChange={handleBigCursorEnabledChange}
-            disabled={bigCursorLoading}
-          />
-        </SettingsRow>
-        {bigCursorEnabled && (
-          <SettingsRow
-            label="Cursor scale"
-            description="How much larger to make the cursor (1.5x – 10x)"
-            below={
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <Slider
-                    value={[bigCursorScale]}
-                    onValueChange={handleBigCursorScaleChange}
-                    onValueCommit={handleBigCursorScaleCommit}
-                    min={1.5}
-                    max={10}
-                    step={0.5}
-                    className="flex-1"
-                  />
-                  <span className="w-10 shrink-0 text-right text-[13px] tabular-nums text-muted-foreground">
-                    {bigCursorScale.toFixed(1)}x
-                  </span>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        await invoke("test_cursor_scale", { scale: bigCursorScale });
-                        const sysSize = await invoke<number>("get_system_cursor_size");
-                        setSystemCursorSize(sysSize);
-                        toast.success(`Cursor scaled to ${bigCursorScale.toFixed(1)}x`);
-                      } catch (e) {
-                        toast.error("Failed to test cursor scale");
-                      }
-                    }}
-                  >
-                    Test Scale
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        await invoke("test_cursor_restore");
-                        const sysSize = await invoke<number>("get_system_cursor_size");
-                        setSystemCursorSize(sysSize);
-                        toast.success("Cursor restored to normal");
-                      } catch (e) {
-                        toast.error("Failed to restore cursor");
-                      }
-                    }}
-                  >
-                    Restore
-                  </Button>
-                </div>
-              </div>
-            }
-          />
-        )}
       </SettingsGroup>
 
       <SettingsGroup
@@ -449,6 +308,77 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
           </Button>
         </SettingsRow>
       </SettingsGroup>
+
+      <BuildGroup />
     </div>
+  );
+}
+
+interface BuildInfo {
+  version: string;
+  build: string;
+  commit: string;
+  branch: string;
+  built_at: string;
+  dirty: boolean;
+  demo: boolean;
+  cohort: string | null;
+}
+
+/**
+ * Which build this is, in one copyable line.
+ *
+ * Every DMG used to be "Juno 0.7.0", so a bug report could only name a date
+ * and two builds from the same day were indistinguishable. This says the
+ * commit, and one click puts it on the clipboard for the report.
+ */
+function BuildGroup() {
+  const [info, setInfo] = useState<BuildInfo | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    invoke<BuildInfo>("get_build_info")
+      .then(setInfo)
+      .catch((error) => console.error("Failed to read build info:", error));
+  }, []);
+
+  if (!info) return null;
+
+  const label =
+    `${info.version} (${info.build}) ${info.commit}` +
+    (info.dirty ? " dirty" : "") +
+    (info.demo ? ` · demo${info.cohort ? ` ${info.cohort}` : ""}` : "");
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(label);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Could not copy the build ID");
+    }
+  };
+
+  return (
+    <SettingsGroup title="Build">
+      <SettingsRow
+        label={label}
+        description={`${info.branch}, built ${new Date(info.built_at).toLocaleString()}`}
+      >
+        <Button variant="outline" size="sm" onClick={copy}>
+          {copied ? (
+            <>
+              <Check className="mr-2 h-4 w-4" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="mr-2 h-4 w-4" />
+              Copy
+            </>
+          )}
+        </Button>
+      </SettingsRow>
+    </SettingsGroup>
   );
 }

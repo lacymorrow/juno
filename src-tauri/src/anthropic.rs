@@ -39,6 +39,8 @@ struct AgentExecutionQueue {
 struct QueuedQuery {
     id: String,
     query: String,
+    /// Images attached to this query, as data URLs.
+    images: Option<Vec<String>>,
     _queued_at: std::time::Instant,
     app_handle: tauri::AppHandle,
 }
@@ -55,6 +57,7 @@ impl AgentExecutionQueue {
     async fn queue_query(
         &self,
         query: String,
+        images: Option<Vec<String>>,
         app_handle: tauri::AppHandle,
         state: tauri::State<'_, AppState>,
     ) -> Result<String, String> {
@@ -62,6 +65,7 @@ impl AgentExecutionQueue {
         let queued_query = QueuedQuery {
             id: query_id.clone(),
             query,
+            images,
             _queued_at: std::time::Instant::now(),
             app_handle,
         };
@@ -129,8 +133,13 @@ impl AgentExecutionQueue {
         info!("Starting atomic agent execution for query ID: {}", query.id);
 
         // Execute the actual agent logic
-        let result =
-            execute_agent_internal(query.query.clone(), state, query.app_handle.clone()).await;
+        let result = execute_agent_internal(
+            query.query.clone(),
+            query.images.clone(),
+            state,
+            query.app_handle.clone(),
+        )
+        .await;
 
         // Guard automatically cleans up on drop
         drop(guard);
@@ -327,6 +336,8 @@ fn is_substantial_user_communication(content: &str) -> bool {
 #[tauri::command]
 pub async fn submit_query(
     query: String,
+    // Images pasted or dropped into the composer, as base64 data URLs.
+    images: Option<Vec<String>>,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -399,7 +410,12 @@ pub async fn submit_query(
     // Use the queue system to ensure only one agent runs at a time
     let queue = get_agent_execution_queue();
     let _query_id = match queue
-        .queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone())
+        .queue_query(
+            trimmed_query.to_string(),
+            images,
+            app_handle.clone(),
+            state.clone(),
+        )
         .await
     {
         Ok(id) => id,
@@ -517,6 +533,7 @@ async fn finish_session_terminal_state(
 /// Internal agent execution function - handles the actual agent logic
 async fn execute_agent_internal(
     query: String,
+    images: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -547,22 +564,6 @@ async fn execute_agent_internal(
     if companion_mode {
         info!("🔍 Companion mode enabled — computer use tools will be withheld");
     }
-
-    // Apply big cursor scaling if enabled — RAII guard restores on all exit paths
-    let _cursor_guard = match &agent_settings {
-        Some(s) if s.big_cursor_enabled => {
-            info!(
-                "[CursorScale] Big cursor enabled, scaling to {:.1}x",
-                s.big_cursor_scale
-            );
-            crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
-        }
-        Some(_) => crate::cursor_scale::CursorScaleGuard::noop(),
-        None => {
-            warn!("[CursorScale] Agent settings unavailable, skipping cursor scaling");
-            crate::cursor_scale::CursorScaleGuard::noop()
-        }
-    };
 
     // Register this run in the parallel-agent registry so the switcher UI
     // sees it and per-session cancel/focus commands have a live target.
@@ -1007,6 +1008,9 @@ async fn execute_agent_internal(
                 trimmed_query.to_string()
             };
 
+            // Whatever was pasted into the composer rides along with the
+            // message that started this run.
+            single_agent_runner.set_pending_images(images.clone());
             let result = single_agent_runner.run(contextual_query, cancel_rx).await;
             result
         }
@@ -1301,6 +1305,9 @@ async fn execute_agent_internal(
                 trimmed_query.to_string()
             };
 
+            // Whatever was pasted into the composer rides along with the
+            // message that started this run.
+            orchestrator_runner.set_pending_images(images.clone());
             let result = orchestrator_runner.run(contextual_query, cancel_rx).await;
             result
         }
@@ -1858,6 +1865,7 @@ async fn execute_specialized_agent_task(
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            images: None,
         };
 
         if let Err(e) = fresh_memory.add_message(user_message).await {

@@ -282,6 +282,7 @@ impl MultiAgentOrchestrator {
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
+                images: None,
             }];
             expert_messages.extend_from_slice(messages);
 

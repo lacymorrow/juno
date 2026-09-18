@@ -47,7 +47,6 @@ pub mod timer_tools; // Add timer tools for agent scheduling
 pub mod tool_config; // Configuration and category management for all tools
 pub mod tool_mapping; // Add tool mapping service
 pub mod tool_versioning; // API versioning and compatibility management
-pub mod ui_token_selector; // UI-Guided Visual Token Selection system
 pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research // Enhanced Visual Reasoning System from CVPR 2025 research
 pub mod visible_windows; // Lightweight on-screen window enumeration via CGWindowListCopyWindowInfo
 

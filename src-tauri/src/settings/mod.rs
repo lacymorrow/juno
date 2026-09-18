@@ -90,10 +90,6 @@ pub struct FloatingBarSettings {
 pub struct AgentSettings {
     pub trigger_mode: String,   // "tap" or "hold"
     pub execution_mode: String, // "single" or "multi"
-    #[serde(default = "defaults::big_cursor_enabled")]
-    pub big_cursor_enabled: bool,
-    #[serde(default = "defaults::big_cursor_scale")]
-    pub big_cursor_scale: f32,
     /// Companion/observe-only mode — agent sees screen but never takes actions
     #[serde(default)]
     pub companion_mode: bool,
@@ -386,8 +382,6 @@ impl Default for AgentSettings {
         Self {
             trigger_mode: defaults::AGENT_TRIGGER_MODE.to_string(),
             execution_mode: defaults::AGENT_EXECUTION_MODE.to_string(),
-            big_cursor_enabled: defaults::BIG_CURSOR_ENABLED,
-            big_cursor_scale: defaults::BIG_CURSOR_SCALE,
             companion_mode: false,
             background_mode: defaults::BACKGROUND_MODE,
             mouse_control: defaults::MOUSE_CONTROL.to_string(),

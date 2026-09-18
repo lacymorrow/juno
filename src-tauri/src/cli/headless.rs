@@ -1372,7 +1372,7 @@ impl HeadlessRuntime {
                 "Application state not available in headless runtime".to_string(),
             )
         })?;
-        crate::anthropic::submit_query(query.clone(), state, self.app_handle.clone())
+        crate::anthropic::submit_query(query.clone(), None, state, self.app_handle.clone())
             .await
             .map_err(|e| JunoError::ApplicationError(format!("Failed to submit query: {}", e)))?;
 

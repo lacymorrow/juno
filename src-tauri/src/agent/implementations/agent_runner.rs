@@ -34,6 +34,11 @@ where
     /// tracking is active. Lets the approval wait surface `NeedsInput` in
     /// the switcher UI and notify for background sessions (LAC-1432).
     session_id: Option<crate::agents::AgentSessionId>,
+    /// Images the person attached to the message that started this run.
+    ///
+    /// Set before `run` rather than passed through it, so the trait signature
+    /// every implementor shares stays as it is.
+    pending_images: Option<Vec<String>>,
 }
 
 impl<M, T> DefaultAgentRunner<M, T>
@@ -61,7 +66,13 @@ where
             current_step: 0,
             app_handle: Arc::new(app_handle), // Store AppHandle
             session_id: None,
+            pending_images: None,
         }
+    }
+
+    /// Attach images to the message that will start the next run.
+    pub fn set_pending_images(&mut self, images: Option<Vec<String>>) {
+        self.pending_images = images.filter(|i| !i.is_empty());
     }
 
     /// Creates a new DefaultAgentRunner with a boxed brain implementation
@@ -82,6 +93,7 @@ where
             current_step: 0,
             app_handle: Arc::new(app_handle), // Store AppHandle
             session_id: None,
+            pending_images: None,
         }
     }
 
@@ -249,6 +261,7 @@ where
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
                     name: Some(tool_call.name.clone()),
+                    images: None,
                 })
                 .await?;
                 cancelled_count += 1;
@@ -598,6 +611,7 @@ where
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
                     name: Some(tool_call.name.clone()),
+                    images: None,
                 })
                 .await?;
             }
@@ -698,6 +712,7 @@ where
             tool_calls: None,
             tool_call_id: Some(tool_call.id.clone()),
             name: Some(tool_call.name.clone()),
+            images: None,
         })
         .await?;
 
@@ -822,16 +837,13 @@ where
             self.max_steps
         );
 
-        // Add initial user message to memory
+        // Add initial user message to memory, with whatever was attached to it.
         {
             let mut mem = self.memory.lock().await;
-            mem.add_message(Message {
-                role: Role::User,
-                content: initial_prompt,
-                tool_calls: None,
-                tool_call_id: None,
-                name: None,
-            })
+            mem.add_message(Message::from_user(
+                initial_prompt,
+                self.pending_images.take(),
+            ))
             .await?;
         }
 
@@ -966,6 +978,7 @@ where
                             tool_calls: None,
                             tool_call_id: None,
                             name: None,
+                            images: None,
                         })
                         .await?;
                     }
@@ -1062,6 +1075,7 @@ where
                     tool_calls: Some(tool_calls.clone()),
                     tool_call_id: None,
                     name: None,
+                    images: None,
                 };
 
                 {
@@ -1318,6 +1332,7 @@ mod tests {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            images: None,
         });
 
         messages.push(Message {
@@ -1326,6 +1341,7 @@ mod tests {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            images: None,
         });
 
         // Add an assistant message with tool calls
@@ -1348,6 +1364,7 @@ mod tests {
             tool_calls: Some(tool_calls.clone()),
             tool_call_id: None,
             name: None,
+            images: None,
         });
 
         // Add tool results for the first tool only (partial execution)
@@ -1357,6 +1374,7 @@ mod tests {
             tool_calls: None,
             tool_call_id: Some("tool1".to_string()),
             name: Some("test_tool".to_string()),
+            images: None,
         });
 
         // Now manually implement the counting logic from our fix

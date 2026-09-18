@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Command,
+  Globe,
   Keyboard,
   Mic,
   MousePointer2,
@@ -33,9 +34,14 @@ import ShortcutInput from "../ShortcutInput";
 type TriggerMethod = "push_to_talk" | "toggle" | "voice";
 type TriggerTarget = "agent" | "dictation";
 
+type BindingTab = "keyboard" | "mouse" | "special";
+
 type Binding =
   | { kind: "keyboard"; shortcut: string }
-  | { kind: "mouse"; button: number };
+  | { kind: "mouse"; button: number }
+  // Keys that produce no ordinary key event, so a webview never sees them and
+  // they are chosen from a list rather than recorded.
+  | { kind: "modifier"; key: "fn" };
 
 interface Trigger {
   method: TriggerMethod;
@@ -99,6 +105,7 @@ function mouseLabel(button: number): string {
 function bindingLabel(binding: Binding | null): string {
   if (!binding) return "Set binding";
   if (binding.kind === "keyboard") return binding.shortcut || "Set binding";
+  if (binding.kind === "modifier") return "Fn (globe)";
   return mouseLabel(binding.button);
 }
 
@@ -149,7 +156,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
 
   // Which key row has its binding editor open, and which capture tab it shows.
   const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [bindingTab, setBindingTab] = useState<Record<string, "keyboard" | "mouse">>(
+  const [bindingTab, setBindingTab] = useState<Record<string, BindingTab>>(
     {},
   );
 
@@ -372,7 +379,12 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
               const key = triggerKey(trigger);
               setBindingTab((prev) => ({
                 ...prev,
-                [key]: trigger.binding?.kind === "mouse" ? "mouse" : "keyboard",
+                [key]:
+                  trigger.binding?.kind === "mouse"
+                    ? "mouse"
+                    : trigger.binding?.kind === "modifier"
+                      ? "special"
+                      : "keyboard",
               }));
               setEditingKey(key);
             }}
@@ -412,12 +424,12 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
 interface TriggerRowProps {
   trigger: Trigger;
   editing: boolean;
-  bindingTab: "keyboard" | "mouse";
+  bindingTab: BindingTab;
   rowError: string | null;
   alwaysListening: boolean;
   onOpenEditor: () => void;
   onCloseEditor: () => void;
-  onTabChange: (tab: "keyboard" | "mouse") => void;
+  onTabChange: (tab: BindingTab) => void;
   onPatch: (
     key: string,
     patch: Partial<Trigger>,
@@ -602,7 +614,7 @@ function TriggerRow({
       {!isVoice && editing && (
         <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-2.5">
           <div className="inline-flex rounded-md border p-0.5 text-[12px]">
-            {(["keyboard", "mouse"] as const).map((tab) => (
+            {(["keyboard", "mouse", "special"] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -614,7 +626,7 @@ function TriggerRow({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {tab === "keyboard" ? "Keyboard" : "Mouse"}
+                {tab === "keyboard" ? "Keyboard" : tab === "mouse" ? "Mouse" : "Fn key"}
               </button>
             ))}
           </div>
@@ -638,7 +650,7 @@ function TriggerRow({
                 onCloseEditor();
               }}
             />
-          ) : (
+          ) : bindingTab === "mouse" ? (
             <MouseCapture
               current={trigger.binding?.kind === "mouse" ? trigger.binding : null}
               onCapture={async (button) => {
@@ -647,6 +659,34 @@ function TriggerRow({
               }}
               onCancel={onCloseEditor}
             />
+          ) : (
+            /* Chosen, not recorded: the Fn key never reaches a web page, so
+               there is nothing for a key recorder to capture. */
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  await setBindingNow({ kind: "modifier", key: "fn" });
+                  onCloseEditor();
+                }}
+                className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[13px] transition-colors hover:bg-accent"
+              >
+                <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="font-medium">Fn (globe)</span>
+              </button>
+              <p className="text-[12px] leading-snug text-muted-foreground">
+                macOS gives the globe key its own job by default. Set System
+                Settings, Keyboard, "Press globe key to" to "Do Nothing", or it
+                will open the emoji picker every time you talk to Juno.
+              </p>
+              <button
+                type="button"
+                onClick={onCloseEditor}
+                className="text-[12px] text-muted-foreground underline-offset-2 hover:underline"
+              >
+                Cancel
+              </button>
+            </div>
           )}
         </div>
       )}

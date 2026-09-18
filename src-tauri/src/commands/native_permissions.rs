@@ -26,6 +26,45 @@ pub struct NativePermissionChecker;
 
 impl NativePermissionChecker {
     /// Check microphone permission using the voice-transcription plugin's TCC API
+    /// True only when macOS has actually refused this app the microphone.
+    ///
+    /// "Not granted" and "refused" are different states, and only the second
+    /// one sticks: macOS answers from a decision it already gave, so a process
+    /// that was denied keeps hearing denied until it restarts, while one that
+    /// has never asked sees the first grant immediately. Setup uses this to
+    /// decide whether it owes the person a restart, so treating the two alike
+    /// would demand a pointless relaunch of everyone on a fresh machine.
+    pub fn microphone_explicitly_denied() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            use tauri_plugin_voice_transcription::mic_permissions;
+            matches!(
+                mic_permissions::check_microphone_permission(),
+                mic_permissions::MicrophonePermissionStatus::Denied
+            )
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    /// True only when macOS has actually refused this app input monitoring.
+    /// See `microphone_explicitly_denied` for why the distinction matters.
+    pub fn input_monitoring_explicitly_denied() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            matches!(
+                crate::platform::input_monitoring::check_input_monitoring_access(),
+                crate::platform::input_monitoring::InputMonitoringAccess::Denied
+            )
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
     pub fn check_microphone_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {
@@ -125,60 +164,45 @@ impl NativePermissionChecker {
     }
 
     /// Request accessibility permission with native prompt - NO admin privileges required
+    /// Take the person to the Accessibility switch.
+    ///
+    /// Deliberately does not use `kAXTrustedCheckOptionPrompt`. That alert says
+    /// Juno "would like to control this computer" and offers to open System
+    /// Settings, which is where this sends them anyway, so raising it meant one
+    /// click produced two windows: a dialog asking to do the thing already done
+    /// behind it.
+    ///
+    /// The trade: the prompting call is also what registers an app in the
+    /// Accessibility list on a machine that has never seen it. Juno reaches for
+    /// AX on its own at startup (the stop-key and mouse-button monitors both
+    /// check), which registers it too. If a brand new machine ever opens this
+    /// pane and finds no Juno row, this is the reason, and the answer is to
+    /// register once at first launch rather than to bring the dialog back here.
     pub fn request_accessibility_permission() -> Result<(), String> {
         #[cfg(target_os = "macos")]
         {
             use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions;
 
-            // First, try to trigger permission dialog
-            match check_accessibility_permissions(true) {
-                Ok(granted) => {
-                    if granted {
-                        info!("Accessibility permissions already granted");
-                        Ok(())
-                    } else {
-                        info!("Accessibility permission dialog shown, opening System Settings for manual grant");
-                        // Open accessibility settings to let user grant permission manually
-                        match Command::new("open")
-                            .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
-                            .status()
-                        {
-                            Ok(status) => {
-                                if status.success() {
-                                    info!("Accessibility settings opened successfully");
-                                    Ok(())
-                                } else {
-                                    warn!("Failed to open accessibility settings");
-                                    Err("Failed to open accessibility settings".to_string())
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Error opening accessibility settings: {}", e);
-                                Err(format!("Error opening accessibility settings: {}", e))
-                            }
-                        }
-                    }
+            if matches!(check_accessibility_permissions(false), Ok(true)) {
+                info!("Accessibility permissions already granted");
+                return Ok(());
+            }
+
+            info!("Accessibility not granted; opening the pane so it can be switched on");
+            match Command::new("open")
+                .args([
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                ])
+                .status()
+            {
+                Ok(status) if status.success() => Ok(()),
+                Ok(_) => {
+                    warn!("Failed to open the Accessibility pane");
+                    Err("Failed to open accessibility settings".to_string())
                 }
                 Err(e) => {
-                    warn!("Error requesting accessibility permissions: {}", e);
-                    // Still try to open settings as fallback
-                    info!("Opening accessibility settings as fallback");
-                    match Command::new("open")
-                        .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
-                        .status()
-                    {
-                        Ok(status) => {
-                            if status.success() {
-                                info!("Accessibility settings opened successfully (fallback)");
-                                Ok(())
-                            } else {
-                                Err(format!("Failed to request accessibility permissions: {}", e))
-                            }
-                        }
-                        Err(_) => {
-                            Err(format!("Failed to request accessibility permissions: {}", e))
-                        }
-                    }
+                    warn!("Error opening the Accessibility pane: {}", e);
+                    Err(format!("Error opening accessibility settings: {}", e))
                 }
             }
         }

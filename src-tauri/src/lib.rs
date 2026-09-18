@@ -25,13 +25,14 @@ pub mod agent;
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod agents; // Multi-agent system with specialized agents
 pub mod anthropic;
+pub mod build_info; // Which build this is: version, commit, branch, demo cohort
 pub mod cleanup; // Application cleanup and resource management
 pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
 pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
-pub mod cursor_scale;
+pub mod cursor_scale_migration; // Undo a pointer an older build left enlarged
 pub mod demo; // Golden demo builds that carry their own Anthropic key
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
@@ -54,7 +55,6 @@ pub mod tools;
 pub mod triggers; // Unified activation model (methods x targets)
 pub mod tts;
 pub mod utils;
-pub mod voice_control;
 pub mod window_management; // Window operations, state management, and positioning
 
 // Tray icon data is now handled by the menu::tray_menu module
@@ -79,7 +79,7 @@ use commands::{
     safari_clear_cache, safari_click_element, safari_execute_javascript, safari_extract_dom,
     safari_get_url, safari_is_active, safari_list_clickable_elements, safari_navigate,
     safari_type_text, shell::*, sound::*, test_accessibility_permissions, text_editor::*,
-    ui_commands::*, ui_token_selection::*, window::*,
+    ui_commands::*, window::*,
 };
 
 // Import specific sound commands from sound.rs
@@ -113,7 +113,7 @@ use crate::commands::{
     reset_keyboard_shortcuts, set_keyboard_shortcut, set_keyboard_shortcuts,
     validate_keyboard_shortcut,
 };
-use crate::commands::{get_triggers, set_triggers};
+use crate::commands::{get_triggers, set_trigger_capture, set_triggers};
 
 // Import MCP commands explicitly
 use crate::commands::mcp::{
@@ -462,6 +462,7 @@ pub fn run() {
             update_provider_api_key,
             check_api_keys_available,
             crate::demo::get_demo_info,
+            crate::build_info::get_build_info,
             update_provider_model,
             update_provider_max_tokens,
             update_provider_temperature,
@@ -496,6 +497,7 @@ pub fn run() {
             restart_app_after_permissions,
             prompt_app_restart_after_permissions,
             check_restart_needed_after_permissions,
+            permissions_awaiting_relaunch,
             handle_restart_after_permissions,
             // QA Test Commands from mouse.rs
 
@@ -514,13 +516,6 @@ pub fn run() {
             left_mouse_down,
             left_mouse_up,
             get_cursor_position,
-            get_big_cursor_enabled,
-            set_big_cursor_enabled,
-            get_big_cursor_scale,
-            set_big_cursor_scale,
-            test_cursor_scale,
-            test_cursor_restore,
-            get_system_cursor_size,
             get_companion_mode,
             set_companion_mode,
 
@@ -582,16 +577,6 @@ pub fn run() {
             input_control::commands::dismiss_mouse_control_prompt,
             input_control::commands::get_background_mode,
             input_control::commands::set_background_mode,
-            // UI Token Selection Commands
-            initialize_ui_token_selection,
-            test_ui_token_selection,
-            run_performance_benchmark,
-            get_performance_metrics,
-            validate_cost_reduction_target,
-            test_multi_monitor_optimization,
-            reset_performance_metrics,
-            get_ui_token_config,
-            set_ui_token_config,
             // Autostart Commands
             enable_autostart,
             disable_autostart,
@@ -617,6 +602,7 @@ pub fn run() {
             reset_keyboard_shortcuts,
             get_triggers,
             set_triggers,
+            set_trigger_capture,
             validate_keyboard_shortcut,
             get_shortcut_suggestions,
             get_shortcut_best_practices,
@@ -715,6 +701,8 @@ pub fn run() {
             window_management::close_settings_window,
             window_management::open_main_window,
             window_management::close_main_window,
+            platform::file_panels::save_chat_export,
+            platform::file_panels::load_chat_import,
             window_management::open_onboarding_window,
             window_management::close_onboarding_window,
             window_management::open_desktop_cursor_overlay,
@@ -795,10 +783,7 @@ pub fn run() {
             // Core Commands
             cancel_agent_execution,
             get_system_context,
-            get_agent_execution_progress,
             set_agent_execution_progress,
-            set_debug_mode,
-            get_debug_mode,
             // Tray Icon Commands
             commands::tray_commands::set_tray_icon_default,
             commands::tray_commands::set_tray_icon_agent_active,
@@ -806,7 +791,6 @@ pub fn run() {
             commands::tray_commands::set_tray_icon_always_listening,
             commands::tray_commands::set_tray_icon_processing,
             commands::tray_commands::set_tray_icon_error,
-            commands::tray_commands::set_tray_icon_paused,
             commands::tray_commands::update_tray_icon_from_state,
             commands::tray_commands::test_all_tray_icon_states,
             commands::tray_commands::get_current_tray_icon_state,
@@ -860,16 +844,6 @@ pub fn run() {
             execute_safari_tool,
 
             // Tool Choice Intelligence Commands
-            commands::tool_choice::get_tool_choice_config,
-            commands::tool_choice::set_tool_choice_config,
-            commands::tool_choice::analyze_tool_choice,
-            commands::tool_choice::get_operational_modes,
-            commands::tool_choice::test_tool_choice_patterns,
-            commands::tool_choice::get_tool_choice_stats,
-            commands::tool_choice::reset_tool_choice_config,
-            commands::tool_choice::set_tool_choice_enabled,
-            commands::tool_choice::get_tool_choice_enabled,
-            commands::tool_choice::validate_tool_choice_config,
             // Config file commands
             open_config_directory,
             open_config_file,
@@ -1023,12 +997,17 @@ pub fn run() {
             cleanup::init_cleanup_handlers(app_handle.clone());
             // --- End of Cleanup Handlers ---
 
-            // Log if cursor is enlarged (from a previous crash or user accessibility).
-            // We do NOT auto-reset — the settings UI shows a "Reset to Normal" banner.
-            let startup_cursor_size = cursor_scale::get_system_cursor_size();
-            if startup_cursor_size > 1.0 {
-                info!("System cursor is enlarged ({:.1}x) — UI will show reset banner",
-                    startup_cursor_size);
+            // Name this build in the log, so a report that includes a log says
+            // exactly which one it came from.
+            info!("Juno {}", crate::build_info::build_info().label());
+
+            // Older builds signalled agent activity by enlarging the system
+            // pointer and could die without putting it back. Juno no longer
+            // touches that preference; this undoes what those builds left.
+            if let Ok(config_dir) = app_handle.path().app_config_dir() {
+                tauri::async_runtime::spawn(async move {
+                    cursor_scale_migration::run(&config_dir);
+                });
             }
 
             // Sweep orphaned temp browser profile directories from previous sessions
@@ -1114,9 +1093,20 @@ pub fn run() {
                         // say where Juno went.
                         commands::dock_icon::handle_reopen(app_handle);
                     }
-                    tauri::RunEvent::ExitRequested { .. } => {
-                        // Restore cursor scale on app exit — prevents stuck big cursor
-                        cursor_scale::force_restore_cursor_scale();
+                    // The red X on the chat window means "put it away", not
+                    // "destroy it". Destroying loses its React state and the
+                    // audio element that plays TTS for the whole app, and it
+                    // skips the handover that gives the bar its pane back.
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event: tauri::WindowEvent::CloseRequested { api, .. },
+                        ..
+                    } if label == constants::window_labels::MAIN => {
+                        api.prevent_close();
+                        if let Some(window) = app_handle.get_webview_window(&label) {
+                            let _ = window.hide();
+                        }
+                        window_management::announce_main_window(app_handle, false);
                     }
                     tauri::RunEvent::WindowEvent {
                         label,

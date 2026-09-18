@@ -342,7 +342,8 @@ pub async fn fire_automation(app: &AppHandle, automation: &mut ScheduledAutomati
     );
 
     let state = app.state::<crate::state::AppState>();
-    let result = crate::anthropic::submit_query(automation.query.clone(), state, app.clone()).await;
+    let result =
+        crate::anthropic::submit_query(automation.query.clone(), None, state, app.clone()).await;
 
     automation.last_run_at = Some(now_secs());
     automation.last_result = Some(match &result {

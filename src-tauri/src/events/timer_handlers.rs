@@ -420,6 +420,7 @@ impl TimerEventHandler {
         // Call the main agent submission function
         if let Err(e) = crate::anthropic::submit_query(
             query.to_string(),
+            None,
             self.app_handle.state::<AppState>(),
             self.app_handle.clone(),
         )

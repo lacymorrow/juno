@@ -236,7 +236,11 @@ describe("floatingBarWindowSize", () => {
     expect(floatingBarWindowSize({ layout: "hover", paneOpen: false, rosterVisible: false }))
       .toEqual({ width: 164, height: 66, anchorY: 33 });
     expect(floatingBarWindowSize({ layout: "voice", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 252, height: 66, anchorY: 33 });
+      .toEqual({ width: 292, height: 66, anchorY: 33 });
+    // Status shares voice's width so the bar does not lurch wider the moment
+    // the mic closes, for a word and a stop button.
+    expect(floatingBarWindowSize({ layout: "status", paneOpen: false, rosterVisible: false }))
+      .toEqual({ width: 292, height: 66, anchorY: 33 });
     expect(floatingBarWindowSize({ layout: "full", paneOpen: false, rosterVisible: false }))
       .toEqual({ width: 467, height: 92, anchorY: 46 });
     expect(floatingBarWindowSize({ layout: "full", paneOpen: true, rosterVisible: false }))
@@ -267,8 +271,11 @@ describe("pickLayout", () => {
     expect(pickLayout({ ...base, state: "always_listening" })).toBe("voice");
     expect(pickLayout({ ...base, state: "default", inputOpen: true })).toBe("full");
     expect(pickLayout({ ...base, state: "expanding" })).toBe("full");
-    expect(pickLayout({ ...base, state: "loading" })).toBe("full");
-    expect(pickLayout({ ...base, state: "error" })).toBe("full");
+    // Working states carry a label and one control, not an input, so they get
+    // the status width rather than the full 419px.
+    expect(pickLayout({ ...base, state: "loading" })).toBe("status");
+    expect(pickLayout({ ...base, state: "error" })).toBe("status");
+    expect(pickLayout({ ...base, state: "transcribing" })).toBe("status");
     expect(pickLayout({ ...base, state: "default", paneOpen: true })).toBe("full");
     expect(pickLayout({ ...base, state: "default", rosterVisible: true })).toBe("full");
   });
@@ -404,7 +411,7 @@ describe("FloatingBar", () => {
 
     expect(bar()).toHaveAttribute("data-layout", "voice");
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("listening");
-    expect(lastResize()).toEqual({ width: 252, height: 66, anchorY: 33 });
+    expect(lastResize()).toEqual({ width: 292, height: 66, anchorY: 33 });
 
     // "Stop" used to be the only control and it submitted what you had said.
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -439,9 +446,11 @@ describe("FloatingBar", () => {
     setBarState({ barState: "listening", audioLevel: 0.6 });
     expect(bar()).toHaveAttribute("data-layout", "voice");
 
-    // The backend sets transcribing the instant the mic stops.
+    // The backend sets transcribing the instant the mic stops. The bar keeps
+    // the same width it had while listening: the old behaviour jumped from
+    // 220px to 419px mid-sentence to show one more word.
     setBarState({ barState: "transcribing" });
-    expect(bar()).toHaveAttribute("data-layout", "full");
+    expect(bar()).toHaveAttribute("data-layout", "status");
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("transcribing");
     // A processing state has a Stop control, and no live audio bars.
     expect(screen.getByRole("button", { name: "Stop Juno" })).toBeInTheDocument();

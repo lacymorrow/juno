@@ -887,8 +887,13 @@ impl CloudCommandProcessor {
     ) -> Result<String, CloudError> {
         let app_state = self.app_handle.state::<AppState>();
 
-        match crate::anthropic::submit_query(query.to_string(), app_state, self.app_handle.clone())
-            .await
+        match crate::anthropic::submit_query(
+            query.to_string(),
+            None,
+            app_state,
+            self.app_handle.clone(),
+        )
+        .await
         {
             Ok(()) => {
                 // The submit_query function handles the response via events

@@ -479,6 +479,8 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     let triggers = state.get_triggers().unwrap_or_default();
     let mut registered_combos: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut mouse_bindings: Vec<crate::platform::mouse_button_monitor::MouseBinding> = Vec::new();
+    let mut modifier_bindings: Vec<crate::platform::modifier_key_monitor::ModifierBinding> =
+        Vec::new();
     for trigger in triggers.iter().filter(|t| t.enabled) {
         match &trigger.binding {
             Some(crate::triggers::Binding::Keyboard { shortcut: combo }) => {
@@ -503,6 +505,9 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
             Some(crate::triggers::Binding::Mouse { button }) => {
                 mouse_bindings.push((*button, trigger.method, trigger.target));
             }
+            Some(crate::triggers::Binding::Modifier { key }) => {
+                modifier_bindings.push((*key, trigger.method, trigger.target));
+            }
             None => {}
         }
     }
@@ -512,6 +517,12 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     // above; mouse buttons cannot, so they use the NSEvent monitor.
     if let Err(e) = crate::platform::mouse_button_monitor::sync(app, mouse_bindings) {
         error!("Failed to sync mouse-button monitor: {}", e);
+    }
+
+    // Same again for bare modifiers such as Fn, which produce no ordinary key
+    // event and so cannot go through the plugin either.
+    if let Err(e) = crate::platform::modifier_key_monitor::sync(app, modifier_bindings) {
+        error!("Failed to sync modifier-key monitor: {}", e);
     }
 
     // Register the voice activation shortcut with error handling

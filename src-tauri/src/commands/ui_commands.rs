@@ -1482,22 +1482,33 @@ pub async fn handle_query_accepted(_app_handle: &AppHandle, query: String) {
 /// not when the run finishes. Without a UI manager the event is emitted
 /// directly so the query is never dropped.
 #[tauri::command]
-pub async fn dispatch_query(query: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    if query.trim().is_empty() {
+pub async fn dispatch_query(
+    query: String,
+    // Pictures pasted into the composer, as base64 data URLs.
+    images: Option<Vec<String>>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    // An image on its own is a perfectly good message: "what is this?".
+    let has_images = images.as_ref().is_some_and(|i| !i.is_empty());
+    if query.trim().is_empty() && !has_images {
         return Ok(());
     }
 
-    if let Some(manager) = get_ui_manager().await {
-        let mut manager = manager.lock().await;
-        manager.handle_bar_submit(query).await
-    } else {
-        app_handle
-            .emit(
-                events::agent::QUERY_READY,
-                serde_json::json!({ "query": query }),
-            )
-            .map_err(|e| format!("Failed to dispatch query: {}", e))
+    // Straight to the agent when there are attachments. The bar-submit path
+    // carries only a string, and silently dropping the picture someone just
+    // pasted is worse than not offering to paste at all.
+    if !has_images {
+        if let Some(manager) = get_ui_manager().await {
+            let mut manager = manager.lock().await;
+            return manager.handle_bar_submit(query).await;
+        }
     }
+    app_handle
+        .emit(
+            events::agent::QUERY_READY,
+            serde_json::json!({ "query": query, "images": images }),
+        )
+        .map_err(|e| format!("Failed to dispatch query: {}", e))
 }
 
 pub async fn handle_dictation_started(_app_handle: &AppHandle) {

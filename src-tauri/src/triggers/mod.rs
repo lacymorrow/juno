@@ -40,6 +40,46 @@ pub enum TriggerTarget {
     Dictation,
 }
 
+/// A key that produces no ordinary key event, only a modifier flag change.
+///
+/// Caps Lock is deliberately absent. Checked on hardware: it emits one event
+/// per press and nothing on release, because it is a hardware toggle, so a
+/// push-to-talk bound to it would hold the microphone open until the next
+/// press. Remapping it with `hidutil` to a spare function key is the honest
+/// route, and that already works as an ordinary keyboard binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModifierKey {
+    /// The globe key. Reports key code 63 with bit 1 << 23 while held.
+    Fn,
+}
+
+impl ModifierKey {
+    /// Every key setup listens for while asking someone to press theirs.
+    pub const ALL: [ModifierKey; 1] = [ModifierKey::Fn];
+
+    /// The macOS virtual key code reported on `NSEventTypeFlagsChanged`.
+    pub fn key_code(self) -> u16 {
+        match self {
+            Self::Fn => 63,
+        }
+    }
+
+    /// The `NSEventModifierFlag` bit that is set while the key is held.
+    pub fn flag_bit(self) -> usize {
+        match self {
+            Self::Fn => 1 << 23,
+        }
+    }
+
+    /// What the settings window calls it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fn => "Fn (globe)",
+        }
+    }
+}
+
 /// The physical input bound to a key/mouse method.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -51,6 +91,10 @@ pub enum Binding {
     /// 3+ = extra side buttons). Watched by the passive input monitor, not the
     /// global-shortcut plugin.
     Mouse { button: u16 },
+    /// A bare modifier key such as Fn, which produces no ordinary key event.
+    /// Watched by `platform::modifier_key_monitor`, never by the
+    /// global-shortcut plugin, which cannot register it.
+    Modifier { key: ModifierKey },
 }
 
 impl Binding {
@@ -64,6 +108,7 @@ impl Binding {
                 2 => "Middle Click".to_string(),
                 n => format!("Mouse Button {}", n + 1),
             },
+            Binding::Modifier { key } => key.label().to_string(),
         }
     }
 }

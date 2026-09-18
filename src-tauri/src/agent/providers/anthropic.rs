@@ -146,6 +146,23 @@ struct ApiContentBlock {
     signature: Option<String>, // `thinking` block signature
     #[serde(skip_serializing_if = "Option::is_none")]
     data: Option<String>, // `redacted_thinking` block payload
+    // --- Image blocks (a picture the person attached to their message) ---
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<ApiImageSource>,
+}
+
+/// Split a `data:` URL into the media type and payload Anthropic wants.
+///
+/// Returns `None` for anything that is not a base64 data URL, so a malformed
+/// paste is dropped rather than sent as a block the API will reject.
+fn parse_data_url(url: &str) -> Option<(String, String)> {
+    let rest = url.strip_prefix("data:")?;
+    let (meta, data) = rest.split_once(',')?;
+    let media_type = meta.strip_suffix(";base64")?;
+    if !media_type.starts_with("image/") || data.is_empty() {
+        return None;
+    }
+    Some((media_type.to_string(), data.to_string()))
 }
 
 impl ApiContentBlock {
@@ -162,6 +179,7 @@ impl ApiContentBlock {
             thinking: None,
             signature: None,
             data: None,
+            source: None,
         }
     }
 }
@@ -1186,6 +1204,28 @@ impl AnthropicBrain {
             }
         }
 
+        // Images first: a turn reads as "here is a picture, now do this", and
+        // the API pays attention to order.
+        if message.role == Role::User {
+            if let Some(images) = &message.images {
+                for url in images {
+                    let Some((media_type, data)) = parse_data_url(url) else {
+                        tracing::warn!(
+                            "Dropping an attachment that is not a base64 image data URL"
+                        );
+                        continue;
+                    };
+                    let mut block = ApiContentBlock::empty("image");
+                    block.source = Some(ApiImageSource {
+                        source_type: "base64".to_string(),
+                        media_type,
+                        data,
+                    });
+                    content_blocks.push(block);
+                }
+            }
+        }
+
         // Add text content if present
         if !message.content.is_empty() {
             content_blocks.push(ApiContentBlock {
@@ -1199,6 +1239,7 @@ impl AnthropicBrain {
                 thinking: None,
                 signature: None,
                 data: None,
+                source: None,
             });
         }
 
@@ -1221,6 +1262,7 @@ impl AnthropicBrain {
                     thinking: None,
                     signature: None,
                     data: None,
+                    source: None,
                 });
             }
         }
@@ -1498,6 +1540,7 @@ impl AgentBrain for AnthropicBrain {
                             thinking: None,
                             signature: None,
                             data: None,
+                            source: None,
                         }]),
                     });
                 }

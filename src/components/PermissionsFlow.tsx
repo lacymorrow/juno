@@ -354,7 +354,24 @@ export function PermissionsFlow({
     }
   };
 
+  // Whatever the backend says is required, not the number two. It said two
+  // out loud, so a fifth permission or a change of mind about Screen Recording
+  // would have quietly made the badge a lie.
+  const requiredCount = permissions
+    ? [
+        permissions.accessibility,
+        permissions.screen_recording,
+        permissions.microphone,
+        permissions.input_monitoring,
+      ].filter((p) => p?.required).length
+    : 0;
+
   const getPermissionPriorityIcon = (permission: AppPermissionStatus) => {
+    // A row can arrive before its type does; without this the switch throws
+    // and takes the whole permissions screen down.
+    if (!permission?.permission_type) {
+      return <Shield className="h-5 w-5 text-gray-600" />;
+    }
     switch (permission.permission_type) {
       case "accessibility":
         return <Lock className="h-5 w-5 text-blue-600" />;
@@ -655,7 +672,7 @@ export function PermissionsFlow({
             Required Permissions
           </h3>
           <Badge variant="destructive" className="bg-red-100 text-red-700">
-            2 Required
+            {requiredCount} Required
           </Badge>
         </div>
         <p className="text-sm text-gray-600 mb-4">
