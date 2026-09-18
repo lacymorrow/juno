@@ -295,6 +295,19 @@ impl DictationStateManager {
     // Private helper methods
 
     async fn reset_voice_controller(&self, app_handle: &AppHandle) -> Result<(), String> {
+        // Retire the session first. This path discards audio, so whatever it
+        // was recording has no owner afterwards and a final result the engine
+        // emits on the way down is typed by nobody. Ungated, because it runs
+        // from the coordinated stop and from the recovery paths, both of which
+        // exist for when the rest of the state is already wrong.
+        let app_state = app_handle.state::<crate::state::AppState>();
+        if let Ok(session) = app_state.claim_voice_discard(crate::state::SessionClaim::Current) {
+            warn!(
+                "[StateManager] Discarding voice session {}",
+                session.describe()
+            );
+        }
+
         match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
             Some(controller_state) => {
                 let stop_result = tokio::time::timeout(

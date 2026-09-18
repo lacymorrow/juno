@@ -41,7 +41,6 @@ pub mod core {
     pub const SET_DEBUG_MODE: &str = "set_debug_mode";
     pub const GET_PERFORMANCE_MONITORING: &str = "get_performance_monitoring";
     pub const SET_PERFORMANCE_MONITORING: &str = "set_performance_monitoring";
-    pub const CANCEL_AGENT_EXECUTION: &str = "cancel_agent_execution";
     pub const GET_AGENT_EXECUTION_PROGRESS: &str = "get_agent_execution_progress";
     pub const SET_AGENT_EXECUTION_PROGRESS: &str = "set_agent_execution_progress";
     pub const GET_SYSTEM_CONTEXT: &str = "get_system_context";

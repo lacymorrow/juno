@@ -487,7 +487,6 @@ export const COMMANDS = {
   CORE_SET_DEBUG_MODE: 'set_debug_mode',
   CORE_GET_PERFORMANCE_MONITORING: 'get_performance_monitoring',
   CORE_SET_PERFORMANCE_MONITORING: 'set_performance_monitoring',
-  CORE_CANCEL_AGENT_EXECUTION: 'cancel_agent_execution',
   CORE_GET_AGENT_EXECUTION_PROGRESS: 'get_agent_execution_progress',
   CORE_SET_AGENT_EXECUTION_PROGRESS: 'set_agent_execution_progress',
   CORE_GET_SYSTEM_CONTEXT: 'get_system_context',
