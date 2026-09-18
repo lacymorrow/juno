@@ -118,11 +118,11 @@ export default function AudioVisualizer({
   animationStyle = "organic",
 }: AudioVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>();
-  const audioContextRef = useRef<AudioContext>();
-  const analyserRef = useRef<AnalyserNode>();
-  const dataArrayRef = useRef<Uint8Array>();
-  const streamRef = useRef<MediaStream>();
+  const animationRef = useRef<number | undefined>(undefined);
+  const audioContextRef = useRef<AudioContext | undefined>(undefined);
+  const analyserRef = useRef<AnalyserNode | undefined>(undefined);
+  const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | undefined>(undefined);
+  const streamRef = useRef<MediaStream | undefined>(undefined);
 
   // Use refs for animation state to avoid re-renders
   const transitionProgressRef = useRef(1);

@@ -15,20 +15,20 @@ describe('ttsService', () => {
     vi.clearAllMocks();
 
     // Mock Audio class
-    global.Audio = vi.fn().mockImplementation((src) => ({
+    global.Audio = vi.fn().mockImplementation(function (src: string) { return {
       src,
       play: mockAudioPlay,
       onended: null,
       onerror: null,
       error: null
-    }));
+    }; });
 
     // Mock SpeechSynthesisUtterance
-    global.SpeechSynthesisUtterance = vi.fn().mockImplementation((text) => ({
+    global.SpeechSynthesisUtterance = vi.fn().mockImplementation(function (text: string) { return {
       text,
       onend: null,
       onerror: null
-    }));
+    }; });
 
     // Set navigator.onLine to true by default
     Object.defineProperty(navigator, 'onLine', { value: true, writable: true });
@@ -56,7 +56,7 @@ describe('ttsService', () => {
       });
 
       // Mock SpeechSynthesisUtterance to capture the onend callback
-      global.SpeechSynthesisUtterance = vi.fn().mockImplementation((text) => {
+      global.SpeechSynthesisUtterance = vi.fn().mockImplementation(function (text: string) {
         return {
           text,
           set onend(callback: () => void) {
@@ -106,7 +106,7 @@ describe('ttsService', () => {
       });
 
       // Mock Audio to capture the onended callback
-      global.Audio = vi.fn().mockImplementation((src) => {
+      global.Audio = vi.fn().mockImplementation(function (src: string) {
         return {
           src,
           play: () => {
@@ -167,7 +167,7 @@ describe('ttsService', () => {
       mockInvokeFn.mockResolvedValue('https://example.com/audio.mp3');
 
       // Mock Audio to simulate an error during playback
-      global.Audio = vi.fn().mockImplementation((src) => {
+      global.Audio = vi.fn().mockImplementation(function (src: string) {
         return {
           src,
           play: () => {
