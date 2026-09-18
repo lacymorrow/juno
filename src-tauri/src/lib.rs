@@ -78,7 +78,7 @@ use commands::{
     safari_clear_cache, safari_click_element, safari_execute_javascript, safari_extract_dom,
     safari_get_url, safari_is_active, safari_list_clickable_elements, safari_navigate,
     safari_type_text, shell::*, sound::*, test_accessibility_permissions, text_editor::*,
-    ui_commands::*, ui_token_selection::*, window::*,
+    ui_commands::*, window::*,
 };
 
 // Import specific sound commands from sound.rs
@@ -582,16 +582,6 @@ pub fn run() {
             input_control::commands::dismiss_mouse_control_prompt,
             input_control::commands::get_background_mode,
             input_control::commands::set_background_mode,
-            // UI Token Selection Commands
-            initialize_ui_token_selection,
-            test_ui_token_selection,
-            run_performance_benchmark,
-            get_performance_metrics,
-            validate_cost_reduction_target,
-            test_multi_monitor_optimization,
-            reset_performance_metrics,
-            get_ui_token_config,
-            set_ui_token_config,
             // Autostart Commands
             enable_autostart,
             disable_autostart,
@@ -859,16 +849,6 @@ pub fn run() {
             execute_safari_tool,
 
             // Tool Choice Intelligence Commands
-            commands::tool_choice::get_tool_choice_config,
-            commands::tool_choice::set_tool_choice_config,
-            commands::tool_choice::analyze_tool_choice,
-            commands::tool_choice::get_operational_modes,
-            commands::tool_choice::test_tool_choice_patterns,
-            commands::tool_choice::get_tool_choice_stats,
-            commands::tool_choice::reset_tool_choice_config,
-            commands::tool_choice::set_tool_choice_enabled,
-            commands::tool_choice::get_tool_choice_enabled,
-            commands::tool_choice::validate_tool_choice_config,
             // Config file commands
             open_config_directory,
             open_config_file,

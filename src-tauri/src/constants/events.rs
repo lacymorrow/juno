@@ -379,13 +379,6 @@ pub mod shortcuts {
     pub const VOICE_ACTIVATION: &str = "shortcut-voice-activation";
 }
 
-/// Tool choice events
-pub mod tool_choice {
-    pub const CONFIG_CHANGED: &str = "tool-choice-config-changed";
-    pub const CONFIG_RESET: &str = "tool-choice-config-reset";
-    pub const ENABLED_CHANGED: &str = "tool-choice-enabled-changed";
-}
-
 /// Scheduled automation events (user-facing cron schedules)
 pub mod scheduler {
     /// Emitted whenever the automation list changes (create/update/delete/run)
