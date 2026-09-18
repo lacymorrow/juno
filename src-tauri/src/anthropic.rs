@@ -565,22 +565,6 @@ async fn execute_agent_internal(
         info!("🔍 Companion mode enabled — computer use tools will be withheld");
     }
 
-    // Apply big cursor scaling if enabled — RAII guard restores on all exit paths
-    let _cursor_guard = match &agent_settings {
-        Some(s) if s.big_cursor_enabled => {
-            info!(
-                "[CursorScale] Big cursor enabled, scaling to {:.1}x",
-                s.big_cursor_scale
-            );
-            crate::cursor_scale::CursorScaleGuard::new(s.big_cursor_scale as f64)
-        }
-        Some(_) => crate::cursor_scale::CursorScaleGuard::noop(),
-        None => {
-            warn!("[CursorScale] Agent settings unavailable, skipping cursor scaling");
-            crate::cursor_scale::CursorScaleGuard::noop()
-        }
-    };
-
     // Register this run in the parallel-agent registry so the switcher UI
     // sees it and per-session cancel/focus commands have a live target.
     // If the parallel cap is hit we log and continue — the queue guarantees

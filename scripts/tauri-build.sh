@@ -22,12 +22,72 @@
 # the build out privately.
 #
 #   JUNO_DEMO_COHORT=sept-investors bun run tauri:build --demo
+#
+# Every build names itself. The DMG comes out as
+#   Juno-Demo-0.7.0-b2174-a19b4631.dmg
+# with a .json manifest beside it, and the same facts are compiled into the
+# binary by build.rs so Settings can show them. Two builds made on the same day
+# used to be indistinguishable once they left this machine.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 key_path="$HOME/.tauri/juno.key"
 demo_key_path="$HOME/.tauri/juno-demo.key"
 demo=0
+
+# --- Build identity -------------------------------------------------------
+# Kept in step with src-tauri/build.rs, which compiles these same facts in.
+version="$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"
+build_number="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
+commit="$(git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)"
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+  dirty=true
+else
+  dirty=false
+fi
+
+# Rename the bundle to something no other build can collide with, and drop a
+# manifest next to it so the artifact stays identifiable after it is moved,
+# renamed, or mailed to someone.
+name_artifacts() {
+  local product="$1" dmg_dir="src-tauri/target/release/bundle/dmg"
+  local built name target
+  built="$(find "$dmg_dir" -maxdepth 1 -name '*.dmg' -newermt '-30 minutes' 2>/dev/null | head -1)"
+  if [[ -z "$built" ]]; then
+    echo "tauri-build: no DMG found in $dmg_dir, skipping naming" >&2
+    return 0
+  fi
+
+  name="${product}-${version}-b${build_number}-${commit}"
+  [[ "$dirty" == "true" ]] && name="${name}-dirty"
+  target="${dmg_dir}/${name}.dmg"
+  mv -f "$built" "$target"
+
+  cat > "${dmg_dir}/${name}.json" <<JSON
+{
+  "product": "${product}",
+  "version": "${version}",
+  "build": "${build_number}",
+  "commit": "${commit}",
+  "branch": "${branch}",
+  "dirty": ${dirty},
+  "builtAt": "${built_at}",
+  "demo": $([[ "$demo" == "1" ]] && echo true || echo false),
+  "cohort": $([[ -n "${JUNO_DEMO_COHORT:-}" ]] && echo "\"${JUNO_DEMO_COHORT}\"" || echo null),
+  "artifact": "${name}.dmg"
+}
+JSON
+
+  echo "tauri-build: ${target}" >&2
+  echo "tauri-build: manifest ${dmg_dir}/${name}.json" >&2
+  if [[ "$dirty" == "true" ]]; then
+    echo "tauri-build: NOTE this build has uncommitted changes, ${commit} does not fully describe it" >&2
+  else
+    echo "tauri-build: to mark it shipped: git tag build/${build_number} ${commit}" >&2
+  fi
+}
 
 args=()
 for arg in "$@"; do
@@ -68,16 +128,25 @@ MSG
   export JUNO_DEMO_ANTHROPIC_KEY
   export JUNO_DEMO_COHORT="${JUNO_DEMO_COHORT:-}"
   echo "tauri-build: demo build, key ${JUNO_DEMO_ANTHROPIC_KEY:0:7}... (${#JUNO_DEMO_ANTHROPIC_KEY} chars)${JUNO_DEMO_COHORT:+, cohort $JUNO_DEMO_COHORT}" >&2
-  exec bunx tauri build --config '{"productName":"Juno Demo","identifier":"com.juno.desktop.demo","bundle":{"createUpdaterArtifacts":false}}' "$@"
+  echo "tauri-build: ${version} build ${build_number} ${commit} on ${branch}" >&2
+  bunx tauri build --config '{"productName":"Juno Demo","identifier":"com.juno.desktop.demo","bundle":{"createUpdaterArtifacts":false}}' "$@"
+  name_artifacts "Juno-Demo"
+  exit 0
 fi
 
 # Not a demo build: make sure nothing exported a demo key into this one.
 unset JUNO_DEMO_ANTHROPIC_KEY JUNO_DEMO_COHORT
+# Not `exec` below: an exec'd process replaces this shell, and the EXIT trap
+# that checks for key material would never run.
 trap assert_no_key_in_binary EXIT
+
+echo "tauri-build: ${version} build ${build_number} ${commit} on ${branch}" >&2
 
 if [[ "${JUNO_UNSIGNED_BUILD:-}" == "1" ]]; then
   echo "tauri-build: JUNO_UNSIGNED_BUILD=1, building without updater artifacts" >&2
-  exec bunx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' "$@"
+  bunx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' "$@"
+  name_artifacts "Juno"
+  exit 0
 fi
 
 if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
@@ -100,4 +169,5 @@ if [[ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD+x}" && ! -t 0 ]]; then
   exit 1
 fi
 
-exec bunx tauri build "$@"
+bunx tauri build "$@"
+name_artifacts "Juno"

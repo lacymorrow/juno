@@ -31,7 +31,8 @@ pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
 pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
-pub mod cursor_scale;
+pub mod cursor_scale_migration; // Undo a pointer an older build left enlarged
+pub mod build_info; // Which build this is: version, commit, branch, demo cohort
 pub mod demo; // Golden demo builds that carry their own Anthropic key
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
@@ -461,6 +462,7 @@ pub fn run() {
             update_provider_api_key,
             check_api_keys_available,
             crate::demo::get_demo_info,
+            crate::build_info::get_build_info,
             update_provider_model,
             update_provider_max_tokens,
             update_provider_temperature,
@@ -514,13 +516,6 @@ pub fn run() {
             left_mouse_down,
             left_mouse_up,
             get_cursor_position,
-            get_big_cursor_enabled,
-            set_big_cursor_enabled,
-            get_big_cursor_scale,
-            set_big_cursor_scale,
-            test_cursor_scale,
-            test_cursor_restore,
-            get_system_cursor_size,
             get_companion_mode,
             set_companion_mode,
 
@@ -1002,12 +997,17 @@ pub fn run() {
             cleanup::init_cleanup_handlers(app_handle.clone());
             // --- End of Cleanup Handlers ---
 
-            // Log if cursor is enlarged (from a previous crash or user accessibility).
-            // We do NOT auto-reset — the settings UI shows a "Reset to Normal" banner.
-            let startup_cursor_size = cursor_scale::get_system_cursor_size();
-            if startup_cursor_size > 1.0 {
-                info!("System cursor is enlarged ({:.1}x) — UI will show reset banner",
-                    startup_cursor_size);
+            // Name this build in the log, so a report that includes a log says
+            // exactly which one it came from.
+            info!("Juno {}", crate::build_info::build_info().label());
+
+            // Older builds signalled agent activity by enlarging the system
+            // pointer and could die without putting it back. Juno no longer
+            // touches that preference; this undoes what those builds left.
+            if let Ok(config_dir) = app_handle.path().app_config_dir() {
+                tauri::async_runtime::spawn(async move {
+                    cursor_scale_migration::run(&config_dir);
+                });
             }
 
             // Sweep orphaned temp browser profile directories from previous sessions
@@ -1107,10 +1107,6 @@ pub fn run() {
                             let _ = window.hide();
                         }
                         window_management::announce_main_window(app_handle, false);
-                    }
-                    tauri::RunEvent::ExitRequested { .. } => {
-                        // Restore cursor scale on app exit — prevents stuck big cursor
-                        cursor_scale::force_restore_cursor_scale();
                     }
                     tauri::RunEvent::WindowEvent {
                         label,

@@ -1656,6 +1656,17 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             >
               {isDriving ? `Juno is ${label}` : (label ?? "Ask Juno")}
             </span>
+            {/* Watching the pointer move on its own, the question is how to
+                make it stop. The stop-key monitor in Rust has always taken
+                Escape; nothing ever said so. */}
+            {isDriving && (
+              <kbd
+                className="shrink-0 rounded border border-white/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/55"
+                data-testid="floating-bar-stop-hint"
+              >
+                esc to stop
+              </kbd>
+            )}
             {isVoice && <AudioLevelBars audioLevel={barState.audioLevel} />}
             {/* Three answers, not one. The single "Stop" here finalised the
                 audio and submitted it, so the only way to abandon a sentence

@@ -1099,68 +1099,6 @@ pub(crate) async fn set_smooth_mouse_movement_setting(
 
 // === Big Cursor Settings ===
 
-#[tauri::command]
-pub(crate) async fn get_big_cursor_enabled(
-    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
-) -> Result<bool, String> {
-    let agent_settings = settings_manager.get_agent_settings().await?;
-    Ok(agent_settings.big_cursor_enabled)
-}
-
-#[tauri::command]
-pub(crate) async fn set_big_cursor_enabled(
-    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
-    enabled: bool,
-) -> Result<(), String> {
-    let mut agent_settings = settings_manager.get_agent_settings().await?;
-    agent_settings.big_cursor_enabled = enabled;
-    settings_manager.set_agent_settings(&agent_settings).await?;
-
-    if !enabled {
-        crate::cursor_scale::force_restore_cursor_scale();
-    }
-
-    info!(
-        "Big cursor {}",
-        if enabled { "enabled" } else { "disabled" }
-    );
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) async fn get_big_cursor_scale(
-    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
-) -> Result<f32, String> {
-    let agent_settings = settings_manager.get_agent_settings().await?;
-    Ok(agent_settings.big_cursor_scale)
-}
-
-#[tauri::command]
-pub(crate) async fn set_big_cursor_scale(
-    settings_manager: State<'_, crate::settings::manager::SettingsManager>,
-    scale: f32,
-) -> Result<(), String> {
-    use crate::constants::settings::validation;
-    if !(validation::MIN_BIG_CURSOR_SCALE..=validation::MAX_BIG_CURSOR_SCALE).contains(&scale) {
-        return Err(format!(
-            "Cursor scale must be between {} and {}",
-            validation::MIN_BIG_CURSOR_SCALE,
-            validation::MAX_BIG_CURSOR_SCALE
-        ));
-    }
-
-    let mut agent_settings = settings_manager.get_agent_settings().await?;
-    agent_settings.big_cursor_scale = scale;
-    settings_manager.set_agent_settings(&agent_settings).await?;
-
-    if crate::cursor_scale::is_cursor_scaled() {
-        crate::cursor_scale::update_active_scale(scale as f64);
-    }
-
-    info!("Big cursor scale set to {:.1}x", scale);
-    Ok(())
-}
-
 // === Companion Mode Settings ===
 
 #[tauri::command]
@@ -1192,21 +1130,3 @@ pub(crate) async fn set_companion_mode(
 // - focused_window_relative_click(relative_x, relative_y, modifier)
 // These functions require get_window_bounds() and get_focused_window_bounds() methods
 
-#[tauri::command]
-pub(crate) fn test_cursor_scale(scale: f64) -> Result<(), String> {
-    info!("[CursorScale] Test: setting cursor scale to {:.1}x", scale);
-    crate::cursor_scale::write_cursor_size_preview(scale);
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) fn test_cursor_restore() -> Result<(), String> {
-    info!("[CursorScale] User-initiated cursor reset to default");
-    crate::cursor_scale::reset_cursor_to_default();
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) fn get_system_cursor_size() -> Result<f64, String> {
-    Ok(crate::cursor_scale::get_system_cursor_size())
-}
