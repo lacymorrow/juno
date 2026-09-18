@@ -774,7 +774,6 @@ pub fn run() {
             commands::notifications::send_notification,
             commands::notifications::test_notification,
             // Core Commands
-            cancel_agent_execution,
             get_system_context,
             set_agent_execution_progress,
             // Tray Icon Commands

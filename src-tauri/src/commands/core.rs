@@ -660,17 +660,20 @@ pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> 
     Ok(result)
 }
 
-/// Cancel currently executing agent
-#[tauri::command]
-pub async fn cancel_agent_execution(state: State<'_, AppState>) -> Result<(), String> {
-    info!("Cancelling agent execution");
-
-    // Use the proper method to mark agent execution as finished
-    state.mark_agent_execution_finished();
-
-    info!("Agent execution cancelled successfully");
-    Ok(())
-}
+// `cancel_agent_execution` used to live here. It was removed rather than
+// repaired: it cleared the execution flag and nothing else, so the run it
+// claimed to cancel kept going, and the only thing it really did was make the
+// UI believe the agent had stopped. Teaching it to announce would have made
+// that lie more convincing, and teaching it to actually cancel would have
+// meant one of two bad trades. Delegating to `stop_all_operations` stops TTS,
+// dictation and always-listening too, which is not what a command named for
+// agent execution should do, and `coordinated_stop_all_operations` already
+// exposes exactly that to the frontend. Reimplementing the narrow cancel here
+// would fork the conditional flag clear in `stop_coordinator.rs`, which only
+// clears when no background session is still running, and a second copy of
+// that rule is how the flag and the icon drifted apart in the first place.
+// Nothing in `src/` ever invoked it. Use `coordinated_stop_all_operations`,
+// which is what the stop key itself goes through.
 
 /// Get system context information
 #[tauri::command]

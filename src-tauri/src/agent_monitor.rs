@@ -282,7 +282,12 @@ pub async fn on_agent_input_released_with_mode(
             // query, instead of starting a second session. Cleared when the
             // session ends in handle_agent_transcription_stop / _cancel.
             set_bar_voice_active(true);
-            if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
+            // Say how this was triggered, so the session records its method at
+            // birth instead of a stop path inferring it later.
+            if let Err(e) = app_handle.emit(
+                events::agent::TRANSCRIPTION_START,
+                serde_json::json!({ "method": "toggle" }),
+            ) {
                 error!(
                     "[AgentMonitor] Failed to emit agent-transcription-start: {}",
                     e
@@ -313,7 +318,14 @@ pub async fn agent_voice(app: AppHandle, action: String) -> Result<(), String> {
     };
     info!("[AgentMonitor] agent_voice({action}) from the bar");
     set_bar_voice_active(action == "start");
-    app.emit(event, ()).map_err(|e| e.to_string())
+    // A start says how it was triggered so the session can record it. Stop and
+    // cancel carry no method: they act on whatever session is standing.
+    let payload = if action == "start" {
+        serde_json::json!({ "method": "mouse" })
+    } else {
+        serde_json::Value::Null
+    };
+    app.emit(event, payload).map_err(|e| e.to_string())
 }
 
 // Public function to force reset the agent input state
@@ -336,8 +348,13 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tauri::async_runtime::
             // Check if we should start agent mode
             if state.check_and_start_agent() {
                 info!("[AgentMonitor] Background task detected agent should start - emitting agent-transcription-start");
-                // Emit event to start agent
-                if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
+                // Emit event to start agent. This is the held-key path, so the
+                // session records push_to_talk rather than leaving the method
+                // unstated for a stop path to guess at.
+                if let Err(e) = app_handle.emit(
+                    events::agent::TRANSCRIPTION_START,
+                    serde_json::json!({ "method": "push_to_talk" }),
+                ) {
                     error!(
                         "[AgentMonitor] Failed to emit agent-transcription-start: {}",
                         e

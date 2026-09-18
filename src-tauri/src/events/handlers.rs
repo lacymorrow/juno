@@ -10,6 +10,7 @@ use tracing::{error, info, warn};
 
 use crate::agent::tools::timer_tools::TimerTask;
 use crate::events::timer_handlers::TimerEventHandler;
+use crate::state::{SessionClaim, VoiceStartMethod, VoiceTarget};
 use crate::window_management::WindowManager;
 use crate::{constants, state};
 
@@ -99,10 +100,13 @@ fn setup_dictation_listeners(app: &AppHandle) {
     let app_handle_for_dictation_start = app.clone();
     app.listen(
         constants::events::dictation::TRANSCRIPTION_START,
-        move |_event| {
+        move |event| {
             let app_handle = app_handle_for_dictation_start.clone();
+            // The payload says how this session was triggered, so the session
+            // identity can record it instead of the stop paths inferring it.
+            let method = VoiceStartMethod::from_event_payload(event.payload());
             tauri::async_runtime::spawn(async move {
-                handle_dictation_transcription_start(app_handle).await;
+                handle_dictation_transcription_start(app_handle, method).await;
             });
         },
     );
@@ -174,13 +178,28 @@ async fn handle_voice_transcription_final_result(app_handle: AppHandle, payload_
         payload_str
     );
 
-    // Route on what the session was started for, not on whether one is still
-    // running. Reading `dictation_active` here always saw false, because the
-    // transcript is produced by stopping the session that would have set it,
-    // so every dictation was submitted to the agent instead of being typed.
+    // Ask the session who this text belongs to. Routing used to read
+    // `dictation_active`, which always saw false here, because the transcript
+    // is produced by stopping the session that would have set it, so every
+    // dictation was submitted to the agent instead of being typed. The session
+    // records its target when it starts and keeps it past the stop.
     let app_state = app_handle.state::<state::AppState>();
-    let is_dictation_active =
-        app_state.take_dictation_session() || app_state.get_dictation_active().unwrap_or(false);
+    let Some(session) = app_state.take_voice_transcript_owner() else {
+        // Text with no owner is not delivered. Every path that opens the
+        // microphone registers a session, so arriving here means the session
+        // was cancelled and the engine finalised anyway. Delivering it would
+        // mean typing or, worse, acting on a sentence the person asked to
+        // throw away, which is the whole family of bugs this exists to end.
+        warn!(
+            "[Event] Final result arrived with no voice session to own it; discarding it rather than guessing where it should go"
+        );
+        return;
+    };
+    info!(
+        "[Event] Final result belongs to voice session {}",
+        session.describe()
+    );
+    let deliver_to_dictation = session.target == VoiceTarget::Dictation;
 
     // Extract text from payload
     let extracted_text = match serde_json::from_str::<serde_json::Value>(payload_str) {
@@ -191,8 +210,8 @@ async fn handle_voice_transcription_final_result(app_handle: AppHandle, payload_
         Err(_) => None,
     };
 
-    // Handle the result based on mode
-    if is_dictation_active {
+    // Hand the text to the side of the app that its session belongs to.
+    if deliver_to_dictation {
         handle_dictation_mode_result(app_handle, extracted_text).await;
     } else {
         handle_agent_mode_result(app_handle, extracted_text, payload_str.to_string()).await;
@@ -389,31 +408,54 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, _pa
 }
 
 async fn handle_voice_transcription_error(app_handle: AppHandle) {
-    // A failed session produces no transcript, so nothing would consume the
-    // dictation latch. Left set, it would misroute the *next* session's result.
-    app_handle
-        .state::<crate::state::AppState>()
-        .take_dictation_session();
+    // A failed session produces no transcript, so nothing would close it out.
+    // Left open it would claim the *next* session's result, and every stop
+    // aimed at the next session would be refused as stale.
+    let app_state = app_handle.state::<crate::state::AppState>();
+    match app_state.claim_voice_discard(SessionClaim::Current) {
+        Ok(session) => warn!(
+            "[Event] Transcription failed; discarding voice session {}",
+            session.describe()
+        ),
+        Err(rejection) => info!(
+            "[Event] Transcription failed with nothing to discard: {}",
+            rejection.reason()
+        ),
+    }
 
     // Play voice error sound automatically when transcription fails
-    let state = app_handle.state::<crate::state::AppState>();
-    if let Err(e) = crate::commands::sound::play_voice_error_sound(app_handle.clone(), state).await
+    if let Err(e) =
+        crate::commands::sound::play_voice_error_sound(app_handle.clone(), app_state).await
     {
         warn!("Failed to play voice error sound: {}", e);
     }
 }
 
-async fn handle_dictation_transcription_start(app_handle: AppHandle) {
-    // Mark this as Dictation Mode in AppState BEFORE starting transcription
+async fn handle_dictation_transcription_start(app_handle: AppHandle, method: VoiceStartMethod) {
     let app_state = app_handle.state::<state::AppState>();
+
+    // Give the session an identity before anything opens the microphone. Every
+    // stop path from here on consults it rather than working out for itself
+    // whether it owns what it is stopping.
+    let begun = app_state.begin_voice_session(VoiceTarget::Dictation, method);
+    if let Some(superseded) = begun.superseded {
+        warn!(
+            "[Dictation Mode] Starting {} while {} was still registered; the older session loses ownership",
+            begun.session.describe(),
+            superseded.describe()
+        );
+    }
+    let session_id = begun.session.id;
+    info!(
+        "[Dictation Mode] Opened voice session {}",
+        begun.session.describe()
+    );
+
+    // Mark this as Dictation Mode in AppState BEFORE starting transcription.
+    // This is a liveness flag for the UI only; the session above is what says
+    // who the transcript belongs to.
     if let Err(e) = app_state.set_dictation_active(true) {
         warn!("Failed to set dictation active state: {}", e);
-    }
-    // And latch the intent, which has to outlive the flag above: the transcript
-    // is delivered after the session stops, when `dictation_active` is already
-    // false again.
-    if let Err(e) = app_state.begin_dictation_session() {
-        warn!("Failed to record the dictation session: {}", e);
     }
 
     // Pause always listening mode if it's active
@@ -486,6 +528,11 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
             Err(e) => {
                 error!("[Dictation Mode] Failed to start dictation: {}", e);
 
+                // The microphone never opened, so this session owns nothing.
+                // Leaving it registered would make it claim the next
+                // session's transcript.
+                let _ = app_state.claim_voice_discard(SessionClaim::Id(session_id));
+
                 // Reset the dictation active flag
                 if let Err(e) = app_state.set_dictation_active(false) {
                     warn!("Failed to reset dictation active state: {}", e);
@@ -513,6 +560,9 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
     } else {
         error!("[Dictation Mode] Voice controller not found, cannot start dictation");
 
+        // Nothing was ever recording, so retire the identity we just minted.
+        let _ = app_state.claim_voice_discard(SessionClaim::Id(session_id));
+
         // Reset the dictation active flag
         if let Err(e) = app_state.set_dictation_active(false) {
             warn!("Failed to reset dictation active state: {}", e);
@@ -531,19 +581,59 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
 async fn handle_dictation_cancel(app_handle: AppHandle) {
     info!("[Event] Cancelling dictation");
 
-    // Cancel means cancel, the same way it does on the agent path. This used
-    // to call stop_dictation, which finalises the audio and emits a final
-    // result, so asking to cancel dictation typed what you had just said.
-    if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-        let _ = tauri_plugin_voice_transcription::commands::cancel_dictation(
-            app_handle.clone(),
-            controller_state,
-        )
-        .await;
+    let app_state = app_handle.state::<state::AppState>();
+
+    // The verb is fixed, the session is not. If what is open is an agent
+    // session, this cancel is aimed at the wrong state machine: reaching into
+    // the shared voice controller here would silence the microphone while the
+    // agent path still believed it was listening. Hand it to the path that
+    // owns it instead, with the same verb.
+    if let Some(session) = app_state.current_voice_session() {
+        if session.target == VoiceTarget::Agent {
+            info!(
+                "[Dictation Cancel] The open session is {}; routing the cancel there",
+                session.describe()
+            );
+            if let Err(e) = app_handle.emit(constants::events::agent::CANCEL, ()) {
+                error!(
+                    "[Dictation Cancel] Failed to hand the cancel to the agent: {}",
+                    e
+                );
+            }
+            return;
+        }
+    }
+
+    // Claim it before touching the audio. A cancel that owns nothing still
+    // runs the cleanup below, because that cleanup is idempotent and is the
+    // only thing that unsticks a monitor left mid-hold.
+    match app_state.claim_voice_discard(SessionClaim::Current) {
+        Ok(session) => {
+            info!(
+                "[Dictation Cancel] Discarding voice session {}",
+                session.describe()
+            );
+            // Cancel means cancel, the same way it does on the agent path.
+            // This used to call stop_dictation, which finalises the audio and
+            // emits a final result, so asking to cancel dictation typed what
+            // you had just said.
+            if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
+                let _ = tauri_plugin_voice_transcription::commands::cancel_dictation(
+                    app_handle.clone(),
+                    controller_state,
+                )
+                .await;
+            }
+        }
+        Err(rejection) => {
+            info!(
+                "[Dictation Cancel] No audio to discard ({}); running cleanup only",
+                rejection.reason()
+            );
+        }
     }
 
     // Reset state
-    let app_state = app_handle.state::<state::AppState>();
     if let Err(e) = app_state.set_dictation_active(false) {
         warn!("Failed to reset dictation active state: {}", e);
     }
@@ -605,13 +695,50 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
 async fn handle_dictation_stop(app_handle: AppHandle) {
     info!("[Event] Stopping dictation normally");
 
+    let app_state = app_handle.state::<state::AppState>();
+
+    // Same rule as cancel: the verb stays "commit", the session decides whose
+    // audio it commits. An agent session finalised through here would have its
+    // text typed instead of submitted.
+    if let Some(session) = app_state.current_voice_session() {
+        if session.target == VoiceTarget::Agent {
+            info!(
+                "[Dictation Stop] The open session is {}; routing the stop there",
+                session.describe()
+            );
+            if let Err(e) = app_handle.emit(constants::events::agent::TRANSCRIPTION_STOP, ()) {
+                error!(
+                    "[Dictation Stop] Failed to hand the stop to the agent: {}",
+                    e
+                );
+            }
+            return;
+        }
+    }
+
+    // Claim before doing anything visible or audible. A stop for a session
+    // that is already gone (a key released after a cancel, a doubled stop
+    // event) finds nothing to claim and does nothing at all, rather than
+    // finalising and typing a session somebody else already ended.
+    match app_state.claim_voice_commit(SessionClaim::Current) {
+        Ok(session) => {
+            info!(
+                "[Dictation Stop] Committing voice session {}",
+                session.describe()
+            );
+        }
+        Err(rejection) => {
+            info!("[Dictation Stop] Nothing to stop: {}", rejection.reason());
+            return;
+        }
+    }
+
     // Reset visible state FIRST, before the speech-to-text finalization below.
     // `stop_dictation()` blocks for however long the final transcription takes
     // (often a second or more); doing the state reset and bar update after it
     // left the bar visually stuck in dictation mode the whole time. Flip the
     // bar out of dictation mode now so the UI reacts to the key-up immediately,
     // then finalize the transcription.
-    let app_state = app_handle.state::<state::AppState>();
     if let Err(e) = app_state.set_dictation_active(false) {
         warn!("Failed to reset dictation active state: {}", e);
     }
@@ -670,6 +797,22 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
 
 async fn handle_force_stop_transcription(app_handle: AppHandle) {
     info!("[Event] Force stopping transcription");
+
+    // A force path runs precisely when the rest of the state is not to be
+    // trusted, so it is not gated on owning a session: it tears the controller
+    // down either way. It does claim the session when there is one, because
+    // this finalises the audio and an unowned transcript is dropped.
+    let app_state = app_handle.state::<state::AppState>();
+    match app_state.claim_voice_commit(SessionClaim::Current) {
+        Ok(session) => info!(
+            "[Force Stop] Finalising voice session {}",
+            session.describe()
+        ),
+        Err(rejection) => warn!(
+            "[Force Stop] Tearing down the controller with no session to claim: {}",
+            rejection.reason()
+        ),
+    }
 
     if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
         let _ = tauri_plugin_voice_transcription::commands::stop_dictation(

@@ -148,7 +148,11 @@ pub mod utils {
         if let Some(controller_state) = app_handle.try_state::<std::sync::Arc<
             std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>,
         >>() {
-            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+            // Cancel, not stop. Recovering from a transcription error is a
+            // cancel-shaped situation, and stop_dictation finalises the audio
+            // and emits a final result that gets typed. Erroring out would have
+            // delivered whatever the failing engine had managed to hear.
+            let _ = tauri_plugin_voice_transcription::commands::cancel_dictation(
                 app_handle.clone(),
                 controller_state,
             )
@@ -184,14 +188,18 @@ pub mod utils {
     pub async fn handle_agent_error(app_handle: &AppHandle, error: &str) {
         log_and_emit_error(app_handle, "AgentSystem", "execution", error, true);
 
-        // Stop agent execution
-        let app_state = app_handle.state::<crate::state::AppState>();
-        app_state.mark_agent_execution_finished();
-
         // Stop TTS if running
         crate::tts::stop_speech();
 
-        if let Err(e) = app_handle.emit(crate::constants::events::agent::ACTIVE, false) {
+        // Stop agent execution. Clearing the flag and announcing it are one
+        // call: doing them separately is how the two drifted apart elsewhere
+        // in this lifecycle, and an error path is the worst place to leave the
+        // menu bar showing an agent that has already failed.
+        if let Err(e) = crate::state_management::handle_agent_execution_state_transition(
+            app_handle, false, None, None,
+        )
+        .await
+        {
             error!(
                 "{}",
                 format_error(

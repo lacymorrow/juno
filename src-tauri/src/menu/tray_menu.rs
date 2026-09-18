@@ -792,6 +792,31 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
     info!("✅ Tray icon state monitoring setup completed");
 }
 
+/// Pick the icon that matches a set of live subsystems.
+///
+/// Split out from `determine_current_state` so the precedence is testable
+/// without an `AppHandle`. A run that is executing outranks everything else on
+/// purpose: the voice capture that may have started it is already over by the
+/// time the agent is working, and a capture-phase teardown that emits
+/// `agent-active = false` while a run is still going must not be allowed to
+/// drop the icon out of Agent mid-run. Recomputing from the flags is what
+/// makes that payload harmless.
+fn tray_state_for(is_agent: bool, is_dictation: bool, is_always_listening: bool) -> TrayIconState {
+    if is_agent {
+        return TrayIconState::Agent;
+    }
+
+    if is_dictation {
+        return TrayIconState::Recording;
+    }
+
+    if is_always_listening {
+        return TrayIconState::Armed;
+    }
+
+    TrayIconState::Idle
+}
+
 /// Determine the current tray icon state based on app state
 async fn determine_current_state(app_handle: &AppHandle) -> TrayIconState {
     let app_state = app_handle.state::<AppState>();
@@ -806,22 +831,9 @@ async fn determine_current_state(app_handle: &AppHandle) -> TrayIconState {
         is_agent, is_dictation, is_always_listening
     );
 
-    if is_agent {
-        return TrayIconState::Agent;
-    }
-
-    if is_dictation {
-        return TrayIconState::Recording;
-    }
-
-    // Check always listening state
-    if is_always_listening {
-        info!("Always listening is active, showing the armed icon");
-        return TrayIconState::Armed;
-    }
-
-    info!("No active states, showing the idle icon");
-    TrayIconState::Idle
+    let state = tray_state_for(is_agent, is_dictation, is_always_listening);
+    info!("Tray icon state resolved to {:?}", state);
+    state
 }
 
 /// Update the tray icon state
@@ -1082,6 +1094,41 @@ mod tests {
         }
         assert_eq!(TrayIconState::Idle.label(), "Ready");
         assert_eq!(TrayIconState::Error.label(), "Needs attention");
+    }
+
+    #[test]
+    fn an_executing_agent_outranks_every_other_state() {
+        // A typed run sets only the execution flag: nothing is being captured
+        // and nothing is listening, so this is the case the menu bar used to
+        // get wrong by showing Idle for the whole run.
+        assert_eq!(tray_state_for(true, false, false), TrayIconState::Agent);
+
+        // A voice-started run overlaps with the capture and always-listening
+        // flags on the way in and out. Agent still wins, which is what keeps a
+        // capture-phase teardown from dropping the icon mid-run.
+        assert_eq!(tray_state_for(true, true, false), TrayIconState::Agent);
+        assert_eq!(tray_state_for(true, false, true), TrayIconState::Agent);
+        assert_eq!(tray_state_for(true, true, true), TrayIconState::Agent);
+    }
+
+    #[test]
+    fn the_remaining_states_fall_through_in_order() {
+        assert_eq!(tray_state_for(false, true, false), TrayIconState::Recording);
+        assert_eq!(tray_state_for(false, true, true), TrayIconState::Recording);
+        assert_eq!(tray_state_for(false, false, true), TrayIconState::Armed);
+        assert_eq!(tray_state_for(false, false, false), TrayIconState::Idle);
+    }
+
+    #[test]
+    fn an_unreadable_active_payload_is_not_treated_as_true() {
+        // `Some(true)` is the only payload the listeners short-circuit on.
+        // Anything else sends them back to the flags, which is how a stale or
+        // malformed event stops being able to strand the icon.
+        assert_eq!(payload_is_active("true"), Some(true));
+        assert_eq!(payload_is_active("false"), Some(false));
+        assert_eq!(payload_is_active("null"), None);
+        assert_eq!(payload_is_active(""), None);
+        assert_eq!(payload_is_active("\"true\""), None);
     }
 
     #[test]

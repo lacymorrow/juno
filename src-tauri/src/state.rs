@@ -14,8 +14,13 @@ use tokio::sync::{watch, Mutex as TokioMutex};
 use tracing::{debug, error, info, warn};
 
 pub mod desktop_wrapper;
+pub mod voice_session;
 use crate::commands::shell::ShellSessions;
 pub use desktop_wrapper::DesktopWrapper;
+pub use voice_session::{
+    BeginOutcome, ClaimRejection, SessionClaim, VoicePhase, VoiceSession, VoiceSessionId,
+    VoiceSessionRegistry, VoiceStartMethod, VoiceTarget,
+};
 
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
@@ -199,17 +204,14 @@ pub struct AudioSettings {
     pub supertonic_server_url: String,
     pub supertonic_voice: String,
     pub supertonic_speed: f64,
-    pub dictation_active: bool,
-    /// What the current voice session was started for, as opposed to whether
-    /// one is running right now.
+    /// Whether a dictation session is running right now.
     ///
-    /// `dictation_active` is a liveness flag: it goes false the moment the
-    /// session stops. The transcript only arrives *because* the session
-    /// stopped, so routing on the liveness flag always read false and sent
-    /// every dictation straight to the agent. This latch is set when a
-    /// dictation session starts and cleared only once its transcript has been
-    /// routed.
-    pub dictation_session: bool,
+    /// A liveness flag and nothing more: it goes false the moment the session
+    /// stops, so it can drive the UI but must never be asked who owns a
+    /// transcript. That question belongs to
+    /// [`voice_session::VoiceSessionRegistry`], which records what the session
+    /// was started for and keeps that answer past the stop.
+    pub dictation_active: bool,
     pub dictation_clipboard_enabled: bool,
     pub sound_enabled: bool,
     pub always_listening_active: bool,
@@ -240,7 +242,6 @@ impl Default for AudioSettings {
             supertonic_voice: crate::tts::supertonic::DEFAULT_VOICE.to_string(),
             supertonic_speed: crate::tts::supertonic::DEFAULT_SPEED,
             dictation_active: false,
-            dictation_session: false,
             dictation_clipboard_enabled: true,
             sound_enabled: true,
             always_listening_active: false,
@@ -319,6 +320,11 @@ pub struct AppState {
 
     // Grouped settings structures (major simplification)
     pub audio_settings: Arc<StdMutex<AudioSettings>>,
+
+    /// Who owns the microphone. One registry, one session, consulted by every
+    /// start and every stop. See [`voice_session`] for why it exists.
+    voice_sessions: Arc<StdMutex<VoiceSessionRegistry>>,
+
     pub agent_execution: Arc<StdMutex<AgentExecutionState>>,
     pub ui_settings: Arc<StdMutex<UISettings>>,
     pub input_settings: Arc<StdMutex<InputSettings>>,
@@ -388,6 +394,7 @@ impl AppState {
 
             // Initialize grouped settings
             audio_settings: Arc::new(StdMutex::new(AudioSettings::default())),
+            voice_sessions: Arc::new(StdMutex::new(VoiceSessionRegistry::new())),
             agent_execution: Arc::new(StdMutex::new(AgentExecutionState::default())),
             ui_settings: Arc::new(StdMutex::new(UISettings::default())),
             input_settings: Arc::new(StdMutex::new(InputSettings::default())),
@@ -655,22 +662,47 @@ impl AppState {
             .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "dictation active status", e))
     }
 
-    /// Remember that the session now starting is a dictation, so its transcript
-    /// can be routed correctly once it arrives.
-    pub fn begin_dictation_session(&self) -> Result<(), String> {
-        self.audio_settings
+    // -- Voice session identity -------------------------------------------
+    //
+    // Thin wrappers over the one registry. A poisoned lock is recovered rather
+    // than propagated: refusing to answer "whose session is this" would leave
+    // every stop path back where it started, guessing.
+
+    fn voice_sessions(&self) -> std::sync::MutexGuard<'_, VoiceSessionRegistry> {
+        self.voice_sessions
             .lock()
-            .map(|mut settings| settings.dictation_session = true)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "dictation session", e))
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Whether the transcript now arriving belongs to a dictation session,
-    /// clearing the latch so the next session starts from a clean slate.
-    pub fn take_dictation_session(&self) -> bool {
-        self.audio_settings
-            .lock()
-            .map(|mut settings| std::mem::take(&mut settings.dictation_session))
-            .unwrap_or(false)
+    /// Open a voice session and record what it is for and how it was started.
+    /// Called once by each start path, before the microphone opens.
+    pub fn begin_voice_session(
+        &self,
+        target: VoiceTarget,
+        method: VoiceStartMethod,
+    ) -> BeginOutcome {
+        self.voice_sessions().begin(target, method)
+    }
+
+    /// The session that is open now, if any.
+    pub fn current_voice_session(&self) -> Option<VoiceSession> {
+        self.voice_sessions().current()
+    }
+
+    /// Claim a session in order to finalise it. The transcript that follows
+    /// belongs to the returned session.
+    pub fn claim_voice_commit(&self, claim: SessionClaim) -> Result<VoiceSession, ClaimRejection> {
+        self.voice_sessions().claim_commit(claim)
+    }
+
+    /// Claim a session in order to throw it away. Nothing is typed or sent.
+    pub fn claim_voice_discard(&self, claim: SessionClaim) -> Result<VoiceSession, ClaimRejection> {
+        self.voice_sessions().claim_discard(claim)
+    }
+
+    /// Hand the arriving transcript to the session that owns it.
+    pub fn take_voice_transcript_owner(&self) -> Option<VoiceSession> {
+        self.voice_sessions().take_transcript_owner()
     }
 
     pub fn set_dictation_active(&self, active: bool) -> Result<(), String> {
@@ -2445,38 +2477,69 @@ mod tests {
     }
 
     #[test]
-    fn dictation_session_outlives_the_liveness_flag() {
+    fn the_session_outlives_the_liveness_flag() {
         // The exact sequence that sent every dictation to the agent: the
         // session starts, then stops (clearing dictation_active), and only
         // afterwards does the transcript arrive and get routed.
         let state = AppState::new(None);
-        state.begin_dictation_session().unwrap();
+        let session = state
+            .begin_voice_session(VoiceTarget::Dictation, VoiceStartMethod::PushToTalk)
+            .session;
         state.set_dictation_active(true).unwrap();
 
+        state
+            .claim_voice_commit(SessionClaim::Id(session.id))
+            .expect("the stop owns this session");
         state.set_dictation_active(false).unwrap();
         assert!(
             !state.get_dictation_active().unwrap(),
             "the liveness flag is false by the time the transcript lands"
         );
-        assert!(
-            state.take_dictation_session(),
-            "but the session is still known to be a dictation"
+        assert_eq!(
+            state.take_voice_transcript_owner().map(|s| s.target),
+            Some(VoiceTarget::Dictation),
+            "but the session still says what it was started for"
         );
     }
 
     #[test]
-    fn dictation_session_is_consumed_once() {
-        // Otherwise a stale latch would capture the next agent query.
+    fn a_transcript_has_exactly_one_owner() {
+        // Otherwise a leftover owner would capture the next session's text.
         let state = AppState::new(None);
-        state.begin_dictation_session().unwrap();
-        assert!(state.take_dictation_session());
-        assert!(!state.take_dictation_session());
+        state.begin_voice_session(VoiceTarget::Dictation, VoiceStartMethod::Toggle);
+        assert!(state.take_voice_transcript_owner().is_some());
+        assert!(state.take_voice_transcript_owner().is_none());
     }
 
     #[test]
-    fn an_agent_session_is_not_a_dictation() {
+    fn nothing_owns_a_transcript_when_no_session_was_opened() {
         let state = AppState::new(None);
-        assert!(!state.take_dictation_session());
+        assert!(state.take_voice_transcript_owner().is_none());
+        assert_eq!(
+            state.claim_voice_commit(SessionClaim::Current),
+            Err(ClaimRejection::Nothing)
+        );
+    }
+
+    #[test]
+    fn a_late_release_cannot_resurrect_a_cancelled_session() {
+        // Push-to-talk cancelled below the threshold, key still held, then
+        // released. The release carries the id it started with, which is no
+        // longer the current session, so it does nothing.
+        let state = AppState::new(None);
+        let cancelled = state
+            .begin_voice_session(VoiceTarget::Agent, VoiceStartMethod::PushToTalk)
+            .session;
+        state
+            .claim_voice_discard(SessionClaim::Id(cancelled.id))
+            .expect("the cancel owns it");
+
+        assert_eq!(
+            state.claim_voice_commit(SessionClaim::Id(cancelled.id)),
+            Err(ClaimRejection::Nothing),
+            "the release must not finalise and submit what was just cancelled"
+        );
+        assert!(state.take_voice_transcript_owner().is_none());
     }
 
     #[test]
