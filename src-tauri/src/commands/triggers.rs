@@ -39,6 +39,17 @@ pub async fn set_triggers(
     triggers: Vec<Trigger>,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<Trigger>, String> {
+    // Validate what was actually sent, before deduping. Deduping first meant a
+    // trigger that collided on (method, target) was dropped on the floor and
+    // the command still returned Ok, so the row the person had just added
+    // simply vanished with nothing said about it.
+    let dropped = triggers.len() - triggers::dedupe_by_key(triggers.clone()).len();
+    if dropped > 0 {
+        return Err(
+            "That combination of trigger and action already exists. Edit the existing one instead."
+                .to_string(),
+        );
+    }
     let normalized = triggers::dedupe_by_key(triggers);
 
     // Bindings owned by the non-activation utility shortcuts are off-limits.
