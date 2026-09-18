@@ -33,7 +33,6 @@ pub mod keyboard_keys {
     pub const DICTATION_INPUT: &str = "dictation_input";
     pub const STOP_CURRENT_TASK: &str = "stop_current_task";
     pub const OPEN_SETTINGS: &str = "open_settings";
-    pub const VOICE_ACTIVATION: &str = "voice_activation";
 }
 
 /// Onboarding setting keys
@@ -179,18 +178,16 @@ pub mod defaults {
     #[cfg(not(target_os = "macos"))]
     pub const DICTATION_INPUT: &str = "Alt+Space";
 
+    // Fixed, not a default. Escape is the universal cancel key and Cmd+Comma
+    // is the macOS convention for settings, so there is no version of either
+    // that a person is better off rebinding. Nothing writes these any more:
+    // the registration and dispatch paths read these constants directly.
     pub const STOP_CURRENT_TASK: &str = "Escape";
 
     #[cfg(target_os = "macos")]
     pub const OPEN_SETTINGS: &str = "Cmd+Comma";
     #[cfg(not(target_os = "macos"))]
     pub const OPEN_SETTINGS: &str = "Ctrl+Comma";
-
-    // Global voice activation — always-on, works from any app without focusing main window
-    #[cfg(target_os = "macos")]
-    pub const VOICE_ACTIVATION: &str = "Option+Shift+V";
-    #[cfg(not(target_os = "macos"))]
-    pub const VOICE_ACTIVATION: &str = "Alt+Shift+V";
 }
 
 /// Command names for settings operations (to prevent duplication)

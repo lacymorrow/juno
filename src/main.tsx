@@ -45,17 +45,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
             </Routes>
           </BrowserRouter>
         </TooltipProvider>
-        {/* Toast notifications */}
-        <Toaster
-        position="top-center"
-        expand={true}
-        richColors={true}
-        closeButton={true}
-        duration={3000}
-        style={{
-          fontSize: "14px",
-        }}
-      />
+        {/* Toast notifications. Every knob lives in the Toaster wrapper so all
+            windows show the same flat, collapsed stack. */}
+        <Toaster />
       </SettingsProvider>
     </VoiceProvider>
   </React.StrictMode>,

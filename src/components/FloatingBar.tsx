@@ -22,7 +22,7 @@ import {
   PhysicalPosition,
 } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ArrowUp, MessageSquare, Mic, Square, Type, X } from "lucide-react";
+import { ArrowUp, Ear, EarOff, MessageSquare, Mic, Square, Type, X } from "lucide-react";
 
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
@@ -158,12 +158,15 @@ export function floatingBarWindowSize({
   paneOpen,
   rosterVisible,
   composerGrowth = 0,
+  extraWidth = 0,
 }: {
   layout: BarLayout;
   paneOpen: boolean;
   rosterVisible: boolean;
   /** Extra height the typed text needs beyond a single line. */
   composerGrowth?: number;
+  /** Extra width for a control this layout does not always carry. */
+  extraWidth?: number;
 }) {
   const l = BAR_LAYOUTS[layout];
   const d = FLOATING_BAR_DIMENSIONS;
@@ -171,7 +174,7 @@ export function floatingBarWindowSize({
   // the window would simply be clipped by it.
   const band = l.band + Math.max(0, composerGrowth);
   return {
-    width: l.width + 2 * l.pad,
+    width: l.width + Math.max(0, extraWidth) + 2 * l.pad,
     height:
       band +
       2 * l.pad +
@@ -180,6 +183,13 @@ export function floatingBarWindowSize({
     anchorY: l.pad + band / 2,
   };
 }
+
+/**
+ * One pill button and the gap beside it. The hover pill is sized for three
+ * controls; the wake-phrase toggle is a fourth and only exists when a voice
+ * trigger does, so the pill is told to make room for it rather than clipping.
+ */
+export const BAR_PILL_BUTTON_PX = 32;
 
 /** One line of the bar's composer, and the most it may grow to. */
 export const BAR_COMPOSER_LINE_PX = 18;
@@ -346,10 +356,13 @@ function StatusDot({
   state,
   audioLevel,
   driving = false,
+  voicePaused = false,
 }: {
   state: UIState;
   audioLevel: number;
   driving?: boolean;
+  /** A wake phrase is configured, but its engine is paused right now. */
+  voicePaused?: boolean;
 }) {
   const dot = "size-[7px] shrink-0 rounded-full";
 
@@ -418,10 +431,17 @@ function StatusDot({
     case UI.BAR_STATES_DICTATION_READY:
       return <div className={cn(dot, "bg-[#e8b36a]")} />;
     default:
+      // At rest the dot is the only thing on screen, so it carries whether Juno
+      // is listening for its wake phrase. Armed keeps the slow idle breath;
+      // paused is dimmer and still, because a dot that moves the same way in
+      // both states tells a person nothing about whether they can be heard.
       return (
         <div
-          className={cn(dot, "bg-white")}
-          style={{ animation: "fbar-idle 4s ease-in-out infinite" }}
+          data-testid={voicePaused ? "floating-bar-voice-paused" : undefined}
+          className={cn(dot, voicePaused ? "bg-white/30" : "bg-white")}
+          style={
+            voicePaused ? undefined : { animation: "fbar-idle 4s ease-in-out infinite" }
+          }
         />
       );
   }
@@ -494,6 +514,24 @@ const toMonitorRects = (
     size: { width: m.size.width, height: m.size.height },
     scaleFactor: m.scaleFactor,
   }));
+
+/**
+ * Which monitor a physical point is on, or -1 when it is on none of them (the
+ * gap between two displays of different heights is a real place a window's
+ * corner can sit). Callers decide what "none" means for them.
+ */
+const monitorIndexAt = (
+  mons: Array<{ position: { x: number; y: number }; size: { width: number; height: number } }>,
+  x: number,
+  y: number,
+): number =>
+  mons.findIndex(
+    (m) =>
+      x >= m.position.x &&
+      x < m.position.x + m.size.width &&
+      y >= m.position.y &&
+      y < m.position.y + m.size.height,
+  );
 
 /**
  * The window's size in logical pixels. Wells are computed from this, never
@@ -600,10 +638,13 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // mouse-moved into an inactive window's webview, so CSS :hover never fires
   // while another app is active; the native tracking area forwards the
   // cursor position and we light the button under it ourselves.
-  const [hoveredButton, setHoveredButton] = useState<"mic" | "type" | "chat" | null>(null);
+  const [hoveredButton, setHoveredButton] = useState<
+    "mic" | "type" | "chat" | "listen" | null
+  >(null);
   const micRef = useRef<HTMLButtonElement>(null);
   const typeRef = useRef<HTMLButtonElement>(null);
   const chatRef = useRef<HTMLButtonElement>(null);
+  const listenRef = useRef<HTMLButtonElement>(null);
   const moveFrameRef = useRef<number | null>(null);
 
   const onMouseEnterWindow = useCallback(() => {
@@ -651,7 +692,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         return pointInRect(x, y, r);
       };
       setHoveredButton(
-        hit(micRef) ? "mic" : hit(typeRef) ? "type" : hit(chatRef) ? "chat" : null,
+        hit(micRef)
+          ? "mic"
+          : hit(typeRef)
+            ? "type"
+            : hit(chatRef)
+              ? "chat"
+              : hit(listenRef)
+                ? "listen"
+                : null,
       );
     });
   }, []);
@@ -724,7 +773,25 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   useEventListener(EVENTS.PERMISSIONS_NEEDED, () => setPaneShown(true));
 
   const dismissPane = useCallback(() => setPaneShown(false), []);
-  const reopenPane = useCallback(() => setPaneShown(true), []);
+
+  /**
+   * The chat button on the idle pill: show the conversation here, in the pane.
+   *
+   * While the full-size window is up the pane is gated shut (the two would say
+   * everything twice), so this button used to set a flag that `paneOpen`
+   * immediately discarded: pressing it did nothing at all, which is the worst
+   * thing a visible control can do. Asking for the pane is asking for the
+   * conversation in the bar, so the full-size window is put away first and the
+   * pane opens when Rust announces it has gone.
+   */
+  const reopenPane = useCallback(() => {
+    if (mainWindowOpen) {
+      void invoke(COMMANDS.WINDOWS_CLOSE_MAIN_WINDOW).catch((error) =>
+        console.error("FloatingBar: could not close the main window:", error),
+      );
+    }
+    setPaneShown(true);
+  }, [mainWindowOpen]);
 
   // The full-size window taking over, and handing back.
   useEventListener(EVENTS.BAR_MAIN_WINDOW_OPENED, () => setMainWindowOpen(true));
@@ -734,16 +801,39 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const [inputOpen, setInputOpen] = useState(false);
   const [composerGrowth, setComposerGrowth] = useState(0);
 
+  // Whether a turn is in flight, readable from callbacks that are defined
+  // above the derived state that works it out. Kept in step during render.
+  const isWorkingRef = useRef(false);
+
+  // A request for the text input that cannot be honoured yet, because a voice
+  // or working session is still winding down and the bar closes the input
+  // while one is. Consumed by the effect that watches for the bar going quiet.
+  const wantsInputWhenClearRef = useRef(false);
+
   // Starting a new chat means wanting to type, so the pane stays up, empty,
   // with the caret in it. Rotating the backend conversation matters too: the
   // bar used to clear the screen while the agent kept appending to the same
   // conversation and memory buffer.
+  //
+  // Mid-answer it has to stop that answer first. Rotating under a live stream
+  // left the reply arriving into a conversation nobody could see any more, and
+  // the input this opens was closed again a frame later by the working state,
+  // so "New chat" read as a button that ate the screen and gave nothing back.
+  // Stopping is what the person meant by starting again.
   const startNewChat = useCallback(() => {
-    void invoke("new_conversation").catch(() => {});
-    chat.startNewChat();
-    setPaneShown(true);
-    setInputOpen(true);
-  }, [chat.startNewChat]);
+    void (async () => {
+      const wasWorking = isWorkingRef.current;
+      if (wasWorking) await chat.stop();
+      await invoke("new_conversation").catch(() => {});
+      chat.startNewChat();
+      setPaneShown(true);
+      // The stop has been asked for but the backend may still be winding down,
+      // and it closes any input that is open while it does. Ask again once it
+      // is clear.
+      if (wasWorking) wantsInputWhenClearRef.current = true;
+      setInputOpen(true);
+    })();
+  }, [chat.startNewChat, chat.stop]);
 
   // Arm the global Escape monitor only while the pane is open, so Escape can
   // dismiss the pane even when the bar is not focused (the backend emits
@@ -830,7 +920,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   });
   const inputRef = composer.ref;
   // Only what exceeds a single line counts as growth; the band already holds
-  // the first line.
+  // the first line. An empty or absent composer measures to exactly one line,
+  // so this is 0 whenever there is nothing to make room for.
   useEffect(() => {
     const grown = Math.max(0, composer.height - BAR_COMPOSER_LINE_PX);
     setComposerGrowth((prev) => (prev === grown ? prev : grown));
@@ -860,6 +951,82 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     setPaneShown(false);
   }, [closeInput]);
 
+  // === THE WAKE PHRASE ===
+  //
+  // Two separate facts, both answered by Rust rather than inferred here.
+  // `voiceConfigured` is whether a voice trigger exists at all, which is the
+  // person's standing intent and lives in the triggers list. `voiceListening`
+  // is whether the engine is actually running right now, which is an outcome:
+  // it can be false with a trigger enabled because the engine failed to start,
+  // or because this bar paused it. A dot that claims Juno is listening when it
+  // is not is worse than no dot, so neither is ever guessed.
+  const [voiceConfigured, setVoiceConfigured] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+
+  // The startup arming happens while this webview is still loading, so the
+  // first voice-trigger-listening event is usually gone before anyone is
+  // listening for it. Ask once on mount for the same two facts.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [listening, triggers] = await Promise.all([
+          invoke<boolean>("get_always_listening_status"),
+          invoke<Array<{ method?: string; enabled?: boolean; phrase?: string | null }>>(
+            COMMANDS.TRIGGERS_GET_TRIGGERS,
+          ),
+        ]);
+        if (cancelled) return;
+        setVoiceListening(Boolean(listening));
+        setVoiceConfigured(
+          triggers.some(
+            (t) => t.method === "voice" && t.enabled === true && Boolean(t.phrase?.trim()),
+          ),
+        );
+      } catch (error) {
+        console.debug("FloatingBar: could not read the wake phrase state:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The one signal for both. Rust emits it whenever it arms or disarms the
+  // engine: at startup, when the triggers change, when this bar pauses or
+  // resumes it, and after a coordinated stop re-arms. It carries the outcome,
+  // so an engine that failed to start reads as not listening even though the
+  // trigger is there, which is the honest thing to draw.
+  useEventListener<{ listening?: boolean; phrases?: string[] } | null>(
+    EVENTS.VOICE_TRIGGER_LISTENING,
+    (payload) => {
+      setVoiceListening(Boolean(payload?.listening));
+      setVoiceConfigured((payload?.phrases?.length ?? 0) > 0);
+    },
+  );
+
+  /**
+   * Pause or resume the wake phrase, from the bar.
+   *
+   * This controls the engine, never the trigger. The trigger is the standing
+   * intent, so pausing writes nothing to the triggers list: it stops the engine
+   * and leaves `always_listening_active` false, and the next launch arms it
+   * again from the stored triggers (`apply_stored_voice_triggers` clears that
+   * flag first and re-applies). Resuming restarts the same controller, which
+   * still holds the wake words it was given.
+   *
+   * The bar does not move the dot itself. Both commands report what actually
+   * happened through `always-listening-mode-changed`, and the dot follows that.
+   */
+  const toggleVoiceListening = useCallback(() => {
+    const command = voiceListening
+      ? "stop_always_listening_mode"
+      : "start_always_listening_mode";
+    void invoke(command).catch((error) =>
+      console.error("FloatingBar: could not change the wake phrase engine:", error),
+    );
+  }, [voiceListening]);
+
   /** The mic button: a spoken query to the agent (same path as the hotkey). */
   const startTalking = useCallback(async () => {
     try {
@@ -884,20 +1051,56 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
   }, []);
 
-  /** Stop listening and throw it away. Nothing is transcribed, nothing sent. */
+  /**
+   * Stop listening and throw it away. Nothing is transcribed, nothing sent.
+   *
+   * Which cancel that is depends on whose session is open. `agent_voice` speaks
+   * for a spoken query to the agent, and it was used for every voice state, so
+   * cancelling a dictation session reached into the shared voice controller
+   * without telling the dictation state machine anything: the mic went quiet
+   * while `dictation_active`, the dictation monitor and the escape registration
+   * all still believed a session was running, and a key trigger that was still
+   * held simply put it back. From the person's side the X did nothing. A
+   * dictation session is cancelled through its own event, which Rust's
+   * `handle_dictation_cancel` uses to unwind all of that in one place.
+   *
+   * `isDictationMode` rather than the bar state is the discriminator on
+   * purpose: an open dictation mic shows as LISTENING, not DICTATING (the UI
+   * manager's `handle_dictation_started` sets Listening for either kind of
+   * session), so the state alone would miss the case this exists for.
+   */
+  const isDictationSession =
+    barState.isDictationMode || barState.barState === UI.BAR_STATES_DICTATING;
   const cancelTalking = useCallback(async () => {
     try {
+      if (isDictationSession) {
+        // The bar's own state settles from the BAR_STATE_UPDATE that Rust emits
+        // when it puts dictation mode down, exactly as the agent path does.
+        await emit(EVENTS.DICTATION_TRANSCRIPTION_CANCEL);
+        return;
+      }
       await invoke("agent_voice", { action: "cancel" });
     } catch (error) {
       console.error("❌ FloatingBar: failed to cancel listening:", error);
     }
-  }, []);
+  }, [isDictationSession]);
 
-  /** Changed their mind about talking: drop the audio and open the input. */
+  /**
+   * Changed their mind about talking: drop the audio and open the input.
+   *
+   * The input cannot simply be opened here. The backend is still in a voice
+   * state for the moment it takes the cancel to land, and while it is, the bar
+   * both refuses to show the composer and actively closes an input that is
+   * open. So the old version set a flag that was thrown away a frame later and
+   * the button did nothing at all: the person pressed "type instead", the mic
+   * closed, and they were left looking at the idle pill. The wish is recorded
+   * here and acted on when Rust says the session is actually over, which is the
+   * only thing that knows.
+   */
   const switchToTyping = useCallback(async () => {
+    wantsInputWhenClearRef.current = true;
     await cancelTalking();
-    openInput();
-  }, [cancelTalking, openInput]);
+  }, [cancelTalking]);
 
   // Pictures pasted into the pill, as data URLs, alongside the typed text.
   const [pastedImages, setPastedImages] = useState<string[]>([]);
@@ -905,6 +1108,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
+      // A turn is already on its way. The composer is hidden while one is, but
+      // the backend takes a moment to say so, and Enter held down or pressed
+      // twice in that window sent the same question twice.
+      if (isWorkingRef.current) return;
       const trimmedValue = localInputValue.trim();
       // A picture on its own is a message: "what is this?".
       if (!trimmedValue && pastedImages.length === 0) return;
@@ -1017,6 +1224,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const isInputState = INPUT_STATES.includes(currentUiState);
   const isVoice = VOICE_STATES.includes(currentUiState);
   const isWorking = WORKING_STATES.includes(currentUiState) || chat.isProcessing;
+  isWorkingRef.current = isWorking;
 
   // === JUNO IS DRIVING ===
   //
@@ -1043,6 +1251,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     rosterVisible: showRosterStrip,
     driving: isDriving,
   });
+
+  // The hover pill carries a fourth control when there is a wake phrase to
+  // pause, so the pill and its window are both told to make room for it. Every
+  // other layout is unchanged, and so is a bar with no voice trigger.
+  const pillExtraWidth = layout === "hover" && voiceConfigured ? BAR_PILL_BUTTON_PX : 0;
 
   useEffect(() => {
     if (layout !== "hover") setHoveredButton(null);
@@ -1079,6 +1292,66 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   useEffect(() => {
     if ((isVoice || isWorking) && inputOpen) closeInput();
   }, [isVoice, isWorking, inputOpen, closeInput]);
+
+  /**
+   * The X, wherever it appears, and the Stop square: one meaning.
+   *
+   * "Stop what is happening and put me back at rest." The person should not
+   * have to know whether what is happening is a spoken query, a dictation, a
+   * running agent task or a half-typed line, and until now they did: the X in
+   * the composer threw away a draft, the X in the voice row cancelled a
+   * session, and the two had nothing in common but the glyph.
+   *
+   * It is one function, not one command, because the stops underneath are not
+   * interchangeable. A spoken turn is cancelled through its own cancel, which
+   * discards the audio and leaves everything else alone. The coordinated stop
+   * (`stop_all_operations`, the one Escape reaches) is the heavier instrument:
+   * it clears every subsystem and then re-arms the wake phrase from the stored
+   * triggers, which is right for a running task and for an utterance nothing
+   * lighter can reach, and wrong for a sentence somebody is still saying into
+   * the ordinary mic.
+   */
+  const stopCurrentActivity = useCallback(() => {
+    // A wake-phrase capture is held by the always-listening engine, not by the
+    // voice controller every lighter cancel reaches, so stopping that engine is
+    // the only thing that drops the utterance. That is safe now: the
+    // coordinated stop re-arms from the stored triggers on its way out, so the
+    // wake phrase survives being used to cancel one sentence.
+    if (currentUiState === UI.BAR_STATES_ALWAYS_LISTENING) {
+      void chat.stop();
+      return;
+    }
+    if (isVoice) {
+      void cancelTalking();
+      return;
+    }
+    if (isDriving || isWorking) {
+      void chat.stop();
+      return;
+    }
+    // Nothing is running. The only thing left to put down is the draft, and
+    // the pane with it, because an open pane keeps the composer up.
+    abandonInput();
+  }, [
+    currentUiState,
+    isVoice,
+    isDriving,
+    isWorking,
+    cancelTalking,
+    chat.stop,
+    abandonInput,
+  ]);
+
+  // "Type instead" and "New chat", honoured once the session they interrupted
+  // is really over. Anything that starts in the meantime (the hotkey, a wake
+  // word) outranks the request: the wish was to type instead of *that*
+  // session, not instead of whatever the person started next.
+  useEffect(() => {
+    if (!wantsInputWhenClearRef.current) return;
+    if (isVoice || isWorking) return;
+    wantsInputWhenClearRef.current = false;
+    openInput();
+  }, [isVoice, isWorking, openInput]);
 
   /**
    * Escape while idle closes the input, then the pane. Escape while work is
@@ -1139,46 +1412,127 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     if (paneOpen || showRosterStrip) void recomputeGrowUp();
   }, [paneOpen, showRosterStrip, recomputeGrowUp]);
 
+  // The drag-well slot the bar currently occupies (col/row), so it can re-home
+  // to the same slot on another display when the cursor moves there, and so a
+  // resize knows which edge of the screen it is anchored to.
+  const currentSlotRef = useRef<WellSlot | null>(null);
+
+  // The display geometry the well maths runs on, kept here so a resize can
+  // work out where it belongs without waiting on IPC first: a hover that has
+  // to ask the OS about monitors before the window may grow is a hover that
+  // stutters. Refreshed in the background after every resize and at every
+  // point that moves the bar deliberately, so the only stale moment is between
+  // a display being rearranged and the next resize, which the on-screen clamp
+  // in useWindowSize covers.
+  const geometryRef = useRef<{ mons: MonitorRect[]; monitorIndex: number } | null>(null);
+
+  const refreshGeometry = useCallback(async () => {
+    try {
+      const [pos, mons] = await Promise.all([
+        getCurrentWindow().outerPosition(),
+        availableMonitors(),
+      ]);
+      if (!mons.length) return;
+      const idx = monitorIndexAt(mons, pos.x, pos.y);
+      geometryRef.current = {
+        mons: toMonitorRects(mons),
+        // A corner that is momentarily nowhere (mid-move, or in the gap
+        // between two displays) is not a reason to re-home the bar.
+        monitorIndex: idx >= 0 ? idx : (geometryRef.current?.monitorIndex ?? 0),
+      };
+    } catch (error) {
+      console.debug("FloatingBar: geometry refresh failed:", error);
+    }
+  }, []);
+
+  /**
+   * The well this bar's slot maps to at `size` (logical px), on the display it
+   * is on. Null while the slot or the geometry is unknown (nothing has placed
+   * the bar yet), so callers can fall back.
+   *
+   * A well is defined for a window size: the top-right well puts the window's
+   * *right* edge on the inset, so the same slot is a different top-left once
+   * the window grows. That is why a resize has to ask again rather than keep
+   * the top-left it had.
+   */
+  const wellForCurrentSlot = useCallback(
+    (size: { width: number; height: number }): Well | null => {
+      const slot = currentSlotRef.current;
+      const geo = geometryRef.current;
+      if (!slot || !geo) return null;
+      const wells = computeWells(geo.mons, {
+        windowWidth: size.width,
+        windowHeight: size.height,
+        includeCenter: true,
+      });
+      if (!wells.length) return null;
+      return wellForSlot(slot, geo.monitorIndex, wells);
+    },
+    [],
+  );
+
   // On launch the bar always lands in a well, never at an arbitrary spot.
   // A remembered position is re-snapped to the nearest current well (so it
   // survives a resolution / monitor change); a fresh install with nothing saved
   // defaults to the least-intrusive well: top-right on the monitor the bar
   // opened on. Top-right clears the menu bar and the Dock, unlike the bottom
-  // wells which do not yet measure the Dock. Runs once, independent of the
-  // first resize so it does not fight window sizing.
+  // wells which do not yet measure the Dock.
+  //
+  // This also puts the bar on screen. The window is created hidden at the
+  // placeholder frame in tauri.conf.json, because only the webview knows which
+  // well the bar was left in; Rust used to show it on a 100ms timer, so the bar
+  // appeared at the placeholder frame and then moved and resized itself while
+  // the app finished loading, which is the jump people saw. Frame first, then
+  // show, and the first thing on screen is already right. `show_bar_when_ready`
+  // is called whatever happens above: a bar that cannot work out its well is
+  // still better than no bar (and Rust shows it anyway after a few seconds).
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const win = getCurrentWindow();
         const saved = await invoke<{ x: number; y: number } | null>("get_bar_position");
-        const [logical, pos, mons] = await Promise.all([
-          logicalWindowSize(win),
-          win.outerPosition(),
+        const [pos, mons] = await Promise.all([
+          getCurrentWindow().outerPosition(),
           availableMonitors(),
         ]);
         if (cancelled || !mons.length) return;
 
-        const wells = computeWells(toMonitorRects(mons), { ...logical, includeCenter: true });
+        // The size the bar is about to be, not the size the window happens to
+        // have been created at: a well is computed for a footprint, and the
+        // resize effect is racing this one to apply exactly this size.
+        const initial = floatingBarWindowSize({
+          layout: "compact",
+          paneOpen: false,
+          rosterVisible: false,
+        });
+        const wells = computeWells(toMonitorRects(mons), {
+          windowWidth: initial.width,
+          windowHeight: initial.height,
+          includeCenter: true,
+        });
         if (!wells.length) return;
 
         let target: Well | null = saved ? nearestWell(saved, wells) : null;
         if (!target) {
-          // The monitor the window currently sits on (fall back to the first).
-          const monIndex = mons.findIndex(
-            (m) =>
-              pos.x >= m.position.x &&
-              pos.x < m.position.x + m.size.width &&
-              pos.y >= m.position.y &&
-              pos.y < m.position.y + m.size.height,
-          );
-          const mon = monIndex >= 0 ? monIndex : 0;
+          // The monitor the window was created on, or the first one.
+          const mon = Math.max(0, monitorIndexAt(mons, pos.x, pos.y));
           target = wellForSlot(SLOT.topRight, mon, wells) ?? wells[0];
         }
         if (cancelled || !target) return;
 
-        await win.setPosition(new PhysicalPosition(target.x, target.y));
+        // Move and size in one transaction, so even a bar that is somehow
+        // already visible cannot show an intermediate frame.
+        await invoke("set_bar_frame", {
+          x: target.x,
+          y: target.y,
+          width: initial.width,
+          height: initial.height,
+        });
         currentSlotRef.current = { fx: target.fx, fy: target.fy };
+        geometryRef.current = {
+          mons: toMonitorRects(mons),
+          monitorIndex: target.monitorIndex,
+        };
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
         } catch {
@@ -1186,6 +1540,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         }
       } catch (error) {
         console.debug("FloatingBar: default/restore well failed:", error);
+      } finally {
+        if (!cancelled) {
+          await invoke("show_bar_when_ready").catch((error) =>
+            console.error("FloatingBar: could not show the bar:", error),
+          );
+        }
       }
     })();
     return () => {
@@ -1206,16 +1566,43 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       // Gated on the composer being on screen, exactly as the pill is, so the
       // window and the pill inside it never disagree about how tall it is.
       composerGrowth: showInput ? composerGrowth : 0,
+      extraWidth: pillExtraWidth,
     });
     const prev = lastWindowRef.current;
     lastWindowRef.current = { width: next.width, height: next.height };
-    // growUp is only sent when set, so the downward path's resize config (and
-    // its tests) stay byte-for-byte identical.
-    const config = growUp ? { ...next, growUp: true } : next;
-    const apply = () =>
+
+    const apply = () => {
+      // A bar that sits in a well is anchored to a screen edge, not to its own
+      // top-left. The top-right well holds the window's *right* edge on the
+      // inset, so opening the chat pane has to grow the window leftward to stay
+      // there. The centre-stable resize grew it around its own centre instead
+      // and let the on-screen clamp shove it back, so every open and close of
+      // the pane walked the bar a little further out of the well: it came back
+      // to the idle pill somewhere beside the well it started in, and only a
+      // fresh drag put it back. Asking for the same slot at the new size does
+      // both jobs at once, grows from the anchored edge and lands the collapsed
+      // pill exactly back in its well, and both happen inside the one setFrame
+      // call the resize already made, so nothing is ever seen moving twice.
+      //
+      // Not while a drag is in flight: the bar belongs under the cursor then,
+      // not in the well it may be about to leave.
+      const dragging = snapArmedRef.current || snapAnimatingRef.current;
+      const well = dragging ? null : wellForCurrentSlot(next);
+      // growUp is only sent when there is no well to anchor to, so the fallback
+      // path's resize config (and its tests) stay byte-for-byte identical.
+      const config = well
+        ? { ...next, well: { x: well.x, y: well.y } }
+        : growUp
+          ? { ...next, growUp: true }
+          : next;
       resizeWindowIfChanged(config).catch((error) =>
         console.error("❌ FloatingBar: Failed to resize window:", error),
       );
+      // The displays may have been rearranged since the last time we looked;
+      // catching up now costs the next resize nothing.
+      void refreshGeometry();
+    };
+
     // Growing: make room first, then the pill animates into it. Shrinking:
     // let the pill animate down before the window snaps around it.
     const shrinking = prev !== null && next.width <= prev.width && next.height <= prev.height;
@@ -1225,7 +1612,18 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
     const t = setTimeout(apply, SHRINK_DELAY_MS);
     return () => clearTimeout(t);
-  }, [layout, paneOpen, showRosterStrip, growUp, composerGrowth, showInput, resizeWindowIfChanged]);
+  }, [
+    layout,
+    paneOpen,
+    showRosterStrip,
+    growUp,
+    composerGrowth,
+    showInput,
+    pillExtraWidth,
+    resizeWindowIfChanged,
+    wellForCurrentSlot,
+    refreshGeometry,
+  ]);
 
   // === DRAG ANYWHERE, SNAP INTO A WELL ===
   //
@@ -1244,9 +1642,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // settle the bar into the nearest well.
   const snapArmedRef = useRef(false);
   const snapAnimatingRef = useRef(false);
-  // The drag-well slot the bar currently occupies (col/row), so it can re-home
-  // to the same slot on another display when the cursor moves there.
-  const currentSlotRef = useRef<WellSlot | null>(null);
   // Whether the snap-well drop indicator overlay is currently shown, so we
   // hide it exactly once on release regardless of which settle path fires.
   const snapOverlayShownRef = useRef(false);
@@ -1279,6 +1674,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       snapAnimatingRef.current = true;
       await animateWindowTo(win, { x: pos.x, y: pos.y }, { x: target.x, y: target.y });
       currentSlotRef.current = { fx: target.fx, fy: target.fy };
+      // The bar has just been dropped somewhere deliberate: this is the freshest
+      // the geometry ever gets, and the next resize anchors to it.
+      geometryRef.current = {
+        mons: toMonitorRects(monitors),
+        monitorIndex: target.monitorIndex,
+      };
       // Remember where it landed so the bar reopens here next launch, and
       // re-derive the growth direction since the dock may have changed.
       try {
@@ -1335,6 +1736,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         if (!target) return;
         await win.setPosition(new PhysicalPosition(target.x, target.y));
         currentSlotRef.current = { fx: target.fx, fy: target.fy };
+        geometryRef.current = { mons: toMonitorRects(mons), monitorIndex: targetIdx };
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
         } catch {
@@ -1431,12 +1833,13 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // fixed height, so the window grew around a 34px pill and the textarea was
   // clipped inside it, which looked like the growth not working at all.
   //
-  // Only while the composer is actually on screen. The measured height survives
-  // the textarea unmounting, so without this the pill would stay tall after the
-  // input closed.
+  // Only while the composer is actually on screen: belt and braces next to the
+  // hook giving up its measured height when the textarea detaches, so a pill
+  // left tall by a race is still impossible.
   const growth = showInput ? Math.max(0, composerGrowth) : 0;
   const pill = {
     ...BAR_LAYOUTS[layout],
+    width: BAR_LAYOUTS[layout].width + pillExtraWidth,
     height: BAR_LAYOUTS[layout].height + growth,
   };
   const pad = BAR_LAYOUTS[layout].pad;
@@ -1538,6 +1941,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             state={currentUiState}
             audioLevel={barState.audioLevel}
             driving={isDriving}
+            voicePaused={voiceConfigured && !voiceListening}
           />
         )}
 
@@ -1582,6 +1986,30 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             >
               <MessageSquare className="size-3.5" />
             </button>
+            {/* The wake phrase, when there is one. A microphone that is open
+                all day is worth being able to close for a while without going
+                to Settings and taking the trigger away, which is a different
+                and more permanent thing to mean. */}
+            {voiceConfigured && (
+              <button
+                ref={listenRef}
+                type="button"
+                onClick={toggleVoiceListening}
+                aria-label={
+                  voiceListening ? "Stop listening for the wake phrase" : "Listen for the wake phrase"
+                }
+                title={voiceListening ? "Stop listening" : "Start listening"}
+                data-testid="floating-bar-voice-toggle"
+                data-listening={voiceListening ? "" : undefined}
+                data-phover={hoveredButton === "listen" ? "" : undefined}
+                className={cn(
+                  pillButton,
+                  hoveredButton === "listen" && "bg-white/[0.12] text-white",
+                )}
+              >
+                {voiceListening ? <Ear className="size-3.5" /> : <EarOff className="size-3.5" />}
+              </button>
+            )}
           </div>
         ) : showInput ? (
           <form
@@ -1646,7 +2074,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               </button>
               <button
                 type="button"
-                onClick={abandonInput}
+                onClick={stopCurrentActivity}
                 aria-label="Close without sending"
                 title="Close without sending"
                 className={inputControlButton}
@@ -1681,6 +2109,19 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                 esc to stop
               </kbd>
             )}
+            {/* And the same thing to press, for a hand that is already on the
+                mouse Juno is holding. The hint stays: it is the faster way. */}
+            {isDriving && (
+              <button
+                type="button"
+                onClick={stopCurrentActivity}
+                aria-label="Stop Juno"
+                title="Stop Juno (Esc)"
+                className={inputControlButton}
+              >
+                <X className="size-3" />
+              </button>
+            )}
             {isVoice && <AudioLevelBars audioLevel={barState.audioLevel} />}
             {/* Three answers, not one. The single "Stop" here finalised the
                 audio and submitted it, so the only way to abandon a sentence
@@ -1707,7 +2148,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void cancelTalking()}
+                  onClick={stopCurrentActivity}
                   aria-label="Cancel without sending"
                   title="Cancel without sending"
                   className={inputControlButton}
@@ -1716,10 +2157,25 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                 </button>
               </div>
             )}
+            {/* A wake phrase landed and Juno is taking down what follows. There
+                is nothing to send here (the engine decides when the sentence
+                ends) and nothing to switch to, but there is something to stop,
+                and the rule is that when there is, the X is there. */}
+            {currentUiState === UI.BAR_STATES_ALWAYS_LISTENING && (
+              <button
+                type="button"
+                onClick={stopCurrentActivity}
+                aria-label="Cancel without sending"
+                title="Cancel without sending"
+                className={inputControlButton}
+              >
+                <X className="size-3" />
+              </button>
+            )}
             {isWorking && (
               <button
                 type="button"
-                onClick={() => void chat.stop()}
+                onClick={stopCurrentActivity}
                 aria-label="Stop Juno"
                 title="Stop Juno (Esc)"
                 className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/[0.08] text-white/60 transition-colors hover:bg-white/[0.16] hover:text-white"

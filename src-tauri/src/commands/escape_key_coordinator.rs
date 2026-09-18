@@ -4,9 +4,10 @@
 //! TTS, dictation, onboarding) and keeps a stop-key *observer* alive while any
 //! of them is active.
 //!
-//! Which observer depends on the configured `stop_current_task` shortcut:
+//! Which observer depends on the stop key, which is always `Escape` and is no
+//! longer configurable:
 //!
-//! * a bare key (the default, `Escape`) is watched with a **passive NSEvent
+//! * a bare key (`Escape`) is watched with a **passive NSEvent
 //!   monitor** (`platform::stop_key_monitor`). It never consumes the key, so
 //!   every other app — and Juno's own web views — still receive Escape;
 //! * a modified chord (e.g. `Cmd+Escape`) is registered through the
@@ -427,14 +428,14 @@ impl EscapeKeyCoordinator {
     }
 }
 
-/// Resolve the binding for the user's current `stop_current_task` setting.
-fn current_binding(app_handle: &AppHandle) -> StopKeyBinding {
-    let setting = app_handle
-        .try_state::<crate::state::AppState>()
-        .and_then(|state| state.get_keyboard_shortcuts().ok())
-        .map(|shortcuts| shortcuts.stop_current_task)
-        .unwrap_or_else(|| "Escape".to_string());
-    resolve_stop_key_binding(&setting)
+/// Resolve the binding for the stop key.
+///
+/// Escape, always. It stopped being a setting: it is the universal cancel key
+/// on macOS and rebinding it only ever made Juno stranger than the rest of the
+/// system. Reading the constant rather than a stored field is what keeps that
+/// true for someone whose store still holds a custom value from an older build.
+fn current_binding(_app_handle: &AppHandle) -> StopKeyBinding {
+    resolve_stop_key_binding(crate::constants::settings::defaults::STOP_CURRENT_TASK)
 }
 
 /// Is anything live that a stop-key press would need to stop?

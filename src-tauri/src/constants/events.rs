@@ -197,9 +197,27 @@ pub mod tts {
     pub const STOP_REQUESTED: &str = "tts-stop-requested";
 }
 
+/// The voice trigger: the one signal pair the bar renders.
+/// NOTE: no curly braces in doc comments inside these modules. The TS constant
+/// generator matches a module body with a negated-brace class, so a brace in a
+/// comment cuts the module short and silently drops the constants after it.
+pub mod voice_trigger {
+    /// The wake-phrase engine is armed, or is not. Payload fields: listening
+    /// (bool), phrases (array of string). Emitted every time the voice triggers
+    /// are applied, which is on save and at startup, and again if the speech
+    /// engine finishes loading late. It reports what actually happened, so a
+    /// failed start reports listening false rather than lying to the bar.
+    pub const LISTENING: &str = "voice-trigger-listening";
+    /// The speech engine finished loading in the background. Emitted by the
+    /// voice-transcription plugin, not by Juno. No payload worth reading here.
+    pub const ENGINE_READY: &str = "voice-engine-ready";
+}
+
 /// Always listening events
 pub mod always_listening {
     pub const MODE_CHANGED: &str = "always-listening-mode-changed";
+    /// A wake phrase was just heard. Payload fields: phrase (the matched
+    /// phrase, lowercase), target ("agent" or "dictation").
     pub const WAKE_WORD_DETECTED: &str = "always-listening:wake-word-detected";
     pub const TOGGLE_DICTATION_REQUEST: &str = "toggle-dictation-request";
     pub const STARTED: &str = "always-listening:started";
@@ -376,7 +394,6 @@ pub mod shortcuts {
     pub const AGENT_MODE: &str = "shortcut-agent-mode";
     pub const DICTATION_INPUT: &str = "shortcut-dictation-input";
     pub const ESCAPE_KEY: &str = "shortcut-escape-key";
-    pub const VOICE_ACTIVATION: &str = "shortcut-voice-activation";
 }
 
 /// Scheduled automation events (user-facing cron schedules)

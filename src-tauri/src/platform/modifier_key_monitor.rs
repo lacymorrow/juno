@@ -45,14 +45,37 @@ pub fn modifier_edge(key_code: u16, modifier_flags: usize, target: ModifierKey) 
     Some(modifier_flags & target.flag_bit() != 0)
 }
 
+/// The bare modifier this event is the *press* edge of, if any.
+///
+/// Capture mode reports presses and ignores releases: someone choosing a key
+/// has chosen it the moment they push it, and reporting the release too would
+/// hand setup the same answer twice.
+pub fn captured_key(key_code: u16, modifier_flags: usize) -> Option<ModifierKey> {
+    ModifierKey::ALL
+        .into_iter()
+        .find(|key| modifier_edge(key_code, modifier_flags, *key) == Some(true))
+}
+
+/// How long a capture request stands before it lapses on its own.
+///
+/// Capture swallows the key, so a request that is never withdrawn disables the
+/// key for the rest of the run. That is exactly what happened: setup asks for
+/// capture on its last screen and the window is destroyed on Done, so the
+/// matching `set_capture(false)` never arrived and Fn stopped working
+/// everywhere until Juno was quit. The frontend now withdraws it properly, but
+/// a swallowed key must not depend on a webview living long enough to say so,
+/// hence the lease. Generous enough that nobody reading the screen loses it.
+#[cfg(target_os = "macos")]
+const CAPTURE_LEASE: std::time::Duration = std::time::Duration::from_secs(120);
+
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::{modifier_edge, ModifierBinding};
+    use super::{captured_key, modifier_edge, ModifierBinding, CAPTURE_LEASE};
     use block::ConcreteBlock;
     use cocoa::base::{id, nil};
     use objc::{class, msg_send, sel, sel_impl};
     use std::ffi::c_void;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Mutex;
     use tauri::AppHandle;
     use tracing::{debug, error, info, warn};
@@ -73,6 +96,22 @@ mod imp {
     /// While setup is asking someone to press their key, report what arrives
     /// instead of acting on it.
     static CAPTURING: AtomicBool = AtomicBool::new(false);
+    /// Bumped by every change to `CAPTURING`, so a lapsing lease can tell its
+    /// own request apart from a later one and leave that later one alone.
+    static CAPTURE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+    /// Stop reporting presses and go back to firing triggers.
+    ///
+    /// Called from every route out of capture: the explicit withdrawal, the
+    /// lease lapsing, and a binding being saved. Saving counts because the
+    /// person has just chosen their key, which is the whole job capture was
+    /// asked to do.
+    fn end_capture() {
+        CAPTURE_GENERATION.fetch_add(1, Ordering::SeqCst);
+        if CAPTURING.swap(false, Ordering::SeqCst) {
+            debug!("[ModifierKeyMonitor] Capture ended; presses fire their trigger again");
+        }
+    }
 
     /// Whether adding the global monitor is safe right now.
     fn accessibility_trusted() -> bool {
@@ -115,19 +154,17 @@ mod imp {
         // Setup is asking which key to use. Report the press and act on
         // nothing: this is someone choosing a binding, not using one.
         if CAPTURING.load(Ordering::SeqCst) {
-            for key in super::ModifierKey::ALL {
-                if modifier_edge(key_code, flags, key) == Some(true) {
-                    debug!("[ModifierKeyMonitor] Captured {} for binding", key.label());
-                    if let Err(e) = tauri::Emitter::emit(
-                        app,
-                        crate::constants::events::triggers::KEY_CAPTURED,
-                        serde_json::json!({ "key": key }),
-                    ) {
-                        warn!(
-                            "[ModifierKeyMonitor] Could not report the captured key: {}",
-                            e
-                        );
-                    }
+            if let Some(key) = captured_key(key_code, flags) {
+                debug!("[ModifierKeyMonitor] Captured {} for binding", key.label());
+                if let Err(e) = tauri::Emitter::emit(
+                    app,
+                    crate::constants::events::triggers::KEY_CAPTURED,
+                    serde_json::json!({ "key": key }),
+                ) {
+                    warn!(
+                        "[ModifierKeyMonitor] Could not report the captured key: {}",
+                        e
+                    );
                 }
             }
             return;
@@ -161,6 +198,11 @@ mod imp {
 
     /// Install (or re-install) the monitors for the given bindings.
     pub fn sync(app: &AppHandle, bindings: Vec<ModifierBinding>) -> Result<(), String> {
+        // A binding has just been written, so whoever was choosing a key has
+        // finished choosing. Ending capture here means a lost "stop capturing"
+        // cannot leave the key swallowed all the way to the next launch.
+        end_capture();
+
         remove(app)?;
 
         if let Ok(mut guard) = BINDINGS.lock() {
@@ -172,8 +214,12 @@ mod imp {
 
         let trusted = accessibility_trusted();
         if !trusted {
-            info!(
-                "[ModifierKeyMonitor] Accessibility not granted yet; installing the local monitor only, so the key works while Juno is focused. ensure_global adds the rest when it lands."
+            // Worth a warning, not a note: this is the state a "the Fn key does
+            // nothing" report is usually in. The local monitor only sees events
+            // delivered to Juno, and the bar does not take keyboard focus, so
+            // in practice the key does nothing until Accessibility is granted.
+            warn!(
+                "[ModifierKeyMonitor] Accessibility is NOT granted, so only the local monitor is installed and the key fires solely while a Juno window is focused. Grant Accessibility in System Settings > Privacy & Security; ensure_global completes the monitor the moment it lands."
             );
         }
         install(app, trusted)
@@ -243,10 +289,36 @@ mod imp {
     /// local half is enough: setup's own window is focused while it asks, and
     /// Accessibility may well not be granted yet.
     pub fn set_capture(app: &AppHandle, active: bool) -> Result<(), String> {
-        CAPTURING.store(active, Ordering::SeqCst);
-        if active {
-            return install(app, accessibility_trusted());
+        if !active {
+            return withdraw_capture(app);
         }
+
+        let generation = CAPTURE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        CAPTURING.store(true, Ordering::SeqCst);
+        // The lease. See CAPTURE_LEASE: the key stays swallowed until this
+        // request is withdrawn, and the window that asked can be destroyed
+        // before it manages to withdraw anything.
+        let app_for_lease = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(CAPTURE_LEASE).await;
+            // A newer request, or any other end to this one, moved the
+            // generation on. Leave that one alone.
+            if CAPTURE_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            warn!(
+                "[ModifierKeyMonitor] Capture was never withdrawn; letting it lapse so the key fires its trigger again"
+            );
+            if let Err(e) = withdraw_capture(&app_for_lease) {
+                warn!("[ModifierKeyMonitor] Could not lapse the capture: {}", e);
+            }
+        });
+        install(app, accessibility_trusted())
+    }
+
+    /// End capture and take the monitors back down if nothing is bound to them.
+    fn withdraw_capture(app: &AppHandle) -> Result<(), String> {
+        end_capture();
         // Keep the monitors only if a real binding still needs them.
         let still_bound = match BINDINGS.lock() {
             Ok(g) => !g.is_empty(),
@@ -400,5 +472,22 @@ mod tests {
         // Shift is key code 56 and has its own bit; it must not reach a
         // trigger bound to Fn.
         assert_eq!(modifier_edge(56, 0x00020102, ModifierKey::Fn), None);
+    }
+
+    #[test]
+    fn capture_reports_the_fn_press_only() {
+        assert_eq!(captured_key(63, FN_HELD), Some(ModifierKey::Fn));
+        // The release edge is the same key arriving again; reporting it would
+        // answer setup's question twice for one press.
+        assert_eq!(captured_key(63, FN_RELEASED), None);
+    }
+
+    #[test]
+    fn capture_ignores_keys_that_merely_carry_the_function_bit() {
+        // Left arrow and F5, both of which set 1 << 23 on macOS.
+        assert_eq!(captured_key(123, FN_HELD), None);
+        assert_eq!(captured_key(96, FN_HELD), None);
+        // And an ordinary modifier, which has its own bit entirely.
+        assert_eq!(captured_key(56, 0x00020102), None);
     }
 }

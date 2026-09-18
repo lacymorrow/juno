@@ -65,9 +65,14 @@ pub async fn start_always_listening_mode(
                     if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, true) {
                         error!("{} {}", COMMAND, format_error(FAILED_TO_EMIT, "always-listening-mode-changed", e));
                     }
+                    crate::commands::triggers::emit_listening_outcome(&app, true);
 
-                    // Update floating bar
-                    crate::commands::ui_commands::handle_always_listening_change(&app, true).await;
+                    // The bar state is deliberately left alone. Waiting for a
+                    // wake phrase is not an activity worth showing: it is the
+                    // resting state, and putting the bar into AlwaysListening
+                    // here made "armed" and "just heard you" look identical.
+                    // The bar grows when the phrase actually lands, driven from
+                    // the wake-word listener in `integration.rs`.
 
                     Ok("Always listening mode started successfully".to_string())
                 }
@@ -159,6 +164,7 @@ pub async fn stop_always_listening_mode(
                     if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, false) {
                         error!("{} {}", COMMAND, format_error(FAILED_TO_EMIT, "always-listening-mode-changed", e));
                     }
+                    crate::commands::triggers::emit_listening_outcome(&app, false);
 
                     // Update floating bar
                     crate::commands::ui_commands::handle_always_listening_change(&app, false).await;

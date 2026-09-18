@@ -99,7 +99,10 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
             : undefined;
 
         return (
-          <div key={`msg-container-${index}-${msg.timestamp || Date.now()}`}>
+          // The key has to hold still across a streaming update. A `Date.now()`
+          // fallback changes on every render, which remounts the row mid-stream
+          // and throws away its scroll height, selection and open tool cards.
+          <div key={msg.messageId ?? `msg-${index}-${msg.timestamp ?? "no-ts"}`}>
             {/* Timestamp header - minimal text-only */}
             {showTimestamp && msg.timestamp && (
               <div className="flex justify-center my-3">

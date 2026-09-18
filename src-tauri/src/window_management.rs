@@ -101,6 +101,113 @@ impl WindowConfig {
     }
 }
 
+/// Put a window in front of the person and make Juno the app they are in.
+///
+/// Three calls, in this order, because macOS treats them as three separate
+/// things and the order is load-bearing:
+///
+/// - Showing a window only orders it into Juno's own window list. It does not
+///   make Juno the active application, so a window shown while the person is
+///   in another app comes up behind that app.
+/// - Only focusing activates the application, and it quietly does nothing when
+///   the window is hidden or minimized. So it has to come last, after the
+///   other two have made it eligible.
+///
+/// Unminimize, then show, then focus. Focusing before unminimizing is why a
+/// minimized chat window could be shown and still not come back.
+fn present_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window.unminimize().map_err(|e| e.to_string())?;
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Which chat surface a show-or-hide request should act on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatSurface {
+    /// The full-size chat window is on screen.
+    MainWindow {
+        /// Whether it is the window the person is actually looking at. A
+        /// visible window that is not frontmost is the "I cannot get back to
+        /// it" case, and it wants bringing forward, not putting away.
+        frontmost: bool,
+    },
+    /// The bar is holding the conversation, either in its pane or collapsed to
+    /// the idle pill. Which of those two it is, is the bar's own answer.
+    BarPane,
+}
+
+/// Resolve which chat surface is active.
+///
+/// This reads the same fact `announce_main_window` broadcasts, the visibility
+/// of the full-size window, so the tray and the bar cannot reach different
+/// conclusions: Rust is the side that knows, and the bar is told. Everything
+/// below the full-size window belongs to the bar, including whether its pane
+/// is up, which is why that is one variant here and not two.
+pub fn active_chat_surface(app: &AppHandle) -> ChatSurface {
+    if !WindowManager::is_window_visible(app, window_labels::MAIN) {
+        return ChatSurface::BarPane;
+    }
+    let frontmost = app
+        .get_webview_window(window_labels::MAIN)
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false);
+    ChatSurface::MainWindow { frontmost }
+}
+
+/// Show or hide a chat surface.
+///
+/// The single answer to "give me the chat back", used by the tray menu row and
+/// by a click on the tray icon so those two cannot disagree about what is on
+/// screen. It carries more weight than it sounds: Cmd+backtick only cycles
+/// windows inside the frontmost app, so it can never reach Juno once focus has
+/// left Juno, and with the Dock icon hidden Juno is not in Cmd+Tab either. The
+/// menu bar is then the only way back, which means it has to be the dependable
+/// one.
+///
+/// The surface is passed in rather than resolved here so the caller can decide
+/// *when* to read it. The tray reads it as the pointer arrives, before AppKit
+/// starts tracking a menu, because what counts is which window was in front of
+/// the person when they reached for the menu bar.
+pub async fn toggle_chat_surface(app: &AppHandle, surface: ChatSurface) {
+    match surface {
+        // In front of the person and asked about: put it away. This goes
+        // through the same command the bar's own reopen uses, so the bar hears
+        // the window has gone and can take the conversation back.
+        ChatSurface::MainWindow { frontmost: true } => {
+            if let Err(e) = close_main_window(app.clone()).await {
+                warn!("Could not put the chat window away: {}", e);
+            }
+        }
+        // On screen, but behind something else. Asking for the chat here means
+        // asking to get back to it, so bring it forward rather than hiding a
+        // window the person cannot currently see.
+        ChatSurface::MainWindow { frontmost: false } => {
+            if let Err(e) = open_main_window(app.clone()).await {
+                warn!("Could not bring the chat window forward: {}", e);
+            }
+        }
+        // The bar owns the conversation. Put the bar itself on screen if it is
+        // not (shown, never focused: it is a panel, and focusing it would pull
+        // the person out of the app they are in), then let the bar flip its own
+        // pane. Going through the bar's toggle rather than deciding here is
+        // what lets the idle pill become the pane, which is what someone with
+        // no chat on screen is asking for.
+        ChatSurface::BarPane => {
+            if let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) {
+                if !bar.is_visible().unwrap_or(false) {
+                    if let Err(e) = bar.show() {
+                        warn!("Could not put the floating bar on screen: {}", e);
+                    }
+                }
+            }
+            if let Err(e) = app.emit(constants::events::bar::TOGGLE_PANE, ()) {
+                warn!("Could not ask the bar to toggle its chat pane: {}", e);
+            }
+        }
+    }
+}
+
 /// Window management operations
 pub struct WindowManager;
 
@@ -115,13 +222,13 @@ impl WindowManager {
             // Check if window is actually valid (not destroyed)
             match existing_window.is_visible() {
                 Ok(_) => {
-                    existing_window.show().map_err(|e| e.to_string())?;
                     // Only steal app focus for windows that explicitly request it.
                     // Overlay windows (cursor overlay, floating panel) must not activate
-                    // Juno — that would yank keyboard focus from the user's active app.
+                    // Juno: that would yank keyboard focus from the user's active app.
                     if config.focus {
-                        existing_window.set_focus().map_err(|e| e.to_string())?;
-                        existing_window.unminimize().map_err(|e| e.to_string())?;
+                        present_window(&existing_window)?;
+                    } else {
+                        existing_window.show().map_err(|e| e.to_string())?;
                     }
 
                     info!("Showed existing {} window", config.label);
@@ -204,9 +311,7 @@ impl WindowManager {
     /// Focus a window by label
     pub async fn focus_window(app: &AppHandle, label: &str) -> Result<(), String> {
         if let Some(window) = app.get_webview_window(label) {
-            window.show().map_err(|e| e.to_string())?;
-            window.set_focus().map_err(|e| e.to_string())?;
-            window.unminimize().map_err(|e| e.to_string())?;
+            present_window(&window)?;
             info!("Focused {} window", label);
         }
         Ok(())

@@ -25,26 +25,16 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
 
     let app_state = app.state::<state::AppState>();
 
-    // Get current keyboard shortcuts from state
-    let current_shortcuts = match app_state.get_keyboard_shortcuts() {
-        Ok(shortcuts) => shortcuts,
-        Err(e) => {
-            error!(
-                "{}",
-                crate::format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e)
-            );
-            return; // Exit early if we can't get shortcuts
-        }
-    };
-
-    // Parse the utility shortcuts (stop / open-settings / voice-activation).
-    // Activation (agent + dictation) is driven by the triggers matrix below.
+    // The two utility shortcuts are fixed constants, not settings: Escape
+    // cancels and Cmd+Comma opens settings, the way every Mac app does it, so
+    // there is nothing to look up and nothing a stored value could override.
+    // Activation (agent + dictation) is driven by the triggers matrix below,
+    // and voice is a trigger method of its own, so there is no
+    // voice-activation shortcut at all.
     let stop_shortcut: Option<Shortcut> =
-        parse_shortcut_string(&current_shortcuts.stop_current_task);
+        parse_shortcut_string(crate::constants::settings::defaults::STOP_CURRENT_TASK);
     let settings_shortcut: Option<Shortcut> =
-        parse_shortcut_string(&current_shortcuts.open_settings);
-    let voice_activation_shortcut: Option<Shortcut> =
-        parse_shortcut_string(&current_shortcuts.voice_activation);
+        parse_shortcut_string(crate::constants::settings::defaults::OPEN_SETTINGS);
 
     // Handle each shortcut type (use separate conditions to check all shortcuts)
     if let Some(stop_shortcut_obj) = stop_shortcut {
@@ -57,13 +47,6 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     if let Some(settings_shortcut_obj) = settings_shortcut {
         if *shortcut == settings_shortcut_obj {
             handle_settings_shortcut(app, event);
-        }
-    }
-
-    // Check voice activation shortcut
-    if let Some(voice_activation_obj) = voice_activation_shortcut {
-        if *shortcut == voice_activation_obj {
-            handle_voice_activation_shortcut(app, event);
         }
     }
 
@@ -91,6 +74,15 @@ fn dispatch_activation_triggers(
         }
     };
 
+    // One key press is one activation per target, however many rows describe it.
+    // Two enabled triggers can legitimately share a combo while pointing at
+    // different targets, but nothing good comes of dispatching the same target
+    // twice for a single edge: the second call re-enters a session the first
+    // one just started, and the UI is told "agent mode activated" once per
+    // matching row. That is where the stack of identical toasts came from.
+    let mut fired_agent = false;
+    let mut fired_dictation = false;
+
     for trigger in triggers.iter().filter(|t| t.enabled) {
         let Some(Binding::Keyboard { shortcut: combo }) = &trigger.binding else {
             continue; // voice + mouse handled elsewhere
@@ -102,8 +94,24 @@ fn dispatch_activation_triggers(
             continue;
         }
         match trigger.target {
-            TriggerTarget::Agent => handle_agent_mode_shortcut(app, event, trigger.method),
-            TriggerTarget::Dictation => handle_dictation_input_shortcut(app, event, trigger.method),
+            TriggerTarget::Agent => {
+                if fired_agent {
+                    continue;
+                }
+                fired_agent = true;
+                handle_agent_mode_shortcut(app, event, trigger.method);
+            }
+            TriggerTarget::Dictation => {
+                if fired_dictation {
+                    continue;
+                }
+                fired_dictation = true;
+                handle_dictation_input_shortcut(app, event, trigger.method);
+            }
+        }
+
+        if fired_agent && fired_dictation {
+            break;
         }
     }
 }
@@ -401,36 +409,6 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
     }
 }
 
-/// Always-on tap-to-toggle voice recording from anywhere on macOS (Option+Shift+V default).
-fn handle_voice_activation_shortcut(app: &AppHandle, event: &ShortcutEvent) {
-    // Only fire on key press — this is a stateless toggle, no hold semantics
-    if event.state() != ShortcutState::Pressed {
-        return;
-    }
-
-    // Emit visual feedback event (for onboarding UI and status indicators)
-    if let Err(e) = app.emit(
-        events::shortcuts::VOICE_ACTIVATION,
-        serde_json::json!({
-            "state": "pressed",
-            "shortcut": "voice_activation"
-        }),
-    ) {
-        error!("[Voice Activation] Failed to emit shortcut event: {}", e);
-    }
-
-    // During onboarding, only provide visual feedback
-    let app_state = app.state::<state::AppState>();
-    if app_state.is_onboarding_active() {
-        info!("[Voice Activation] Pressed during onboarding - visual feedback only");
-        return;
-    }
-
-    // Delegate to the dictation tap handler — same behaviour: toggle recording on each press
-    info!("[Voice Activation] Triggering voice activation (tap-mode dictation toggle)");
-    handle_dictation_tap_mode(app);
-}
-
 /// Add a new command to trigger shortcut testing events during onboarding
 #[tauri::command]
 pub async fn trigger_shortcut_test_event(
@@ -441,7 +419,6 @@ pub async fn trigger_shortcut_test_event(
     let event_name = match shortcut_name.as_str() {
         "agent_mode" => events::shortcuts::AGENT_MODE,
         "dictation_input" => events::shortcuts::DICTATION_INPUT,
-        "voice_activation" => events::shortcuts::VOICE_ACTIVATION,
         _ => return Err("Unknown shortcut name".to_string()),
     };
 

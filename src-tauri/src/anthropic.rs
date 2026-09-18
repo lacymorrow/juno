@@ -496,6 +496,19 @@ async fn finish_session_terminal_state(
 ) {
     use crate::agents::AgentSessionStatus;
 
+    // Every way out of an agent run passes through here, so this is where the
+    // run says it is over. It used to say nothing on the way out: the
+    // execution flag was cleared in silence, and anything that shows agent
+    // activity kept showing it until some unrelated event happened to make it
+    // look at the state again. That is why the menu bar stayed on the agent
+    // icon after a run finished. Every caller clears the flag before calling
+    // this, so a listener that recomputes from the flag now sees the truth.
+    // This goes above the session-handle check on purpose: a run with no
+    // session row still has to announce that it ended.
+    if let Err(e) = app_handle.emit(events::agent::ACTIVE, false) {
+        warn!("Failed to announce that the agent run ended: {}", e);
+    }
+
     let Some(handle) = session_handle else {
         return;
     };
