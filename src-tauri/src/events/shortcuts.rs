@@ -397,7 +397,12 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
         tauri::async_runtime::spawn(async move {
             // Emit dictation transcription start event instead of active event
             // This will be handled by the event listener in events/handlers.rs
-            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_START, ()) {
+            // Say how this was triggered, so the session records its method at
+            // birth rather than a stop path inferring it later.
+            if let Err(e) = app_handle.emit(
+                events::dictation::TRANSCRIPTION_START,
+                serde_json::json!({ "method": "toggle" }),
+            ) {
                 error!(
                     "[Dictation Tap Mode] Failed to emit dictation-transcription-start event: {}",
                     e

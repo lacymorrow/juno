@@ -1,4 +1,5 @@
 use crate::constants::{events, monitor_sessions};
+use crate::state::{SessionClaim, VoiceStartMethod};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -207,8 +208,15 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
 
         // Check if we should start transcription immediately
         if state.check_and_start_transcription() {
-            // Emit event to start transcription immediately
-            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_START, ()) {
+            // Emit event to start transcription immediately. The payload says
+            // how this session is being triggered: this monitor only ever
+            // watches a held key or button, so the session it opens is a
+            // push-to-talk one and says so rather than leaving the start
+            // handler to work it out.
+            if let Err(e) = app_handle.emit(
+                events::dictation::TRANSCRIPTION_START,
+                serde_json::json!({ "method": VoiceStartMethod::PushToTalk.as_wire() }),
+            ) {
                 error!(
                     "[DictationMonitor] Failed to emit dictation-transcription-start: {}",
                     e
@@ -273,6 +281,21 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
 // Helper function to force stop the voice controller
 async fn force_stop_voice_controller(app_handle: &AppHandle) {
     warn!("[DictationMonitor] Attempting to force stop voice controller");
+
+    // Ungated, like every force path: it runs when a session is already stuck.
+    // Claiming matters because this finalises the audio, and a transcript with
+    // no session to own it is dropped rather than delivered.
+    let app_state = app_handle.state::<crate::state::AppState>();
+    match app_state.claim_voice_commit(SessionClaim::Current) {
+        Ok(session) => info!(
+            "[DictationMonitor] Force stop is finalising voice session {}",
+            session.describe()
+        ),
+        Err(rejection) => warn!(
+            "[DictationMonitor] Force stop with no session to claim: {}",
+            rejection.reason()
+        ),
+    }
 
     // Try to stop the voice transcription plugin only if the controller exists
     match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {

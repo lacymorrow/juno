@@ -446,25 +446,47 @@ pub async fn handle_dictation_state_transition(
     Ok(())
 }
 
-/// Handle state transitions for agent execution
+/// Handle state transitions for agent execution.
+///
+/// This is the one place where the execution flag and the `agent-active`
+/// announcement move together. They used to move apart: every real call site
+/// flipped the flag through `AppState` directly and left the announcement to
+/// whoever happened to remember it, so the only thing that ever said
+/// `agent-active = true` was the voice CAPTURE path. A typed run set the flag
+/// in silence and the menu bar never showed that an agent was working. Writing
+/// the flag and announcing it in one function is what makes it impossible for
+/// the two to disagree, so route both directions of the lifecycle through here
+/// rather than calling the `mark_*` methods.
+///
+/// `max_steps` carries the run's iteration budget when the caller knows it.
+/// The agent runner does, and the progress UI reads it back, so the parameter
+/// lives here instead of forcing that caller to bypass this function to record
+/// it. `None` starts a run with no step budget, which is what the older
+/// `mark_agent_execution_started` always did.
 pub async fn handle_agent_execution_state_transition(
     app_handle: &AppHandle,
     active: bool,
     execution_id: Option<String>,
+    max_steps: Option<u32>,
 ) -> Result<(), String> {
     let app_state = app_handle.state::<AppState>();
 
     if active {
-        if let Some(id) = execution_id {
-            app_state.mark_agent_execution_started(id)?;
-        } else {
+        let Some(id) = execution_id else {
             return Err("Execution ID required when starting agent execution".to_string());
+        };
+        match max_steps {
+            Some(steps) => app_state.mark_agent_execution_started_with_steps(id, steps)?,
+            None => app_state.mark_agent_execution_started(id)?,
         }
     } else {
         app_state.mark_agent_execution_finished();
     }
 
-    // Emit state change event for UI
+    // The flag is written before the event is emitted on purpose. Listeners
+    // that recompute from state rather than trusting the payload (the tray
+    // does exactly that) must find the new truth already in place when the
+    // event reaches them, otherwise they recompute the state we just left.
     if let Err(e) = app_handle.emit(events::agent::ACTIVE, active) {
         error!("Failed to emit agent-active event: {}", e);
         return Err(format!("Failed to emit agent state event: {}", e));
@@ -508,7 +530,16 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
 
     // Signal cancellation for all operations
     app_state.signal_cancel();
-    app_state.mark_agent_execution_finished();
+
+    // Clearing the execution flag and announcing it go through the one
+    // transition so an emergency stop cannot leave the menu bar animating an
+    // agent that is no longer running.
+    if let Err(e) = handle_agent_execution_state_transition(app_handle, false, None, None).await {
+        warn!(
+            "[State] Failed to announce the end of agent execution during emergency cleanup: {}",
+            e
+        );
+    }
 
     // Reset dictation state
     if let Err(e) = app_state.set_dictation_active(false) {
@@ -534,8 +565,8 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
     crate::agent_monitor::force_reset_agent_input_state().await;
     crate::dictation_monitor::force_reset_dictation_input_state().await;
 
-    // Emit state updates
-    let _ = app_handle.emit(events::agent::ACTIVE, false);
+    // Emit state updates. `agent-active` is not in this list: the transition
+    // above already announced it alongside the flag write.
     let _ = app_handle.emit(events::dictation::ACTIVE, false);
     let _ = app_handle.emit(events::always_listening::MODE_CHANGED, false);
     let _ = app_handle.emit(events::tts::STOP_REQUESTED, ());

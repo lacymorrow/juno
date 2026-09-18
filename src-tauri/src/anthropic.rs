@@ -399,6 +399,25 @@ pub async fn submit_query(
         // interpretation.
         if crate::agent::local_intents::try_handle_media_intent(&app_handle, trimmed_query).await {
             info!("Query handled locally as a media intent: {}", trimmed_query);
+            // No agent run will start, so nothing further will ever say this
+            // ended. A spoken media command still went through the voice
+            // capture path, which announces `agent-active = true` when the mic
+            // opens, and without this the menu bar would keep animating an
+            // agent that was never asked to run. The flag is already false
+            // here, so this only closes the announcement.
+            if let Err(e) = crate::state_management::handle_agent_execution_state_transition(
+                &app_handle,
+                false,
+                None,
+                None,
+            )
+            .await
+            {
+                warn!(
+                    "Failed to announce that a locally handled query is done: {}",
+                    e
+                );
+            }
             return Ok(());
         }
     }
@@ -501,11 +520,20 @@ async fn finish_session_terminal_state(
     // execution flag was cleared in silence, and anything that shows agent
     // activity kept showing it until some unrelated event happened to make it
     // look at the state again. That is why the menu bar stayed on the agent
-    // icon after a run finished. Every caller clears the flag before calling
-    // this, so a listener that recomputes from the flag now sees the truth.
+    // icon after a run finished.
+    //
+    // Clearing the flag now belongs to this call too. Callers used to clear it
+    // themselves and then call in here to announce, which is two steps that
+    // could drift apart, and on the start side they had already drifted. One
+    // transition writes the flag and announces it together, so a listener that
+    // recomputes from the flag always sees the truth the event describes.
     // This goes above the session-handle check on purpose: a run with no
     // session row still has to announce that it ended.
-    if let Err(e) = app_handle.emit(events::agent::ACTIVE, false) {
+    if let Err(e) = crate::state_management::handle_agent_execution_state_transition(
+        app_handle, false, None, None,
+    )
+    .await
+    {
         warn!("Failed to announce that the agent run ended: {}", e);
     }
 
@@ -553,11 +581,24 @@ async fn execute_agent_internal(
     // Generate a unique execution ID for this agent run
     let execution_id = uuid::Uuid::new_v4().to_string();
 
-    // Mark agent execution as started with max iterations (both modes use 15)
-    let _ = state.mark_agent_execution_started_with_steps(
-        execution_id.clone(),
-        agent::config::MAX_ITERATIONS,
-    );
+    // Mark agent execution as started with max iterations (both modes use 15).
+    //
+    // This goes through the state transition rather than setting the flag
+    // directly because setting the flag directly is what hid typed runs: the
+    // only thing that ever announced `agent-active = true` was the voice
+    // capture path, so a query the user typed set the flag in silence and the
+    // menu bar never left its idle icon. The transition writes the flag and
+    // announces it as one act, which is also how the finish side works below.
+    if let Err(e) = crate::state_management::handle_agent_execution_state_transition(
+        &app_handle,
+        true,
+        Some(execution_id.clone()),
+        Some(agent::config::MAX_ITERATIONS),
+    )
+    .await
+    {
+        warn!("Failed to announce that the agent run started: {}", e);
+    }
     info!(
         "Starting new agent execution with ID: {} (max steps: {})",
         execution_id,
@@ -864,7 +905,6 @@ async fn execute_agent_internal(
                     let _ = coordinator
                         .unregister_escape_user(&app_handle, "agent_execution")
                         .await;
-                    state.mark_agent_execution_finished();
                     finish_session_terminal_state(
                         session_handle.as_ref(),
                         &app_handle,
@@ -980,7 +1020,6 @@ async fn execute_agent_internal(
                     let _ = coordinator
                         .unregister_escape_user(&app_handle, "agent_execution")
                         .await;
-                    state.mark_agent_execution_finished();
                     finish_session_terminal_state(
                         session_handle.as_ref(),
                         &app_handle,
@@ -1071,7 +1110,6 @@ async fn execute_agent_internal(
                     let _ = coordinator
                         .unregister_escape_user(&app_handle, "agent_execution")
                         .await;
-                    state.mark_agent_execution_finished();
                     finish_session_terminal_state(
                         session_handle.as_ref(),
                         &app_handle,
@@ -1268,7 +1306,6 @@ async fn execute_agent_internal(
                     let _ = coordinator
                         .unregister_escape_user(&app_handle, "agent_execution")
                         .await;
-                    state.mark_agent_execution_finished();
                     finish_session_terminal_state(
                         session_handle.as_ref(),
                         &app_handle,
@@ -1329,10 +1366,10 @@ async fn execute_agent_internal(
     state.reset_cancel();
     info!("Agent cancellation signal reset.");
 
-    // Mark agent execution as finished
-    state.mark_agent_execution_finished();
+    // The execution flag is cleared by `finish_session_terminal_state` below,
+    // in the same call that announces the end, so the two cannot disagree.
     info!(
-        "Agent execution marked as finished for ID: {}",
+        "Agent execution reached its terminal state for ID: {}",
         execution_id
     );
 
