@@ -1129,4 +1129,3 @@ pub(crate) async fn set_companion_mode(
 // - window_relative_click(window_id, relative_x, relative_y, modifier)
 // - focused_window_relative_click(relative_x, relative_y, modifier)
 // These functions require get_window_bounds() and get_focused_window_bounds() methods
-
