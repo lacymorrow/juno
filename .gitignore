@@ -385,7 +385,6 @@ backend-server/build/
 
 .hive-mind/
 
-# Code-signing material must never be committed (Developer ID exports)
-*.p12
-*.pfx
+# Code-signing material: see the certificate rules further up, which also
+# cover the base64 spellings used to paste an identity into a CI secret.
 *.cer
