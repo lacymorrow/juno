@@ -1203,7 +1203,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       layout,
       paneOpen,
       rosterVisible: showRosterStrip,
-      composerGrowth,
+      // Gated on the composer being on screen, exactly as the pill is, so the
+      // window and the pill inside it never disagree about how tall it is.
+      composerGrowth: showInput ? composerGrowth : 0,
     });
     const prev = lastWindowRef.current;
     lastWindowRef.current = { width: next.width, height: next.height };
@@ -1223,7 +1225,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
     const t = setTimeout(apply, SHRINK_DELAY_MS);
     return () => clearTimeout(t);
-  }, [layout, paneOpen, showRosterStrip, growUp, composerGrowth, resizeWindowIfChanged]);
+  }, [layout, paneOpen, showRosterStrip, growUp, composerGrowth, showInput, resizeWindowIfChanged]);
 
   // === DRAG ANYWHERE, SNAP INTO A WELL ===
   //
@@ -1424,9 +1426,21 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   // === RENDER ===
 
-  const pill = BAR_LAYOUTS[layout];
+  // The typed text makes the pill taller, and the window was already sized for
+  // it by floatingBarWindowSize. These two were not: they stayed at the layout's
+  // fixed height, so the window grew around a 34px pill and the textarea was
+  // clipped inside it, which looked like the growth not working at all.
+  //
+  // Only while the composer is actually on screen. The measured height survives
+  // the textarea unmounting, so without this the pill would stay tall after the
+  // input closed.
+  const growth = showInput ? Math.max(0, composerGrowth) : 0;
+  const pill = {
+    ...BAR_LAYOUTS[layout],
+    height: BAR_LAYOUTS[layout].height + growth,
+  };
   const pad = BAR_LAYOUTS[layout].pad;
-  const band = BAR_LAYOUTS[layout].band;
+  const band = BAR_LAYOUTS[layout].band + growth;
 
   // The pane and roster render either below the pill (default, growing down) or
   // above it (docked in the bottom half, growing up); only the margin side and

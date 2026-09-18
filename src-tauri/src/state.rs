@@ -203,6 +203,16 @@ pub struct AudioSettings {
     pub supertonic_voice: String,
     pub supertonic_speed: f64,
     pub dictation_active: bool,
+    /// What the current voice session was started for, as opposed to whether
+    /// one is running right now.
+    ///
+    /// `dictation_active` is a liveness flag: it goes false the moment the
+    /// session stops. The transcript only arrives *because* the session
+    /// stopped, so routing on the liveness flag always read false and sent
+    /// every dictation straight to the agent. This latch is set when a
+    /// dictation session starts and cleared only once its transcript has been
+    /// routed.
+    pub dictation_session: bool,
     pub dictation_clipboard_enabled: bool,
     pub sound_enabled: bool,
     pub always_listening_active: bool,
@@ -233,6 +243,7 @@ impl Default for AudioSettings {
             supertonic_voice: crate::tts::supertonic::DEFAULT_VOICE.to_string(),
             supertonic_speed: crate::tts::supertonic::DEFAULT_SPEED,
             dictation_active: false,
+            dictation_session: false,
             dictation_clipboard_enabled: true,
             sound_enabled: true,
             always_listening_active: false,
@@ -645,6 +656,24 @@ impl AppState {
             .lock()
             .map(|settings| settings.dictation_active)
             .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "dictation active status", e))
+    }
+
+    /// Remember that the session now starting is a dictation, so its transcript
+    /// can be routed correctly once it arrives.
+    pub fn begin_dictation_session(&self) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.dictation_session = true)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "dictation session", e))
+    }
+
+    /// Whether the transcript now arriving belongs to a dictation session,
+    /// clearing the latch so the next session starts from a clean slate.
+    pub fn take_dictation_session(&self) -> bool {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| std::mem::take(&mut settings.dictation_session))
+            .unwrap_or(false)
     }
 
     pub fn set_dictation_active(&self, active: bool) -> Result<(), String> {
@@ -2416,6 +2445,41 @@ mod tests {
 
         // Verify update persists
         assert_eq!(state.get_tts_provider().unwrap(), "openai");
+    }
+
+    #[test]
+    fn dictation_session_outlives_the_liveness_flag() {
+        // The exact sequence that sent every dictation to the agent: the
+        // session starts, then stops (clearing dictation_active), and only
+        // afterwards does the transcript arrive and get routed.
+        let state = AppState::new(None);
+        state.begin_dictation_session().unwrap();
+        state.set_dictation_active(true).unwrap();
+
+        state.set_dictation_active(false).unwrap();
+        assert!(
+            !state.get_dictation_active().unwrap(),
+            "the liveness flag is false by the time the transcript lands"
+        );
+        assert!(
+            state.take_dictation_session(),
+            "but the session is still known to be a dictation"
+        );
+    }
+
+    #[test]
+    fn dictation_session_is_consumed_once() {
+        // Otherwise a stale latch would capture the next agent query.
+        let state = AppState::new(None);
+        state.begin_dictation_session().unwrap();
+        assert!(state.take_dictation_session());
+        assert!(!state.take_dictation_session());
+    }
+
+    #[test]
+    fn an_agent_session_is_not_a_dictation() {
+        let state = AppState::new(None);
+        assert!(!state.take_dictation_session());
     }
 
     #[test]
