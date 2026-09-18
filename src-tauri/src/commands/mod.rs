@@ -20,6 +20,7 @@ pub mod safari_tools;
 pub mod agent_continuation;
 pub mod agent_sessions; // Parallel agent-session registry commands (LAC-1432)
 pub mod always_listening;
+pub mod auto_grant; // Post-Accessibility auto-grant of remaining permission toggles
 pub mod bar_position; // Floating-bar last-well persistence
 pub mod cloud;
 pub mod cloud_test;
@@ -107,6 +108,7 @@ pub use self::enhanced_visual_reasoning_commands::{
 pub use self::error_recovery::*;
 pub use self::filesystem::{get_file_content, list_files, save_agent_response, set_file_content};
 // Floating bar functionality fully migrated to ui_commands.rs - no longer needed
+pub use self::auto_grant::*;
 pub use self::mcp::*;
 pub use self::memory::*;
 pub use self::mouse::*;

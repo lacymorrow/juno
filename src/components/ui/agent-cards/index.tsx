@@ -8,6 +8,14 @@
  */
 
 import { cn } from "@/lib/utils";
+import { useMemo, useRef } from "react";
+import {
+  paintRain,
+  paintSnow,
+  paintSun,
+  useCanvasEffect,
+  type CanvasPainter,
+} from "../canvas-effects";
 import {
   Cloud,
   Sun,
@@ -52,13 +60,29 @@ const WEATHER_ICONS: Record<string, LucideIcon> = {
   windy: Wind,
 };
 
-/** Maps condition to a weather animation CSS class */
-function getWeatherEffectClass(condition: string): string {
+/** Picks the canvas painter for a condition; null means no ambient effect. */
+function getWeatherPainter(condition: string): CanvasPainter | null {
   const c = condition.toLowerCase();
-  if (c === "rain" || c === "rainy" || c === "storm" || c === "thunder")
-    return "juno-weather-rain";
-  if (c === "snow" || c === "snowy") return "juno-weather-snow";
-  return "";
+  if (c === "storm" || c === "thunder") return paintRain(true);
+  if (c === "rain" || c === "rainy") return paintRain(false);
+  if (c === "snow" || c === "snowy") return paintSnow();
+  if (c === "sunny" || c === "clear") return paintSun();
+  return null;
+}
+
+/** Full-bleed canvas behind the card content. */
+function WeatherEffects({ condition }: { condition: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const painter = useMemo(() => getWeatherPainter(condition), [condition]);
+  useCanvasEffect(canvasRef, painter ?? (() => false));
+  if (!painter) return null;
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden="true"
+      className="absolute inset-0 -z-10 w-full h-full pointer-events-none"
+    />
+  );
 }
 
 /** Maps condition to gradient background */
@@ -113,7 +137,6 @@ export function WeatherCard({
   forecast,
 }: WeatherCardProps) {
   const Icon = WEATHER_ICONS[condition.toLowerCase()] || Cloud;
-  const weatherEffect = getWeatherEffectClass(condition);
   const gradient = getWeatherGradient(condition);
   const iconColor = getWeatherIconColor(condition);
   const isSunny =
@@ -122,12 +145,12 @@ export function WeatherCard({
   return (
     <div
       className={cn(
-        "rounded-xl border bg-gradient-to-br p-4 space-y-3 juno-animate-in",
+        "relative isolate overflow-hidden rounded-xl border bg-gradient-to-br p-4 space-y-3 juno-animate-in",
         "shadow-sm hover:shadow-md transition-shadow",
         gradient,
-        weatherEffect,
       )}
     >
+      <WeatherEffects condition={condition} />
       {/* Header: location + temp + icon */}
       <div className="flex items-center justify-between">
         <div>
@@ -146,27 +169,13 @@ export function WeatherCard({
             {condition}
           </div>
         </div>
-        <div className="relative">
-          <Icon
-            className={cn(
-              "h-12 w-12 transition-transform",
-              iconColor,
-              isSunny && "juno-float",
-            )}
-          />
-          {/* Sun rays effect */}
-          {isSunny && (
-            <div
-              className="absolute inset-0 rounded-full opacity-20"
-              style={{
-                background:
-                  "radial-gradient(circle, rgba(251,191,36,0.4) 0%, transparent 70%)",
-                animation: "juno-sun-rotate 20s linear infinite",
-                transform: "scale(1.8)",
-              }}
-            />
+        <Icon
+          className={cn(
+            "h-12 w-12 transition-transform",
+            iconColor,
+            isSunny && "juno-float",
           )}
-        </div>
+        />
       </div>
 
       {/* Detail row */}

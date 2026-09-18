@@ -111,6 +111,8 @@ pub mod permissions {
     pub const REQUEST_INPUT_MONITORING_PERMISSION: &str =
         "request_input_monitoring_permission_native";
     pub const TEST_MICROPHONE_FUNCTIONALITY: &str = "test_microphone_functionality";
+    pub const AUTO_GRANT_PERMISSIONS: &str = "auto_grant_permissions";
+    pub const CANCEL_AUTO_GRANT: &str = "cancel_auto_grant";
 }
 
 /// Utility command names

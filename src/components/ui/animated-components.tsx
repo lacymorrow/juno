@@ -3,13 +3,22 @@
  *
  * These provide delightful entry animations, micro-interactions,
  * and visual effects that the agent can compose into rich responses.
- * All animations are CSS-based for performance.
+ * Entry transitions are CSS. Ambient effects (glow, rings, confetti) are
+ * canvas, via `canvas-effects.tsx`, so they read as light rather than as a
+ * box-shadow keyframe.
  *
  * Registered in availableComponents in jsx-message-renderer.tsx.
  */
 
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  paintConfetti,
+  paintGlow,
+  paintRings,
+  parseColor,
+  useCanvasEffect,
+} from "./canvas-effects";
 
 // ============================================================
 // AnimatedCard — card with smooth entry animation
@@ -245,6 +254,16 @@ interface GlowBadgeProps {
   color?: "blue" | "green" | "yellow" | "red" | "purple";
 }
 
+const GLOW_BLEED = 14;
+
+const GLOW_RGB = {
+  blue: "#3b82f6",
+  green: "#22c55e",
+  yellow: "#eab308",
+  red: "#ef4444",
+  purple: "#a855f7",
+} as const;
+
 export function GlowBadge({
   children,
   className,
@@ -258,16 +277,34 @@ export function GlowBadge({
     purple: "bg-purple-500/10 text-purple-500 border-purple-500/30",
   }[color];
 
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const painter = useMemo(
+    () => paintGlow(parseColor(GLOW_RGB[color]), GLOW_BLEED, 9999),
+    [color],
+  );
+  useCanvasEffect(canvasRef, painter);
+
   return (
-    <span
-      className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border",
-        "juno-glow juno-animate-scale",
-        styles,
-        className,
-      )}
-    >
-      {children}
+    <span className={cn("relative inline-flex", className)}>
+      <canvas
+        ref={canvasRef}
+        aria-hidden="true"
+        className="absolute pointer-events-none"
+        style={{
+          inset: -GLOW_BLEED,
+          width: `calc(100% + ${GLOW_BLEED * 2}px)`,
+          height: `calc(100% + ${GLOW_BLEED * 2}px)`,
+        }}
+      />
+      <span
+        className={cn(
+          "relative inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border",
+          "juno-animate-scale",
+          styles,
+        )}
+      >
+        {children}
+      </span>
     </span>
   );
 }
@@ -299,7 +336,7 @@ export function ShimmerText({ children, className }: ShimmerTextProps) {
 }
 
 // ============================================================
-// Confetti — CSS-only celebration burst
+// Confetti — canvas celebration burst (one-shot, stops when settled)
 // ============================================================
 
 interface ConfettiProps {
@@ -320,35 +357,23 @@ const CONFETTI_COLORS = [
 ];
 
 export function Confetti({ count = 12, className }: ConfettiProps) {
-  const pieces = useMemo(
-    () =>
-      Array.from({ length: count }).map((_, i) => ({
-        angle: (360 / count) * i,
-        distance: 20 + Math.random() * 20,
-        size: 3 + Math.random() * 4,
-      })),
-    [count],
-  );
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const painter = useMemo(() => paintConfetti(CONFETTI_COLORS, count), [count]);
+  useCanvasEffect(canvasRef, painter);
 
+  // The inline box stays 32x32 so layout is unchanged; the canvas overhangs
+  // it so pieces can actually fly.
   return (
-    <div
-      className={cn("relative inline-flex items-center justify-center w-8 h-8", className)}
+    <span
+      className={cn("relative inline-flex w-8 h-8", className)}
       aria-hidden="true"
     >
-      {pieces.map((piece, i) => (
-        <div
-          key={i}
-          className="absolute rounded-full"
-          style={{
-            width: `${piece.size}px`,
-            height: `${piece.size}px`,
-            backgroundColor: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-            animation: `juno-confetti 0.8s cubic-bezier(0.16, 1, 0.3, 1) ${i * 0.03}s both`,
-            transform: `rotate(${piece.angle}deg) translateY(-${piece.distance}px)`,
-          }}
-        />
-      ))}
-    </div>
+      <canvas
+        ref={canvasRef}
+        className="absolute pointer-events-none"
+        style={{ left: -44, top: -56, width: 120, height: 96 }}
+      />
+    </span>
   );
 }
 
@@ -369,27 +394,20 @@ export function PulseRing({
   size = 40,
   className,
 }: PulseRingProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const painter = useMemo(() => {
+    const alpha = /rgba\([^)]*,\s*([\d.]+)\s*\)/.exec(color)?.[1];
+    return paintRings(parseColor(color), alpha ? Number(alpha) * 2 : 0.8);
+  }, [color]);
+  useCanvasEffect(canvasRef, painter);
+
   return (
-    <div
-      className={cn("relative inline-flex items-center justify-center", className)}
-      style={{ width: `${size}px`, height: `${size}px` }}
+    <canvas
+      ref={canvasRef}
+      className={cn("inline-block align-middle", className)}
+      style={{ width: size, height: size }}
       aria-hidden="true"
-    >
-      {[0, 0.4, 0.8].map((delay) => (
-        <div
-          key={delay}
-          className="absolute inset-0 rounded-full border-2"
-          style={{
-            borderColor: color,
-            animation: `juno-pulse-ring 2s cubic-bezier(0, 0, 0.2, 1) ${delay}s infinite`,
-          }}
-        />
-      ))}
-      <div
-        className="w-2 h-2 rounded-full"
-        style={{ backgroundColor: color }}
-      />
-    </div>
+    />
   );
 }
 

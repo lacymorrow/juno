@@ -20,7 +20,7 @@ bun run dev
 
 # Build
 bun run build                    # Frontend build (tsc + vite)
-bun tauri build                  # Full production app
+bun run tauri:build              # Full production app (loads ~/.tauri/juno.key for updater signing)
 bun run build:universal          # Universal macOS binary
 
 # Testing

@@ -436,7 +436,7 @@ function App() {
 
       {/* Main Content */}
       <div className="flex-1 min-h-0">
-        <ResizablePanelGroup direction="horizontal">
+        <ResizablePanelGroup orientation="horizontal">
           {/* Primary Content Panel */}
           <ResizablePanel defaultSize={appState.isDevPanelOpen ? 70 : 100}>
             <div className="flex flex-col h-full">

@@ -1,0 +1,19 @@
+# Vendored copy of https://crates.io/crates/block 0.1.6 (MIT, Steven Sheldon).
+# Pulled in via [patch.crates-io] in the workspace Cargo.toml.
+#
+# Upstream is unmaintained and declares `static _NSConcreteStackBlock: Class`
+# with `enum Class {}`, which rustc flags as `uninhabited_static` and will turn
+# into a hard error (rust-lang/rust#74840). The only change here is in
+# src/lib.rs: `Class` is an opaque zero-sized struct instead of an empty enum.
+#
+# Drop this directory once `cocoa` / `objc` are migrated to `objc2` + `block2`.
+
+[package]
+name = "block"
+version = "0.1.6"
+authors = ["Steven Sheldon"]
+edition = "2015"
+description = "Rust interface for Apple's C language extension of blocks. Vendored with an uninhabited_static fix."
+license = "MIT"
+repository = "http://github.com/SSheldon/rust-block"
+publish = false

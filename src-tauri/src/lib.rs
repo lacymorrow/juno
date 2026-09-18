@@ -721,6 +721,8 @@ pub fn run() {
             // Phase C: guided cursor flight to System Settings + permission demos
             commands::guide_to_system_settings,
             commands::run_permission_demo,
+            commands::auto_grant_permissions,
+            commands::cancel_auto_grant,
             // Phase D: onboarding analytics (local buffer; no external network)
             commands::record_onboarding_event,
             commands::get_last_onboarding_phase,
