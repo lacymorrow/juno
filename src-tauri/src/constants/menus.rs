@@ -17,6 +17,8 @@ pub mod tray_menu_ids {
     pub const SHOW_HIDE: &str = "show-hide";
     pub const SHOW_HIDE_FLOATING_BAR: &str = "show-hide-floating-bar";
     pub const DEVELOPER_TOOLS: &str = "developer-tools";
+    /// Disabled first row showing the state word
+    pub const STATUS: &str = "tray-status";
 }
 
 pub mod app_menu_ids {

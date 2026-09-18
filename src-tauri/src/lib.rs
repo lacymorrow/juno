@@ -25,6 +25,7 @@ pub mod agent;
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod agents; // Multi-agent system with specialized agents
 pub mod anthropic;
+pub mod build_info; // Which build this is: version, commit, branch, demo cohort
 pub mod cleanup; // Application cleanup and resource management
 pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
@@ -32,7 +33,6 @@ pub mod commands;
 pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
 pub mod cursor_scale_migration; // Undo a pointer an older build left enlarged
-pub mod build_info; // Which build this is: version, commit, branch, demo cohort
 pub mod demo; // Golden demo builds that carry their own Anthropic key
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
