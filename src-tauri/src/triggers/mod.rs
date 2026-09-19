@@ -16,7 +16,7 @@
 //! [`Trigger::apply_to_legacy`]) so existing runtime consumers keep working
 //! without a codebase-wide rewrite.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// How a trigger fires.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -78,37 +78,133 @@ impl ModifierKey {
             Self::Fn => "Fn (globe)",
         }
     }
+
+    /// The shortcut string this key is recorded as.
+    ///
+    /// Fn is a key on the keyboard, so it is written down the way every other
+    /// key is written down. The fact that it has to be watched differently is
+    /// a detail of the watching, not of the binding.
+    pub fn shortcut(self) -> &'static str {
+        match self {
+            Self::Fn => "Fn",
+        }
+    }
+
+    /// Every spelling of this key a shortcut string may use. Apple has called
+    /// the same physical key both Fn and Globe, and a hand-edited store or an
+    /// older build may carry either.
+    fn aliases(self) -> &'static [&'static str] {
+        match self {
+            Self::Fn => &["fn", "globe"],
+        }
+    }
+}
+
+/// The bare modifier key a shortcut string names, if it names one.
+///
+/// This is the single place that decides which watcher a key goes to. A bare
+/// modifier produces no ordinary key event, so the global-shortcut plugin
+/// cannot register it and [`crate::platform::modifier_key_monitor`] takes it
+/// instead. That is a fact about how the key is watched, which is why it lives
+/// in the registration path and not in the shape of a binding.
+pub fn bare_modifier(shortcut: &str) -> Option<ModifierKey> {
+    let shortcut = shortcut.trim();
+    ModifierKey::ALL.into_iter().find(|key| {
+        key.aliases()
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(shortcut))
+    })
 }
 
 /// The physical input bound to a key/mouse method.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Two kinds, because from where the person sits there are two: a key and a
+/// mouse button. Fn used to be a third, and it should not have been.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Binding {
-    /// A keyboard combo string parseable by [`crate::shortcuts::parse_shortcut_string`],
-    /// e.g. `"Option+Space"`.
+    /// A keyboard shortcut string. Usually a combo parseable by
+    /// [`crate::shortcuts::parse_shortcut_string`], e.g. `"Option+Space"`; it
+    /// may also be a bare modifier such as `"Fn"`, which that parser does not
+    /// know and [`bare_modifier`] does.
     Keyboard { shortcut: String },
     /// A mouse button by AppKit `buttonNumber` (0 = left, 1 = right, 2 = middle,
     /// 3+ = extra side buttons). Watched by the passive input monitor, not the
     /// global-shortcut plugin.
     Mouse { button: u16 },
-    /// A bare modifier key such as Fn, which produces no ordinary key event.
-    /// Watched by `platform::modifier_key_monitor`, never by the
-    /// global-shortcut plugin, which cannot register it.
+}
+
+/// The shapes a stored or incoming binding may arrive in.
+///
+/// `modifier` is the retired third kind. It is accepted here and converted on
+/// read so an Fn trigger already on disk survives the change, and so does a
+/// window that has not reloaded since. Nothing writes it: [`Binding`]
+/// serializes as keyboard or mouse only, so there is one live representation.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum StoredBinding {
+    Keyboard { shortcut: String },
+    Mouse { button: u16 },
     Modifier { key: ModifierKey },
+}
+
+impl<'de> Deserialize<'de> for Binding {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(match StoredBinding::deserialize(deserializer)? {
+            StoredBinding::Keyboard { shortcut } => Binding::Keyboard { shortcut },
+            StoredBinding::Mouse { button } => Binding::Mouse { button },
+            StoredBinding::Modifier { key } => Binding::Keyboard {
+                shortcut: key.shortcut().to_string(),
+            },
+        })
+    }
+}
+
+/// Which observer is able to see a given binding fire.
+///
+/// One binding kind for keys, and this decides who watches each one. Keeping
+/// the decision in a function of the shortcut string is what stops "the plugin
+/// cannot register Fn" from leaking back into the model or the settings window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Watcher {
+    /// The tauri global-shortcut plugin, which handles ordinary combos.
+    GlobalShortcut,
+    /// `platform::modifier_key_monitor`, for keys that only ever arrive as a
+    /// change of modifier flags.
+    ModifierKey(ModifierKey),
+    /// `platform::mouse_button_monitor`, by AppKit `buttonNumber`.
+    MouseButton(u16),
+}
+
+/// Who watches this binding.
+pub fn watcher_for(binding: &Binding) -> Watcher {
+    match binding {
+        Binding::Keyboard { shortcut } => match bare_modifier(shortcut) {
+            Some(key) => Watcher::ModifierKey(key),
+            None => Watcher::GlobalShortcut,
+        },
+        Binding::Mouse { button } => Watcher::MouseButton(*button),
+    }
 }
 
 impl Binding {
     /// Human label for logs and conflict messages.
     pub fn describe(&self) -> String {
         match self {
-            Binding::Keyboard { shortcut } => shortcut.clone(),
+            // A bare modifier gets its spoken name, because "Fn (globe)" is
+            // what a person would recognise in "that is already in use".
+            Binding::Keyboard { shortcut } => bare_modifier(shortcut)
+                .map(|key| key.label().to_string())
+                .unwrap_or_else(|| shortcut.clone()),
             Binding::Mouse { button } => match button {
                 0 => "Left Click".to_string(),
                 1 => "Right Click".to_string(),
                 2 => "Middle Click".to_string(),
                 n => format!("Mouse Button {}", n + 1),
             },
-            Binding::Modifier { key } => key.label().to_string(),
         }
     }
 }
@@ -328,8 +424,14 @@ pub fn derive_legacy(
             "tap".to_string()
         }
     };
+    // A bare modifier is a keyboard binding, but it is not a combo string: the
+    // legacy fields are fed to `parse_shortcut_string`, which knows nothing of
+    // Fn, and to key caps that draw one modifier plus one key. So it falls
+    // through to the previous value, the same way a mouse button does.
     let keyboard_combo = |t: &Trigger, fallback: &str| match &t.binding {
-        Some(Binding::Keyboard { shortcut }) => shortcut.clone(),
+        Some(Binding::Keyboard { shortcut }) if bare_modifier(shortcut).is_none() => {
+            shortcut.clone()
+        }
         _ => fallback.to_string(),
     };
 
@@ -368,17 +470,6 @@ pub fn derive_legacy(
     )
 }
 
-/// Validate a trigger list before it is persisted. Returns a human-readable
-/// error the UI can show inline on the offending row.
-///
-/// Rules:
-/// - No two enabled key/mouse triggers may share the same binding.
-/// - A key/mouse trigger that is enabled must actually have a binding.
-/// - An enabled voice trigger must have a non-blank phrase.
-///
-/// `reserved` are binding descriptions already owned by the two fixed utility
-/// shortcuts (Escape to stop, Cmd+Comma to open settings); an enabled keyboard
-/// trigger may not collide with one.
 /// Turn off any key or mouse trigger that has no binding recorded yet.
 ///
 /// A freshly added row is allowed to persist unconfigured, so the work of
@@ -397,6 +488,54 @@ pub fn disable_unbound(triggers: &mut [Trigger]) {
     }
 }
 
+/// Switch on a key or mouse trigger that has just had its first binding recorded.
+///
+/// This is the other half of [`disable_unbound`]'s contract. That function ends
+/// "binding a key is what turns it on", and nothing carried it out: a row added
+/// from the "+" menu persists unbound, so it is switched off, and recording a
+/// key left it switched off. The person was then looking at a row that named
+/// their key, drawn greyed out, doing nothing, with no hint that a second and
+/// unrelated-looking gesture was still owed. Nobody binds a key in order to
+/// leave it off.
+///
+/// It bit the globe key hardest. Fn cannot be tried out to see whether it took,
+/// because a trigger that is off is never registered, so "it does not work" and
+/// "it was never set" look identical from the outside.
+///
+/// Only the None -> Some edge counts. Changing which key is bound on a row
+/// somebody deliberately switched off leaves it off, because that is a change
+/// of which key, not a decision to start using it.
+pub fn enable_newly_bound(previous: &[Trigger], next: &mut [Trigger]) {
+    for t in next.iter_mut() {
+        if t.is_voice() || t.enabled || t.binding.is_none() {
+            continue;
+        }
+        // A row that did not exist a moment ago and arrives already bound was
+        // bound by whatever created it, so it counts as newly bound too.
+        let was_unbound = previous
+            .iter()
+            .find(|p| p.key() == t.key())
+            .map(|p| p.binding.is_none())
+            .unwrap_or(true);
+        if was_unbound {
+            t.enabled = true;
+        }
+    }
+}
+
+/// Validate a trigger list before it is persisted. Returns a human-readable
+/// error the UI can show inline on the offending row.
+///
+/// Rules:
+/// - No two enabled key/mouse triggers may share the same binding.
+/// - An enabled voice trigger must have a non-blank phrase.
+///
+/// A key/mouse trigger with no binding is allowed through and is switched off
+/// by [`disable_unbound`] instead, so adding a row is not lost work.
+///
+/// `reserved` are binding descriptions already owned by the two fixed utility
+/// shortcuts (Escape to stop, Cmd+Comma to open settings); an enabled keyboard
+/// trigger may not collide with one.
 pub fn validate(triggers: &[Trigger], reserved: &[String]) -> Result<(), String> {
     use std::collections::HashSet;
     let mut seen_bindings: HashSet<String> = HashSet::new();
@@ -709,6 +848,268 @@ mod tests {
                 .any(|t| t.target == TriggerTarget::Dictation
                     && t.method == TriggerMethod::PushToTalk)
         );
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Recording a key is what turns a row on                           */
+    /* ---------------------------------------------------------------- */
+
+    fn key_trigger(target: TriggerTarget, binding: Option<Binding>, enabled: bool) -> Trigger {
+        Trigger {
+            method: TriggerMethod::PushToTalk,
+            target,
+            binding,
+            phrase: None,
+            require_hey_prefix: false,
+            enabled,
+        }
+    }
+
+    #[test]
+    fn binding_a_key_to_an_unbound_row_switches_it_on() {
+        // The reported defect. Adding a row leaves it off because it cannot
+        // fire yet; choosing a key used to leave it off as well, so the row
+        // named the key and did nothing.
+        let previous = vec![key_trigger(TriggerTarget::Dictation, None, false)];
+        let mut next = vec![key_trigger(
+            TriggerTarget::Dictation,
+            Some(Binding::Keyboard {
+                shortcut: "Fn".to_string(),
+            }),
+            false,
+        )];
+        enable_newly_bound(&previous, &mut next);
+        assert!(next[0].enabled);
+    }
+
+    #[test]
+    fn rebinding_a_row_somebody_switched_off_leaves_it_off() {
+        // Changing which key is bound is not a decision to start using it.
+        let previous = vec![key_trigger(
+            TriggerTarget::Dictation,
+            Some(Binding::Keyboard {
+                shortcut: "Option+Space".to_string(),
+            }),
+            false,
+        )];
+        let mut next = vec![key_trigger(
+            TriggerTarget::Dictation,
+            Some(Binding::Keyboard {
+                shortcut: "Fn".to_string(),
+            }),
+            false,
+        )];
+        enable_newly_bound(&previous, &mut next);
+        assert!(!next[0].enabled);
+    }
+
+    #[test]
+    fn a_row_that_is_still_unbound_is_not_switched_on() {
+        let previous = vec![key_trigger(TriggerTarget::Dictation, None, false)];
+        let mut next = vec![key_trigger(TriggerTarget::Dictation, None, false)];
+        enable_newly_bound(&previous, &mut next);
+        assert!(!next[0].enabled);
+    }
+
+    #[test]
+    fn the_two_switch_rules_do_not_fight() {
+        // Run in the order set_triggers runs them: a newly bound row ends on,
+        // an unbound one ends off, and neither undoes the other.
+        let previous = vec![
+            key_trigger(TriggerTarget::Dictation, None, false),
+            key_trigger(TriggerTarget::Agent, None, false),
+        ];
+        let mut next = vec![
+            key_trigger(
+                TriggerTarget::Dictation,
+                Some(Binding::Keyboard {
+                    shortcut: "Fn".to_string(),
+                }),
+                false,
+            ),
+            key_trigger(TriggerTarget::Agent, None, true),
+        ];
+        enable_newly_bound(&previous, &mut next);
+        disable_unbound(&mut next);
+        assert!(next[0].enabled, "the row that just got a key is on");
+        assert!(!next[1].enabled, "the row with no key is off");
+    }
+
+    #[test]
+    fn a_voice_trigger_is_never_switched_on_by_this() {
+        // Voice is armed by its phrase and has no binding to record.
+        let previous = vec![voice("juno", TriggerTarget::Agent, false)];
+        let mut next = vec![voice("juno", TriggerTarget::Agent, false)];
+        enable_newly_bound(&previous, &mut next);
+        assert!(!next[0].enabled);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Fn is a keyboard key                                             */
+    /* ---------------------------------------------------------------- */
+
+    #[test]
+    fn a_settings_file_written_before_the_collapse_keeps_its_fn_trigger() {
+        // The retired shape, exactly as it sits in a store on disk today. If
+        // this ever stops resolving, someone's globe key silently stops
+        // working after an update, which is the whole reason it is read.
+        let stored = r#"[{
+            "method": "push_to_talk",
+            "target": "dictation",
+            "binding": { "kind": "modifier", "key": "fn" },
+            "phrase": null,
+            "require_hey_prefix": false,
+            "enabled": true
+        }]"#;
+        let triggers: Vec<Trigger> =
+            serde_json::from_str(stored).expect("the old shape must still be readable");
+        assert_eq!(
+            triggers[0].binding,
+            Some(Binding::Keyboard {
+                shortcut: "Fn".to_string()
+            }),
+            "an old modifier binding becomes the keyboard binding it always was"
+        );
+        assert!(triggers[0].enabled, "and it is still switched on");
+    }
+
+    #[test]
+    fn the_converted_binding_survives_the_save_that_follows() {
+        // Reading is only half of it: the next save writes the new shape, and
+        // that has to read back as the same key rather than as a stranger.
+        let stored = r#"{ "kind": "modifier", "key": "fn" }"#;
+        let read: Binding = serde_json::from_str(stored).expect("old shape");
+        let written = serde_json::to_string(&read).expect("serialize");
+        assert_eq!(written, r#"{"kind":"keyboard","shortcut":"Fn"}"#);
+        let reread: Binding = serde_json::from_str(&written).expect("new shape");
+        assert_eq!(read, reread);
+    }
+
+    #[test]
+    fn nothing_writes_the_retired_shape_any_more() {
+        // One live representation. A `modifier` binding can be read and never
+        // produced, so the two shapes cannot drift apart in the store.
+        let fn_binding = Binding::Keyboard {
+            shortcut: "Fn".to_string(),
+        };
+        let written = serde_json::to_string(&fn_binding).expect("serialize");
+        assert!(!written.contains("modifier"));
+    }
+
+    #[test]
+    fn a_bare_modifier_goes_to_the_modifier_watcher() {
+        // The plugin cannot register a key that only ever changes a modifier
+        // flag, so the registration layer hands it to the flags-changed
+        // monitor. This is the only place that distinction is allowed to live.
+        assert_eq!(
+            watcher_for(&Binding::Keyboard {
+                shortcut: "Fn".to_string()
+            }),
+            Watcher::ModifierKey(ModifierKey::Fn)
+        );
+        assert_eq!(
+            watcher_for(&Binding::Keyboard {
+                shortcut: "globe".to_string()
+            }),
+            Watcher::ModifierKey(ModifierKey::Fn),
+            "Apple calls the same key both things"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_combo_still_goes_to_the_global_shortcut_plugin() {
+        assert_eq!(
+            watcher_for(&Binding::Keyboard {
+                shortcut: "Option+Space".to_string()
+            }),
+            Watcher::GlobalShortcut
+        );
+        // A combo that merely mentions the word is not the bare key.
+        assert_eq!(
+            watcher_for(&Binding::Keyboard {
+                shortcut: "Fn+F5".to_string()
+            }),
+            Watcher::GlobalShortcut
+        );
+        assert_eq!(
+            watcher_for(&Binding::Mouse { button: 3 }),
+            Watcher::MouseButton(3)
+        );
+    }
+
+    #[test]
+    fn an_fn_binding_is_valid_and_stays_switched_on() {
+        // The reported defect: a trigger bound to Fn could not be enabled. It
+        // is a binding like any other, so it passes validation and
+        // disable_unbound leaves it alone.
+        let mut ts = vec![Trigger {
+            method: TriggerMethod::PushToTalk,
+            target: TriggerTarget::Dictation,
+            binding: Some(Binding::Keyboard {
+                shortcut: "Fn".to_string(),
+            }),
+            phrase: None,
+            require_hey_prefix: false,
+            enabled: true,
+        }];
+        disable_unbound(&mut ts);
+        assert!(ts[0].enabled);
+        assert!(validate(&ts, &["Escape".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn fn_is_named_the_way_a_person_would_name_it_in_a_conflict() {
+        let label = Binding::Keyboard {
+            shortcut: "Fn".to_string(),
+        }
+        .describe();
+        assert_eq!(label, "Fn (globe)");
+    }
+
+    #[test]
+    fn fn_and_a_combo_cannot_be_confused_for_a_duplicate() {
+        let ts = vec![
+            Trigger {
+                method: TriggerMethod::PushToTalk,
+                target: TriggerTarget::Dictation,
+                binding: Some(Binding::Keyboard {
+                    shortcut: "Fn".to_string(),
+                }),
+                phrase: None,
+                require_hey_prefix: false,
+                enabled: true,
+            },
+            Trigger {
+                method: TriggerMethod::Toggle,
+                target: TriggerTarget::Agent,
+                binding: Some(Binding::Keyboard {
+                    shortcut: "Option+D".to_string(),
+                }),
+                phrase: None,
+                require_hey_prefix: false,
+                enabled: true,
+            },
+        ];
+        assert!(validate(&ts, &[]).is_ok());
+    }
+
+    #[test]
+    fn derive_legacy_keeps_previous_combo_for_an_fn_binding() {
+        // The legacy fields are parsed as combos and drawn as key caps, and
+        // "Fn" is neither. It falls through the same way a mouse button does.
+        let ts = vec![Trigger {
+            method: TriggerMethod::PushToTalk,
+            target: TriggerTarget::Dictation,
+            binding: Some(Binding::Keyboard {
+                shortcut: "Fn".to_string(),
+            }),
+            phrase: None,
+            require_hey_prefix: false,
+            enabled: true,
+        }];
+        let (_, _, d_combo, d_mode, ..) = derive_legacy(&ts, "kept+a", "kept+d");
+        assert_eq!(d_combo, "kept+d");
+        assert_eq!(d_mode, "hold");
     }
 
     #[test]

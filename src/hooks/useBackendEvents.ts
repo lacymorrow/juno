@@ -20,7 +20,6 @@ type AxGroundingAuditEvent = {
 type SubmitQueryResult = {
 	text: string;
 	spoken_text?: string;
-	audio_base64?: string;
 	agent_state: string;
 	screenshot_base64?: string;
 };
@@ -88,10 +87,6 @@ interface UseBackendEventsProps {
 	addAssistantMessage: (content: string, metadata?: Partial<ChatMessage>) => void;
 	setConversationWithPruning: (updateFn: React.SetStateAction<ChatMessage[]>) => void;
 
-	// Audio management
-	playAudioFromBase64: (base64Audio: string) => void;
-	stopCurrentAudio: () => void;
-
 	// State management
 	setIsProcessing: (processing: boolean) => void;
 	setServerStatus: (status: "connected" | "error" | "connecting") => void;
@@ -116,8 +111,6 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
 export function useBackendEvents({
 	addSystemMessage,
 	setConversationWithPruning,
-	playAudioFromBase64,
-	stopCurrentAudio,
 	setIsProcessing,
 	setServerStatus,
 	skipServerCheck = false,
@@ -156,10 +149,6 @@ export function useBackendEvents({
 					screenshot_base64: response.screenshot_base64,
 					timestamp: Date.now(),
 				};
-
-				if (response.audio_base64) {
-					playAudioFromBase64(response.audio_base64);
-				}
 
 				return [...prevConversation, assistantMessage];
 			} else {
@@ -243,24 +232,12 @@ export function useBackendEvents({
 		}
 	);
 
-	// Listen for TTS audio ready events
-	useEventListener<{ audio_base64: string }>(
-		EVENTS.TTS_AUDIO_READY,
-		(payload) => {
-			console.log("TTS audio ready event received");
-			if (payload.audio_base64) {
-				playAudioFromBase64(payload.audio_base64);
-			}
-		}
-	);
-
 	// Listen for TTS stop requests
 	useEventListener(
 		EVENTS.TTS_STOP_REQUESTED,
 		async () => {
 			console.log("TTS stop requested event received - stopping TTS immediately");
 			try {
-				stopCurrentAudio();
 				await stopTTS((msg, level) =>
 					console.log(`[TTS-${level || "info"}] ${msg}`)
 				);
@@ -594,7 +571,6 @@ export function useBackendEvents({
 					console.log(`[Agent Stop All TTS-${level || "info"}] ${msg}`)
 				);
 				setIsProcessing(false);
-				stopCurrentAudio();
 				console.log("Agent stop all: UI cleanup completed successfully");
 			} catch (error) {
 				console.error("Error during agent stop all cleanup:", error);

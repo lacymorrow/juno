@@ -12,6 +12,7 @@ import ClickQATestPanel from "./devtools/ClickQATestPanel";
 import FileOperations from "./devtools/FileOperations";
 import KeyboardOperations from "./devtools/KeyboardOperations";
 import MouseOperations from "./devtools/MouseOperations";
+import PermissionDiagnostics from "./devtools/PermissionDiagnostics";
 import ScreenshotOperations from "./devtools/ScreenshotOperations";
 import SystemContextDebug from "./devtools/SystemContextDebug";
 import { ToolDebugPanel } from "./devtools/ToolDebugPanel";
@@ -175,6 +176,14 @@ const DevToolsPanel: React.FC = () => {
   return (
     <ScrollArea className="h-full w-full rounded-md border p-4">
       <div className="space-y-6">
+        {/* First, because a permission macOS is not actually granting is what
+            makes the rest of this panel look broken. */}
+        <div>
+          <h2 className="text-lg font-semibold">Permissions</h2>
+          <Separator className="my-2" />
+          <PermissionDiagnostics />
+        </div>
+
         <div>
           <h2 className="text-lg font-semibold">🔧 Tool Configuration Debug</h2>
           <Separator className="my-2" />

@@ -898,7 +898,10 @@ export default function OnboardingFlow({
     setFnSaveError(null);
     try {
       const triggers = await invoke<TriggerShape[]>(COMMANDS.TRIGGERS_GET_TRIGGERS);
-      const fnBinding = { kind: "modifier" as const, key: "fn" as const };
+      // The globe key is a keyboard key, so it is a keyboard binding whose
+      // shortcut string is "Fn". Which watcher can see it is the backend's
+      // problem, not a second kind of binding.
+      const fnBinding = { kind: "keyboard" as const, shortcut: "Fn" as const };
       const isTalkTrigger = (trigger: TriggerShape) =>
         trigger.method === "push_to_talk" && trigger.target === "dictation";
       // Also switched on, because a trigger that is off is never registered:
@@ -931,13 +934,16 @@ export default function OnboardingFlow({
       });
       // Believe the list that came back, not the one we sent: the backend
       // normalizes and can reject.
-      const adopted = saved.some(
-        (trigger) =>
-          isTalkTrigger(trigger) &&
-          (trigger.binding as { kind?: string; key?: string } | null)?.kind ===
-            "modifier" &&
-          (trigger.binding as { kind?: string; key?: string } | null)?.key === "fn"
-      );
+      const adopted = saved.some((trigger) => {
+        if (!isTalkTrigger(trigger)) return false;
+        const binding = trigger.binding as
+          | { kind?: string; shortcut?: string }
+          | null;
+        return (
+          binding?.kind === "keyboard" &&
+          binding.shortcut?.trim().toLowerCase() === "fn"
+        );
+      });
       if (!mountedRef.current) return;
       if (adopted) {
         setFnOffered(true);

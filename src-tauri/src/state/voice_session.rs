@@ -16,6 +16,15 @@
 //! guessing. A claim that does not match the current session is refused, so a
 //! stale stop is a no-op rather than a wrong action.
 //!
+//! A fifth came from the other end. Stops had to claim; starts did not, so a
+//! second start replaced the standing session in place. The microphone did not
+//! change hands, because the audio engine refuses a second recording, so the
+//! second start failed and its failure path tore down the state of the session
+//! it had just taken the name of: capture flag down, tray back to idle, input
+//! monitor reset, while the first session's microphone was still recording. So
+//! [`VoiceSessionRegistry::begin`] refuses too, and a start with nowhere to go
+//! is a no-op like a stale stop.
+//!
 //! The logic here is pure and unit tested. [`crate::state::AppState`] owns one
 //! registry behind a mutex and exposes thin wrappers.
 
@@ -218,17 +227,23 @@ impl ClaimRejection {
     }
 }
 
-/// What [`VoiceSessionRegistry::begin`] did.
+/// Why [`VoiceSessionRegistry::begin`] refused to open a session.
+///
+/// There is one microphone, so a start that arrives while a session is standing
+/// is not a start. The refusal carries the session that still owns the
+/// microphone, because the only useful thing to say about a refused start is
+/// whose session it was refused in favour of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BeginOutcome {
-    /// The session that now owns the microphone.
-    pub session: VoiceSession,
-    /// A session that was still registered and has just lost ownership.
-    ///
-    /// Always a bug upstream: something opened a second session without ending
-    /// the first. Reported rather than hidden so it shows up in a log instead
-    /// of as a mystery months later.
-    pub superseded: Option<VoiceSession>,
+pub struct StartRefused {
+    /// The session that still owns the microphone.
+    pub standing: VoiceSession,
+}
+
+impl StartRefused {
+    /// What a log line calls this refusal.
+    pub fn reason(self) -> String {
+        format!("{} already owns the microphone", self.standing.describe())
+    }
 }
 
 /// The single owner of voice session identity.
@@ -247,11 +262,34 @@ impl VoiceSessionRegistry {
         Self::default()
     }
 
-    /// Open a session and hand back its identity.
+    /// Open a session and hand back its identity, unless one is already open.
     ///
-    /// Ids are never reused, so an id from an earlier session can only ever be
-    /// refused, never mistaken for the current one.
-    pub fn begin(&mut self, target: VoiceTarget, method: VoiceStartMethod) -> BeginOutcome {
+    /// Stops have always had to claim. Starts did not: a second start replaced
+    /// the standing session in place and reported it as "superseded" in a
+    /// warning nobody could act on. The microphone never actually changed
+    /// hands, because the audio engine refuses a second recording, so the
+    /// second start then failed and its failure path tore down the state of the
+    /// session it had just taken the name of. That is how a live microphone
+    /// ended up behind a bar that said nothing was happening.
+    ///
+    /// Refusing is the honest answer. The microphone is already open, and a
+    /// second press of the same control means "I am already talking", not
+    /// "throw away what I said and start again"; ending the standing session
+    /// here would discard audio nobody asked to discard. Anything that really
+    /// does mean to replace a session stops or cancels it first, and those
+    /// paths already exist and already claim.
+    ///
+    /// A refused start mints nothing, so ids stay in step with sessions that
+    /// really opened. Ids are never reused, so an id from an earlier session
+    /// can only ever be refused, never mistaken for the current one.
+    pub fn begin(
+        &mut self,
+        target: VoiceTarget,
+        method: VoiceStartMethod,
+    ) -> Result<VoiceSession, StartRefused> {
+        if let Some(standing) = self.current {
+            return Err(StartRefused { standing });
+        }
         self.last_id += 1;
         let session = VoiceSession {
             id: self.last_id,
@@ -259,10 +297,8 @@ impl VoiceSessionRegistry {
             method,
             phase: VoicePhase::Live,
         };
-        BeginOutcome {
-            session,
-            superseded: self.current.replace(session),
-        }
+        self.current = Some(session);
+        Ok(session)
     }
 
     /// The session that is open now, if there is one.
@@ -337,27 +373,38 @@ mod tests {
         VoiceSessionRegistry::new()
     }
 
+    /// Open a session in a test that is not about the start guard.
+    fn open(
+        reg: &mut VoiceSessionRegistry,
+        target: VoiceTarget,
+        method: VoiceStartMethod,
+    ) -> VoiceSession {
+        match reg.begin(target, method) {
+            Ok(session) => session,
+            Err(refused) => panic!("nothing should have been open, but {}", refused.reason()),
+        }
+    }
+
     #[test]
     fn a_session_carries_its_identity_from_the_start() {
         let mut reg = registry();
-        let begun = reg.begin(VoiceTarget::Dictation, VoiceStartMethod::PushToTalk);
-        assert_eq!(begun.session.target, VoiceTarget::Dictation);
-        assert_eq!(begun.session.method, VoiceStartMethod::PushToTalk);
-        assert!(begun.session.is_live());
-        assert!(begun.superseded.is_none());
-        assert_eq!(reg.current(), Some(begun.session));
+        let session = open(
+            &mut reg,
+            VoiceTarget::Dictation,
+            VoiceStartMethod::PushToTalk,
+        );
+        assert_eq!(session.target, VoiceTarget::Dictation);
+        assert_eq!(session.method, VoiceStartMethod::PushToTalk);
+        assert!(session.is_live());
+        assert_eq!(reg.current(), Some(session));
     }
 
     #[test]
     fn ids_are_never_reused() {
         let mut reg = registry();
-        let first = reg
-            .begin(VoiceTarget::Agent, VoiceStartMethod::Toggle)
-            .session;
+        let first = open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::Toggle);
         reg.claim_discard(SessionClaim::Current).expect("claimed");
-        let second = reg
-            .begin(VoiceTarget::Agent, VoiceStartMethod::Toggle)
-            .session;
+        let second = open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::Toggle);
         assert_ne!(first.id, second.id);
     }
 
@@ -367,14 +414,10 @@ mod tests {
         // and a new one opens; the key that was still held from the first one
         // finally comes up and tries to commit it.
         let mut reg = registry();
-        let cancelled = reg
-            .begin(VoiceTarget::Agent, VoiceStartMethod::PushToTalk)
-            .session;
+        let cancelled = open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::PushToTalk);
         reg.claim_discard(SessionClaim::Id(cancelled.id))
             .expect("the cancel owns it");
-        let fresh = reg
-            .begin(VoiceTarget::Agent, VoiceStartMethod::PushToTalk)
-            .session;
+        let fresh = open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::PushToTalk);
 
         assert_eq!(
             reg.claim_commit(SessionClaim::Id(cancelled.id)),
@@ -394,9 +437,7 @@ mod tests {
         // registry, so the late stop has nothing to finalise and nothing is
         // submitted.
         let mut reg = registry();
-        let session = reg
-            .begin(VoiceTarget::Agent, VoiceStartMethod::PushToTalk)
-            .session;
+        let session = open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::PushToTalk);
         reg.claim_discard(SessionClaim::Id(session.id))
             .expect("claimed");
         assert_eq!(
@@ -413,14 +454,10 @@ mod tests {
     #[test]
     fn a_stale_cancel_is_refused_too() {
         let mut reg = registry();
-        let first = reg
-            .begin(VoiceTarget::Dictation, VoiceStartMethod::Toggle)
-            .session;
+        let first = open(&mut reg, VoiceTarget::Dictation, VoiceStartMethod::Toggle);
         reg.claim_discard(SessionClaim::Id(first.id))
             .expect("claimed");
-        let second = reg
-            .begin(VoiceTarget::Dictation, VoiceStartMethod::Toggle)
-            .session;
+        let second = open(&mut reg, VoiceTarget::Dictation, VoiceStartMethod::Toggle);
         assert_eq!(
             reg.claim_discard(SessionClaim::Id(first.id)),
             Err(ClaimRejection::Stale)
@@ -433,9 +470,11 @@ mod tests {
         // Two stop paths firing for one release would otherwise finalise the
         // audio twice.
         let mut reg = registry();
-        let session = reg
-            .begin(VoiceTarget::Dictation, VoiceStartMethod::PushToTalk)
-            .session;
+        let session = open(
+            &mut reg,
+            VoiceTarget::Dictation,
+            VoiceStartMethod::PushToTalk,
+        );
         assert!(reg.claim_commit(SessionClaim::Id(session.id)).is_ok());
         assert_eq!(
             reg.claim_commit(SessionClaim::Id(session.id)),
@@ -452,9 +491,11 @@ mod tests {
         // The original defect: routing asked whether a session was live, and
         // the transcript only exists because it stopped being live.
         let mut reg = registry();
-        let session = reg
-            .begin(VoiceTarget::Dictation, VoiceStartMethod::PushToTalk)
-            .session;
+        let session = open(
+            &mut reg,
+            VoiceTarget::Dictation,
+            VoiceStartMethod::PushToTalk,
+        );
         let committed = reg
             .claim_commit(SessionClaim::Id(session.id))
             .expect("claimed");
@@ -471,7 +512,7 @@ mod tests {
     fn a_transcript_is_owned_once() {
         // Otherwise a leftover owner would capture the next session's text.
         let mut reg = registry();
-        reg.begin(VoiceTarget::Dictation, VoiceStartMethod::Toggle);
+        open(&mut reg, VoiceTarget::Dictation, VoiceStartMethod::Toggle);
         reg.claim_commit(SessionClaim::Current).expect("claimed");
         assert!(reg.take_transcript_owner().is_some());
         assert!(reg.take_transcript_owner().is_none());
@@ -482,7 +523,11 @@ mod tests {
         // Cancel means cancel: if the engine emits a final result anyway, there
         // is nobody left to type it or send it.
         let mut reg = registry();
-        reg.begin(VoiceTarget::Dictation, VoiceStartMethod::PushToTalk);
+        open(
+            &mut reg,
+            VoiceTarget::Dictation,
+            VoiceStartMethod::PushToTalk,
+        );
         reg.claim_discard(SessionClaim::Current).expect("claimed");
         assert!(reg.take_transcript_owner().is_none());
     }
@@ -490,9 +535,11 @@ mod tests {
     #[test]
     fn a_cancel_during_finalisation_still_drops_the_text() {
         let mut reg = registry();
-        let session = reg
-            .begin(VoiceTarget::Dictation, VoiceStartMethod::PushToTalk)
-            .session;
+        let session = open(
+            &mut reg,
+            VoiceTarget::Dictation,
+            VoiceStartMethod::PushToTalk,
+        );
         reg.claim_commit(SessionClaim::Id(session.id))
             .expect("claimed");
         reg.claim_discard(SessionClaim::Current)
@@ -505,20 +552,102 @@ mod tests {
         // The speech engine can finalise on its own (silence detection). The
         // session is the owner either way.
         let mut reg = registry();
-        reg.begin(VoiceTarget::Agent, VoiceStartMethod::WakePhrase);
+        open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::WakePhrase);
         let owner = reg.take_transcript_owner().expect("owned");
         assert_eq!(owner.target, VoiceTarget::Agent);
     }
 
     #[test]
-    fn the_registry_reports_a_session_it_had_to_supersede() {
+    fn a_start_while_a_session_is_live_is_refused() {
+        // The bug this guard exists for: the bar's mic pressed twice. The
+        // second press used to open a session, take ownership from the first,
+        // and then fail at the audio engine with "Already dictating".
         let mut reg = registry();
-        let first = reg
-            .begin(VoiceTarget::Agent, VoiceStartMethod::Toggle)
-            .session;
-        let outcome = reg.begin(VoiceTarget::Dictation, VoiceStartMethod::PushToTalk);
-        assert_eq!(outcome.superseded, Some(first));
-        assert_eq!(reg.current(), Some(outcome.session));
+        let live = open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::Mouse);
+        assert_eq!(
+            reg.begin(VoiceTarget::Agent, VoiceStartMethod::Mouse),
+            Err(StartRefused { standing: live })
+        );
+    }
+
+    #[test]
+    fn a_refused_start_leaves_the_existing_session_untouched() {
+        // The whole point. A refused start must not be able to affect the
+        // session that is actually recording: not its identity, not its phase,
+        // and not its right to be stopped by the control the person is looking
+        // at.
+        let mut reg = registry();
+        let live = open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::Mouse);
+
+        assert!(reg
+            .begin(VoiceTarget::Dictation, VoiceStartMethod::Toggle)
+            .is_err());
+
+        assert_eq!(
+            reg.current(),
+            Some(live),
+            "the standing session is still the open one, unchanged"
+        );
+        assert_eq!(
+            reg.claim_commit(SessionClaim::Id(live.id)),
+            Ok(VoiceSession {
+                phase: VoicePhase::Finishing,
+                ..live
+            }),
+            "and its own stop still reaches it"
+        );
+        assert_eq!(
+            reg.take_transcript_owner().map(|owner| owner.id),
+            Some(live.id),
+            "so its transcript still goes where it was started to go"
+        );
+    }
+
+    #[test]
+    fn a_refused_start_mints_no_identity() {
+        // Otherwise a refused start burns an id, and the ids in two log lines
+        // stop being a count of the sessions that really opened.
+        let mut reg = registry();
+        let live = open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::Mouse);
+        assert!(reg
+            .begin(VoiceTarget::Agent, VoiceStartMethod::Mouse)
+            .is_err());
+        reg.claim_discard(SessionClaim::Current).expect("claimed");
+
+        let next = open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::Mouse);
+        assert_eq!(
+            next.id,
+            live.id + 1,
+            "the next session that really opens is the next id"
+        );
+    }
+
+    #[test]
+    fn a_start_is_refused_while_the_standing_session_is_finishing() {
+        // A committed session still owns a transcript that has not arrived.
+        // Starting over it would hand that text to the new session.
+        let mut reg = registry();
+        let live = open(&mut reg, VoiceTarget::Dictation, VoiceStartMethod::Toggle);
+        let finishing = reg
+            .claim_commit(SessionClaim::Id(live.id))
+            .expect("the stop owns it");
+        assert_eq!(
+            reg.begin(VoiceTarget::Agent, VoiceStartMethod::Mouse),
+            Err(StartRefused {
+                standing: finishing
+            })
+        );
+    }
+
+    #[test]
+    fn a_start_is_allowed_once_the_session_before_it_has_ended() {
+        // The guard refuses a second microphone, not a second sentence.
+        let mut reg = registry();
+        open(&mut reg, VoiceTarget::Agent, VoiceStartMethod::Mouse);
+        reg.claim_discard(SessionClaim::Current).expect("claimed");
+        assert!(reg
+            .begin(VoiceTarget::Agent, VoiceStartMethod::Mouse)
+            .is_ok());
     }
 
     #[test]
@@ -541,7 +670,11 @@ mod tests {
         // from the keyboard was not its to cancel and the button did nothing.
         // The verb is still "cancel"; the registry is what says whose.
         let mut reg = registry();
-        reg.begin(VoiceTarget::Dictation, VoiceStartMethod::PushToTalk);
+        open(
+            &mut reg,
+            VoiceTarget::Dictation,
+            VoiceStartMethod::PushToTalk,
+        );
         let claimed = reg
             .claim_discard(SessionClaim::Current)
             .expect("the open session is the one the X means");

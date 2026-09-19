@@ -75,11 +75,11 @@ use commands::{
     accessibility_click, accessibility_scan, always_listening::*, app_url::*, autostart::*,
     computer, core::*, dictation::*, element::*, error_recovery::*, execute_accessibility_tool,
     execute_safari_tool, filesystem::*, get_accessibility_tool_definitions, keyboard::*, media::*,
-    memory::*, mouse::*, orchestrator::*, permissions::*, persistent_memory::*, providers::*,
-    safari_clear_cache, safari_click_element, safari_execute_javascript, safari_extract_dom,
-    safari_get_url, safari_is_active, safari_list_clickable_elements, safari_navigate,
-    safari_type_text, shell::*, sound::*, test_accessibility_permissions, text_editor::*,
-    ui_commands::*, window::*,
+    memory::*, mouse::*, orchestrator::*, permission_diagnostics::*, permissions::*,
+    persistent_memory::*, providers::*, safari_clear_cache, safari_click_element,
+    safari_execute_javascript, safari_extract_dom, safari_get_url, safari_is_active,
+    safari_list_clickable_elements, safari_navigate, safari_type_text, shell::*, sound::*,
+    test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
 };
 
 // Import specific sound commands from sound.rs
@@ -495,6 +495,9 @@ pub fn run() {
             check_restart_needed_after_permissions,
             permissions_awaiting_relaunch,
             handle_restart_after_permissions,
+            // Permission diagnostics: the live answer, and the reset for a stale grant
+            get_permission_diagnostics,
+            reset_permission_grant,
             // QA Test Commands from mouse.rs
 
             // Mouse Settings Commands
@@ -597,6 +600,7 @@ pub fn run() {
             get_triggers,
             set_triggers,
             set_trigger_capture,
+            commands::triggers::open_keyboard_settings,
             validate_keyboard_shortcut,
             commands::conversations::list_conversations,
             commands::conversations::get_current_conversation_id,
@@ -1086,9 +1090,26 @@ pub fn run() {
                         commands::dock_icon::handle_reopen(app_handle);
                     }
                     // The red X on the chat window means "put it away", not
-                    // "destroy it". Destroying loses its React state and the
-                    // audio element that plays TTS for the whole app, and it
-                    // skips the handover that gives the bar its pane back.
+                    // "destroy it". Destroying loses its React state and its
+                    // scroll position, and it skips the handover that gives the
+                    // bar its pane back.
+                    //
+                    // This comment used to also claim the chat window holds the
+                    // audio element that plays TTS for the whole app. It does
+                    // not: TTS is played by the Rust backend, which spawns
+                    // afplay (src-tauri/src/tts/mod.rs). The HTMLAudioElement in
+                    // the React tree is fed by an event Rust never emits. The
+                    // hide is left as it is because the other reasons still
+                    // hold, but the TTS one is not one of them.
+                    //
+                    // The chat window is the only one that gets this treatment.
+                    // Settings and onboarding are deliberately absent: they fall
+                    // through to Tauri's default, which destroys the window, and
+                    // that is what they want. Settings is rebuilt from its
+                    // declared config in tauri.conf.json when it is next opened,
+                    // so a rebuilt one is the same window, and a settings window
+                    // that was kept alive hidden would reopen showing whatever it
+                    // read the last time somebody looked at it.
                     tauri::RunEvent::WindowEvent {
                         label,
                         event: tauri::WindowEvent::CloseRequested { api, .. },
