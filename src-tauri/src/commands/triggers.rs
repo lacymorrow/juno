@@ -19,19 +19,59 @@ pub async fn get_triggers(app_state: State<'_, AppState>) -> Result<Vec<Trigger>
     app_state.get_triggers()
 }
 
-/// Replace the activation triggers: validate, store in memory, persist, and
-/// Listen for a bare modifier key so setup can ask someone to press theirs.
+/// Listen for a bare modifier key so a screen can ask someone to press theirs.
 ///
 /// While this is on, pressing Fn reports the key rather than starting
-/// dictation: the person is choosing a binding, not using one. Setup asks
-/// instead of interrogating the hardware, because "does this machine have an
-/// Fn key" has no single answer once a second keyboard is plugged in, and the
+/// dictation: the person is choosing a binding, not using one. The trigger
+/// editor arms it for the same reason setup does, because Fn never reaches a
+/// web page and so a key recorder in the window would sit there seeing
+/// nothing while the person pressed the key they wanted.
+///
+/// Asking beats interrogating the hardware: "does this machine have an Fn
+/// key" has no single answer once a second keyboard is plugged in, and the
 /// press proves the key actually reaches Juno, which no capability check can.
 #[tauri::command]
 pub async fn set_trigger_capture(app: tauri::AppHandle, active: bool) -> Result<(), String> {
     crate::platform::modifier_key_monitor::set_capture(&app, active)
 }
 
+/// Open the macOS Keyboard settings pane, where "Press globe key to" lives.
+///
+/// macOS claims the globe key for the emoji picker by default and an app
+/// cannot suppress that, so someone binding Fn has one switch to flip first.
+/// Sending them straight to the pane beats describing a path through System
+/// Settings. The pane identifier is the Ventura and later Settings extension;
+/// older releases answer to the preference-pane id instead, so that is tried
+/// second rather than leaving the click doing nothing.
+#[tauri::command]
+pub async fn open_keyboard_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        const PANES: [&str; 2] = [
+            "x-apple.systempreferences:com.apple.Keyboard-Settings.extension",
+            "x-apple.systempreferences:com.apple.preference.keyboard",
+        ];
+        let mut last_error = String::new();
+        for url in PANES {
+            match std::process::Command::new("open").args([url]).status() {
+                Ok(status) if status.success() => {
+                    info!("[Triggers] Opened Keyboard settings via {}", url);
+                    return Ok(());
+                }
+                Ok(status) => last_error = format!("`open {}` exited with {}", url, status),
+                Err(e) => last_error = format!("`open {}` failed: {}", url, e),
+            }
+        }
+        Err(format!("Could not open Keyboard settings. {}", last_error))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Keyboard settings are a macOS pane.".to_string())
+    }
+}
+
+/// Replace the activation triggers: validate, store in memory, persist, and
 /// re-register global shortcuts / voice. Returns the normalized list, or an
 /// error string the UI shows inline on the offending row.
 #[tauri::command]
@@ -53,9 +93,18 @@ pub async fn set_triggers(
     }
     let mut normalized = triggers::dedupe_by_key(triggers);
 
-    // A row with no binding cannot fire, so it must not come back claiming to
-    // be on. This runs before validate, so the returned list is what the UI
-    // renders and the switch reflects what the trigger can actually do.
+    // Recording a key is what turns a row on. A row added from the "+" menu is
+    // switched off while it is unbound, and nothing used to switch it back on
+    // once a key was chosen, so the person ended up looking at a row that named
+    // their key, greyed out, doing nothing. Compared against what was stored a
+    // moment ago, because only the first binding counts: rebinding a row
+    // somebody deliberately switched off leaves it off.
+    let previous = app_state.get_triggers().unwrap_or_default();
+    triggers::enable_newly_bound(&previous, &mut normalized);
+
+    // And the reverse: a row with no binding cannot fire, so it must not come
+    // back claiming to be on. Both run before validate, so the returned list is
+    // what the UI renders and the switch reflects what the trigger can do.
     triggers::disable_unbound(&mut normalized);
 
     // Escape and Cmd+Comma are still live and still off-limits, so a trigger

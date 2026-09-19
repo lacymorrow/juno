@@ -23,6 +23,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
+import { useEventListener } from "@/hooks/useEventListener";
+
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup } from "../ui";
 import ShortcutInput from "../ShortcutInput";
@@ -34,14 +37,15 @@ import ShortcutInput from "../ShortcutInput";
 type TriggerMethod = "push_to_talk" | "toggle" | "voice";
 type TriggerTarget = "agent" | "dictation";
 
-type BindingTab = "keyboard" | "mouse" | "special";
+type BindingTab = "keyboard" | "mouse";
 
+// Two kinds, because from where the person sits there are two: a key and a
+// mouse button. Fn is a key, so it is a keyboard binding whose shortcut string
+// is "Fn". That it has to be watched by a native monitor rather than the
+// global-shortcut plugin is the backend's business, not this screen's.
 type Binding =
   | { kind: "keyboard"; shortcut: string }
-  | { kind: "mouse"; button: number }
-  // Keys that produce no ordinary key event, so a webview never sees them and
-  // they are chosen from a list rather than recorded.
-  | { kind: "modifier"; key: "fn" };
+  | { kind: "mouse"; button: number };
 
 interface Trigger {
   method: TriggerMethod;
@@ -102,10 +106,29 @@ function mouseLabel(button: number): string {
   }
 }
 
+/**
+ * Every spelling of the globe key a shortcut string may use. Apple has called
+ * the same physical key both Fn and Globe; the backend accepts either.
+ */
+const FN_ALIASES = ["fn", "globe"];
+
+/** The shortcut string the backend records a globe-key press as. */
+const FN_SHORTCUT = "Fn";
+
+const isFnShortcut = (shortcut: string) =>
+  FN_ALIASES.includes(shortcut.trim().toLowerCase());
+
+/** Whether this binding is the globe key, which macOS has its own plans for. */
+function isFnBinding(binding: Binding | null): boolean {
+  return binding?.kind === "keyboard" && isFnShortcut(binding.shortcut);
+}
+
 function bindingLabel(binding: Binding | null): string {
   if (!binding) return "Set binding";
-  if (binding.kind === "keyboard") return binding.shortcut || "Set binding";
-  if (binding.kind === "modifier") return "Fn (globe)";
+  if (binding.kind === "keyboard") {
+    if (isFnShortcut(binding.shortcut)) return "Fn (globe)";
+    return binding.shortcut || "Set binding";
+  }
   return mouseLabel(binding.button);
 }
 
@@ -199,6 +222,13 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
    */
   const applyTriggers = useCallback(
     async (next: Trigger[], editedKey: string) => {
+      // Drop any save still waiting out its debounce. It carries a list from
+      // before this change, so letting it land afterwards would quietly undo
+      // the binding that was just recorded.
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
       try {
         const normalized = await invoke<Trigger[]>("set_triggers", {
           triggers: next,
@@ -223,6 +253,55 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
       }, 300);
     },
     [applyTriggers],
+  );
+
+  /**
+   * Record a binding on one row. The single path for it, so a key captured by
+   * pressing it and one recorded in the editor behave identically. Whether the
+   * row switches itself on is the backend's call, not this screen's.
+   */
+  const setBindingFor = useCallback(
+    async (key: string, binding: Binding | null) => {
+      const next = triggersRef.current.map((t) =>
+        triggerKey(t) === key ? { ...t, binding } : t,
+      );
+      setTriggers(next);
+      await applyTriggers(next, key);
+    },
+    [applyTriggers],
+  );
+
+  // While a key row's editor is open on the keyboard tab, ask the backend to
+  // report a bare modifier press instead of firing it. Fn never reaches a web
+  // page, so without this the recorder would sit there seeing nothing while
+  // the person pressed the key they wanted, and dictation would start instead.
+  // The request is a lease with its own expiry on the backend, so a settings
+  // window that is closed mid-capture cannot leave the key swallowed.
+  const capturing = editingKey !== null && (bindingTab[editingKey] ?? "keyboard") === "keyboard";
+
+  useEffect(() => {
+    if (!capturing) return;
+    void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: true }).catch(
+      (e) => console.debug("[Triggers] could not listen for the globe key:", e),
+    );
+    return () => {
+      void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, {
+        active: false,
+      }).catch((e) =>
+        console.debug("[Triggers] could not stop listening for the globe key:", e),
+      );
+    };
+  }, [capturing]);
+
+  useEventListener<{ key?: string; shortcut?: string }>(
+    EVENTS.TRIGGERS_KEY_CAPTURED,
+    (payload) => {
+      // Only the row that asked for it, and only while it is still asking.
+      if (!capturing || !editingKey) return;
+      const shortcut = payload?.shortcut || FN_SHORTCUT;
+      setEditingKey(null);
+      void setBindingFor(editingKey, { kind: "keyboard", shortcut });
+    },
   );
 
   const patchTrigger = useCallback(
@@ -379,12 +458,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
               const key = triggerKey(trigger);
               setBindingTab((prev) => ({
                 ...prev,
-                [key]:
-                  trigger.binding?.kind === "mouse"
-                    ? "mouse"
-                    : trigger.binding?.kind === "modifier"
-                      ? "special"
-                      : "keyboard",
+                [key]: trigger.binding?.kind === "mouse" ? "mouse" : "keyboard",
               }));
               setEditingKey(key);
             }}
@@ -396,8 +470,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
               }))
             }
             onPatch={patchTrigger}
-            onApplyBinding={applyTriggers}
-            currentList={triggers}
+            onSetBinding={setBindingFor}
             onRemove={() => removeTrigger(triggerKey(trigger))}
           />
         ))}
@@ -435,8 +508,9 @@ interface TriggerRowProps {
     patch: Partial<Trigger>,
     opts?: { immediate?: boolean },
   ) => void;
-  onApplyBinding: (next: Trigger[], editedKey: string) => Promise<void>;
-  currentList: Trigger[];
+  /** Record a binding on this row. One implementation, in the parent, so a
+      key recorded by pressing it and one chosen here take the same path. */
+  onSetBinding: (key: string, binding: Binding | null) => Promise<void>;
   onRemove: () => void;
 }
 
@@ -450,8 +524,7 @@ function TriggerRow({
   onCloseEditor,
   onTabChange,
   onPatch,
-  onApplyBinding,
-  currentList,
+  onSetBinding,
   onRemove,
 }: TriggerRowProps) {
   const key = triggerKey(trigger);
@@ -465,12 +538,7 @@ function TriggerRow({
         ? Command
         : Keyboard;
 
-  const setBindingNow = async (binding: Binding | null) => {
-    const next = currentList.map((t) =>
-      triggerKey(t) === key ? { ...t, binding } : t,
-    );
-    await onApplyBinding(next, key);
-  };
+  const setBindingNow = (binding: Binding | null) => onSetBinding(key, binding);
 
   return (
     <div className="px-4 py-3">
@@ -614,7 +682,7 @@ function TriggerRow({
       {!isVoice && editing && (
         <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-2.5">
           <div className="inline-flex rounded-md border p-0.5 text-[12px]">
-            {(["keyboard", "mouse", "special"] as const).map((tab) => (
+            {(["keyboard", "mouse"] as const).map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -626,31 +694,40 @@ function TriggerRow({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {tab === "keyboard" ? "Keyboard" : tab === "mouse" ? "Mouse" : "Fn key"}
+                {tab === "keyboard" ? "Keyboard" : "Mouse"}
               </button>
             ))}
           </div>
 
           {bindingTab === "keyboard" ? (
-            <ShortcutInput
-              label="Keyboard shortcut"
-              description="Press the key combination that summons this trigger."
-              value={
-                trigger.binding?.kind === "keyboard"
-                  ? trigger.binding.shortcut
-                  : ""
-              }
-              shortcutName={`trigger_${key}`}
-              isSystemManaged={false}
-              isLoading={false}
-              onSave={async (_name, value) => {
-                await setBindingNow(
-                  value ? { kind: "keyboard", shortcut: value } : null,
-                );
-                onCloseEditor();
-              }}
-            />
-          ) : bindingTab === "mouse" ? (
+            <div className="space-y-2">
+              <ShortcutInput
+                label="Keyboard shortcut"
+                description="Press the key combination that summons this trigger."
+                value={
+                  trigger.binding?.kind === "keyboard"
+                    ? trigger.binding.shortcut
+                    : ""
+                }
+                shortcutName={`trigger_${key}`}
+                isSystemManaged={false}
+                isLoading={false}
+                onSave={async (_name, value) => {
+                  await setBindingNow(
+                    value ? { kind: "keyboard", shortcut: value } : null,
+                  );
+                  onCloseEditor();
+                }}
+              />
+              {/* The globe key is a key, so it is recorded by pressing it like
+                  any other. It just never reaches this page, so the press is
+                  reported by the backend while this editor is open. */}
+              <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                <Globe className="size-3 shrink-0" aria-hidden />
+                Or press the globe key (Fn) now to use that.
+              </p>
+            </div>
+          ) : (
             <MouseCapture
               current={trigger.binding?.kind === "mouse" ? trigger.binding : null}
               onCapture={async (button) => {
@@ -659,37 +736,13 @@ function TriggerRow({
               }}
               onCancel={onCloseEditor}
             />
-          ) : (
-            /* Chosen, not recorded: the Fn key never reaches a web page, so
-               there is nothing for a key recorder to capture. */
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={async () => {
-                  await setBindingNow({ kind: "modifier", key: "fn" });
-                  onCloseEditor();
-                }}
-                className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[13px] transition-colors hover:bg-accent"
-              >
-                <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span className="font-medium">Fn (globe)</span>
-              </button>
-              <p className="text-[12px] leading-snug text-muted-foreground">
-                macOS gives the globe key its own job by default. Set System
-                Settings, Keyboard, "Press globe key to" to "Do Nothing", or it
-                will open the emoji picker every time you talk to Juno.
-              </p>
-              <button
-                type="button"
-                onClick={onCloseEditor}
-                className="text-[12px] text-muted-foreground underline-offset-2 hover:underline"
-              >
-                Cancel
-              </button>
-            </div>
           )}
         </div>
       )}
+
+      {/* Only beside an Fn binding: macOS has already given that key a job,
+          and nothing else on this screen is affected by it. */}
+      {!isVoice && isFnBinding(trigger.binding) && <GlobeKeyNote />}
 
       {rowError && (
         <p className="mt-2 text-[12px] leading-snug text-destructive">
@@ -697,6 +750,54 @@ function TriggerRow({
         </p>
       )}
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The globe key note                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What macOS does with the globe key before Juno gets a say.
+ *
+ * Shown only where it applies, next to a trigger bound to Fn, because it is
+ * advice about one key and not a standing notice about triggers. The link goes
+ * to the Keyboard pane rather than describing a path through System Settings;
+ * macOS has no deeper link than the pane, so the sentence still names the row.
+ */
+function GlobeKeyNote() {
+  const [failed, setFailed] = useState(false);
+
+  return (
+    <p className="mt-2 flex items-start gap-1.5 text-[12px] leading-snug text-muted-foreground">
+      <Globe className="mt-[2px] size-3 shrink-0" aria-hidden />
+      <span>
+        macOS gives the globe key its own job by default. Set{" "}
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await invoke(COMMANDS.TRIGGERS_OPEN_KEYBOARD_SETTINGS);
+              setFailed(false);
+            } catch (e) {
+              console.debug("[Triggers] could not open Keyboard settings:", e);
+              setFailed(true);
+            }
+          }}
+          className="text-[#007AFF] underline-offset-2 hover:underline"
+        >
+          System Settings, Keyboard
+        </button>
+        , "Press globe key to" to "Do Nothing", or it will open the emoji picker
+        every time you talk to Juno.
+        {failed && (
+          <span className="block text-muted-foreground/80">
+            Juno could not open that pane. Open System Settings and look under
+            Keyboard.
+          </span>
+        )}
+      </span>
+    </p>
   );
 }
 

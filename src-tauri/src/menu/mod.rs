@@ -66,6 +66,7 @@ fn is_app_menu_event(event_id: &str) -> bool {
             | constants::app_menu_ids::NEW_CHAT
             | constants::app_menu_ids::IMPORT_CHAT
             | constants::app_menu_ids::EXPORT_CHAT
+            | constants::app_menu_ids::CLOSE_WINDOW
             | constants::app_menu_ids::TOGGLE_FLOATING_BAR
             | constants::app_menu_ids::TOGGLE_DEV_PANEL
             | constants::app_menu_ids::SHOW_DEVTOOLS

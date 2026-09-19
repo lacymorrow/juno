@@ -27,8 +27,6 @@ function renderBackendEvents() {
       addSystemMessage: vi.fn(),
       addAssistantMessage: vi.fn(),
       setConversationWithPruning,
-      playAudioFromBase64: vi.fn(),
-      stopCurrentAudio: vi.fn(),
       setIsProcessing,
       setServerStatus: vi.fn(),
     }),

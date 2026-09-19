@@ -5,100 +5,44 @@
 //! managing, and controlling all application windows.
 
 use crate::constants::{self, ui::window_labels};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::utils::config::WindowConfig as DeclaredWindowConfig;
+use tauri::{AppHandle, Emitter, Manager, WebviewWindowBuilder};
 use tracing::{error, info, warn};
 
-#[cfg(target_os = "macos")]
-use tauri::TitleBarStyle;
+/// The label of the desktop cursor overlay window.
+///
+/// It has no entry in `constants::ui::window_labels` yet, and that module
+/// belongs to the generated-constants pipeline, so the label lives here next to
+/// its only Rust user.
+pub const DESKTOP_CURSOR_OVERLAY_LABEL: &str = "desktop-cursor-overlay";
 
-/// Window configuration for different window types
-#[derive(Debug, Clone)]
-pub struct WindowConfig {
-    pub label: String,
-    pub title: String,
-    pub url: String,
-    pub width: f64,
-    pub height: f64,
-    pub min_width: f64,
-    pub min_height: f64,
-    pub resizable: bool,
-    pub center: bool,
-    pub transparent_title_bar: bool,
-    /// Whether to steal application focus when the window is shown.
-    /// Must be false for all overlay windows (floating-bar, floating-panel,
-    /// desktop-cursor-overlay) — setting focus calls [NSApp activateIgnoringOtherApps:YES]
-    /// which yanks keyboard focus away from the user's active application.
-    pub focus: bool,
+/// Find a window's declared configuration by label.
+///
+/// `src-tauri/tauri.conf.json` is the single source of truth for what every
+/// Juno window is. Tauri parses that file once and keeps the parsed
+/// [`DeclaredWindowConfig`] values on the app handle, so anything that rebuilds
+/// a window at runtime can start from the exact description Tauri itself used
+/// at startup.
+///
+/// This used to be a second, hand-maintained copy of each window's shape in
+/// Rust, and the copy was always a subset. It carried size, title and
+/// resizability but not `transparent`, `shadow`, `hiddenTitle`,
+/// `titleBarStyle`, `skipTaskbar` or `alwaysOnTop`, so every window that went
+/// through the rebuild path came back subtly wrong. For settings that meant
+/// losing its transparency and therefore its vibrant sidebar the first time
+/// somebody closed it with the red X. Two descriptions of one window was the
+/// defect; there is now one.
+fn find_declared_window<'a>(
+    windows: &'a [DeclaredWindowConfig],
+    label: &str,
+) -> Option<&'a DeclaredWindowConfig> {
+    windows.iter().find(|window| window.label == label)
 }
 
-impl WindowConfig {
-    /// Create configuration for settings window from Tauri config
-    pub fn settings() -> Self {
-        Self {
-            label: window_labels::SETTINGS.to_string(),
-            title: "Juno Settings".to_string(),
-            url: "/settings".to_string(),
-            width: 700.0,
-            height: 600.0,
-            min_width: 420.0,
-            min_height: 300.0,
-            resizable: true,
-            center: true,
-            transparent_title_bar: true,
-            focus: true,
-        }
-    }
-
-    /// Create configuration for onboarding window from Tauri config
-    pub fn onboarding() -> Self {
-        Self {
-            label: window_labels::ONBOARDING.to_string(),
-            title: "Welcome to Juno".to_string(),
-            url: "/onboarding".to_string(),
-            width: 440.0,
-            height: 700.0,
-            min_width: 200.0,
-            min_height: 300.0,
-            resizable: false,
-            center: true,
-            transparent_title_bar: false,
-            focus: true,
-        }
-    }
-
-    /// Create configuration for main window from Tauri config
-    pub fn main() -> Self {
-        Self {
-            label: window_labels::MAIN.to_string(),
-            title: "Juno".to_string(),
-            url: "/".to_string(),
-            width: 600.0,
-            height: 700.0,
-            min_width: 400.0,
-            min_height: 300.0,
-            resizable: true,
-            center: false,
-            transparent_title_bar: true,
-            focus: true,
-        }
-    }
-
-    /// Create configuration for desktop cursor overlay window from Tauri config
-    pub fn desktop_cursor_overlay() -> Self {
-        Self {
-            label: "desktop-cursor-overlay".to_string(),
-            title: "Desktop Cursor Overlay".to_string(),
-            url: "/desktop-cursor-overlay".to_string(),
-            width: 1.0,
-            height: 1.0,
-            min_width: 1.0,
-            min_height: 1.0,
-            resizable: false,
-            center: false,
-            transparent_title_bar: true,
-            focus: false, // Overlay must never steal focus from the user's active app
-        }
-    }
+/// The declared configuration for `label`, cloned so callers can layer runtime
+/// overrides on top without editing the app's own config.
+pub fn declared_window_config(app: &AppHandle, label: &str) -> Option<DeclaredWindowConfig> {
+    find_declared_window(&app.config().app.windows, label).cloned()
 }
 
 /// Put a window in front of the person and make Juno the app they are in.
@@ -212,74 +156,76 @@ pub async fn toggle_chat_surface(app: &AppHandle, surface: ChatSurface) {
 pub struct WindowManager;
 
 impl WindowManager {
-    /// Create or show a window with the given configuration
-    pub async fn create_or_show_window(
-        app: &AppHandle,
-        config: WindowConfig,
-    ) -> Result<(), String> {
+    /// Show the window with this label, building it from its declared
+    /// configuration if it is not currently alive.
+    ///
+    /// The window is described once, in `tauri.conf.json`, and this path builds
+    /// from that description rather than from a copy of it. That is what makes
+    /// a window recreated here indistinguishable from the one Tauri creates at
+    /// startup: same transparency, same shadow, same title bar, same taskbar
+    /// and always-on-top behaviour. The only thing overridden is `visible`,
+    /// because the declared configs are all `visible: false` so nothing flashes
+    /// on screen during launch, and "open this window" plainly means show it.
+    pub async fn create_or_show_window(app: &AppHandle, label: &str) -> Result<(), String> {
+        let mut config = declared_window_config(app, label).ok_or_else(|| {
+            format!(
+                "No window labelled '{}' is declared in tauri.conf.json",
+                label
+            )
+        })?;
+
         // Check if window already exists and is valid
-        if let Some(existing_window) = app.get_webview_window(&config.label) {
+        if let Some(existing_window) = app.get_webview_window(label) {
             // Check if window is actually valid (not destroyed)
             match existing_window.is_visible() {
                 Ok(_) => {
-                    // Only steal app focus for windows that explicitly request it.
-                    // Overlay windows (cursor overlay, floating panel) must not activate
-                    // Juno: that would yank keyboard focus from the user's active app.
+                    // Only steal app focus for windows whose declared config asks
+                    // for it. Overlay windows (cursor overlay, floating panel,
+                    // floating bar) declare `focus: false` because focusing calls
+                    // [NSApp activateIgnoringOtherApps:YES], which yanks keyboard
+                    // focus away from whatever app the person is actually using.
                     if config.focus {
                         present_window(&existing_window)?;
                     } else {
                         existing_window.show().map_err(|e| e.to_string())?;
                     }
 
-                    info!("Showed existing {} window", config.label);
+                    info!("Showed existing {} window", label);
                     return Ok(());
                 }
                 Err(_) => {
                     // Window exists in registry but is invalid/destroyed, create new one
-                    info!(
-                        "Existing {} window is invalid, creating new one",
-                        config.label
-                    );
+                    info!("Existing {} window is invalid, creating new one", label);
                 }
             }
         }
 
-        // Create new window if it doesn't exist
-        let mut builder =
-            WebviewWindowBuilder::new(app, &config.label, WebviewUrl::App(config.url.into()))
-                .title(&config.title)
-                .inner_size(config.width, config.height)
-                .min_inner_size(config.min_width, config.min_height)
-                .resizable(config.resizable)
-                .visible(true);
+        // The one runtime override: a window being opened is a window being seen.
+        config.visible = true;
 
-        if config.center {
-            builder = builder.center();
-        }
+        let window = WebviewWindowBuilder::from_config(app, &config)
+            .map_err(|e| {
+                error!("Failed to prepare {} window from its config: {}", label, e);
+                e.to_string()
+            })?
+            .build()
+            .map_err(|e| {
+                error!("Failed to build {} window: {}", label, e);
+                e.to_string()
+            })?;
 
-        let window = builder.build().map_err(|e| {
-            error!("Failed to build {} window: {}", config.label, e);
-            e.to_string()
-        })?;
+        info!("Successfully built {} window", label);
 
-        info!("Successfully built {} window", config.label);
-
-        // Apply macOS-specific styling after window is created
-        #[cfg(target_os = "macos")]
-        if config.transparent_title_bar {
-            if let Err(e) = window.set_title_bar_style(TitleBarStyle::Transparent) {
-                warn!("Failed to set title bar style for {}: {}", config.label, e);
-            }
-        }
-
-        // Only take focus for non-overlay windows
+        // The builder already asks for focus when the config declares it, but
+        // ask again once the window exists: on macOS a window built while
+        // another app is frontmost can come up behind it.
         if config.focus {
             if let Err(e) = window.set_focus() {
-                warn!("Failed to set focus for {} window: {}", config.label, e);
+                warn!("Failed to set focus for {} window: {}", label, e);
             }
         }
 
-        info!("Successfully created and showed {} window", config.label);
+        info!("Successfully created and showed {} window", label);
         Ok(())
     }
 
@@ -412,20 +358,32 @@ fn apply_settings_vibrancy(app: &AppHandle) {
 /// Open the native settings window
 #[tauri::command]
 pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::create_or_show_window(&app, WindowConfig::settings()).await?;
+    WindowManager::create_or_show_window(&app, window_labels::SETTINGS).await?;
 
     // Give the settings window the native translucent-sidebar look. Applied
-    // after the window exists/shows; idempotent across repeated opens.
+    // after the window exists/shows; idempotent across repeated opens, and
+    // necessary on every open now that closing settings destroys it.
     #[cfg(target_os = "macos")]
     apply_settings_vibrancy(&app);
 
     Ok(())
 }
 
-/// Close the native settings window
+/// Close the native settings window, destroying it.
+///
+/// Settings is destroyed rather than hidden, unlike the chat window. A hidden
+/// window keeps its React tree, its listeners and its timers running for
+/// something nobody is looking at, and settings in particular has to tell the
+/// truth when it opens: a settings window hidden before the person granted a
+/// permission in System Settings would come back still showing the old answer.
+///
+/// Destroying used to be the wrong trade because the rebuild path lost the
+/// window's transparency and with it the vibrant sidebar. It rebuilds from the
+/// declared config now, so a reopened settings window is the same window, and
+/// there is nothing left to keep a hidden one alive for.
 #[tauri::command]
 pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::hide_window(&app, window_labels::SETTINGS).await
+    WindowManager::close_window(&app, window_labels::SETTINGS).await
 }
 
 /// Open the native onboarding window.
@@ -443,7 +401,7 @@ pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
             warn!("Could not hide the floating bar for onboarding: {}", e);
         }
     }
-    WindowManager::create_or_show_window(&app, WindowConfig::onboarding()).await
+    WindowManager::create_or_show_window(&app, window_labels::ONBOARDING).await
 }
 
 /// Close the native onboarding window, putting the bar back if we took it away.
@@ -489,15 +447,19 @@ pub fn mark_bar_withheld_for_onboarding() {
 /// is up.
 #[tauri::command]
 pub async fn open_main_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::create_or_show_window(&app, WindowConfig::main()).await?;
+    WindowManager::create_or_show_window(&app, window_labels::MAIN).await?;
     announce_main_window(&app, true);
     Ok(())
 }
 
 /// Put the full-size chat window away and give the conversation back to the bar.
 ///
-/// Hides rather than closes: the webview keeps its React state, its scroll
-/// position, and the audio element that plays TTS for the whole app.
+/// Hides rather than closes: the webview keeps its React state and its scroll
+/// position. This comment used to claim the window also holds the audio element
+/// that plays TTS for the whole app. It does not. TTS is played by the Rust
+/// backend, which spawns afplay from `crate::tts`; the HTMLAudioElement in the
+/// React tree is fed by an event Rust never emits. The hide stands on the
+/// React-state and bar-handover reasons alone.
 #[tauri::command]
 pub async fn close_main_window(app: AppHandle) -> Result<(), String> {
     WindowManager::hide_window(&app, window_labels::MAIN).await?;
@@ -531,7 +493,7 @@ pub fn announce_main_window(app: &AppHandle, open: bool) {
 /// Open the desktop cursor overlay window
 #[tauri::command]
 pub async fn open_desktop_cursor_overlay(app: AppHandle) -> Result<(), String> {
-    WindowManager::create_or_show_window(&app, WindowConfig::desktop_cursor_overlay()).await
+    WindowManager::create_or_show_window(&app, DESKTOP_CURSOR_OVERLAY_LABEL).await
 }
 
 /// Get window states for tray menu and other uses
@@ -546,23 +508,101 @@ pub async fn get_window_states(app: &AppHandle) -> (bool, bool) {
 mod tests {
     use super::*;
 
+    /// The real `tauri.conf.json`, parsed the same way Tauri parses it.
+    ///
+    /// These tests read the shipped file rather than a fixture on purpose. The
+    /// bug they guard against is the declared config and the code drifting
+    /// apart, and a fixture would just be a third copy to drift.
+    fn declared_windows() -> Vec<DeclaredWindowConfig> {
+        let raw = include_str!("../tauri.conf.json");
+        let value: serde_json::Value =
+            serde_json::from_str(raw).expect("tauri.conf.json is not valid JSON");
+        serde_json::from_value(value["app"]["windows"].clone())
+            .expect("app.windows in tauri.conf.json does not parse as Tauri window configs")
+    }
+
     #[test]
-    fn test_window_config_creation() {
-        let settings_config = WindowConfig::settings();
-        assert_eq!(settings_config.label, window_labels::SETTINGS);
-        assert_eq!(settings_config.title, "Juno Settings");
-        assert_eq!(settings_config.width, 700.0);
-        assert!(settings_config.resizable);
+    fn finds_a_declared_window_by_label() {
+        let windows = declared_windows();
 
-        let onboarding_config = WindowConfig::onboarding();
-        assert_eq!(onboarding_config.label, window_labels::ONBOARDING);
-        assert_eq!(onboarding_config.title, "Welcome to Juno");
-        assert_eq!(onboarding_config.width, 440.0); // Match tauri.conf.json
-        assert!(!onboarding_config.resizable); // Match tauri.conf.json
+        let settings = find_declared_window(&windows, window_labels::SETTINGS)
+            .expect("settings window should be declared");
+        assert_eq!(settings.label, window_labels::SETTINGS);
+        assert_eq!(settings.title, "Juno Settings");
+        assert_eq!(settings.width, 700.0);
+        assert!(settings.resizable);
 
-        let main_config = WindowConfig::main();
-        assert_eq!(main_config.label, window_labels::MAIN);
-        assert_eq!(main_config.title, "Juno");
-        assert!(!main_config.center); // Main window should not auto-center
+        let onboarding = find_declared_window(&windows, window_labels::ONBOARDING)
+            .expect("onboarding window should be declared");
+        assert_eq!(onboarding.title, "Welcome to Juno");
+        assert_eq!(onboarding.width, 440.0);
+        assert!(!onboarding.resizable);
+
+        let main = find_declared_window(&windows, window_labels::MAIN)
+            .expect("main window should be declared");
+        assert_eq!(main.title, "Juno");
+    }
+
+    #[test]
+    fn an_undeclared_label_finds_nothing() {
+        let windows = declared_windows();
+        assert!(find_declared_window(&windows, "no-such-window").is_none());
+    }
+
+    #[test]
+    fn every_window_opened_at_runtime_is_declared() {
+        // create_or_show_window can only build a window it can look up, so a
+        // label used in Rust but missing from tauri.conf.json is a window that
+        // silently never opens. Catch it here instead of at runtime.
+        let windows = declared_windows();
+        for label in [
+            window_labels::MAIN,
+            window_labels::SETTINGS,
+            window_labels::ONBOARDING,
+            window_labels::FLOATING_BAR,
+            DESKTOP_CURSOR_OVERLAY_LABEL,
+        ] {
+            assert!(
+                find_declared_window(&windows, label).is_some(),
+                "window '{}' is opened from Rust but not declared in tauri.conf.json",
+                label
+            );
+        }
+    }
+
+    #[test]
+    fn settings_keeps_the_properties_a_rebuild_used_to_drop() {
+        // The old hand-maintained copy carried none of these, so a rebuilt
+        // settings window came back opaque and lost its vibrant sidebar.
+        let windows = declared_windows();
+        let settings = find_declared_window(&windows, window_labels::SETTINGS)
+            .expect("settings window should be declared");
+
+        assert!(
+            settings.transparent,
+            "settings needs transparency for vibrancy"
+        );
+        assert!(settings.shadow);
+        assert!(settings.hidden_title);
+        assert!(!settings.skip_taskbar);
+        assert!(!settings.always_on_top);
+        assert!(
+            settings.center,
+            "settings is centred on open, and the declared config is where that is said"
+        );
+    }
+
+    #[test]
+    fn windows_start_hidden_so_launch_does_not_flash() {
+        // Every window is declared invisible and shown deliberately, which is
+        // why `visible` is the one field create_or_show_window overrides.
+        let windows = declared_windows();
+        for window in &windows {
+            assert!(
+                !window.visible,
+                "window '{}' is declared visible; launch would flash it on screen",
+                window.label
+            );
+        }
     }
 }

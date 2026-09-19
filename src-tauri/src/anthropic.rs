@@ -176,7 +176,8 @@ fn get_agent_execution_queue() -> &'static AgentExecutionQueue {
 pub struct SubmitQueryResult {
     pub text: String,
     pub spoken_text: Option<String>, // Optional separate content for TTS
-    pub audio_base64: Option<String>,
+    // No audio field: playback is an `afplay` child process this module spawns
+    // and owns, so audio bytes never travel back out with the text.
     pub agent_state: String, // Send final state to frontend
     pub screenshot_data: Option<serde_json::Value>, // Optional screenshot data from the session
 }
@@ -1449,7 +1450,6 @@ async fn execute_agent_internal(
             SubmitQueryResult {
                 text: message.clone(),
                 spoken_text: None, // TTS content is now handled during streaming via XML tags
-                audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: "Finished".to_string(),
                 screenshot_data: None, // Capture screenshot if needed
             }
@@ -1574,8 +1574,7 @@ async fn execute_agent_internal(
 
             let result = SubmitQueryResult {
                 text: msg.clone(),
-                spoken_text: None,  // Error messages use same content for speech
-                audio_base64: None, // Will be set below if TTS is enabled
+                spoken_text: None, // Error messages use same content for speech
                 agent_state: state_str,
                 screenshot_data: None,
             };

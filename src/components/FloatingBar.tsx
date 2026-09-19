@@ -1413,63 +1413,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   }, [paneOpen, showRosterStrip, recomputeGrowUp]);
 
   // The drag-well slot the bar currently occupies (col/row), so it can re-home
-  // to the same slot on another display when the cursor moves there, and so a
-  // resize knows which edge of the screen it is anchored to.
+  // to the same slot on another display when the cursor moves there.
   const currentSlotRef = useRef<WellSlot | null>(null);
-
-  // The display geometry the well maths runs on, kept here so a resize can
-  // work out where it belongs without waiting on IPC first: a hover that has
-  // to ask the OS about monitors before the window may grow is a hover that
-  // stutters. Refreshed in the background after every resize and at every
-  // point that moves the bar deliberately, so the only stale moment is between
-  // a display being rearranged and the next resize, which the on-screen clamp
-  // in useWindowSize covers.
-  const geometryRef = useRef<{ mons: MonitorRect[]; monitorIndex: number } | null>(null);
-
-  const refreshGeometry = useCallback(async () => {
-    try {
-      const [pos, mons] = await Promise.all([
-        getCurrentWindow().outerPosition(),
-        availableMonitors(),
-      ]);
-      if (!mons.length) return;
-      const idx = monitorIndexAt(mons, pos.x, pos.y);
-      geometryRef.current = {
-        mons: toMonitorRects(mons),
-        // A corner that is momentarily nowhere (mid-move, or in the gap
-        // between two displays) is not a reason to re-home the bar.
-        monitorIndex: idx >= 0 ? idx : (geometryRef.current?.monitorIndex ?? 0),
-      };
-    } catch (error) {
-      console.debug("FloatingBar: geometry refresh failed:", error);
-    }
-  }, []);
-
-  /**
-   * The well this bar's slot maps to at `size` (logical px), on the display it
-   * is on. Null while the slot or the geometry is unknown (nothing has placed
-   * the bar yet), so callers can fall back.
-   *
-   * A well is defined for a window size: the top-right well puts the window's
-   * *right* edge on the inset, so the same slot is a different top-left once
-   * the window grows. That is why a resize has to ask again rather than keep
-   * the top-left it had.
-   */
-  const wellForCurrentSlot = useCallback(
-    (size: { width: number; height: number }): Well | null => {
-      const slot = currentSlotRef.current;
-      const geo = geometryRef.current;
-      if (!slot || !geo) return null;
-      const wells = computeWells(geo.mons, {
-        windowWidth: size.width,
-        windowHeight: size.height,
-        includeCenter: true,
-      });
-      if (!wells.length) return null;
-      return wellForSlot(slot, geo.monitorIndex, wells);
-    },
-    [],
-  );
 
   // On launch the bar always lands in a well, never at an arbitrary spot.
   // A remembered position is re-snapped to the nearest current well (so it
@@ -1529,10 +1474,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           height: initial.height,
         });
         currentSlotRef.current = { fx: target.fx, fy: target.fy };
-        geometryRef.current = {
-          mons: toMonitorRects(mons),
-          monitorIndex: target.monitorIndex,
-        };
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
         } catch {
@@ -1572,35 +1513,22 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     lastWindowRef.current = { width: next.width, height: next.height };
 
     const apply = () => {
-      // A bar that sits in a well is anchored to a screen edge, not to its own
-      // top-left. The top-right well holds the window's *right* edge on the
-      // inset, so opening the chat pane has to grow the window leftward to stay
-      // there. The centre-stable resize grew it around its own centre instead
-      // and let the on-screen clamp shove it back, so every open and close of
-      // the pane walked the bar a little further out of the well: it came back
-      // to the idle pill somewhere beside the well it started in, and only a
-      // fresh drag put it back. Asking for the same slot at the new size does
-      // both jobs at once, grows from the anchored edge and lands the collapsed
-      // pill exactly back in its well, and both happen inside the one setFrame
-      // call the resize already made, so nothing is ever seen moving twice.
+      // Centre-stable, both axes: the window grows and shrinks around the pill
+      // rather than around a screen edge.
       //
-      // Not while a drag is in flight: the bar belongs under the cursor then,
-      // not in the well it may be about to leave.
-      const dragging = snapArmedRef.current || snapAnimatingRef.current;
-      const well = dragging ? null : wellForCurrentSlot(next);
-      // growUp is only sent when there is no well to anchor to, so the fallback
-      // path's resize config (and its tests) stay byte-for-byte identical.
-      const config = well
-        ? { ...next, well: { x: well.x, y: well.y } }
-        : growUp
-          ? { ...next, growUp: true }
-          : next;
+      // A previous attempt anchored growth to the well the bar is docked in,
+      // to stop the chat pane walking the bar out of that well a little at a
+      // time. It fixed that and broke the case that happens a hundred times a
+      // day. The pill is centred in its window, so pinning the docked edge
+      // moves the pill by half the size change, in one frame, while the pill's
+      // own width is still animating: every hover jumped the pill sideways and
+      // every collapse jumped it back, and the collapse jumped after the shrink
+      // delay, with nothing connecting the two. Reverted rather than patched,
+      // because the walk is a slow annoyance and this was a fast one.
+      const config = growUp ? { ...next, growUp: true } : next;
       resizeWindowIfChanged(config).catch((error) =>
         console.error("❌ FloatingBar: Failed to resize window:", error),
       );
-      // The displays may have been rearranged since the last time we looked;
-      // catching up now costs the next resize nothing.
-      void refreshGeometry();
     };
 
     // Growing: make room first, then the pill animates into it. Shrinking:
@@ -1621,8 +1549,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     showInput,
     pillExtraWidth,
     resizeWindowIfChanged,
-    wellForCurrentSlot,
-    refreshGeometry,
   ]);
 
   // === DRAG ANYWHERE, SNAP INTO A WELL ===
@@ -1674,12 +1600,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       snapAnimatingRef.current = true;
       await animateWindowTo(win, { x: pos.x, y: pos.y }, { x: target.x, y: target.y });
       currentSlotRef.current = { fx: target.fx, fy: target.fy };
-      // The bar has just been dropped somewhere deliberate: this is the freshest
-      // the geometry ever gets, and the next resize anchors to it.
-      geometryRef.current = {
-        mons: toMonitorRects(monitors),
-        monitorIndex: target.monitorIndex,
-      };
       // Remember where it landed so the bar reopens here next launch, and
       // re-derive the growth direction since the dock may have changed.
       try {
@@ -1736,7 +1656,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         if (!target) return;
         await win.setPosition(new PhysicalPosition(target.x, target.y));
         currentSlotRef.current = { fx: target.fx, fy: target.fy };
-        geometryRef.current = { mons: toMonitorRects(mons), monitorIndex: targetIdx };
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
         } catch {
@@ -2049,11 +1968,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             {/* Typing used to be Enter or nothing: no way to send by hand, no
                 way to reach the mic, and no way out but Escape. */}
             <div className="flex shrink-0 items-center gap-1">
+              {/* Not "switch to dictation": dictation types what you say into
+                  whatever app has focus, and this mic is the inverse of the
+                  "type instead" control next to it. It opens a spoken turn to
+                  Juno, the same one the pill's mic opens, so it says so. */}
               <button
                 type="button"
                 onClick={switchToTalking}
-                aria-label="Switch to dictation"
-                title="Switch to dictation"
+                aria-label="Talk to Juno"
+                title="Talk to Juno"
                 className={inputControlButton}
               >
                 <Mic className="size-3" />

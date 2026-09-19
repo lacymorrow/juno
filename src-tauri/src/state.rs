@@ -18,7 +18,7 @@ pub mod voice_session;
 use crate::commands::shell::ShellSessions;
 pub use desktop_wrapper::DesktopWrapper;
 pub use voice_session::{
-    BeginOutcome, ClaimRejection, SessionClaim, VoicePhase, VoiceSession, VoiceSessionId,
+    ClaimRejection, SessionClaim, StartRefused, VoicePhase, VoiceSession, VoiceSessionId,
     VoiceSessionRegistry, VoiceStartMethod, VoiceTarget,
 };
 
@@ -687,11 +687,16 @@ impl AppState {
 
     /// Open a voice session and record what it is for and how it was started.
     /// Called once by each start path, before the microphone opens.
+    ///
+    /// Refused while a session is already open: there is one microphone, and a
+    /// start that clobbers the session holding it leaves a live recording with
+    /// nobody to stop it. The caller treats a refusal as "already listening"
+    /// and does nothing at all.
     pub fn begin_voice_session(
         &self,
         target: VoiceTarget,
         method: VoiceStartMethod,
-    ) -> BeginOutcome {
+    ) -> Result<VoiceSession, StartRefused> {
         self.voice_sessions().begin(target, method)
     }
 
@@ -2544,7 +2549,7 @@ mod tests {
         let state = AppState::new(None);
         let session = state
             .begin_voice_session(VoiceTarget::Dictation, VoiceStartMethod::PushToTalk)
-            .session;
+            .expect("nothing else is open");
         state.set_dictation_active(true).unwrap();
 
         state
@@ -2566,9 +2571,33 @@ mod tests {
     fn a_transcript_has_exactly_one_owner() {
         // Otherwise a leftover owner would capture the next session's text.
         let state = AppState::new(None);
-        state.begin_voice_session(VoiceTarget::Dictation, VoiceStartMethod::Toggle);
+        state
+            .begin_voice_session(VoiceTarget::Dictation, VoiceStartMethod::Toggle)
+            .expect("nothing else is open");
         assert!(state.take_voice_transcript_owner().is_some());
         assert!(state.take_voice_transcript_owner().is_none());
+    }
+
+    #[test]
+    fn a_second_start_cannot_take_the_microphone_from_a_live_session() {
+        // The bar's mic pressed twice. The second press is refused, and the
+        // session that is actually recording keeps its identity, so the stop
+        // the person eventually presses still reaches it.
+        let state = AppState::new(None);
+        let live = state
+            .begin_voice_session(VoiceTarget::Agent, VoiceStartMethod::Mouse)
+            .expect("nothing else is open");
+
+        let refused = state
+            .begin_voice_session(VoiceTarget::Agent, VoiceStartMethod::Mouse)
+            .expect_err("the microphone is already open");
+        assert_eq!(refused.standing, live);
+
+        assert_eq!(state.current_voice_session(), Some(live));
+        assert!(
+            state.claim_voice_commit(SessionClaim::Id(live.id)).is_ok(),
+            "the live session is still the one a stop reaches"
+        );
     }
 
     #[test]
@@ -2589,7 +2618,7 @@ mod tests {
         let state = AppState::new(None);
         let cancelled = state
             .begin_voice_session(VoiceTarget::Agent, VoiceStartMethod::PushToTalk)
-            .session;
+            .expect("nothing else is open");
         state
             .claim_voice_discard(SessionClaim::Id(cancelled.id))
             .expect("the cancel owns it");

@@ -186,11 +186,9 @@ async function renderBar() {
 const bar = () => screen.getByTestId("floating-bar");
 /**
  * The last size the bar asked its window for. Asserted with `toMatchObject`
- * rather than `toEqual`: once the bar knows which snap well it is sitting in it
- * also sends `well`, the top-left that keeps the window's docked edge on the
- * screen inset at the new size, and whether it knows that yet depends on an IPC
- * round trip these tests do not order. The sizes are what these tests are
- * about; where the well puts them is covered by the snapWells tests.
+ * rather than `toEqual` so a test says only what it is about: a resize also
+ * carries `anchorY` and, when the bar is docked low, `growUp`, and where those
+ * put the window is covered by the useWindowSize tests.
  */
 const lastResize = () =>
   resizeWindowIfChanged.mock.calls[resizeWindowIfChanged.mock.calls.length - 1]?.[0];

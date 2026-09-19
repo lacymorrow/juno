@@ -87,6 +87,13 @@ fn dispatch_activation_triggers(
         let Some(Binding::Keyboard { shortcut: combo }) = &trigger.binding else {
             continue; // voice + mouse handled elsewhere
         };
+        // A bare modifier such as Fn is a keyboard binding, but the plugin
+        // cannot register it and the flags-changed monitor fires it directly.
+        // Skipping it here keeps that one edge from arriving twice if the
+        // combo parser ever learns to spell it.
+        if crate::triggers::bare_modifier(combo).is_some() {
+            continue;
+        }
         let Some(parsed) = parse_shortcut_string(combo) else {
             continue;
         };

@@ -133,8 +133,10 @@ pub mod windows {
 pub mod triggers {
     pub const GET_TRIGGERS: &str = "get_triggers";
     pub const SET_TRIGGERS: &str = "set_triggers";
-    /// Listen for a bare modifier key while setup asks someone to press theirs
+    /// Listen for a bare modifier key while a screen asks someone to press theirs
     pub const SET_TRIGGER_CAPTURE: &str = "set_trigger_capture";
+    /// Open the macOS Keyboard pane, where "Press globe key to" lives
+    pub const OPEN_KEYBOARD_SETTINGS: &str = "open_keyboard_settings";
 }
 
 /// Background operation and the consent it needs

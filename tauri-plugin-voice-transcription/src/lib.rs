@@ -17,6 +17,7 @@ pub mod error;
 pub mod mic_permissions;
 pub mod shared_whisper;
 pub mod utils;
+pub mod wake_word;
 
 pub use always_listening::AlwaysListeningController;
 pub use config::VoiceTranscriptionConfig;

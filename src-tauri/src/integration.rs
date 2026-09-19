@@ -810,23 +810,40 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
     // retries below, because a cancel can arrive during any of them. Once the
     // session exists, that cancel retires it and the checks further down see
     // that this start no longer owns anything.
+    //
+    // The registry refuses this if a session is already standing, which is the
+    // whole of the double-press bug: the second press used to take ownership,
+    // then fail at the audio engine with "Already dictating", then run a
+    // teardown that put the tray, the capture flag and the input monitor back
+    // to rest while the first session's microphone was still open.
     let app_state = app_handle.state::<state::AppState>();
-    let begun = app_state.begin_voice_session(VoiceTarget::Agent, method);
-    if let Some(superseded) = begun.superseded {
-        warn!(
-            "[Agent Mode] Starting {} while {} was still registered; the older session loses ownership",
-            begun.session.describe(),
-            superseded.describe()
-        );
-    }
-    let session_id = begun.session.id;
-    info!(
-        "[Agent Mode] Opened voice session {}",
-        begun.session.describe()
-    );
+    let session = match app_state.begin_voice_session(VoiceTarget::Agent, method) {
+        Ok(session) => session,
+        Err(refused) => {
+            // A no-op, deliberately. The microphone is already open and a
+            // second press of the same control means "I am already talking".
+            // Ending the standing session here would throw away audio nobody
+            // asked to throw away, and the engine would refuse the restart
+            // anyway. The controls that really do mean "end this" are the bar's
+            // stop and cancel, and they claim the session they end.
+            info!("[Agent Mode] Ignoring an agent start: {}", refused.reason());
+            // The bar-voice latch says "a bar-initiated agent query is open".
+            // If what is standing is a dictation session it is not one, and
+            // leaving the latch set would make the next activation edge end a
+            // session the bar does not speak for. Same rule as the stop and
+            // cancel paths below.
+            if refused.standing.target == VoiceTarget::Dictation {
+                crate::agent_monitor::set_bar_voice_active(false);
+            }
+            return;
+        }
+    };
+    let session_id = session.id;
+    info!("[Agent Mode] Opened voice session {}", session.describe());
 
-    // Has this start been overtaken (cancelled, or superseded by a newer
-    // session) while it was waiting on something?
+    // Has this start been overtaken while it was waiting on something? Only a
+    // stop or a cancel can take the session now, since a competing start is
+    // refused rather than allowed to replace it.
     let still_ours = |app_handle: &AppHandle| {
         app_handle
             .state::<state::AppState>()
@@ -848,21 +865,9 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
     .await
     {
         info!("[Agent Mode] Not starting dictation: {}", message);
-        // The microphone never opened, so retire the identity we minted above.
-        let _ = app_state.claim_voice_discard(SessionClaim::Id(session_id));
-        crate::agent_monitor::force_reset_agent_input_state().await;
-        if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
-            app_handle,
-            false,
-            CaptureBar::Follows,
-        )
-        .await
-        {
-            error!(
-                "[Agent Mode] Failed to close the agent capture phase after a permission stop: {}",
-                e
-            );
-        }
+        // The microphone never opened, so retire the identity we minted above
+        // and unwind only what this start put up.
+        abandon_agent_start(app_handle, session_id, &message).await;
         return;
     }
 
@@ -877,20 +882,12 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
         .is_none()
     {
         warn!("[Agent Mode] Voice controller not available - cannot start agent transcription");
-        let _ = app_state.claim_voice_discard(SessionClaim::Id(session_id));
-        crate::agent_monitor::force_reset_agent_input_state().await;
-        if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
+        abandon_agent_start(
             app_handle,
-            false,
-            CaptureBar::Follows,
+            session_id,
+            "the voice controller is not available",
         )
-        .await
-        {
-            error!(
-                "[Agent Mode] Failed to announce the agent capture phase: {}",
-                e
-            );
-        }
+        .await;
         return;
     }
 
@@ -1015,12 +1012,50 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
     // All retries exhausted or non-retryable error. Nothing is recording, so
     // this session owns nothing and must not be left standing to claim the
     // next one's transcript.
-    let _ = app_state.claim_voice_discard(SessionClaim::Id(session_id));
+    error!("[Agent Mode] Failed to start agent transcription: {last_error}");
+    if !abandon_agent_start(app_handle, session_id, &last_error).await {
+        // Someone else owns the microphone now, so there is nothing of ours to
+        // report and nothing of theirs to interrupt with an error banner.
+        return;
+    }
     crate::error_handling::utils::handle_agent_error(
         app_handle,
         &format!("Failed to start agent transcription: {}", last_error),
     )
     .await;
+}
+
+/// Unwind a start that never got a microphone, and only what it put up.
+///
+/// The tray icon, the agent capture flag and the agent input monitor are
+/// global: they describe whichever session is open, not the one that failed.
+/// Resetting them on behalf of a start that no longer owns anything is how the
+/// app came to say it was idle while another session's microphone was still
+/// recording. The claim is the test, exactly as it is for a stop: if this start
+/// is no longer the open session, somebody else is, and their state is not ours
+/// to take down.
+///
+/// Answers whether this start still owned its session, so the caller knows
+/// whether the failure is worth telling the person about.
+async fn abandon_agent_start(
+    app_handle: &AppHandle,
+    session_id: crate::state::VoiceSessionId,
+    reason: &str,
+) -> bool {
+    let app_state = app_handle.state::<state::AppState>();
+    if let Err(rejection) = app_state.claim_voice_discard(SessionClaim::Id(session_id)) {
+        info!(
+            "[Agent Mode] Agent start #{session_id} gave up ({reason}), but it no longer owns the session ({}); leaving the open one alone",
+            rejection.reason()
+        );
+        return false;
+    }
+    info!("[Agent Mode] Agent start #{session_id} gave up: {reason}");
+
+    // Nothing owns the microphone now, so nothing may be left recording on it.
+    close_unowned_audio_stream(app_handle).await;
+
+    crate::agent_monitor::set_bar_voice_active(false);
     crate::agent_monitor::force_reset_agent_input_state().await;
     if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
         app_handle,
@@ -1030,9 +1065,61 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
     .await
     {
         error!(
-            "[Agent Mode] Failed to close the agent capture phase after an error: {}",
+            "[Agent Mode] Failed to close the agent capture phase after an abandoned start: {}",
             e
         );
+    }
+    true
+}
+
+/// Close a microphone that no voice session owns.
+///
+/// The registry is the only record of who owns the audio stream. A stream with
+/// nothing standing in the registry can never be claimed: no stop will finalise
+/// it, no cancel will discard it, and the partials it keeps producing drive a
+/// bar for a session that no longer exists. Whatever it eventually transcribes
+/// would be handed to whichever session happened to be open by then, which is
+/// not the person who spoke it.
+///
+/// Discarded rather than stopped. A stop finalises, and a finalised transcript
+/// is what gets submitted; nobody is waiting on this audio.
+///
+/// The registry is read again immediately before the cancel because a start can
+/// register between the two reads. That start has not opened a microphone yet
+/// (every start path registers before it touches the engine), so the second
+/// read is what keeps this from closing a session that has only just begun.
+pub(crate) async fn close_unowned_audio_stream(app_handle: &AppHandle) {
+    let app_state = app_handle.state::<state::AppState>();
+    if app_state.current_voice_session().is_some() {
+        return;
+    }
+
+    let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() else {
+        return;
+    };
+    match tauri_plugin_voice_transcription::commands::get_dictation_status(controller_state).await {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(e) => {
+            warn!("[Voice] Could not tell whether the microphone is open: {e}");
+            return;
+        }
+    }
+
+    if app_state.current_voice_session().is_some() {
+        return;
+    }
+    let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() else {
+        return;
+    };
+    warn!("[Voice] The microphone is open with no session to own it; discarding the audio rather than leaving it recording behind an idle bar");
+    if let Err(e) = tauri_plugin_voice_transcription::commands::cancel_dictation(
+        app_handle.clone(),
+        controller_state,
+    )
+    .await
+    {
+        error!("[Voice] Failed to close the unowned microphone: {e}");
     }
 }
 
@@ -1285,8 +1372,16 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
         .await;
 
     if !claimed {
-        // Nothing of ours is recording, so leave the controller alone and just
-        // put the input monitor and the bar back to rest.
+        // Nothing of ours is recording, so put the input monitor and the bar
+        // back to rest without finalising anything.
+        //
+        // "Nothing of ours" is not the same as "nothing at all", though. If the
+        // engine is still recording with an empty registry, that stream belongs
+        // to no session and no later stop or cancel can reach it, so this is
+        // the moment to close it. A cancel that merely raced ahead of a start
+        // is unaffected: a start registers its session before it opens the
+        // microphone, so there is nothing recording yet to close.
+        close_unowned_audio_stream(app_handle).await;
         crate::agent_monitor::force_reset_agent_input_state().await;
         crate::commands::ui_commands::handle_dictation_finished(app_handle, None).await;
         if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
@@ -1398,16 +1493,22 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
     // is not gated on owning a session. It still claims one when there is one,
     // because this finalises the audio and an unowned transcript is dropped.
     let app_state = app_handle.state::<state::AppState>();
-    match app_state.claim_voice_commit(SessionClaim::Current) {
-        Ok(session) => info!(
-            "[Agent Mode] Force stop is finalising voice session {}",
-            session.describe()
-        ),
-        Err(rejection) => warn!(
-            "[Agent Mode] Force stop with no session to claim: {}",
-            rejection.reason()
-        ),
-    }
+    let owned = match app_state.claim_voice_commit(SessionClaim::Current) {
+        Ok(session) => {
+            info!(
+                "[Agent Mode] Force stop is finalising voice session {}",
+                session.describe()
+            );
+            true
+        }
+        Err(rejection) => {
+            warn!(
+                "[Agent Mode] Force stop with no session to claim: {}",
+                rejection.reason()
+            );
+            false
+        }
+    };
 
     // Unregister escape key registered during transcription start
     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
@@ -1415,15 +1516,26 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
         .unregister_escape_user(app_handle, "agent_transcription")
         .await;
 
-    // Force stop agent mode
+    // Force stop agent mode. A session that was claimed is finalised, because
+    // somebody was waiting on what they said. Audio with no session to claim is
+    // discarded instead: finalising it produces a transcript whose only route is
+    // the agent, and nobody asked for it. The far end drops an unowned
+    // transcript too, but not producing one is the better place to stop.
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
         Some(controller_state) => {
-            // Force stop voice transcription
-            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
-                app_handle.clone(),
-                controller_state,
-            )
-            .await;
+            if owned {
+                let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+                    app_handle.clone(),
+                    controller_state,
+                )
+                .await;
+            } else {
+                let _ = tauri_plugin_voice_transcription::commands::cancel_dictation(
+                    app_handle.clone(),
+                    controller_state,
+                )
+                .await;
+            }
         }
         None => {
             warn!("[Agent Mode] Voice controller not available during force stop");

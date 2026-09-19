@@ -210,7 +210,6 @@ pub mod menu {
 
 /// Text-to-speech events
 pub mod tts {
-    pub const AUDIO_READY: &str = "tts-audio-ready";
     pub const STOP_REQUESTED: &str = "tts-stop-requested";
 }
 

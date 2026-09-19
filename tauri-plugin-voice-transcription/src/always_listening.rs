@@ -23,9 +23,38 @@ const INTENT_DETECTION_BUFFER_MS: u64 = 3000; // Buffer for intent detection (in
 const VOLUME_THRESHOLD: f32 = 0.01; // Increased from 0.003 to reduce false triggers
 const VOLUME_THRESHOLD_END: f32 = 0.005; // Increased from 0.002
 const SILENCE_TIMEOUT_MS: u64 = 3000; // Return to monitoring after silence
-const MIN_TRANSCRIPTION_DURATION_MS: u64 = 1000; // Increased from 500ms to 1000ms for better speech capture
 const VOLUME_DROP_TOLERANCE_MS: u64 = 200; // Allow brief volume drops during activity
 const MIN_SPEECH_VOLUME: f32 = 0.02; // Minimum volume required for speech processing
+
+/// How much unbroken speech goes by before we look for a wake word in it, and
+/// how often we look again while someone keeps talking.
+///
+/// This used to be a second, and a second is longer than the word. Somebody who
+/// says "juno" and stops is done in about half of one, so the old deadline was
+/// never reached: the volume fell, the tolerance below expired, and the
+/// utterance was thrown away unexamined. Six hundred milliseconds catches a
+/// wake word spoken inside a longer sentence, and the end-of-speech check in
+/// the worker catches the short one on its own.
+const WAKE_WORD_CHECK_INTERVAL_MS: u64 = 600;
+
+/// How much audio is kept after a check that found nothing.
+///
+/// The buffer used to be emptied, which chopped any word that happened to
+/// straddle two checks in half and left the next check with too little audio to
+/// transcribe at all. Keeping the tail means a wake word is always heard whole
+/// by one check or the other, and that the following check still clears
+/// Whisper's one-second floor.
+const WAKE_WORD_PREROLL_MS: u64 = 600;
+
+/// The least audio worth transcribing at all. Below this there is no word in
+/// there, only a door or a keyboard.
+const MIN_WAKE_WORD_AUDIO_MS: u64 = 350;
+
+/// Whisper returns no segments at all for audio shorter than one second: its
+/// decoder needs a hundred mel frames before it will look. Short buffers are
+/// padded with silence up to this rather than discarded, which is what lets a
+/// wake word be caught the moment it is finished instead of a second later.
+const WHISPER_MIN_AUDIO_MS: u64 = 1000;
 
 // New constants for intelligent filtering
 const MIN_MEANINGFUL_CONTENT_LENGTH: usize = 3; // Minimum characters for meaningful content
@@ -38,8 +67,15 @@ const MIN_SENSITIVITY: f32 = 0.1;
 const MAX_SENSITIVITY: f32 = 2.0;
 const DEFAULT_SENSITIVITY: f32 = 0.5;
 
-// Default wake words for activation
-const DEFAULT_WAKE_WORDS: &[&str] = &["hey juno", "juno", "joono", "computer", "hey computer"];
+// Default wake words for activation.
+//
+// "joono" used to sit in this list: a hand-spelled second spelling, added
+// because Whisper hears the name several ways and the matcher compared
+// literal strings. The matcher is phonetic now, so "joono" and "juneau" both
+// reach "juno" on their own. Spelling out homophones here would be guessing
+// at Whisper's output one transcription at a time, and every guess that
+// missed looked to the person like Juno simply not answering.
+const DEFAULT_WAKE_WORDS: &[&str] = &["hey juno", "juno", "computer", "hey computer"];
 
 // Stop words that should end always listening mode
 const STOP_WORDS: &[&str] = &[
@@ -363,8 +399,8 @@ impl AlwaysListeningController {
         let mut audio_buffer: Vec<f32> = Vec::new();
         let mut current_state = AlwaysListeningState::Monitoring;
         let buffer_capacity = (sample_rate as u64 * INTENT_DETECTION_BUFFER_MS / 1000) as usize;
-        let min_transcription_samples =
-            (sample_rate as u64 * MIN_TRANSCRIPTION_DURATION_MS / 1000) as usize;
+        let min_wake_word_samples = (sample_rate as u64 * MIN_WAKE_WORD_AUDIO_MS / 1000) as usize;
+        let wake_word_preroll_samples = (sample_rate as u64 * WAKE_WORD_PREROLL_MS / 1000) as usize;
         let mut audio_activity_start: Option<Instant> = None;
         let mut last_volume_drop: Option<Instant> = None;
 
@@ -440,6 +476,15 @@ impl AlwaysListeningController {
                             // Divide by sensitivity so higher sensitivity = lower threshold = triggers more easily
                             let volume_threshold = VOLUME_THRESHOLD / sensitivity;
 
+                            // Two different things ask for a wake word check.
+                            // Speech that has been running a while may have one
+                            // buried in it, and speech that has just stopped may
+                            // have been nothing but one. The second case is the
+                            // one that was missing: a word as short as "juno" is
+                            // over before any running-speech deadline arrives,
+                            // so waiting for the deadline meant never looking.
+                            let mut check_for_wake_word = false;
+
                             if volume > volume_threshold {
                                 // Mark the start of audio activity if not already tracking
                                 if audio_activity_start.is_none() {
@@ -452,64 +497,11 @@ impl AlwaysListeningController {
                                     audio_buffer.drain(0..audio_buffer.len() - buffer_capacity);
                                 }
 
-                                // Only attempt transcription if we have sufficient audio duration and samples
                                 if let Some(start_time) = audio_activity_start {
-                                    let activity_duration = start_time.elapsed().as_millis();
-
-                                    if activity_duration >= MIN_TRANSCRIPTION_DURATION_MS as u128
-                                        && audio_buffer.len() >= min_transcription_samples
+                                    if start_time.elapsed().as_millis()
+                                        >= WAKE_WORD_CHECK_INTERVAL_MS as u128
                                     {
-                                        // Check if the accumulated audio has sufficient volume for speech
-                                        let buffer_volume =
-                                            Self::calculate_rms_volume(&audio_buffer);
-
-                                        if buffer_volume >= MIN_SPEECH_VOLUME {
-                                            info!("[AlwaysListening] Sufficient audio accumulated: {}ms, {} samples, volume: {:.6}",
-                                                   activity_duration, audio_buffer.len(), buffer_volume);
-
-                                            // Check for wake words or speech
-                                            if let Some(matched_phrase) = Self::detect_intent(
-                                                session.as_mut(),
-                                                &audio_buffer,
-                                                sample_rate,
-                                                &wake_words,
-                                                &app_handle,
-                                            ) {
-                                                current_state = AlwaysListeningState::Activated;
-                                                info!("[AlwaysListening] Intent detected (phrase: '{}') - activating transcription", matched_phrase);
-
-                                                // Update last activity
-                                                if let Ok(mut activity) = last_activity.lock() {
-                                                    *activity = Some(Instant::now());
-                                                }
-
-                                                // Emit activation event carrying the matched wake
-                                                // phrase so the app can route to the right target.
-                                                if let Err(e) = app_handle.emit(
-                                                    "always-listening:activated",
-                                                    matched_phrase.clone(),
-                                                ) {
-                                                    error!("[AlwaysListening] Failed to emit activation event: {}", e);
-                                                }
-
-                                                // Start active transcription
-                                                audio_buffer.clear();
-                                                audio_activity_start = None; // Reset activity tracking
-                                                last_volume_drop = None; // Reset drop tracking
-                                            } else {
-                                                // No wake word detected, keep monitoring but maintain shorter buffer
-                                                audio_buffer.clear();
-                                                audio_activity_start = None; // Reset activity tracking
-                                                last_volume_drop = None; // Reset drop tracking
-                                            }
-                                        } else {
-                                            info!("[AlwaysListening] Audio accumulated but volume too low for speech: {:.6} < {:.6}",
-                                                   buffer_volume, MIN_SPEECH_VOLUME);
-                                            // Reset and wait for higher volume audio
-                                            audio_buffer.clear();
-                                            audio_activity_start = None;
-                                            last_volume_drop = None;
-                                        }
+                                        check_for_wake_word = true;
                                     }
                                 }
                             } else {
@@ -526,6 +518,10 @@ impl AlwaysListeningController {
                                             > VOLUME_DROP_TOLERANCE_MS as u128
                                         {
                                             info!("[AlwaysListening] Audio activity ended after tolerance period - volume: {:.6} < {:.6}", volume, end_threshold);
+                                            // Look at what was just said before
+                                            // letting go of it. This is the whole
+                                            // of a quickly spoken wake word.
+                                            check_for_wake_word = true;
                                             audio_activity_start = None;
                                             last_volume_drop = None;
                                         }
@@ -551,6 +547,70 @@ impl AlwaysListeningController {
                                 // Maintain rolling buffer during monitoring
                                 if audio_buffer.len() > buffer_capacity {
                                     audio_buffer.drain(0..audio_buffer.len() - buffer_capacity);
+                                }
+                            }
+
+                            if check_for_wake_word && audio_buffer.len() >= min_wake_word_samples {
+                                // Check if the accumulated audio has sufficient volume for speech
+                                let buffer_volume = Self::calculate_rms_volume(&audio_buffer);
+
+                                if buffer_volume >= MIN_SPEECH_VOLUME {
+                                    info!(
+                                        "[AlwaysListening] Checking for a wake word: {} samples, volume: {:.6}",
+                                        audio_buffer.len(),
+                                        buffer_volume
+                                    );
+
+                                    // Check for wake words or speech
+                                    if let Some(matched_phrase) = Self::detect_intent(
+                                        session.as_mut(),
+                                        &audio_buffer,
+                                        sample_rate,
+                                        &wake_words,
+                                        &app_handle,
+                                    ) {
+                                        current_state = AlwaysListeningState::Activated;
+                                        info!("[AlwaysListening] Intent detected (phrase: '{}') - activating transcription", matched_phrase);
+
+                                        // Update last activity
+                                        if let Ok(mut activity) = last_activity.lock() {
+                                            *activity = Some(Instant::now());
+                                        }
+
+                                        // Emit activation event carrying the matched wake
+                                        // phrase so the app can route to the right target.
+                                        if let Err(e) = app_handle.emit(
+                                            "always-listening:activated",
+                                            matched_phrase.clone(),
+                                        ) {
+                                            error!("[AlwaysListening] Failed to emit activation event: {}", e);
+                                        }
+
+                                        // Start active transcription
+                                        audio_buffer.clear();
+                                        audio_activity_start = None; // Reset activity tracking
+                                        last_volume_drop = None; // Reset drop tracking
+                                    } else {
+                                        // Nothing in it, but keep the tail: the
+                                        // next check needs the run-up, both so a
+                                        // word split across two checks is heard
+                                        // whole and so Whisper has its second of
+                                        // audio to work with.
+                                        Self::keep_tail(
+                                            &mut audio_buffer,
+                                            wake_word_preroll_samples,
+                                        );
+                                        audio_activity_start = None; // Reset activity tracking
+                                        last_volume_drop = None; // Reset drop tracking
+                                    }
+                                } else {
+                                    debug!("[AlwaysListening] Audio accumulated but volume too low for speech: {:.6} < {:.6}",
+                                           buffer_volume, MIN_SPEECH_VOLUME);
+                                    // Too quiet to be speech, so there is nothing
+                                    // in it worth keeping as run-up either.
+                                    audio_buffer.clear();
+                                    audio_activity_start = None;
+                                    last_volume_drop = None;
                                 }
                             }
                         }
@@ -661,6 +721,32 @@ impl AlwaysListeningController {
         info!("[AlwaysListening] Worker thread finished");
     }
 
+    /// Drop everything but the last `keep` samples, so the next wake word check
+    /// still has the run-up to whatever is said next.
+    fn keep_tail(audio_buffer: &mut Vec<f32>, keep: usize) {
+        if audio_buffer.len() > keep {
+            audio_buffer.drain(0..audio_buffer.len() - keep);
+        }
+    }
+
+    /// Put silence in front of audio that is shorter than Whisper will look at.
+    ///
+    /// whisper.cpp refuses anything under a second: it needs a hundred mel
+    /// frames before it decodes, and returns no segments at all below that,
+    /// which reads from the outside as "nothing was said". Leading silence
+    /// costs nothing, since the decoder pads the clip out to thirty seconds
+    /// either way, and it means a word that took half a second to say is still
+    /// a word Whisper will read.
+    fn pad_to_whisper_minimum(audio: Vec<f32>) -> Vec<f32> {
+        let minimum = (WHISPER_SAMPLE_RATE as u64 * WHISPER_MIN_AUDIO_MS / 1000) as usize;
+        if audio.len() >= minimum {
+            return audio;
+        }
+        let mut padded = vec![0.0_f32; minimum - audio.len()];
+        padded.extend_from_slice(&audio);
+        padded
+    }
+
     fn calculate_rms_volume(audio_chunk: &[f32]) -> f32 {
         if audio_chunk.is_empty() {
             return 0.0;
@@ -683,7 +769,6 @@ impl AlwaysListeningController {
         }
 
         let audio_duration_ms = (audio_buffer.len() as f32 / sample_rate as f32 * 1000.0) as u32;
-        let min_duration_for_transcription = MIN_TRANSCRIPTION_DURATION_MS as u32;
 
         info!(
             "[AlwaysListening] detect_intent: Processing {} samples ({}ms) for {} wake words",
@@ -692,10 +777,10 @@ impl AlwaysListeningController {
             wake_words.len()
         );
 
-        // Ensure we have sufficient audio duration for meaningful transcription
-        if audio_duration_ms < min_duration_for_transcription {
+        // There is no word in a clip this short, only a noise.
+        if audio_duration_ms < MIN_WAKE_WORD_AUDIO_MS as u32 {
             info!("[AlwaysListening] detect_intent: Audio duration too short ({}ms < {}ms), skipping transcription",
-                   audio_duration_ms, min_duration_for_transcription);
+                   audio_duration_ms, MIN_WAKE_WORD_AUDIO_MS);
             return None;
         }
 
@@ -757,15 +842,11 @@ impl AlwaysListeningController {
             audio_buffer.to_vec()
         };
 
-        // Ensure resampled audio also meets minimum duration and quality
         let resampled_duration_ms =
             (audio_to_process.len() as f32 / WHISPER_SAMPLE_RATE as f32 * 1000.0) as u32;
-        if resampled_duration_ms < min_duration_for_transcription {
-            info!("[AlwaysListening] detect_intent: Resampled audio duration too short ({}ms < {}ms), skipping transcription",
-                   resampled_duration_ms, min_duration_for_transcription);
-            return None;
-        }
 
+        // Volume is measured before padding, because padding is silence and
+        // would drag the average down towards the floor we are testing against.
         let resampled_volume = Self::calculate_rms_volume(&audio_to_process);
         if resampled_volume < MIN_SPEECH_VOLUME * 0.5 {
             // Allow slightly lower volume after resampling
@@ -774,7 +855,9 @@ impl AlwaysListeningController {
             return None;
         }
 
-        info!("[AlwaysListening] Running transcription for wake word detection ({}ms of audio, volume: {:.6})",
+        let audio_to_process = Self::pad_to_whisper_minimum(audio_to_process);
+
+        info!("[AlwaysListening] Running transcription for wake word detection ({}ms of speech, volume: {:.6})",
                resampled_duration_ms, resampled_volume);
 
         match session.transcribe_partial(&audio_to_process) {
@@ -789,20 +872,18 @@ impl AlwaysListeningController {
                 // Check for wake words. Return the matched phrase (lowercased)
                 // so the app can route this activation to the right target
                 // (e.g. "juno" -> agent, "transcribe" -> dictation).
-                for wake_word in wake_words {
-                    let wake_word_lower = wake_word.to_lowercase();
-                    if text_lower.contains(&wake_word_lower) {
-                        info!(
-                            "[AlwaysListening] ✅ WAKE WORD DETECTED: '{}' found in '{}'",
-                            wake_word, text_lower
-                        );
-                        return Some(wake_word_lower);
-                    } else {
-                        debug!(
-                            "[AlwaysListening] Wake word '{}' not found in '{}'",
-                            wake_word_lower, text_lower
-                        );
-                    }
+                //
+                // The comparison is on how the words sound, not on how Whisper
+                // spelled them: it writes down its best guess at a name it does
+                // not know, so "juno" comes back as "Juneau." and a literal
+                // comparison misses a person who said exactly the right word.
+                if let Some(matched) = crate::wake_word::match_wake_phrase(&text_lower, wake_words)
+                {
+                    info!(
+                        "[AlwaysListening] ✅ WAKE WORD DETECTED: '{}' heard in '{}'",
+                        matched, text_lower
+                    );
+                    return Some(matched);
                 }
 
                 // No wake words configured — any speech activates (empty match).
@@ -1412,7 +1493,8 @@ impl AlwaysListeningController {
             "test_audio_volume": test_volume,
             "volume_threshold": VOLUME_THRESHOLD,
             "min_speech_volume": MIN_SPEECH_VOLUME,
-            "min_transcription_duration_ms": MIN_TRANSCRIPTION_DURATION_MS,
+            "min_transcription_duration_ms": WHISPER_MIN_AUDIO_MS,
+            "wake_word_check_interval_ms": WAKE_WORD_CHECK_INTERVAL_MS,
             "transcription_test": transcription_result,
             "wake_words": self.wake_words,
             "sensitivity": self.sensitivity,

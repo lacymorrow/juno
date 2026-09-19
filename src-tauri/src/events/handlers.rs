@@ -437,18 +437,26 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle, method: Voi
     // Give the session an identity before anything opens the microphone. Every
     // stop path from here on consults it rather than working out for itself
     // whether it owns what it is stopping.
-    let begun = app_state.begin_voice_session(VoiceTarget::Dictation, method);
-    if let Some(superseded) = begun.superseded {
-        warn!(
-            "[Dictation Mode] Starting {} while {} was still registered; the older session loses ownership",
-            begun.session.describe(),
-            superseded.describe()
-        );
-    }
-    let session_id = begun.session.id;
+    //
+    // Refused while a session is already open, and refused before this handler
+    // has touched a single flag. The microphone is already recording for
+    // somebody, and everything below here (the dictation flag, the always
+    // listening pause, the bar's dictation mode) describes a session that would
+    // never exist.
+    let session = match app_state.begin_voice_session(VoiceTarget::Dictation, method) {
+        Ok(session) => session,
+        Err(refused) => {
+            info!(
+                "[Dictation Mode] Ignoring a dictation start: {}",
+                refused.reason()
+            );
+            return;
+        }
+    };
+    let session_id = session.id;
     info!(
         "[Dictation Mode] Opened voice session {}",
-        begun.session.describe()
+        session.describe()
     );
 
     // Mark this as Dictation Mode in AppState BEFORE starting transcription.
@@ -531,7 +539,23 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle, method: Voi
                 // The microphone never opened, so this session owns nothing.
                 // Leaving it registered would make it claim the next
                 // session's transcript.
-                let _ = app_state.claim_voice_discard(SessionClaim::Id(session_id));
+                //
+                // Only unwind what this start put up. If the session we minted
+                // is not the open one any more, the dictation flag and the bar
+                // are describing somebody else's session, and putting them
+                // back to rest here is what leaves a live microphone with an
+                // idle-looking app around it.
+                if app_state
+                    .claim_voice_discard(SessionClaim::Id(session_id))
+                    .is_err()
+                {
+                    info!("[Dictation Mode] The failed start no longer owns its session; leaving the open one alone");
+                    return;
+                }
+
+                // Nothing owns the microphone now, so nothing may be left
+                // recording on it.
+                crate::integration::close_unowned_audio_stream(&app_handle).await;
 
                 // Reset the dictation active flag
                 if let Err(e) = app_state.set_dictation_active(false) {
@@ -630,6 +654,10 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
                 "[Dictation Cancel] No audio to discard ({}); running cleanup only",
                 rejection.reason()
             );
+            // Nothing of ours is recording, which is not the same as nothing at
+            // all. An engine still recording with an empty registry holds audio
+            // no stop or cancel can ever reach, so close it here.
+            crate::integration::close_unowned_audio_stream(&app_handle).await;
         }
     }
 

@@ -32,6 +32,29 @@ pub mod instructions {
     pub const INPUT_MONITORING_INSTRUCTIONS: &str = "Optional: Go to System Preferences > Privacy & Security > Input Monitoring and add Juno to enable global shortcuts";
 }
 
+// TCC service names, which is what `tccutil` and every other tool that reads
+// the permission database call these. They are not the names the panes use:
+// Input Monitoring is filed as `ListenEvent`, and Screen Recording as
+// `ScreenCapture`.
+//
+// `SystemPolicyAllFiles` (Full Disk Access) and `PostEvent` are valid service
+// names too, and both are deliberately absent. Juno asks for neither, so
+// naming them here would only make it possible to clear a grant some other app
+// is relying on.
+pub mod tcc_services {
+    pub const ACCESSIBILITY: &str = "Accessibility";
+    pub const INPUT_MONITORING: &str = "ListenEvent";
+    pub const MICROPHONE: &str = "Microphone";
+    pub const SCREEN_RECORDING: &str = "ScreenCapture";
+}
+
+// System tools this app shells out to for permission work.
+pub mod tools {
+    /// Resets a TCC grant. Ships with macOS and needs no sudo for grants owned
+    /// by the running user.
+    pub const TCCUTIL_PATH: &str = "/usr/bin/tccutil";
+}
+
 // Permission-related URLs and paths
 pub mod urls {
     pub const SYSTEM_PREFERENCES_SECURITY: &str =

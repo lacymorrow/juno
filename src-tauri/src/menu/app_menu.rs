@@ -73,11 +73,30 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
         .accelerator("CmdOrCtrl+S")
         .build(app)?;
 
+    // Cmd+W is the one shortcut every macOS user already has in their hands, and
+    // without a Close item in the menu bar macOS has nothing to fire, so the key
+    // did nothing at all in the settings and onboarding windows.
+    //
+    // This is a custom item rather than the predefined `close_window`, because
+    // that one destroys whatever window has focus and Juno's windows do not all
+    // want the same thing. The chat window is put away rather than destroyed,
+    // because it holds the conversation's React state and scroll position and
+    // because closing it hands the conversation back to the bar. Settings and
+    // onboarding really are destroyed. So the handler routes to the same close
+    // paths the rest of the UI already uses, and each window keeps its own one
+    // right answer.
+    let close_window_menu_item = MenuItemBuilder::new("Close Window")
+        .id(constants::app_menu_ids::CLOSE_WINDOW)
+        .accelerator("CmdOrCtrl+W")
+        .build(app)?;
+
     let file_submenu = SubmenuBuilder::new(app, "File")
         .item(&new_chat_menu_item)
         .separator()
         .item(&import_chat_menu_item)
         .item(&export_chat_menu_item)
+        .separator()
+        .item(&close_window_menu_item)
         .build()?;
 
     // Edit Menu with native Tauri predefined items for proper keyboard shortcut handling
@@ -288,6 +307,14 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             }
         }
 
+        constants::app_menu_ids::CLOSE_WINDOW => {
+            info!("[Menu] Close Window menu item clicked");
+            let app_handle_clone = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                close_focused_window(app_handle_clone).await;
+            });
+        }
+
         // View Menu
         constants::app_menu_ids::TOGGLE_FLOATING_BAR => {
             info!("[Menu] Toggle Floating Bar menu item clicked");
@@ -458,6 +485,75 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         _ => {
             info!("[Menu] Unhandled menu event: {:?}", event_id);
         }
+    }
+}
+
+/// The label of the window the person is actually looking at, if any.
+///
+/// Cmd+W has to act on the front window, and only the window itself knows
+/// whether it is the front one. Exactly one window answers yes, so the
+/// non-deterministic map order does not matter.
+fn focused_window_label(app_handle: &AppHandle) -> Option<String> {
+    app_handle
+        .webview_windows()
+        .into_iter()
+        .find(|(_, window)| window.is_focused().unwrap_or(false))
+        .map(|(label, _)| label)
+}
+
+/// Put the focused window away, in whatever way that particular window is meant
+/// to be put away.
+///
+/// Each window already has one right answer for "close me", and Cmd+W is just
+/// another way of asking. The chat window hides, keeping its webview state.
+/// Settings and onboarding are destroyed, the same as their red X does.
+///
+/// Settings used to hide here too, because a rebuilt settings window came back
+/// without the transparency its vibrant sidebar needs. It is now rebuilt from
+/// its declared config in tauri.conf.json, so that reason is gone, and settings
+/// gets the behaviour it actually wants: it is thrown away and rebuilt, so it
+/// cannot reopen showing a permission state it read some time yesterday.
+///
+/// The floating bar, the floating panel and the overlays are deliberately not in
+/// this list. They are panels and chrome, not documents: closing the bar with
+/// Cmd+W would take away the hotkey surface and the mic with no window left to
+/// bring them back. Hiding the bar stays where it already lives, on Cmd+B and
+/// in the tray.
+async fn close_focused_window(app_handle: AppHandle) {
+    let Some(label) = focused_window_label(&app_handle) else {
+        info!("[Menu] Close Window: no Juno window is focused, nothing to close");
+        return;
+    };
+
+    let result = match label.as_str() {
+        constants::window_labels::MAIN => {
+            crate::window_management::close_main_window(app_handle).await
+        }
+        constants::window_labels::SETTINGS => {
+            crate::window_management::close_settings_window(app_handle).await
+        }
+        constants::window_labels::ONBOARDING => {
+            crate::window_management::close_onboarding_window(app_handle).await
+        }
+        other => {
+            info!(
+                "[Menu] Close Window ignored for '{}': it is not a closable window",
+                other
+            );
+            return;
+        }
+    };
+
+    if let Err(e) = result {
+        error!(
+            "{} {}",
+            prefixes::MENU,
+            format_error(
+                templates::FAILED_TO_PROCESS,
+                &format!("close of window '{}'", label),
+                e
+            )
+        );
     }
 }
 
