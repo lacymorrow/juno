@@ -16,7 +16,24 @@ pub mod agent {
     pub const STOP_ALL: &str = "agent-stop-all";
 
     // Agent state events
+    /// The agent is executing, or has stopped executing. Payload is a bool.
+    ///
+    /// This says nothing about the microphone. A typed run announces itself
+    /// here with no capture at all, and a run started by voice keeps this true
+    /// for as long as it works, which can be minutes after the microphone
+    /// closed. Emitted only by the execution lifecycle, so a listener that
+    /// wants "is the agent working" can trust the payload.
     pub const ACTIVE: &str = "agent-active";
+    /// The microphone is open for an agent query, or it has closed.
+    /// Payload is a bool.
+    ///
+    /// Capture is the short phase before a run, and it is over before
+    /// execution begins. It used to be announced as `agent-active` too, so
+    /// every listener had to guess which of the two phases an event carried
+    /// and a capture teardown arriving mid-run read as "the agent stopped".
+    /// Anything that wants to reason about the microphone listens here
+    /// instead.
+    pub const CAPTURE_ACTIVE: &str = "agent-capture-active";
     pub const ERROR: &str = "agent-error";
     pub const TRANSCRIPTION_START: &str = "agent-transcription-start";
     pub const TRANSCRIPTION_STOP: &str = "agent-transcription-stop";

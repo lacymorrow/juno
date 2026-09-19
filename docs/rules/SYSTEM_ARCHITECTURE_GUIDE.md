@@ -168,7 +168,8 @@ pub struct TrayIconManager {
 
 #### Automatic State Detection
 
-- **Event-Driven Updates**: Listens to application events (`agent-active`, `dictation-active`, etc.)
+- **Event-Driven Updates**: Listens to application events (`agent-active`, `agent-capture-active`, `dictation-active`, etc.)
+- **Two Agent Lifetimes**: `agent-active` is the run; `agent-capture-active` is the microphone being open for an agent query. Both show the Agent icon, and both have a matching flag in `AppState`, so a `false` on either one sends the tray back to the flags rather than being taken at face value
 - **Priority System**: Intelligent state resolution (Agent Active > Dictation > Always Listening > Default)
 - **State Persistence**: Maintains consistent icon state across application lifecycle
 - **Error Recovery**: Graceful fallback to default state on errors

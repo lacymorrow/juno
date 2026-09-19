@@ -337,10 +337,20 @@ impl StopCoordinator {
 
     /// Emit state update events once only
     async fn emit_state_events(&self, app_handle: &AppHandle) {
+        // A stop closes the microphone as well as the run, and the capture
+        // phase keeps a flag now. Clear it here, next to the announcement, so
+        // the two cannot part company: a capture flag left standing after a
+        // stop would hold the menu bar on the agent icon for the rest of the
+        // session, because every later recompute would read it and believe it.
+        if let Some(app_state) = app_handle.try_state::<AppState>() {
+            app_state.set_agent_capture_active(false);
+        }
+
         let events = [
-            ("agent-active", false),
-            ("dictation-active", false),
-            ("always-listening-mode-changed", false),
+            (events::agent::ACTIVE, false),
+            (events::agent::CAPTURE_ACTIVE, false),
+            (events::dictation::ACTIVE, false),
+            (events::always_listening::MODE_CHANGED, false),
         ];
 
         for (event_name, active) in events.iter() {

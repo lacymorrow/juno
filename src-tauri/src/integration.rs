@@ -15,6 +15,7 @@ use crate::constants::errors::{prefixes, templates};
 use crate::constants::events;
 use crate::format_error;
 use crate::state::{SessionClaim, VoiceStartMethod, VoiceTarget};
+use crate::state_management::CaptureBar;
 use crate::utils::async_runtime::safe_spawn_async_task;
 use crate::{commands, constants, state};
 
@@ -850,16 +851,15 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
         // The microphone never opened, so retire the identity we minted above.
         let _ = app_state.claim_voice_discard(SessionClaim::Id(session_id));
         crate::agent_monitor::force_reset_agent_input_state().await;
-        if let Err(e) = utils::synchronize_component_state(
+        if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
             app_handle,
-            "agent",
             false,
-            Some(constants::events::agent::ACTIVE),
+            CaptureBar::Follows,
         )
         .await
         {
             error!(
-                "[Agent Mode] Failed to reset agent state after permission stop: {}",
+                "[Agent Mode] Failed to close the agent capture phase after a permission stop: {}",
                 e
             );
         }
@@ -879,16 +879,15 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
         warn!("[Agent Mode] Voice controller not available - cannot start agent transcription");
         let _ = app_state.claim_voice_discard(SessionClaim::Id(session_id));
         crate::agent_monitor::force_reset_agent_input_state().await;
-        if let Err(e) = utils::synchronize_component_state(
+        if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
             app_handle,
-            "agent",
             false,
-            Some(constants::events::agent::ACTIVE),
+            CaptureBar::Follows,
         )
         .await
         {
             error!(
-                "[Agent Mode] Failed to synchronize agent state change: {}",
+                "[Agent Mode] Failed to announce the agent capture phase: {}",
                 e
             );
         }
@@ -979,16 +978,15 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
                     warn!("[Agent Mode] Failed to register escape key for agent transcription: {} - continuing anyway", e);
                 }
 
-                if let Err(e) = utils::synchronize_component_state(
+                if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
                     app_handle,
-                    "agent",
                     true,
-                    Some(constants::events::agent::ACTIVE),
+                    CaptureBar::Follows,
                 )
                 .await
                 {
                     error!(
-                        "[Agent Mode] Failed to synchronize agent state change: {}",
+                        "[Agent Mode] Failed to announce the agent capture phase: {}",
                         e
                     );
                 }
@@ -1024,16 +1022,15 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
     )
     .await;
     crate::agent_monitor::force_reset_agent_input_state().await;
-    if let Err(e) = utils::synchronize_component_state(
+    if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
         app_handle,
-        "agent",
         false,
-        Some(constants::events::agent::ACTIVE),
+        CaptureBar::Follows,
     )
     .await
     {
         error!(
-            "[Agent Mode] Failed to synchronize agent state change after error: {}",
+            "[Agent Mode] Failed to close the agent capture phase after an error: {}",
             e
         );
     }
@@ -1149,6 +1146,28 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                     let _ = coordinator
                         .unregister_escape_user(app_handle, "agent_transcription")
                         .await;
+
+                    // The microphone is shut, so the capture phase is over even
+                    // though the interaction is not: the words it captured are on
+                    // their way to the agent. This is the one success path out of
+                    // capture, and while capture and execution shared an event it
+                    // was silent, because the `agent-active = true` from the start
+                    // of capture was simply left standing until the run ended. A
+                    // flag left standing the same way would pin the menu bar to the
+                    // agent icon for the rest of the session, so say it here. The
+                    // bar keeps whatever the submission has already put there.
+                    if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
+                        app_handle,
+                        false,
+                        CaptureBar::Untouched,
+                    )
+                    .await
+                    {
+                        error!(
+                            "[Agent Mode] Failed to close the agent capture phase after a successful stop: {}",
+                            e
+                        );
+                    }
                 }
                 Err(e) => {
                     error!("[Agent Mode] Failed to stop transcription: {}", e);
@@ -1168,15 +1187,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
 
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = utils::synchronize_component_state(
+                    if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
                         app_handle,
-                        "agent",
                         false,
-                        Some(constants::events::agent::ACTIVE),
+                        CaptureBar::Follows,
                     )
                     .await
                     {
-                        error!("[Agent Mode] Failed to synchronize agent state change after transcription stop failure: {}", e);
+                        error!("[Agent Mode] Failed to close the agent capture phase after a transcription stop failure: {}", e);
                     }
                 }
             }
@@ -1195,16 +1213,15 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
 
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = utils::synchronize_component_state(
+            if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
                 app_handle,
-                "agent",
                 false,
-                Some(constants::events::agent::ACTIVE),
+                CaptureBar::Follows,
             )
             .await
             {
                 error!(
-                    "[Agent Mode] Failed to synchronize agent state change: {}",
+                    "[Agent Mode] Failed to announce the agent capture phase: {}",
                     e
                 );
             }
@@ -1272,16 +1289,15 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
         // put the input monitor and the bar back to rest.
         crate::agent_monitor::force_reset_agent_input_state().await;
         crate::commands::ui_commands::handle_dictation_finished(app_handle, None).await;
-        if let Err(e) = utils::synchronize_component_state(
+        if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
             app_handle,
-            "agent",
             false,
-            Some(constants::events::agent::ACTIVE),
+            CaptureBar::Follows,
         )
         .await
         {
             error!(
-                "[Agent Mode] Failed to synchronize agent state change after an unowned cancel: {}",
+                "[Agent Mode] Failed to close the agent capture phase after an unowned cancel: {}",
                 e
             );
         }
@@ -1315,17 +1331,17 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                     // a processing state for something that will never arrive.
                     crate::commands::ui_commands::handle_dictation_finished(app_handle, None).await;
 
-                    // Use synchronize_component_state to update UI manager AND emit event
-                    if let Err(e) = utils::synchronize_component_state(
+                    // Close the capture phase: the microphone is shut, so the bar goes
+                    // back to rest and the flag and its event move together.
+                    if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
                         app_handle,
-                        "agent",
                         false,
-                        Some(constants::events::agent::ACTIVE),
+                        CaptureBar::Follows,
                     )
                     .await
                     {
                         error!(
-                            "[Agent Mode] Failed to synchronize agent state change: {}",
+                            "[Agent Mode] Failed to announce the agent capture phase: {}",
                             e
                         );
                     }
@@ -1336,16 +1352,16 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                     // Force reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    // Use synchronize_component_state to update UI manager AND emit event
-                    if let Err(e) = utils::synchronize_component_state(
+                    // Close the capture phase: the microphone is shut, so the bar goes
+                    // back to rest and the flag and its event move together.
+                    if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
                         app_handle,
-                        "agent",
                         false,
-                        Some(constants::events::agent::ACTIVE),
+                        CaptureBar::Follows,
                     )
                     .await
                     {
-                        error!("[Agent Mode] Failed to synchronize agent state change after cancel failure: {}", e);
+                        error!("[Agent Mode] Failed to close the agent capture phase after a cancel failure: {}", e);
                     }
                 }
             }
@@ -1358,17 +1374,17 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            // Use synchronize_component_state to update UI manager AND emit event
-            if let Err(e) = utils::synchronize_component_state(
+            // Close the capture phase: the microphone is shut, so the bar goes
+            // back to rest and the flag and its event move together.
+            if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
                 app_handle,
-                "agent",
                 false,
-                Some(constants::events::agent::ACTIVE),
+                CaptureBar::Follows,
             )
             .await
             {
                 error!(
-                    "[Agent Mode] Failed to synchronize agent state change: {}",
+                    "[Agent Mode] Failed to announce the agent capture phase: {}",
                     e
                 );
             }
@@ -1417,17 +1433,17 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
     // Reset agent input monitor state
     crate::agent_monitor::force_reset_agent_input_state().await;
 
-    // Use synchronize_component_state to update UI manager AND emit event
-    if let Err(e) = utils::synchronize_component_state(
+    // Close the capture phase: the microphone is shut, so the bar goes back to
+    // rest and the flag and its event move together.
+    if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
         app_handle,
-        "agent",
         false,
-        Some(constants::events::agent::ACTIVE),
+        CaptureBar::Follows,
     )
     .await
     {
         error!(
-            "[Agent Mode] Failed to synchronize agent state change during force stop: {}",
+            "[Agent Mode] Failed to close the agent capture phase during a force stop: {}",
             e
         );
     }
@@ -1512,6 +1528,13 @@ pub mod utils {
             "dictation" => {
                 commands::ui_commands::handle_dictation_mode_change(app_handle, new_state).await;
             }
+            // The agent arm moves only the bar. Both halves of the agent
+            // lifecycle now own a flag as well as an event, and a flag written
+            // apart from its announcement is what stranded the menu bar the
+            // last two times, so go through
+            // `handle_agent_capture_state_transition` or
+            // `handle_agent_execution_state_transition` instead of asking this
+            // function to emit an agent event for you.
             "agent" => {
                 if new_state {
                     commands::ui_commands::handle_agent_started(app_handle).await;

@@ -600,21 +600,33 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
 
     let app_handle_clone = app_handle.clone();
 
-    // Listen for various state change events
-    let _ = app_handle.listen(crate::constants::events::agent::ACTIVE, {
-        let app_handle = app_handle_clone.clone();
-        move |event| {
-            let app_handle = app_handle.clone();
-            let event = event.clone();
-            tauri::async_runtime::spawn(async move {
-                let new_state = match payload_is_active(event.payload()) {
-                    Some(true) => TrayIconState::Agent,
-                    _ => determine_current_state(&app_handle).await,
-                };
-                update_tray_icon_state(new_state).await;
-            });
-        }
-    });
+    // Listen for various state change events.
+    //
+    // The two halves of the agent lifecycle arrive on two events now, and the
+    // icon is the same for both: a person watching the menu bar wants to know
+    // Juno is busy with them, not which phase it is in. What the split buys
+    // here is that a `false` on either one no longer claims anything about the
+    // other, so the recompute below can answer from both flags instead of
+    // guessing which lifetime the payload belonged to.
+    for agent_event in [
+        crate::constants::events::agent::ACTIVE,
+        crate::constants::events::agent::CAPTURE_ACTIVE,
+    ] {
+        let _ = app_handle.listen(agent_event, {
+            let app_handle = app_handle_clone.clone();
+            move |event| {
+                let app_handle = app_handle.clone();
+                let event = event.clone();
+                tauri::async_runtime::spawn(async move {
+                    let new_state = match payload_is_active(event.payload()) {
+                        Some(true) => TrayIconState::Agent,
+                        _ => determine_current_state(&app_handle).await,
+                    };
+                    update_tray_icon_state(new_state).await;
+                });
+            }
+        });
+    }
 
     // Listen for dictation state changes (both immediate and confirmed)
     let _ = app_handle.listen(crate::constants::events::dictation::ACTIVE, {
@@ -795,14 +807,21 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
 /// Pick the icon that matches a set of live subsystems.
 ///
 /// Split out from `determine_current_state` so the precedence is testable
-/// without an `AppHandle`. A run that is executing outranks everything else on
-/// purpose: the voice capture that may have started it is already over by the
-/// time the agent is working, and a capture-phase teardown that emits
-/// `agent-active = false` while a run is still going must not be allowed to
-/// drop the icon out of Agent mid-run. Recomputing from the flags is what
-/// makes that payload harmless.
-fn tray_state_for(is_agent: bool, is_dictation: bool, is_always_listening: bool) -> TrayIconState {
-    if is_agent {
+/// without an `AppHandle`. Executing and capturing are two different lifetimes
+/// of the agent and both show the Agent icon, so either one on its own is
+/// enough: capture covers the microphone being open for a query, execution
+/// covers the run that query starts, and a typed run has only the second.
+/// Together they outrank everything else on purpose, because a capture
+/// teardown landing while a run is still going must not drop the icon out of
+/// Agent mid-run. Recomputing from the flags rather than from whichever
+/// payload arrived is what makes that harmless.
+fn tray_state_for(
+    is_agent_executing: bool,
+    is_agent_capturing: bool,
+    is_dictation: bool,
+    is_always_listening: bool,
+) -> TrayIconState {
+    if is_agent_executing || is_agent_capturing {
         return TrayIconState::Agent;
     }
 
@@ -822,16 +841,22 @@ async fn determine_current_state(app_handle: &AppHandle) -> TrayIconState {
     let app_state = app_handle.state::<AppState>();
 
     // Check states in order of priority
-    let is_agent = app_state.is_agent_executing();
+    let is_agent_executing = app_state.is_agent_executing();
+    let is_agent_capturing = app_state.is_agent_capture_active();
     let is_dictation = app_state.is_dictation_active();
     let is_always_listening = app_state.get_always_listening_active().unwrap_or(false);
 
     info!(
-        "🔍 Tray icon state check - Agent: {}, Dictation: {}, Always Listening: {}",
-        is_agent, is_dictation, is_always_listening
+        "🔍 Tray icon state check - Agent executing: {}, Agent capturing: {}, Dictation: {}, Always Listening: {}",
+        is_agent_executing, is_agent_capturing, is_dictation, is_always_listening
     );
 
-    let state = tray_state_for(is_agent, is_dictation, is_always_listening);
+    let state = tray_state_for(
+        is_agent_executing,
+        is_agent_capturing,
+        is_dictation,
+        is_always_listening,
+    );
     info!("Tray icon state resolved to {:?}", state);
     state
 }
@@ -1101,22 +1126,88 @@ mod tests {
         // A typed run sets only the execution flag: nothing is being captured
         // and nothing is listening, so this is the case the menu bar used to
         // get wrong by showing Idle for the whole run.
-        assert_eq!(tray_state_for(true, false, false), TrayIconState::Agent);
+        assert_eq!(
+            tray_state_for(true, false, false, false),
+            TrayIconState::Agent
+        );
 
-        // A voice-started run overlaps with the capture and always-listening
-        // flags on the way in and out. Agent still wins, which is what keeps a
-        // capture-phase teardown from dropping the icon mid-run.
-        assert_eq!(tray_state_for(true, true, false), TrayIconState::Agent);
-        assert_eq!(tray_state_for(true, false, true), TrayIconState::Agent);
-        assert_eq!(tray_state_for(true, true, true), TrayIconState::Agent);
+        // A voice-started run overlaps with dictation and always-listening on
+        // the way in and out. Agent still wins, which is what keeps a teardown
+        // in one of those subsystems from dropping the icon mid-run.
+        assert_eq!(
+            tray_state_for(true, false, true, false),
+            TrayIconState::Agent
+        );
+        assert_eq!(
+            tray_state_for(true, false, false, true),
+            TrayIconState::Agent
+        );
+        assert_eq!(
+            tray_state_for(true, false, true, true),
+            TrayIconState::Agent
+        );
+    }
+
+    #[test]
+    fn capture_and_execution_each_show_the_agent_icon_on_their_own() {
+        // The four combinations of the two agent lifetimes. They are separate
+        // phases with separate events now, and the menu bar's promise is that
+        // it shows the Agent icon through both, so only the empty combination
+        // is allowed to fall through.
+
+        // Capture only: the microphone is open for a query and no run has
+        // started yet. Before the split this phase and the run shared an
+        // event, and the icon survived on the shared name alone; if the
+        // capture flag were missing here the icon would go idle the moment a
+        // person started speaking to the agent.
+        assert_eq!(
+            tray_state_for(false, true, false, false),
+            TrayIconState::Agent
+        );
+
+        // Execution only: the run the capture started, or a typed run that
+        // never captured anything.
+        assert_eq!(
+            tray_state_for(true, false, false, false),
+            TrayIconState::Agent
+        );
+
+        // Both: the overlap while a run starts before the capture teardown has
+        // landed. Whichever event arrives first, the answer does not change.
+        assert_eq!(
+            tray_state_for(true, true, false, false),
+            TrayIconState::Agent
+        );
+
+        // Neither: no agent of any kind, so the remaining subsystems decide.
+        assert_eq!(
+            tray_state_for(false, false, false, false),
+            TrayIconState::Idle
+        );
+        assert_eq!(
+            tray_state_for(false, false, true, false),
+            TrayIconState::Recording
+        );
     }
 
     #[test]
     fn the_remaining_states_fall_through_in_order() {
-        assert_eq!(tray_state_for(false, true, false), TrayIconState::Recording);
-        assert_eq!(tray_state_for(false, true, true), TrayIconState::Recording);
-        assert_eq!(tray_state_for(false, false, true), TrayIconState::Armed);
-        assert_eq!(tray_state_for(false, false, false), TrayIconState::Idle);
+        assert_eq!(
+            tray_state_for(false, false, true, false),
+            TrayIconState::Recording
+        );
+        assert_eq!(
+            tray_state_for(false, false, true, true),
+            TrayIconState::Recording
+        );
+        assert_eq!(
+            tray_state_for(false, false, false, true),
+            TrayIconState::Armed
+        );
+        assert_eq!(
+            tray_state_for(false, false, false, false),
+            TrayIconState::Idle
+        );
     }
 
     #[test]

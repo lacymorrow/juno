@@ -446,6 +446,66 @@ pub async fn handle_dictation_state_transition(
     Ok(())
 }
 
+/// Whether a capture transition should move the floating bar with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureBar {
+    /// The bar follows the microphone: it opens when capture starts and goes
+    /// back to rest when capture ends. Every path that ends a capture without
+    /// producing a query wants this.
+    Follows,
+    /// Leave the bar where it is. The successful stop is the one caller that
+    /// needs this: the microphone is closing, but the words it captured are
+    /// already on their way to the agent, and putting the bar back to rest
+    /// here would wipe the working state that submission just set.
+    Untouched,
+}
+
+/// Handle state transitions for the agent capture phase.
+///
+/// Capture is the microphone being open for an agent query. It is a different
+/// lifetime from execution, not a different name for it: capture is over
+/// before the agent starts working, a typed run has no capture at all, and a
+/// run can work for minutes with the microphone shut. Both phases used to be
+/// announced as `agent-active`, so every listener had to guess which one it
+/// was holding, and a capture teardown arriving mid-run told the chat surface
+/// the agent had stopped while it was still working.
+///
+/// The flag and the event move together here for the same reason the
+/// execution transition below keeps its pair together: a listener that
+/// recomputes from `AppState` rather than trusting the payload (the menu bar
+/// does exactly that) has to find the new truth already written when the event
+/// reaches it. Set the flag through this function rather than through
+/// `AppState` directly.
+pub async fn handle_agent_capture_state_transition(
+    app_handle: &AppHandle,
+    active: bool,
+    bar: CaptureBar,
+) -> Result<(), String> {
+    let app_state = app_handle.state::<AppState>();
+    app_state.set_agent_capture_active(active);
+
+    if bar == CaptureBar::Follows {
+        if active {
+            crate::commands::ui_commands::handle_agent_started(app_handle).await;
+        } else {
+            crate::commands::ui_commands::handle_agent_stopped(app_handle).await;
+        }
+    }
+
+    // Flag first, event second, as above: the menu bar recomputes from the
+    // flags whenever a payload is anything other than `true`.
+    if let Err(e) = app_handle.emit(events::agent::CAPTURE_ACTIVE, active) {
+        error!("Failed to emit agent-capture-active event: {}", e);
+        return Err(format!("Failed to emit agent capture state event: {}", e));
+    }
+
+    info!(
+        "Agent capture state transition completed: active={}",
+        active
+    );
+    Ok(())
+}
+
 /// Handle state transitions for agent execution.
 ///
 /// This is the one place where the execution flag and the `agent-active`
@@ -457,6 +517,10 @@ pub async fn handle_dictation_state_transition(
 /// the flag and announcing it in one function is what makes it impossible for
 /// the two to disagree, so route both directions of the lifecycle through here
 /// rather than calling the `mark_*` methods.
+///
+/// `agent-active` now carries only this meaning. Capture has its own event and
+/// its own transition above, so a listener holding an `agent-active` payload
+/// knows it is being told about a run and nothing else.
 ///
 /// `max_steps` carries the run's iteration budget when the caller knows it.
 /// The agent runner does, and the progress UI reads it back, so the parameter
@@ -541,6 +605,19 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
         );
     }
 
+    // An emergency stop closes the microphone too, and the capture phase has
+    // its own flag and its own event. Clearing one lifetime and leaving the
+    // other standing is the same class of bug in a smaller shape: the menu bar
+    // would keep the agent icon on for a capture that ended with the stop.
+    if let Err(e) =
+        handle_agent_capture_state_transition(app_handle, false, CaptureBar::Follows).await
+    {
+        warn!(
+            "[State] Failed to announce the end of agent capture during emergency cleanup: {}",
+            e
+        );
+    }
+
     // Reset dictation state
     if let Err(e) = app_state.set_dictation_active(false) {
         warn!("Failed to reset dictation active state: {}", e);
@@ -565,8 +642,9 @@ async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), 
     crate::agent_monitor::force_reset_agent_input_state().await;
     crate::dictation_monitor::force_reset_dictation_input_state().await;
 
-    // Emit state updates. `agent-active` is not in this list: the transition
-    // above already announced it alongside the flag write.
+    // Emit state updates. Neither `agent-active` nor `agent-capture-active` is
+    // in this list: the two transitions above already announced them alongside
+    // their flag writes.
     let _ = app_handle.emit(events::dictation::ACTIVE, false);
     let _ = app_handle.emit(events::always_listening::MODE_CHANGED, false);
     let _ = app_handle.emit(events::tts::STOP_REQUESTED, ());
