@@ -311,14 +311,27 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     // The set is deduped: two triggers may not share a binding (validated on
     // save), but the same combo must never be registered twice. Mouse bindings
     // and voice phrases are handled by their own subsystems, not here.
+    //
+    // This is also the one place that decides which watcher a key goes to. A
+    // bare modifier such as Fn is a keyboard binding like any other as far as
+    // the model and the settings window are concerned; it just produces no
+    // ordinary key event, so the global-shortcut plugin cannot register it and
+    // the flags-changed monitor takes it instead. The branch is here, in the
+    // registration layer, rather than in the shape of a binding.
     let triggers = state.get_triggers().unwrap_or_default();
     let mut registered_combos: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut mouse_bindings: Vec<crate::platform::mouse_button_monitor::MouseBinding> = Vec::new();
     let mut modifier_bindings: Vec<crate::platform::modifier_key_monitor::ModifierBinding> =
         Vec::new();
     for trigger in triggers.iter().filter(|t| t.enabled) {
-        match &trigger.binding {
-            Some(crate::triggers::Binding::Keyboard { shortcut: combo }) => {
+        let Some(binding) = trigger.binding.as_ref() else {
+            continue;
+        };
+        match crate::triggers::watcher_for(binding) {
+            crate::triggers::Watcher::GlobalShortcut => {
+                let crate::triggers::Binding::Keyboard { shortcut: combo } = binding else {
+                    continue;
+                };
                 let key = combo.to_lowercase();
                 if !registered_combos.insert(key) {
                     continue; // already registered this combo
@@ -337,13 +350,12 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
                     None => warn!("Failed to parse trigger shortcut: {}", combo),
                 }
             }
-            Some(crate::triggers::Binding::Mouse { button }) => {
-                mouse_bindings.push((*button, trigger.method, trigger.target));
+            crate::triggers::Watcher::ModifierKey(key) => {
+                modifier_bindings.push((key, trigger.method, trigger.target));
             }
-            Some(crate::triggers::Binding::Modifier { key }) => {
-                modifier_bindings.push((*key, trigger.method, trigger.target));
+            crate::triggers::Watcher::MouseButton(button) => {
+                mouse_bindings.push((button, trigger.method, trigger.target));
             }
-            None => {}
         }
     }
 

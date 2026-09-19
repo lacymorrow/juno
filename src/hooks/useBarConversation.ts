@@ -14,11 +14,12 @@ const noop = () => {};
  * typed into the bar, spoken, sent from the main window, a cloud client or a
  * rendered component — shows up in the bar's chat pane identically.
  *
- * Two deliberate differences from the main window:
- *  - audio playback is a no-op here, so a spoken response is never played
- *    twice (the main window owns TTS playback);
- *  - the backend health probe is skipped, so the pane never opens on a
- *    "Connected…" system message.
+ * One deliberate difference from the main window: the backend health probe is
+ * skipped, so the pane never opens on a "Connected…" system message.
+ *
+ * Speech needs no such guard. Rust owns playback end to end (one `afplay`
+ * child process), so a spoken response cannot double up no matter how many
+ * windows are mirroring the conversation.
  */
 export function useBarConversation() {
   const conversation = useConversation();
@@ -29,8 +30,6 @@ export function useBarConversation() {
     addSystemMessage: conversation.addSystemMessage,
     addAssistantMessage: conversation.addAssistantMessage,
     setConversationWithPruning: conversation.setConversationWithPruning,
-    playAudioFromBase64: noop,
-    stopCurrentAudio: noop,
     setIsProcessing,
     setServerStatus: noop,
     skipServerCheck: true,

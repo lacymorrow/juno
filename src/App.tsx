@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import { COMMANDS, EVENTS } from "@/lib/constants.generated";
+import { stopTTS } from "@/lib/ttsService";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 
 import { AppHeader } from "@/components/AppHeader";
@@ -27,7 +28,6 @@ import KeyPressOverlay from "@/components/KeyPressOverlay";
 import { useAppState } from "@/hooks/useAppState";
 import { useConversation } from "@/hooks/useConversation";
 import { useOnboardingState } from "@/hooks/useOnboardingState";
-import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
@@ -51,7 +51,6 @@ function App() {
   const appState = useAppState();
   const conversation = useConversation();
   const { isOnboardingActive } = useOnboardingState();
-  const audioPlayback = useAudioPlayback();
   const { playError } = useSound();
   const agentSessions = useAgentSessions();
 
@@ -139,7 +138,11 @@ function App() {
     console.log("🛑 Stop requested by user");
 
     try {
-      await audioPlayback.stopAllAudio();
+      // Speech is an `afplay` child process owned by Rust, so silencing it is a
+      // separate command from tearing down the run.
+      await stopTTS((msg, level) =>
+        console.log(`[Stop-${level || "info"}] ${msg}`),
+      );
       await invoke("stop_all_operations");
       console.log("✅ All operations stopped successfully");
       conversation.addSystemMessage("🛑 All operations stopped by user");
@@ -147,7 +150,7 @@ function App() {
       console.error("❌ Error stopping operations:", error);
       conversation.addSystemMessage(`❌ Error stopping operations: ${error}`);
     }
-  }, [audioPlayback.stopAllAudio, conversation.addSystemMessage]);
+  }, [conversation.addSystemMessage]);
 
   // Update check handler
   const handleUpdateCheck = useCallback(async () => {
@@ -181,8 +184,6 @@ function App() {
     addSystemMessage: conversation.addSystemMessage,
     addAssistantMessage: conversation.addAssistantMessage,
     setConversationWithPruning: conversation.setConversationWithPruning,
-    playAudioFromBase64: audioPlayback.playAudioFromBase64,
-    stopCurrentAudio: audioPlayback.stopCurrentAudio,
     setIsProcessing: appState.setIsProcessing,
     setServerStatus: appState.setServerStatus,
   });

@@ -2,7 +2,10 @@
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
-// Mock the window.speechSynthesis API
+// jsdom implements none of the audio APIs. These stubs are environment
+// scaffolding, not an endorsement of any particular path: Juno prefers Rust for
+// audio, but the browser APIs stay available, so anything that reaches for one
+// has somewhere to land instead of throwing "not implemented".
 Object.defineProperty(window, 'speechSynthesis', {
 	value: {
 		speak: vi.fn(),
@@ -14,7 +17,6 @@ Object.defineProperty(window, 'speechSynthesis', {
 	writable: true,
 });
 
-// Mock Audio class
 global.Audio = class {
 	src: string | undefined;
 	onended: (() => void) | null = null;
@@ -30,7 +32,6 @@ global.Audio = class {
 	}
 } as unknown as new (src?: string) => HTMLAudioElement;
 
-// Mock navigator.onLine
 Object.defineProperty(navigator, 'onLine', {
 	writable: true,
 	value: true,

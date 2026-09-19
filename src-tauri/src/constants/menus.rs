@@ -31,6 +31,7 @@ pub mod app_menu_ids {
     pub const NEW_CHAT: &str = "new-chat";
     pub const IMPORT_CHAT: &str = "import-chat";
     pub const EXPORT_CHAT: &str = "export-chat";
+    pub const CLOSE_WINDOW: &str = "close-window";
 
     // View Menu
     pub const TOGGLE_FLOATING_BAR: &str = "toggle-floating-bar";

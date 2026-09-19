@@ -154,6 +154,14 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
             error!("Failed to setup mouse tracking area: {}", e);
         }
 
+        // Where the bar belongs, applied while it is still hidden. The webview
+        // works the well out for itself once it has loaded and applies the same
+        // frame, but it cannot be relied on to get there first, and until it
+        // does the window sits at the spot macOS cascaded it to. Doing this here
+        // means every path that puts the bar on screen puts it on screen in the
+        // right place.
+        crate::commands::bar_position::restore_bar_position(app_handle);
+
         // Ensure proper window activation
         activate_floating_bar_window(window);
     } else {
@@ -373,9 +381,12 @@ fn setup_desktop_cursor_overlay_window(app_handle: &AppHandle) {
 
 /// How long the bar is given to place itself before it is shown regardless.
 ///
-/// Long enough that the webview wins the race on any machine that is not in
-/// trouble, short enough that a bar which never reports in is still on screen
-/// while the person is looking for it.
+/// Short enough that a bar which never reports in is still on screen while the
+/// person is looking for it. It is deliberately no longer sized to win a race:
+/// a `tauri:dev` build routinely needs more than this to boot its webview, so
+/// this timer does fire there, and the reason that used to matter (the bar
+/// appearing at the cascade spot and then jumping) is handled by restoring the
+/// stored position before the window is ever shown.
 #[cfg(target_os = "macos")]
 const BAR_SHOW_FALLBACK_MS: u64 = 2500;
 
@@ -386,13 +397,12 @@ const BAR_SHOW_FALLBACK_MS: u64 = 2500;
 /// away from whatever app the user is currently in.  orderFront: (via show())
 /// makes the window visible without changing the active application.
 ///
-/// This is now only the safety net. The bar is created hidden at the
-/// placeholder frame in `tauri.conf.json` and does not know its real spot (the
-/// well it was left in last launch) until the webview has mounted and asked for
-/// it, so it puts itself on screen through `show_bar_when_ready` once its first
-/// frame is set. Showing it on a short timer here is what made it appear at the
-/// placeholder frame and then visibly jump into place a moment later. A webview
-/// that never gets that far still gets a bar, just a late one.
+/// This is only the safety net. The bar normally puts itself on screen through
+/// `show_bar_when_ready`, once the webview has worked out which well it belongs
+/// in and set its first frame. A webview that never gets that far still gets a
+/// bar, just a late one, and it is in the right place: `restore_bar_position`
+/// has already applied the stored well to the hidden window, so this show no
+/// longer exposes the spot macOS cascaded the window to.
 #[cfg(target_os = "macos")]
 fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
     tauri::async_runtime::spawn(async move {

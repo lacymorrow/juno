@@ -156,10 +156,15 @@ mod imp {
         if CAPTURING.load(Ordering::SeqCst) {
             if let Some(key) = captured_key(key_code, flags) {
                 debug!("[ModifierKeyMonitor] Captured {} for binding", key.label());
+                // `shortcut` is what a binding is written down as, so the
+                // settings window can record this press the same way it
+                // records any other key it was asked to listen for. `key` is
+                // kept beside it for screens that only need to know which key
+                // arrived.
                 if let Err(e) = tauri::Emitter::emit(
                     app,
                     crate::constants::events::triggers::KEY_CAPTURED,
-                    serde_json::json!({ "key": key }),
+                    serde_json::json!({ "key": key, "shortcut": key.shortcut() }),
                 ) {
                     warn!(
                         "[ModifierKeyMonitor] Could not report the captured key: {}",
