@@ -635,6 +635,12 @@ export function useBackendEvents({
 	// Backend clears agent activity on every failure path that never reaches
 	// a stream end or backend response (e.g. a submission rejected before the
 	// agent runs), so processing can never get stuck on.
+	//
+	// Trusting the payload is only safe because `agent-active` means one thing:
+	// the run. It used to carry the microphone as well, so a capture teardown
+	// arriving mid-run switched the chat surface out of "working" while the
+	// agent kept going. The microphone now announces itself on
+	// `agent-capture-active`, which this hook deliberately does not listen to.
 	useEventListener<boolean>(EVENTS.AGENT_ACTIVE, (active) => {
 		if (!active) {
 			setIsProcessing(false);

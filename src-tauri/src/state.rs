@@ -362,6 +362,16 @@ pub struct AppState {
     /// Used to suppress agent/dictation actions while still providing visual shortcut feedback.
     onboarding_active: Arc<std::sync::atomic::AtomicBool>,
 
+    /// Runtime flag: true while the microphone is open for an agent query.
+    ///
+    /// The capture phase used to have no flag at all, only an event, which is
+    /// why nothing could recompute from state during it: the menu bar had to
+    /// take a capture-phase event on faith because asking `AppState` what was
+    /// happening could only answer about execution. It is written by
+    /// `handle_agent_capture_state_transition` in the same breath as the
+    /// `agent-capture-active` event, so the two cannot disagree.
+    agent_capture_active: Arc<std::sync::atomic::AtomicBool>,
+
     // Rate limiting for command safety
     pub rate_limiters: Arc<GlobalRateLimiters>,
 
@@ -450,6 +460,7 @@ impl AppState {
             permissions_checked: Arc::new(StdMutex::new(false)),
             cloud_enabled: Arc::new(StdMutex::new(false)),
             onboarding_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            agent_capture_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 
             // Use the rate limiters created above
             rate_limiters,
@@ -1207,6 +1218,28 @@ impl AppState {
     /// Check if agent is currently active (alias for is_agent_mode_active)
     pub fn is_agent_active(&self) -> bool {
         self.is_agent_mode_active()
+    }
+
+    /// Is the microphone open for an agent query right now?
+    ///
+    /// This is the capture phase, not the run. It is false for the whole of a
+    /// typed run, and false again long before a spoken run finishes working.
+    /// Ask `is_agent_executing` for the run.
+    pub fn is_agent_capture_active(&self) -> bool {
+        self.agent_capture_active
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Record that the agent capture phase opened or closed.
+    ///
+    /// Go through `handle_agent_capture_state_transition` rather than calling
+    /// this directly: the flag on its own tells nobody, and a flag written
+    /// without its event is the half-move that stranded the menu bar the last
+    /// time this lifecycle was split in two.
+    pub fn set_agent_capture_active(&self, active: bool) {
+        self.agent_capture_active
+            .store(active, std::sync::atomic::Ordering::Release);
+        info!("[AppState] Agent capture active state set to: {}", active);
     }
 
     /// Check if onboarding is currently active
@@ -2290,6 +2323,33 @@ mod tests {
         state.mark_agent_execution_finished();
         assert!(!state.is_agent_executing());
         assert!(state.get_current_agent_execution_id().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_agent_capture_is_tracked_apart_from_execution() {
+        let state = AppState::new(None);
+
+        // The two lifetimes are independent. A capture is the microphone being
+        // open for a query; it starts and ends before the run it produces, and
+        // a typed run never has one at all.
+        assert!(!state.is_agent_capture_active());
+
+        state.set_agent_capture_active(true);
+        assert!(state.is_agent_capture_active());
+        assert!(
+            !state.is_agent_executing(),
+            "an open microphone is not a running agent"
+        );
+
+        state
+            .mark_agent_execution_started("test-execution-456".to_string())
+            .unwrap();
+        state.set_agent_capture_active(false);
+        assert!(
+            state.is_agent_executing(),
+            "the capture ending says nothing about the run it started"
+        );
+        assert!(!state.is_agent_capture_active());
     }
 
     #[tokio::test]

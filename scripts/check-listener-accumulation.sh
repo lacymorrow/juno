@@ -23,7 +23,7 @@ fi
 
 # Check for duplicate voice event listeners in source code
 echo -e "\n🎤 Checking for duplicate voice event listeners..."
-VOICE_EVENTS=("dictation-active" "app-dictation-started" "app-dictation-finished" "agent-active")
+VOICE_EVENTS=("dictation-active" "app-dictation-started" "app-dictation-finished" "agent-active" "agent-capture-active")
 
 for event in "${VOICE_EVENTS[@]}"; do
     LISTENERS=$(grep -r "listen.*['\"]$event['\"]" src/ --include="*.ts" --include="*.tsx" 2>/dev/null | wc -l)

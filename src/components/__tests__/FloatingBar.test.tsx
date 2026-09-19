@@ -750,10 +750,25 @@ describe("FloatingBar", () => {
 
     submitUserMessage("What time is it?");
     streamAssistant("m1", "It is half past nine.");
+    // `agent-active` is the run, and only the run: this is the agent reporting
+    // that it has finished working.
     fire("agent-active", false);
 
     expect(screen.getByText("It is half past nine.")).toBeInTheDocument();
     expect(screen.getByTestId("bar-chat-pane-status")).toHaveTextContent("esc to close");
+  });
+
+  it("keeps showing progress when the microphone closes mid-run", async () => {
+    await renderBar();
+
+    submitUserMessage("Open Safari");
+    // A spoken query closes the microphone as soon as the person stops
+    // speaking, which is before the agent has done anything. While capture and
+    // execution shared `agent-active`, this teardown reached the pane as "the
+    // agent stopped" and the status settled while the agent worked on.
+    fire("agent-capture-active", false);
+
+    expect(screen.getByTestId("bar-chat-pane-status")).toHaveTextContent("working");
   });
 
   it("keeps the pill as an input for follow-ups while the pane is open", async () => {

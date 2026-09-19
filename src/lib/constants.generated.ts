@@ -13,6 +13,7 @@ export const EVENTS = {
   AGENT_STATUS_UPDATE: 'agent-status-update',
   AGENT_STOP_ALL: 'agent-stop-all',
   AGENT_ACTIVE: 'agent-active',
+  AGENT_CAPTURE_ACTIVE: 'agent-capture-active',
   AGENT_ERROR: 'agent-error',
   AGENT_TRANSCRIPTION_START: 'agent-transcription-start',
   AGENT_TRANSCRIPTION_STOP: 'agent-transcription-stop',

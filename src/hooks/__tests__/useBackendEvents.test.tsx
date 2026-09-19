@@ -56,7 +56,7 @@ describe("useBackendEvents: unified submission state", () => {
     ]);
   });
 
-  it("switches processing off when the backend reports the agent inactive", () => {
+  it("switches processing off when the backend reports the run finished", () => {
     const { setIsProcessing } = renderBackendEvents();
 
     handlers.get("agent-active")?.(false);
@@ -64,6 +64,20 @@ describe("useBackendEvents: unified submission state", () => {
 
     setIsProcessing.mockClear();
     handlers.get("agent-active")?.(true);
+    expect(setIsProcessing).not.toHaveBeenCalled();
+  });
+
+  it("does not settle when the microphone closes: capture is not the run", () => {
+    const { setIsProcessing } = renderBackendEvents();
+
+    // Capture ends the moment the person stops speaking, which is before the
+    // run it started has done anything. While both phases were announced as
+    // `agent-active`, this false switched the chat surface out of "working"
+    // and the agent went on working with nothing on screen to say so. The hook
+    // wants the run, so it must not listen to the microphone at all.
+    expect(handlers.has("agent-capture-active")).toBe(false);
+
+    handlers.get("agent-capture-active")?.(false);
     expect(setIsProcessing).not.toHaveBeenCalled();
   });
 

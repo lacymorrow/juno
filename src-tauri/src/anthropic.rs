@@ -400,11 +400,11 @@ pub async fn submit_query(
         if crate::agent::local_intents::try_handle_media_intent(&app_handle, trimmed_query).await {
             info!("Query handled locally as a media intent: {}", trimmed_query);
             // No agent run will start, so nothing further will ever say this
-            // ended. A spoken media command still went through the voice
-            // capture path, which announces `agent-active = true` when the mic
-            // opens, and without this the menu bar would keep animating an
-            // agent that was never asked to run. The flag is already false
-            // here, so this only closes the announcement.
+            // ended, and every surface that switched to a working state when
+            // the query was accepted would sit there. The flag is already
+            // false here, so this only closes the announcement. Capture closes
+            // itself when the microphone shuts, which has already happened by
+            // the time a spoken command reaches this line.
             if let Err(e) = crate::state_management::handle_agent_execution_state_transition(
                 &app_handle,
                 false,

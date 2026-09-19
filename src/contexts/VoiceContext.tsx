@@ -266,12 +266,26 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
         }));
       });
 
-      // Agent-specific events
-      await addListener(EVENTS.AGENT_ACTIVE, () => {
-        setAgentState((prev) => ({
-          ...prev,
-          status: UI.AGENT_STATUS_LISTENING,
-        }));
+      // Agent-specific events.
+      //
+      // "Listening" is the microphone being open for a query, which is the
+      // capture phase and not the run, so this follows the capture event. It
+      // used to follow `agent-active`, which carried both phases and ignored
+      // the payload, so a run that was already working could be relabelled as
+      // listening by a capture teardown that had nothing to do with it.
+      await addListener<boolean>(EVENTS.AGENT_CAPTURE_ACTIVE, (event) => {
+        const capturing = event.payload === true;
+        setAgentState((prev) => {
+          if (capturing) {
+            return { ...prev, status: UI.AGENT_STATUS_LISTENING };
+          }
+          // The microphone closed. Only "listening" belongs to capture, so a
+          // run that has already moved on to thinking or responding keeps the
+          // status it earned.
+          return prev.status === UI.AGENT_STATUS_LISTENING
+            ? { ...prev, status: UI.AGENT_STATUS_IDLE }
+            : prev;
+        });
       });
 
       await addListener(EVENTS.AGENT_THOUGHT_PROCESS, () => {
