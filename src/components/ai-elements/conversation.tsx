@@ -198,6 +198,39 @@ export const Conversation = ({ className, children, ...props }: ConversationProp
   );
 };
 
+/**
+ * Force the newest message into view when the person sends one.
+ *
+ * Autoscroll deliberately refuses to yank somebody back down while they are
+ * reading earlier messages: content arriving is not a reason to move them.
+ * Sending is a different act. Its whole point is to watch what you just said
+ * land and the reply form under it, so it re-arms the pin wherever the
+ * scroller happened to be. Once pinned, the resize observer keeps it there
+ * while the loader and the reply grow, so this fires once per send rather
+ * than fighting the stream.
+ *
+ * `signal` should change exactly once per sent message. The id of the newest
+ * user message is the natural choice; a count works too.
+ */
+export type ConversationScrollOnSendProps = {
+  signal: string | number | null;
+};
+
+export const ConversationScrollOnSend = ({
+  signal,
+}: ConversationScrollOnSendProps) => {
+  const { scrollToBottom } = useConversationContext();
+  const seen = useRef(signal);
+
+  useEffect(() => {
+    if (signal === null || signal === seen.current) return;
+    seen.current = signal;
+    scrollToBottom();
+  }, [signal, scrollToBottom]);
+
+  return null;
+};
+
 export type ConversationContentProps = ComponentProps<"div"> & {
   /** Extra classes for the scrolling element that wraps the list. */
   scrollClassName?: string;

@@ -4,6 +4,7 @@ import {
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton,
+  ConversationScrollOnSend,
 } from "@/components/ai-elements/conversation";
 import { ChatMessageComponent } from "@/components/ChatMessageV2";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
@@ -83,6 +84,13 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   className,
   contentClassName,
 }: ChatContainerProps) {
+  // How many messages the person has sent. Sending is the one moment the
+  // conversation should jump to the bottom whatever the reader was doing.
+  const sentCount = React.useMemo(
+    () => conversation.filter((m) => m.role === "user").length,
+    [conversation],
+  );
+
   // Memoize message list to prevent unnecessary re-renders
   const messageList = React.useMemo(
     () =>
@@ -143,6 +151,10 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
     // question about taking the mouse never scrolls out of sight.
     <div className="flex min-h-0 flex-1 flex-col">
       <Conversation className={cn("flex-1 min-h-0", className)}>
+        {/* Counting sent messages rather than watching the array: the count
+            changes exactly once per send, while the array changes on every
+            streamed token. */}
+        <ConversationScrollOnSend signal={sentCount} />
         {conversation.length === 0 ? (
           <ConversationEmptyState>
             <div className="flex flex-col items-center justify-center space-y-6 py-12">
