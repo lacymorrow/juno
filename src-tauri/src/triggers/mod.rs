@@ -40,6 +40,45 @@ pub enum TriggerTarget {
     Dictation,
 }
 
+impl TriggerMethod {
+    /// The serde name. The settings window builds a row's identity out of this
+    /// and the target, so both sides must spell it the same way.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PushToTalk => "push_to_talk",
+            Self::Toggle => "toggle",
+            Self::Voice => "voice",
+        }
+    }
+
+    /// How the row names itself on screen.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PushToTalk => "Push to talk",
+            Self::Toggle => "Toggle",
+            Self::Voice => "Voice",
+        }
+    }
+}
+
+impl TriggerTarget {
+    /// The serde name. See [`TriggerMethod::as_str`].
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Dictation => "dictation",
+        }
+    }
+
+    /// How the row names itself on screen.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Agent => "Agent",
+            Self::Dictation => "Dictation",
+        }
+    }
+}
+
 /// A key that produces no ordinary key event, only a modifier flag change.
 ///
 /// Caps Lock is deliberately absent. Checked on hardware: it emits one event
@@ -238,6 +277,20 @@ impl Trigger {
     /// The uniqueness key. At most one trigger per `(method, target)` pair.
     pub fn key(&self) -> (TriggerMethod, TriggerTarget) {
         (self.method, self.target)
+    }
+
+    /// The same key as a string, spelled `"<method>:<target>"`.
+    ///
+    /// This is the name the settings window uses to say which row it is
+    /// editing, so a check that runs while someone is typing can tell "this
+    /// combo is already mine" from "this combo belongs to another row".
+    pub fn key_str(&self) -> String {
+        format!("{}:{}", self.method.as_str(), self.target.as_str())
+    }
+
+    /// How this row reads on screen, e.g. `"Push to talk to Dictation"`.
+    pub fn label(&self) -> String {
+        format!("{} to {}", self.method.label(), self.target.label())
     }
 
     pub fn is_voice(&self) -> bool {
@@ -536,6 +589,39 @@ pub fn enable_newly_bound(previous: &[Trigger], next: &mut [Trigger]) {
 /// `reserved` are binding descriptions already owned by the two fixed utility
 /// shortcuts (Escape to stop, Cmd+Comma to open settings); an enabled keyboard
 /// trigger may not collide with one.
+/// Would binding `combo` to the row named `editing_key` collide with anything?
+///
+/// Returns the sentence the save would fail with, so the hint shown while
+/// someone is still typing and the result of pressing Save cannot disagree.
+/// `editing_key` is a [`Trigger::key_str`]; passing the row being edited is
+/// what keeps a row from reporting a conflict with its own current binding.
+pub fn combo_conflict(
+    triggers: &[Trigger],
+    combo: &str,
+    editing_key: Option<&str>,
+    reserved: &[String],
+) -> Option<String> {
+    let label = Binding::Keyboard {
+        shortcut: combo.to_string(),
+    }
+    .describe();
+
+    if reserved.iter().any(|r| r.eq_ignore_ascii_case(&label)) {
+        return Some(format!("\"{label}\" is already used by another shortcut."));
+    }
+
+    triggers
+        .iter()
+        .filter(|t| t.enabled)
+        .filter(|t| editing_key.is_none_or(|k| t.key_str() != k))
+        .find(|t| {
+            t.binding
+                .as_ref()
+                .is_some_and(|b| b.describe().eq_ignore_ascii_case(&label))
+        })
+        .map(|t| format!("\"{label}\" is already bound to {}.", t.label()))
+}
+
 pub fn validate(triggers: &[Trigger], reserved: &[String]) -> Result<(), String> {
     use std::collections::HashSet;
     let mut seen_bindings: HashSet<String> = HashSet::new();
@@ -585,6 +671,80 @@ mod tests {
             require_hey_prefix: false,
             enabled,
         }
+    }
+
+    #[test]
+    fn a_row_does_not_conflict_with_its_own_binding() {
+        // The bug this covers: every trigger row reported "already assigned"
+        // against the combo it was already holding, which disabled Save and
+        // made both activation shortcuts impossible to rebind.
+        let ts = vec![key_trigger(
+            TriggerTarget::Dictation,
+            Some(Binding::Keyboard {
+                shortcut: "Option+Space".to_string(),
+            }),
+            true,
+        )];
+        let me = ts[0].key_str();
+        assert_eq!(
+            combo_conflict(&ts, "Option+Space", Some(&me), &[]),
+            None,
+            "a row must be allowed to keep the combo it already has"
+        );
+    }
+
+    #[test]
+    fn another_rows_binding_still_conflicts() {
+        let ts = vec![key_trigger(
+            TriggerTarget::Agent,
+            Some(Binding::Keyboard {
+                shortcut: "Option+Space".to_string(),
+            }),
+            true,
+        )];
+        let other = Trigger {
+            method: TriggerMethod::Toggle,
+            target: TriggerTarget::Dictation,
+            binding: None,
+            phrase: None,
+            require_hey_prefix: false,
+            enabled: true,
+        }
+        .key_str();
+        let msg = combo_conflict(&ts, "Option+Space", Some(&other), &[])
+            .expect("a combo held by another enabled row is taken");
+        assert!(msg.contains("Push to talk to Agent"), "got: {msg}");
+    }
+
+    #[test]
+    fn a_switched_off_row_does_not_hold_its_combo() {
+        // A disabled trigger is not registered, so its combo is free. Saying
+        // otherwise would strand a key behind a row that does nothing.
+        let ts = vec![key_trigger(
+            TriggerTarget::Agent,
+            Some(Binding::Keyboard {
+                shortcut: "Option+Space".to_string(),
+            }),
+            false,
+        )];
+        assert_eq!(combo_conflict(&ts, "Option+Space", None, &[]), None);
+    }
+
+    #[test]
+    fn the_reserved_combos_are_never_available() {
+        let reserved = vec!["Escape".to_string(), "Cmd+Comma".to_string()];
+        assert!(combo_conflict(&[], "Escape", None, &reserved).is_some());
+        assert!(combo_conflict(&[], "cmd+comma", None, &reserved).is_some());
+        assert_eq!(combo_conflict(&[], "Option+Space", None, &reserved), None);
+    }
+
+    #[test]
+    fn a_rows_key_string_matches_what_the_settings_window_sends() {
+        // The settings window builds `trigger_${method}:${target}` from the
+        // serde names. If these drift, the exclusion silently stops matching
+        // and the self-conflict bug comes straight back.
+        let t = key_trigger(TriggerTarget::Dictation, None, true);
+        assert_eq!(t.key_str(), "push_to_talk:dictation");
     }
 
     #[test]

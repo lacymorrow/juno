@@ -100,6 +100,17 @@ fn dispatch_activation_triggers(
         if *shortcut != parsed {
             continue;
         }
+        // Logged at info, because "the shortcut does nothing" is the report
+        // that keeps coming back and this is the line that settles it: the
+        // registration log above says the combo was claimed, and this one says
+        // a press of it arrived and was routed.
+        info!(
+            "[GlobalShortcut] {} fired {} ({:?})",
+            combo,
+            trigger.label(),
+            event.state()
+        );
+
         match trigger.target {
             TriggerTarget::Agent => {
                 if fired_agent {

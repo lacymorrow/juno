@@ -231,52 +231,6 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Check for conflicts between shortcuts
-fn check_shortcut_conflicts(
-    new_shortcut: &str,
-    current_shortcuts: &crate::state::KeyboardShortcuts,
-    exclude_key: Option<&str>,
-) -> Result<(), String> {
-    let normalized_new = new_shortcut.to_lowercase().replace(" ", "");
-
-    let shortcuts_to_check = [
-        ("agent_mode", &current_shortcuts.agent_mode),
-        ("dictation_input", &current_shortcuts.dictation_input),
-        ("stop_current_task", &current_shortcuts.stop_current_task),
-        ("open_settings", &current_shortcuts.open_settings),
-    ];
-
-    for (key, existing_shortcut) in &shortcuts_to_check {
-        if let Some(exclude) = exclude_key {
-            if *key == exclude {
-                continue; // Skip the one we're currently editing
-            }
-        }
-
-        let normalized_existing = existing_shortcut.to_lowercase().replace(" ", "");
-        if normalized_new == normalized_existing {
-            return Err(format!(
-                "Shortcut '{}' is already assigned to '{}'",
-                new_shortcut,
-                get_shortcut_display_name_for_validation(key)
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-/// Helper function for validation error messages
-fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
-    match shortcut_name {
-        "agent_mode" => "Agent Mode",
-        "dictation_input" => "Dictation Input",
-        "stop_current_task" => "Stop Current Task",
-        "open_settings" => "Open Settings",
-        _ => shortcut_name,
-    }
-}
-
 /// Register global shortcuts with proper error handling for missing permissions
 pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Result<(), String> {
     // Check if we have Input Monitoring permissions first
@@ -405,17 +359,29 @@ pub async fn validate_keyboard_shortcut(
     // Validate format
     validate_shortcut_format(&shortcut_value)?;
 
-    // Get current shortcuts for conflict checking
-    let current_shortcuts = state
-        .get_keyboard_shortcuts()
-        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?;
+    // Conflicts are checked against the triggers, because triggers are the only
+    // thing that binds an activation combo now. This used to read the derived
+    // legacy `KeyboardShortcuts` and skip the row being edited by names like
+    // "dictation_input", which the settings window stopped sending when
+    // triggers replaced the shortcuts pane. Nothing matched, so every row
+    // conflicted with its own current binding ("already assigned to Dictation
+    // Input") and Save stayed disabled, which is why neither activation
+    // shortcut could be rebound.
+    let editing_key = shortcut_name
+        .as_deref()
+        .and_then(|name| name.strip_prefix("trigger_"));
 
-    // Check for conflicts
-    check_shortcut_conflicts(
-        &shortcut_value,
-        &current_shortcuts,
-        shortcut_name.as_deref(),
-    )?;
+    let reserved = [
+        crate::constants::settings::defaults::STOP_CURRENT_TASK.to_string(),
+        crate::constants::settings::defaults::OPEN_SETTINGS.to_string(),
+    ];
+
+    let triggers = state.get_triggers().unwrap_or_default();
+    if let Some(conflict) =
+        crate::triggers::combo_conflict(&triggers, &shortcut_value, editing_key, &reserved)
+    {
+        return Err(conflict);
+    }
 
     Ok("Valid shortcut".to_string())
 }
