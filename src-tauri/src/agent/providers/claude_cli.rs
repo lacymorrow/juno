@@ -26,6 +26,74 @@ use tracing::{debug, error, info, warn};
 /// Reset on app restart (static lifetime).
 static AUTH_VERIFIED: AtomicBool = AtomicBool::new(false);
 
+/// Claude CLI session ids, keyed by the Juno conversation they belong to.
+///
+/// The CLI is a subprocess: one spawn is one session, and a spawn with no
+/// `--resume` starts from nothing. Every turn was therefore a brand new
+/// conversation, which is why Juno kept answering follow-ups with "this is a
+/// fresh session, I don't have the previous turn" while the chat window
+/// showed the whole history above it. The history was never reaching her.
+///
+/// Keyed by conversation rather than held on the brain, because the brain is
+/// rebuilt from settings on every single query. Starting a new chat mints a
+/// new conversation id, so a new chat gets no entry here and correctly starts
+/// the CLI fresh; nothing has to be explicitly cleared.
+static CLI_SESSIONS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, String>>,
+> = std::sync::OnceLock::new();
+
+/// Conversations to remember a session id for. Well past what one run of the
+/// app will revisit, and bounded so a long-lived process cannot grow this
+/// forever.
+const MAX_TRACKED_SESSIONS: usize = 64;
+
+fn cli_sessions() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    CLI_SESSIONS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// The CLI session to continue for `conversation_id`, if we have seen one.
+fn resume_id_for(conversation_id: &str) -> Option<String> {
+    match cli_sessions().lock() {
+        Ok(map) => map.get(conversation_id).cloned(),
+        Err(e) => {
+            warn!("[ClaudeCLI] Session registry poisoned: {}", e);
+            None
+        }
+    }
+}
+
+/// Remember the CLI session this conversation is now running in.
+fn remember_session(conversation_id: &str, session_id: &str) {
+    match cli_sessions().lock() {
+        Ok(mut map) => {
+            if map.len() >= MAX_TRACKED_SESSIONS && !map.contains_key(conversation_id) {
+                // Nothing here is worth an LRU. Conversations are revisited in
+                // the near term or not at all, and losing one only costs a
+                // fresh session on the next message.
+                map.clear();
+            }
+            map.insert(conversation_id.to_string(), session_id.to_string());
+        }
+        Err(e) => warn!("[ClaudeCLI] Session registry poisoned: {}", e),
+    }
+}
+
+/// Forget a session the CLI has told us it will not resume.
+fn forget_session(conversation_id: &str) {
+    if let Ok(mut map) = cli_sessions().lock() {
+        map.remove(conversation_id);
+    }
+}
+
+/// Which Juno conversation this run belongs to.
+async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<String> {
+    use tauri::Manager;
+    let handle = app_handle.as_ref()?;
+    let state = handle.try_state::<crate::state::AppState>()?;
+    let id = state.current_conversation_id.lock().await.clone();
+    Some(id)
+}
+
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolDefinition};
 use crate::agent::traits::AgentBrain;
 use crate::settings::ProviderConfig as CentralizedProviderConfig;
@@ -256,6 +324,13 @@ pub struct ClaudeCliBrain {
     /// `None` when juno-cua isn't installed — the CLI then runs with its
     /// built-in tools only (LAC-3696).
     mcp_config_path: Option<PathBuf>,
+    /// The session id the CLI reported during the current run.
+    ///
+    /// Filled by the stream reader and read once the run finishes, so the
+    /// next message in this conversation can continue the same session. Kept
+    /// here rather than threaded through the return type because the stream
+    /// loop already borrows `&self` and the brain lives exactly one run.
+    observed_session: std::sync::Mutex<Option<String>>,
 }
 
 impl ClaudeCliBrain {
@@ -305,11 +380,16 @@ impl ClaudeCliBrain {
             model,
             system_prompt: config.system_prompt.clone(),
             mcp_config_path,
+            observed_session: std::sync::Mutex::new(None),
         })
     }
 
     /// Build the subprocess command arguments.
-    fn build_args(&self, query: &str) -> Vec<String> {
+    ///
+    /// `resume` continues an existing CLI session rather than starting a new
+    /// one, which is what makes a second message in the same chat a follow-up
+    /// instead of a cold open.
+    fn build_args(&self, query: &str, resume: Option<&str>) -> Vec<String> {
         let mut args = vec![
             "-p".to_string(),
             "--output-format".to_string(),
@@ -326,6 +406,14 @@ impl ClaudeCliBrain {
             // matching this provider's existing trust model.
             "--dangerously-skip-permissions".to_string(),
         ];
+
+        // Continue the session this conversation is already running in. The
+        // CLI keeps the full transcript and its own tool results on its side,
+        // so resuming carries far more than replaying our message list could.
+        if let Some(session) = resume {
+            args.push("--resume".to_string());
+            args.push(session.to_string());
+        }
 
         if let Some(ref mcp_path) = self.mcp_config_path {
             args.push("--mcp-config".to_string());
@@ -370,22 +458,60 @@ impl ClaudeCliBrain {
         // Validate auth before spawning the query subprocess
         check_auth_status(&self.binary_path).await?;
 
-        let args = self.build_args(query);
+        // Continue this conversation's CLI session if it has one.
+        let conversation = conversation_id_for(&app_handle).await;
+        let resume = conversation.as_deref().and_then(resume_id_for);
 
-        info!(
-            "Spawning Claude CLI: {} {}",
-            self.binary_path.display(),
-            args.iter().take(6).cloned().collect::<Vec<_>>().join(" ")
-        );
+        let args = self.build_args(query, resume.as_deref());
 
-        let mut child = tokio::process::Command::new(&self.binary_path)
-            .args(&args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e)))?;
+        match resume.as_deref() {
+            Some(session) => info!(
+                "Spawning Claude CLI (resuming session {}): {}",
+                session,
+                self.binary_path.display()
+            ),
+            None => info!(
+                "Spawning Claude CLI (new session): {} {}",
+                self.binary_path.display(),
+                args.iter().take(6).cloned().collect::<Vec<_>>().join(" ")
+            ),
+        }
+
+        let spawn = |args: &Vec<String>| {
+            tokio::process::Command::new(&self.binary_path)
+                .args(args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+        };
+
+        let mut child = match spawn(&args) {
+            Ok(child) => child,
+            // A session id we stored can stop being resumable: the CLI prunes
+            // its history, or the transcript is gone. Falling back to a fresh
+            // session costs the thread's context, which is exactly what we
+            // had before this existed, and beats failing the message outright.
+            Err(e) if resume.is_some() => {
+                warn!(
+                    "Claude CLI would not resume ({}); starting a fresh session",
+                    e
+                );
+                if let Some(ref id) = conversation {
+                    forget_session(id);
+                }
+                spawn(&self.build_args(query, None)).map_err(|e| {
+                    AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e))
+                })?
+            }
+            Err(e) => {
+                return Err(AgentError::LlmError(format!(
+                    "Failed to spawn Claude CLI: {}",
+                    e
+                )))
+            }
+        };
 
         let stdout = child.stdout.take().ok_or_else(|| {
             AgentError::LlmError("Failed to capture Claude CLI stdout".to_string())
@@ -558,6 +684,26 @@ impl ClaudeCliBrain {
             }
         }
 
+        // Remember the session this conversation is now in, so the next
+        // message continues it. Recorded here rather than mid-stream because
+        // a cancelled or failed run has already returned above, and a session
+        // that produced nothing is not one worth resuming into.
+        if let Some(ref id) = conversation {
+            let observed = self
+                .observed_session
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone());
+            match observed {
+                Some(session) => remember_session(id, &session),
+                // The CLI always reports one, so this means the stream ended
+                // before any usable line arrived. Dropping the old id is the
+                // safe move: resuming into a session we cannot confirm is
+                // worse than starting cleanly.
+                None => forget_session(id),
+            }
+        }
+
         // Use final_result if available, otherwise accumulated_text
         let complete_text = final_result.unwrap_or(accumulated_text);
 
@@ -618,6 +764,18 @@ impl ClaudeCliBrain {
                     };
 
                     let event_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+                    // Every stream-json line carries the session this run is
+                    // in. Recorded from whichever line shows up first, so the
+                    // next message in this conversation can resume it.
+                    if let Some(session) = parsed.get("session_id").and_then(|v| v.as_str()) {
+                        if let Ok(mut slot) = self.observed_session.lock() {
+                            if slot.as_deref() != Some(session) {
+                                debug!("Claude CLI session: {}", session);
+                                *slot = Some(session.to_string());
+                            }
+                        }
+                    }
 
                     match event_type {
                         "assistant" => {
@@ -915,8 +1073,9 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             mcp_config_path: None,
+            observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("test query");
+        let args = brain.build_args("test query", None);
         assert!(args.contains(&"-p".to_string()));
         assert!(args.contains(&"stream-json".to_string()));
         assert!(args.contains(&"sonnet".to_string()));
@@ -937,8 +1096,9 @@ mod tests {
             model: "opus".to_string(),
             system_prompt: Some("You are helpful.".to_string()),
             mcp_config_path: None,
+            observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("test query");
+        let args = brain.build_args("test query", None);
         assert!(args.contains(&"--system-prompt".to_string()));
         assert!(args.contains(&"You are helpful.".to_string()));
     }
@@ -948,14 +1108,59 @@ mod tests {
     /// still blocks user-level servers, and the model must be steered toward
     /// the MCP tools via --append-system-prompt.
     #[test]
+    fn resuming_passes_the_session_to_the_cli() {
+        // Without this flag every message was a new CLI session, so Juno
+        // answered follow-ups as if the chat above her had never happened.
+        let brain = ClaudeCliBrain {
+            binary_path: PathBuf::from("/usr/bin/claude"),
+            model: "sonnet".to_string(),
+            system_prompt: None,
+            mcp_config_path: None,
+            observed_session: std::sync::Mutex::new(None),
+        };
+        let args = brain.build_args("and what about the other one?", Some("abc-123"));
+        let idx = args
+            .iter()
+            .position(|a| a == "--resume")
+            .expect("--resume is passed when a session is known");
+        assert_eq!(args[idx + 1], "abc-123");
+    }
+
+    #[test]
+    fn a_first_message_starts_a_fresh_session() {
+        let brain = ClaudeCliBrain {
+            binary_path: PathBuf::from("/usr/bin/claude"),
+            model: "sonnet".to_string(),
+            system_prompt: None,
+            mcp_config_path: None,
+            observed_session: std::sync::Mutex::new(None),
+        };
+        let args = brain.build_args("hello", None);
+        assert!(!args.iter().any(|a| a == "--resume"));
+    }
+
+    #[test]
+    fn a_conversation_remembers_its_session() {
+        let convo = "conversation-under-test";
+        assert_eq!(resume_id_for(convo), None, "nothing known yet");
+        remember_session(convo, "session-1");
+        assert_eq!(resume_id_for(convo), Some("session-1".to_string()));
+        // A new chat is a new id, so it gets no session and starts clean.
+        assert_eq!(resume_id_for("a-different-conversation"), None);
+        forget_session(convo);
+        assert_eq!(resume_id_for(convo), None);
+    }
+
+    #[test]
     fn test_build_args_with_mcp_config() {
         let brain = ClaudeCliBrain {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
             mcp_config_path: Some(PathBuf::from("/tmp/juno-cua-mcp-test.json")),
+            observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("move the mouse");
+        let args = brain.build_args("move the mouse", None);
 
         let mcp_flag_idx = args
             .iter()
@@ -1031,6 +1236,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             mcp_config_path: None,
+            observed_session: std::sync::Mutex::new(None),
         }
     }
 

@@ -89,6 +89,12 @@ pub fn apply_saved_dock_icon_policy(app: &AppHandle) {
 }
 
 /// Put the process in (or out of) the Dock and the app switcher.
+///
+/// Changing the activation policy deactivates the app, and AppKit orders its
+/// windows out when that happens. Somebody turning the Dock icon off is doing
+/// it from the settings window, so without the restore below the switch they
+/// just flipped takes the window they flipped it in off the screen with it.
+/// Which windows were up is read before the change and put back after.
 #[cfg(target_os = "macos")]
 pub fn apply_dock_icon_policy(app: &AppHandle, visible: bool) {
     let policy = if visible {
@@ -96,12 +102,55 @@ pub fn apply_dock_icon_policy(app: &AppHandle, visible: bool) {
     } else {
         tauri::ActivationPolicy::Accessory
     };
+
+    let on_screen = windows_on_screen(app);
+
     match app.set_activation_policy(policy) {
         Ok(()) => info!(
             "[DockIcon] Activation policy set to {}",
             if visible { "regular" } else { "accessory" }
         ),
-        Err(e) => warn!("[DockIcon] Failed to set activation policy: {}", e),
+        Err(e) => {
+            warn!("[DockIcon] Failed to set activation policy: {}", e);
+            return;
+        }
+    }
+
+    restore_windows(app, &on_screen);
+}
+
+/// The labels of the windows currently on screen, and which one had focus.
+#[cfg(target_os = "macos")]
+fn windows_on_screen(app: &AppHandle) -> Vec<(String, bool)> {
+    app.webview_windows()
+        .into_iter()
+        .filter(|(_, w)| w.is_visible().unwrap_or(false))
+        .map(|(label, w)| (label, w.is_focused().unwrap_or(false)))
+        .collect()
+}
+
+/// Put back the windows the policy change took away.
+///
+/// Focus is only returned to the window that had it. The floating bar is a
+/// panel and is deliberately never focused, so restoring it blindly would pull
+/// the person out of whatever app they were typing in.
+#[cfg(target_os = "macos")]
+fn restore_windows(app: &AppHandle, on_screen: &[(String, bool)]) {
+    for (label, was_focused) in on_screen {
+        let Some(window) = app.get_webview_window(label) else {
+            continue;
+        };
+        if !window.is_visible().unwrap_or(false) {
+            if let Err(e) = window.show() {
+                warn!("[DockIcon] Could not put {} back on screen: {}", label, e);
+                continue;
+            }
+        }
+        if *was_focused {
+            if let Err(e) = window.set_focus() {
+                warn!("[DockIcon] Could not return focus to {}: {}", label, e);
+            }
+        }
     }
 }
 

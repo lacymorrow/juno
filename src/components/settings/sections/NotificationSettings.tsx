@@ -165,7 +165,11 @@ export default function NotificationSettings() {
 
   const updatePersistImportant = async (persist: boolean) => {
     try {
-      await invoke("set_notification_persist_important", { persist });
+      // The backend parameter is `persist_important`. Tauri matches arguments
+      // by name, so sending `persist` meant this toggle never reached it.
+      await invoke("set_notification_persist_important", {
+        persistImportant: persist,
+      });
       setNotificationSettings((prev) => ({
         ...prev,
         persist_important: persist,
