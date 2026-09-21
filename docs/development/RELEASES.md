@@ -66,6 +66,80 @@ The in-app updater uses [`tauri-plugin-updater`](https://v2.tauri.app/plugin/upd
 
 **If the private key is lost,** existing installs can never receive updates again. Back up `~/.tauri/juno.key` securely.
 
+## Code signing and notarization (Apple)
+
+This is a different thing from the updater key above, and confusing the two is
+how an unsigned demo build got handed to someone. Two signatures matter:
+
+| Signature | What it proves | Where the key lives |
+|-----------|----------------|---------------------|
+| Tauri updater key | that an update came from us | `~/.tauri/juno.key`, `TAURI_SIGNING_PRIVATE_KEY` in CI |
+| Apple Developer ID + notarization ticket | that macOS will let the app open at all | login keychain, `APPLE_*` repo secrets in CI |
+
+macOS puts a quarantine attribute on anything downloaded. Gatekeeper then
+refuses an ad-hoc signed app with **"This app is damaged and can't be opened.
+You should move it to the Trash."** and refuses a signed but un-notarized one
+with **"Apple could not verify this app is free of malware."** Neither message
+mentions signing, so the failure looks like a corrupt download.
+
+### In CI
+
+`.github/workflows/release-tauri.yml` exports whichever of `APPLE_CERTIFICATE`,
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
+`APPLE_PASSWORD` and `APPLE_TEAM_ID` exist as repo secrets, and `tauri-action`
+signs and notarizes with them. With no secrets set the step exports nothing and
+the release build comes out unsigned.
+
+### Locally
+
+`bun run tauri:build` (and `--demo`) does the whole thing through
+`scripts/tauri-build.sh`:
+
+1. Finds a `Developer ID Application` identity with `security find-identity -v -p codesigning`
+   and exports it as `APPLE_SIGNING_IDENTITY`, so tauri signs the app and the DMG
+   during bundling. If several are installed it picks the first in sorted order
+   and says which.
+2. Submits the finished DMG with `xcrun notarytool submit --wait`, using the
+   keychain profile named by `JUNO_NOTARY_PROFILE` (default `juno`), then
+   staples the ticket to the DMG and to the `.app` on disk.
+3. Runs `codesign -dv`, `spctl -a -vvv -t install` on the app and
+   `xcrun stapler validate` on the DMG, and prints a boxed verdict. Anything
+   other than "SIGNED, NOTARIZED, STAPLED. SHIPPABLE." means do not hand the
+   artifact to anyone.
+
+Run `bun run tauri:build`, not `bun tauri build`. The second one calls the tauri
+CLI directly and skips all of the above.
+
+**One-time setup on a new machine:**
+
+```bash
+# 1. Developer ID Application certificate in the login keychain
+#    (Xcode > Settings > Accounts > Manage Certificates, or double-click the .p12)
+security find-identity -v -p codesigning     # should list "Developer ID Application: ..."
+
+# 2. notarytool credentials, stored in the keychain, never in the repo
+xcrun notarytool store-credentials juno \
+  --apple-id <apple-id> --team-id <TEAMID> --password <app-specific-password>
+xcrun notarytool history --keychain-profile juno   # should succeed
+```
+
+The app-specific password comes from appleid.apple.com, not your Apple ID
+password.
+
+**Escape hatches**, both of which produce something that will be refused once
+downloaded, and both of which say so loudly at the end of the build:
+
+| Variable | Effect |
+|----------|--------|
+| `JUNO_SKIP_NOTARIZE=1` | sign, but skip the notarization round trip. For iterating when you only care that it compiles. |
+| `JUNO_UNSIGNED_BUILD=1` | no updater artifacts, no Developer ID signature, no notarization. For a machine with no certificate. |
+
+There is no flag to skip signing on its own. It costs seconds, needs no
+network, and a build worth bundling is worth signing. Missing the certificate
+or the notary profile is a hard error, raised before the build starts rather
+than after twenty minutes of cargo, so the only way to get an unsigned artifact
+is to ask for one by name.
+
 ## Required GitHub secrets
 
 | Secret | Purpose | Source |
@@ -74,6 +148,7 @@ The in-app updater uses [`tauri-plugin-updater`](https://v2.tauri.app/plugin/upd
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypt the private key | What you typed when generating the key |
 | `HOMEBREW_TAP_TOKEN` | Push to lacymorrow/homebrew-tap from CI | GitHub PAT with `repo` scope |
 | `GITHUB_TOKEN` | Create releases | Automatic |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | Code sign and notarize the release build | See [Code signing and notarization](#code-signing-and-notarization-apple) |
 
 ## Local prerequisites
 
@@ -139,13 +214,23 @@ Once CI does publish, juno-www will pick up the new release on the next ISR reva
 
 The repo is **public** so this should never happen — GitHub Actions has unlimited minutes for public repos. If you see this, the repo got accidentally flipped private. Check `gh repo view --json visibility`.
 
-### macOS updater downloads update but app fails to launch
+### "This app is damaged and can't be opened" / "Apple could not verify this app"
 
-Gatekeeper is quarantining the binary because we don't have an Apple Developer ID. Until that's set up, end-user auto-updates won't actually complete. Users have to manually allow the app via System Settings → Privacy & Security each time. **This is the single biggest known limitation.** Fixing it requires:
-1. Apple Developer Program membership ($99/yr)
-2. Developer ID Application certificate
-3. Adding cert + notarization secrets to GitHub Actions
-4. ~15 lines of additional workflow YAML
+The artifact is not signed and notarized. It is not a corrupt download, and the
+message does not say so. Check the artifact itself:
+
+```bash
+codesign -dv --verbose=4 <app>     # want: Authority=Developer ID Application, TeamIdentifier set
+xcrun stapler validate <dmg>       # want: The validate action worked!
+spctl -a -vvv -t install <app>     # want: accepted, source=Notarized Developer ID
+```
+
+`Signature=adhoc` with `TeamIdentifier=not set` means it was built without a
+Developer ID. If it came from `bun run tauri:build`, the verdict box at the end
+of that build already said so. If it came from `bun tauri build`, that command
+bypasses the wrapper and does none of this: rebuild with `bun run tauri:build`.
+If it came from CI, the `APPLE_*` repo secrets are missing or empty. See
+[Code signing and notarization](#code-signing-and-notarization-apple).
 
 ### `latest.json.version` doesn't match the git tag
 
@@ -169,6 +254,7 @@ gh release delete v0.X.Y-rc1 --yes --cleanup-tag
 | File | Purpose |
 |------|---------|
 | `scripts/release.ts` | Orchestrator — the one command you run |
+| `scripts/tauri-build.sh` | Local `bun run tauri:build`: updater key, build identity, Apple signing, notarization, stapling, Gatekeeper verdict |
 | `scripts/bump-version.sh` | Bumps versions across all manifests |
 | `.github/workflows/release-tauri.yml` | CI: builds universal macOS DMG, generates `latest.json` |
 | `.github/workflows/release-cua.yml` | CI: builds juno-cua binaries, updates homebrew tap |
