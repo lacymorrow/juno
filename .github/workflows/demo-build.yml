@@ -1,0 +1,235 @@
+name: Demo build
+
+# Builds, signs, notarizes, and staples the Juno DEMO build entirely in CI, so
+# demo builds no longer run on a developer's local machine. Manual trigger
+# only: open the Actions tab, pick this workflow, and press "Run workflow".
+#
+# The demo is a golden copy that carries an Anthropic key compiled in, handed
+# out privately to people who should be able to open Juno and talk to it
+# without signing up for a provider. It installs beside a normal Juno under its
+# own bundle id, sets createUpdaterArtifacts:false, and does NOT self-update, so
+# it needs no updater signing key (TAURI_SIGNING_PRIVATE_KEY) at all. See the
+# "Demo builds:" comment block in scripts/tauri-build.sh.
+#
+# NEW repository secrets a human must add before this can run
+# (Settings > Secrets and variables > Actions):
+#   JUNO_DEMO_ANTHROPIC_KEY   Anthropic key for the demo workspace, compiled
+#                             into the binary. Give the demo its own workspace
+#                             with a spend cap, one key per cohort. Required.
+#   BLOB_READ_WRITE_TOKEN     Vercel Blob read/write token for the private demo
+#                             store. Only needed when the "upload" input is
+#                             true. Same token the juno-www project uses.
+#
+# EXISTING secrets reused from release-tauri.yml (already added for releases):
+#   APPLE_CERTIFICATE            base64 of the Developer ID Application .p12
+#   APPLE_CERTIFICATE_PASSWORD   password for the .p12
+#   APPLE_SIGNING_IDENTITY       e.g. "Developer ID Application: Name (TEAMID)"
+#   APPLE_ID                     Apple ID email for notarization
+#   APPLE_PASSWORD               app-specific password for that Apple ID
+#   APPLE_TEAM_ID                10-character team ID
+#
+# Unlike release-tauri.yml, this workflow does NOT go through tauri-action.
+# The demo build runs scripts/tauri-build.sh directly (bun run tauri:build
+# --demo). That script only detects an already-installed signing identity and
+# notarizes through an xcrun notarytool keychain profile, so this workflow has
+# to import the certificate into a keychain and create that notary profile
+# itself. tauri-action does both of those for the release; here we do them by
+# hand. All six Apple secrets are therefore required for the demo, which is the
+# build most likely to be handed to someone else and so the one that most needs
+# to open cleanly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      cohort:
+        description: 'Demo cohort tag, lowercase letters, digits and hyphens (e.g. "alpha-2"). Compiled into the build and shown in Settings.'
+        required: true
+        type: string
+      upload:
+        description: "Also upload the signed DMG to the private Vercel Blob store. Leave off to only attach it as a run artifact."
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build-demo:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # The repo pins its toolchain in rust-toolchain.toml. Read the pin so the
+      # installed target lands on the toolchain cargo actually uses (rustup
+      # honors the pin and auto-installs it with only the host target).
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          [ -n "$channel" ] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      # Apple Silicon only, to match the current release build. The Parakeet STT
+      # engine ships prebuilt ONNX Runtime binaries for aarch64 but not x86_64
+      # macOS, so a universal or Intel build fails on the Intel half.
+      - name: Install Rust (pinned toolchain)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: aarch64-apple-darwin
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      # Import the Developer ID Application certificate into a dedicated,
+      # throwaway keychain and register the notarytool profile that
+      # scripts/tauri-build.sh expects. Both live only for this run. The
+      # keychain password is generated here and never leaves this step, so the
+      # cert import and the notary profile are created together.
+      #
+      # scripts/tauri-build.sh notarizes with `xcrun notarytool
+      # --keychain-profile juno` (its default profile name), so the profile is
+      # created under that name and JUNO_NOTARY_PROFILE is passed explicitly to
+      # the build for clarity.
+      - name: Set up code signing and notarization
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!var:-}" ]; then
+              echo "missing required secret: $var" >&2
+              exit 1
+            fi
+          done
+
+          keychain="$RUNNER_TEMP/juno-signing.keychain-db"
+          keychain_pw="$(openssl rand -base64 24)"
+          cert_path="$RUNNER_TEMP/certificate.p12"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$cert_path"
+
+          security create-keychain -p "$keychain_pw" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_pw" "$keychain"
+
+          security import "$cert_path" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_pw" "$keychain" >/dev/null
+
+          # Put the throwaway keychain first in the search list and make it the
+          # default, so codesign finds the identity and notarytool finds the
+          # profile without either being handed a keychain path explicitly.
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security default-keychain -s "$keychain"
+
+          rm -f "$cert_path"
+
+          # notarytool reads this profile from the keychain when the build
+          # notarizes. Stored into the same keychain, non-interactively.
+          xcrun notarytool store-credentials juno \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_PASSWORD" \
+            --keychain "$keychain"
+
+          echo "Imported signing identity and stored notary profile 'juno'."
+
+      # The build wrapper reads JUNO_DEMO_ANTHROPIC_KEY and JUNO_DEMO_COHORT,
+      # signs with APPLE_SIGNING_IDENTITY, and notarizes + staples through the
+      # 'juno' notary profile created above. It fails the run if the artifact
+      # would not open on someone else's Mac.
+      - name: Build the demo (signed, notarized, stapled)
+        env:
+          JUNO_DEMO_ANTHROPIC_KEY: ${{ secrets.JUNO_DEMO_ANTHROPIC_KEY }}
+          JUNO_DEMO_COHORT: ${{ inputs.cohort }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          JUNO_NOTARY_PROFILE: juno
+        run: |
+          if [ -z "${JUNO_DEMO_ANTHROPIC_KEY:-}" ]; then
+            echo "missing required secret: JUNO_DEMO_ANTHROPIC_KEY" >&2
+            exit 1
+          fi
+          bun run tauri:build --demo --target aarch64-apple-darwin
+
+      # The wrapper renames the DMG to Juno-Demo-<version>-b<build>-<commit>.dmg
+      # and drops a manifest beside it. Find both so later steps can use them.
+      - name: Locate the demo DMG
+        id: locate
+        run: |
+          set -euo pipefail
+          dmg="$(find "$GITHUB_WORKSPACE" -path '*/bundle/dmg/Juno-Demo-*.dmg' -type f | head -1)"
+          [ -n "$dmg" ] || { echo "no demo DMG found" >&2; exit 1; }
+          echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$dmg")" >> "$GITHUB_OUTPUT"
+          echo "manifest=${dmg%.dmg}.json" >> "$GITHUB_OUTPUT"
+          echo "Found $dmg"
+
+      # Always attach the DMG (and its manifest) to the run, so it is
+      # downloadable even when the Blob upload is off.
+      - name: Upload the DMG as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.locate.outputs.name }}
+          path: |
+            ${{ steps.locate.outputs.dmg }}
+            ${{ steps.locate.outputs.manifest }}
+          if-no-files-found: error
+
+      # Optional: push the signed DMG to the private Vercel Blob store the same
+      # way juno-www stores it (private access, pathname demo/<dmg-name>; see
+      # juno-www/lib/demo/storage.ts and scripts/mint-demo-code.mjs). This only
+      # uploads and prints the pathname. It does NOT mint an access code or
+      # touch any env var. A human still points JUNO_DEMO_CODES at the printed
+      # pathname with juno-www/scripts/mint-demo-code.mjs.
+      - name: Upload the DMG to Vercel Blob
+        if: ${{ inputs.upload }}
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          DMG_PATH: ${{ steps.locate.outputs.dmg }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BLOB_READ_WRITE_TOKEN:-}" ]; then
+            echo "upload requested but BLOB_READ_WRITE_TOKEN is not set" >&2
+            exit 1
+          fi
+          work="$RUNNER_TEMP/blob-upload"
+          mkdir -p "$work"
+          cd "$work"
+          bun add @vercel/blob >/dev/null 2>&1
+          cat > upload.mjs <<'NODE'
+          import { readFile } from "node:fs/promises"
+          import { put } from "@vercel/blob"
+
+          const file = process.env.DMG_PATH
+          const name = file.split("/").pop()
+          const pathname = `demo/${name}`
+          const data = await readFile(file)
+
+          const result = await put(pathname, data, {
+            access: "private",
+            addRandomSuffix: false,
+            contentType: "application/x-apple-diskimage",
+            token: process.env.BLOB_READ_WRITE_TOKEN,
+          })
+
+          console.log("")
+          console.log("Uploaded to private Vercel Blob.")
+          console.log("  pathname: %s", result.pathname)
+          console.log("")
+          console.log("Point JUNO_DEMO_CODES at that pathname, e.g.:")
+          console.log("  node scripts/mint-demo-code.mjs <cohort> %s", result.pathname)
+          console.log("(run from the juno-www repo)")
+          NODE
+          DMG_PATH="$DMG_PATH" BLOB_READ_WRITE_TOKEN="$BLOB_READ_WRITE_TOKEN" bun upload.mjs
