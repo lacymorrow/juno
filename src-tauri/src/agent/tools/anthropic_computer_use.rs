@@ -54,6 +54,46 @@ pub struct SessionToolContext {
     pub color: String,
 }
 
+/// Run one computer action and show, on screen, that Juno did it.
+///
+/// The single entry point for computer use, whichever provider asked. The
+/// in-process tool registry calls it, and so does the MCP server Juno offers
+/// to the Claude CLI, because the alternative is two implementations of
+/// "move the mouse and say so" that drift apart until one of them silently
+/// stops drawing a cursor. Which is exactly what happened when mouse control
+/// was delegated to an outside binary: the smooth-movement setting and the
+/// cursor overlay both lived here, on a path nothing took any more.
+pub async fn run_computer_action(
+    app_handle: &tauri::AppHandle,
+    input: Value,
+    session_id: Option<&str>,
+    cursor_id: &str,
+    cursor_color: &str,
+) -> Result<Value, String> {
+    let result = execute_computer_tool(app_handle, input.clone(), session_id).await;
+
+    // Emit cursor position for the agent overlay (non-blocking).
+    if result.is_ok() {
+        let action = input["action"].as_str().unwrap_or("");
+        if let Some((raw_x, raw_y)) = extract_coordinate(&input) {
+            use crate::utils::coordinates;
+            let (sx, sy) = coordinates::transform_to_screen_coordinates(raw_x, raw_y);
+            let cursor_state = match action {
+                "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" => {
+                    "clicking"
+                }
+                "mouse_move" => "moving",
+                _ => "idle",
+            };
+            emit_agent_cursor_update(app_handle, cursor_id, sx, sy, cursor_state, cursor_color);
+        }
+        // A screenshot has no coordinate, so the cursor is left where it is
+        // rather than moved to nowhere.
+    }
+
+    result
+}
+
 /// Emit a cursor position update for a named agent. No-op if the app_handle cannot emit.
 fn emit_agent_cursor_update(
     app_handle: &tauri::AppHandle,
@@ -72,9 +112,45 @@ fn emit_agent_cursor_update(
         color: color.to_string(),
     };
     state_manager.update_agent_cursor(cursor.clone());
+
+    // Put the overlay on screen. It is declared hidden and nothing ever showed
+    // it, so every cursor update so far has been drawn into a window nobody
+    // was looking at: the pointer moved on its own with nothing to say why.
+    show_cursor_overlay(app_handle);
+
     if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_UPDATE, &cursor) {
         tracing::debug!("agent cursor update emit failed: {}", e);
     }
+}
+
+/// Bring up the click-through overlay that draws agent cursors.
+///
+/// Cheap to call repeatedly: an already-visible window is left alone, so this
+/// sits on the hot path of every mouse action without costing anything after
+/// the first one.
+fn show_cursor_overlay(app_handle: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(window) =
+        app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL)
+    {
+        if window.is_visible().unwrap_or(false) {
+            return;
+        }
+        if let Err(e) = window.show() {
+            tracing::warn!("Could not show the cursor overlay: {}", e);
+        }
+        return;
+    }
+
+    // Not built yet (it is declared in tauri.conf.json, but a window can be
+    // destroyed). Building is async, so it is spawned rather than awaited on
+    // the action path.
+    let app = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::window_management::open_desktop_cursor_overlay(app).await {
+            tracing::warn!("Could not open the cursor overlay: {}", e);
+        }
+    });
 }
 
 /// Emit cursor removal for a named agent (call on agent completion or cancellation).
@@ -88,6 +164,24 @@ pub(crate) fn emit_agent_cursor_remove(app_handle: &tauri::AppHandle, agent_id: 
     let payload = serde_json::json!({ "agent_id": agent_id });
     if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_REMOVE, &payload) {
         tracing::debug!("agent cursor remove emit failed: {}", e);
+    }
+
+    // Once nobody is driving, take the overlay away. It is click-through and
+    // transparent, so leaving it up harms nothing, but a window that is only
+    // ever shown is a window that is eventually blamed for something.
+    let nobody_left = app_handle
+        .try_state::<AppState>()
+        .map(|state| state.agent_cursors_is_empty())
+        .unwrap_or(true);
+    if nobody_left {
+        use tauri::Manager;
+        if let Some(window) =
+            app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL)
+        {
+            if let Err(e) = window.hide() {
+                tracing::debug!("Could not hide the cursor overlay: {}", e);
+            }
+        }
     }
 }
 
@@ -2675,40 +2769,14 @@ pub async fn register_anthropic_computer_use_tools_with_version(
                             let cursor_color = cursor_color.clone();
                             let session_id = session_id.clone();
                             async move {
-                                let result = execute_computer_tool(
+                                run_computer_action(
                                     &handle,
-                                    input.clone(),
+                                    input,
                                     session_id.as_deref(),
+                                    &cursor_id,
+                                    &cursor_color,
                                 )
-                                .await;
-                                // Emit cursor position for the agent overlay (non-blocking)
-                                if result.is_ok() {
-                                    let action = input["action"].as_str().unwrap_or("");
-                                    if let Some((raw_x, raw_y)) = extract_coordinate(&input) {
-                                        use crate::utils::coordinates;
-                                        let (sx, sy) = coordinates::transform_to_screen_coordinates(
-                                            raw_x, raw_y,
-                                        );
-                                        let cursor_state = match action {
-                                            "left_click" | "right_click" | "middle_click"
-                                            | "double_click" | "triple_click" => "clicking",
-                                            "mouse_move" => "moving",
-                                            _ => "idle",
-                                        };
-                                        emit_agent_cursor_update(
-                                            &handle,
-                                            &cursor_id,
-                                            sx,
-                                            sy,
-                                            cursor_state,
-                                            &cursor_color,
-                                        );
-                                    } else if action == "screenshot" {
-                                        // Keep cursor visible in "thinking" state during screenshot analysis
-                                        // (no coordinate available — don't move the cursor)
-                                    }
-                                }
-                                result
+                                .await
                             }
                         }
                     })

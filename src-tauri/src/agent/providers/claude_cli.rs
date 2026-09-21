@@ -6,9 +6,12 @@
 //! provider spawns a subprocess per query and streams the response back to the UI
 //! via the same Tauri events as the Anthropic provider.
 //!
-//! Desktop automation (mouse, keyboard, screenshots) is wired in via the
-//! `juno-cua` stdio MCP server when the binary is available (LAC-3696) —
-//! see [`detect_juno_cua`] and [`write_mcp_config`].
+//! Desktop automation (mouse, keyboard, screenshots) is Juno's own tool,
+//! served to the CLI over MCP from inside this process — see
+//! [`crate::agent::providers::juno_mcp`]. It used to be delegated to
+//! `juno-cua`, a separate binary, which meant the mouse moved without Juno
+//! knowing: the smooth-movement setting went unread and the cursor overlay
+//! went untold, so nothing on screen said who was driving.
 //!
 //! NOTE: This provider is macOS-only (matching Juno's platform target). The binary
 //! detection paths are Unix-specific.
@@ -95,6 +98,7 @@ async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<St
 }
 
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolDefinition};
+use crate::agent::providers::juno_mcp;
 use crate::agent::traits::AgentBrain;
 use crate::settings::ProviderConfig as CentralizedProviderConfig;
 
@@ -152,71 +156,16 @@ pub fn is_claude_cli_available() -> bool {
     detect_claude_cli().is_ok()
 }
 
-/// Detect the `juno-cua` binary — Juno's headless computer-use CLI, which
-/// doubles as a stdio MCP server (`juno-cua serve-mcp`).
+/// Write the `--mcp-config` file pointing the CLI at Juno's own tool server.
 ///
-/// Checked in order:
-/// 1. Next to the current executable — covers dev builds (the cargo workspace
-///    puts `juno-cua` in the same `target/` dir as the app) and a future
-///    bundled `externalBin` (Tauri places sidecars next to the main binary).
-/// 2. Common install locations (npm/Homebrew distribute it).
-/// 3. Manual PATH scan.
-///
-/// Returns `None` when not found — the provider degrades gracefully to the
-/// CLI's built-in tools.
-pub fn detect_juno_cua() -> Option<PathBuf> {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("juno-cua");
-            if candidate.is_file() {
-                info!("Found juno-cua next to app binary: {}", candidate.display());
-                return Some(candidate);
-            }
-        }
-    }
-
-    let candidates = [
-        dirs::home_dir().map(|h| h.join(".local/bin/juno-cua")),
-        Some(PathBuf::from("/opt/homebrew/bin/juno-cua")),
-        Some(PathBuf::from("/usr/local/bin/juno-cua")),
-    ];
-    for candidate in candidates.into_iter().flatten() {
-        if candidate.is_file() {
-            info!("Found juno-cua at: {}", candidate.display());
-            return Some(candidate);
-        }
-    }
-
-    if let Ok(path_var) = std::env::var("PATH") {
-        for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join("juno-cua");
-            if candidate.is_file() {
-                info!("Found juno-cua via PATH: {}", candidate.display());
-                return Some(candidate);
-            }
-        }
-    }
-
-    None
-}
-
-/// Write the MCP config JSON pointing the Claude CLI at the juno-cua stdio
-/// MCP server. Combined with `--strict-mcp-config`, this makes juno-cua the
-/// ONLY MCP server the CLI loads (user-level servers stay disabled).
-///
-/// The file is pid-scoped in the temp dir so concurrent Juno instances
-/// (multi-instance dev) can't clobber each other's configs.
-fn write_mcp_config(cua_path: &std::path::Path) -> Result<PathBuf, AgentError> {
-    let config = serde_json::json!({
-        "mcpServers": {
-            "juno-cua": {
-                "command": cua_path.to_string_lossy(),
-                "args": ["serve-mcp"]
-            }
-        }
-    });
-    let path = std::env::temp_dir().join(format!("juno-cua-mcp-{}.json", std::process::id()));
-    let bytes = serde_json::to_vec(&config).map_err(|e| {
+/// With `--strict-mcp-config` this is the only MCP server the CLI loads, so
+/// the person's own user-level servers stay out of Juno's agent. The file is
+/// pid-scoped so two Junos in a dev session cannot clobber each other, and it
+/// carries the bearer token, which is why it goes to a file the CLI reads
+/// rather than onto a command line every `ps` on the machine can see.
+fn write_mcp_config(endpoint: &juno_mcp::Endpoint) -> Result<PathBuf, AgentError> {
+    let path = std::env::temp_dir().join(format!("juno-mcp-{}.json", std::process::id()));
+    let bytes = serde_json::to_vec(&juno_mcp::mcp_config(endpoint)).map_err(|e| {
         AgentError::ConfigurationError(format!("Failed to serialize MCP config: {}", e))
     })?;
     std::fs::write(&path, bytes).map_err(|e| {
@@ -232,11 +181,11 @@ fn write_mcp_config(cua_path: &std::path::Path) -> Result<PathBuf, AgentError> {
 /// System-prompt guidance appended when the juno-cua MCP server is wired in.
 /// Without this, models tend to fall back to `cliclick`/`screencapture` via
 /// Bash even when MCP computer-use tools are available (LAC-3692).
-const MCP_TOOL_GUIDANCE: &str = "You have desktop automation tools from the \"juno-cua\" MCP \
-server (screenshot capture, mouse movement, clicking, typing, scrolling, key presses, \
-clipboard, and accessibility queries). For ANY desktop or GUI automation — moving the mouse, \
-clicking, taking screenshots, typing into apps — use these MCP tools. Do NOT use shell \
-commands like cliclick, screencapture, or osascript for desktop automation.";
+const MCP_TOOL_GUIDANCE: &str = "You have a desktop automation tool from the \"juno\" MCP \
+server: `computer`, which takes screenshots and moves, clicks, types, scrolls and presses keys. \
+For ANY desktop or GUI automation use it. Do NOT use shell commands like cliclick, \
+screencapture, or osascript for desktop automation: they bypass Juno, so the pointer moves with \
+nothing on screen saying that Juno is the one moving it.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.
@@ -320,10 +269,6 @@ pub struct ClaudeCliBrain {
     binary_path: PathBuf,
     model: String,
     system_prompt: Option<String>,
-    /// Path to the MCP config JSON wiring in juno-cua's computer-use tools.
-    /// `None` when juno-cua isn't installed — the CLI then runs with its
-    /// built-in tools only (LAC-3696).
-    mcp_config_path: Option<PathBuf>,
     /// The session id the CLI reported during the current run.
     ///
     /// Filled by the stream reader and read once the run finishes, so the
@@ -344,42 +289,16 @@ impl ClaudeCliBrain {
             .clone()
             .unwrap_or_else(|| model_aliases::SONNET.to_string());
 
-        // Wire in Juno's computer-use tools via the juno-cua MCP server when
-        // available. Failure to set this up is non-fatal — the provider still
-        // works with the CLI's built-in tools (LAC-3696).
-        let mcp_config_path = match detect_juno_cua() {
-            Some(cua_path) => match write_mcp_config(&cua_path) {
-                Ok(path) => Some(path),
-                Err(e) => {
-                    warn!(
-                        "Found juno-cua but failed to write MCP config ({}); \
-                         computer-use tools unavailable for Claude CLI provider",
-                        e
-                    );
-                    None
-                }
-            },
-            None => {
-                info!(
-                    "juno-cua not found — Claude CLI provider will run without \
-                     computer-use MCP tools (install juno-cua to enable mouse/screen control)"
-                );
-                None
-            }
-        };
-
         info!(
-            "Initializing Claude CLI brain (binary: {}, model: {}, computer-use MCP: {})",
+            "Initializing Claude CLI brain (binary: {}, model: {})",
             binary_path.display(),
-            model,
-            mcp_config_path.is_some()
+            model
         );
 
         Ok(Self {
             binary_path,
             model,
             system_prompt: config.system_prompt.clone(),
-            mcp_config_path,
             observed_session: std::sync::Mutex::new(None),
         })
     }
@@ -389,7 +308,12 @@ impl ClaudeCliBrain {
     /// `resume` continues an existing CLI session rather than starting a new
     /// one, which is what makes a second message in the same chat a follow-up
     /// instead of a cold open.
-    fn build_args(&self, query: &str, resume: Option<&str>) -> Vec<String> {
+    fn build_args(
+        &self,
+        query: &str,
+        resume: Option<&str>,
+        mcp_config: Option<&std::path::Path>,
+    ) -> Vec<String> {
         let mut args = vec![
             "-p".to_string(),
             "--output-format".to_string(),
@@ -415,7 +339,7 @@ impl ClaudeCliBrain {
             args.push(session.to_string());
         }
 
-        if let Some(ref mcp_path) = self.mcp_config_path {
+        if let Some(mcp_path) = mcp_config {
             args.push("--mcp-config".to_string());
             args.push(mcp_path.to_string_lossy().to_string());
             args.push("--append-system-prompt".to_string());
@@ -462,7 +386,27 @@ impl ClaudeCliBrain {
         let conversation = conversation_id_for(&app_handle).await;
         let resume = conversation.as_deref().and_then(resume_id_for);
 
-        let args = self.build_args(query, resume.as_deref());
+        // Hand the CLI Juno's own computer tool. Done per run rather than when
+        // the brain is built, because the server lives in the running app and
+        // the brain is constructed without an app handle (and rebuilt on every
+        // query). Without a handle there is no desktop to drive anyway, which
+        // is the headless and test case, so the CLI simply runs toolless.
+        let mcp_config = match app_handle.as_ref() {
+            Some(handle) => match juno_mcp::ensure_running(handle).await {
+                Ok(endpoint) => write_mcp_config(&endpoint)
+                    .map_err(|e| warn!("Juno's tool server is up but its config is not: {e}"))
+                    .ok(),
+                Err(e) => {
+                    // Non-fatal, and deliberately loud: the CLI still answers,
+                    // it just cannot touch the desktop.
+                    warn!("Could not offer Juno's computer tool to the CLI: {e}");
+                    None
+                }
+            },
+            None => None,
+        };
+
+        let args = self.build_args(query, resume.as_deref(), mcp_config.as_deref());
 
         match resume.as_deref() {
             Some(session) => info!(
@@ -501,7 +445,7 @@ impl ClaudeCliBrain {
                 if let Some(ref id) = conversation {
                     forget_session(id);
                 }
-                spawn(&self.build_args(query, None)).map_err(|e| {
+                spawn(&self.build_args(query, None, mcp_config.as_deref())).map_err(|e| {
                     AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e))
                 })?
             }
@@ -1072,10 +1016,9 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
-            mcp_config_path: None,
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("test query", None);
+        let args = brain.build_args("test query", None, None);
         assert!(args.contains(&"-p".to_string()));
         assert!(args.contains(&"stream-json".to_string()));
         assert!(args.contains(&"sonnet".to_string()));
@@ -1095,10 +1038,9 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "opus".to_string(),
             system_prompt: Some("You are helpful.".to_string()),
-            mcp_config_path: None,
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("test query", None);
+        let args = brain.build_args("test query", None, None);
         assert!(args.contains(&"--system-prompt".to_string()));
         assert!(args.contains(&"You are helpful.".to_string()));
     }
@@ -1115,10 +1057,9 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
-            mcp_config_path: None,
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("and what about the other one?", Some("abc-123"));
+        let args = brain.build_args("and what about the other one?", Some("abc-123"), None);
         let idx = args
             .iter()
             .position(|a| a == "--resume")
@@ -1132,10 +1073,9 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
-            mcp_config_path: None,
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("hello", None);
+        let args = brain.build_args("hello", None, None);
         assert!(!args.iter().any(|a| a == "--resume"));
     }
 
@@ -1152,58 +1092,43 @@ mod tests {
     }
 
     #[test]
-    fn test_build_args_with_mcp_config() {
+    fn the_cli_is_pointed_at_junos_own_tool_server() {
         let brain = ClaudeCliBrain {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
-            mcp_config_path: Some(PathBuf::from("/tmp/juno-cua-mcp-test.json")),
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("move the mouse", None);
+        let config = PathBuf::from("/tmp/juno-mcp-test.json");
+        let args = brain.build_args("move the mouse", None, Some(&config));
 
-        let mcp_flag_idx = args
+        let idx = args
             .iter()
             .position(|a| a == "--mcp-config")
             .expect("--mcp-config flag present");
-        assert_eq!(args[mcp_flag_idx + 1], "/tmp/juno-cua-mcp-test.json");
-
-        // Strict mode must remain — explicit config + strict = ONLY our server
-        assert!(args.contains(&"--strict-mcp-config".to_string()));
-
-        // Guidance prompt steers the model away from cliclick/Bash fallbacks
-        let guidance_idx = args
-            .iter()
-            .position(|a| a == "--append-system-prompt")
-            .expect("--append-system-prompt flag present");
-        assert!(args[guidance_idx + 1].contains("juno-cua"));
-    }
-
-    /// The MCP config file must contain the serve-mcp invocation for the
-    /// detected binary, keyed under mcpServers.juno-cua (the server name
-    /// becomes the mcp__juno-cua__* tool prefix).
-    #[test]
-    fn test_write_mcp_config_shape() {
-        let cua_path = PathBuf::from("/opt/homebrew/bin/juno-cua");
-        let config_path = write_mcp_config(&cua_path).expect("write mcp config");
-
-        let content = std::fs::read_to_string(&config_path).expect("read mcp config");
-        let parsed: Value = serde_json::from_str(&content).expect("valid JSON");
-
-        let server = &parsed["mcpServers"]["juno-cua"];
-        assert_eq!(server["command"], "/opt/homebrew/bin/juno-cua");
-        assert_eq!(server["args"], serde_json::json!(["serve-mcp"]));
-
-        let _ = std::fs::remove_file(&config_path);
+        assert_eq!(args[idx + 1], "/tmp/juno-mcp-test.json");
+        assert!(
+            args.iter().any(|a| a == "--strict-mcp-config"),
+            "the person's own MCP servers must stay out of Juno's agent"
+        );
+        assert!(
+            args.iter().any(|a| a.contains("juno")),
+            "the guidance has to name the server the tool is on"
+        );
     }
 
     #[test]
-    fn test_detect_juno_cua_does_not_panic() {
-        // Environment-dependent — on machines without juno-cua this is None
-        let result = detect_juno_cua();
-        if let Some(path) = result {
-            assert!(path.is_file());
-        }
+    fn without_a_desktop_the_cli_runs_toolless() {
+        // Headless and test runs have no app handle, so there is no tool
+        // server and nothing to point at. The CLI still answers.
+        let brain = ClaudeCliBrain {
+            binary_path: PathBuf::from("/usr/bin/claude"),
+            model: "sonnet".to_string(),
+            system_prompt: None,
+            observed_session: std::sync::Mutex::new(None),
+        };
+        let args = brain.build_args("hello", None, None);
+        assert!(!args.iter().any(|a| a == "--mcp-config"));
     }
 
     /// Write an executable shell script that stands in for the `claude` binary.
@@ -1235,7 +1160,6 @@ mod tests {
             binary_path,
             model: "sonnet".to_string(),
             system_prompt: None,
-            mcp_config_path: None,
             observed_session: std::sync::Mutex::new(None),
         }
     }

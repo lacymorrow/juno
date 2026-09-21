@@ -10,7 +10,6 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_notification::NotificationExt;
 use tracing::{info, warn};
 
 use crate::constants::events;
@@ -178,15 +177,7 @@ pub fn announce_reopen_attempt(app: &AppHandle, count: usize) {
     } else {
         "It lives in the menu bar at the top of your screen. Click the Juno icon there."
     };
-    let shown = app
-        .notification()
-        .builder()
-        .title("Juno is already running")
-        .body(body)
-        .show();
-    if let Err(e) = shown {
-        warn!("[DockIcon] Failed to show the menu bar hint: {}", e);
-    }
+    crate::commands::notifications::notify(app, "Juno is already running", body);
 }
 
 /// React to a reopen of an app that has no Dock icon: count it, say where
