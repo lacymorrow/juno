@@ -144,6 +144,12 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
     // Setup ends at the floating bar, not in a full-size window nobody asked
     // for. close_onboarding_window puts the bar back on screen.
 
+    // And she introduces herself, once, at the moment she becomes usable.
+    // Here rather than at the next launch, because "first launch" from the
+    // person's side is the first time Juno is a thing they can talk to, and
+    // that is now. Every launch after this one gets the two-word hello.
+    crate::greeting::on_first_run(&app).await;
+
     Ok(())
 }
 
@@ -189,6 +195,11 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
     stop_listening_for_a_binding(&app);
 
     // Skipping setup lands in the same place finishing it does: the bar.
+
+    // She still says who she is. Someone who skipped setup is the person most
+    // likely to be wondering what just appeared in their menu bar, and it is
+    // one sentence.
+    crate::greeting::on_first_run(&app).await;
 
     Ok(())
 }
@@ -492,6 +503,11 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
         // bar; the big chat window is somewhere you go, opened from the bar,
         // not something that greets you at login. Its webview is still created
         // from tauri.conf.json, so it keeps owning TTS playback while hidden.
+
+        // Say hello. Two words, through the ordinary TTS path, so turning TTS
+        // off turns this off too. The introduction is not repeated here: that
+        // one is said once, when onboarding ends.
+        crate::greeting::on_launch(&app_handle).await;
     }
 
     Ok(())
