@@ -1,4 +1,4 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 
@@ -13,6 +13,11 @@ import OnboardingWindow from "./OnboardingWindow";
 import { DesktopCursorOverlay } from "./components/DesktopCursorOverlay";
 import { SnapWellsOverlay } from "./components/SnapWellsOverlay";
 import { BarHost } from "./components/bar/BarHost";
+
+// Diagnostic bench for the floating bar. Lazily loaded so its Tauri stand-in is
+// installed only when the (unlinked) /__bar-harness route is opened directly,
+// never on a normal launch.
+const BarStateHarness = lazy(() => import("./bar-harness/BarStateHarness"));
 
 import "./styles/globals.css";
 
@@ -42,6 +47,15 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
               <Route path="/onboarding" element={<OnboardingWindow />} />
               <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
               <Route path="/snap-wells-overlay" element={<SnapWellsOverlay />} />
+              {/* Unlinked diagnostic bench; not reachable through normal UI. */}
+              <Route
+                path="/__bar-harness"
+                element={
+                  <Suspense fallback={null}>
+                    <BarStateHarness />
+                  </Suspense>
+                }
+              />
             </Routes>
           </BrowserRouter>
         </TooltipProvider>
