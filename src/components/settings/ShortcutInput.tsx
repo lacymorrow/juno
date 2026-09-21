@@ -479,11 +479,6 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                 </div>
                 <div className="flex-1">
                   <span>{validationError || validationMessage}</span>
-                  {validationError && validationError.includes("conflicts") && (
-                    <div className="mt-1 text-xs opacity-75">
-                      Consider using a different key combination to avoid conflicts.
-                    </div>
-                  )}
                 </div>
               </div>
             )}
