@@ -57,3 +57,38 @@ pub trait TranscriptionEngine: Send + Sync {
     /// from shared weights); may involve model warm-up for Parakeet.
     fn create_session(&self) -> Result<Box<dyn TranscriptionSession>, String>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The whole Intel story rests on this: a user who chose Parakeet on Apple
+    // Silicon has "parakeet" written to their Tauri Store. That value must still
+    // deserialize on every architecture (including Intel, or after a config
+    // sync) so the settings load never fails. The variant is deliberately not
+    // cfg-gated; only its engine implementation is. This test locks that in.
+    #[test]
+    fn parakeet_setting_deserializes_on_every_arch() {
+        let provider: SttProvider =
+            serde_json::from_str("\"parakeet\"").expect("stored \"parakeet\" must deserialize");
+        assert_eq!(provider, SttProvider::Parakeet);
+        assert_eq!(provider.as_str(), "parakeet");
+    }
+
+    #[test]
+    fn stt_provider_round_trips_through_json() {
+        for provider in [SttProvider::Whisper, SttProvider::Parakeet] {
+            let json = serde_json::to_string(&provider).expect("serialize");
+            let back: SttProvider = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(provider, back);
+        }
+    }
+
+    #[test]
+    fn default_provider_is_whisper() {
+        // The safety argument for making Parakeet arm64-only depends on Whisper
+        // being the default, so Intel users who never touched the setting are
+        // unaffected.
+        assert_eq!(SttProvider::default(), SttProvider::Whisper);
+    }
+}

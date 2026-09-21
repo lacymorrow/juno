@@ -1,11 +1,16 @@
 use once_cell::sync::Lazy;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::engine::{SttProvider, TranscriptionEngine};
+// Parakeet only compiles on aarch64 (see Cargo.toml / lib.rs), so its type and
+// the std::path::Path it needs are pulled in only there. On Intel the Parakeet
+// arm below never touches these, which is why they would otherwise be unused.
+#[cfg(target_arch = "aarch64")]
 use crate::engine_parakeet::ParakeetEngine;
+#[cfg(target_arch = "aarch64")]
+use std::path::Path;
 use crate::engine_whisper::WhisperEngine;
 use crate::shared_whisper::SharedWhisperManager;
 
@@ -120,12 +125,20 @@ impl EngineManager {
         whisper_model_path: &str,
         parakeet_model_dir: Option<&str>,
     ) -> Result<Arc<dyn TranscriptionEngine>, String> {
+        // `parakeet_model_dir` is consumed only by the aarch64 Parakeet arm; on
+        // Intel the Parakeet arm ignores it and falls back to Whisper, so mark it
+        // used to keep the shared signature warning-free.
+        #[cfg(not(target_arch = "aarch64"))]
+        let _ = parakeet_model_dir;
+
         match provider {
             SttProvider::Whisper => {
                 let ctx = SharedWhisperManager::initialize(whisper_model_path)
                     .map_err(|e| e.to_string())?;
                 Ok(Arc::new(WhisperEngine::new(ctx)))
             }
+            // Apple Silicon: build the real Parakeet engine.
+            #[cfg(target_arch = "aarch64")]
             SttProvider::Parakeet => {
                 let dir = parakeet_model_dir.ok_or_else(|| {
                     "Parakeet model directory not configured. \
@@ -142,6 +155,41 @@ impl EngineManager {
                 let engine = ParakeetEngine::new(Path::new(dir))?;
                 Ok(Arc::new(engine))
             }
+            // Intel: parakeet-rs has no x86_64 build, so a stored "parakeet"
+            // selection is honoured as best we can by falling back to Whisper.
+            // The setting is accepted (the variant still deserializes), it just
+            // cannot be run here, the same way an unavailable model falls back.
+            #[cfg(not(target_arch = "aarch64"))]
+            SttProvider::Parakeet => {
+                warn!("Parakeet is Apple Silicon only; using Whisper on this Mac");
+                let ctx = SharedWhisperManager::initialize(whisper_model_path)
+                    .map_err(|e| e.to_string())?;
+                Ok(Arc::new(WhisperEngine::new(ctx)))
+            }
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "aarch64")))]
+mod intel_fallback_tests {
+    use super::*;
+
+    // On Intel there is no Parakeet build, so selecting Parakeet must resolve to
+    // the Whisper path. We prove which arm ran by the error surface: the Whisper
+    // arm fails trying to load a missing model file, never with the Parakeet
+    // "model directory not configured" message the aarch64 arm would emit. This
+    // avoids loading a multi-GB model just to assert the routing.
+    #[test]
+    fn parakeet_selection_falls_back_to_whisper_on_intel() {
+        let err = EngineManager::build_engine(
+            SttProvider::Parakeet,
+            "/nonexistent/juno-whisper-model.bin",
+            None,
+        )
+        .expect_err("a missing whisper model path should error");
+        assert!(
+            !err.contains("Parakeet model directory"),
+            "Intel must take the Whisper fallback arm, not the Parakeet arm; got: {err}"
+        );
     }
 }
