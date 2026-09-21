@@ -26,7 +26,6 @@ use std::str::FromStr;
 use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{info, warn};
@@ -367,15 +366,11 @@ pub async fn fire_automation(app: &AppHandle, automation: &mut ScheduledAutomati
             Ok(()) => format!("Running: {}", automation.query),
             Err(e) => format!("Failed to start: {}", e),
         };
-        let notification = app
-            .notification()
-            .builder()
-            .title(format!("Juno automation: {}", automation.name))
-            .body(body.chars().take(200).collect::<String>())
-            .show();
-        if let Err(e) = notification {
-            warn!("Failed to show automation notification: {}", e);
-        }
+        crate::commands::notifications::notify(
+            app,
+            &format!("Juno automation: {}", automation.name),
+            &body.chars().take(200).collect::<String>(),
+        );
     }
 }
 

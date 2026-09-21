@@ -104,8 +104,9 @@ use crate::commands::{
     approve_tool_execution, clear_pending_tool_approvals, deny_tool_execution, get_enabled_tools,
     get_pending_tool_approvals, get_registered_tools, get_tool_approval_required, get_tool_config,
     get_tool_configuration_summary, get_tool_configurations, is_tool_enabled,
-    reset_tool_configuration, set_tool_approval_required, set_tool_category_enabled,
-    set_tool_enabled, test_dynamic_tool_categorization, test_tool_config, test_tool_config_command,
+    reset_tool_configuration, set_all_tools_enabled, set_tool_approval_required,
+    set_tool_category_enabled, set_tool_enabled, test_dynamic_tool_categorization,
+    test_tool_config, test_tool_config_command,
 };
 
 // Import keyboard shortcuts commands explicitly
@@ -555,6 +556,7 @@ pub fn run() {
             get_tool_configurations,
             get_tool_config,
             set_tool_enabled,
+            set_all_tools_enabled,
             set_tool_category_enabled,
             get_enabled_tools,
             is_tool_enabled,
@@ -768,12 +770,7 @@ pub fn run() {
             commands::scheduled_tasks::run_scheduled_task_now,
             commands::scheduled_tasks::preview_cron_schedule,
             commands::notifications::get_notification_settings,
-            commands::notifications::set_notification_type,
-            commands::notifications::set_notification_sound_enabled,
-            commands::notifications::set_notification_duration,
-            commands::notifications::set_notification_position,
-            commands::notifications::set_notification_show_icons,
-            commands::notifications::set_notification_persist_important,
+            commands::notifications::set_notifications_enabled,
             commands::notifications::check_notification_permission,
             commands::notifications::request_notification_permission,
             commands::notifications::send_notification,

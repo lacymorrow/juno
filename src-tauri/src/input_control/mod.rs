@@ -379,21 +379,11 @@ pub async fn request_physical_cursor(
 
 /// Tell the person Juno is waiting on them, in case nothing is on screen.
 fn notify_consent_request(app_handle: &AppHandle, request: &PhysicalCursorRequest) {
-    use tauri_plugin_notification::NotificationExt;
-
     let body = match request.target_app.as_deref() {
         Some(app_name) => format!("Juno wants to {} in {}.", request.reason, app_name),
         None => format!("Juno wants to {}.", request.reason),
     };
-    if let Err(e) = app_handle
-        .notification()
-        .builder()
-        .title("Juno needs your mouse")
-        .body(body)
-        .show()
-    {
-        warn!("Failed to show the input control notification: {}", e);
-    }
+    crate::commands::notifications::notify(app_handle, "Juno needs your mouse", &body);
 }
 
 async fn wait_for_decision(request_id: &str) -> Option<InputControlDecision> {

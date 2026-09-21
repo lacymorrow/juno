@@ -74,19 +74,27 @@ function useConversationAutoScroll(): ConversationContextValue {
   /** Whether new content pulls the view down. Off only once the reader scrolls away. */
   const pinned = useRef(true);
   /**
-   * The scrollTop we wrote ourselves. The scroll event it raises lands a frame
-   * later, so it is matched against this and not mistaken for the reader.
+   * Set while a scroll we performed has not yet raised its event.
+   *
+   * This used to record the scrollTop we wrote and compare the event against
+   * it. That comparison loses the race it exists to win: a streamed token
+   * landing between the write and the event a frame later changes scrollHeight,
+   * so the position no longer matches, our own write is read as the reader
+   * scrolling away, and the list unpins mid-reply. Which is exactly what
+   * "it scrolls to the bottom but does not stay there" was.
+   *
+   * A flag cannot drift that way. The cost is that a genuine scroll arriving in
+   * the same frame as ours is ignored, and the reader simply scrolls again.
    */
-  const selfScrollTop = useRef<number | null>(null);
+  const selfScrollPending = useRef(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollElement.current;
     if (!el) return;
     pinned.current = true;
+    selfScrollPending.current = true;
     el.scrollTop = el.scrollHeight;
-    // Read back what the browser clamped it to, not what we asked for.
-    selfScrollTop.current = el.scrollTop;
     setIsAtBottom(true);
   }, []);
 
@@ -115,12 +123,11 @@ function useConversationAutoScroll(): ConversationContextValue {
     const el = scrollElement.current;
     if (!el) return;
 
-    if (selfScrollTop.current !== null && el.scrollTop === selfScrollTop.current) {
+    if (selfScrollPending.current) {
       // Our own write, echoed back. The reader did not move, so stay pinned.
-      selfScrollTop.current = null;
+      selfScrollPending.current = false;
       return;
     }
-    selfScrollTop.current = null;
 
     const atBottom = distanceFromBottom(el) <= AT_BOTTOM_TOLERANCE_PX;
     pinned.current = atBottom;
@@ -220,7 +227,12 @@ export const ConversationScrollOnSend = ({
   signal,
 }: ConversationScrollOnSendProps) => {
   const { scrollToBottom } = useConversationContext();
-  const seen = useRef(signal);
+  // Starts empty rather than at the current signal, so the first value after
+  // mount counts as a send. Sending from the floating bar dispatches the query
+  // and *then* opens the chat pane, so by the time this mounts the message is
+  // already in the list; seeding from it meant the pane opened at the top of
+  // the conversation with the new message off the bottom of the screen.
+  const seen = useRef<string | number | null>(null);
 
   useEffect(() => {
     if (signal === null || signal === seen.current) return;

@@ -55,13 +55,20 @@ pub async fn get_mouse_control(app_handle: AppHandle) -> Result<String, String> 
 }
 
 /// Set the consent setting for driving the physical mouse.
+///
+/// The argument is named `mode` because that is what every caller sends. It
+/// was `value`, and Tauri matches these by name, so the call was rejected
+/// before this function ever ran: changing the setting reported "Could not
+/// change that setting", and the "stop asking" button in the consent notice
+/// did nothing at all. The frontend tests mock `invoke`, so they asserted the
+/// name they sent and stayed green through the whole thing.
 #[tauri::command]
-pub async fn set_mouse_control(value: String, app_handle: AppHandle) -> Result<(), String> {
-    let normalized = value.trim().to_lowercase();
+pub async fn set_mouse_control(mode: String, app_handle: AppHandle) -> Result<(), String> {
+    let normalized = mode.trim().to_lowercase();
     if normalized != defaults::MOUSE_CONTROL && normalized != defaults::MOUSE_CONTROL_ALWAYS {
         return Err(format!(
             "Invalid mouse control value '{}'. Use '{}' or '{}'.",
-            value,
+            mode,
             defaults::MOUSE_CONTROL,
             defaults::MOUSE_CONTROL_ALWAYS
         ));

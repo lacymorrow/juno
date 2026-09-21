@@ -22,11 +22,19 @@ use crate::triggers::{Binding, TriggerMethod, TriggerTarget};
 /// item rather than someone opening Juno on purpose.
 const LOGIN_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// The two words for every launch after the first.
-const HELLO: &str = "Welcome back.";
+/// Every launch after the first. Short, but it says who is talking: a voice
+/// from an empty desktop saying only "welcome back" leaves the person working
+/// out which of their apps just spoke.
+const HELLO: &str = "Juno here. Welcome back.";
 
 /// What she says when there is no key bound to talk to her yet.
 const INTRO_UNBOUND: &str = "Hi, I'm Juno. I'm in your menu bar whenever you need me.";
+
+/// How long to wait for the bar before giving up and speaking anyway.
+const BAR_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// How often to look while waiting.
+const BAR_POLL: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// Say hello. Called on every launch where onboarding is already behind us.
 pub async fn on_launch(app: &AppHandle) {
@@ -105,17 +113,46 @@ async fn speak(app: &AppHandle, line: String) {
         return;
     }
 
-    info!("[Greeting] {}", line);
-
     // Through the ordinary TTS path, so the provider setting governs this the
     // same way it governs everything else she says. "Off" means off.
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        // Wait until she is actually on screen. A voice arriving before the
+        // bar does is a voice from nowhere: the person hears Juno a beat
+        // before they have anything to look at, and the greeting reads as a
+        // glitch rather than as her saying hello.
+        wait_for_the_bar(&app).await;
+
+        info!("[Greeting] {}", line);
         let state = app.state::<crate::state::AppState>();
         if let Err(e) = crate::tts::invoke_tts(line, state, app.clone()).await {
             warn!("[Greeting] Could not speak: {}", e);
         }
     });
+}
+
+/// Block until the floating bar is on screen, or until [`BAR_WAIT`] is up.
+///
+/// Polled rather than driven by an event, because the bar reaches the screen
+/// by several routes (its declared config, the startup timer, onboarding
+/// handing it back) and "is it visible" is the one question all of them
+/// answer the same way. Giving up and speaking anyway is deliberate: a
+/// greeting that waits forever for a bar someone has switched off is a
+/// greeting that never happens.
+async fn wait_for_the_bar(app: &AppHandle) {
+    let deadline = std::time::Instant::now() + BAR_WAIT;
+    let label = crate::constants::window_labels::FLOATING_BAR;
+
+    while std::time::Instant::now() < deadline {
+        if let Some(bar) = app.get_webview_window(label) {
+            if bar.is_visible().unwrap_or(false) {
+                return;
+            }
+        }
+        tokio::time::sleep(BAR_POLL).await;
+    }
+
+    debug!("[Greeting] Bar never appeared within the wait; greeting anyway");
 }
 
 /// Did this machine boot within the last couple of minutes?

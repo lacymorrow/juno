@@ -20,8 +20,7 @@ use crate::scheduler::{
 use serde_json::{json, Value};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
-use tauri_plugin_notification::NotificationExt;
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 fn now_secs() -> u64 {
@@ -123,22 +122,18 @@ async fn create_exec(input: Value, app_handle: AppHandle) -> Result<Value, Strin
 
     // Surface agent-initiated persistence at creation time: the `notify` flag
     // only covers firing, and the user may never open Settings → Automations.
-    let notification = app_handle
-        .notification()
-        .builder()
-        .title("Juno: automation created")
-        .body(format!(
+    crate::commands::notifications::notify(
+        &app_handle,
+        "Juno: automation created",
+        &format!(
             "The agent scheduled '{}' ({})",
             automation.name,
             automation
                 .natural_language
                 .as_deref()
                 .unwrap_or(&automation.cron)
-        ))
-        .show();
-    if let Err(e) = notification {
-        warn!("Failed to show automation-created notification: {}", e);
-    }
+        ),
+    );
     Ok(json!({
         "success": true,
         "automation": automation,
