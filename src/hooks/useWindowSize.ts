@@ -39,6 +39,26 @@ interface AnchorState {
 const lastAnchorByLabel: Map<string, AnchorState> = new Map();
 
 /**
+ * Forget the last-resize baseline for a window.
+ *
+ * The anchor maths in `anchoredTop` keeps the pill's vertical centre fixed
+ * ACROSS A RESIZE by correcting the new top against what the previous resize
+ * left behind. That is only sound while the window moves for no reason other
+ * than our resizes. It also moves for reasons this cache never sees: gliding
+ * into a gravity well on drag release, hopping to another display, and the
+ * launch restore all call `setPosition` / `set_bar_frame` directly. After one
+ * of those the stored baseline describes where the window used to be, so the
+ * next resize applies a correction against a position that no longer exists
+ * and the pill drifts. Every such move must call this so the next resize
+ * starts fresh (top-anchored from the real, just-set position) instead of
+ * chasing a stale baseline.
+ */
+export function resetWindowAnchor(label: string): void {
+  lastAnchorByLabel.delete(label);
+  lastSizeByLabel.delete(label);
+}
+
+/**
  * The new physical top edge for a resize that keeps the pill's vertical centre
  * at the same screen position, whichever direction the window grows.
  *
