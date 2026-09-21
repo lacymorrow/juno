@@ -101,6 +101,29 @@ pub async fn set_tool_enabled(
     Ok(())
 }
 
+/// Turn every tool on, or everything that can be turned off, off.
+///
+/// Required tools are unaffected: the agent cannot work without them, which is
+/// why their individual switches are greyed out too.
+#[tauri::command]
+pub async fn set_all_tools_enabled(
+    enabled: bool,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Setting all tools enabled: {}", enabled);
+
+    let config_manager = state.get_tool_config_manager().await;
+    {
+        let mut config_guard = config_manager.lock().await;
+        config_guard.set_all_tools_enabled(enabled);
+    }
+
+    state.save_tool_config(&app_handle).await?;
+
+    Ok(())
+}
+
 /// Set tool category enabled status
 #[tauri::command]
 pub async fn set_tool_category_enabled(

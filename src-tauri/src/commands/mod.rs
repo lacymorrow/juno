@@ -147,6 +147,7 @@ pub use self::tools::{
     get_tool_configurations,
     is_tool_enabled,
     reset_tool_configuration,
+    set_all_tools_enabled,
     set_tool_approval_required,
     set_tool_category_enabled,
     set_tool_enabled,

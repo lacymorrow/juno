@@ -18,6 +18,63 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
         .replacen("{}", &error.to_string(), 1)
 }
 
+/// Speak straight out of `say`, without synthesising a file first.
+///
+/// `invoke_system_tts` renders the whole clip to an .m4a and hands back base64
+/// for the caller to play with afplay. That is two serial steps, and on a
+/// sentence of any length the first one takes seconds: measured at about 3.5s
+/// before a single sound came out, with the reply already on screen by then.
+/// The request was that Juno's voice arrive before the text, and it already
+/// started first; it just had nothing to play yet.
+///
+/// `say` on its own starts speaking almost immediately and streams as it goes,
+/// so this is the difference between hearing her in a tenth of a second and
+/// hearing her in four. The file route stays for the providers that genuinely
+/// return audio data.
+///
+/// The child's pid joins the same registry afplay's does, so Escape stops this
+/// exactly the way it stops everything else Juno is playing.
+#[cfg(target_os = "macos")]
+pub async fn speak_directly(text: String) -> Result<String, String> {
+    if crate::tts::is_tts_stop_requested() {
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
+    info!("Speaking via system TTS: {} chars", text.chars().count());
+
+    let mut child = tokio::process::Command::new("say")
+        .arg(&text)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("Failed to start 'say': {}", e))?;
+
+    let pid = child.id();
+    if let Some(pid) = pid {
+        crate::tts::register_audio_pid(pid);
+    }
+
+    let status = child.wait().await;
+
+    if let Some(pid) = pid {
+        crate::tts::unregister_audio_pid(pid);
+    }
+
+    // A stop arrives as SIGTERM to that pid, so a non-success exit right after
+    // one is the user pressing Escape rather than a failure worth reporting.
+    if crate::tts::is_tts_stop_requested() {
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
+    match status {
+        Ok(status) if status.success() => Ok("TTS_COMPLETED".to_string()),
+        Ok(status) => Err(format!("'say' exited with {}", status)),
+        Err(e) => Err(format!("Failed to wait for 'say': {}", e)),
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn invoke_system_tts(text: String) -> Result<String, String> {

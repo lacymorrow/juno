@@ -26,7 +26,7 @@ fn audio_pid_registry() -> &'static StdMutex<Vec<u32>> {
     JUNO_AUDIO_PIDS.get_or_init(|| StdMutex::new(Vec::new()))
 }
 
-fn register_audio_pid(pid: u32) {
+pub(crate) fn register_audio_pid(pid: u32) {
     match audio_pid_registry().lock() {
         Ok(mut pids) => {
             pids.push(pid);
@@ -37,7 +37,7 @@ fn register_audio_pid(pid: u32) {
     }
 }
 
-fn unregister_audio_pid(pid: u32) {
+pub(crate) fn unregister_audio_pid(pid: u32) {
     match audio_pid_registry().lock() {
         Ok(mut pids) => {
             pids.retain(|&p| p != pid);
@@ -776,6 +776,12 @@ async fn execute_tts_with_completion_tracking(
             } else if result == "TTS_CONTENT_FILTERED" {
                 info!("TTS content was filtered out");
                 Ok(result)
+            } else if result == "TTS_COMPLETED" {
+                // Already spoken. The system provider streams out of `say`
+                // rather than handing back audio to play, so there is nothing
+                // left to do and nothing here that could be decoded.
+                info!("TTS spoke directly; no playback step needed");
+                Ok(result)
             } else {
                 // This should be base64 audio data - play it with completion tracking!
                 info!("TTS audio generated, attempting playback with completion tracking...");
@@ -1047,6 +1053,13 @@ pub async fn invoke_tts_for_provider(
                 ));
             supertonic::invoke_supertonic_tts(text, server_url, voice, speed).await
         }
+        // Straight to the speakers rather than to a file and back. This is the
+        // one provider that can start talking immediately, and making it wait
+        // on a full render was what put several seconds between the reply
+        // appearing and Juno saying it.
+        #[cfg(target_os = "macos")]
+        "system" => system::speak_directly(text).await,
+        #[cfg(not(target_os = "macos"))]
         "system" => system::invoke_system_tts(text).await,
         "off" => {
             warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
