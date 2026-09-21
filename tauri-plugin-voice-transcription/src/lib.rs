@@ -11,6 +11,11 @@ pub mod constants;
 pub mod controller;
 pub mod engine;
 pub mod engine_manager;
+// Parakeet is Apple Silicon only: parakeet-rs ships a prebuilt ONNX Runtime for
+// aarch64 macOS but not x86_64, so the module (and its crate dependency) compile
+// only on aarch64. The SttProvider::Parakeet variant and get_parakeet_model_status
+// command still exist on every arch; on Intel the manager falls back to Whisper.
+#[cfg(target_arch = "aarch64")]
 pub mod engine_parakeet;
 pub mod engine_whisper;
 pub mod error;

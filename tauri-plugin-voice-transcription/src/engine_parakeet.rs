@@ -131,34 +131,7 @@ impl TranscriptionSession for ParakeetSession {
     }
 }
 
-/// Metadata about the Parakeet model download state.
-#[derive(Debug, serde::Serialize)]
-pub struct ParakeetModelStatus {
-    pub downloaded: bool,
-    pub model_dir: String,
-    pub files_present: Vec<String>,
-    pub files_missing: Vec<String>,
-}
-
-impl ParakeetModelStatus {
-    pub fn check(model_dir: &Path) -> Self {
-        let required = ["model.onnx", "model.onnx_data", "tokenizer.json"];
-        let mut present = Vec::new();
-        let mut missing = Vec::new();
-
-        for &file in &required {
-            if model_dir.join(file).exists() {
-                present.push(file.to_string());
-            } else {
-                missing.push(file.to_string());
-            }
-        }
-
-        Self {
-            downloaded: missing.is_empty(),
-            model_dir: model_dir.to_string_lossy().into_owned(),
-            files_present: present,
-            files_missing: missing,
-        }
-    }
-}
+// `ParakeetModelStatus` used to live here, but the get_parakeet_model_status
+// command must return it on every architecture (including Intel, where this
+// module is not compiled). It now lives in commands.rs, which compiles on all
+// arches and reports availability alongside the download state.

@@ -4,7 +4,6 @@ use crate::constants;
 use crate::controller::VoiceController;
 use crate::engine::SttProvider;
 use crate::engine_manager::EngineManager;
-use crate::engine_parakeet::ParakeetModelStatus;
 use crate::error::Error;
 use crate::utils::resolve_model_path;
 use serde_json::json;
@@ -1068,6 +1067,68 @@ pub async fn set_stt_provider<R: tauri::Runtime>(
     Ok(provider_name)
 }
 
+/// Availability and download state of the Parakeet model.
+///
+/// Lives here (not in engine_parakeet, which is aarch64 only) so the command
+/// return type exists on every architecture and the frontend has one stable
+/// contract. `available` is the field a UI should gate on: false on Intel Macs,
+/// where parakeet-rs has no x86_64 ONNX Runtime and Juno uses Whisper instead.
+#[derive(Debug, serde::Serialize)]
+pub struct ParakeetModelStatus {
+    /// Whether Parakeet can run on this machine at all (Apple Silicon only).
+    pub available: bool,
+    /// Whether all required model files are present. Always false when unavailable.
+    pub downloaded: bool,
+    pub model_dir: String,
+    pub files_present: Vec<String>,
+    pub files_missing: Vec<String>,
+    /// Human-readable reason Parakeet is unavailable, set only when `available` is false.
+    pub reason: Option<String>,
+}
+
+impl ParakeetModelStatus {
+    /// Apple Silicon: report the real on-disk download state.
+    #[cfg(target_arch = "aarch64")]
+    fn check(model_dir: &std::path::Path) -> Self {
+        let required = ["model.onnx", "model.onnx_data", "tokenizer.json"];
+        let mut present = Vec::new();
+        let mut missing = Vec::new();
+
+        for &file in &required {
+            if model_dir.join(file).exists() {
+                present.push(file.to_string());
+            } else {
+                missing.push(file.to_string());
+            }
+        }
+
+        Self {
+            available: true,
+            downloaded: missing.is_empty(),
+            model_dir: model_dir.to_string_lossy().into_owned(),
+            files_present: present,
+            files_missing: missing,
+            reason: None,
+        }
+    }
+
+    /// Intel: Parakeet cannot run, so report it unavailable with a reason a UI
+    /// can show rather than offering a dead choice.
+    #[cfg(not(target_arch = "aarch64"))]
+    fn unavailable(model_dir: &std::path::Path) -> Self {
+        Self {
+            available: false,
+            downloaded: false,
+            model_dir: model_dir.to_string_lossy().into_owned(),
+            files_present: Vec::new(),
+            files_missing: Vec::new(),
+            reason: Some(
+                "Parakeet is not supported on Intel Macs; Juno uses Whisper here.".to_string(),
+            ),
+        }
+    }
+}
+
 #[tauri::command]
 pub fn get_parakeet_model_status<R: tauri::Runtime>(
     app: AppHandle<R>,
@@ -1075,7 +1136,12 @@ pub fn get_parakeet_model_status<R: tauri::Runtime>(
     info!("[Plugin] get_parakeet_model_status called");
     let config = VoiceTranscriptionConfig::default();
     let parakeet_dir = resolve_model_path(&app, &config.parakeet_model_dir);
-    Ok(ParakeetModelStatus::check(std::path::Path::new(
-        &parakeet_dir,
-    )))
+    let path = std::path::Path::new(&parakeet_dir);
+
+    #[cfg(target_arch = "aarch64")]
+    let status = ParakeetModelStatus::check(path);
+    #[cfg(not(target_arch = "aarch64"))]
+    let status = ParakeetModelStatus::unavailable(path);
+
+    Ok(status)
 }
