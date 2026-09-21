@@ -143,7 +143,7 @@ bun test              # Frontend (Vitest)
 cargo test --manifest-path src-tauri/Cargo.toml  # Backend
 
 # Build
-bun tauri build       # Production app
+bun run tauri:build   # Production app (signed + notarized)
 ```
 
 See [CLAUDE.md](CLAUDE.md) for detailed development rules and architecture docs.

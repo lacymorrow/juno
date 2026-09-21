@@ -19,7 +19,7 @@ Title should follow Conventional Commits, e.g.: feat(agent): add browser scroll-
 - [ ] `cargo test --manifest-path src-tauri/Cargo.toml` passes
 - [ ] `cargo check --manifest-path src-tauri/Cargo.toml` passes (required for Rust changes)
 - [ ] Manually verified in `bun run tauri:dev`
-- [ ] Manually verified in production build (`bun tauri build`)
+- [ ] Manually verified in production build (`bun run tauri:build`)
 
 ## Screenshots / recording
 

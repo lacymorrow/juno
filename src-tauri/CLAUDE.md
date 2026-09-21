@@ -35,7 +35,7 @@ cargo check --manifest-path src-tauri/Cargo.toml  # CRITICAL: Run after every Ru
 cargo build --manifest-path src-tauri/Cargo.toml  # Build backend
 cargo test --manifest-path src-tauri/Cargo.toml   # Run tests
 bun run tauri dev                                  # Full app development
-bun run tauri build                                # Build production app
+bun run tauri:build                                # Build production app (signs + notarizes)
 ```
 
 ## Architecture
