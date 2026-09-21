@@ -1,12 +1,6 @@
-export type NotificationType = "system" | "toast" | "both" | "disabled";
-
 export interface NotificationSettings {
-  type: NotificationType;
-  sound_enabled: boolean;
-  duration: number; // For toast notifications (in milliseconds)
-  position: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "top-center" | "bottom-center";
-  show_icons: boolean;
-  persist_important: boolean; // Keep important notifications until manually dismissed
+  /** Whether Juno shows notifications at all. */
+  enabled: boolean;
 }
 
 export interface NotificationData {

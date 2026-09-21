@@ -1,18 +1,23 @@
-use crate::constants::events;
 use crate::state::AppState;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 
+/// What there is to decide about notifications.
+///
+/// One switch, because one switch is what Juno can actually act on. The
+/// previous six (type, sound, duration, position, show icons, persist
+/// important) were stored, read back by the screen that drew them, and
+/// consulted by nothing on the way to a notification. Four of them could
+/// never have worked: macOS owns how a user notification is presented, so an
+/// app does not get to pick its duration or its corner. The "toast" half of
+/// the type setting emitted an event no window listened for, and choosing
+/// "Disabled" changed nothing at all while promising, in as many words, that
+/// Juno would stop.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSettings {
-    pub notification_type: String, // "system", "toast", "both", or "disabled"
-    pub sound_enabled: bool,
-    pub duration: u32,    // Duration in milliseconds for toast notifications
-    pub position: String, // Position for toast notifications
-    pub show_icons: bool,
-    pub persist_important: bool,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,105 +41,43 @@ pub struct SystemNotificationPermission {
 pub async fn get_notification_settings(
     state: tauri::State<'_, AppState>,
 ) -> Result<NotificationSettings, String> {
-    let notification_type = state
-        .get_notification_type()
-        .map_err(|e| format!("Failed to get notification type: {}", e))?;
-    let sound_enabled = state
-        .get_notification_sound_enabled()
-        .map_err(|e| format!("Failed to get sound enabled: {}", e))?;
-    let duration = state
-        .get_notification_duration()
-        .map_err(|e| format!("Failed to get duration: {}", e))?;
-    let position = state
-        .get_notification_position()
-        .map_err(|e| format!("Failed to get position: {}", e))?;
-    let show_icons = state
-        .get_notification_show_icons()
-        .map_err(|e| format!("Failed to get show icons: {}", e))?;
-    let persist_important = state
-        .get_notification_persist_important()
-        .map_err(|e| format!("Failed to get persist important: {}", e))?;
-
     Ok(NotificationSettings {
-        notification_type,
-        sound_enabled,
-        duration,
-        position,
-        show_icons,
-        persist_important,
+        enabled: state.get_notifications_enabled()?,
     })
 }
 
-/// Set notification type
+/// Turn Juno's notifications on or off.
 #[tauri::command]
-pub async fn set_notification_type(
-    state: tauri::State<'_, AppState>,
-    notification_type: String,
-) -> Result<(), String> {
-    state
-        .set_notification_type(notification_type)
-        .map_err(|e| format!("Failed to set notification type: {}", e))?;
-    Ok(())
-}
-
-/// Set notification sound enabled
-#[tauri::command]
-pub async fn set_notification_sound_enabled(
+pub async fn set_notifications_enabled(
     state: tauri::State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    state
-        .set_notification_sound_enabled(enabled)
-        .map_err(|e| format!("Failed to set sound enabled: {}", e))?;
-    Ok(())
+    state.set_notifications_enabled(enabled)
 }
 
-/// Set notification duration
-#[tauri::command]
-pub async fn set_notification_duration(
-    state: tauri::State<'_, AppState>,
-    duration: u32,
-) -> Result<(), String> {
-    state
-        .set_notification_duration(duration)
-        .map_err(|e| format!("Failed to set duration: {}", e))?;
-    Ok(())
-}
+/// Show a system notification, unless the person has switched them off.
+///
+/// The one door. Everything that notifies goes through here, so "off" is a
+/// single check in a single place rather than a promise each call site has to
+/// remember to keep. It used to be the other way round: this module honoured
+/// the setting and the four things that actually notify (the scheduler, a new
+/// automation, the request for the physical mouse, the menu-bar-only hint)
+/// each called the plugin directly and honoured nothing.
+pub fn notify(app: &AppHandle, title: &str, body: &str) {
+    let enabled = app
+        .try_state::<AppState>()
+        .map(|state| state.get_notifications_enabled().unwrap_or(true))
+        // No state means we are too early or headless. Speak up rather than
+        // swallow: a missed notification is worse than an extra one.
+        .unwrap_or(true);
+    if !enabled {
+        info!("Notifications are off; not showing: {}", title);
+        return;
+    }
 
-/// Set notification position
-#[tauri::command]
-pub async fn set_notification_position(
-    state: tauri::State<'_, AppState>,
-    position: String,
-) -> Result<(), String> {
-    state
-        .set_notification_position(position)
-        .map_err(|e| format!("Failed to set position: {}", e))?;
-    Ok(())
-}
-
-/// Set notification show icons
-#[tauri::command]
-pub async fn set_notification_show_icons(
-    state: tauri::State<'_, AppState>,
-    show_icons: bool,
-) -> Result<(), String> {
-    state
-        .set_notification_show_icons(show_icons)
-        .map_err(|e| format!("Failed to set show icons: {}", e))?;
-    Ok(())
-}
-
-/// Set notification persist important
-#[tauri::command]
-pub async fn set_notification_persist_important(
-    state: tauri::State<'_, AppState>,
-    persist_important: bool,
-) -> Result<(), String> {
-    state
-        .set_notification_persist_important(persist_important)
-        .map_err(|e| format!("Failed to set persist important: {}", e))?;
-    Ok(())
+    if let Err(e) = app.notification().builder().title(title).body(body).show() {
+        error!("Failed to show notification '{}': {}", title, e);
+    }
 }
 
 /// Check system notification permission
@@ -196,43 +139,10 @@ pub async fn request_notification_permission(
 #[tauri::command]
 pub async fn send_notification(
     app: AppHandle,
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
     data: NotificationData,
 ) -> Result<(), String> {
-    let settings = get_notification_settings(state.clone()).await?;
-
-    // Check if notifications are disabled
-    if settings.notification_type == "disabled" {
-        return Ok(());
-    }
-
-    // Send system notification if enabled
-    if settings.notification_type == "system" || settings.notification_type == "both" {
-        let permission = check_notification_permission(app.clone()).await?;
-
-        if permission.granted {
-            let notification_result = app
-                .notification()
-                .builder()
-                .title(&data.title)
-                .body(&data.message)
-                .show();
-
-            if let Err(e) = notification_result {
-                error!("Failed to send system notification: {}", e);
-            } else {
-                info!("System notification sent successfully");
-            }
-        }
-    }
-
-    // Send toast notification if enabled (emitted to frontend)
-    if settings.notification_type == "toast" || settings.notification_type == "both" {
-        app.emit(events::notifications::TOAST, &data)
-            .map_err(|e| format!("Failed to emit toast notification: {}", e))?;
-        info!("Toast notification emitted successfully");
-    }
-
+    notify(&app, &data.title, &data.message);
     Ok(())
 }
 
@@ -242,13 +152,11 @@ pub async fn test_notification(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let test_data = NotificationData {
-        title: "Test Notification".to_string(),
-        message: "This is a test notification to verify your settings.".to_string(),
-        level: "info".to_string(),
-        important: Some(false),
-        timeout: None,
-    };
-
-    send_notification(app, state, test_data).await
+    let _ = state;
+    notify(
+        &app,
+        "Juno",
+        "This is what a notification from Juno looks like.",
+    );
+    Ok(())
 }

@@ -421,6 +421,27 @@ impl ToolConfigManager {
         }
     }
 
+    /// Turn every tool on, or every tool that can be turned off, off.
+    ///
+    /// Required tools stay on either way: they are the ones the agent cannot
+    /// work without, which is why the switch beside them is greyed out. A
+    /// "disable all" that quietly broke the agent would be a trap, so this
+    /// draws the same line the individual switches do.
+    ///
+    /// Categories move with their tools, because a tool left enabled inside a
+    /// disabled category is still off, and a person who pressed "enable all"
+    /// and got nothing would be right to call that broken.
+    pub fn set_all_tools_enabled(&mut self, enabled: bool) {
+        for tool in self.tools.values_mut() {
+            if enabled || !tool.required {
+                tool.enabled = enabled;
+            }
+        }
+        for category_enabled in self.category_enabled.values_mut() {
+            *category_enabled = enabled;
+        }
+    }
+
     /// Enable or disable an entire category of tools.
     /// Changes enablement state for all tools in a category.
     /// Used by: Settings UI for category-level management.
@@ -881,4 +902,44 @@ pub async fn save_tool_config_to_centralized_settings(
     config_guard
         .save_to_centralized_settings(settings_manager)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disable_all_leaves_the_tools_the_agent_cannot_work_without() {
+        let mut manager = ToolConfigManager::default();
+        manager.set_all_tools_enabled(false);
+
+        let required: Vec<&ToolConfig> = manager.tools.values().filter(|t| t.required).collect();
+        assert!(
+            !required.is_empty(),
+            "the fixture proves nothing if no tool is required"
+        );
+        for tool in required {
+            assert!(
+                tool.enabled,
+                "{} is required, so disable-all must not switch it off",
+                tool.name
+            );
+        }
+        assert!(
+            manager.tools.values().any(|t| !t.enabled),
+            "everything optional should be off"
+        );
+    }
+
+    #[test]
+    fn enable_all_turns_the_categories_on_too() {
+        // A tool left enabled inside a disabled category is still off, so an
+        // "enable all" that skipped categories would visibly do nothing.
+        let mut manager = ToolConfigManager::default();
+        manager.set_all_tools_enabled(false);
+        manager.set_all_tools_enabled(true);
+
+        assert!(manager.tools.values().all(|t| t.enabled));
+        assert!(manager.category_enabled.values().all(|enabled| *enabled));
+    }
 }

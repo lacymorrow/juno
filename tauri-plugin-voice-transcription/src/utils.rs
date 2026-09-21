@@ -12,12 +12,41 @@ static WHISPER_ARTIFACT_RE: Lazy<Option<Regex>> = Lazy::new(|| {
     ).map_err(|e| tracing::error!("Failed to compile WHISPER_ARTIFACT_RE: {}", e)).ok()
 });
 
+/// A whole utterance that is nothing but one bracketed span.
+///
+/// Whisper narrates what it hears when it hears no speech, and it writes that
+/// narration as its own segment: `(upbeat music)`, `(clicking)`, `(keyboard
+/// clacking)`, `[door closes]`. The wording is open ended, so the named-token
+/// list above can never catch up with it, but the shape is not: an entire
+/// transcription consisting of a single parenthesised or bracketed span is a
+/// description of a sound, never something a person said.
+///
+/// Anchored to the whole string on purpose. A parenthesis inside real speech
+/// ("I said (quietly) that it was fine") is speech, and eating it would be a
+/// worse bug than the one this fixes.
+static WHOLE_UTTERANCE_ARTIFACT_RE: Lazy<Option<Regex>> = Lazy::new(|| {
+    Regex::new(r"^\s*[\(\[\*][^\)\]\*]*[\)\]\*]\s*$")
+        .map_err(|e| tracing::error!("Failed to compile WHOLE_UTTERANCE_ARTIFACT_RE: {}", e))
+        .ok()
+});
+
 /// Remove Whisper audio marker artifacts from transcription text.
 ///
 /// Strips tokens like `[BLANK_AUDIO]`, `[BLANK AUDIO]`, `[SILENCE]`, `[INAUDIBLE]`, `[MUSIC]`,
 /// `[NOISE]`, `[APPLAUSE]`, `[LAUGHTER]`, their `(...)` and `*...*` variants, and the plain-text
 /// "blank audio" form.  Collapses any resulting extra whitespace.
+///
+/// Returns an empty string when the whole utterance was a sound description,
+/// which callers treat as "nothing was said": no typing, no clipboard, no
+/// query handed to the agent.
 pub fn filter_transcription_text(text: &str) -> String {
+    if let Some(re) = &*WHOLE_UTTERANCE_ARTIFACT_RE {
+        if re.is_match(text) {
+            tracing::debug!("Dropping sound-description transcription: {:?}", text);
+            return String::new();
+        }
+    }
+
     match &*WHISPER_ARTIFACT_RE {
         Some(re) => {
             let cleaned = re.replace_all(text, " ");
@@ -240,4 +269,54 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
         model_path
     );
     model_path.to_string()
+}
+
+#[cfg(test)]
+mod transcription_filter_tests {
+    use super::filter_transcription_text;
+
+    #[test]
+    fn a_sound_description_is_not_something_someone_said() {
+        // The reported cases, plus the shape they share. Whisper's wording here
+        // is open ended, which is why this is matched by shape and not by word.
+        for artifact in [
+            "(upbeat music)",
+            "(clicking)",
+            "(keyboard clacking)",
+            "[door closes]",
+            "  (soft piano music)  ",
+            "*rustling*",
+        ] {
+            assert_eq!(
+                filter_transcription_text(artifact),
+                "",
+                "{artifact} is a description of a sound"
+            );
+        }
+    }
+
+    #[test]
+    fn a_parenthesis_inside_real_speech_survives() {
+        // Eating this would be a worse bug than the one the rule above fixes.
+        assert_eq!(
+            filter_transcription_text("I said (quietly) that it was fine"),
+            "I said (quietly) that it was fine"
+        );
+    }
+
+    #[test]
+    fn the_named_tokens_still_go() {
+        assert_eq!(
+            filter_transcription_text("hello [BLANK_AUDIO] world"),
+            "hello world"
+        );
+    }
+
+    #[test]
+    fn ordinary_speech_is_left_exactly_alone() {
+        assert_eq!(
+            filter_transcription_text("move my mouse in a slow circle"),
+            "move my mouse in a slow circle"
+        );
+    }
 }

@@ -316,8 +316,19 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
       }
       toast.success("Shortcut updated successfully");
     } catch (error) {
+      // Show what the backend actually said. It names the row already holding
+      // the combo ("Option+Z is already bound to Toggle to Agent"), and
+      // replacing that with "Failed to save shortcut" left the refusal with no
+      // reason attached: the save just did not happen and nothing said why.
       console.error("Failed to save shortcut:", error);
-      toast.error("Failed to save shortcut");
+      const reason =
+        typeof error === "string"
+          ? error
+          : error instanceof Error
+            ? error.message
+            : "Failed to save shortcut";
+      setValidationError(reason);
+      toast.error(reason);
     }
   };
 

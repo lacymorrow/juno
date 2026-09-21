@@ -217,7 +217,6 @@ pub struct AudioSettings {
     pub always_listening_active: bool,
     pub always_listening_sensitivity: f32,
     pub always_listening_wake_words: Vec<String>,
-    pub notification_sound_enabled: bool,
     pub was_always_listening_active_before_dictation: bool,
 }
 
@@ -250,7 +249,6 @@ impl Default for AudioSettings {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
-            notification_sound_enabled: true,
             was_always_listening_active_before_dictation: false,
         }
     }
@@ -272,11 +270,16 @@ pub struct UISettings {
     pub bar_ui_state: String,
     pub performance_monitoring_enabled: bool,
     pub debug_mode: bool,
-    pub notification_type: String,
-    pub notification_duration: u32,
-    pub notification_position: String,
-    pub notification_show_icons: bool,
-    pub notification_persist_important: bool,
+    /// Whether Juno shows system notifications at all.
+    ///
+    /// This replaces a pane of six: type, sound, duration, position, show
+    /// icons, persist important. Every one of them was stored here, read back
+    /// only by the screen that drew it, and consulted by nothing on the way to
+    /// an actual notification. Four could never have worked: macOS owns the
+    /// presentation of a user notification, so an app does not get to choose
+    /// how long it stays or where it sits. The remaining choice is the one
+    /// worth having, and it is now honoured at every send site.
+    pub notifications_enabled: bool,
     pub smooth_mouse_movement: bool,
 }
 
@@ -286,11 +289,7 @@ impl Default for UISettings {
             bar_ui_state: "default".to_string(),
             performance_monitoring_enabled: true,
             debug_mode: false,
-            notification_type: "system".to_string(),
-            notification_duration: 5000,
-            notification_position: "bottom-right".to_string(),
-            notification_show_icons: true,
-            notification_persist_important: true,
+            notifications_enabled: true,
             smooth_mouse_movement: true, // Default to smooth movement for better UX
         }
     }
@@ -816,26 +815,6 @@ impl AppState {
             .map_err(|e| format_error(templates::FAILED_TO_SET, "always listening wake words", e))
     }
 
-    pub fn get_notification_sound_enabled(&self) -> Result<bool, String> {
-        self.audio_settings
-            .lock()
-            .map(|settings| settings.notification_sound_enabled)
-            .map_err(|e| {
-                format_error(
-                    templates::FAILED_TO_RETRIEVE,
-                    "notification sound enabled",
-                    e,
-                )
-            })
-    }
-
-    pub fn set_notification_sound_enabled(&self, enabled: bool) -> Result<(), String> {
-        self.audio_settings
-            .lock()
-            .map(|mut settings| settings.notification_sound_enabled = enabled)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification sound enabled", e))
-    }
-
     // UI Settings - Getter/Setter methods
     pub fn get_bar_ui_state(&self) -> Result<String, String> {
         self.ui_settings
@@ -891,86 +870,19 @@ impl AppState {
             .map_err(|e| format_error(templates::FAILED_TO_SET, "debug mode", e))
     }
 
-    pub fn get_notification_type(&self) -> Result<String, String> {
+    /// Does the person want Juno's notifications at all?
+    pub fn get_notifications_enabled(&self) -> Result<bool, String> {
         self.ui_settings
             .lock()
-            .map(|settings| settings.notification_type.clone())
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification type", e))
+            .map(|settings| settings.notifications_enabled)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notifications enabled", e))
     }
 
-    pub fn set_notification_type(&self, notification_type: String) -> Result<(), String> {
+    pub fn set_notifications_enabled(&self, enabled: bool) -> Result<(), String> {
         self.ui_settings
             .lock()
-            .map(|mut settings| settings.notification_type = notification_type)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification type", e))
-    }
-
-    pub fn get_notification_duration(&self) -> Result<u32, String> {
-        self.ui_settings
-            .lock()
-            .map(|settings| settings.notification_duration)
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification duration", e))
-    }
-
-    pub fn set_notification_duration(&self, duration: u32) -> Result<(), String> {
-        self.ui_settings
-            .lock()
-            .map(|mut settings| settings.notification_duration = duration)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification duration", e))
-    }
-
-    pub fn get_notification_position(&self) -> Result<String, String> {
-        self.ui_settings
-            .lock()
-            .map(|settings| settings.notification_position.clone())
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification position", e))
-    }
-
-    pub fn set_notification_position(&self, position: String) -> Result<(), String> {
-        self.ui_settings
-            .lock()
-            .map(|mut settings| settings.notification_position = position)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification position", e))
-    }
-
-    pub fn get_notification_show_icons(&self) -> Result<bool, String> {
-        self.ui_settings
-            .lock()
-            .map(|settings| settings.notification_show_icons)
-            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "notification show icons", e))
-    }
-
-    pub fn set_notification_show_icons(&self, show_icons: bool) -> Result<(), String> {
-        self.ui_settings
-            .lock()
-            .map(|mut settings| settings.notification_show_icons = show_icons)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "notification show icons", e))
-    }
-
-    pub fn get_notification_persist_important(&self) -> Result<bool, String> {
-        self.ui_settings
-            .lock()
-            .map(|settings| settings.notification_persist_important)
-            .map_err(|e| {
-                format_error(
-                    templates::FAILED_TO_RETRIEVE,
-                    "notification persist important",
-                    e,
-                )
-            })
-    }
-
-    pub fn set_notification_persist_important(&self, persist: bool) -> Result<(), String> {
-        self.ui_settings
-            .lock()
-            .map(|mut settings| settings.notification_persist_important = persist)
-            .map_err(|e| {
-                format_error(
-                    templates::FAILED_TO_SET,
-                    "notification persist important",
-                    e,
-                )
-            })
+            .map(|mut settings| settings.notifications_enabled = enabled)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "notifications enabled", e))
     }
 
     pub fn get_smooth_mouse_movement(&self) -> Result<bool, String> {
@@ -2091,6 +2003,17 @@ impl AppState {
     }
 
     /// Remove an agent's cursor (call when the agent finishes or is cancelled).
+    /// Is nobody driving the pointer any more?
+    ///
+    /// A poisoned lock answers "yes" so the overlay comes down rather than
+    /// being stranded on screen by a lock nobody can take.
+    pub fn agent_cursors_is_empty(&self) -> bool {
+        self.agent_cursors
+            .lock()
+            .map(|map| map.is_empty())
+            .unwrap_or(true)
+    }
+
     pub fn remove_agent_cursor(&self, agent_id: &str) {
         match self.agent_cursors.lock() {
             Ok(mut map) => {

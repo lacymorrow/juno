@@ -327,6 +327,20 @@ async fn handle_agent_mode_result(
     match serde_json::from_str::<serde_json::Value>(&payload_str) {
         Ok(payload_json) => {
             if let Some(text_value) = payload_json.get("text") {
+                // Nothing said, nothing asked. The filter returns an empty
+                // string when the whole utterance was Whisper narrating a
+                // sound it heard, and waking the agent to answer silence is
+                // a slow, expensive way to say nothing. Dictation already
+                // guarded this; the agent did not.
+                if text_value
+                    .as_str()
+                    .map(|t| t.trim().is_empty())
+                    .unwrap_or(false)
+                {
+                    info!("[Event] Empty transcription, not waking the agent");
+                    return;
+                }
+
                 let transformed_payload = serde_json::json!({
                     "query": text_value
                 });

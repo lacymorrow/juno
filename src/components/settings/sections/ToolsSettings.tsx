@@ -13,6 +13,7 @@ import { SettingsGroup, SettingsRow } from "../ui";
 export default function ToolsSettings({ settings }: SettingsSectionProps) {
   const [toolApprovalRequired, setToolApprovalRequired] = useState(false);
   const [toolApprovalLoading, setToolApprovalLoading] = useState(false);
+  const [bulkPending, setBulkPending] = useState(false);
   const [smoothMouseMovement, setSmoothMouseMovement] = useState(false);
   const [smoothMouseMovementLoading, setSmoothMouseMovementLoading] =
     useState(false);
@@ -180,6 +181,34 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     }
   };
 
+  /**
+   * Turn everything on, or everything that can be turned off, off.
+   *
+   * Required tools are untouched, the same line their individual switches
+   * already draw. A "disable all" that switched them off would leave an agent
+   * that cannot take a screenshot or move the mouse, which is not a state
+   * anybody is asking for when they press a button labelled like this.
+   */
+  const handleSetAllTools = async (enabled: boolean) => {
+    setBulkPending(true);
+    try {
+      await invoke("set_all_tools_enabled", { enabled });
+      settings.invalidateToolConfigCache();
+      await settings.loadToolConfigurations();
+      toast.success(
+        enabled ? "All tools enabled" : "Optional tools disabled",
+      );
+    } catch (error) {
+      console.error("Failed to change every tool:", error);
+      toast.error(
+        typeof error === "string" ? error : "Could not change the tools",
+      );
+      await settings.loadToolConfigurations();
+    } finally {
+      setBulkPending(false);
+    }
+  };
+
   const handleResetToolConfiguration = async () => {
     try {
       await invoke("reset_tool_configuration");
@@ -285,8 +314,32 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
       <SettingsGroup
         title="Tool Categories"
-        footer="Enable or disable categories of tools available to the AI agent"
+        footer="Enable or disable categories of tools available to the AI agent. Required tools stay on: the agent cannot work without them."
       >
+        <SettingsRow
+          label="Everything at once"
+          description="Required tools are not affected."
+        >
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={bulkPending || settings.toolConfigLoading}
+              onClick={() => handleSetAllTools(true)}
+            >
+              Enable all
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={bulkPending || settings.toolConfigLoading}
+              onClick={() => handleSetAllTools(false)}
+            >
+              Disable all
+            </Button>
+          </div>
+        </SettingsRow>
+
         {settings.toolConfigLoading ? (
           <SettingsRow
             below={

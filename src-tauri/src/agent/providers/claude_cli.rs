@@ -6,9 +6,12 @@
 //! provider spawns a subprocess per query and streams the response back to the UI
 //! via the same Tauri events as the Anthropic provider.
 //!
-//! Desktop automation (mouse, keyboard, screenshots) is wired in via the
-//! `juno-cua` stdio MCP server when the binary is available (LAC-3696) —
-//! see [`detect_juno_cua`] and [`write_mcp_config`].
+//! Desktop automation (mouse, keyboard, screenshots) is Juno's own tool,
+//! served to the CLI over MCP from inside this process — see
+//! [`crate::agent::providers::juno_mcp`]. It used to be delegated to
+//! `juno-cua`, a separate binary, which meant the mouse moved without Juno
+//! knowing: the smooth-movement setting went unread and the cursor overlay
+//! went untold, so nothing on screen said who was driving.
 //!
 //! NOTE: This provider is macOS-only (matching Juno's platform target). The binary
 //! detection paths are Unix-specific.
@@ -26,7 +29,76 @@ use tracing::{debug, error, info, warn};
 /// Reset on app restart (static lifetime).
 static AUTH_VERIFIED: AtomicBool = AtomicBool::new(false);
 
+/// Claude CLI session ids, keyed by the Juno conversation they belong to.
+///
+/// The CLI is a subprocess: one spawn is one session, and a spawn with no
+/// `--resume` starts from nothing. Every turn was therefore a brand new
+/// conversation, which is why Juno kept answering follow-ups with "this is a
+/// fresh session, I don't have the previous turn" while the chat window
+/// showed the whole history above it. The history was never reaching her.
+///
+/// Keyed by conversation rather than held on the brain, because the brain is
+/// rebuilt from settings on every single query. Starting a new chat mints a
+/// new conversation id, so a new chat gets no entry here and correctly starts
+/// the CLI fresh; nothing has to be explicitly cleared.
+static CLI_SESSIONS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, String>>,
+> = std::sync::OnceLock::new();
+
+/// Conversations to remember a session id for. Well past what one run of the
+/// app will revisit, and bounded so a long-lived process cannot grow this
+/// forever.
+const MAX_TRACKED_SESSIONS: usize = 64;
+
+fn cli_sessions() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    CLI_SESSIONS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// The CLI session to continue for `conversation_id`, if we have seen one.
+fn resume_id_for(conversation_id: &str) -> Option<String> {
+    match cli_sessions().lock() {
+        Ok(map) => map.get(conversation_id).cloned(),
+        Err(e) => {
+            warn!("[ClaudeCLI] Session registry poisoned: {}", e);
+            None
+        }
+    }
+}
+
+/// Remember the CLI session this conversation is now running in.
+fn remember_session(conversation_id: &str, session_id: &str) {
+    match cli_sessions().lock() {
+        Ok(mut map) => {
+            if map.len() >= MAX_TRACKED_SESSIONS && !map.contains_key(conversation_id) {
+                // Nothing here is worth an LRU. Conversations are revisited in
+                // the near term or not at all, and losing one only costs a
+                // fresh session on the next message.
+                map.clear();
+            }
+            map.insert(conversation_id.to_string(), session_id.to_string());
+        }
+        Err(e) => warn!("[ClaudeCLI] Session registry poisoned: {}", e),
+    }
+}
+
+/// Forget a session the CLI has told us it will not resume.
+fn forget_session(conversation_id: &str) {
+    if let Ok(mut map) = cli_sessions().lock() {
+        map.remove(conversation_id);
+    }
+}
+
+/// Which Juno conversation this run belongs to.
+async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<String> {
+    use tauri::Manager;
+    let handle = app_handle.as_ref()?;
+    let state = handle.try_state::<crate::state::AppState>()?;
+    let id = state.current_conversation_id.lock().await.clone();
+    Some(id)
+}
+
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolDefinition};
+use crate::agent::providers::juno_mcp;
 use crate::agent::traits::AgentBrain;
 use crate::settings::ProviderConfig as CentralizedProviderConfig;
 
@@ -84,71 +156,16 @@ pub fn is_claude_cli_available() -> bool {
     detect_claude_cli().is_ok()
 }
 
-/// Detect the `juno-cua` binary — Juno's headless computer-use CLI, which
-/// doubles as a stdio MCP server (`juno-cua serve-mcp`).
+/// Write the `--mcp-config` file pointing the CLI at Juno's own tool server.
 ///
-/// Checked in order:
-/// 1. Next to the current executable — covers dev builds (the cargo workspace
-///    puts `juno-cua` in the same `target/` dir as the app) and a future
-///    bundled `externalBin` (Tauri places sidecars next to the main binary).
-/// 2. Common install locations (npm/Homebrew distribute it).
-/// 3. Manual PATH scan.
-///
-/// Returns `None` when not found — the provider degrades gracefully to the
-/// CLI's built-in tools.
-pub fn detect_juno_cua() -> Option<PathBuf> {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("juno-cua");
-            if candidate.is_file() {
-                info!("Found juno-cua next to app binary: {}", candidate.display());
-                return Some(candidate);
-            }
-        }
-    }
-
-    let candidates = [
-        dirs::home_dir().map(|h| h.join(".local/bin/juno-cua")),
-        Some(PathBuf::from("/opt/homebrew/bin/juno-cua")),
-        Some(PathBuf::from("/usr/local/bin/juno-cua")),
-    ];
-    for candidate in candidates.into_iter().flatten() {
-        if candidate.is_file() {
-            info!("Found juno-cua at: {}", candidate.display());
-            return Some(candidate);
-        }
-    }
-
-    if let Ok(path_var) = std::env::var("PATH") {
-        for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join("juno-cua");
-            if candidate.is_file() {
-                info!("Found juno-cua via PATH: {}", candidate.display());
-                return Some(candidate);
-            }
-        }
-    }
-
-    None
-}
-
-/// Write the MCP config JSON pointing the Claude CLI at the juno-cua stdio
-/// MCP server. Combined with `--strict-mcp-config`, this makes juno-cua the
-/// ONLY MCP server the CLI loads (user-level servers stay disabled).
-///
-/// The file is pid-scoped in the temp dir so concurrent Juno instances
-/// (multi-instance dev) can't clobber each other's configs.
-fn write_mcp_config(cua_path: &std::path::Path) -> Result<PathBuf, AgentError> {
-    let config = serde_json::json!({
-        "mcpServers": {
-            "juno-cua": {
-                "command": cua_path.to_string_lossy(),
-                "args": ["serve-mcp"]
-            }
-        }
-    });
-    let path = std::env::temp_dir().join(format!("juno-cua-mcp-{}.json", std::process::id()));
-    let bytes = serde_json::to_vec(&config).map_err(|e| {
+/// With `--strict-mcp-config` this is the only MCP server the CLI loads, so
+/// the person's own user-level servers stay out of Juno's agent. The file is
+/// pid-scoped so two Junos in a dev session cannot clobber each other, and it
+/// carries the bearer token, which is why it goes to a file the CLI reads
+/// rather than onto a command line every `ps` on the machine can see.
+fn write_mcp_config(endpoint: &juno_mcp::Endpoint) -> Result<PathBuf, AgentError> {
+    let path = std::env::temp_dir().join(format!("juno-mcp-{}.json", std::process::id()));
+    let bytes = serde_json::to_vec(&juno_mcp::mcp_config(endpoint)).map_err(|e| {
         AgentError::ConfigurationError(format!("Failed to serialize MCP config: {}", e))
     })?;
     std::fs::write(&path, bytes).map_err(|e| {
@@ -164,11 +181,11 @@ fn write_mcp_config(cua_path: &std::path::Path) -> Result<PathBuf, AgentError> {
 /// System-prompt guidance appended when the juno-cua MCP server is wired in.
 /// Without this, models tend to fall back to `cliclick`/`screencapture` via
 /// Bash even when MCP computer-use tools are available (LAC-3692).
-const MCP_TOOL_GUIDANCE: &str = "You have desktop automation tools from the \"juno-cua\" MCP \
-server (screenshot capture, mouse movement, clicking, typing, scrolling, key presses, \
-clipboard, and accessibility queries). For ANY desktop or GUI automation — moving the mouse, \
-clicking, taking screenshots, typing into apps — use these MCP tools. Do NOT use shell \
-commands like cliclick, screencapture, or osascript for desktop automation.";
+const MCP_TOOL_GUIDANCE: &str = "You have a desktop automation tool from the \"juno\" MCP \
+server: `computer`, which takes screenshots and moves, clicks, types, scrolls and presses keys. \
+For ANY desktop or GUI automation use it. Do NOT use shell commands like cliclick, \
+screencapture, or osascript for desktop automation: they bypass Juno, so the pointer moves with \
+nothing on screen saying that Juno is the one moving it.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.
@@ -252,10 +269,13 @@ pub struct ClaudeCliBrain {
     binary_path: PathBuf,
     model: String,
     system_prompt: Option<String>,
-    /// Path to the MCP config JSON wiring in juno-cua's computer-use tools.
-    /// `None` when juno-cua isn't installed — the CLI then runs with its
-    /// built-in tools only (LAC-3696).
-    mcp_config_path: Option<PathBuf>,
+    /// The session id the CLI reported during the current run.
+    ///
+    /// Filled by the stream reader and read once the run finishes, so the
+    /// next message in this conversation can continue the same session. Kept
+    /// here rather than threaded through the return type because the stream
+    /// loop already borrows `&self` and the brain lives exactly one run.
+    observed_session: std::sync::Mutex<Option<String>>,
 }
 
 impl ClaudeCliBrain {
@@ -269,47 +289,31 @@ impl ClaudeCliBrain {
             .clone()
             .unwrap_or_else(|| model_aliases::SONNET.to_string());
 
-        // Wire in Juno's computer-use tools via the juno-cua MCP server when
-        // available. Failure to set this up is non-fatal — the provider still
-        // works with the CLI's built-in tools (LAC-3696).
-        let mcp_config_path = match detect_juno_cua() {
-            Some(cua_path) => match write_mcp_config(&cua_path) {
-                Ok(path) => Some(path),
-                Err(e) => {
-                    warn!(
-                        "Found juno-cua but failed to write MCP config ({}); \
-                         computer-use tools unavailable for Claude CLI provider",
-                        e
-                    );
-                    None
-                }
-            },
-            None => {
-                info!(
-                    "juno-cua not found — Claude CLI provider will run without \
-                     computer-use MCP tools (install juno-cua to enable mouse/screen control)"
-                );
-                None
-            }
-        };
-
         info!(
-            "Initializing Claude CLI brain (binary: {}, model: {}, computer-use MCP: {})",
+            "Initializing Claude CLI brain (binary: {}, model: {})",
             binary_path.display(),
-            model,
-            mcp_config_path.is_some()
+            model
         );
 
         Ok(Self {
             binary_path,
             model,
             system_prompt: config.system_prompt.clone(),
-            mcp_config_path,
+            observed_session: std::sync::Mutex::new(None),
         })
     }
 
     /// Build the subprocess command arguments.
-    fn build_args(&self, query: &str) -> Vec<String> {
+    ///
+    /// `resume` continues an existing CLI session rather than starting a new
+    /// one, which is what makes a second message in the same chat a follow-up
+    /// instead of a cold open.
+    fn build_args(
+        &self,
+        query: &str,
+        resume: Option<&str>,
+        mcp_config: Option<&std::path::Path>,
+    ) -> Vec<String> {
         let mut args = vec![
             "-p".to_string(),
             "--output-format".to_string(),
@@ -327,7 +331,15 @@ impl ClaudeCliBrain {
             "--dangerously-skip-permissions".to_string(),
         ];
 
-        if let Some(ref mcp_path) = self.mcp_config_path {
+        // Continue the session this conversation is already running in. The
+        // CLI keeps the full transcript and its own tool results on its side,
+        // so resuming carries far more than replaying our message list could.
+        if let Some(session) = resume {
+            args.push("--resume".to_string());
+            args.push(session.to_string());
+        }
+
+        if let Some(mcp_path) = mcp_config {
             args.push("--mcp-config".to_string());
             args.push(mcp_path.to_string_lossy().to_string());
             args.push("--append-system-prompt".to_string());
@@ -370,22 +382,80 @@ impl ClaudeCliBrain {
         // Validate auth before spawning the query subprocess
         check_auth_status(&self.binary_path).await?;
 
-        let args = self.build_args(query);
+        // Continue this conversation's CLI session if it has one.
+        let conversation = conversation_id_for(&app_handle).await;
+        let resume = conversation.as_deref().and_then(resume_id_for);
 
-        info!(
-            "Spawning Claude CLI: {} {}",
-            self.binary_path.display(),
-            args.iter().take(6).cloned().collect::<Vec<_>>().join(" ")
-        );
+        // Hand the CLI Juno's own computer tool. Done per run rather than when
+        // the brain is built, because the server lives in the running app and
+        // the brain is constructed without an app handle (and rebuilt on every
+        // query). Without a handle there is no desktop to drive anyway, which
+        // is the headless and test case, so the CLI simply runs toolless.
+        let mcp_config = match app_handle.as_ref() {
+            Some(handle) => match juno_mcp::ensure_running(handle).await {
+                Ok(endpoint) => write_mcp_config(&endpoint)
+                    .map_err(|e| warn!("Juno's tool server is up but its config is not: {e}"))
+                    .ok(),
+                Err(e) => {
+                    // Non-fatal, and deliberately loud: the CLI still answers,
+                    // it just cannot touch the desktop.
+                    warn!("Could not offer Juno's computer tool to the CLI: {e}");
+                    None
+                }
+            },
+            None => None,
+        };
 
-        let mut child = tokio::process::Command::new(&self.binary_path)
-            .args(&args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e)))?;
+        let args = self.build_args(query, resume.as_deref(), mcp_config.as_deref());
+
+        match resume.as_deref() {
+            Some(session) => info!(
+                "Spawning Claude CLI (resuming session {}): {}",
+                session,
+                self.binary_path.display()
+            ),
+            None => info!(
+                "Spawning Claude CLI (new session): {} {}",
+                self.binary_path.display(),
+                args.iter().take(6).cloned().collect::<Vec<_>>().join(" ")
+            ),
+        }
+
+        let spawn = |args: &Vec<String>| {
+            tokio::process::Command::new(&self.binary_path)
+                .args(args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+        };
+
+        let mut child = match spawn(&args) {
+            Ok(child) => child,
+            // A session id we stored can stop being resumable: the CLI prunes
+            // its history, or the transcript is gone. Falling back to a fresh
+            // session costs the thread's context, which is exactly what we
+            // had before this existed, and beats failing the message outright.
+            Err(e) if resume.is_some() => {
+                warn!(
+                    "Claude CLI would not resume ({}); starting a fresh session",
+                    e
+                );
+                if let Some(ref id) = conversation {
+                    forget_session(id);
+                }
+                spawn(&self.build_args(query, None, mcp_config.as_deref())).map_err(|e| {
+                    AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e))
+                })?
+            }
+            Err(e) => {
+                return Err(AgentError::LlmError(format!(
+                    "Failed to spawn Claude CLI: {}",
+                    e
+                )))
+            }
+        };
 
         let stdout = child.stdout.take().ok_or_else(|| {
             AgentError::LlmError("Failed to capture Claude CLI stdout".to_string())
@@ -558,6 +628,26 @@ impl ClaudeCliBrain {
             }
         }
 
+        // Remember the session this conversation is now in, so the next
+        // message continues it. Recorded here rather than mid-stream because
+        // a cancelled or failed run has already returned above, and a session
+        // that produced nothing is not one worth resuming into.
+        if let Some(ref id) = conversation {
+            let observed = self
+                .observed_session
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone());
+            match observed {
+                Some(session) => remember_session(id, &session),
+                // The CLI always reports one, so this means the stream ended
+                // before any usable line arrived. Dropping the old id is the
+                // safe move: resuming into a session we cannot confirm is
+                // worse than starting cleanly.
+                None => forget_session(id),
+            }
+        }
+
         // Use final_result if available, otherwise accumulated_text
         let complete_text = final_result.unwrap_or(accumulated_text);
 
@@ -618,6 +708,18 @@ impl ClaudeCliBrain {
                     };
 
                     let event_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+                    // Every stream-json line carries the session this run is
+                    // in. Recorded from whichever line shows up first, so the
+                    // next message in this conversation can resume it.
+                    if let Some(session) = parsed.get("session_id").and_then(|v| v.as_str()) {
+                        if let Ok(mut slot) = self.observed_session.lock() {
+                            if slot.as_deref() != Some(session) {
+                                debug!("Claude CLI session: {}", session);
+                                *slot = Some(session.to_string());
+                            }
+                        }
+                    }
 
                     match event_type {
                         "assistant" => {
@@ -914,9 +1016,9 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
-            mcp_config_path: None,
+            observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("test query");
+        let args = brain.build_args("test query", None, None);
         assert!(args.contains(&"-p".to_string()));
         assert!(args.contains(&"stream-json".to_string()));
         assert!(args.contains(&"sonnet".to_string()));
@@ -936,9 +1038,9 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "opus".to_string(),
             system_prompt: Some("You are helpful.".to_string()),
-            mcp_config_path: None,
+            observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("test query");
+        let args = brain.build_args("test query", None, None);
         assert!(args.contains(&"--system-prompt".to_string()));
         assert!(args.contains(&"You are helpful.".to_string()));
     }
@@ -948,57 +1050,85 @@ mod tests {
     /// still blocks user-level servers, and the model must be steered toward
     /// the MCP tools via --append-system-prompt.
     #[test]
-    fn test_build_args_with_mcp_config() {
+    fn resuming_passes_the_session_to_the_cli() {
+        // Without this flag every message was a new CLI session, so Juno
+        // answered follow-ups as if the chat above her had never happened.
         let brain = ClaudeCliBrain {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
-            mcp_config_path: Some(PathBuf::from("/tmp/juno-cua-mcp-test.json")),
+            observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("move the mouse");
+        let args = brain.build_args("and what about the other one?", Some("abc-123"), None);
+        let idx = args
+            .iter()
+            .position(|a| a == "--resume")
+            .expect("--resume is passed when a session is known");
+        assert_eq!(args[idx + 1], "abc-123");
+    }
 
-        let mcp_flag_idx = args
+    #[test]
+    fn a_first_message_starts_a_fresh_session() {
+        let brain = ClaudeCliBrain {
+            binary_path: PathBuf::from("/usr/bin/claude"),
+            model: "sonnet".to_string(),
+            system_prompt: None,
+            observed_session: std::sync::Mutex::new(None),
+        };
+        let args = brain.build_args("hello", None, None);
+        assert!(!args.iter().any(|a| a == "--resume"));
+    }
+
+    #[test]
+    fn a_conversation_remembers_its_session() {
+        let convo = "conversation-under-test";
+        assert_eq!(resume_id_for(convo), None, "nothing known yet");
+        remember_session(convo, "session-1");
+        assert_eq!(resume_id_for(convo), Some("session-1".to_string()));
+        // A new chat is a new id, so it gets no session and starts clean.
+        assert_eq!(resume_id_for("a-different-conversation"), None);
+        forget_session(convo);
+        assert_eq!(resume_id_for(convo), None);
+    }
+
+    #[test]
+    fn the_cli_is_pointed_at_junos_own_tool_server() {
+        let brain = ClaudeCliBrain {
+            binary_path: PathBuf::from("/usr/bin/claude"),
+            model: "sonnet".to_string(),
+            system_prompt: None,
+            observed_session: std::sync::Mutex::new(None),
+        };
+        let config = PathBuf::from("/tmp/juno-mcp-test.json");
+        let args = brain.build_args("move the mouse", None, Some(&config));
+
+        let idx = args
             .iter()
             .position(|a| a == "--mcp-config")
             .expect("--mcp-config flag present");
-        assert_eq!(args[mcp_flag_idx + 1], "/tmp/juno-cua-mcp-test.json");
-
-        // Strict mode must remain — explicit config + strict = ONLY our server
-        assert!(args.contains(&"--strict-mcp-config".to_string()));
-
-        // Guidance prompt steers the model away from cliclick/Bash fallbacks
-        let guidance_idx = args
-            .iter()
-            .position(|a| a == "--append-system-prompt")
-            .expect("--append-system-prompt flag present");
-        assert!(args[guidance_idx + 1].contains("juno-cua"));
-    }
-
-    /// The MCP config file must contain the serve-mcp invocation for the
-    /// detected binary, keyed under mcpServers.juno-cua (the server name
-    /// becomes the mcp__juno-cua__* tool prefix).
-    #[test]
-    fn test_write_mcp_config_shape() {
-        let cua_path = PathBuf::from("/opt/homebrew/bin/juno-cua");
-        let config_path = write_mcp_config(&cua_path).expect("write mcp config");
-
-        let content = std::fs::read_to_string(&config_path).expect("read mcp config");
-        let parsed: Value = serde_json::from_str(&content).expect("valid JSON");
-
-        let server = &parsed["mcpServers"]["juno-cua"];
-        assert_eq!(server["command"], "/opt/homebrew/bin/juno-cua");
-        assert_eq!(server["args"], serde_json::json!(["serve-mcp"]));
-
-        let _ = std::fs::remove_file(&config_path);
+        assert_eq!(args[idx + 1], "/tmp/juno-mcp-test.json");
+        assert!(
+            args.iter().any(|a| a == "--strict-mcp-config"),
+            "the person's own MCP servers must stay out of Juno's agent"
+        );
+        assert!(
+            args.iter().any(|a| a.contains("juno")),
+            "the guidance has to name the server the tool is on"
+        );
     }
 
     #[test]
-    fn test_detect_juno_cua_does_not_panic() {
-        // Environment-dependent — on machines without juno-cua this is None
-        let result = detect_juno_cua();
-        if let Some(path) = result {
-            assert!(path.is_file());
-        }
+    fn without_a_desktop_the_cli_runs_toolless() {
+        // Headless and test runs have no app handle, so there is no tool
+        // server and nothing to point at. The CLI still answers.
+        let brain = ClaudeCliBrain {
+            binary_path: PathBuf::from("/usr/bin/claude"),
+            model: "sonnet".to_string(),
+            system_prompt: None,
+            observed_session: std::sync::Mutex::new(None),
+        };
+        let args = brain.build_args("hello", None, None);
+        assert!(!args.iter().any(|a| a == "--mcp-config"));
     }
 
     /// Write an executable shell script that stands in for the `claude` binary.
@@ -1030,7 +1160,7 @@ mod tests {
             binary_path,
             model: "sonnet".to_string(),
             system_prompt: None,
-            mcp_config_path: None,
+            observed_session: std::sync::Mutex::new(None),
         }
     }
 

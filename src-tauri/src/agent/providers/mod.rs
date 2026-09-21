@@ -3,6 +3,7 @@ pub mod claude_cli;
 pub mod config;
 pub mod factory;
 pub mod gemini;
+pub mod juno_mcp;
 pub mod openai;
 pub mod rig;
 pub mod types;
