@@ -203,6 +203,36 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     case "get_always_listening_status":
       return false;
 
+    // --- settings reads the bar's chat pane pulls on mount ---
+    // `useSettings.loadAllSettings` fans these out in one Promise.all and then
+    // does `wakeWords.join(", ")`; a bare `null` there throws and surfaces as
+    // "Failed to load some settings" plus a "Failed to execute ..." toast. Each
+    // must resolve to a value of the shape the hook expects.
+    case "get_tts_provider_command":
+      return "system";
+    case "get_providers":
+      return [];
+    case "get_active_provider":
+      return ""; // empty skips the follow-up get_provider_settings fetch
+    case "get_agent_mode":
+      return "agent";
+    case "get_agent_trigger_mode":
+      return "hotkey";
+    case "get_dictation_trigger_mode":
+      return "hotkey";
+    case "get_dictation_clipboard_enabled":
+    case "get_sound_enabled":
+    case "get_performance_monitoring":
+      return false;
+    case "get_always_listening_sensitivity":
+      return 0.5;
+    case "get_always_listening_wake_words":
+      return [];
+    case "get_chatterbox_settings_command":
+      return { reference_audio_url: null, exaggeration: 0.5, use_hd: false };
+    case "get_supertonic_settings_command":
+      return { server_url: "", voice: "", speed: 1 };
+
     // Everything else the bar fires (interactions, dispatch, stop, focus,
     // dictation cancel, pane ledger, show-when-ready, webview focus, ...) has no
     // meaningful return in the harness; resolving undefined is enough.
