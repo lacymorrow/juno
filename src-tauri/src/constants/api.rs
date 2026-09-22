@@ -114,7 +114,11 @@ pub mod cloud_networking {
     pub const MAX_BACKOFF_EXPONENT: u32 = 5;
     pub const CONNECTION_CHECK_INTERVAL_MS: u64 = 5000;
     pub const WATCHDOG_TIMEOUT_MS: u64 = 60000;
-    pub const MAX_RETRY_INTERVAL_MS: u64 = 300000; // 5 minutes
+    /// Ceiling on a single reconnection backoff, in milliseconds (5 minutes).
+    /// Enforced by `cloud::connector::backoff_delay`; the exponent limit above
+    /// keeps the real delay well under it, and this is the bound that holds if
+    /// either of the two values feeding it is ever raised.
+    pub const MAX_RETRY_INTERVAL_MS: u64 = 300000;
 
     // Heartbeat and status configuration
     pub const HEARTBEAT_SEND_INTERVAL_MS: u64 = 30000;

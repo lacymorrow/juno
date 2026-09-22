@@ -504,10 +504,14 @@ impl ProductionCloudConnector {
                         self.set_connection_state(ConnectorState::Reconnecting(retry_count))
                             .await;
 
-                        // Exponential backoff
-                        let delay = base_delay
-                            * api::cloud_networking::BACKOFF_MULTIPLIER
-                                .pow(retry_count.min(api::cloud_networking::MAX_BACKOFF_EXPONENT));
+                        // Exponential backoff, capped by the constant that
+                        // declares the cap. The exponent limit alone already
+                        // keeps this under MAX_RETRY_INTERVAL_MS today, so the
+                        // clamp changes nothing now — that is the point. A
+                        // declared bound that nothing applies is a bound that
+                        // quietly stops being true the moment someone raises
+                        // BASE_RETRY_DELAY_MS or MAX_BACKOFF_EXPONENT.
+                        let delay = backoff_delay(base_delay, retry_count);
                         info!("Retrying connection in {:?}", delay);
                         tokio::time::sleep(delay).await;
                     }
@@ -1442,9 +1446,57 @@ impl Clone for ProductionCloudConnector {
     }
 }
 
+/// How long to wait before reconnection attempt number `retry_count`.
+///
+/// `base_delay * BACKOFF_MULTIPLIER ^ min(retry_count, MAX_BACKOFF_EXPONENT)`,
+/// then clamped to `MAX_RETRY_INTERVAL_MS`.
+///
+/// The clamp is the whole reason this is a function. `MAX_RETRY_INTERVAL_MS`
+/// declared a five-minute ceiling that nothing read, and the exponent limit
+/// happened to keep the real delay at 64 seconds — well under it. A cap nobody
+/// applies is a cap that silently stops holding as soon as someone raises
+/// `BASE_RETRY_DELAY_MS` or `MAX_BACKOFF_EXPONENT`, and it is the shape of bug
+/// this audit was written about. `saturating_mul` keeps an over-large base from
+/// overflowing the multiplication into a panic before the clamp can run.
+fn backoff_delay(base_delay: Duration, retry_count: u32) -> Duration {
+    let exponent = retry_count.min(api::cloud_networking::MAX_BACKOFF_EXPONENT);
+    let multiplier = api::cloud_networking::BACKOFF_MULTIPLIER.saturating_pow(exponent);
+    let max_interval = Duration::from_millis(api::cloud_networking::MAX_RETRY_INTERVAL_MS);
+    base_delay.saturating_mul(multiplier).min(max_interval)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backoff_grows_then_stops_at_the_exponent_limit() {
+        let base = Duration::from_millis(api::cloud_networking::BASE_RETRY_DELAY_MS);
+        assert_eq!(backoff_delay(base, 1), base * 2);
+        assert_eq!(backoff_delay(base, 2), base * 4);
+        let at_limit = backoff_delay(base, api::cloud_networking::MAX_BACKOFF_EXPONENT);
+        // Past the exponent limit the delay stops growing.
+        assert_eq!(backoff_delay(base, 99), at_limit);
+    }
+
+    #[test]
+    fn backoff_never_exceeds_the_interval_the_constant_declares() {
+        let max_interval = Duration::from_millis(api::cloud_networking::MAX_RETRY_INTERVAL_MS);
+        let base = Duration::from_millis(api::cloud_networking::BASE_RETRY_DELAY_MS);
+        for retry_count in 0..50 {
+            assert!(backoff_delay(base, retry_count) <= max_interval);
+        }
+        // And it still holds if someone gives the base an absurd value: the
+        // cap is enforced, not merely implied by the exponent limit.
+        assert_eq!(backoff_delay(Duration::from_secs(86_400), 5), max_interval);
+        assert_eq!(backoff_delay(Duration::MAX, 5), max_interval);
+    }
+
+    #[test]
+    fn the_declared_cap_is_expressed_in_the_unit_its_name_claims() {
+        // Five minutes, stated in milliseconds, as the constant's comment says.
+        assert_eq!(api::cloud_networking::MAX_RETRY_INTERVAL_MS, 300_000);
+    }
 
     #[test]
     fn test_cpu_usage_parsing() {
