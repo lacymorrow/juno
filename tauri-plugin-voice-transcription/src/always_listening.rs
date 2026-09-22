@@ -448,6 +448,18 @@ impl AlwaysListeningController {
             // Process audio data
             match audio_data_rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(audio_chunk) => {
+                    // Echo guard: while Juno is speaking (TTS playing), throw away
+                    // everything the mic hears so she never wakes on her own voice.
+                    // Clearing the rolling buffer and resetting the activity trackers
+                    // means nothing captured mid-speech replays the instant she stops.
+                    if crate::is_capture_suppressed() {
+                        if !audio_buffer.is_empty() {
+                            audio_buffer.clear();
+                        }
+                        audio_activity_start = None;
+                        last_volume_drop = None;
+                        continue;
+                    }
                     audio_buffer.extend_from_slice(&audio_chunk);
 
                     // Calculate volume level

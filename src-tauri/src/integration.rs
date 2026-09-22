@@ -457,6 +457,14 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
 
         let app_handle_clone = app_handle_for_wake_word.clone();
         safe_spawn_async_task(move || async move {
+            // A gentle chime the moment the wake phrase lands, so Juno answers
+            // "I'm listening" before a word of the request is spoken (Siri's
+            // model: acknowledge, then capture).
+            crate::commands::sound::play_cue(
+                &app_handle_clone,
+                crate::commands::sound::SoundType::NotificationAmbient,
+            );
+
             let app_state = app_handle_clone.state::<state::AppState>();
             let target = voice_target_for_phrase(&app_state, &matched_phrase);
             if let Ok(mut pending) = PENDING_VOICE_TARGET.lock() {
@@ -570,8 +578,17 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
                                 }
                             }
                             crate::triggers::TriggerTarget::Agent => {
-                                // Submit the query to the agent system
-                                if let Err(e) = crate::anthropic::submit_query(
+                                // One voice turn at a time: drop a repeat of the
+                                // same utterance inside 1s so a stray re-fire (or
+                                // Juno catching a tail of her own prompt) can't
+                                // stack a second agent run. The other submit paths
+                                // already dedup; the always-listening path did not.
+                                if is_duplicate_submission(trimmed_text) {
+                                    info!(
+                                        "[AlwaysListening] Duplicate voice query within 1s - ignoring: '{}'",
+                                        trimmed_text
+                                    );
+                                } else if let Err(e) = crate::anthropic::submit_query(
                                     trimmed_text.to_string(),
                                     None,
                                     app_state,
@@ -620,9 +637,16 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
                 event.payload()
             );
 
+            // The stop-word payload carries the spoken text ({reason, text}); we
+            // need it to tell "quit the app" from "stop listening".
+            let spoken_text = serde_json::from_str::<serde_json::Value>(event.payload())
+                .ok()
+                .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(String::from))
+                .unwrap_or_default();
+
             let app_handle_clone = app_handle_for_stop_request.clone();
             safe_spawn_async_task(move || async move {
-                handle_always_listening_stop_request(&app_handle_clone).await;
+                handle_always_listening_stop_request(&app_handle_clone, &spoken_text).await;
             });
         },
     );
@@ -656,8 +680,38 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
     );
 }
 
+/// Whether a post-wake command means "quit the whole app", as opposed to just
+/// stopping listening. Quit on explicit quit words, or on "stop"/"close"/"bye"
+/// only when Juno is named ("stop juno"). Bare "stop"/"cancel" must never be a
+/// surprise app-quit, since they also mean "stop the agent" / "stop listening".
+fn is_quit_app_command(text: &str) -> bool {
+    let t = text.to_lowercase();
+    let has_word = |w: &str| t.split_whitespace().any(|word| word == w);
+    if has_word("quit")
+        || has_word("exit")
+        || has_word("goodbye")
+        || has_word("shutdown")
+        || t.contains("shut down")
+    {
+        return true;
+    }
+    // Addressed to Juno by name: "stop juno", "close juno", "bye juno".
+    t.contains("juno") && (has_word("stop") || has_word("close") || has_word("bye"))
+}
+
 /// Handle always listening stop requests
-async fn handle_always_listening_stop_request(app_handle: &AppHandle) {
+async fn handle_always_listening_stop_request(app_handle: &AppHandle, spoken_text: &str) {
+    // "Quit Juno" / "goodbye" / "shut down" (or a named "stop juno") ends the
+    // app; a bare stop word only disarms listening (below).
+    if is_quit_app_command(spoken_text) {
+        info!(
+            "[AlwaysListening] Quit command heard ('{}') - exiting Juno",
+            spoken_text
+        );
+        app_handle.exit(0);
+        return;
+    }
+
     // Stop always listening mode
     let app_state = app_handle.state::<state::AppState>();
     match commands::always_listening::stop_always_listening_mode(app_handle.clone(), app_state)

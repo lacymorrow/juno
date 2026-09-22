@@ -28,6 +28,25 @@ pub use error::{Error, Result};
 pub use shared_whisper::SharedWhisperManager;
 pub use utils::resolve_model_path;
 
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+
+/// While true, the always-listening loop drops every mic chunk instead of
+/// buffering or transcribing it. The app raises this whenever Juno is speaking
+/// (TTS playback), so she never hears her own voice and wakes on it. It is the
+/// echo/self-listening guard, driven from the app's single TTS play/stop point.
+static CAPTURE_SUPPRESSED: AtomicBool = AtomicBool::new(false);
+
+/// Mute (true) or unmute (false) always-listening capture. Called by the app
+/// around TTS playback. Cheap and lock-free; safe to call from any thread.
+pub fn set_capture_suppressed(suppressed: bool) {
+    CAPTURE_SUPPRESSED.store(suppressed, AtomicOrdering::SeqCst);
+}
+
+/// Whether always-listening capture is currently suppressed (Juno is speaking).
+pub fn is_capture_suppressed() -> bool {
+    CAPTURE_SUPPRESSED.load(AtomicOrdering::SeqCst)
+}
+
 /// Initialize the Voice Transcription plugin
 pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
     Builder::<R>::new("voice-transcription")
