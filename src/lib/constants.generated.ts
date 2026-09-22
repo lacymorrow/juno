@@ -921,6 +921,7 @@ export const SETTINGS = {
   STORE_KEYS_SHOW_TRAY_ICON: 'show_tray_icon',
   STORE_KEYS_SHOW_GLOW_BORDER: 'show_glow_border',
   STORE_KEYS_CLI: 'cli',
+  STORE_KEYS_CLI_PERSISTENT_SESSION_ENABLED: 'cli_persistent_session_enabled',
   STORE_KEYS_VOICE_TRANSCRIPTION: 'voice_transcription',
   STORE_KEYS_TRIGGERS: 'triggers',
   KEYBOARD_KEYS_AGENT_MODE: 'agent_mode',

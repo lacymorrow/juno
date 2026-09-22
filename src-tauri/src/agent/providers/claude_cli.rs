@@ -98,7 +98,7 @@ async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<St
 }
 
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolDefinition};
-use crate::agent::providers::juno_mcp;
+use crate::agent::providers::{claude_cli_session, juno_mcp};
 use crate::agent::traits::AgentBrain;
 use crate::settings::ProviderConfig as CentralizedProviderConfig;
 
@@ -405,6 +405,58 @@ impl ClaudeCliBrain {
             },
             None => None,
         };
+
+        // Experimental (off by default): run this turn in one long-lived process
+        // kept alive for the conversation, instead of spawning a fresh one here.
+        // Worth ~1.6-3.1s per follow-up — see docs/plans/cli-persistent-session-spike.md.
+        //
+        // Every failure path returns `Unavailable` having emitted nothing, and falls
+        // through to the one-shot spawn below. That fallback resumes the same session
+        // id the persistent process was pinned to, so no context is lost either way.
+        if let (Some(handle), Some(conversation_id)) = (app_handle.as_ref(), conversation.as_ref())
+        {
+            if claude_cli_session::is_enabled(handle) {
+                // Continue this conversation's CLI session if it has one, otherwise
+                // mint an id for the process to pin. The distinction matters: the CLI
+                // refuses to start if handed --session-id for a session that already
+                // exists, so an existing id has to arrive as --resume instead.
+                let (session_id, session_is_new) = match resume.clone() {
+                    Some(existing) => (existing, false),
+                    None => (uuid::Uuid::new_v4().to_string(), true),
+                };
+
+                let request = claude_cli_session::TurnRequest {
+                    binary: &self.binary_path,
+                    model: &self.model,
+                    system_prompt: self.system_prompt.as_deref(),
+                    mcp_config: mcp_config.as_deref(),
+                    mcp_guidance: MCP_TOOL_GUIDANCE,
+                    conversation_id,
+                    session_id: &session_id,
+                    session_is_new,
+                    query,
+                    app_handle: handle,
+                    message_id: message_id.clone(),
+                    cancel_rx: cancel_rx.clone(),
+                };
+
+                match claude_cli_session::run_turn(request).await {
+                    Ok(claude_cli_session::TurnOutcome::Completed(text)) => {
+                        remember_session(conversation_id, &session_id);
+                        return Ok(text);
+                    }
+                    Ok(claude_cli_session::TurnOutcome::Unavailable) => {
+                        debug!("Persistent Claude CLI session unavailable; spawning one-shot");
+                    }
+                    Err(e) => {
+                        // The turn actually started and then failed. Re-running it on
+                        // the one-shot path would bill the user twice for one message.
+                        remember_session(conversation_id, &session_id);
+                        return Err(e);
+                    }
+                }
+            }
+        }
 
         let args = self.build_args(query, resume.as_deref(), mcp_config.as_deref());
 
@@ -892,7 +944,7 @@ impl AgentBrain for ClaudeCliBrain {
 
 /// Extract text content from a Claude CLI assistant message JSON object.
 /// Handles both `content` array format and direct `content` string.
-fn extract_text_from_message(message: &Value) -> String {
+pub(super) fn extract_text_from_message(message: &Value) -> String {
     // Try content array format: {"content": [{"type": "text", "text": "..."}]}
     if let Some(content_array) = message.get("content").and_then(|v| v.as_array()) {
         let mut text = String::new();
