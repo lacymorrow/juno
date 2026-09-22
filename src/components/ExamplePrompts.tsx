@@ -20,6 +20,7 @@ import {
   Grid3X3,
   Settings,
   ChevronRight,
+  Loader2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { isDevelopment } from "@/lib";
@@ -36,13 +37,24 @@ interface ExamplePrompt {
   prompt: string;
 }
 
+/** Whether the backend can take a query yet; the main window's `serverStatus`. */
+export type BackendStatus = "connecting" | "connected" | "error";
+
 interface ExamplePromptsProps {
   onPromptSelect: (prompt: string) => void;
+  /**
+   * Until the backend is connected the buttons wait, disabled, under one
+   * quiet "Connecting…" line, and come alive the instant it is. Before this
+   * they looked ready and did nothing, which read as broken.
+   */
+  backendStatus?: BackendStatus;
 }
 
 export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
   onPromptSelect,
+  backendStatus = "connected",
 }) => {
+  const connecting = backendStatus === "connecting";
   const [isDevMode, setIsDevMode] = useState(false);
   // Closed on every mount so the pane always opens on the real empty state.
   // The dev commands are a workbench, not the first thing anyone should read.
@@ -210,7 +222,14 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
       {prompts.map((example, index) => (
         <button
           key={index}
-          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs bg-secondary/50 hover:bg-secondary border border-border/40 text-foreground/80 hover:text-foreground transition-colors cursor-pointer"
+          type="button"
+          disabled={connecting}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border border-border/40 px-3 py-1.5 text-xs text-foreground/80 transition-colors",
+            connecting
+              ? "cursor-default bg-secondary/30 opacity-50"
+              : "cursor-pointer bg-secondary/50 hover:bg-secondary hover:text-foreground",
+          )}
           onClick={() => onPromptSelect(example.prompt)}
         >
           <example.icon size={12} className="opacity-60 flex-shrink-0" />
@@ -225,6 +244,30 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
       {/* Development builds used to swap these out entirely, which meant nobody
           working on Juno ever saw the empty state a real user gets. */}
       {renderPrompts(productionPrompts)}
+
+      {/* One line, no toast. The buttons above are the only thing on screen
+          that could look ready, so this says why they are not yet. */}
+      {connecting && (
+        <div
+          role="status"
+          data-testid="example-prompts-connecting"
+          className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground"
+        >
+          <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+          <span>Connecting…</span>
+        </div>
+      )}
+      {/* The empty state ignores system messages, so the backend's "not
+          responding" notice would otherwise be invisible here. */}
+      {backendStatus === "error" && (
+        <p
+          role="status"
+          data-testid="example-prompts-error"
+          className="text-center text-xs text-muted-foreground"
+        >
+          Backend is not responding. Check the logs.
+        </p>
+      )}
 
       {isDevMode && (
         <Collapsible open={devCommandsOpen} onOpenChange={setDevCommandsOpen}>

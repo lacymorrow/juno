@@ -1,6 +1,7 @@
 import { Plus, Settings, SquareArrowOutUpRight, X } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { ChatContainerV2 } from "@/components/chat/ChatContainerV2";
+import type { BackendStatus } from "@/components/ExamplePrompts";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 import type { ShareAnchor } from "@/hooks/useConversation";
 import { cn } from "@/lib/utils";
@@ -9,17 +10,19 @@ import { BAR_DEPTH_GLOW } from "@/components/bar/barAppearance";
 interface BarChatPaneProps {
   messages: ChatMessage[];
   isProcessing: boolean;
+  /** Gates the empty-state example prompts, same as the main window. */
+  backendStatus: BackendStatus;
   height: number;
   copiedMessageId: string | null;
   onCopyResponse: (response: ResponseExportInput, index: number) => void;
   onShareResponse: (response: ResponseExportInput, anchor: ShareAnchor) => void;
+  /** An example prompt clicked in the empty state; sends it like a typed follow-up. */
+  onExamplePromptSelect: (prompt: string) => void;
   onApprovalUpdate: (toolId: string, state: "approved" | "denied") => void;
   onContinuationUpdate: (requestId: string, state: "stopped" | "continued") => void;
   onDismiss: () => void;
   onNewChat: () => void;
 }
-
-const noopPromptSelect = () => {};
 
 const headerButton =
   "flex size-6 items-center justify-center rounded-full text-white/35 transition-colors hover:bg-white/[0.08] hover:text-white/80";
@@ -51,10 +54,12 @@ const openSettings = () => {
 export function BarChatPane({
   messages,
   isProcessing,
+  backendStatus,
   height,
   copiedMessageId,
   onCopyResponse,
   onShareResponse,
+  onExamplePromptSelect,
   onApprovalUpdate,
   onContinuationUpdate,
   onDismiss,
@@ -127,7 +132,8 @@ export function BarChatPane({
           copiedMessageId={copiedMessageId}
           onCopyResponse={onCopyResponse}
           onShareResponse={onShareResponse}
-          onExamplePromptSelect={noopPromptSelect}
+          onExamplePromptSelect={onExamplePromptSelect}
+          backendStatus={backendStatus}
           onApprovalUpdate={onApprovalUpdate}
           onContinuationUpdate={onContinuationUpdate}
           contentClassName="gap-4 px-4 py-3 text-[13px]"
