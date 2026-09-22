@@ -53,7 +53,7 @@ fi
 # Update other package.json files
 if command -v jq >/dev/null 2>&1; then
   echo "Updating other package.json files..."
-  for pkg in $(find . -name "package.json" -type f | grep -v node_modules | grep -v target | grep -v "^\./package.json$"); do
+  for pkg in $(find . -name "package.json" -type f | grep -v node_modules | grep -v target | grep -v ".paperclip" | grep -v "^\./package.json$"); do
     if [ -f "$pkg" ]; then
       echo "  Updating $pkg"
       jq --arg v "$NEW_VERSION" '(.version) |= $v' "$pkg" > "$pkg.tmp" && mv "$pkg.tmp" "$pkg"
