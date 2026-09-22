@@ -28,16 +28,15 @@ pub mod tool_names {
     pub const TEXT_EDITOR_UNDO_EDIT: &str = "text_editor_undo_edit";
 
     // Browser tools
+    // Exactly the tools `agent::tools::browser_tools::get_browser_tool_definitions()`
+    // returns. Adding a name here that has no definition behind it creates a
+    // settings toggle for a tool the agent can never call; `tool_config` has a
+    // test that fails if these two lists drift apart.
     pub const BROWSER_NAVIGATE: &str = "browser_navigate";
-    pub const BROWSER_CLICK: &str = "browser_click";
-    pub const BROWSER_TYPE: &str = "browser_type";
-    pub const BROWSER_SCROLL: &str = "browser_scroll";
     pub const BROWSER_SCREENSHOT: &str = "browser_screenshot";
-    pub const BROWSER_GET_CONTENT: &str = "browser_get_content";
     pub const BROWSER_INTERACT: &str = "browser_interact";
     pub const BROWSER_EXTRACT_CONTENT: &str = "browser_extract_content";
     pub const BROWSER_GET_CURRENT_URL: &str = "browser_get_current_url";
-    pub const BROWSER_FORM: &str = "browser_form";
 
     // Safari tools (specialized browser automation for Safari)
     pub const SAFARI_EXTRACT_DOM: &str = "safari_extract_dom";
