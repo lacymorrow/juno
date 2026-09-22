@@ -413,7 +413,10 @@ impl Provider {
                         image_tier: ImageTier::HighResolution,
                         adaptive_thinking: true,
                         server_side_fallback: true,
-                        is_recommended: false,
+                        // The recommended default. Opus 5.5 takes this over in
+                        // the follow-up commit, now that Juno sends
+                        // `computer_toolset_20260801`.
+                        is_recommended: true,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_5_5,
@@ -427,10 +430,7 @@ impl Provider {
                         image_tier: ImageTier::HighResolution,
                         adaptive_thinking: true,
                         server_side_fallback: true,
-                        // The recommended default. Anthropic's headline current
-                        // model, materially cheaper per token than the Fable
-                        // tier, and drivable now that Juno sends the toolset.
-                        is_recommended: true,
+                        is_recommended: false,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_5,
@@ -1050,17 +1050,14 @@ mod tests {
 
     /// And Juno's own constraint on top of that: the Anthropic default must be
     /// a model Juno can actually drive the desktop with. Opus 5.5 is the
-    /// current lineup's headline model, and it is the default now that Juno
-    /// sends `computer_toolset_20260801` and can actually drive it.
+    /// current lineup's headline model; the follow-up commit makes it the
+    /// default now that Juno sends `computer_toolset_20260801`.
     #[test]
     fn anthropic_default_can_drive_the_computer() {
         assert_eq!(
             Provider::Anthropic.default_model(),
-            model_ids::CLAUDE_OPUS_5_5
+            model_ids::CLAUDE_FABLE_5_1
         );
-        // Opus 5.5 rejects every earlier tool version, so a default that
-        // somehow resolved to the legacy path would be a broken default.
-        assert!(Provider::Anthropic.uses_computer_toolset(model_ids::CLAUDE_OPUS_5_5));
         assert!(
             Provider::Anthropic.model_supports_computer_use(Provider::Anthropic.default_model()),
             "a desktop-automation app must not default to a model it cannot drive the desktop with"
