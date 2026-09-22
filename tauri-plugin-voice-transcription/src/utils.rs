@@ -328,7 +328,10 @@ mod transcription_filter_tests {
     fn juneau_is_rewritten_to_juno() {
         // Whisper hears the assistant's name as the Alaska capital.
         assert_eq!(filter_transcription_text("hey juneau"), "hey Juno");
-        assert_eq!(filter_transcription_text("Juneau, what time is it"), "Juno, what time is it");
+        assert_eq!(
+            filter_transcription_text("Juneau, what time is it"),
+            "Juno, what time is it"
+        );
         // Whole word only: a word that merely contains the letters is untouched.
         assert_eq!(filter_transcription_text("juneaus"), "juneaus");
     }
