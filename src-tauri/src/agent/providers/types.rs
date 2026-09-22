@@ -244,6 +244,11 @@ pub struct ModelInfo {
     /// True when the provider lists the model as legacy. The picker hides
     /// these unless advanced settings are on, or the model is the active one.
     pub is_legacy: bool,
+    /// True when the model can only do computer use through
+    /// `computer_toolset_20260801`. Hidden like a legacy model: the toolset is
+    /// newer, costs roughly 2x the input-token overhead per request, and is not
+    /// what Juno drives by default, so opting into it is an advanced choice.
+    pub requires_computer_toolset: bool,
 }
 
 impl From<&ModelDefinition> for ModelInfo {
@@ -255,6 +260,7 @@ impl From<&ModelDefinition> for ModelInfo {
             supports_computer_use: def.supports_computer_use(),
             is_recommended: def.is_recommended,
             is_legacy: def.availability == Availability::Legacy,
+            requires_computer_toolset: def.uses_computer_toolset(),
         }
     }
 }

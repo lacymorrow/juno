@@ -6,6 +6,34 @@ import { EVENTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
 import { hasMixedContent } from "@/components/ui/mixed-content-renderer";
 
+/** Index of the last element matching `predicate`, or -1. */
+function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
+	for (let i = items.length - 1; i >= 0; i--) {
+		if (predicate(items[i])) return i;
+	}
+	return -1;
+}
+
+/**
+ * Place a message ahead of an assistant bubble that is still streaming.
+ *
+ * The backend opens the assistant bubble the moment a turn starts, before the
+ * model has produced a single token. Reasoning and tool calls arrive after that
+ * but happened *before* the answer, so appending them put the model's thinking
+ * underneath its conclusion. Anything that belongs to the work goes in front of
+ * the bubble that will hold the result.
+ */
+function insertBeforeOpenAssistant(
+	prev: ChatMessage[],
+	message: ChatMessage
+): ChatMessage[] {
+	const openBubble = prev.findIndex(
+		(msg) => msg.role === "assistant" && msg.isStreaming
+	);
+	if (openBubble === -1) return [...prev, message];
+	return [...prev.slice(0, openBubble), message, ...prev.slice(openBubble)];
+}
+
 // AX grounding audit payload emitted before each computer use click
 type AxGroundingAuditEvent = {
 	action: string;
@@ -277,17 +305,14 @@ export function useBackendEvents({
 					const axAudit = payload.tool_name === "computer" ? lastAxAudit.current : null;
 					lastAxAudit.current = null;
 
-					newMessage = {
-						role: "tool_call_result",
-						tool_name: payload.tool_name,
+					const resultFields = {
 						tool_output: payload.tool_output,
 						success: payload.success,
-						content: payload.content ||
+						result_content: payload.content ||
 							(payload.success
 								? `Tool ${payload.tool_name} executed successfully.`
 								: `Tool ${payload.tool_name} failed.`),
 						screenshot_base64: payload.screenshot_base64,
-						timestamp: currentTime,
 						...(axAudit && {
 							ax_grounded: axAudit.ax_grounded,
 							ax_role: axAudit.ax_role,
@@ -295,6 +320,34 @@ export function useBackendEvents({
 							ax_screen_coordinate: axAudit.screen_coordinate,
 							ax_action: axAudit.action,
 						}),
+					};
+
+					// Fold the result into the call that produced it rather than
+					// adding a second row. One tool call is one thing that happened;
+					// showing the request and the result as separate messages doubled
+					// the height of every computer-use turn for no added information.
+					const pendingIndex = findLastIndex(
+						prev,
+						(msg) =>
+							msg.role === "tool_call_request" &&
+							msg.tool_name === payload.tool_name &&
+							msg.success === undefined
+					);
+
+					if (pendingIndex !== -1) {
+						const merged = [...prev];
+						merged[pendingIndex] = { ...merged[pendingIndex], ...resultFields };
+						return merged;
+					}
+
+					// No matching call (a result that arrived without its request, or
+					// after a reload) — fall back to a standalone row so it is never lost.
+					newMessage = {
+						role: "tool_call_result",
+						tool_name: payload.tool_name,
+						content: resultFields.result_content,
+						timestamp: currentTime,
+						...resultFields,
 					};
 				} else if (type === "generic_content" && payload.content) {
 					newMessage = {
@@ -305,7 +358,7 @@ export function useBackendEvents({
 				}
 
 				if (newMessage) {
-					return [...prev, newMessage];
+					return insertBeforeOpenAssistant(prev, newMessage);
 				}
 				return prev;
 			});
@@ -326,9 +379,7 @@ export function useBackendEvents({
 		"tool-approval-request",
 		(payload) => {
 			console.log("Tool approval request received (inline):", payload);
-			setConversationWithPruning((prev) => [
-				...prev,
-				{
+			setConversationWithPruning((prev) => insertBeforeOpenAssistant(prev, {
 					role: "tool_call_request",
 					content: payload.description,
 					tool_name: payload.tool_name,
@@ -339,8 +390,7 @@ export function useBackendEvents({
 					target_app: payload.target_app,
 					approval_timeout_seconds: payload.timeout_seconds ?? 60,
 					timestamp: payload.timestamp,
-				},
-			]);
+			}));
 		}
 	);
 
@@ -451,7 +501,7 @@ export function useBackendEvents({
 				timestamp: Date.now(),
 			};
 
-			setConversationWithPruning((prev) => [...prev, thinkingMessage]);
+			setConversationWithPruning((prev) => insertBeforeOpenAssistant(prev, thinkingMessage));
 		}
 	);
 
@@ -482,18 +532,30 @@ export function useBackendEvents({
 			console.log("Thinking stream ended:", payload);
 			const { message_id, complete_text } = payload;
 
-			setConversationWithPruning((prev) =>
-				prev.map((msg) => {
+			setConversationWithPruning((prev) => {
+				const closed = prev.map((msg) => {
 					if (msg.messageId === message_id && msg.isStreaming && msg.role === "thinking") {
+						// Never let an empty end-payload erase text the chunks already
+						// delivered. The Claude CLI emits a thinking block with no
+						// `thinking_delta` at all, so `complete_text` arrives empty and
+						// used to overwrite good content — or leave an accordion that
+						// opens onto nothing.
 						return {
 							...msg,
-							content: complete_text,
+							content: complete_text?.trim() ? complete_text : msg.content,
 							isStreaming: false,
 						};
 					}
 					return msg;
-				})
-			);
+				});
+
+				// A reasoning surface that finished with nothing in it is noise: the
+				// trigger says "Thought for 3 seconds" and the panel is blank. Drop it
+				// rather than render an empty box.
+				return closed.filter(
+					(msg) => !(msg.role === "thinking" && !msg.isStreaming && !msg.content.trim())
+				);
+			});
 		}
 	);
 

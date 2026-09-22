@@ -13,6 +13,8 @@ export interface ProviderInfo {
     /** The provider lists this model as legacy. Hidden unless advanced
      * settings are on, or it is the model currently in use. */
     is_legacy: boolean;
+	/** Model drives the computer only through computer_toolset_20260801 (advanced). */
+	requires_computer_toolset?: boolean;
     /** Drives the computer, but only through a tool version Juno does not
      * send yet. Not a chat-only model — say so accurately. */
   }[];

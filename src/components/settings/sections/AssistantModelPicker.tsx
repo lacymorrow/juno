@@ -62,7 +62,10 @@ export default function AssistantModelPicker({
       (p) =>
         p.model_info &&
         p.model_info.some(
-          (m) => showAdvanced || !m.is_legacy || m.id === currentModelId
+          (m) =>
+            showAdvanced ||
+            (!m.is_legacy && !m.requires_computer_toolset) ||
+            m.id === currentModelId
         )
     );
     const active = withModels.filter((p) => p.id === settings.activeProvider);
@@ -83,7 +86,10 @@ export default function AssistantModelPicker({
   const visibleModels = useCallback(
     (models: typeof settings.providers[number]["model_info"]) =>
       models.filter(
-        (model) => showAdvanced || !model.is_legacy || model.id === currentModelId
+        (model) =>
+          showAdvanced ||
+          (!model.is_legacy && !model.requires_computer_toolset) ||
+          model.id === currentModelId
       ),
     [showAdvanced, currentModelId]
   );

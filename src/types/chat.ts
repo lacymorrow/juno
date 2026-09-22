@@ -30,6 +30,14 @@ export type ChatMessage = {
   tool_args?: any;
   tool_output?: any;
   success?: boolean;
+  /**
+   * The result line for a `tool_call_request` that has completed.
+   *
+   * A tool call and its result are one row, not two: `success` switches the row
+   * from running to done, and this carries the outcome text. `content` stays as
+   * the request description so the row keeps its title after it resolves.
+   */
+  result_content?: string;
   timestamp?: number;
   isStreaming?: boolean;
   messageId?: string;
