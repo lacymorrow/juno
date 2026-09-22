@@ -540,7 +540,9 @@ mod timer_tools_impl {
 
         let timer_task = TimerTask {
             id: timer_id.clone(),
-            trigger_time: max_duration_seconds.map(|d| now.saturating_add(d)).unwrap_or(u64::MAX),
+            trigger_time: max_duration_seconds
+                .map(|d| now.saturating_add(d))
+                .unwrap_or(u64::MAX),
             context: Value::Object(context),
             description: description.clone(),
             created_at: now,
@@ -785,7 +787,9 @@ mod timer_tools_impl {
 
         let timer_task = TimerTask {
             id: timer_id.clone(),
-            trigger_time: max_duration_seconds.map(|d| now.saturating_add(d)).unwrap_or(u64::MAX),
+            trigger_time: max_duration_seconds
+                .map(|d| now.saturating_add(d))
+                .unwrap_or(u64::MAX),
             context: Value::Object(context),
             description: description.clone(),
             created_at: now,
