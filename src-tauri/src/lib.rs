@@ -1163,6 +1163,16 @@ pub fn run() {
                             }
                         });
                     }
+                    // The event loop is over; the process is about to end. Any
+                    // persistent Claude CLI processes must die with it —
+                    // `kill_on_drop` covers a drop on a live runtime, not the app
+                    // being torn down around the children (their conversations
+                    // survive via their session ids on disk).
+                    tauri::RunEvent::Exit => {
+                        tauri::async_runtime::block_on(
+                            agent::providers::claude_cli_session::shutdown_all(),
+                        );
+                    }
                     _ => {}
                 }
             });

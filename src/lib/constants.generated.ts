@@ -487,6 +487,8 @@ export const COMMANDS = {
   SETTINGS_SET_AUTOSTART_ENABLED: 'set_autostart_enabled',
   SETTINGS_GET_ADVANCED_SETTINGS_ENABLED: 'get_advanced_settings_enabled',
   SETTINGS_SET_ADVANCED_SETTINGS_ENABLED: 'set_advanced_settings_enabled',
+  SETTINGS_GET_CLI_PERSISTENT_SESSION_ENABLED: 'get_cli_persistent_session_enabled',
+  SETTINGS_SET_CLI_PERSISTENT_SESSION_ENABLED: 'set_cli_persistent_session_enabled',
   CORE_GET_DEMO_INFO: 'get_demo_info',
   CORE_GET_DEBUG_MODE: 'get_debug_mode',
   CORE_SET_DEBUG_MODE: 'set_debug_mode',
