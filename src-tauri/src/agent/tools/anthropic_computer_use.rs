@@ -22,6 +22,9 @@ use tracing::{info, warn};
 
 /// Minimum milliseconds between consecutive UI-modifying actions (click, type, key).
 /// Prevents "clicked too fast" failures when the UI is still loading/animating.
+///
+/// One of TWO cooldowns — see [`enforce_action_cooldown`] before changing it.
+/// Do not lower it: the failures it prevents are real macOS behaviour.
 const ACTION_COOLDOWN_MS: u64 = 300;
 
 /// Timestamp (ms since epoch) of the last UI-modifying action.
@@ -217,6 +220,48 @@ fn is_ui_modifying_action(action: &str) -> bool {
 
 /// If the action is UI-modifying and the cooldown hasn't elapsed, sleep briefly.
 /// Records the current time for the next cooldown check.
+///
+/// # Two cooldowns exist, and they OVERLAP — they do not stack
+///
+/// Both of these are load bearing. Neither is redundant; neither may be
+/// lowered; do not "simplify" one of them away.
+///
+/// * **This floor** ([`ACTION_COOLDOWN_MS`], 300 ms) — applies to *every*
+///   UI-modifying action, measured from the previous one's own timestamp.
+///   Critically, it is the **sole** spacing for the AX-grounded paths of
+///   `left_click` / `right_click` / `double_click` / `type`: those press via
+///   the accessibility API and never touch the input arbiter at all.
+/// * **`InputArbiter::acquire`** (`DEFAULT_COOLDOWN`, 500 ms) — applies only
+///   to actions that take a physical-input guard, measured from the previous
+///   guard's *release*. It also serializes physical input across parallel
+///   agent sessions (LAC-1432), since macOS has one hardware pointer.
+///
+/// For the actions that hit both (this floor runs first, then `acquire`) it
+/// looks like up to 800 ms of sleeping per action. It is not. Both are sleeps
+/// to an *absolute deadline* computed from a past reference point, and
+/// sequential deadline-sleeps compose as `max`, never as a sum:
+///
+/// ```text
+///   action N-1:  this fn records its timestamp T0 AFTER its own sleep
+///                ... action executes ...
+///                guard drops at T = T0 + d   (d = execution time, d >= 0)
+///
+///   action N:    this fn sleeps until  T0 + 300ms
+///                acquire  sleeps until T  + 500ms
+///                => starts at max(T0 + 300, T + 500) = T + 500, since T >= T0
+/// ```
+///
+/// So whenever the arbiter is involved its 500 ms deadline dominates and this
+/// floor adds exactly zero. Skipping this floor for guard-taking actions would
+/// save nothing, and it would *break* the case where the previous action took
+/// the AX path: the arbiter's clock is then stale and this floor is the only
+/// spacing there is.
+///
+/// Observed spacing today: ~500 ms between guard-taking actions, ~300 ms
+/// between AX-path ones.
+///
+/// Note `InputArbiter::try_acquire` deliberately enforces nothing, so it never
+/// substitutes for this floor either.
 async fn enforce_action_cooldown(action: &str) {
     if !is_ui_modifying_action(action) {
         return;
@@ -1295,7 +1340,17 @@ pub async fn execute_computer_tool(
     )
     .await;
 
-    // Enforce cooldown between rapid UI actions to prevent "clicked too fast" failures
+    // Enforce cooldown between rapid UI actions to prevent "clicked too fast" failures.
+    //
+    // This is one of TWO cooldowns, and the two OVERLAP rather than stack —
+    // read `enforce_action_cooldown`'s docs before touching either. Short
+    // version: this 300 ms floor sleeps to a deadline measured from the last
+    // action's timestamp, `acquire()` below sleeps to a deadline measured from
+    // the last guard *release*, and because release always comes later, the
+    // arbiter's 500 ms deadline dominates for any action that takes a guard.
+    // Running both costs max(300, 500), not 800. Do not skip this call for
+    // guard-taking actions: it saves nothing, and it is the ONLY spacing the
+    // AX-grounded click/type paths below ever get.
     enforce_action_cooldown(action).await;
 
     // Serialize coordinate-based physical input across parallel sessions
@@ -1304,6 +1359,10 @@ pub async fn execute_computer_tool(
     // ALWAYS physical; the click/type actions that attempt AX-grounded
     // interaction first acquire the guard inside their physical fallback
     // blocks instead, so AX-only actions keep running in parallel.
+    //
+    // Whether those click/type actions take a guard at all is therefore a
+    // runtime outcome, which is the other reason the 300 ms floor above must
+    // run unconditionally: at that point nobody knows yet which branch wins.
     let always_physical = matches!(
         action,
         "middle_click"
@@ -1447,7 +1506,12 @@ pub async fn execute_computer_tool(
 
                     let mut outcome = None;
                     if !ax_result.used_ax_click {
-                        // Physical fallback — serialize with other sessions' input.
+                        // Physical fallback — serialize with other sessions' input. The
+                        // 300 ms action-cooldown floor already ran at the top of this
+                        // function; it does NOT stack with the 500 ms cooldown here,
+                        // because acquire() measures elapsed time after that sleep.
+                        // The AX branch above takes neither this guard nor its cooldown,
+                        // which is why the floor has to be unconditional up there.
                         let _guard = state_manager.input_arbiter().acquire(session_id).await;
                         // Process-targeted injection (SkyLight → CGEventPostToPid) bypasses AX
                         // and works on canvas, games, Chromium web content and non-AX apps.
@@ -1507,7 +1571,12 @@ pub async fn execute_computer_tool(
 
                     let mut outcome = None;
                     if !ax_result.used_ax_click {
-                        // Physical fallback — serialize with other sessions' input.
+                        // Physical fallback — serialize with other sessions' input. The
+                        // 300 ms action-cooldown floor already ran at the top of this
+                        // function; it does NOT stack with the 500 ms cooldown here,
+                        // because acquire() measures elapsed time after that sleep.
+                        // The AX branch above takes neither this guard nor its cooldown,
+                        // which is why the floor has to be unconditional up there.
                         let _guard = state_manager.input_arbiter().acquire(session_id).await;
                         outcome = Some(handle_anthropic_result!(
                             run_background_first(
@@ -1594,7 +1663,12 @@ pub async fn execute_computer_tool(
 
                     let mut outcome = None;
                     if !ax_result.used_ax_click {
-                        // Physical fallback — serialize with other sessions' input.
+                        // Physical fallback — serialize with other sessions' input. The
+                        // 300 ms action-cooldown floor already ran at the top of this
+                        // function; it does NOT stack with the 500 ms cooldown here,
+                        // because acquire() measures elapsed time after that sleep.
+                        // The AX branch above takes neither this guard nor its cooldown,
+                        // which is why the floor has to be unconditional up there.
                         let _guard = state_manager.input_arbiter().acquire(session_id).await;
                         outcome = Some(handle_anthropic_result!(
                             run_background_first(
@@ -1950,6 +2024,11 @@ pub async fn execute_computer_tool(
                         // paste is posted to the process the agent is working on
                         // after pointing input focus at it without raising it, so
                         // it cannot land in whatever app the user is looking at.
+                        //
+                        // As with the click fallbacks: the 300 ms action-cooldown
+                        // floor already ran at the top of this function and does
+                        // NOT stack with the 500 ms cooldown here. The AX typing
+                        // path above takes neither.
                         let _guard = state_manager.input_arbiter().acquire(session_id).await;
                         let preview: String = text
                             .chars()
@@ -2815,4 +2894,76 @@ pub async fn register_anthropic_computer_use_tools_with_version(
         tool_count
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod cooldown_tests {
+    use super::*;
+
+    /// Pins which actions pay the 300 ms `ACTION_COOLDOWN_MS` floor.
+    ///
+    /// This list must stay a superset of the actions that take the input
+    /// arbiter's guard, because for the AX-grounded paths of `left_click`,
+    /// `right_click`, `double_click` and `type` this floor is the ONLY
+    /// spacing there is — they never acquire a guard.
+    #[test]
+    fn ui_modifying_actions_are_the_paced_set() {
+        for action in [
+            "left_click",
+            "right_click",
+            "middle_click",
+            "double_click",
+            "triple_click",
+            "left_click_drag",
+            "mouse_move",
+            "left_mouse_down",
+            "left_mouse_up",
+            "key",
+            "hold_key",
+            "type",
+            "scroll",
+        ] {
+            assert!(
+                is_ui_modifying_action(action),
+                "{action} lost its action-cooldown floor"
+            );
+        }
+    }
+
+    /// Every action that unconditionally takes the input-arbiter guard in
+    /// `execute_computer_tool` must also be UI-modifying, so it is covered
+    /// by the 300 ms floor when the arbiter's own clock is stale (i.e. when
+    /// the previous action went down an AX path and took no guard).
+    #[test]
+    fn always_physical_actions_also_pay_the_floor() {
+        for action in [
+            "middle_click",
+            "triple_click",
+            "left_click_drag",
+            "mouse_move",
+            "left_mouse_down",
+            "left_mouse_up",
+            "key",
+            "hold_key",
+            "scroll",
+        ] {
+            assert!(
+                is_ui_modifying_action(action),
+                "{action} always takes the arbiter guard but is not UI-modifying; \
+                 after AX-only work the arbiter's clock is stale and this action \
+                 would have no spacing at all"
+            );
+        }
+    }
+
+    /// Read-only actions are paced by neither mechanism.
+    #[test]
+    fn read_only_actions_are_unpaced() {
+        for action in ["screenshot", "cursor_position", "wait", "zoom"] {
+            assert!(
+                !is_ui_modifying_action(action),
+                "{action} is read-only and must not pay the action-cooldown floor"
+            );
+        }
+    }
 }
