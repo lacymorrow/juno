@@ -554,6 +554,7 @@ mod tool_name_truth {
     use crate::agent::core::ToolDefinition;
     use crate::agent::tools::browser_tools::get_browser_tool_definitions;
     use crate::agent::tools::safari_tools::get_safari_tool_definitions;
+    use crate::agent::tools::tool_config::ToolConfigManager;
     use std::collections::BTreeSet;
 
     struct ToolFamily {
@@ -606,7 +607,7 @@ mod tool_name_truth {
     /// Direction 1: nothing may name a tool that does not exist.
     #[test]
     fn every_declared_tool_name_resolves_to_a_registered_tool() {
-        let config = super::super::tool_config::ToolConfigManager::default();
+        let config = ToolConfigManager::default();
 
         for family in families() {
             let registered = registered_names(&family);
@@ -618,12 +619,9 @@ mod tool_name_truth {
                 family.registration_site
             );
 
-            let in_settings = names_with_prefix(
-                config.tools.keys().map(String::as_str),
-                family.prefix,
-            );
-            let phantom_settings: Vec<&String> =
-                in_settings.difference(&registered).collect();
+            let in_settings =
+                names_with_prefix(config.tools.keys().map(String::as_str), family.prefix);
+            let phantom_settings: Vec<&String> = in_settings.difference(&registered).collect();
             assert!(
                 phantom_settings.is_empty(),
                 "tool_config.rs shows settings toggles for {} {} tool(s) that are \
@@ -643,10 +641,8 @@ mod tool_name_truth {
                 registered
             );
 
-            let in_mapping =
-                names_with_prefix(TOOL_CATEGORY_MAP.keys().copied(), family.prefix);
-            let phantom_mapping: Vec<&String> =
-                in_mapping.difference(&registered).collect();
+            let in_mapping = names_with_prefix(TOOL_CATEGORY_MAP.keys().copied(), family.prefix);
+            let phantom_mapping: Vec<&String> = in_mapping.difference(&registered).collect();
             assert!(
                 phantom_mapping.is_empty(),
                 "tool_mapping.rs categorizes {} {} tool name(s) that are never \
@@ -671,17 +667,14 @@ mod tool_name_truth {
     /// Direction 2: every real tool must be something the person can turn off.
     #[test]
     fn every_registered_tool_can_be_turned_off_in_settings() {
-        let config = super::super::tool_config::ToolConfigManager::default();
+        let config = ToolConfigManager::default();
 
         for family in families() {
             let registered = registered_names(&family);
-            let in_settings = names_with_prefix(
-                config.tools.keys().map(String::as_str),
-                family.prefix,
-            );
+            let in_settings =
+                names_with_prefix(config.tools.keys().map(String::as_str), family.prefix);
 
-            let untoggleable: Vec<&String> =
-                registered.difference(&in_settings).collect();
+            let untoggleable: Vec<&String> = registered.difference(&in_settings).collect();
             assert!(
                 untoggleable.is_empty(),
                 "{} {} tool(s) are registered but missing from tool_config.rs: {:?}.\n\
