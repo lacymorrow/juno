@@ -138,15 +138,11 @@ use crate::commands::enhanced_visual_reasoning_commands::{
     validate_visual_analysis_request,
 };
 
-// Import whisper model management commands
-use crate::commands::whisper_model::{
-    download_whisper_model, get_current_whisper_model, get_whisper_download_status,
-    get_whisper_models, set_whisper_model,
-};
-// Import STT engine + live-partial commands
-use crate::commands::stt::{
-    get_live_partial_transcription, get_stt_provider, get_system_arch,
-    set_live_partial_transcription, set_stt_provider,
+// Import speech-to-text model + live-partial commands
+use crate::commands::stt::{get_live_partial_transcription, set_live_partial_transcription};
+use crate::commands::stt_models::{
+    cancel_stt_model_download, decline_stt_model_offer, delete_stt_model, download_stt_model,
+    get_stt_models_status, use_stt_model,
 };
 
 // Added for selector parsing
@@ -691,18 +687,16 @@ pub fn run() {
             set_audio_level_monitoring,
             test_whisper_model,
             force_transcription_test,
-            // Whisper Model Management Commands
-            get_whisper_models,
-            get_current_whisper_model,
-            download_whisper_model,
-            set_whisper_model,
-            get_whisper_download_status,
-            // STT Engine + Live-Partial Commands
-            get_stt_provider,
-            set_stt_provider,
+            // Speech-to-Text Model Commands
+            get_stt_models_status,
+            download_stt_model,
+            cancel_stt_model_download,
+            use_stt_model,
+            delete_stt_model,
+            decline_stt_model_offer,
+            // Live-Partial Commands
             get_live_partial_transcription,
             set_live_partial_transcription,
-            get_system_arch,
             // Environment Commands
             load_bundled_environment,
             test_environment_variables,
@@ -891,19 +885,20 @@ pub fn run() {
             // --- Dock icon: honour the saved menu-bar-only preference ---
             commands::dock_icon::apply_saved_dock_icon_policy(&app_handle);
 
-            // --- Initialize Whisper Download State ---
+            // --- Initialize STT Model Download State ---
             app.manage(std::sync::Arc::new(std::sync::Mutex::new(
-                crate::commands::whisper_model::WhisperDownloadState::new(),
+                crate::commands::stt_models::SttDownloadState::new(),
             )));
 
-            // --- Honor persisted STT provider + live-partial mode at startup ---
+            // --- Honor persisted STT model + live-partial mode at startup ---
             // The voice plugin boots Whisper by default; this re-applies the saved
-            // engine choice and live-partial display mode once its background
+            // model choice and live-partial display mode once its background
             // engine init has had time to settle (best effort).
             let stt_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                crate::commands::stt::apply_persisted_stt_settings(&stt_app_handle).await;
+                crate::commands::stt::apply_persisted_live_partial(&stt_app_handle).await;
+                crate::commands::stt_models::apply_persisted_stt_model(&stt_app_handle).await;
             });
 
             // --- Initialize Application State Management ---

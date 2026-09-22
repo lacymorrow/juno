@@ -229,6 +229,22 @@ pub mod voice_trigger {
     pub const ENGINE_READY: &str = "voice-engine-ready";
 }
 
+/// Speech-to-text model downloads and switches. Payload fields are the same
+/// for every engine.
+pub mod stt_models {
+    /// Fields: model_id, bytes_downloaded, total_bytes, percent (0-100),
+    /// activate_when_done. One aggregate stream per download, even for a
+    /// multi-file model.
+    pub const DOWNLOAD_PROGRESS: &str = "stt-model-download-progress";
+    /// Fields: model_id, activated (bool: the engine switched to it).
+    pub const DOWNLOAD_COMPLETE: &str = "stt-model-download-complete";
+    /// Fields: model_id, error (string), cancelled (bool).
+    pub const DOWNLOAD_ERROR: &str = "stt-model-download-error";
+    /// The active model changed. Fields: model_id, automatic (bool: it was a
+    /// download finishing, not a tap on Use).
+    pub const CHANGED: &str = "stt-model-changed";
+}
+
 /// Always listening events
 pub mod always_listening {
     pub const MODE_CHANGED: &str = "always-listening-mode-changed";

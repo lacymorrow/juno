@@ -83,6 +83,17 @@ pub mod always_listening {
     pub const GET_ALWAYS_LISTENING_WAKE_WORDS: &str = "get_always_listening_wake_words";
 }
 
+/// Speech-to-text model commands. One surface for every engine: the UI passes
+/// a catalog id and the backend dispatches by engine.
+pub mod stt_models {
+    pub const GET_STATUS: &str = "get_stt_models_status";
+    pub const DOWNLOAD: &str = "download_stt_model";
+    pub const CANCEL_DOWNLOAD: &str = "cancel_stt_model_download";
+    pub const USE: &str = "use_stt_model";
+    pub const DELETE: &str = "delete_stt_model";
+    pub const DECLINE_OFFER: &str = "decline_stt_model_offer";
+}
+
 /// TTS command names
 pub mod tts {
     pub const INVOKE_TTS: &str = "invoke_tts";

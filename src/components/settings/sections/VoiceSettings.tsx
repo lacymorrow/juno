@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -9,7 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Download, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import { useState } from "react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
@@ -23,12 +22,6 @@ const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
 
 export default function VoiceSettings({ settings }: SettingsSectionProps) {
   const {
-    whisperModels,
-    currentWhisperModel,
-    whisperDownloading,
-    whisperDownloadProgress,
-    handleWhisperModelChange,
-    handleWhisperModelDownload,
     chatterboxReferenceAudioUrl,
     chatterboxExaggeration,
     chatterboxUseHd,
@@ -38,9 +31,6 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     supertonicSpeed,
     handleSupertonicSettingsChange,
   } = settings;
-
-  const selectedModel = whisperModels.find((m) => m.id === currentWhisperModel);
-  const downloadingModel = whisperModels.find((m) => m.id === whisperDownloading);
 
   // Local draft state for Chatterbox settings (save on blur/button)
   const [chatterboxRefUrl, setChatterboxRefUrl] = useState<string>(chatterboxReferenceAudioUrl ?? "");
@@ -266,115 +256,6 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             onCheckedChange={settings.handleLivePartialTranscriptionChange}
           />
         </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup
-        title="Speech-to-Text Model"
-        advanced
-        footer="Choose the Whisper model used for transcription. Larger models are more accurate but require a one-time download."
-      >
-        {whisperDownloading && (
-          <SettingsRow
-            below={
-              <div className="space-y-2 rounded-md border border-border p-3 bg-muted/40">
-                <p className="text-sm font-medium">
-                  Downloading {downloadingModel?.display_name ?? whisperDownloading}…
-                </p>
-                {whisperDownloadProgress ? (
-                  <>
-                    <Progress value={whisperDownloadProgress.percent} className="h-2" />
-                    <p className="text-xs text-muted-foreground">
-                      {(whisperDownloadProgress.bytes_downloaded / 1024 / 1024).toFixed(0)} MB
-                      {whisperDownloadProgress.total_bytes > 0
-                        ? ` / ${(whisperDownloadProgress.total_bytes / 1024 / 1024).toFixed(0)} MB`
-                        : ""}{" "}
-                      — {whisperDownloadProgress.percent.toFixed(0)}%
-                    </p>
-                  </>
-                ) : (
-                  <Progress className="h-2 animate-pulse" />
-                )}
-              </div>
-            }
-          />
-        )}
-
-        <SettingsRow
-          htmlFor="whisper-model"
-          label="Active Model"
-          description={
-            selectedModel
-              ? selectedModel.downloaded
-                ? `Active, ${selectedModel.size_mb} MB`
-                : `Not downloaded yet, ${selectedModel.size_mb} MB`
-              : undefined
-          }
-        >
-          <Select
-            value={currentWhisperModel}
-            onValueChange={(id) => {
-              const model = whisperModels.find((m) => m.id === id);
-              if (model?.downloaded) {
-                handleWhisperModelChange(id);
-              }
-            }}
-            disabled={!!whisperDownloading}
-          >
-            <SelectTrigger id="whisper-model" className="w-[220px]">
-              <SelectValue placeholder="Select model" />
-            </SelectTrigger>
-            <SelectContent>
-              {whisperModels.map((model) => (
-                <SelectItem
-                  key={model.id}
-                  value={model.id}
-                  disabled={!model.downloaded}
-                >
-                  {model.display_name}
-                  {model.is_default ? " (Recommended)" : ""}
-                  {!model.downloaded ? ", not downloaded" : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-
-        <SettingsRow
-          label="Download a Model"
-          below={
-            <div className="grid gap-2">
-              {whisperModels
-                .filter((m) => !m.downloaded)
-                .map((model) => (
-                  <div
-                    key={model.id}
-                    className="flex items-center justify-between rounded-md border border-border px-3 py-2"
-                  >
-                    <div>
-                      <p className="text-sm font-medium">{model.display_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {model.size_mb} MB
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleWhisperModelDownload(model.id)}
-                      disabled={!!whisperDownloading}
-                    >
-                      <Download className="mr-1 h-3 w-3" />
-                      Download
-                    </Button>
-                  </div>
-                ))}
-              {whisperModels.filter((m) => !m.downloaded).length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  All available models are downloaded.
-                </p>
-              )}
-            </div>
-          }
-        />
       </SettingsGroup>
     </div>
   );

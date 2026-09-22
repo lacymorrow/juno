@@ -140,6 +140,9 @@ describe("visibleCategories", () => {
       "triggers",
       "voice",
       "ai",
+      // Models is where the dictation model lives (Fast / Balanced / Most
+      // accurate); everyone gets to choose, so it is not advanced-gated.
+      "models",
       "notifications",
       "security",
     ]);
@@ -201,7 +204,7 @@ describe("searchRows", () => {
   });
 
   it("is case-insensitive", () => {
-    expect(searchRows("WHISPER").map((r) => r.rowId)).toContain("whisper-model");
+    expect(searchRows("WHISPER").map((r) => r.rowId)).toContain("model-row-tiny-en");
   });
 
   it("indexes every row against a real section id", () => {
