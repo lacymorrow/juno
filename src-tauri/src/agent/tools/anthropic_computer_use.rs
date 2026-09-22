@@ -24,7 +24,34 @@ use tracing::{info, warn};
 /// Prevents "clicked too fast" failures when the UI is still loading/animating.
 const ACTION_COOLDOWN_MS: u64 = 300;
 
-/// Timestamp (ms since epoch) of the last UI-modifying action.
+/// Process-start baseline for [`monotonic_now_ms`].
+///
+/// [`std::time::Instant`] is the only clock guaranteed to move forward, but it
+/// cannot live in an `AtomicU64`. Measuring from one fixed baseline gives a
+/// monotonic millisecond counter that can, so the cooldown stays lock-free.
+static MONOTONIC_BASELINE: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
+
+/// Milliseconds on the monotonic clock, counted from a process-start baseline.
+///
+/// Offset by one so a real reading is never `0`, which leaves `0` free to mean
+/// "no action recorded yet" in [`LAST_UI_ACTION_MS`].
+fn monotonic_now_ms() -> u64 {
+    (MONOTONIC_BASELINE.elapsed().as_millis() as u64).saturating_add(1)
+}
+
+/// Monotonic millisecond stamp of the last UI-modifying action; `0` if none.
+///
+/// Monotonic, **not** wall clock. This used to hold `SystemTime` millis since
+/// the epoch, which is a silent hazard: an NTP step *forward* makes the
+/// measured gap look large, the cooldown then sleeps zero, and the only pacing
+/// AX-path clicks and typing ever get disappears — precisely the "clicked too
+/// fast" failure [`ACTION_COOLDOWN_MS`] exists to prevent. A step *backward*
+/// was harmless by comparison (one spurious full-length sleep), so the
+/// dangerous direction was the one that produced no symptom in a log.
+///
+/// [`crate::agent::input_arbiter::InputArbiter`] already measures its own
+/// cooldown with `Instant`; this makes the two agree on what a clock is.
 static LAST_UI_ACTION_MS: AtomicU64 = AtomicU64::new(0);
 
 /// Monotonic counter for assigning unique cursor IDs to concurrent agent instances.
@@ -257,15 +284,16 @@ pub(crate) fn failure_halts_batch(tool_name: &str, input: &Value) -> bool {
 
 /// If the action is UI-modifying and the cooldown hasn't elapsed, sleep briefly.
 /// Records the current time for the next cooldown check.
+///
+/// Elapsed time is measured on the monotonic clock (see [`monotonic_now_ms`]),
+/// never on the wall clock: a wall-clock jump must not be able to cancel the
+/// pacing.
 async fn enforce_action_cooldown(action: &str) {
     if !is_ui_modifying_action(action) {
         return;
     }
 
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-        .as_millis() as u64;
+    let now_ms = monotonic_now_ms();
 
     let last_ms = LAST_UI_ACTION_MS.load(Ordering::Relaxed);
     if last_ms > 0 {
@@ -282,12 +310,8 @@ async fn enforce_action_cooldown(action: &str) {
         }
     }
 
-    // Record this action's timestamp
-    let final_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-        .as_millis() as u64;
-    LAST_UI_ACTION_MS.store(final_ms, Ordering::Relaxed);
+    // Record this action's timestamp, re-read after any sleep.
+    LAST_UI_ACTION_MS.store(monotonic_now_ms(), Ordering::Relaxed);
 }
 
 // --- Computer Use Safety Checks ---
@@ -2976,5 +3000,80 @@ mod hold_key_duration_tests {
             .unwrap_or_default();
         assert!(message.contains("seconds"));
         assert!(message.contains("milliseconds"));
+    }
+}
+
+/// The action cooldown must be paced by a clock that only moves forward.
+#[cfg(test)]
+mod action_cooldown_tests {
+    use super::*;
+
+    #[test]
+    fn monotonic_now_ms_never_returns_the_sentinel() {
+        // `0` means "no action recorded yet". A real reading must never
+        // collide with it, or the first action after process start would be
+        // treated as "never happened" a second time.
+        assert!(monotonic_now_ms() > 0);
+    }
+
+    #[test]
+    fn monotonic_now_ms_does_not_go_backwards() {
+        let first = monotonic_now_ms();
+        let second = monotonic_now_ms();
+        assert!(
+            second >= first,
+            "monotonic clock went backwards: {first} then {second}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_only_actions_are_not_paced() {
+        // A screenshot changes nothing on screen, so it must not pay the
+        // cooldown.
+        let start = std::time::Instant::now();
+        enforce_action_cooldown("screenshot").await;
+        enforce_action_cooldown("cursor_position").await;
+        enforce_action_cooldown("wait").await;
+        enforce_action_cooldown("zoom").await;
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(ACTION_COOLDOWN_MS),
+            "read-only actions slept; they took {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn consecutive_ui_actions_are_separated_by_the_cooldown() {
+        // Prime the stamp, then time the next one. The gap between the two
+        // returns is what a real click-then-type sequence sees.
+        enforce_action_cooldown("left_click").await;
+        let start = std::time::Instant::now();
+        enforce_action_cooldown("type").await;
+        let elapsed = start.elapsed();
+        // Tolerate the millisecond or two that may pass between the priming
+        // call returning and `start` being taken.
+        let floor = std::time::Duration::from_millis(ACTION_COOLDOWN_MS)
+            .saturating_sub(std::time::Duration::from_millis(10));
+        assert!(
+            elapsed >= floor,
+            "second UI action ran {:?} after the first, cooldown is {}ms",
+            elapsed,
+            ACTION_COOLDOWN_MS
+        );
+    }
+
+    #[tokio::test]
+    async fn the_cooldown_stamp_is_monotonic_millis_not_epoch_millis() {
+        // The regression guard. Epoch millis are ~1.7e12 and climbing; millis
+        // since process start are small. If this ever reads like a wall-clock
+        // timestamp again, a forward NTP step can make the measured gap look
+        // enormous and skip the sleep entirely — the failure this fix removes.
+        enforce_action_cooldown("left_click").await;
+        let stamp = LAST_UI_ACTION_MS.load(Ordering::Relaxed);
+        assert!(stamp > 0, "a UI action must record a stamp");
+        assert!(
+            stamp < 1_000_000_000,
+            "cooldown stamp {stamp} looks like epoch millis, not monotonic millis"
+        );
     }
 }
