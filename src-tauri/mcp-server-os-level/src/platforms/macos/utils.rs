@@ -187,8 +187,14 @@ pub(crate) fn element_contains_text(e: &AXUIElement, text: &str) -> bool {
     contains_in_title || contains_in_desc
 }
 
-/// Captures a screenshot of the main display and encodes it as base64 PNG.
-pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
+/// Captures a screenshot of the display containing the cursor and returns the raw
+/// image buffer, with no PNG or base64 encoding applied.
+///
+/// This is the zero-encode sibling of [`capture_and_encode_screenshot`]. Callers that
+/// re-encode the image themselves (resize + JPEG, for example) should use this instead:
+/// the PNG encode plus base64 round-trip in `capture_and_encode_screenshot` costs roughly
+/// 180ms per capture at 1920x1080 and is pure waste when the PNG is immediately discarded.
+pub fn capture_screenshot_buffer() -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
     // 1. Get current cursor position
     let cursor_point = {
         // Use kCGEventSourceStateHIDSystemState to get the event source for system events
@@ -226,6 +232,17 @@ pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
     // 3. Capture the specific display (uses ScreenCaptureKit when available)
     let buffer = capture_display_buffer(Some(target_display_id))?;
     debug!("Captured screenshot for display ID: {}", target_display_id);
+
+    Ok(buffer)
+}
+
+/// Captures a screenshot of the main display and encodes it as base64 PNG.
+///
+/// Behaviour is unchanged for existing callers: this performs exactly the same capture
+/// as before (now shared with `capture_screenshot_buffer`) followed by the same PNG +
+/// base64 encode it always did.
+pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
+    let buffer = capture_screenshot_buffer()?;
 
     // 4. Encode
     encode_imagebuffer_to_base64_png(&buffer)
