@@ -552,10 +552,10 @@ impl Desktop {
                             },
                         );
                         props.insert(
-                            "duration".to_string(),
+                            "duration_ms".to_string(),
                             ToolParameter {
                                 type_: "number".to_string(),
-                                description: "Duration in milliseconds for wait or hold_key actions.".to_string(),
+                                description: "Duration in MILLISECONDS for wait or hold_key actions. The unit is in the name: this server takes milliseconds, unlike Anthropic's canonical computer tool where a bare 'duration' means seconds. A legacy 'duration' key is still accepted here and is also milliseconds.".to_string(),
                             },
                         );
                         props
@@ -1543,7 +1543,11 @@ impl Desktop {
                     text: Option<String>,
                     scroll_direction: Option<String>,
                     scroll_amount: Option<f64>,
-                    duration: Option<u64>,
+                    /// Milliseconds. The unit is in the name because a bare
+                    /// `duration` means seconds in Anthropic's canonical computer
+                    /// tool; the alias keeps older MCP clients working.
+                    #[serde(alias = "duration")]
+                    duration_ms: Option<u64>,
                 }
                 let parsed_args: ComputerArgs = from_value(args).map_err(|e| {
                     AutomationError::InvalidArgument(format!("Error parsing computer args: {}", e))
@@ -1715,7 +1719,7 @@ impl Desktop {
                                 "text (key name) required for hold_key action".to_string(),
                             )
                         })?;
-                        self.hold_key(&key, parsed_args.duration)?;
+                        self.hold_key(&key, parsed_args.duration_ms)?;
                         Ok(json!({"status": "success"}))
                     }
                     "scroll" => {
@@ -1738,12 +1742,12 @@ impl Desktop {
                         Ok(json!({"status": "success"}))
                     }
                     "wait" => {
-                        let duration = parsed_args.duration.ok_or_else(|| {
+                        let duration_ms = parsed_args.duration_ms.ok_or_else(|| {
                             AutomationError::InvalidArgument(
-                                "duration required for wait action".to_string(),
+                                "duration_ms (milliseconds) required for wait action".to_string(),
                             )
                         })?;
-                        self.wait(duration)?;
+                        self.wait(duration_ms)?;
                         Ok(json!({"status": "success"}))
                     }
                     "cursor_position" => {

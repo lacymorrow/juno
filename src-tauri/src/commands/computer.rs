@@ -20,7 +20,15 @@ pub struct ComputerInput {
     pub scroll_count: Option<i32>,
     #[serde(rename = "scrollDirection")]
     pub scroll_direction: Option<String>,
-    pub duration: Option<u64>,
+    /// Milliseconds, for the `hold_key` and `wait` actions.
+    ///
+    /// The unit is in the name on purpose. The agent-facing `computer` tool
+    /// follows Anthropic's schema, where a bare `duration` means SECONDS
+    /// (see `agent/tools/anthropic_computer_use.rs`), so a bare `duration`
+    /// here would mean two different things in two places. The `duration`
+    /// alias keeps older callers working; no in-tree caller sends either.
+    #[serde(alias = "duration")]
+    pub duration_ms: Option<u64>,
 }
 
 /// Computer action result structure
@@ -474,16 +482,16 @@ async fn handle_hold_key(
         .as_ref()
         .ok_or("Hold key action requires text parameter")?;
 
-    let duration = input.duration.unwrap_or(1000);
+    let duration_ms = input.duration_ms.unwrap_or(1000);
 
-    crate::commands::keyboard::hold_key(key.clone(), Some(duration), app_handle.clone(), state)
+    crate::commands::keyboard::hold_key(key.clone(), Some(duration_ms), app_handle.clone(), state)
         .await
         .map_err(|e| format!("Hold key failed: {}", e))?;
 
     Ok(ComputerResult {
         success: true,
         action: "hold_key".to_string(),
-        message: Some(format!("Held key {} for {}ms", key, duration)),
+        message: Some(format!("Held key {} for {}ms", key, duration_ms)),
         screenshot: None,
         error: None,
         coordinate: None,
@@ -491,14 +499,14 @@ async fn handle_hold_key(
 }
 
 async fn handle_wait(input: &ComputerInput) -> Result<ComputerResult, String> {
-    let duration = input.duration.unwrap_or(1000);
+    let duration_ms = input.duration_ms.unwrap_or(1000);
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(duration)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(duration_ms)).await;
 
     Ok(ComputerResult {
         success: true,
         action: "wait".to_string(),
-        message: Some(format!("Waited for {}ms", duration)),
+        message: Some(format!("Waited for {}ms", duration_ms)),
         screenshot: None,
         error: None,
         coordinate: None,
