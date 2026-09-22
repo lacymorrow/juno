@@ -273,6 +273,42 @@ const WORKING_STATES: readonly string[] = [
   UI.BAR_STATES_STOPPING,
 ];
 
+/**
+ * The activity-indicator flame for a bar state: which colour, how bright, and
+ * whether it breathes. `null` means no flame (idle). The colour/intensity are a
+ * small language:
+ *   blue  = Juno's own listening / working    green = your dictation input
+ *   red   = error                             dim   = ambient, bright = engaged
+ *   pulse = ongoing work (thinking / processing / ambient wait)
+ * Named states win over the generic working fallback, because TRANSCRIBING is
+ * itself a working state but belongs to the your-input (green) family.
+ */
+export function flameForState(
+  state: string,
+  isWorking: boolean,
+  sessionColor: string,
+): { color: string; intensity: number; pulse: boolean } | null {
+  switch (state) {
+    case UI.BAR_STATES_DICTATING:
+      return { color: "#30D158", intensity: 0.2, pulse: false }; // green: your speech -> text
+    case UI.BAR_STATES_TRANSCRIBING:
+      return { color: "#30D158", intensity: 0.13, pulse: true }; // green breathe: converting your speech
+    case UI.BAR_STATES_LISTENING:
+      return { color: "#0A84FF", intensity: 0.2, pulse: false }; // blue: listening to your request
+    case UI.BAR_STATES_ALWAYS_LISTENING:
+      return { color: "#0A84FF", intensity: 0.07, pulse: true }; // dim blue breathe: ambient wait
+    case UI.BAR_STATES_ERROR:
+      return { color: "#FF453A", intensity: 0.24, pulse: false }; // red: something failed
+    default:
+      break;
+  }
+  if (isWorking) {
+    // Agent working: the focused session's own colour, breathing.
+    return { color: sessionColor, intensity: 0.22, pulse: true };
+  }
+  return null;
+}
+
 /** Is a point within a rect? Exported for the hover hit-test tests. */
 export function pointInRect(
   x: number,
@@ -1251,36 +1287,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const showRosterStrip = agentSessions.length >= 2;
 
   // === ACTIVITY INDICATOR (bar flame border) ===
-  // A quick flash when dictation / transcription starts, a steady low ember
-  // while the agent works. The colour follows the focused session, so parallel
-  // agents read apart and the border eases between their colours; a bare capture
-  // flash is system blue. Mounted only while active, so idle costs no GPU.
-  const CAPTURE_STATES: string[] = [
-    UI.BAR_STATES_LISTENING,
-    UI.BAR_STATES_DICTATING,
-    UI.BAR_STATES_TRANSCRIBING,
-  ];
+  // The border lights up and HOLDS while Juno is doing something; colour and
+  // intensity name the mode (see flameForState). The agent-working colour
+  // follows the focused session so parallel agents read apart.
   const focusedSessionColor =
     agentSessions.find((s) => s.focused)?.display_color ?? "#0A84FF";
-  const [flameFlash, setFlameFlash] = useState(false);
-  const prevBarStateRef = useRef(currentUiState);
-  useEffect(() => {
-    const entered =
-      CAPTURE_STATES.includes(currentUiState) &&
-      !CAPTURE_STATES.includes(prevBarStateRef.current);
-    prevBarStateRef.current = currentUiState;
-    if (!entered) return;
-    setFlameFlash(true);
-    const t = setTimeout(() => setFlameFlash(false), 450);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUiState]);
-
-  const flameActive = isWorking || flameFlash;
-  // A capture flash before any agent work is system blue; once she is working,
-  // the border takes the focused session's colour.
-  const flameColor = flameFlash && !isWorking ? "#0A84FF" : focusedSessionColor;
-  const flameIntensity = flameFlash ? 0.5 : 0.15;
+  const flame = flameForState(currentUiState, isWorking, focusedSessionColor);
 
   const layout = pickLayout({
     state: currentUiState,
@@ -1897,13 +1909,14 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         )}
         style={{ width: pill.width, height: pill.height }}
       >
-        {/* Activity indicator: a flash on dictation/transcription start, a
-            steady low ember while the agent works. Behind the content, mounted
-            only while active. */}
-        {flameActive && (
+        {/* Activity indicator: a lit border whose colour + intensity name the
+            mode (dictation, transcription, listening, working, error). Behind
+            the content, mounted only while active. */}
+        {flame && (
           <BarFlameBorder
-            color={flameColor}
-            intensity={flameIntensity}
+            color={flame.color}
+            intensity={flame.intensity}
+            pulse={flame.pulse}
             radius={pill.height / 2}
           />
         )}
