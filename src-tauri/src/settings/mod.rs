@@ -162,7 +162,11 @@ pub struct CloudSettings {
     /// `MIN_HEARTBEAT_INTERVAL`/`MAX_HEARTBEAT_INTERVAL` (10..=300 seconds).
     pub heartbeat_interval: u64,
     /// Seconds a cloud-dispatched command may run before it is abandoned.
-    /// Validated as `1..=3600`, i.e. up to one hour.
+    /// Defaults to `defaults::CLOUD_COMMAND_TIMEOUT_SECONDS`, which is the one
+    /// source for this value; `CloudConfig` reads it from here.
+    ///
+    /// Unlike `CLISettings::command_timeout` — a different field that happens
+    /// to share the name — nothing validates this one on the way in.
     pub command_timeout: u64,
     pub security_level: String,
 }
@@ -475,7 +479,7 @@ impl Default for CloudSettings {
             auto_connect: defaults::AUTO_CONNECT,
             reconnect_interval: 30,
             heartbeat_interval: 60,
-            command_timeout: 30,
+            command_timeout: defaults::CLOUD_COMMAND_TIMEOUT_SECONDS,
             // New configs default to the most restrictive level (2026-09 security audit)
             security_level: "high".to_string(),
         }

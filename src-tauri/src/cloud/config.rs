@@ -94,7 +94,7 @@ pub struct CloudConfig {
     pub auto_connect: bool,
     pub reconnect_interval: u64, // seconds
     pub heartbeat_interval: u64, // seconds
-    pub command_timeout: u64,    // seconds - generous timeout
+    pub command_timeout: u64,    // seconds
     pub security_level: SecurityLevel,
     pub allowed_commands: Vec<String>, // All commands allowed by default
     pub denied_commands: Vec<String>,  // Only truly destructive commands
@@ -121,7 +121,10 @@ impl Default for CloudConfig {
             auto_connect: true,
             reconnect_interval: 30,
             heartbeat_interval: 60,
-            command_timeout: 600,
+            // Same source as `CloudSettings::default()`. This impl used to
+            // declare 600 on its own, but `from_centralized_settings` overwrites
+            // it from the stored settings, so 30 was always the value that ran.
+            command_timeout: crate::constants::settings::defaults::CLOUD_COMMAND_TIMEOUT_SECONDS,
             // New configs default to the most restrictive level; the stored level
             // is preserved on load and never downgraded (2026-09 security audit).
             security_level: SecurityLevel::High,
@@ -421,6 +424,33 @@ mod tests {
         let config = CloudConfig::default();
         assert!(!config.enabled);
         assert!(matches!(config.security_level, SecurityLevel::High));
+    }
+
+    #[test]
+    fn the_two_command_timeout_defaults_agree_and_name_their_unit() {
+        // They used to be 600 here and 30 in settings, and since the config is
+        // built from settings the 600 was never the value that ran. One source
+        // now, in seconds, and the conservative one.
+        let from_config = CloudConfig::default().command_timeout;
+        let from_settings = CloudSettings::default().command_timeout;
+        assert_eq!(from_config, from_settings);
+        assert_eq!(
+            from_config,
+            crate::constants::settings::defaults::CLOUD_COMMAND_TIMEOUT_SECONDS
+        );
+        assert_eq!(from_config, 30);
+    }
+
+    #[test]
+    fn a_config_built_from_settings_carries_the_stored_command_timeout() {
+        let settings = CloudSettings {
+            command_timeout: 90,
+            ..Default::default()
+        };
+        assert_eq!(
+            CloudConfig::from_centralized_settings(&settings).command_timeout,
+            90
+        );
     }
 
     #[test]

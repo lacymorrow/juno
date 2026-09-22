@@ -155,6 +155,20 @@ pub mod defaults {
     pub const AGENT_TRIGGER_MODE: &str = "tap";
     pub const CLOUD_ENABLED: bool = false;
     pub const AUTO_CONNECT: bool = false;
+    /// Seconds a cloud-dispatched command may run before it is abandoned.
+    ///
+    /// The single source for this default. `CloudConfig::default()` used to
+    /// carry its own value of 600 while `CloudSettings::default()` carried 30,
+    /// and since `CloudConfig` is built from the stored settings the effective
+    /// default was always 30 — the config advertised a ten-minute default it
+    /// never got to apply. The conservative value wins: a cloud-dispatched
+    /// command that hangs should be given up on in half a minute, not ten, and
+    /// picking 30 keeps the behaviour every existing install already has.
+    ///
+    /// Not validated on the way in: `set_cloud_settings` checks only the
+    /// heartbeat interval. The `1..=3600` range belongs to `CLISettings`, which
+    /// has a separate field of the same name.
+    pub const CLOUD_COMMAND_TIMEOUT_SECONDS: u64 = 30;
     pub const AUTOSTART_ENABLED: bool = false;
     /// The settings window shows the trimmed "basic" set until the user opts in.
     pub const ADVANCED_SETTINGS_ENABLED: bool = false;
