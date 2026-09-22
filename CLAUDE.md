@@ -172,6 +172,8 @@ Alternative to direct API keys — uses the locally installed `claude` binary (C
 
 **Key flags**:
 - `-p` — Print mode (non-interactive, pipe-friendly)
+- `--include-partial-messages` — Raw streaming events, not just finished messages. This is what makes reasoning, tool names and tool arguments visible *while* Claude works; without it the first visible text lands only at the end of the turn. A `claude` too old to accept it exits non-zero with empty stdout, so `run_streaming` retries once with the flag stripped and latches `PARTIAL_MESSAGES_UNSUPPORTED` for the session (degraded, never failed).
+- `--effort <low|medium|high|xhigh|max>` — Hidden advanced setting (`providers[].effort` in the settings store, no UI), default `high`. An unrecognised value is dropped rather than forwarded.
 - `--strict-mcp-config` — Only MCP servers from `--mcp-config` load; user-level servers never do
 - `--mcp-config <path>` — Added when `juno-cua` is detected: wires Juno's computer-use tools (screenshot, click, mouse_move, type, scroll) in via the `juno-cua serve-mcp` stdio server (LAC-3696)
 - `--append-system-prompt` — Added alongside `--mcp-config`: steers the model toward the MCP tools instead of `cliclick`/`screencapture` via Bash

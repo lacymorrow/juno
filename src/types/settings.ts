@@ -23,6 +23,12 @@ export interface ProviderSettings {
   max_tokens?: number;
   temperature?: number;
   system_prompt?: string;
+  /**
+   * How hard the model thinks per turn, where the provider exposes it.
+   * Hidden advanced setting: the backend owns it and no UI edits it. Listed
+   * here only so the type matches the Rust `ProviderConfig` it comes from.
+   */
+  effort?: string;
 }
 
 export interface ToolConfig {
