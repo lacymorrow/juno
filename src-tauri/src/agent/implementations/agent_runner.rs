@@ -459,30 +459,46 @@ where
             self.add_tool_result_to_memory(tool_call, tool_result)
                 .await?;
 
-            // Halt on first failure. A batch is an ordered plan — `left_click`
-            // then `type` then `key Return`. If the click missed, running the
-            // rest types into whatever window happens to be focused. Stop, let
-            // the model read the error result, and let it re-plan.
+            // Halt the rest of the batch when a UI-mutating action failed. A batch
+            // of physical actions is an ordered plan — `left_click` then `type`
+            // then `key Return` — so a missed click must not be followed by typing
+            // into whatever window happens to be focused. Independent tools (file
+            // reads, read-only computer actions) keep going: the model still gets
+            // the error, and stopping them would cost a round trip for no safety.
+            // `failure_halts_batch` owns that trade and documents it.
             //
             // No retry here on purpose: `run_computer_action` already retries
             // internally (AX-grounded click with a coordinate fallback). A second
             // retry layer would hide the failure from the model and risk clicking
             // the wrong thing twice.
             if tool_failed {
+                let halt = crate::agent::tools::anthropic_computer_use::failure_halts_batch(
+                    &tool_call.name,
+                    &tool_call.input,
+                );
                 log::warn!(
-                    "Tool '{}' failed at {}/{} in batch — halting the remaining {} tool call(s)",
+                    "Tool '{}' failed at {}/{} in batch — {}",
                     tool_call.name,
                     i + 1,
                     batch.len(),
-                    batch.len().saturating_sub(i + 1)
+                    if halt {
+                        format!(
+                            "halting the remaining {} tool call(s)",
+                            batch.len().saturating_sub(i + 1)
+                        )
+                    } else {
+                        "continuing: the failure is not order-sensitive".to_string()
+                    }
                 );
-                self.record_unexecuted_after_failure(batch, start_index, i, tool_results_cache)
-                    .await?;
-                // A failure halt is NOT a cancellation. `Ok(false)` means
-                // "cancelled" and makes the caller raise `AgentError::Terminated`,
-                // ending the run. Here the agent loop must keep going so the model
-                // sees the error plus the skipped results and decides what to do.
-                return Ok(true);
+                if halt {
+                    self.record_unexecuted_after_failure(batch, start_index, i, tool_results_cache)
+                        .await?;
+                    // A failure halt is NOT a cancellation. `Ok(false)` means
+                    // "cancelled" and makes the caller raise `AgentError::Terminated`,
+                    // ending the run. Here the agent loop must keep going so the model
+                    // sees the error plus the skipped results and decides what to do.
+                    return Ok(true);
+                }
             }
         }
 
@@ -1843,5 +1859,76 @@ mod batch_halt_tests {
             BATCH_HALT_SKIPPED_MESSAGE,
             "Not executed: an earlier computer action in this turn failed."
         );
+    }
+
+    // --- Which failures halt the batch ---
+
+    use crate::agent::tools::anthropic_computer_use::failure_halts_batch;
+
+    fn computer(action: &str) -> serde_json::Value {
+        serde_json::json!({ "action": action, "coordinate": [100, 200] })
+    }
+
+    #[test]
+    fn ui_mutating_computer_actions_halt() {
+        for action in [
+            "left_click",
+            "right_click",
+            "middle_click",
+            "double_click",
+            "triple_click",
+            "left_click_drag",
+            "mouse_move",
+            "left_mouse_down",
+            "left_mouse_up",
+            "key",
+            "hold_key",
+            "type",
+            "scroll",
+        ] {
+            assert!(
+                failure_halts_batch("computer", &computer(action)),
+                "{action} should halt the batch"
+            );
+        }
+    }
+
+    #[test]
+    fn read_only_computer_actions_do_not_halt() {
+        // A failed screenshot changes nothing on screen, and the clicks behind it
+        // were planned against an earlier screenshot. The model gets the error.
+        for action in ["screenshot", "cursor_position", "wait", "zoom"] {
+            assert!(
+                !failure_halts_batch("computer", &computer(action)),
+                "{action} should not halt the batch"
+            );
+        }
+    }
+
+    #[test]
+    fn independent_tools_do_not_halt() {
+        for name in [
+            "read_file",
+            "bash",
+            "capture_screenshot",
+            "browser_navigate",
+            "str_replace_based_edit_tool",
+        ] {
+            assert!(
+                !failure_halts_batch(name, &serde_json::json!({ "path": "/tmp/x" })),
+                "{name} should not halt the batch"
+            );
+        }
+    }
+
+    #[test]
+    fn computer_call_with_unreadable_action_halts() {
+        // Safe direction: the call may already have moved the pointer or typed.
+        assert!(failure_halts_batch("computer", &serde_json::json!({})));
+        assert!(failure_halts_batch(
+            "computer",
+            &serde_json::json!({ "action": 7 })
+        ));
+        assert!(failure_halts_batch("computer", &serde_json::Value::Null));
     }
 }

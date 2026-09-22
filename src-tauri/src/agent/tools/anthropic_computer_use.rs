@@ -205,7 +205,11 @@ fn extract_coordinate(input: &Value) -> Option<(f64, f64)> {
 
 /// Returns true if the action modifies the UI (click, type, key, scroll, drag).
 /// Read-only actions (screenshot, cursor_position, wait) skip the cooldown.
-fn is_ui_modifying_action(action: &str) -> bool {
+///
+/// This is the single list of physically-mutating actions. It drives both the
+/// inter-action cooldown and [`failure_halts_batch`] — add new mutating actions
+/// here, never to a second copy.
+pub(crate) fn is_ui_modifying_action(action: &str) -> bool {
     matches!(
         action,
         "left_click"
@@ -222,6 +226,42 @@ fn is_ui_modifying_action(action: &str) -> bool {
             | "type"
             | "scroll"
     )
+}
+
+/// Whether a failed tool call should stop the rest of the batch it belongs to.
+///
+/// **The scope is deliberately narrow — read this before widening or narrowing it.**
+///
+/// A batch of physical desktop actions is an ordered plan: `left_click`, then
+/// `type`, then `key Return`. If the click missed, the remaining actions land in
+/// whatever window happens to be focused, so they must not run. That is a real
+/// safety problem, and it is the reason the halt exists.
+///
+/// Nothing else in a batch has that property. Two failed file reads are
+/// independent; halting the second because the first failed costs a model
+/// round trip and buys no safety. Read-only computer actions are the same:
+/// a failed `screenshot` or `cursor_position` changes nothing on screen, the
+/// model still receives the error, and the clicks that follow were already
+/// planned against an earlier screenshot — so a failing `screenshot` does *not*
+/// halt the clicks behind it.
+///
+/// The action name is taken from `input.action` for the `computer` tool, and
+/// from the tool's own name otherwise, then matched against
+/// [`is_ui_modifying_action`]. Reusing that one list is the point: a new
+/// mutating action added there is covered here for free, and no file, browser
+/// or shell tool can ever match it.
+///
+/// A `computer` call whose action is missing or not a string halts. Such a call
+/// may already have moved the pointer or typed, and halting costs a round trip
+/// while continuing can type into the wrong window.
+pub(crate) fn failure_halts_batch(tool_name: &str, input: &Value) -> bool {
+    if tool_name == "computer" {
+        return match input.get("action").and_then(Value::as_str) {
+            Some(action) => is_ui_modifying_action(action),
+            None => true,
+        };
+    }
+    is_ui_modifying_action(tool_name)
 }
 
 /// If the action is UI-modifying and the cooldown hasn't elapsed, sleep briefly.
