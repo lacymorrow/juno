@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::env;
 use tracing::{debug, info};
 
-use crate::agent::providers::types::model_ids;
+use crate::agent::providers::types::Provider;
 use crate::agent::{
     core::{AgentAction, AgentError, Message, Role, ToolDefinition},
     traits::AgentBrain,
@@ -29,10 +29,12 @@ impl RigBrain {
             .ok_or_else(|| {
                 AgentError::ConfigurationError("OpenAI API key not found for Rig provider".into())
             })?;
+        // No hardcoded ID here — the catalog owns the default, so this can
+        // never point at a model Juno has dropped.
         let model = config
             .model
             .clone()
-            .unwrap_or_else(|| model_ids::OPENAI_CUA.to_string());
+            .unwrap_or_else(|| Provider::Rig.default_model().to_string());
         Ok(Self {
             openai_api_key,
             model,
