@@ -17,6 +17,9 @@ pub mod mouse_button_monitor;
 pub mod share_sheet;
 /// Passive stop-key (Escape) observer — macOS implementation plus stubs elsewhere.
 pub mod stop_key_monitor; // Passive mouse-button trigger observer
+/// Recognising Juno's own synthesized keyboard events (macOS only).
+#[cfg(target_os = "macos")]
+pub mod synthetic_events;
 
 #[cfg(target_os = "windows")]
 pub mod windows;

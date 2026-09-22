@@ -61,3 +61,44 @@ extern "C" {
         out: *mut ::std::os::raw::c_void,
     ) -> i32;
 }
+
+// Keyboard layout resolution (Text Input Sources + UCKeyTranslate), used to
+// find the key code that produces "v" under the Command modifier in the
+// current layout. Dvorak-QWERTY-Command maps the Command layer differently
+// from the unmodified layout, so the code cannot be assumed to be ANSI V.
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    /// The keyboard layout the current input source resolves to
+    /// (a `TISInputSourceRef`, returned owned per the Copy rule).
+    pub(crate) fn TISCopyCurrentKeyboardLayoutInputSource() -> *mut ::std::os::raw::c_void;
+
+    /// Borrowed property of an input source (`CFTypeRef`, NOT owned).
+    pub(crate) fn TISGetInputSourceProperty(
+        input_source: *mut ::std::os::raw::c_void,
+        property_key: core_foundation::string::CFStringRef,
+    ) -> *mut ::std::os::raw::c_void;
+
+    /// Property key: `CFDataRef` holding the 'uchr' keyboard layout data.
+    pub(crate) static kTISPropertyUnicodeKeyLayoutData: core_foundation::string::CFStringRef;
+
+    /// Property key: `CFStringRef` uniquely identifying the input source.
+    pub(crate) static kTISPropertyInputSourceID: core_foundation::string::CFStringRef;
+
+    /// Translate a virtual key code + modifier state to the characters it
+    /// would produce under the given 'uchr' layout data.
+    pub(crate) fn UCKeyTranslate(
+        key_layout_ptr: *const ::std::os::raw::c_void,
+        virtual_key_code: u16,
+        key_action: u16,
+        modifier_key_state: u32,
+        keyboard_type: u32,
+        key_translate_options: u32,
+        dead_key_state: *mut u32,
+        max_string_length: libc::c_ulong,
+        actual_string_length: *mut libc::c_ulong,
+        unicode_string: *mut u16,
+    ) -> i32;
+
+    /// The hardware keyboard type UCKeyTranslate expects.
+    pub(crate) fn LMGetKbdType() -> u8;
+}

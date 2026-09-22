@@ -224,48 +224,18 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
     if let Some(text) = extracted_text {
         let trimmed_text = text.trim();
         if !trimmed_text.is_empty() {
-            let app_state = app_handle.state::<state::AppState>();
-
-            // Store to clipboard if enabled
-            let clipboard_enabled = app_state.get_dictation_clipboard_enabled().unwrap_or(true);
-
-            if clipboard_enabled {
-                match crate::commands::core::set_clipboard(
-                    trimmed_text.to_string(),
-                    app_handle.clone(),
-                    app_state.clone(),
-                )
-                .await
-                {
-                    Ok(()) => {
-                        info!(
-                            "[Dictation Mode] Successfully stored text to clipboard: '{}'",
-                            trimmed_text
-                        );
-                    }
-                    Err(e) => {
-                        error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
-                    }
-                }
-            }
-
-            // Type the transcribed text
-            info!("Executing global_type_text for text: '{}'", trimmed_text);
-            match crate::commands::keyboard::global_type_text(
-                trimmed_text.to_string(),
-                app_handle.clone(),
-                app_state.clone(),
-            )
-            .await
+            // Insert using the configured insertion mode; the copy-to-clipboard
+            // toggle is applied after a successful insert, inside the helper.
+            match crate::commands::dictation::insert_dictation_text(&app_handle, trimmed_text).await
             {
                 Ok(()) => {
                     info!(
-                        "[Dictation Mode] Successfully typed text: '{}'",
+                        "[Dictation Mode] Successfully inserted text: '{}'",
                         trimmed_text
                     );
                 }
                 Err(e) => {
-                    error!("[Dictation Mode] Failed to type transcribed text: {}", e);
+                    error!("[Dictation Mode] Failed to insert transcribed text: {}", e);
                 }
             }
         }

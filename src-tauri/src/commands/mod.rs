@@ -255,6 +255,8 @@ pub async fn load_audio_settings_from_centralized_settings(
 
     let _ = state.set_always_listening_active(audio_settings.always_listening_active);
     let _ = state.set_always_listening_sensitivity(audio_settings.always_listening_sensitivity);
+    let _ = state.set_dictation_clipboard_enabled(audio_settings.dictation_copy_to_clipboard());
+    let _ = state.set_dictation_insertion_mode(audio_settings.dictation_insertion_mode.clone());
     let _ = state.set_always_listening_wake_words(audio_settings.always_listening_wake_words);
 
     tracing::info!("Loaded audio settings from centralized settings into AppState");

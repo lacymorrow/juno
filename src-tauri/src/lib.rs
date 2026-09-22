@@ -481,6 +481,8 @@ pub fn run() {
             // Dictation Settings Commands
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,
+            commands::dictation::get_dictation_insertion_mode,
+            commands::dictation::set_dictation_insertion_mode,
             // Dictation State Management Commands
             force_reset_dictation_state,
             get_dictation_comprehensive_status,
