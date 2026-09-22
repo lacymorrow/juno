@@ -142,8 +142,18 @@ pub struct CloudSettings {
     pub device_name: String,
     pub api_key: Option<String>,
     pub auto_connect: bool,
+    /// Seconds between reconnection attempts. See `cloud/client.rs`, which
+    /// feeds it straight to `Duration::from_secs`.
+    ///
+    /// The unit is documented rather than put in the name because these are
+    /// persisted Tauri Store keys — renaming the field renames the key and
+    /// orphans every setting already on disk.
     pub reconnect_interval: u64,
+    /// Seconds between heartbeats. Validated against
+    /// `MIN_HEARTBEAT_INTERVAL`/`MAX_HEARTBEAT_INTERVAL` (10..=300 seconds).
     pub heartbeat_interval: u64,
+    /// Seconds a cloud-dispatched command may run before it is abandoned.
+    /// Validated as `1..=3600`, i.e. up to one hour.
     pub command_timeout: u64,
     pub security_level: String,
 }

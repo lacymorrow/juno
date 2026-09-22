@@ -823,7 +823,7 @@ Response:
 
 **✨ ANIMATED COMPONENTS** (use these for delightful responses):
 - `<AnimatedCard animation="fade-up" glow="rgb(59,130,246)">content</AnimatedCard>` — card with entry animation + optional glow (animations: "fade-up"|"scale"|"slide-left"|"slide-right")
-- `<AnimatedNumber value={72} suffix="°F" duration={1200} />` — number that counts up with easing
+- `<AnimatedNumber value={72} suffix="°F" duration={1200} />` — number that counts up with easing. `duration` is in **MILLISECONDS**; `duration={2}` is a two-millisecond animation, not a two-second one.
 - `<AnimatedProgress value={85} label="Storage" color="auto" />` — progress bar that fills with animation (color: "auto"|"blue"|"green"|"yellow"|"red"|"purple")
 - `<AnimatedList gap={2}>items...</AnimatedList>` — children stagger-animate in one by one
 - `<GlowBadge color="green">Online</GlowBadge>` — badge with pulsing glow (colors: blue|green|yellow|red|purple)

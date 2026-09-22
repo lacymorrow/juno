@@ -1237,8 +1237,17 @@ fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
             }
         }
         "wait" => {
-            let duration = input["duration"].as_u64().unwrap_or(1);
-            format!("computer/wait({}s)", duration)
+            // Read the same two keys, in the same order and as the same type,
+            // as the handler that actually sleeps. This read only `duration`
+            // and only `as_u64()`, so `{"seconds": 5}` was labelled "wait(1s)"
+            // and so was `{"duration": 1.5}` — the label disagreed with what
+            // the agent had just done, which is how a unit bug hides.
+            let seconds = input
+                .get("seconds")
+                .and_then(Value::as_f64)
+                .or_else(|| input.get("duration").and_then(Value::as_f64))
+                .unwrap_or(1.0);
+            format!("computer/wait({}s)", seconds)
         }
         "zoom" => {
             if let Some(region) = input["region"].as_array() {
@@ -3074,6 +3083,72 @@ mod action_cooldown_tests {
         assert!(
             stamp < 1_000_000_000,
             "cooldown stamp {stamp} looks like epoch millis, not monotonic millis"
+        );
+    }
+}
+
+/// The label an action gets in the log and the UI has to agree with what the
+/// action did. A label that silently rounds or ignores the parameter it is
+/// reporting is how a unit bug survives a code review.
+#[cfg(test)]
+mod descriptive_name_tests {
+    use super::*;
+
+    #[test]
+    fn wait_reports_the_seconds_key() {
+        // The handler prefers `seconds`; the label used to read only
+        // `duration`, so every `{"seconds": n}` wait was labelled "wait(1s)".
+        assert_eq!(
+            get_descriptive_tool_name("wait", &json!({ "seconds": 5 })),
+            "computer/wait(5s)"
+        );
+    }
+
+    #[test]
+    fn wait_reports_the_duration_key_when_seconds_is_absent() {
+        assert_eq!(
+            get_descriptive_tool_name("wait", &json!({ "duration": 3 })),
+            "computer/wait(3s)"
+        );
+    }
+
+    #[test]
+    fn wait_reports_fractional_seconds() {
+        // `as_u64()` returned None here, so a 1.5-second wait read as 1s.
+        assert_eq!(
+            get_descriptive_tool_name("wait", &json!({ "seconds": 1.5 })),
+            "computer/wait(1.5s)"
+        );
+    }
+
+    #[test]
+    fn wait_prefers_seconds_over_duration_like_the_handler_does() {
+        assert_eq!(
+            get_descriptive_tool_name("wait", &json!({ "seconds": 2, "duration": 9 })),
+            "computer/wait(2s)"
+        );
+    }
+
+    #[test]
+    fn wait_with_no_parameter_falls_back_to_one_second() {
+        assert_eq!(
+            get_descriptive_tool_name("wait", &json!({})),
+            "computer/wait(1s)"
+        );
+    }
+
+    #[test]
+    fn hold_key_is_labelled_in_milliseconds_whichever_key_was_sent() {
+        // `duration` is seconds, `duration_ms` is milliseconds, and the label
+        // says ms in both cases — so the two spellings cannot be confused by
+        // reading a log.
+        assert_eq!(
+            get_descriptive_tool_name("hold_key", &json!({ "key": "shift", "duration": 2 })),
+            "computer/hold_key(shift, 2000ms)"
+        );
+        assert_eq!(
+            get_descriptive_tool_name("hold_key", &json!({ "key": "shift", "duration_ms": 2 })),
+            "computer/hold_key(shift, 2ms)"
         );
     }
 }
