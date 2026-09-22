@@ -18,7 +18,7 @@ use crate::constants::{agent, error_messages, events};
 use crate::state::AppState;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
@@ -305,6 +305,39 @@ mod timer_tools_impl {
     pub(super) fn schedule_seconds(input: &Value, key: &str) -> Option<u64> {
         let raw = input.get(key)?.as_f64()?;
         Some((raw.round() as u64).clamp(1, MAX_SCHEDULE_SECONDS))
+    }
+
+    /// A file's modification time, or `None` when the file is absent or the
+    /// platform will not report one.
+    ///
+    /// Wall clock by nature — an mtime is a wall-clock stamp — but the file
+    /// monitor only ever compares one reading against another reading of the
+    /// same clock, never against "now", so a clock step cannot make a file look
+    /// freshly modified or ancient.
+    pub(super) async fn read_modified_time(path: &Path) -> Option<SystemTime> {
+        fs::metadata(path).await.ok()?.modified().ok()
+    }
+
+    /// Has the file changed since the previous tick?
+    ///
+    /// The baseline is the mtime read on the **previous tick**, not the one
+    /// read when the monitor started. Comparing against the start time meant a
+    /// `Modified` monitor could only ever fire for a file touched within
+    /// `check_interval + 1` seconds of the monitor being set up, and was blind
+    /// to every edit after that — which is the opposite of what a monitor is
+    /// for.
+    ///
+    /// `None` on either side is meaningful: it covers a file that did not exist
+    /// yet, one that has since gone, and one whose mtime the platform refused
+    /// to report. A transition into or out of `None` is a change like any
+    /// other, but `current_exists` gates the whole thing so a deletion is left
+    /// to `FileMonitorType::Deleted`.
+    pub(super) fn modification_detected(
+        current_exists: bool,
+        current_modified: Option<SystemTime>,
+        last_modified: Option<SystemTime>,
+    ) -> bool {
+        current_exists && current_modified != last_modified
     }
 
     /// Creates the tool definition for the `set_timer` tool.
@@ -824,21 +857,19 @@ mod timer_tools_impl {
         } else {
             0
         };
+        let initial_modified = read_modified_time(&path).await;
 
         let monitoring_task = tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(check_interval_seconds));
             let mut last_exists = initial_exists;
             let mut last_size = initial_size;
-            // Wall clock, deliberately: this one is compared against a file's
-            // modification time further down, which is also wall clock.
-            let started_at_unix_seconds = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            // Monotonic, for measuring elapsed time only. Keeping the two
-            // apart is the point: the wall clock answers "when", the
-            // monotonic clock answers "how long since", and a clock step must
-            // not be able to underflow the second question.
+            // The baseline `Modified` compares against: the mtime as of the
+            // previous tick, not as of the monitor's start. Updated at the end
+            // of every tick, exactly like `last_size`.
+            let mut last_modified = initial_modified;
+            // Monotonic, for measuring elapsed time. The wall clock is not used
+            // here at all: mtimes are only ever compared against each other, so
+            // a clock step cannot make one look recent or ancient.
             let monitor_started_at = Instant::now();
 
             loop {
@@ -874,32 +905,17 @@ mod timer_tools_impl {
                 } else {
                     0
                 };
+                let current_modified = read_modified_time(&path).await;
 
                 let event_detected = match monitor_type {
                     FileMonitorType::Created => !last_exists && current_exists,
                     FileMonitorType::Deleted => last_exists && !current_exists,
+                    // A modification is an mtime that differs from the one seen
+                    // last tick. `Some` -> `Some` with a new value is the normal
+                    // case; the `None` transitions cover a file that appeared,
+                    // vanished, or whose mtime the platform refused to report.
                     FileMonitorType::Modified => {
-                        if !current_exists {
-                            false
-                        } else {
-                            // Check modification time
-                            match fs::metadata(&path).await {
-                                Ok(metadata) => match metadata.modified() {
-                                    Ok(modified_time) => {
-                                        let started_at_sys = UNIX_EPOCH
-                                            + Duration::from_secs(started_at_unix_seconds);
-                                        modified_time
-                                            .duration_since(started_at_sys)
-                                            .unwrap_or(Duration::ZERO)
-                                            < Duration::from_secs(
-                                                check_interval_seconds.saturating_add(1),
-                                            )
-                                    }
-                                    Err(_) => false,
-                                },
-                                Err(_) => false,
-                            }
-                        }
+                        modification_detected(current_exists, current_modified, last_modified)
                     }
                     FileMonitorType::SizeChanged => current_exists && current_size != last_size,
                 };
@@ -929,6 +945,7 @@ mod timer_tools_impl {
 
                 last_exists = current_exists;
                 last_size = current_size;
+                last_modified = current_modified;
             }
         });
 
@@ -1336,5 +1353,84 @@ mod schedule_seconds_tests {
         // Thirty days, stated in seconds. If this ever disagrees with the doc
         // comment, that is the `wait` bug again.
         assert_eq!(MAX_SCHEDULE_SECONDS, 2_592_000);
+    }
+}
+
+#[cfg(test)]
+mod file_monitor_tests {
+    use super::timer_tools_impl::{modification_detected, read_modified_time};
+    use std::time::{Duration, SystemTime};
+
+    fn stamp(secs_after_epoch: u64) -> Option<SystemTime> {
+        Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs_after_epoch))
+    }
+
+    #[test]
+    fn an_unchanged_mtime_is_not_a_modification() {
+        assert!(!modification_detected(true, stamp(1_000), stamp(1_000)));
+    }
+
+    #[test]
+    fn a_changed_mtime_is_a_modification() {
+        assert!(modification_detected(true, stamp(1_001), stamp(1_000)));
+    }
+
+    #[test]
+    fn an_edit_long_after_the_monitor_started_is_still_detected() {
+        // The regression this fixes. The old check asked "was this file
+        // modified within check_interval + 1 seconds of the monitor starting?",
+        // so an edit an hour in was invisible. Comparing tick to tick, the age
+        // of the monitor is irrelevant.
+        let monitor_started = 1_000;
+        let previous_tick = stamp(monitor_started);
+        let edited_an_hour_later = stamp(monitor_started + 3_600);
+        assert!(modification_detected(
+            true,
+            edited_an_hour_later,
+            previous_tick
+        ));
+    }
+
+    #[test]
+    fn a_file_that_is_gone_is_never_a_modification() {
+        // Deletion belongs to FileMonitorType::Deleted, not here.
+        assert!(!modification_detected(false, None, stamp(1_000)));
+    }
+
+    #[test]
+    fn a_file_that_appeared_since_the_last_tick_counts_as_changed() {
+        assert!(modification_detected(true, stamp(1_000), None));
+    }
+
+    #[tokio::test]
+    async fn a_missing_path_has_no_modification_time() {
+        let missing = std::env::temp_dir().join("juno-file-monitor-does-not-exist-4200");
+        assert_eq!(read_modified_time(&missing).await, None);
+    }
+
+    #[tokio::test]
+    async fn writing_to_a_file_moves_its_modification_time() {
+        let path = std::env::temp_dir().join(format!(
+            "juno-file-monitor-{}-{}",
+            std::process::id(),
+            "mtime"
+        ));
+        let _ = tokio::fs::remove_file(&path).await;
+        tokio::fs::write(&path, b"first")
+            .await
+            .expect("temp file should be writable");
+        let first = read_modified_time(&path).await;
+        assert!(first.is_some());
+
+        // Filesystem mtime granularity can be coarse, so give the second write
+        // a clear gap rather than racing it.
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+        tokio::fs::write(&path, b"second")
+            .await
+            .expect("temp file should still be writable");
+        let second = read_modified_time(&path).await;
+
+        assert!(modification_detected(true, second, first));
+        let _ = tokio::fs::remove_file(&path).await;
     }
 }
