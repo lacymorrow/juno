@@ -8,7 +8,7 @@ use crate::utils::coordinates;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 // Removed unused import - BashResult is handled differently now
 // Keep the tool versioning from errors branch (enhanced functionality)
-use super::tool_versioning::{ToolVersionConfig, ToolVersionManager};
+use super::tool_versioning::{ApiVersion, ToolVersionConfig, ToolVersionManager};
 use crate::state::AgentCursorState;
 use crate::utils::coordinate_validation::{
     validate_coordinate_pair, validate_coordinate_parameter, CoordinateValidationError,
@@ -100,6 +100,15 @@ pub async fn run_computer_action(
     cursor_id: &str,
     cursor_color: &str,
 ) -> Result<Value, String> {
+    // Registration already skips these tools for a model that cannot drive the
+    // computer, but a queued action or stale state can still land here. Say
+    // which model and what to do about it, rather than a generic tool error.
+    if let Some(reason) =
+        crate::agent::providers::factory::BrainFactory::active_computer_use_refusal(app_handle)
+    {
+        return Err(reason);
+    }
+
     let result = execute_computer_tool(app_handle, input.clone(), session_id).await;
 
     // Emit cursor position for the agent overlay (non-blocking).
@@ -2711,12 +2720,8 @@ pub async fn execute_str_replace_tool(
 ///
 /// This function creates tools with proper API types and versioning to ensure
 /// compliance with the official Anthropic Computer Use specification
-pub fn create_versioned_tools(version_config: Option<ToolVersionConfig>) -> Vec<ToolDefinition> {
-    let manager = if let Some(config) = version_config {
-        ToolVersionManager::with_config(config)
-    } else {
-        ToolVersionManager::new()
-    };
+pub fn create_versioned_tools(version_config: ToolVersionConfig) -> Vec<ToolDefinition> {
+    let manager = ToolVersionManager::with_config(version_config);
 
     let mut tools = Vec::new();
 
@@ -2917,14 +2922,23 @@ pub async fn register_anthropic_computer_use_tools_with_version(
     version_config: Option<ToolVersionConfig>,
     session: Option<SessionToolContext>,
 ) -> Result<(), String> {
-    let version_info = version_config
-        .as_ref()
-        .map(|c| format!("{:?}", c.current_version))
-        .unwrap_or_else(|| "latest".to_string());
+    // Resolve the tool version from the model that will actually run, rather
+    // than a fixed default that was wrong for every model on the newer version.
+    let version_config = version_config.unwrap_or_else(|| {
+        let version = crate::agent::providers::factory::BrainFactory::active_provider_and_model(
+            Some(&app_handle),
+        )
+        .and_then(|(provider, model)| provider.computer_use(&model).anthropic_version().cloned())
+        // Providers that drive the desktop with Juno's own function tools
+        // (OpenAI, Gemini, Claude CLI) ignore these Anthropic tool types, so
+        // the newest version is a harmless choice for them.
+        .unwrap_or(ApiVersion::Computer20251124);
+        ToolVersionConfig::new(version)
+    });
 
     info!(
-        "Registering official Anthropic Computer Use tools (API version: {})...",
-        version_info
+        "Registering official Anthropic Computer Use tools (API version: {:?})...",
+        version_config.current_version
     );
 
     // Cursor identity: prefer the parallel-session identity (session id +
