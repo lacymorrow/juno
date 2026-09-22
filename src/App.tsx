@@ -388,16 +388,24 @@ function App() {
   // 2. Backend emits events → Frontend receives and stops audio/UI
   // 3. No frontend state checks needed - escape universally stops everything
 
-  // Example prompt selection — shows the prompt in the input for a beat,
-  // then submits it through the same path as typed input.
+  // Example prompt selection. A click must always land: at a fresh app start
+  // the empty state (and these buttons) is only on screen while the backend is
+  // still connecting — the exact window where `canSubmit` is false — because
+  // once it connects a system message is appended and the empty state is gone.
+  // So we always drop the prompt into the input first (the user sees their
+  // words land), then submit it through the same path as typed input when we
+  // can. If the backend isn't ready yet the text waits in the input instead of
+  // being silently dropped.
   const handleExamplePromptSelect = useCallback(
     (prompt: string) => {
       const trimmedPrompt = prompt.trim();
-      if (!appState.canSubmit || !trimmedPrompt) return;
+      if (!trimmedPrompt) return;
 
-      console.log("🚀 Auto-submitting example prompt:", trimmedPrompt);
       conversation.setQuery(trimmedPrompt);
 
+      if (!appState.canSubmit) return;
+
+      console.log("🚀 Auto-submitting example prompt:", trimmedPrompt);
       pendingTimers.current.push(
         setTimeout(() => {
           void handleSubmit(trimmedPrompt);
