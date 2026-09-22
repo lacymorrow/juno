@@ -142,7 +142,8 @@ pub(crate) async fn get_provider_models(
                     "name": m.name,
                     "supports_computer_use": m.supports_computer_use,
                     "is_recommended": m.is_recommended,
-                    "is_legacy": m.is_legacy
+                    "is_legacy": m.is_legacy,
+                    "needs_newer_tools": m.needs_newer_tools
                 })
             })
             .collect())
@@ -156,7 +157,8 @@ pub(crate) async fn get_provider_models(
                     "name": m,
                     "supports_computer_use": false,
                     "is_recommended": false,
-                    "is_legacy": false
+                    "is_legacy": false,
+                    "needs_newer_tools": false
                 })
             })
             .collect())

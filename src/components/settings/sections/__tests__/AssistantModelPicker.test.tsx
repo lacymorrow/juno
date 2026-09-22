@@ -22,6 +22,7 @@ type Model = {
   supports_computer_use: boolean;
   is_recommended: boolean;
   is_legacy: boolean;
+  needs_newer_tools: boolean;
 };
 
 const CAPABLE: Model = {
@@ -30,6 +31,7 @@ const CAPABLE: Model = {
   supports_computer_use: true,
   is_recommended: true,
   is_legacy: false,
+  needs_newer_tools: false,
 };
 
 const LEGACY: Model = {
@@ -38,6 +40,7 @@ const LEGACY: Model = {
   supports_computer_use: true,
   is_recommended: false,
   is_legacy: true,
+  needs_newer_tools: false,
 };
 
 const CHAT_ONLY: Model = {
@@ -46,6 +49,18 @@ const CHAT_ONLY: Model = {
   supports_computer_use: false,
   is_recommended: false,
   is_legacy: false,
+  needs_newer_tools: false,
+};
+
+/** Capable of computer use, but only through a tool version Juno does not
+ * send yet (Claude Opus 5.5). Calling it a chat model would be untrue. */
+const TOOLSET_ONLY: Model = {
+  id: "claude-opus-5-5",
+  name: "Claude Opus 5.5",
+  supports_computer_use: false,
+  is_recommended: false,
+  is_legacy: false,
+  needs_newer_tools: true,
 };
 
 const settingsWith = (models: Model[], selectedId = models[0].id) =>
@@ -87,6 +102,17 @@ describe("AssistantModelPicker computer-use marking", () => {
     render(<AssistantModelPicker settings={settingsWith([CHAT_ONLY])} />);
 
     expect(screen.getByText(/cannot\s+control the computer/i)).toBeInTheDocument();
+  });
+
+  it("does not call a toolset-only model a chat model", () => {
+    advanced.on = false;
+    render(<AssistantModelPicker settings={settingsWith([TOOLSET_ONLY])} />);
+
+    // The limit is Juno's, not the model's, and the copy has to say so.
+    expect(screen.getByText(/newer tool format/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/cannot\s+control the computer/i)
+    ).not.toBeInTheDocument();
   });
 
   it("says nothing about the limit when the selected model is capable", () => {
