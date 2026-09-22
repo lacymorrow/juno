@@ -192,7 +192,7 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
                             provider, e
                         );
                         if let Ok(mut vc) = voice_arc.lock() {
-                            *vc = VoiceController::new_uninitialized(&model_path_bg, e);
+                            vc.adopt(VoiceController::new_uninitialized(&model_path_bg, e));
                         }
                         return;
                     }
@@ -208,8 +208,14 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
                 match VoiceController::new_with_engine(&model_path_bg, engine.clone()) {
                     Ok(new_vc) => {
                         if let Ok(mut vc) = voice_arc.lock() {
-                            *vc = new_vc;
-                            tracing::info!("[VoicePlugin] VoiceController initialized");
+                            // `adopt`, not `*vc = new_vc`: the app may already have
+                            // applied the persisted live-partial flag to the
+                            // placeholder controller, and it must survive the swap.
+                            vc.adopt(new_vc);
+                            tracing::info!(
+                                "[VoicePlugin] VoiceController initialized (live_partial: {})",
+                                vc.live_partial()
+                            );
                         }
                     }
                     Err(e) => tracing::error!("[VoicePlugin] VoiceController creation failed: {}", e),
