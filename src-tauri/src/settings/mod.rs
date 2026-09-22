@@ -326,6 +326,17 @@ pub struct VoiceTranscriptionSettings {
     pub enable_partial_transcription: bool,
     /// Enable playback of the transcription
     pub enable_playback: bool,
+    /// Which STT engine to use ("whisper" | "parakeet"). Survives restart and is
+    /// honored at startup. Defaults to whisper (backward-compatible).
+    #[serde(default = "default_stt_provider")]
+    pub stt_provider: String,
+    /// Live streaming partial transcription (cumulative, display-only). Advanced/debug.
+    #[serde(default)]
+    pub live_partial_transcription: bool,
+}
+
+fn default_stt_provider() -> String {
+    "whisper".to_string()
 }
 
 impl Default for AppSettings {
@@ -499,6 +510,8 @@ impl Default for VoiceTranscriptionSettings {
             partial_interval_ms: 500,
             enable_partial_transcription: true,
             enable_playback: true,
+            stt_provider: default_stt_provider(),
+            live_partial_transcription: false,
         }
     }
 }

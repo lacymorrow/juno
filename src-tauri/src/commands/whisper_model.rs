@@ -30,6 +30,13 @@ const MODEL_DEFS: &[(&str, &str, &str, u32, bool)] = &[
         600,
         true,
     ),
+    (
+        "large-v3",
+        "ggml-large-v3.bin",
+        "Large v3 — Multilingual (~3.1GB, most accurate)",
+        3100,
+        false,
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
