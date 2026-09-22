@@ -70,6 +70,7 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             commands::get_always_listening_wake_words,
             commands::set_transcription_debugging,
             commands::set_audio_level_monitoring,
+            commands::set_live_partial_transcription,
             commands::test_whisper_model,
             commands::force_transcription_test,
             commands::check_microphone_permission,

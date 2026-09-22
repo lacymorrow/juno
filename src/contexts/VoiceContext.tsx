@@ -85,6 +85,41 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
     let mounted = true;
     const unlistenCallbacks: (() => void)[] = [];
 
+    // Throttle partial-transcription updates. In live streaming mode the backend
+    // emits cumulative partials every ~600ms, but coalescing here keeps the
+    // status text from thrashing and avoids extra renders on the hot path.
+    const PARTIAL_THROTTLE_MS = 100;
+    let lastPartialAt = 0;
+    let pendingPartial: string | null = null;
+    let partialTimer: ReturnType<typeof setTimeout> | undefined;
+    const applyPartial = (text: string) =>
+      setVoiceState((prev) => ({
+        ...prev,
+        isTranscribing: true,
+        transcriptionText: text,
+      }));
+    const onPartial = (text: string) => {
+      const now = Date.now();
+      const elapsed = now - lastPartialAt;
+      if (elapsed >= PARTIAL_THROTTLE_MS) {
+        lastPartialAt = now;
+        pendingPartial = null;
+        applyPartial(text);
+      } else {
+        pendingPartial = text;
+        if (!partialTimer) {
+          partialTimer = setTimeout(() => {
+            partialTimer = undefined;
+            if (pendingPartial !== null) {
+              lastPartialAt = Date.now();
+              applyPartial(pendingPartial);
+              pendingPartial = null;
+            }
+          }, PARTIAL_THROTTLE_MS - elapsed);
+        }
+      }
+    };
+
     const addListener = async <T,>(eventName: string, handler: (event: { payload: T }) => void) => {
       try {
         const unlisten = await listen<T>(eventName, (event) => {
@@ -102,17 +137,15 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
 
     const setupListeners = async () => {
       // Voice transcription events
-      await addListener(EVENTS.VOICE_TRANSCRIPTION_PARTIAL_RESULT, (event) => {
-        const text = event.payload as string;
-        setVoiceState((prev) => ({
-          ...prev,
-          isTranscribing: true,
-          transcriptionText: text,
-        }));
-      });
+      await addListener<{ text: string; provisional?: boolean }>(
+        EVENTS.VOICE_TRANSCRIPTION_PARTIAL_RESULT,
+        (event) => {
+          onPartial(event.payload.text);
+        },
+      );
 
-      await addListener(EVENTS.VOICE_TRANSCRIPTION_FINAL_RESULT, (event) => {
-        const text = event.payload as string;
+      await addListener<{ text: string; provisional?: boolean }>(EVENTS.VOICE_TRANSCRIPTION_FINAL_RESULT, (event) => {
+        const text = event.payload.text;
         setVoiceState((prev) => ({
           ...prev,
           isTranscribing: false,
@@ -333,6 +366,7 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
 
     return () => {
       mounted = false;
+      if (partialTimer) clearTimeout(partialTimer);
       unlistenCallbacks.forEach(safeCleanupEventListener);
     };
   }, []); // Empty deps — listeners set up once on mount

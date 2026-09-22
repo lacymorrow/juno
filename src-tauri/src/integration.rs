@@ -261,10 +261,17 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                     if let Some(text) = text_value.as_str() {
                         let app_handle_clone = app_handle_for_listener.clone();
                         let partial_text = text.to_string();
+                        // Live streaming partials carry `provisional: true` so the
+                        // bar can render them dimmed/italic. Absent = coarse (solid).
+                        let provisional = payload_json
+                            .get("provisional")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         safe_spawn_async_task(move || async move {
                             commands::ui_commands::handle_dictation_partial(
                                 &app_handle_clone,
                                 partial_text,
+                                provisional,
                             )
                             .await;
                         });
@@ -1233,7 +1240,7 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
     // a hotkey release) lands here — clear the bar-voice flag and show a
     // processing state immediately while STT finalizes and the agent starts.
     crate::agent_monitor::set_bar_voice_active(false);
-    crate::commands::ui_commands::handle_dictation_partial(app_handle, String::new()).await;
+    crate::commands::ui_commands::handle_dictation_partial(app_handle, String::new(), false).await;
 
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
         Some(controller_state) => {

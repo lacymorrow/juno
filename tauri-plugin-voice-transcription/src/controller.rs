@@ -58,6 +58,10 @@ pub struct VoiceController {
     actual_recording_sample_rate: Arc<Mutex<Option<u32>>>,
     is_initialized: bool,
     initialization_error: Option<String>,
+    /// Live streaming partial transcription. When true the audio thread keeps a
+    /// sliding window and emits cumulative provisional text on a fast cadence
+    /// instead of decoding a fixed chunk and clearing. Display-only; never typed.
+    live_partial: bool,
 }
 
 impl VoiceController {
@@ -80,6 +84,7 @@ impl VoiceController {
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
             is_initialized: true,
             initialization_error: None,
+            live_partial: false,
         })
     }
 
@@ -106,12 +111,23 @@ impl VoiceController {
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
             is_initialized: false,
             initialization_error: Some(error_message),
+            live_partial: false,
         }
     }
 
     /// Check if the controller was successfully initialized
     pub fn is_initialized(&self) -> bool {
         self.is_initialized
+    }
+
+    /// Toggle live streaming partial transcription. Takes effect on the next
+    /// dictation session. Display-only; partials are never injected as keystrokes.
+    pub fn set_live_partial(&mut self, enabled: bool) {
+        info!(
+            "[VoiceController] Live partial transcription set to {}",
+            enabled
+        );
+        self.live_partial = enabled;
     }
 
     /// Get the initialization error if any
@@ -375,6 +391,7 @@ impl VoiceController {
         let actual_rate_for_thread = actual_rate;
         let app_handle_for_thread = app_handle.clone();
         let channels_for_thread = channels;
+        let live_partial_for_thread = self.live_partial;
 
         let engine = self
             .engine
@@ -395,6 +412,7 @@ impl VoiceController {
                 device,
                 config,
                 sample_format,
+                live_partial_for_thread,
             );
         });
 
@@ -418,8 +436,13 @@ impl VoiceController {
         device: cpal::Device,
         config: cpal::StreamConfig,
         sample_format: SampleFormat,
+        live_partial: bool,
     ) {
-        info!("[AudioThread] Thread started. Engine: '{}'", engine.name());
+        info!(
+            "[AudioThread] Thread started. Engine: '{}', live_partial: {}",
+            engine.name(),
+            live_partial
+        );
 
         let mut session = match engine.create_session() {
             Ok(s) => s,
@@ -545,6 +568,12 @@ impl VoiceController {
         let level_emit_interval = Duration::from_millis(70);
         let mut last_level_emit = Instant::now() - level_emit_interval;
 
+        // Live streaming partial mode: emit cumulative provisional text on a fast
+        // cadence and keep a bounded sliding window so decode cost stays capped.
+        let live_partial_cadence = Duration::from_millis(600);
+        let mut last_live_partial_emit = Instant::now() - live_partial_cadence;
+        let live_window_capacity_samples = (actual_rate as u64 * 10) as usize;
+
         loop {
             // Check for control messages
             match control_rx.try_recv() {
@@ -619,7 +648,28 @@ impl VoiceController {
                 }
 
                 // Process partial transcriptions
-                if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
+                if live_partial {
+                    // Live mode: keep a bounded sliding window (never cleared) and
+                    // emit the cumulative decode as provisional text. Display-only.
+                    if audio_buffer_for_whisper_chunks.len() > live_window_capacity_samples {
+                        let overflow =
+                            audio_buffer_for_whisper_chunks.len() - live_window_capacity_samples;
+                        audio_buffer_for_whisper_chunks.drain(0..overflow);
+                    }
+                    if last_live_partial_emit.elapsed() >= live_partial_cadence
+                        && !audio_buffer_for_whisper_chunks.is_empty()
+                    {
+                        Self::process_partial_transcription(
+                            session.as_mut(),
+                            &audio_buffer_for_whisper_chunks,
+                            actual_rate,
+                            chunk_resampler.as_mut(),
+                            &app_handle,
+                            true,
+                        );
+                        last_live_partial_emit = Instant::now();
+                    }
+                } else if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
                     info!("[AudioThread] Processing partial transcription. Buffer size: {} samples, threshold: {} samples",
                           audio_buffer_for_whisper_chunks.len(), partial_buffer_capacity_samples);
                     Self::process_partial_transcription(
@@ -628,6 +678,7 @@ impl VoiceController {
                         actual_rate,
                         chunk_resampler.as_mut(),
                         &app_handle,
+                        false,
                     );
                     audio_buffer_for_whisper_chunks.clear();
                 }
@@ -641,6 +692,7 @@ impl VoiceController {
         actual_rate: u32,
         resampler: Option<&mut SincFixedIn<f32>>,
         app_handle: &AppHandle<R>,
+        provisional: bool,
     ) {
         let audio_to_transcribe = if actual_rate != WHISPER_SAMPLE_RATE {
             if let Some(r) = resampler {
@@ -663,7 +715,7 @@ impl VoiceController {
             Ok(Some(text)) if !text.is_empty() => {
                 let _ = app_handle.emit(
                     constants::voice_transcription::PARTIAL_RESULT,
-                    serde_json::json!({ "text": text }),
+                    serde_json::json!({ "text": text, "provisional": provisional }),
                 );
             }
             Ok(_) => {}
@@ -688,6 +740,7 @@ impl VoiceController {
                 actual_rate,
                 resampler,
                 app_handle,
+                false,
             );
         }
 

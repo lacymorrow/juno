@@ -792,7 +792,7 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
     // below, matching the on-screen Stop button path. Without this the bar
     // jumped straight from listening to idle on a key-up; the final-result
     // handler returns it to idle once the text is produced.
-    crate::commands::ui_commands::handle_dictation_partial(&app_handle, String::new()).await;
+    crate::commands::ui_commands::handle_dictation_partial(&app_handle, String::new(), false).await;
 
     if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
         error!(

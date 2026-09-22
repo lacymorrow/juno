@@ -223,6 +223,19 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             onCheckedChange={settings.handleDictationClipboardChange}
           />
         </SettingsRow>
+
+        <SettingsRow
+          advanced
+          htmlFor="live-partial-transcription"
+          label="Live transcription"
+          description="Show words as you speak, in Juno's bar. Display-only — provisional text is never typed into the app; the final result is."
+        >
+          <Switch
+            id="live-partial-transcription"
+            checked={settings.livePartialTranscription}
+            onCheckedChange={settings.handleLivePartialTranscriptionChange}
+          />
+        </SettingsRow>
       </SettingsGroup>
 
       <SettingsGroup

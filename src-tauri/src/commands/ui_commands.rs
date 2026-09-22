@@ -145,6 +145,9 @@ pub struct UIManager {
     pub last_submitted_value: String,
     pub current_error: Option<String>,
     pub transcription_text: String,
+    /// True while `transcription_text` is a live streaming partial (rendered
+    /// dimmed/italic in the bar). Reset to solid on final. Display-only.
+    pub transcription_provisional: bool,
     pub spoken_text: String,
     pub is_agent_working: bool,
     pub is_dictation_mode: bool,
@@ -172,6 +175,7 @@ impl UIManager {
             last_submitted_value: String::new(),
             current_error: None,
             transcription_text: String::new(),
+            transcription_provisional: false,
             spoken_text: String::new(),
             is_agent_working: false,
             is_dictation_mode: false,
@@ -252,6 +256,7 @@ impl UIManager {
             "lastSubmittedValue": self.last_submitted_value,
             "currentError": self.current_error,
             "transcriptionText": self.transcription_text,
+            "transcriptionProvisional": self.transcription_provisional,
             "spokenText": self.spoken_text,
             "isAgentWorking": self.is_agent_working,
             "isDictationMode": self.is_dictation_mode,
@@ -681,14 +686,23 @@ impl UIManager {
     pub async fn handle_dictation_started(&mut self) -> Result<(), String> {
         debug!("UI Manager: Handling dictation started");
         self.transcription_text.clear();
+        self.transcription_provisional = false;
         self.voice_mode = ui::voice_modes::DICTATION.to_string();
         self.set_bar_state(BarState::Listening).await;
         Ok(())
     }
 
-    pub async fn handle_dictation_partial(&mut self, partial_text: String) -> Result<(), String> {
-        debug!("UI Manager: Handling dictation partial: '{}'", partial_text);
+    pub async fn handle_dictation_partial(
+        &mut self,
+        partial_text: String,
+        provisional: bool,
+    ) -> Result<(), String> {
+        debug!(
+            "UI Manager: Handling dictation partial (provisional={}): '{}'",
+            provisional, partial_text
+        );
         self.transcription_text = partial_text;
+        self.transcription_provisional = provisional;
         self.set_bar_state(BarState::Transcribing).await;
         Ok(())
     }
@@ -721,6 +735,7 @@ impl UIManager {
         }
 
         self.transcription_text.clear();
+        self.transcription_provisional = false;
         Ok(())
     }
 
@@ -947,6 +962,10 @@ impl UIManager {
             state.insert(
                 "transcriptionText".to_string(),
                 serde_json::Value::String(self.transcription_text.clone()),
+            );
+            state.insert(
+                "transcriptionProvisional".to_string(),
+                serde_json::Value::Bool(self.transcription_provisional),
             );
             state.insert(
                 "spokenText".to_string(),
@@ -1525,10 +1544,17 @@ pub async fn handle_dictation_started(_app_handle: &AppHandle) {
     }
 }
 
-pub async fn handle_dictation_partial(_app_handle: &AppHandle, partial_text: String) {
+pub async fn handle_dictation_partial(
+    _app_handle: &AppHandle,
+    partial_text: String,
+    provisional: bool,
+) {
     if let Some(manager) = get_ui_manager().await {
         let mut manager = manager.lock().await;
-        if let Err(e) = manager.handle_dictation_partial(partial_text).await {
+        if let Err(e) = manager
+            .handle_dictation_partial(partial_text, provisional)
+            .await
+        {
             error!("Failed to handle dictation partial: {}", e);
         }
     }

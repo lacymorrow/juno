@@ -7,6 +7,7 @@ import { useSystemTheme } from "@/hooks/useSystemTheme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Bell,
+  Boxes,
   Brain,
   CalendarClock,
   Mic,
@@ -23,6 +24,7 @@ import {
   GeneralSettings,
   VoiceSettings,
   AIProviderSettings,
+  ModelsSettings,
   SecuritySettings,
   AdvancedSettings,
   AutomationsSettings,
@@ -85,6 +87,15 @@ export const settingsCategories: MacCategory[] = [
     tile: "bg-[#AF52DE]",
     description: "Configure AI models and providers",
     keywords: "model anthropic openai gemini api key provider claude llm",
+  },
+  {
+    id: "models",
+    name: "Models",
+    icon: <Boxes className="h-3.5 w-3.5" />,
+    tile: "bg-[#5856D6]",
+    description: "Dictation and assistant models",
+    keywords: "dictation whisper parakeet stt speech model tier download on device assistant agent",
+    advanced: true,
   },
   {
     id: "notifications",
@@ -312,6 +323,8 @@ function SettingsWindowContent() {
         return <VoiceSettings settings={settings} />;
       case "ai":
         return <AIProviderSettings settings={settings} />;
+      case "models":
+        return <ModelsSettings settings={settings} />;
       case "notifications":
         return <NotificationSettings />;
       case "tools":
