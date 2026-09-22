@@ -35,8 +35,8 @@ pub struct VoiceTranscriptionConfig {
     #[serde(default)]
     pub stt_provider: SttProvider,
 
-    /// Directory containing Parakeet ONNX model files.
-    /// Populated on first download via the `download_parakeet_model` command.
+    /// Directory (relative to the app data dir) holding the Parakeet ONNX files.
+    /// The app's `download_dictation_model` command fills it.
     #[serde(default = "default_parakeet_model_dir")]
     pub parakeet_model_dir: String,
 }

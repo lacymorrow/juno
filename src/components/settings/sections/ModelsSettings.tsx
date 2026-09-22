@@ -1,71 +1,38 @@
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Check, Download, AlertCircle, ChevronRight } from "lucide-react";
-import { SettingsSectionProps } from "../types";
+import { Check, Download, Loader2, Trash2, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useAdvancedSettings } from "../AdvancedSettingsContext";
 import { SettingsGroup, SettingsRow } from "../ui";
-import AssistantModelPicker from "./AssistantModelPicker";
-import { useCallback, useEffect, useState } from "react";
+import {
+  useSttModels,
+  type SttDownloadProgress,
+  type SttModelInfo,
+  type SttModelsController,
+} from "@/hooks/useSttModels";
 
 /**
- * Unified Models pane (Advanced only). Two subsections:
- *   1. Dictation model — plain-language speed/accuracy tiers backed by Whisper,
- *      plus an on-device Parakeet engine (arm64) behind a disclosure.
- *   2. Assistant model — the shared agent/computer-use picker.
+ * Settings > Models: one list of dictation models.
  *
- * Design note (Jobs standard, principle 2): every dictation tier runs on-device,
- * so a per-card "On device" chip would repeat the same non-distinguishing label
- * three times. It is stated once as the section footer instead.
+ * Everyone sees three rows (Fast, Balanced, Most accurate). Advanced settings
+ * reveal the rest of the catalog as more rows in the same list. Each row has
+ * exactly one action for its state: Download, a progress bar with a cancel,
+ * Use, or an Active check. A trash icon appears only on downloaded, inactive
+ * rows; the bundled model is never deletable. The backend decides all of it:
+ * which rows exist for this Mac, which one the engine is really running, and
+ * what is on disk. This file only draws that.
  */
 
-interface DictationTier {
-  key: string;
-  name: string;
-  /** Whisper model id in the backend MODEL_DEFS. */
-  whisperId: string;
-  /** Raw checkpoint name shown as the secondary line. */
-  checkpoint: string;
-  /** 1-5 relative pips. */
-  speed: number;
-  accuracy: number;
-  recommended?: boolean;
+const MB = 1024 * 1024;
+
+function formatMb(bytes: number): string {
+  return `${Math.round(bytes / MB)}`;
 }
 
-const DICTATION_TIERS: DictationTier[] = [
-  {
-    key: "fast",
-    name: "Fast",
-    whisperId: "tiny-en",
-    checkpoint: "Whisper tiny.en",
-    speed: 5,
-    accuracy: 2,
-  },
-  {
-    key: "balanced",
-    name: "Balanced",
-    whisperId: "large-v3-turbo",
-    checkpoint: "Whisper large-v3-turbo",
-    speed: 4,
-    accuracy: 4,
-    recommended: true,
-  },
-  {
-    key: "accurate",
-    name: "Most accurate",
-    whisperId: "large-v3",
-    checkpoint: "Whisper large-v3",
-    speed: 2,
-    accuracy: 5,
-  },
-];
-
-const PARAKEET_MODEL_URL =
-  "https://huggingface.co/onnx-community/parakeet-ctc-0.6b-ONNX/tree/main/onnx";
-
-/** Flat five-pip meter, system-blue accent, no gradients. */
+/** Flat five-pip meter, system blue, no gradients. */
 function PipMeter({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" aria-label={`${label} ${value} of 5`}>
       <span className="w-14 text-[11px] text-muted-foreground">{label}</span>
       <div className="flex gap-1">
         {[1, 2, 3, 4, 5].map((n) => (
@@ -83,312 +50,279 @@ function PipMeter({ label, value }: { label: string; value: number }) {
   );
 }
 
-export default function ModelsSettings({ settings }: SettingsSectionProps) {
-  const {
-    whisperModels,
-    currentWhisperModel,
-    whisperDownloading,
-    whisperDownloadProgress,
-    whisperDownloadError,
-    sttProvider,
-    parakeetStatus,
-    systemArch,
-    loadWhisperModels,
-    loadSttSettings,
-    handleWhisperModelDownload,
-    handleWhisperModelChange,
-    handleSttProviderChange,
-  } = settings;
+function engineLabel(engine: SttModelInfo["engine"]): string {
+  return engine === "parakeet" ? "Parakeet" : "Whisper";
+}
 
-  const [pendingActivate, setPendingActivate] = useState<string | null>(null);
-  const [showExact, setShowExact] = useState(false);
+interface RowProps {
+  model: SttModelInfo;
+  stt: SttModelsController;
+}
 
-  const isArm = systemArch === "aarch64" || systemArch === "arm64";
-
-  useEffect(() => {
-    loadWhisperModels();
-    loadSttSettings();
-  }, [loadWhisperModels, loadSttSettings]);
-
-  const activateWhisper = useCallback(
-    async (whisperId: string) => {
-      await handleWhisperModelChange(whisperId);
-      if (sttProvider !== "whisper") {
-        await handleSttProviderChange("whisper");
-      }
-    },
-    [handleWhisperModelChange, handleSttProviderChange, sttProvider]
+function DownloadingAction({
+  progress,
+  onCancel,
+}: {
+  progress: SttDownloadProgress | null;
+  onCancel: () => void;
+}) {
+  const pct = progress ? Math.min(100, Math.max(0, progress.percent)) : 0;
+  const total = progress?.total_bytes ?? 0;
+  return (
+    <div className="flex w-44 items-center gap-2">
+      <div className="min-w-0 flex-1 space-y-1">
+        {progress ? (
+          <Progress value={pct} className="h-1.5" aria-label="Download progress" />
+        ) : (
+          <Progress className="h-1.5 animate-pulse" aria-label="Starting download" />
+        )}
+        <p className="text-[11px] tabular-nums text-muted-foreground">
+          {progress
+            ? `${Math.round(pct)}% · ${formatMb(progress.bytes_downloaded)}${
+                total > 0 ? ` of ${formatMb(total)}` : ""
+              } MB`
+            : "Starting…"}
+        </p>
+      </div>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        onClick={onCancel}
+        aria-label="Cancel download"
+        title="Cancel download"
+      >
+        <X />
+      </Button>
+    </div>
   );
+}
 
-  // Refresh downloaded flags whenever a download finishes.
+function ModelRow({ model, stt }: RowProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState<"use" | "delete" | null>(null);
+
+  const downloading = stt.progress?.model_id === model.id;
+  const anotherDownloading = !!stt.progress && !downloading;
+  const failed =
+    stt.downloadError?.modelId === model.id && !stt.downloadError.cancelled && !model.downloaded;
+  const actionError = stt.actionError?.modelId === model.id ? stt.actionError.error : null;
+
+  // Leave the inline confirmation if the row stops being deletable underneath it.
   useEffect(() => {
-    if (whisperDownloading === null && pendingActivate) {
-      loadWhisperModels();
+    if (!model.downloaded || model.active || downloading) setConfirmDelete(false);
+  }, [model.downloaded, model.active, downloading]);
+
+  const runUse = async () => {
+    setBusy("use");
+    try {
+      await stt.use(model.id);
+    } finally {
+      setBusy(null);
     }
-  }, [whisperDownloading, pendingActivate, loadWhisperModels]);
-
-  // Auto-activate the tier the user asked to download once it lands.
-  useEffect(() => {
-    if (!pendingActivate) return;
-    const model = whisperModels.find((m) => m.id === pendingActivate);
-    if (model?.downloaded) {
-      activateWhisper(pendingActivate);
-      setPendingActivate(null);
-    }
-  }, [whisperModels, pendingActivate, activateWhisper]);
-
-  // A failed download stops the pending auto-activate; the card shows Retry.
-  useEffect(() => {
-    if (whisperDownloadError && whisperDownloadError.modelId === pendingActivate) {
-      setPendingActivate(null);
-    }
-  }, [whisperDownloadError, pendingActivate]);
-
-  const anyDictationDownloaded = whisperModels.some((m) => m.downloaded);
-
-  const startDownload = (whisperId: string) => {
-    setPendingActivate(whisperId);
-    handleWhisperModelDownload(whisperId);
   };
 
-  const renderTierAction = (tier: DictationTier) => {
-    const model = whisperModels.find((m) => m.id === tier.whisperId);
-    const downloaded = !!model?.downloaded;
-    const isDownloading = whisperDownloading === tier.whisperId;
-    const isActive =
-      sttProvider === "whisper" && currentWhisperModel === tier.whisperId;
-    const errored =
-      whisperDownloadError?.modelId === tier.whisperId &&
-      !isDownloading &&
-      !downloaded;
-    const sizeMb = model?.size_mb;
-
-    if (isDownloading) {
-      const pct = whisperDownloadProgress?.percent ?? 0;
-      const doneMb = whisperDownloadProgress
-        ? Math.round(whisperDownloadProgress.bytes_downloaded / 1024 / 1024)
-        : 0;
-      const totalMb = whisperDownloadProgress?.total_bytes
-        ? Math.round(whisperDownloadProgress.total_bytes / 1024 / 1024)
-        : sizeMb ?? 0;
-      return (
-        <div className="w-40 space-y-1">
-          {whisperDownloadProgress ? (
-            <Progress value={pct} className="h-2" />
-          ) : (
-            <Progress className="h-2 animate-pulse" />
-          )}
-          <p className="text-[11px] text-muted-foreground">
-            {doneMb}
-            {totalMb > 0 ? ` / ${totalMb}` : ""} MB
-          </p>
-        </div>
-      );
+  const runDelete = async () => {
+    setBusy("delete");
+    try {
+      await stt.remove(model.id);
+    } finally {
+      setBusy(null);
+      setConfirmDelete(false);
     }
+  };
 
-    if (errored) {
-      return (
-        <div className="flex flex-col items-end gap-1">
-          <span className="flex items-center gap-1 text-[11px] text-[#e8866a]">
-            <AlertCircle className="h-3 w-3" /> Download failed
-          </span>
-          <Button size="sm" variant="outline" onClick={() => startDownload(tier.whisperId)}>
-            Retry
-          </Button>
-        </div>
-      );
-    }
-
-    if (!downloaded) {
-      return (
-        <Button size="sm" onClick={() => startDownload(tier.whisperId)}>
-          <Download className="mr-1.5 h-3.5 w-3.5" />
-          Download{sizeMb ? ` · ${sizeMb} MB` : ""}
-        </Button>
-      );
-    }
-
-    if (isActive) {
-      return (
-        <span className="flex items-center gap-1.5 text-[13px] font-medium text-[#007AFF]">
-          <Check className="h-4 w-4" /> Active
-        </span>
-      );
-    }
-
-    return (
-      <Button size="sm" variant="outline" onClick={() => activateWhisper(tier.whisperId)}>
+  let action: React.ReactNode;
+  if (downloading) {
+    action = <DownloadingAction progress={stt.progress} onCancel={stt.cancelDownload} />;
+  } else if (model.active) {
+    action = (
+      <span
+        className="flex items-center gap-1.5 text-[13px] font-medium text-[#007AFF]"
+        data-testid={`active-${model.id}`}
+      >
+        <Check className="h-4 w-4" aria-hidden /> Active
+      </span>
+    );
+  } else if (model.downloaded) {
+    action = (
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={runUse}
+        disabled={busy !== null}
+        aria-label={`Use ${model.name}`}
+      >
+        {busy === "use" ? <Loader2 className="animate-spin" aria-hidden /> : null}
         Use
       </Button>
     );
-  };
+  } else {
+    const label = failed ? "Try again" : "Download";
+    action = (
+      <Button
+        size="sm"
+        onClick={() => stt.download(model.id)}
+        disabled={!stt.online || anotherDownloading}
+        aria-label={`${label}: ${model.name}`}
+        title={
+          !stt.online
+            ? "No internet connection"
+            : anotherDownloading
+              ? "Another download is in progress"
+              : undefined
+        }
+      >
+        <Download aria-hidden />
+        {label}
+      </Button>
+    );
+  }
+
+  const canDelete = model.downloaded && !model.bundled && !model.active && !downloading;
+
+  return (
+    <div
+      className="flex items-start justify-between gap-4 px-4 py-3"
+      data-testid={`model-row-${model.id}`}
+    >
+      <div className="min-w-0 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="text-[14px] font-semibold">
+            {model.tier_name ?? model.name}
+          </span>
+          {model.recommended && (
+            <span className="rounded-full bg-[#007AFF]/10 px-1.5 py-px text-[10px] font-medium text-[#007AFF]">
+              Recommended
+            </span>
+          )}
+        </div>
+        <p className="text-[12px] text-muted-foreground">
+          {model.tier_name ? `${model.name} · ` : ""}
+          {engineLabel(model.engine)} · {model.size_mb} MB
+          {model.bundled ? " · Included" : ""}
+        </p>
+        <div className="space-y-1 pt-0.5">
+          <PipMeter label="Speed" value={model.speed} />
+          <PipMeter label="Accuracy" value={model.accuracy} />
+        </div>
+        {failed && (
+          <p className="text-[11px] text-[#e8866a]" role="alert">
+            Download failed. {stt.downloadError?.error}
+          </p>
+        )}
+        {actionError && (
+          <p className="text-[11px] text-[#e8866a]" role="alert">
+            {actionError}
+          </p>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
+        {confirmDelete ? (
+          <div className="flex items-center gap-1.5" role="group" aria-label={`Remove ${model.name}?`}>
+            <span className="text-[12px] text-muted-foreground">Remove?</span>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={runDelete}
+              disabled={busy !== null}
+              aria-label={`Confirm remove ${model.name}`}
+            >
+              Remove
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setConfirmDelete(false)}
+              disabled={busy !== null}
+            >
+              Keep
+            </Button>
+          </div>
+        ) : (
+          <>
+            {action}
+            {canDelete && (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => setConfirmDelete(true)}
+                aria-label={`Remove ${model.name}`}
+                title="Remove from this Mac"
+              >
+                <Trash2 />
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function ModelsSettings() {
+  const stt = useSttModels();
+  const { advanced } = useAdvancedSettings();
+
+  const models = stt.status?.models ?? [];
+  const visible = advanced ? models : models.filter((m) => m.tier !== null);
+  const downloadingModel = stt.progress
+    ? models.find((m) => m.id === stt.progress?.model_id)
+    : undefined;
+  const changed = stt.lastChange?.automatic
+    ? models.find((m) => m.id === stt.lastChange?.model_id)
+    : undefined;
 
   return (
     <div className="space-y-6">
       <SettingsGroup
         title="Dictation model"
-        footer="Runs entirely on your Mac. Your voice is never sent to a server. Balanced is recommended for most people."
+        footer="All models run on your Mac. Your voice never leaves it."
       >
-        {!anyDictationDownloaded && (
+        {(downloadingModel || changed || !stt.online) && (
           <SettingsRow
             below={
-              <p className="text-sm text-muted-foreground">
-                No dictation model downloaded yet. Pick a tier below to download it
-                — it activates automatically when the download finishes.
-              </p>
+              <div className="space-y-1 text-[12px] text-muted-foreground" role="status">
+                {downloadingModel && (
+                  <p className="flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                    Downloading {downloadingModel.name}
+                    {stt.progress?.activate_when_done
+                      ? ". Dictation keeps working; it switches over when this lands."
+                      : "."}
+                  </p>
+                )}
+                {changed && (
+                  <p className="flex items-center justify-between gap-2">
+                    <span>{changed.name} is now active.</span>
+                    <button
+                      type="button"
+                      onClick={stt.dismissChange}
+                      className="text-[11px] hover:text-foreground"
+                    >
+                      OK
+                    </button>
+                  </p>
+                )}
+                {!stt.online && <p>No internet connection. Downloaded models still work.</p>}
+              </div>
             }
           />
         )}
 
-        <SettingsRow
-          below={
-            <div className="space-y-2.5">
-              {DICTATION_TIERS.map((tier) => (
-                <div
-                  key={tier.key}
-                  className="flex items-center justify-between gap-4 rounded-lg border border-black/10 p-3 dark:border-white/10"
-                >
-                  <div className="min-w-0 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[15px] font-semibold">{tier.name}</span>
-                      {tier.recommended && (
-                        <Badge
-                          variant="secondary"
-                          className="bg-blue-100 text-[10px] text-blue-800 dark:bg-blue-950 dark:text-blue-200"
-                        >
-                          Recommended
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-[12px] text-muted-foreground">{tier.checkpoint}</p>
-                    <div className="space-y-1">
-                      <PipMeter label="Speed" value={tier.speed} />
-                      <PipMeter label="Accuracy" value={tier.accuracy} />
-                    </div>
-                  </div>
-                  <div className="shrink-0">{renderTierAction(tier)}</div>
-                </div>
-              ))}
-            </div>
-          }
-        />
-
-        <SettingsRow
-          below={
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowExact((v) => !v)}
-                className="flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
-              >
-                <ChevronRight
-                  className={
-                    showExact
-                      ? "h-3.5 w-3.5 rotate-90 transition-transform"
-                      : "h-3.5 w-3.5 transition-transform"
-                  }
-                />
-                Advanced: choose exact model
-              </button>
-
-              {showExact && (
-                <div className="mt-2 space-y-1.5">
-                  {whisperModels.map((model) => {
-                    const isActive =
-                      sttProvider === "whisper" && currentWhisperModel === model.id;
-                    const isDownloading = whisperDownloading === model.id;
-                    return (
-                      <div
-                        key={model.id}
-                        className="flex items-center justify-between gap-3 rounded-md bg-black/[0.03] px-3 py-2 dark:bg-white/[0.04]"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-[13px]">{model.display_name}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {model.filename} · {model.size_mb} MB
-                          </p>
-                        </div>
-                        {isActive ? (
-                          <span className="flex items-center gap-1 text-[12px] text-[#007AFF]">
-                            <Check className="h-3.5 w-3.5" /> Active
-                          </span>
-                        ) : isDownloading ? (
-                          <span className="text-[12px] text-muted-foreground">
-                            Downloading…
-                          </span>
-                        ) : model.downloaded ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => activateWhisper(model.id)}
-                          >
-                            Use
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleWhisperModelDownload(model.id)}
-                          >
-                            <Download className="mr-1.5 h-3.5 w-3.5" />
-                            Download
-                          </Button>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {isArm && (
-                    <div className="flex items-center justify-between gap-3 rounded-md bg-black/[0.03] px-3 py-2 dark:bg-white/[0.04]">
-                      <div className="min-w-0">
-                        <p className="truncate text-[13px]">Parakeet CTC (on-device)</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          Experimental ONNX engine.{" "}
-                          {parakeetStatus?.downloaded ? (
-                            "Model files present."
-                          ) : (
-                            <>
-                              Requires model files —{" "}
-                              <a
-                                href={PARAKEET_MODEL_URL}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[#007AFF] hover:underline"
-                              >
-                                download here
-                              </a>
-                              .
-                            </>
-                          )}
-                        </p>
-                      </div>
-                      {sttProvider === "parakeet" ? (
-                        <span className="flex items-center gap-1 text-[12px] text-[#007AFF]">
-                          <Check className="h-3.5 w-3.5" /> Active
-                        </span>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleSttProviderChange("parakeet")}
-                        >
-                          Use
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          }
-        />
+        {stt.loading && models.length === 0 ? (
+          <SettingsRow
+            below={
+              <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Checking models…
+              </p>
+            }
+          />
+        ) : (
+          visible.map((model) => <ModelRow key={model.id} model={model} stt={stt} />)
+        )}
       </SettingsGroup>
-
-      <AssistantModelPicker
-        settings={settings}
-        title="Assistant model"
-        footer="The model Juno's agent uses to think and drive your computer."
-      />
     </div>
   );
 }

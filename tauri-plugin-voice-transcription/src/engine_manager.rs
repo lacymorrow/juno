@@ -5,7 +5,7 @@ use std::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::engine::{SttProvider, TranscriptionEngine};
-use crate::engine_parakeet::ParakeetEngine;
+use crate::engine_parakeet::{missing_parakeet_files, ParakeetEngine};
 use crate::engine_whisper::WhisperEngine;
 use crate::shared_whisper::SharedWhisperManager;
 
@@ -68,6 +68,36 @@ impl EngineManager {
         Ok(engine)
     }
 
+    /// Load a different Whisper model file and install it as the active engine.
+    /// `switch(Whisper, ..)` keeps whatever context is already loaded (so a
+    /// restart does not reload a 1+ GB file); this is the path that replaces it.
+    pub fn reload_whisper(
+        whisper_model_path: &str,
+    ) -> Result<Arc<dyn TranscriptionEngine>, String> {
+        info!(
+            "[EngineManager] Reloading Whisper with '{}'",
+            whisper_model_path
+        );
+        if !Path::new(whisper_model_path).is_file() {
+            return Err(format!(
+                "Whisper model file not found at {}",
+                whisper_model_path
+            ));
+        }
+        let ctx = SharedWhisperManager::reinitialize(whisper_model_path)
+            .map_err(|e| format!("Whisper could not load {}: {}", whisper_model_path, e))?;
+        let engine: Arc<dyn TranscriptionEngine> = Arc::new(WhisperEngine::new(ctx));
+
+        let mut guard = ACTIVE_ENGINE
+            .write()
+            .map_err(|e| format!("EngineManager write lock poisoned: {}", e))?;
+        *guard = Some(engine.clone());
+        drop(guard);
+
+        Self::warm_up(engine.clone());
+        Ok(engine)
+    }
+
     /// Run one throwaway decode on a second of silence so first-use costs (Metal shader
     /// compile, ONNX graph init, memory mapping the weights) land now instead of on the
     /// user's first dictation.
@@ -122,8 +152,14 @@ impl EngineManager {
     ) -> Result<Arc<dyn TranscriptionEngine>, String> {
         match provider {
             SttProvider::Whisper => {
+                if !Path::new(whisper_model_path).is_file() {
+                    return Err(format!(
+                        "Whisper model file not found at {}. Download it from Settings > Models.",
+                        whisper_model_path
+                    ));
+                }
                 let ctx = SharedWhisperManager::initialize(whisper_model_path)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| format!("Whisper could not load {}: {}", whisper_model_path, e))?;
                 Ok(Arc::new(WhisperEngine::new(ctx)))
             }
             SttProvider::Parakeet => {
@@ -132,12 +168,15 @@ impl EngineManager {
                      Set `parakeet_model_dir` in voice transcription config."
                         .to_string()
                 })?;
-                if !ParakeetEngine::model_files_present(Path::new(dir)) {
-                    warn!(
-                        "[EngineManager] Parakeet model files not yet downloaded at '{}'. \
-                         Use the download_parakeet_model command to fetch them.",
+                let missing = missing_parakeet_files(Path::new(dir));
+                if !missing.is_empty() {
+                    // Say which files, so the caller (and the log) can tell a
+                    // never-downloaded model from a half-finished one.
+                    return Err(format!(
+                        "Parakeet is not downloaded (missing {} in {}). Download it from Settings > Models.",
+                        missing.join(", "),
                         dir
-                    );
+                    ));
                 }
                 let engine = ParakeetEngine::new(Path::new(dir))?;
                 Ok(Arc::new(engine))
