@@ -1169,6 +1169,31 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // Pictures pasted into the pill, as data URLs, alongside the typed text.
   const [pastedImages, setPastedImages] = useState<string[]>([]);
 
+  /**
+   * The one way a message leaves the bar. Typed follow-ups and the empty
+   * state's example prompts both come through here, so there is a single
+   * answer to "what happens when the bar sends".
+   */
+  const sendMessage = useCallback(
+    async (text: string, images: string[]) => {
+      if (images.length > 0) {
+        // The bar-state interaction carries only a string, so an attachment
+        // goes straight to the agent rather than being quietly dropped.
+        await invoke(COMMANDS.AGENT_DISPATCH_QUERY, {
+          query: text,
+          images,
+        }).catch((error) => console.error("FloatingBar: submit failed:", error));
+      } else {
+        await sendInteraction(
+          createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: text }),
+        );
+      }
+      setLocalInputValue("");
+      setPastedImages([]);
+    },
+    [sendInteraction, createInteraction],
+  );
+
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -1179,22 +1204,26 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       const trimmedValue = localInputValue.trim();
       // A picture on its own is a message: "what is this?".
       if (!trimmedValue && pastedImages.length === 0) return;
-      if (pastedImages.length > 0) {
-        // The bar-state interaction carries only a string, so an attachment
-        // goes straight to the agent rather than being quietly dropped.
-        await invoke(COMMANDS.AGENT_DISPATCH_QUERY, {
-          query: trimmedValue,
-          images: pastedImages,
-        }).catch((error) => console.error("FloatingBar: submit failed:", error));
-      } else {
-        await sendInteraction(
-          createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: trimmedValue }),
-        );
-      }
-      setLocalInputValue("");
-      setPastedImages([]);
+      await sendMessage(trimmedValue, pastedImages);
     },
-    [localInputValue, pastedImages, sendInteraction, createInteraction],
+    [localInputValue, pastedImages, sendMessage],
+  );
+
+  // An example prompt clicked in the pane's empty state. Same contract as the
+  // main window: the words always land in the input first, then go out by
+  // the path a typed follow-up takes. The buttons are disabled while the
+  // backend is connecting; if it is in error, or a turn is already running,
+  // the text waits in the input instead of being silently dropped.
+  const handleExamplePromptSelect = useCallback(
+    (prompt: string) => {
+      const trimmedPrompt = prompt.trim();
+      if (!trimmedPrompt) return;
+      setLocalInputValue(trimmedPrompt);
+      setInputOpen(true);
+      if (isWorkingRef.current || chat.serverStatus !== "connected") return;
+      void sendMessage(trimmedPrompt, pastedImages);
+    },
+    [chat.serverStatus, pastedImages, sendMessage],
   );
 
   /** Read pasted images off the clipboard as data URLs. */
@@ -1899,10 +1928,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       <BarChatPane
         messages={chat.messages}
         isProcessing={isWorking}
+        backendStatus={chat.serverStatus}
         height={FLOATING_BAR_DIMENSIONS.PANE_HEIGHT}
         copiedMessageId={chat.copiedMessageId}
         onCopyResponse={chat.handleCopyResponse}
         onShareResponse={chat.handleShareResponse}
+        onExamplePromptSelect={handleExamplePromptSelect}
         onApprovalUpdate={chat.handleApprovalUpdate}
         onContinuationUpdate={chat.handleContinuationUpdate}
         onDismiss={dismissPane}
