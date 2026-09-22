@@ -29,6 +29,15 @@ use tracing::{debug, error, info, warn};
 /// Reset on app restart (static lifetime).
 static AUTH_VERIFIED: AtomicBool = AtomicBool::new(false);
 
+/// Set once a `claude` build has rejected [`PARTIAL_MESSAGES_FLAG`], so the
+/// rest of the session skips the flag rather than burning a failed spawn on
+/// every single query.
+///
+/// Session-scoped like [`AUTH_VERIFIED`]: someone who upgrades their CLI gets
+/// the fast path back on the next app start, and we never have to probe
+/// `--help` up front to find out.
+static PARTIAL_MESSAGES_UNSUPPORTED: AtomicBool = AtomicBool::new(false);
+
 /// Claude CLI session ids, keyed by the Juno conversation they belong to.
 ///
 /// The CLI is a subprocess: one spawn is one session, and a spawn with no
@@ -112,6 +121,14 @@ pub mod model_aliases {
 /// Maximum time to wait for the Claude CLI subprocess before killing it.
 /// Claude CLI may run multi-step agent loops, so this is generous.
 const CLI_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Asks the CLI for the raw streaming events rather than finished messages
+/// only. Everything the user sees while Juno works depends on it.
+///
+/// Older `claude` builds do not know this flag and exit non-zero on it, which
+/// is why `run_streaming` retries once without it — Juno users install the
+/// CLI themselves, so there is no floor version to assume.
+const PARTIAL_MESSAGES_FLAG: &str = "--include-partial-messages";
 
 /// Detect the Claude CLI binary on PATH.
 /// Returns the path if found, or an error describing what to do.
@@ -338,7 +355,8 @@ impl ClaudeCliBrain {
             // pixel landed at t+7.1s, because a tool-only `assistant` message
             // extracts to the empty string and everything before it — the
             // tool call, its arguments, the reasoning — was never sent.
-            "--include-partial-messages".to_string(),
+            // Stripped again by `run_streaming` for a CLI too old to take it.
+            PARTIAL_MESSAGES_FLAG.to_string(),
             // --strict-mcp-config limits MCP servers to exactly what we pass
             // via --mcp-config (or none) — user-level servers never load.
             // We can't use --bare because it blocks OAuth/keychain auth.
@@ -431,77 +449,12 @@ impl ClaudeCliBrain {
             None => None,
         };
 
-        let args = self.build_args(query, resume.as_deref(), mcp_config.as_deref());
-
-        match resume.as_deref() {
-            Some(session) => info!(
-                "Spawning Claude CLI (resuming session {}): {}",
-                session,
-                self.binary_path.display()
-            ),
-            None => info!(
-                "Spawning Claude CLI (new session): {} {}",
-                self.binary_path.display(),
-                args.iter().take(6).cloned().collect::<Vec<_>>().join(" ")
-            ),
-        }
-
-        let spawn = |args: &Vec<String>| {
-            tokio::process::Command::new(&self.binary_path)
-                .args(args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .stdin(Stdio::null())
-                .kill_on_drop(true)
-                .spawn()
-        };
-
-        let mut child = match spawn(&args) {
-            Ok(child) => child,
-            // A session id we stored can stop being resumable: the CLI prunes
-            // its history, or the transcript is gone. Falling back to a fresh
-            // session costs the thread's context, which is exactly what we
-            // had before this existed, and beats failing the message outright.
-            Err(e) if resume.is_some() => {
-                warn!(
-                    "Claude CLI would not resume ({}); starting a fresh session",
-                    e
-                );
-                if let Some(ref id) = conversation {
-                    forget_session(id);
-                }
-                spawn(&self.build_args(query, None, mcp_config.as_deref())).map_err(|e| {
-                    AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e))
-                })?
-            }
-            Err(e) => {
-                return Err(AgentError::LlmError(format!(
-                    "Failed to spawn Claude CLI: {}",
-                    e
-                )))
-            }
-        };
-
-        let stdout = child.stdout.take().ok_or_else(|| {
-            AgentError::LlmError("Failed to capture Claude CLI stdout".to_string())
-        })?;
-
-        // Drain stderr concurrently to prevent pipe buffer deadlocks.
-        // If the child writes >64KB to stderr while we only read stdout,
-        // both processes would block forever.
-        let stderr = child.stderr.take();
-        let stderr_handle = stderr.map(|se| {
-            tauri::async_runtime::spawn(async move {
-                let mut buf = String::new();
-                let mut reader = BufReader::new(se);
-                let _ = tokio::io::AsyncReadExt::read_to_string(&mut reader, &mut buf).await;
-                buf
-            })
-        });
-
         let msg_id = message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        // Emit stream start
+        // Emit stream start once, before any spawn. The old-CLI retry below
+        // can run the query twice, and the frontend appends a fresh assistant
+        // bubble on every start it sees — a second one would leave an empty
+        // message stranded above the answer.
         if let Some(ref handle) = app_handle {
             crate::agent::tool_logger::emit_stream_start(handle, msg_id.clone());
         }
@@ -524,134 +477,264 @@ impl ClaudeCliBrain {
         // the instant between the stream finishing and the race resolving.
         let post_cancel_rx = cancel_rx.clone();
 
-        // Run the streaming loop with a timeout, cancellable via escape key.
-        // tokio::select! races the stream against the cancellation signal —
-        // whichever completes first wins, and the other branch is dropped.
-        let stream_future = tokio::time::timeout(CLI_TIMEOUT, async {
-            self.process_stream(stdout, &app_handle, &msg_id).await
-        });
+        // Ask for partial messages unless an earlier query this session
+        // already discovered this `claude` build will not take the flag.
+        let mut include_partial_messages = !PARTIAL_MESSAGES_UNSUPPORTED.load(Ordering::Relaxed);
+        // Both fallbacks below are one-shot, and both guards live here rather
+        // than inside the loop body, so one query can never turn into an
+        // unbounded chain of respawns however they interleave.
+        let mut partial_fallback_used = false;
+        let mut resume_fallback_used = false;
+        let mut resume = resume;
 
-        let (accumulated_text, final_result) = if let Some(mut rx) = cancel_rx {
-            tokio::select! {
-                result = stream_future => {
-                    match result {
-                        Ok(Ok(r)) => r,
-                        Ok(Err(e)) => {
-                            if let Some(ref handle) = app_handle {
-                                crate::agent::tool_logger::emit_stream_end(
-                                    handle,
-                                    msg_id,
-                                    format!("Error: {}", e),
-                                );
+        let (accumulated_text, final_result, status) = loop {
+            let mut args = self.build_args(query, resume.as_deref(), mcp_config.as_deref());
+            if !include_partial_messages {
+                strip_partial_messages(&mut args);
+            }
+
+            match resume.as_deref() {
+                Some(session) => info!(
+                    "Spawning Claude CLI (resuming session {}): {}",
+                    session,
+                    self.binary_path.display()
+                ),
+                None => info!(
+                    "Spawning Claude CLI (new session): {} {}",
+                    self.binary_path.display(),
+                    args.iter().take(6).cloned().collect::<Vec<_>>().join(" ")
+                ),
+            }
+
+            let spawn = |args: &Vec<String>| {
+                tokio::process::Command::new(&self.binary_path)
+                    .args(args)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .stdin(Stdio::null())
+                    .kill_on_drop(true)
+                    .spawn()
+            };
+
+            let mut child = match spawn(&args) {
+                Ok(child) => child,
+                // A session id we stored can stop being resumable: the CLI
+                // prunes its history, or the transcript is gone. Falling back
+                // to a fresh session costs the thread's context, which is
+                // exactly what we had before this existed, and beats failing
+                // the message outright.
+                Err(e) if resume.is_some() && !resume_fallback_used => {
+                    resume_fallback_used = true;
+                    warn!(
+                        "Claude CLI would not resume ({}); starting a fresh session",
+                        e
+                    );
+                    if let Some(ref id) = conversation {
+                        forget_session(id);
+                    }
+                    resume = None;
+                    let mut fresh = self.build_args(query, None, mcp_config.as_deref());
+                    if !include_partial_messages {
+                        strip_partial_messages(&mut fresh);
+                    }
+                    spawn(&fresh).map_err(|e| {
+                        AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e))
+                    })?
+                }
+                Err(e) => {
+                    return Err(AgentError::LlmError(format!(
+                        "Failed to spawn Claude CLI: {}",
+                        e
+                    )))
+                }
+            };
+
+            let stdout = child.stdout.take().ok_or_else(|| {
+                AgentError::LlmError("Failed to capture Claude CLI stdout".to_string())
+            })?;
+
+            // Drain stderr concurrently to prevent pipe buffer deadlocks.
+            // If the child writes >64KB to stderr while we only read stdout,
+            // both processes would block forever. It is also the only place
+            // an argument the CLI refused is ever reported.
+            let stderr = child.stderr.take();
+            let stderr_handle = stderr.map(|se| {
+                tauri::async_runtime::spawn(async move {
+                    let mut buf = String::new();
+                    let mut reader = BufReader::new(se);
+                    let _ = tokio::io::AsyncReadExt::read_to_string(&mut reader, &mut buf).await;
+                    buf
+                })
+            });
+
+            // Run the streaming loop with a timeout, cancellable via escape
+            // key. tokio::select! races the stream against the cancellation
+            // signal — whichever completes first wins, and the other branch
+            // is dropped.
+            let stream_future = tokio::time::timeout(CLI_TIMEOUT, async {
+                self.process_stream(stdout, &app_handle, &msg_id).await
+            });
+
+            let (accumulated_text, final_result) = if let Some(mut rx) = cancel_rx.clone() {
+                tokio::select! {
+                    result = stream_future => {
+                        match result {
+                            Ok(Ok(r)) => r,
+                            Ok(Err(e)) => {
+                                if let Some(ref handle) = app_handle {
+                                    crate::agent::tool_logger::emit_stream_end(
+                                        handle,
+                                        msg_id.clone(),
+                                        format!("Error: {}", e),
+                                    );
+                                }
+                                return Err(e);
                             }
-                            return Err(e);
-                        }
-                        Err(_elapsed) => {
-                            if let Some(ref handle) = app_handle {
-                                crate::agent::tool_logger::emit_stream_end(
-                                    handle,
-                                    msg_id,
-                                    "Claude CLI timed out".to_string(),
-                                );
+                            Err(_elapsed) => {
+                                if let Some(ref handle) = app_handle {
+                                    crate::agent::tool_logger::emit_stream_end(
+                                        handle,
+                                        msg_id.clone(),
+                                        "Claude CLI timed out".to_string(),
+                                    );
+                                }
+                                return Err(AgentError::Timeout(format!(
+                                    "Claude CLI timed out after {} seconds",
+                                    CLI_TIMEOUT.as_secs()
+                                )));
                             }
-                            return Err(AgentError::Timeout(format!(
-                                "Claude CLI timed out after {} seconds",
-                                CLI_TIMEOUT.as_secs()
-                            )));
                         }
+                    }
+                    // Loop on changed() + borrow() instead of wait_for() to avoid
+                    // holding a non-Send RwLockReadGuard across the select! boundary.
+                    _ = async {
+                        loop {
+                            if *rx.borrow() { return; }
+                            if rx.changed().await.is_err() {
+                                // Sender dropped — will never cancel
+                                std::future::pending::<()>().await;
+                            }
+                        }
+                    } => {
+                        info!("Claude CLI cancelled via escape key, killing subprocess");
+                        let _ = child.kill().await;
+                        if let Some(ref handle) = app_handle {
+                            crate::agent::tool_logger::emit_stream_end(
+                                handle,
+                                msg_id.clone(),
+                                "Cancelled".to_string(),
+                            );
+                        }
+                        return Err(AgentError::Terminated);
                     }
                 }
-                // Loop on changed() + borrow() instead of wait_for() to avoid
-                // holding a non-Send RwLockReadGuard across the select! boundary.
-                _ = async {
-                    loop {
-                        if *rx.borrow() { return; }
-                        if rx.changed().await.is_err() {
-                            // Sender dropped — will never cancel
-                            std::future::pending::<()>().await;
+            } else {
+                // No AppState available (headless/test) — fall back to timeout-only
+                match stream_future.await {
+                    Ok(Ok(r)) => r,
+                    Ok(Err(e)) => {
+                        if let Some(ref handle) = app_handle {
+                            crate::agent::tool_logger::emit_stream_end(
+                                handle,
+                                msg_id.clone(),
+                                format!("Error: {}", e),
+                            );
                         }
+                        return Err(e);
                     }
-                } => {
-                    info!("Claude CLI cancelled via escape key, killing subprocess");
-                    let _ = child.kill().await;
-                    if let Some(ref handle) = app_handle {
-                        crate::agent::tool_logger::emit_stream_end(
-                            handle,
-                            msg_id,
-                            "Cancelled".to_string(),
-                        );
+                    Err(_elapsed) => {
+                        if let Some(ref handle) = app_handle {
+                            crate::agent::tool_logger::emit_stream_end(
+                                handle,
+                                msg_id.clone(),
+                                "Claude CLI timed out".to_string(),
+                            );
+                        }
+                        return Err(AgentError::Timeout(format!(
+                            "Claude CLI timed out after {} seconds",
+                            CLI_TIMEOUT.as_secs()
+                        )));
                     }
-                    return Err(AgentError::Terminated);
+                }
+            };
+
+            // If cancellation landed after the stream completed but before the
+            // race resolved, discard the response — the user asked to stop, so
+            // nothing should be rendered or spoken (LAC-3697).
+            if post_cancel_rx
+                .as_ref()
+                .map(|rx| *rx.borrow())
+                .unwrap_or(false)
+            {
+                info!("Claude CLI cancelled after stream completion, discarding response");
+                let _ = child.kill().await;
+                if let Some(ref handle) = app_handle {
+                    crate::agent::tool_logger::emit_stream_end(
+                        handle,
+                        msg_id.clone(),
+                        "Cancelled".to_string(),
+                    );
+                }
+                return Err(AgentError::Terminated);
+            }
+
+            // Wait for subprocess to finish
+            let status = child
+                .wait()
+                .await
+                .map_err(|e| AgentError::LlmError(format!("Claude CLI process error: {}", e)))?;
+
+            // Collect stderr — logged either way for debuggability, and read
+            // below to tell "this CLI is too old" from a real failure.
+            let stderr_buf = match stderr_handle {
+                Some(handle) => match handle.await {
+                    Ok(buf) => buf,
+                    Err(e) => {
+                        error!("Failed to read Claude CLI stderr: {}", e);
+                        String::new()
+                    }
+                },
+                None => String::new(),
+            };
+            if !stderr_buf.is_empty() {
+                if status.success() {
+                    warn!(
+                        "Claude CLI stderr (success): {}",
+                        stderr_buf.chars().take(500).collect::<String>()
+                    );
+                } else {
+                    error!(
+                        "Claude CLI stderr (failure): {}",
+                        stderr_buf.chars().take(500).collect::<String>()
+                    );
                 }
             }
-        } else {
-            // No AppState available (headless/test) — fall back to timeout-only
-            match stream_future.await {
-                Ok(Ok(r)) => r,
-                Ok(Err(e)) => {
-                    if let Some(ref handle) = app_handle {
-                        crate::agent::tool_logger::emit_stream_end(
-                            handle,
-                            msg_id,
-                            format!("Error: {}", e),
-                        );
-                    }
-                    return Err(e);
-                }
-                Err(_elapsed) => {
-                    if let Some(ref handle) = app_handle {
-                        crate::agent::tool_logger::emit_stream_end(
-                            handle,
-                            msg_id,
-                            "Claude CLI timed out".to_string(),
-                        );
-                    }
-                    return Err(AgentError::Timeout(format!(
-                        "Claude CLI timed out after {} seconds",
-                        CLI_TIMEOUT.as_secs()
-                    )));
-                }
+
+            // A CLI too old for --include-partial-messages spawns fine, then
+            // exits non-zero having printed nothing. Without this every query
+            // would fail outright until the user upgraded, so retry once with
+            // the flag stripped: the whole-message `assistant` path is still
+            // in `process_stream` and gives exactly the pre-branch behaviour.
+            let produced_nothing = accumulated_text.is_empty()
+                && final_result.as_deref().map(str::is_empty).unwrap_or(true);
+            if include_partial_messages
+                && !partial_fallback_used
+                && !status.success()
+                && produced_nothing
+                && rejects_partial_messages(&stderr_buf)
+            {
+                partial_fallback_used = true;
+                include_partial_messages = false;
+                PARTIAL_MESSAGES_UNSUPPORTED.store(true, Ordering::Relaxed);
+                warn!(
+                    "This `claude` build rejected {}; retrying without it. Update your Claude CLI to see Juno's reasoning and tool actions live instead of only the final answer.",
+                    PARTIAL_MESSAGES_FLAG
+                );
+                continue;
             }
+
+            break (accumulated_text, final_result, status);
         };
-
-        // If cancellation landed after the stream completed but before the
-        // race resolved, discard the response — the user asked to stop, so
-        // nothing should be rendered or spoken (LAC-3697).
-        if post_cancel_rx.map(|rx| *rx.borrow()).unwrap_or(false) {
-            info!("Claude CLI cancelled after stream completion, discarding response");
-            let _ = child.kill().await;
-            if let Some(ref handle) = app_handle {
-                crate::agent::tool_logger::emit_stream_end(handle, msg_id, "Cancelled".to_string());
-            }
-            return Err(AgentError::Terminated);
-        }
-
-        // Wait for subprocess to finish
-        let status = child
-            .wait()
-            .await
-            .map_err(|e| AgentError::LlmError(format!("Claude CLI process error: {}", e)))?;
-
-        // Collect stderr output — log on both success and failure for debuggability
-        if let Some(handle) = stderr_handle {
-            match handle.await {
-                Ok(stderr_buf) if !stderr_buf.is_empty() => {
-                    if status.success() {
-                        warn!(
-                            "Claude CLI stderr (success): {}",
-                            stderr_buf.chars().take(500).collect::<String>()
-                        );
-                    } else {
-                        error!(
-                            "Claude CLI stderr (failure): {}",
-                            stderr_buf.chars().take(500).collect::<String>()
-                        );
-                    }
-                }
-                Err(e) => error!("Failed to read Claude CLI stderr: {}", e),
-                _ => {}
-            }
-        }
 
         // Remember the session this conversation is now in, so the next
         // message continues it. Recorded here rather than mid-stream because
@@ -1353,6 +1436,31 @@ fn resolve_effort(configured: Option<&str>) -> String {
     }
 }
 
+/// Drop [`PARTIAL_MESSAGES_FLAG`] from an argument list, for a `claude` build
+/// too old to accept it. The flag is standalone, so nothing follows it to
+/// remove as well.
+fn strip_partial_messages(args: &mut Vec<String>) {
+    args.retain(|arg| arg != PARTIAL_MESSAGES_FLAG);
+}
+
+/// Did the CLI refuse [`PARTIAL_MESSAGES_FLAG`]?
+///
+/// A subprocess's stderr is the only signal there is — the CLI has no
+/// structured channel for "I do not know that argument", so the usual
+/// no-string-matching-on-errors rule has nothing better to offer here.
+///
+/// The match is on the flag name alone, deliberately. Every version phrases
+/// the rejection differently ("unknown option", "unrecognized option", a bare
+/// usage dump) and that wording will keep drifting, whereas the flag name is
+/// the thing we passed and the thing being complained about. The caller pairs
+/// this with a non-zero exit and completely empty output, which is what makes
+/// it safe to be this loose: a build that supports the flag has no reason to
+/// name it on stderr while failing to produce a single line on stdout. A
+/// false positive costs one extra spawn on a query that was already failing.
+fn rejects_partial_messages(stderr: &str) -> bool {
+    stderr.contains(PARTIAL_MESSAGES_FLAG)
+}
+
 /// The tool as a person would say it.
 ///
 /// MCP tools reach the CLI as `mcp__<server>__<tool>`; nobody needs to read
@@ -1956,6 +2064,83 @@ mod tests {
         // Only valid alongside --print and stream-json, both of which we pass.
         assert!(args.contains(&"-p".to_string()));
         assert!(args.contains(&"stream-json".to_string()));
+    }
+
+    #[test]
+    fn an_old_cli_is_recognised_by_the_flag_it_names() {
+        // Wording drifts between versions; the flag name does not.
+        assert!(rejects_partial_messages(
+            "error: unknown option '--include-partial-messages'"
+        ));
+        assert!(rejects_partial_messages(
+            "unrecognized option: --include-partial-messages\nUsage: claude [options]"
+        ));
+        // Real failures that have nothing to do with the flag must not
+        // trigger a pointless respawn.
+        assert!(!rejects_partial_messages("Error: network unreachable"));
+        assert!(!rejects_partial_messages(""));
+    }
+
+    #[test]
+    fn stripping_the_flag_leaves_the_rest_of_the_command_intact() {
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        let mut args = brain.build_args("hello", Some("abc-123"), None);
+        let before = args.len();
+        strip_partial_messages(&mut args);
+
+        assert!(!args.contains(&PARTIAL_MESSAGES_FLAG.to_string()));
+        assert_eq!(before - 1, args.len(), "only the one standalone flag goes");
+        // Everything the run depends on survives.
+        assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--strict-mcp-config".to_string()));
+        assert!(args.contains(&"abc-123".to_string()));
+        assert_eq!(args.last().map(String::as_str), Some("hello"));
+    }
+
+    /// The whole point of the fallback: a `claude` too old for
+    /// --include-partial-messages must still answer, not fail every query.
+    #[tokio::test]
+    async fn an_old_cli_degrades_instead_of_failing() {
+        let log = std::env::temp_dir().join(format!("juno-old-cli-{}.log", uuid::Uuid::new_v4()));
+        let script = write_fake_cli_script(&format!(
+            r#"echo run >> {log}
+for arg in "$@"; do
+if [ "$arg" = "--include-partial-messages" ]; then
+echo "error: unknown option '--include-partial-messages'" >&2
+exit 1
+fi
+done
+echo '{{"type":"result","result":"answered the old way"}}'"#,
+            log = log.display()
+        ));
+
+        // A previous test may have latched this; the retry is what we are
+        // measuring, so start from the fast path.
+        PARTIAL_MESSAGES_UNSUPPORTED.store(false, Ordering::Relaxed);
+
+        let brain = test_brain(script.clone());
+        let result = brain.run_streaming("test query", None, None, None).await;
+
+        assert_eq!(
+            result.expect("an old CLI must still answer"),
+            "answered the old way"
+        );
+
+        let runs = std::fs::read_to_string(&log).unwrap_or_default();
+        assert_eq!(
+            runs.lines().count(),
+            2,
+            "exactly one retry: the rejected run, then the stripped one"
+        );
+        assert!(
+            PARTIAL_MESSAGES_UNSUPPORTED.load(Ordering::Relaxed),
+            "the rest of the session must skip the flag, not re-discover it"
+        );
+
+        // Leave the static as the rest of the suite expects to find it.
+        PARTIAL_MESSAGES_UNSUPPORTED.store(false, Ordering::Relaxed);
+        let _ = std::fs::remove_file(&script);
+        let _ = std::fs::remove_file(&log);
     }
 
     #[test]
