@@ -628,12 +628,20 @@ impl ToolConfigManager {
     /// Used by: Default configuration creation
     fn add_default_browser_tools(tools: &mut HashMap<String, ToolConfig>) {
         let browser_tools = vec![
-            (tool_names::BROWSER_NAVIGATE, "Navigate to a URL"),
-            (tool_names::BROWSER_CLICK, "Click elements in the browser"),
-            (tool_names::BROWSER_TYPE, "Type text in browser forms"),
-            (tool_names::BROWSER_SCROLL, "Scroll browser pages"),
+            (tool_names::BROWSER_NAVIGATE, "Open a web page"),
+            (
+                tool_names::BROWSER_EXTRACT_CONTENT,
+                "Read text and links off the open page",
+            ),
+            (
+                tool_names::BROWSER_INTERACT,
+                "Click, type, choose, and scroll on the open page",
+            ),
+            (
+                tool_names::BROWSER_GET_CURRENT_URL,
+                "Check which page is open",
+            ),
             (tool_names::BROWSER_SCREENSHOT, "Take browser screenshots"),
-            (tool_names::BROWSER_GET_CONTENT, "Extract page content"),
         ];
 
         // Safari tools (specialized Safari automation - disabled by default)
