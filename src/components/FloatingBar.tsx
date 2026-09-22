@@ -113,7 +113,11 @@ export const BAR_LAYOUTS: Record<
   { width: number; height: number; band: number; pad: number }
 > = {
   compact: { width: 56, height: 16, band: 34, pad: 16 },
-  hover: { width: 132, height: 34, band: 34, pad: 16 },
+  // Wider than the three buttons alone need: the status dot is now always
+  // present at its fixed home (see DOT_HOME_LEFT) even in hover, so the row
+  // starts past it. The optional wake-phrase button is still added on top via
+  // pillExtraWidth.
+  hover: { width: 148, height: 34, band: 34, pad: 16 },
   // Voice and status share a width and a band on purpose. Listening used to
   // open a 220px bar and then, the instant the mic closed, a 419px one, for a
   // status word and a stop button. The extra 200px held nothing, and the jump
@@ -122,6 +126,20 @@ export const BAR_LAYOUTS: Record<
   status: { width: 260, height: 34, band: 34, pad: 16 },
   full: { width: 419, height: 44, band: 44, pad: 24 },
 };
+
+/**
+ * The status dot's fixed home, and the left inset every flowing content block
+ * (buttons, label, composer) uses to clear it. The dot is absolutely positioned
+ * at DOT_HOME_LEFT in EVERY layout, so it never reflows and never teleports:
+ * DOT_HOME_LEFT is chosen to centre it in the 56px compact pill, and reused
+ * verbatim when the pill opens, so growing from compact reveals the label to
+ * the dot's right while the dot itself stays put. CONTENT_LEAD = home + dot +
+ * gap. This is the vertical-centring idea applied to the horizontal axis: one
+ * fixed origin the pill grows around, instead of a per-layout alignment that
+ * flips centre<->left.
+ */
+export const DOT_HOME_LEFT = 23;
+export const CONTENT_LEAD = 38;
 
 export const FLOATING_BAR_DIMENSIONS = {
   ROSTER_STRIP_HEIGHT: 34, // 22px strip + 6px gap + breathing room (LAC-2830 §3)
@@ -1552,6 +1570,18 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const { resizeWindowIfChanged } = useWindowSize(windowLabel);
   const lastWindowRef = useRef<{ width: number; height: number } | null>(null);
 
+  // Vertical centering, the exact analogue of the pill's horizontal centering.
+  // With no pane/roster the window is symmetric top-to-bottom, so the pill sits
+  // at the window's vertical middle — which is the anchor the frame is pinned
+  // to — and any pad/band/anchor change (compact<->full) is absorbed by the
+  // centering the same way the centred window absorbs a width change: the pill
+  // grows around its own middle instead of drifting. With a pane the window is
+  // asymmetric (the pane fills one side), so the pill pins to its near edge
+  // instead. Driven off the APPLIED frame, not the target: on a shrink the
+  // window is held for SHRINK_DELAY_MS, so flipping this with the target would
+  // dump the pill into the middle of a still-tall pane window for that beat.
+  const [vcenter, setVcenter] = useState(true);
+
   useEffect(() => {
     const next = floatingBarWindowSize({
       layout,
@@ -1582,6 +1612,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       resizeWindowIfChanged(config).catch((error) =>
         console.error("❌ FloatingBar: Failed to resize window:", error),
       );
+      // Follow the frame we just applied: centre only when it is symmetric
+      // (no pane / roster on one side). Flips in lockstep with the window, so
+      // the pill's vertical origin never disagrees with the frame mid-move.
+      setVcenter(!paneOpen && !showRosterStrip);
     };
 
     // Growing: make room first, then the pill animates into it. Shrinking:
@@ -1858,7 +1892,14 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   return (
     <div
-      className="relative flex h-screen w-screen cursor-grab select-none flex-col items-center overflow-hidden active:cursor-grabbing"
+      className={cn(
+        "relative flex h-screen w-screen cursor-grab select-none flex-col items-center overflow-hidden active:cursor-grabbing",
+        // Vertical origin: centre the pill in a symmetric window so pad/band/
+        // anchor changes are absorbed (the pill grows around its middle); pin
+        // to the near edge when a pane fills one side. Mirrors the horizontal
+        // centring that already makes width changes smooth. See `vcenter`.
+        vcenter ? "justify-center" : growUp ? "justify-end" : "justify-start",
+      )}
       style={{ padding: pad }}
       onMouseDownCapture={onRootMouseDown}
       onMouseMove={onRootMouseMove}
@@ -1895,19 +1936,25 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         className={cn(
           // `isolate` scopes the flame border's z-index -1 to the pill, so it
           // sits above the pill's dark face but behind its content.
-          "relative isolate flex shrink-0 items-center rounded-full",
+          "relative isolate flex shrink-0 items-center gap-2 rounded-full",
           "border border-white/10 bg-neutral-950/90 text-white backdrop-blur-xl",
           // Juno has the pointer: a hairline in system blue, nothing louder.
           isDriving && "border-[#0A84FF]/70",
           "transition-[width,height,padding] duration-200 ease-out",
           layout === "compact" ? "shadow-lg" : "shadow-2xl",
-          // Idle layouts centre their single child so the compact dot and the
-          // hover buttons occupy the same centre — the swap cross-fades in
-          // place instead of the dot teleporting to the left edge.
-          layout === "compact" || layout === "hover" ? "justify-center" : "gap-2",
-          layout === "full" ? "px-4" : layout === "compact" ? "px-0" : "px-2",
         )}
-        style={{ width: pill.width, height: pill.height }}
+        // Horizontal origin: the dot is absolute at its fixed home, and every
+        // flowing block starts at CONTENT_LEAD so it clears the dot. No layout
+        // flips centre<->left any more, so nothing shifts sideways when the
+        // pill grows or shrinks — only the width changes, around the fixed dot.
+        // The right pad breathes the trailing controls; compact carries no
+        // flowing content, so its right pad is 0.
+        style={{
+          width: pill.width,
+          height: pill.height,
+          paddingLeft: CONTENT_LEAD,
+          paddingRight: layout === "full" ? 16 : layout === "compact" ? 0 : 8,
+        }}
       >
         {/* Activity indicator: a lit border whose colour + intensity name the
             mode (dictation, transcription, listening, working, error). Behind
@@ -1921,17 +1968,22 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           />
         )}
 
-        {/* The status dot lives in the compact idle pill and in the layouts
-            that carry real status (voice, working, input). Hover shows only
-            the buttons, so nothing shifts sideways when the pill grows. */}
-        {layout !== "hover" && (
+        {/* The status dot: Juno's presence, one persistent object. Absolutely
+            positioned at its fixed home in EVERY layout (hover included) and
+            vertically centred, so it never reflows, never teleports, and never
+            flickers out between states — the pill just grows around it and the
+            content appears to its right. */}
+        <div
+          className="pointer-events-none absolute top-1/2 -translate-y-1/2"
+          style={{ left: DOT_HOME_LEFT }}
+        >
           <StatusDot
             state={currentUiState}
             audioLevel={barState.audioLevel}
             driving={isDriving}
             voicePaused={voiceConfigured && !voiceListening}
           />
-        )}
+        </div>
 
         {layout === "compact" ? null : layout === "hover" ? (
           <div

@@ -244,7 +244,7 @@ describe("floatingBarWindowSize", () => {
     expect(floatingBarWindowSize({ layout: "compact", paneOpen: false, rosterVisible: false }))
       .toEqual({ width: 88, height: 66, anchorY: 33 });
     expect(floatingBarWindowSize({ layout: "hover", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 164, height: 66, anchorY: 33 });
+      .toEqual({ width: 180, height: 66, anchorY: 33 });
     expect(floatingBarWindowSize({ layout: "voice", paneOpen: false, rosterVisible: false }))
       .toEqual({ width: 292, height: 66, anchorY: 33 });
     // Status shares voice's width so the bar does not lurch wider the moment
@@ -366,13 +366,13 @@ describe("FloatingBar", () => {
     expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Type to Juno" })).toBeInTheDocument();
     // Growing: the window makes room straight away.
-    expect(lastResize()).toMatchObject({ width: 164, height: 66, anchorY: 33 });
+    expect(lastResize()).toMatchObject({ width: 180, height: 66, anchorY: 33 });
 
     await hover(false);
     expect(bar()).toHaveAttribute("data-layout", "compact");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     // Shrinking: the window waits for the pill to animate down first.
-    expect(lastResize()).toMatchObject({ width: 164, height: 66, anchorY: 33 });
+    expect(lastResize()).toMatchObject({ width: 180, height: 66, anchorY: 33 });
     act(() => {
       vi.advanceTimersByTime(SHRINK_DELAY_MS);
     });
