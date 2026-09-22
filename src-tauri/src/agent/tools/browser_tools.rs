@@ -69,7 +69,7 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "timeout": {
                         "type": "number",
-                        "description": "Optional navigation timeout in milliseconds.",
+                        "description": "Optional navigation timeout in MILLISECONDS. Unlike the other browser tools, navigation does apply this default when omitted.",
                         "default": 30000
                     }
                     // Add more options like returning content vs title later if needed
@@ -105,8 +105,7 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
                     },
                      "timeout": {
                         "type": "number",
-                        "description": "Optional timeout in milliseconds to wait for the selector.",
-                        "default": 5000
+                        "description": "Optional timeout in MILLISECONDS to wait for the selector to appear before extracting. Omit it to query the page once, immediately; there is no default wait."
                     }
                 },
                 "required": ["selector"]
@@ -151,8 +150,7 @@ pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
                     },
                     "timeout": {
                         "type": "number",
-                        "description": "Optional timeout in milliseconds for the interaction/selector.",
-                        "default": 5000
+                        "description": "Optional timeout in MILLISECONDS to wait for 'selector' to appear before acting. Omit it to query the page once, immediately; there is no default wait. Ignored by 'scroll', which takes no selector."
                     }
                     // 'select' action might need more specific options later
                 },

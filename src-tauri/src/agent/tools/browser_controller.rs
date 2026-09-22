@@ -24,8 +24,9 @@ use crate::constants::{
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;
 
-// Timeout defaults
-// const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30000;
+/// How often `wait_for_selector` re-queries the page while waiting out a
+/// caller-supplied timeout.
+const SELECTOR_POLL_INTERVAL_MS: u64 = 100;
 
 /// Drive the CDP connection.
 ///
@@ -103,6 +104,57 @@ impl BrowserController {
     fn js_string_literal(value: &str) -> String {
         // Display for serde_json::Value is infallible, unlike serde_json::to_string.
         serde_json::Value::String(value.to_owned()).to_string()
+    }
+
+    /// Read the caller's optional `timeout`, in milliseconds.
+    ///
+    /// `None` means "the caller asked for nothing", and every caller treats that
+    /// as "do not wait" rather than substituting a default. Read as f64 and
+    /// rounded, because `as_u64()` returns `None` for `2500.5` and would have
+    /// discarded a fractional request without saying so. Non-finite and
+    /// non-positive values are treated as absent for the same reason a zero
+    /// timeout is meaningless: there is nothing useful to honour.
+    fn optional_timeout_ms(args: &Value) -> Option<u64> {
+        args.get("timeout")
+            .and_then(Value::as_f64)
+            .filter(|ms| ms.is_finite() && *ms > 0.0)
+            .map(|ms| ms.round() as u64)
+    }
+
+    /// Poll for `selector` until it matches an element or `timeout_ms` elapses.
+    ///
+    /// Called only when the caller supplied a `timeout`. Returns whether the
+    /// selector was seen; callers proceed either way, so a selector that never
+    /// appears still produces the tool's usual "not found" result instead of a
+    /// new failure mode.
+    ///
+    /// Elapsed time is measured with `Instant`, and against the elapsed value
+    /// rather than a precomputed deadline, so an absurd `timeout_ms` cannot
+    /// overflow the addition.
+    async fn wait_for_selector(page: &Page, selector: &str, timeout_ms: u64) -> bool {
+        let js_fn = format!(
+            "function() {{ return document.querySelector({}) !== null; }}",
+            Self::js_string_literal(selector)
+        );
+        let budget = Duration::from_millis(timeout_ms);
+        let started_at = std::time::Instant::now();
+
+        loop {
+            if let Ok(found) = Self::eval_json(page, &js_fn).await {
+                if found.as_bool().unwrap_or(false) {
+                    return true;
+                }
+            }
+            if started_at.elapsed() >= budget {
+                log::debug!(
+                    "Selector '{}' did not appear within {}ms; continuing anyway",
+                    selector,
+                    timeout_ms
+                );
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(SELECTOR_POLL_INTERVAL_MS)).await;
+        }
     }
 
     /// Evaluate a JavaScript function expression and return its result as JSON.
@@ -961,9 +1013,10 @@ impl BrowserController {
         let url = args["url"]
             .as_str()
             .ok_or_else(|| AgentError::ToolError("Missing 'url' argument".to_string()))?;
-        let timeout_ms = args["timeout"]
-            .as_u64()
-            .unwrap_or(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS);
+        // Navigation is the one browser tool that already applied a default, so
+        // it keeps it — this is only about reading a supplied value correctly.
+        let timeout_ms =
+            Self::optional_timeout_ms(args).unwrap_or(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS);
 
         log::info!("Navigating to: {}", url);
 
@@ -1103,6 +1156,14 @@ impl BrowserController {
             AgentError::ToolError("Page not available for content extraction".to_string())
         })?;
 
+        // Honour an explicit `timeout` by waiting for the selector to appear,
+        // which is what the schema promises it does. With no `timeout` the
+        // selector is queried exactly once, as before: a caller that asked for
+        // nothing gets no new deadline and no new waiting.
+        if let Some(timeout_ms) = Self::optional_timeout_ms(args) {
+            Self::wait_for_selector(page, selector, timeout_ms).await;
+        }
+
         // Expression that reads the requested value off an element bound to `el`.
         // `attribute` reads the static markup attribute; `property` reads the live
         // DOM property (`.value`, `.checked`, ...), which is the only way to see
@@ -1172,6 +1233,15 @@ impl BrowserController {
         let page = page_guard.as_ref().ok_or_else(|| {
             AgentError::ToolError("Page not available for interaction".to_string())
         })?;
+
+        // Same contract as `extract_content`: an explicit `timeout` waits for
+        // the target selector, and its absence waits for nothing. `scroll`
+        // carries no selector, so this is a no-op for it.
+        if let Some(timeout_ms) = Self::optional_timeout_ms(args) {
+            if let Some(selector) = args["selector"].as_str() {
+                Self::wait_for_selector(page, selector, timeout_ms).await;
+            }
+        }
 
         match action {
             "click" => {
@@ -1762,5 +1832,52 @@ mod tests {
             }
             prev_backslash = c == '\\' && !prev_backslash;
         }
+    }
+
+    #[test]
+    fn an_absent_timeout_stays_absent_so_no_default_is_applied() {
+        // The whole point of the fix: a caller that sends nothing gets no
+        // deadline invented for it.
+        let args = serde_json::json!({ "selector": "h1" });
+        assert_eq!(BrowserController::optional_timeout_ms(&args), None);
+    }
+
+    #[test]
+    fn a_whole_millisecond_timeout_is_read_as_given() {
+        let args = serde_json::json!({ "timeout": 5000 });
+        assert_eq!(BrowserController::optional_timeout_ms(&args), Some(5000));
+    }
+
+    #[test]
+    fn a_fractional_timeout_is_rounded_rather_than_discarded() {
+        // `as_u64()` returns None for 2500.5, which silently threw the request
+        // away. Rounding keeps it.
+        let args = serde_json::json!({ "timeout": 2500.5 });
+        assert_eq!(BrowserController::optional_timeout_ms(&args), Some(2501));
+        let down = serde_json::json!({ "timeout": 2500.4 });
+        assert_eq!(BrowserController::optional_timeout_ms(&down), Some(2500));
+    }
+
+    #[test]
+    fn zero_and_negative_timeouts_are_treated_as_absent() {
+        for value in [0, -1] {
+            let args = serde_json::json!({ "timeout": value });
+            assert_eq!(BrowserController::optional_timeout_ms(&args), None);
+        }
+    }
+
+    #[test]
+    fn non_numeric_and_non_finite_timeouts_are_treated_as_absent() {
+        let text = serde_json::json!({ "timeout": "5000" });
+        assert_eq!(BrowserController::optional_timeout_ms(&text), None);
+        let null = serde_json::json!({ "timeout": serde_json::Value::Null });
+        assert_eq!(BrowserController::optional_timeout_ms(&null), None);
+        // JSON has no literal for infinity, so this is the value a float that
+        // overflowed on the way in would arrive as.
+        let huge = serde_json::json!({ "timeout": f64::MAX });
+        assert_eq!(
+            BrowserController::optional_timeout_ms(&huge),
+            Some(u64::MAX)
+        );
     }
 }
