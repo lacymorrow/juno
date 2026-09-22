@@ -23,22 +23,6 @@ interface CachedValue<T> {
 	timestamp: number;
 }
 
-interface WhisperModelInfo {
-	id: string;
-	filename: string;
-	display_name: string;
-	size_mb: number;
-	downloaded: boolean;
-	is_default: boolean;
-}
-
-interface WhisperDownloadProgress {
-	model_id: string;
-	bytes_downloaded: number;
-	total_bytes: number;
-	percent: number;
-}
-
 interface SettingsCache {
 	ttsProvider?: CachedValue<string>;
 	dictationClipboardEnabled?: CachedValue<boolean>;
@@ -58,19 +42,7 @@ interface SettingsCache {
 	keyboardShortcuts?: CachedValue<KeyboardShortcuts>;
 	mcpServers?: CachedValue<MCPServerConfig[]>;
 	mcpServerStatuses?: CachedValue<Record<string, MCPServerStatus>>;
-	whisperModels?: CachedValue<WhisperModelInfo[]>;
-	currentWhisperModel?: CachedValue<string>;
-	sttProvider?: CachedValue<string>;
 	livePartialTranscription?: CachedValue<boolean>;
-	systemArch?: CachedValue<string>;
-}
-
-/** File-presence status for the Parakeet ONNX model directory. */
-export interface ParakeetModelStatus {
-	downloaded: boolean;
-	model_dir: string;
-	files_present: string[];
-	files_missing: string[];
 }
 
 // Cache with 30-second TTL to prevent excessive API calls
@@ -170,18 +142,9 @@ export function useSettings() {
 	const [alwaysListeningWakeWords, setAlwaysListeningWakeWords] = useState<string[]>([...AUDIO.DEFAULT_WAKE_WORDS]);
 	const [wakeWordsInput, setWakeWordsInput] = useState<string>("");
 
-	// Whisper Model Settings
-	const [whisperModels, setWhisperModels] = useState<WhisperModelInfo[]>([]);
-	const [currentWhisperModel, setCurrentWhisperModel] = useState<string>("large-v3-turbo");
-	const [whisperDownloading, setWhisperDownloading] = useState<string | null>(null);
-	const [whisperDownloadProgress, setWhisperDownloadProgress] = useState<WhisperDownloadProgress | null>(null);
-	const [whisperDownloadError, setWhisperDownloadError] = useState<{ modelId: string; error: string } | null>(null);
 
 	// STT engine (dictation model) settings
-	const [sttProvider, setSttProviderState] = useState<string>("whisper");
-	const [parakeetStatus, setParakeetStatus] = useState<ParakeetModelStatus | null>(null);
 	const [livePartialTranscription, setLivePartialTranscriptionState] = useState<boolean>(false);
-	const [systemArch, setSystemArch] = useState<string>("");
 
 	// Tool Configuration Settings
 	const [toolConfigurations, setToolConfigurations] = useState<Record<string, ToolCategory>>({});
@@ -341,70 +304,6 @@ export function useSettings() {
 		};
 	}, []); // No deps needed — handler always gets latest state via event payload
 
-	// Listen for whisper model download events
-	useEffect(() => {
-		let unlistenProgress: (() => void) | undefined;
-		let unlistenComplete: (() => void) | undefined;
-		let unlistenError: (() => void) | undefined;
-		let mounted = true;
-
-		const setup = async () => {
-			try {
-				const fnProgress = await listen<WhisperDownloadProgress>(
-					"whisper-download-progress",
-					(event) => {
-						if (!mounted) return;
-						setWhisperDownloadProgress(event.payload);
-					}
-				);
-				const fnComplete = await listen<{ model_id: string }>(
-					"whisper-download-complete",
-					(event) => {
-						if (!mounted) return;
-						setWhisperDownloading(null);
-						setWhisperDownloadProgress(null);
-						setWhisperDownloadError(null);
-						setCurrentWhisperModel(event.payload.model_id);
-						invalidateCache("whisperModels");
-						invalidateCache("currentWhisperModel");
-					}
-				);
-				const fnError = await listen<{ model_id: string; error: string }>(
-					"whisper-download-error",
-					(event) => {
-						if (!mounted) return;
-						console.error("Whisper download error:", event.payload.error);
-						setWhisperDownloading(null);
-						setWhisperDownloadProgress(null);
-						setWhisperDownloadError({
-							modelId: event.payload.model_id,
-							error: event.payload.error,
-						});
-					}
-				);
-				if (mounted) {
-					unlistenProgress = fnProgress;
-					unlistenComplete = fnComplete;
-					unlistenError = fnError;
-				} else {
-					fnProgress();
-					fnComplete();
-					fnError();
-				}
-			} catch (error) {
-				console.error("Failed to setup whisper download listeners:", error);
-			}
-		};
-
-		setup();
-		return () => {
-			mounted = false;
-			unlistenProgress?.();
-			unlistenComplete?.();
-			unlistenError?.();
-		};
-	}, []);
-
 	const loadAllSettings = useCallback(async () => {
 		setIsLoading(true);
 		try {
@@ -500,11 +399,8 @@ export function useSettings() {
 			// Load permissions status with caching
 			await loadPermissionsStatus();
 
-			// Load whisper model info
-			await loadWhisperModels();
-
-			// Load STT engine + live-partial settings
-			await loadSttSettings();
+			// Load the live-partial dictation display mode
+			await loadLivePartialSetting();
 
 			// Load tool configurations with caching
 			await loadToolConfigurations();
@@ -933,101 +829,14 @@ export function useSettings() {
 		}
 	};
 
-	const loadWhisperModels = useCallback(async () => {
+	const loadLivePartialSetting = useCallback(async () => {
 		try {
-			const [models, current] = await Promise.all([
-				getCachedOrFetch("whisperModels", () =>
-					invokeCommand<WhisperModelInfo[]>("get_whisper_models")
-				),
-				getCachedOrFetch("currentWhisperModel", () =>
-					invokeCommand<string>("get_current_whisper_model")
-				),
-			]);
-			setWhisperModels(models);
-			setCurrentWhisperModel(current);
-		} catch (error) {
-			console.error("Error loading whisper models:", error);
-		}
-	}, [invokeCommand]);
-
-	const handleWhisperModelDownload = useCallback(async (modelId: string) => {
-		try {
-			setWhisperDownloading(modelId);
-			setWhisperDownloadProgress(null);
-			setWhisperDownloadError(null);
-			await invokeCommand("download_whisper_model", { modelId });
-		} catch (error) {
-			console.error("Failed to start whisper model download:", error);
-			setWhisperDownloading(null);
-			toast.error(`Failed to download model: ${error}`);
-		}
-	}, [invokeCommand]);
-
-	const handleWhisperModelChange = useCallback(async (modelId: string) => {
-		try {
-			await invokeCommand(
-				"set_whisper_model",
-				{ modelId },
-				{
-					showSuccessToast: true,
-					successMessage: "Whisper model switched",
-					errorMessage: "Failed to switch model",
-				}
+			const live = await getCachedOrFetch("livePartialTranscription", () =>
+				invokeCommand<boolean>("get_live_partial_transcription")
 			);
-			setCurrentWhisperModel(modelId);
-			invalidateCache("currentWhisperModel");
-		} catch (error) {
-			console.error("Failed to switch whisper model:", error);
-		}
-	}, [invokeCommand]);
-
-	const loadSttSettings = useCallback(async () => {
-		try {
-			const [provider, live, arch] = await Promise.all([
-				getCachedOrFetch("sttProvider", () =>
-					invokeCommand<string>("get_stt_provider")
-				),
-				getCachedOrFetch("livePartialTranscription", () =>
-					invokeCommand<boolean>("get_live_partial_transcription")
-				),
-				getCachedOrFetch("systemArch", () =>
-					invokeCommand<string>("get_system_arch")
-				),
-			]);
-			setSttProviderState(provider);
 			setLivePartialTranscriptionState(live);
-			setSystemArch(arch);
 		} catch (error) {
-			console.error("Error loading STT settings:", error);
-		}
-		// Parakeet file status comes straight from the plugin (no app wrapper).
-		try {
-			const status = await invoke<ParakeetModelStatus>(
-				"plugin:voice-transcription|get_parakeet_model_status"
-			);
-			setParakeetStatus(status);
-		} catch (error) {
-			console.debug("Parakeet status unavailable:", error);
-			setParakeetStatus(null);
-		}
-	}, [invokeCommand]);
-
-	// Switch the dictation engine (Whisper / Parakeet). Persists + hot-swaps.
-	const handleSttProviderChange = useCallback(async (provider: string) => {
-		try {
-			await invokeCommand(
-				"set_stt_provider",
-				{ provider },
-				{
-					showSuccessToast: true,
-					successMessage: `Dictation engine set to ${provider}`,
-					errorMessage: "Failed to switch dictation engine",
-				}
-			);
-			setSttProviderState(provider);
-			invalidateCache("sttProvider");
-		} catch (error) {
-			console.error("Failed to switch STT provider:", error);
+			console.error("Error loading live transcription setting:", error);
 		}
 	}, [invokeCommand]);
 
@@ -1090,16 +899,8 @@ export function useSettings() {
 		editingShortcut,
 		setEditingShortcut,
 
-		// Whisper model
-		whisperModels,
-		currentWhisperModel,
-		whisperDownloading,
-		whisperDownloadProgress,
-		whisperDownloadError,
-		sttProvider,
-		parakeetStatus,
+		// Dictation display mode (the models themselves live in useSttModels)
 		livePartialTranscription,
-		systemArch,
 
 		// Actions
 		loadAllSettings,
@@ -1121,11 +922,7 @@ export function useSettings() {
 		loadPermissionsStatus,
 		loadKeyboardShortcuts,
 		loadToolConfigurations,
-		loadWhisperModels,
-		handleWhisperModelDownload,
-		handleWhisperModelChange,
-		loadSttSettings,
-		handleSttProviderChange,
+		loadLivePartialSetting,
 		handleLivePartialTranscriptionChange,
 		setToolConfigurations,
 		invalidateToolConfigCache,

@@ -60,13 +60,13 @@ pub mod sound;
 pub mod stop_coordinator;
 pub mod stop_operations;
 pub mod stt;
+pub mod stt_models; // Speech-to-text model catalog: status, download, use, delete
 pub mod testing;
 pub mod text_editor;
 pub mod tools;
 pub mod tray_commands;
 pub mod triggers;
 pub mod ui_commands; // Consolidated UI API for all floating elements
-pub mod whisper_model;
 pub mod window; // Debug commands for tool configuration diagnostics
 
 // Re-export commands for easy access in lib.rs
@@ -127,15 +127,12 @@ pub use self::shell::*;
 pub use self::shortcuts::*;
 pub use self::sound::*;
 pub use self::stop_operations::*;
-pub use self::stt::{
-    get_live_partial_transcription, get_stt_provider, get_system_arch,
-    set_live_partial_transcription, set_stt_provider,
+pub use self::stt::{get_live_partial_transcription, set_live_partial_transcription};
+pub use self::stt_models::{
+    cancel_stt_model_download, decline_stt_model_offer, delete_stt_model, download_stt_model,
+    get_stt_models_status, use_stt_model,
 };
 pub use self::triggers::*;
-pub use self::whisper_model::{
-    download_whisper_model, get_current_whisper_model, get_whisper_download_status,
-    get_whisper_models, set_whisper_model,
-};
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{

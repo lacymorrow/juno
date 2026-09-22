@@ -360,6 +360,11 @@ pub struct VoiceTranscriptionSettings {
     /// Live streaming partial transcription (cumulative, display-only). Advanced/debug.
     #[serde(default)]
     pub live_partial_transcription: bool,
+    /// The person answered "Not now" to the Parakeet offer in onboarding, or
+    /// picked a model by hand. Either way the app never asks again; the Models
+    /// pane still offers the download.
+    #[serde(default)]
+    pub parakeet_download_declined: bool,
 }
 
 fn default_stt_provider() -> String {
@@ -541,6 +546,7 @@ impl Default for VoiceTranscriptionSettings {
             enable_playback: true,
             stt_provider: default_stt_provider(),
             live_partial_transcription: false,
+            parakeet_download_declined: false,
         }
     }
 }

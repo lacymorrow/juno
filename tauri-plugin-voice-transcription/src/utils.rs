@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{Manager, Runtime};
 
 /// Compiled regex for all Whisper audio marker artifacts.
@@ -74,6 +74,45 @@ pub fn filter_transcription_text(text: &str) -> String {
         None => text.to_string(),
     };
     correct_name_mishearings(&cleaned)
+}
+
+/// Where downloaded (not bundled) models live: `<app data>/models`. The
+/// Whisper downloader writes here, and the Parakeet directory sits inside it.
+pub fn downloaded_models_dir<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("models"))
+}
+
+/// The Parakeet model directory. Prefers the download location under app data;
+/// falls back to the bundled/dev resolution for a directory someone placed by
+/// hand. When neither exists, returns the download location so a status check
+/// reports "not downloaded" against the directory the download will create.
+pub fn resolve_parakeet_model_dir<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    parakeet_model_dir: &str,
+) -> String {
+    let downloaded = downloaded_models_dir(app).map(|models| {
+        // Config holds "models/parakeet-ctc"; only the last component matters here.
+        let leaf = Path::new(parakeet_model_dir)
+            .file_name()
+            .map(|n| n.to_os_string())
+            .unwrap_or_else(|| "parakeet-ctc".into());
+        models.join(leaf)
+    });
+
+    if let Some(dir) = &downloaded {
+        if crate::engine_parakeet::ParakeetEngine::model_files_present(dir) {
+            return dir.to_string_lossy().to_string();
+        }
+    }
+
+    let resolved = resolve_model_path(app, parakeet_model_dir);
+    if crate::engine_parakeet::ParakeetEngine::model_files_present(Path::new(&resolved)) {
+        return resolved;
+    }
+
+    downloaded
+        .map(|d| d.to_string_lossy().to_string())
+        .unwrap_or(resolved)
 }
 
 /// Resolve model path to an absolute path using production-ready path resolution

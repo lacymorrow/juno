@@ -93,9 +93,8 @@ export const settingsCategories: MacCategory[] = [
     name: "Models",
     icon: <Boxes className="h-3.5 w-3.5" />,
     tile: "bg-[#5856D6]",
-    description: "Dictation and assistant models",
-    keywords: "dictation whisper parakeet stt speech model tier download on device assistant agent",
-    advanced: true,
+    description: "Dictation models",
+    keywords: "dictation whisper parakeet stt speech model fast balanced accurate download on device",
   },
   {
     id: "notifications",
@@ -192,8 +191,10 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "general", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup" },
   // Triggers
   { sectionId: "triggers", rowId: "add-trigger", label: "Add trigger", keywords: "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
-  // Voice & Audio
-  { sectionId: "voice", rowId: "whisper-model", label: "Active Model", keywords: "whisper model transcription download" },
+  // Models
+  { sectionId: "models", rowId: "model-row-parakeet-ctc", label: "Balanced dictation model", keywords: "parakeet balanced recommended dictation model download" },
+  { sectionId: "models", rowId: "model-row-tiny-en", label: "Fast dictation model", keywords: "whisper tiny fast dictation model" },
+  { sectionId: "models", rowId: "model-row-large-v3", label: "Most accurate dictation model", keywords: "whisper large accurate dictation model download" },
   // AI Provider
   { sectionId: "ai", rowId: "ai-provider", label: "Active Provider", keywords: "provider anthropic openai gemini claude" },
   { sectionId: "ai", rowId: "max-tokens", label: "Max Tokens", keywords: "tokens length limit output" },
@@ -324,7 +325,7 @@ function SettingsWindowContent() {
       case "ai":
         return <AIProviderSettings settings={settings} />;
       case "models":
-        return <ModelsSettings settings={settings} />;
+        return <ModelsSettings />;
       case "notifications":
         return <NotificationSettings />;
       case "tools":

@@ -24,9 +24,13 @@ pub use config::VoiceTranscriptionConfig;
 pub use controller::VoiceController;
 pub use engine::{SttProvider, TranscriptionEngine, TranscriptionSession};
 pub use engine_manager::EngineManager;
+pub use engine_parakeet::{
+    missing_parakeet_files, parakeet_file_url, parakeet_total_bytes, ParakeetFile,
+    ParakeetModelStatus, PARAKEET_HF_REPO, PARAKEET_HF_REVISION, PARAKEET_MODEL_FILES,
+};
 pub use error::{Error, Result};
 pub use shared_whisper::SharedWhisperManager;
-pub use utils::resolve_model_path;
+pub use utils::{downloaded_models_dir, resolve_model_path, resolve_parakeet_model_dir};
 
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
@@ -148,7 +152,7 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             };
 
             // Resolve Parakeet model directory
-            let parakeet_model_dir = resolve_model_path(app, &config.parakeet_model_dir);
+            let parakeet_model_dir = resolve_parakeet_model_dir(app, &config.parakeet_model_dir);
 
             // Manage uninitialized controllers immediately so Tauri state is always
             // valid (commands won't panic on missing state) even before the engine loads.

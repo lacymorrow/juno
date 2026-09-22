@@ -27,10 +27,6 @@ import { COMMANDS } from "@/lib/constants.generated";
 
 interface AssistantModelPickerProps {
   settings: SettingsSectionProps["settings"];
-  /** Heading above the card. */
-  title?: string;
-  /** Muted helper text below the card. */
-  footer?: string;
   /** Gate the whole group behind the advanced-settings toggle. */
   advanced?: boolean;
 }
@@ -44,8 +40,6 @@ interface AssistantModelPickerProps {
  */
 export default function AssistantModelPicker({
   settings,
-  title = "Provider Selection",
-  footer = "Choose your AI provider and model",
   advanced = false,
 }: AssistantModelPickerProps) {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
@@ -111,7 +105,11 @@ export default function AssistantModelPicker({
   );
 
   return (
-    <SettingsGroup title={title} advanced={advanced} footer={footer}>
+    <SettingsGroup
+      title="Provider Selection"
+      advanced={advanced}
+      footer="Choose your AI provider and model"
+    >
       <SettingsRow
         htmlFor="ai-provider"
         label="Active Provider"

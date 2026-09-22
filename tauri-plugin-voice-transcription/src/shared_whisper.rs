@@ -7,6 +7,18 @@ use whisper_rs::{WhisperContext, WhisperContextParameters};
 /// Global shared Whisper context — uses RwLock so the model can be swapped at runtime
 static SHARED_WHISPER_CONTEXT: RwLock<Option<Arc<WhisperContext>>> = RwLock::new(None);
 
+/// Path of the model file the shared context was built from. `WhisperContext`
+/// does not remember it, and the Models pane must show the model that is
+/// really loaded, not the one settings asked for (they differ when the
+/// preferred model is missing and startup fell back to the bundled tiny.en).
+static SHARED_WHISPER_MODEL_PATH: RwLock<Option<String>> = RwLock::new(None);
+
+fn remember_model_path(model_path: &str) {
+    if let Ok(mut guard) = SHARED_WHISPER_MODEL_PATH.write() {
+        *guard = Some(model_path.to_string());
+    }
+}
+
 /// Manager for shared Whisper model loading and access
 pub struct SharedWhisperManager;
 
@@ -70,6 +82,7 @@ impl SharedWhisperManager {
         }
 
         *guard = Some(arc_context.clone());
+        remember_model_path(model_path);
         info!("[SharedWhisper] Shared Whisper context initialized successfully");
         Ok(arc_context)
     }
@@ -91,8 +104,17 @@ impl SharedWhisperManager {
             .map_err(|e| Error::Whisper(format!("Shared context lock poisoned: {}", e)))?;
 
         *guard = Some(arc_context.clone());
+        remember_model_path(model_path);
         info!("[SharedWhisper] Shared Whisper context reinitialized with new model");
         Ok(arc_context)
+    }
+
+    /// The model file the shared context is currently built from, if any.
+    pub fn current_model_path() -> Option<String> {
+        SHARED_WHISPER_MODEL_PATH
+            .read()
+            .ok()
+            .and_then(|g| g.clone())
     }
 
     /// Get the shared Whisper context (must be initialized first)

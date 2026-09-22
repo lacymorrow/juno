@@ -11,6 +11,7 @@ import {
   type ReactElement,
 } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
+import type { SttDownloadProgress, SttModelsStatus } from "@/hooks/useSttModels";
 
 // ── Visual language ──────────────────────────────────────────────────────────
 // This flow is styled like a macOS setup assistant: the system SF stack, quiet
@@ -335,10 +336,19 @@ function firstPendingIndex(state: PermissionsState | null): number {
   return idx === -1 ? PERMISSION_FLOW.length : idx;
 }
 
+/** The dictation model onboarding offers, when the backend says to. */
+interface DictationOffer {
+  modelId: string;
+  /** Short family name for the button ("Parakeet"). */
+  family: string;
+  sizeMb: number;
+}
+
 const getOnboardingSteps = (
   permissionsAlreadyGranted: boolean,
   isDevelopmentMode: boolean = false,
-  apiKeysAvailable: boolean = false
+  apiKeysAvailable: boolean = false,
+  dictationOffer: DictationOffer | null = null
 ) => [
   {
     id: "welcome",
@@ -378,6 +388,20 @@ const getOnboardingSteps = (
           action: "Continue",
         },
       ]),
+  // Offered, never assumed: a 600 MB download is the person's call. The
+  // backend decides whether to ask at all (Apple Silicon, not downloaded, not
+  // declined before), so an Intel Mac or a repeat run never sees this screen.
+  ...(dictationOffer
+    ? [
+        {
+          id: "dictation-model",
+          title: "Better dictation",
+          description: `${dictationOffer.family} is a speech model that runs on your Mac. Faster and more accurate than the one built in, and your voice never leaves the machine.`,
+          icon: null, // The model card below is the content here.
+          action: `Download ${dictationOffer.family} (${dictationOffer.sizeMb} MB)`,
+        },
+      ]
+    : []),
   {
     id: "complete",
     title: "You're all set",
@@ -691,6 +715,13 @@ export default function OnboardingFlow({
   const [cliAuthenticated, setCliAuthenticated] = useState(false);
   const [cliChecking, setCliChecking] = useState(true);
   const [cliSelected, setCliSelected] = useState(false);
+
+  // Dictation model offer (see getOnboardingSteps). `sttDownload` tracks the
+  // download this screen started; the download itself runs in the backend and
+  // keeps going after onboarding closes.
+  const [dictationOffer, setDictationOffer] = useState<DictationOffer | null>(null);
+  const [sttDownload, setSttDownload] = useState<"idle" | "started" | "done" | "failed">("idle");
+  const [sttProgress, setSttProgress] = useState<SttDownloadProgress | null>(null);
 
   // API key state
   const [apiKeysAvailable, setApiKeysAvailable] = useState(false);
@@ -1123,6 +1154,24 @@ export default function OnboardingFlow({
         await checkPermissionsStatus();
         if (!mounted) return;
 
+        // Should setup offer the recommended dictation model? The backend
+        // answers no on Intel, when it is already on disk, or when the person
+        // declined before.
+        try {
+          const stt = await invoke<SttModelsStatus>(COMMANDS.STT_MODELS_GET_STATUS);
+          const recommended = stt.models.find((m) => m.recommended);
+          if (mounted && stt.offer_recommended && recommended && !recommended.downloaded) {
+            setDictationOffer({
+              modelId: recommended.id,
+              family: recommended.engine === "parakeet" ? "Parakeet" : "Whisper",
+              sizeMb: recommended.size_mb,
+            });
+          }
+        } catch (error) {
+          console.warn("Failed to check dictation models:", error);
+        }
+        if (!mounted) return;
+
         // Check if API keys are already available (from store or .env)
         try {
           const keysAvailable = await invoke<boolean>("check_api_keys_available");
@@ -1210,8 +1259,52 @@ export default function OnboardingFlow({
   const onboardingSteps = getOnboardingSteps(
     actualPermissionsGranted,
     isDevelopmentMode,
-    apiKeysAvailable
+    apiKeysAvailable,
+    dictationOffer
   );
+
+  // Progress for the download this screen started. Same events the Models
+  // pane draws; the offer is just an earlier place to press Download.
+  useEventListener<SttDownloadProgress>(EVENTS.STT_MODELS_DOWNLOAD_PROGRESS, (payload) => {
+    if (payload.model_id === dictationOffer?.modelId) setSttProgress(payload);
+  });
+  useEventListener<{ model_id: string }>(EVENTS.STT_MODELS_DOWNLOAD_COMPLETE, (payload) => {
+    if (payload.model_id === dictationOffer?.modelId) {
+      setSttProgress(null);
+      setSttDownload("done");
+    }
+  });
+  useEventListener<{ model_id: string; cancelled: boolean }>(
+    EVENTS.STT_MODELS_DOWNLOAD_ERROR,
+    (payload) => {
+      if (payload.model_id === dictationOffer?.modelId) {
+        setSttProgress(null);
+        setSttDownload("failed");
+      }
+    }
+  );
+
+  const startDictationDownload = useCallback(async () => {
+    if (!dictationOffer) return;
+    try {
+      await invoke(COMMANDS.STT_MODELS_DOWNLOAD, {
+        modelId: dictationOffer.modelId,
+        activate: true,
+      });
+      setSttDownload("started");
+    } catch (error) {
+      console.warn("[Onboarding] dictation model download did not start:", error);
+      setSttDownload("failed");
+    }
+  }, [dictationOffer]);
+
+  const declineDictationOffer = useCallback(async () => {
+    try {
+      await invoke(COMMANDS.STT_MODELS_DECLINE_OFFER);
+    } catch (error) {
+      console.warn("[Onboarding] could not record the declined offer:", error);
+    }
+  }, []);
 
   const stepId = onboardingSteps[currentStep]?.id;
 
@@ -1519,6 +1612,13 @@ export default function OnboardingFlow({
       await saveApiKey();
     }
 
+    // The offer screen's primary action is the download itself; once it is
+    // running (or done) the same button reads Continue and advances.
+    if (currentStepData?.id === "dictation-model" && (sttDownload === "idle" || sttDownload === "failed")) {
+      await startDictationDownload();
+      return;
+    }
+
     // Record permission_skipped for any optional permission that was never
     // granted by the time the user moves past the permissions step.
     if (currentStepData?.id === "permissions" && permissionsState) {
@@ -1549,7 +1649,7 @@ export default function OnboardingFlow({
       setIsComplete(true);
       onComplete();
     }
-  }, [currentStep, onboardingSteps, permissionsState, permIndex, detectedProvider, apiKeySaved, saveApiKey, onComplete, recordEvent]);
+  }, [currentStep, onboardingSteps, permissionsState, permIndex, detectedProvider, apiKeySaved, saveApiKey, onComplete, recordEvent, sttDownload, startDictationDownload]);
 
   const handleSkip = () => {
     // Skip the current step by jumping to the end
@@ -1704,6 +1804,23 @@ export default function OnboardingFlow({
   // "later" has to be a real answer, not a dead link.
   const isSkipHidden = currentStep === onboardingSteps.length - 1;
 
+  // The offer screen: its primary action starts the download, then reads
+  // Continue; "Not now" is remembered so setup never asks again. Once the
+  // download is running, "Not now" no longer applies and the link goes away.
+  const isDictationOffer = step.id === "dictation-model" && sttDownload === "idle";
+  const primaryLabel =
+    step.id === "dictation-model"
+      ? sttDownload === "failed"
+        ? "Try again"
+        : sttDownload === "idle"
+          ? step.action
+          : "Continue"
+      : step.action;
+  const declineAndSkipDictation = () => {
+    void declineDictationOffer();
+    handleSkipStep();
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-background"
@@ -1834,6 +1951,51 @@ export default function OnboardingFlow({
                       </motion.div>
                     )}
                   </AnimatePresence>
+                </div>
+              )}
+
+              {/* Dictation model offer: one card, one number, one decision. */}
+              {step.id === "dictation-model" && dictationOffer && (
+                <div className="pt-4 text-left">
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-[14px] font-semibold text-foreground">
+                        {dictationOffer.family}
+                      </span>
+                      <span className="text-[12px] tabular-nums text-muted-foreground">
+                        {dictationOffer.sizeMb} MB
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+                      Runs on your Mac. Until it lands, dictation keeps using the built-in
+                      model; Juno switches over on its own.
+                    </p>
+                    {sttDownload === "started" && (
+                      <div className="mt-3 space-y-1" role="status">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-foreground/[0.08]">
+                          <div
+                            className="h-full rounded-full bg-[#007AFF] transition-[width] duration-300"
+                            style={{ width: `${Math.min(100, Math.max(0, sttProgress?.percent ?? 0))}%` }}
+                          />
+                        </div>
+                        <p className="text-[11px] tabular-nums text-muted-foreground">
+                          {sttProgress
+                            ? `${Math.round(sttProgress.percent)}% downloaded. You can keep going.`
+                            : "Starting download. You can keep going."}
+                        </p>
+                      </div>
+                    )}
+                    {sttDownload === "done" && (
+                      <p className="mt-3 text-[12px] text-muted-foreground" role="status">
+                        Downloaded. {dictationOffer.family} is now your dictation model.
+                      </p>
+                    )}
+                    {sttDownload === "failed" && (
+                      <p className="mt-3 text-[12px] text-destructive" role="alert">
+                        The download did not finish. Try again now, or later in Settings, Models.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2089,18 +2251,30 @@ export default function OnboardingFlow({
                   onClick={needsRelaunch ? handleRelaunch : handleNext}
                   disabled={isContinueDisabled}
                   className={`${BTN_PRIMARY} ${isContinueDisabled ? "cursor-not-allowed" : ""}`}
-                  aria-label={needsRelaunch ? "Restart Juno" : step.action}
+                  aria-label={needsRelaunch ? "Restart Juno" : primaryLabel}
                 >
-                  {needsRelaunch ? "Restart Juno" : step.action}
+                  {needsRelaunch ? "Restart Juno" : primaryLabel}
                 </button>
 
                 {!isSkipHidden && (
                   <button
-                    onClick={currentStep === 0 ? handleSkip : handleSkipStep}
+                    onClick={
+                      currentStep === 0
+                        ? handleSkip
+                        : isDictationOffer
+                          ? declineAndSkipDictation
+                          : handleSkipStep
+                    }
                     className={LINK_QUIET}
-                    aria-label={currentStep === 0 ? "Skip onboarding" : "Skip this step"}
+                    aria-label={
+                      currentStep === 0
+                        ? "Skip onboarding"
+                        : isDictationOffer
+                          ? "Not now"
+                          : "Skip this step"
+                    }
                   >
-                    {currentStep === 0 ? "Set up later" : "Skip"}
+                    {currentStep === 0 ? "Set up later" : isDictationOffer ? "Not now" : "Skip"}
                   </button>
                 )}
               </div>

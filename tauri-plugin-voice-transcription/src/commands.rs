@@ -6,7 +6,7 @@ use crate::engine::SttProvider;
 use crate::engine_manager::EngineManager;
 use crate::engine_parakeet::ParakeetModelStatus;
 use crate::error::Error;
-use crate::utils::resolve_model_path;
+use crate::utils::{resolve_model_path, resolve_parakeet_model_dir};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -1052,7 +1052,7 @@ pub async fn set_stt_provider<R: tauri::Runtime>(
     // Resolve paths needed for engine initialization
     let config = VoiceTranscriptionConfig::default();
     let whisper_path = resolve_model_path(&app, &config.model_path);
-    let parakeet_dir = resolve_model_path(&app, &config.parakeet_model_dir);
+    let parakeet_dir = resolve_parakeet_model_dir(&app, &config.parakeet_model_dir);
 
     let engine = EngineManager::switch(stt_provider, &whisper_path, Some(&parakeet_dir))
         .map_err(|e| Error::ModelError(format!("Failed to switch STT engine: {}", e)))?;
@@ -1106,7 +1106,7 @@ pub fn get_parakeet_model_status<R: tauri::Runtime>(
 ) -> Result<ParakeetModelStatus, Error> {
     info!("[Plugin] get_parakeet_model_status called");
     let config = VoiceTranscriptionConfig::default();
-    let parakeet_dir = resolve_model_path(&app, &config.parakeet_model_dir);
+    let parakeet_dir = resolve_parakeet_model_dir(&app, &config.parakeet_model_dir);
     Ok(ParakeetModelStatus::check(std::path::Path::new(
         &parakeet_dir,
     )))
