@@ -92,6 +92,10 @@ vi.mock("@tauri-apps/api/webview", () => ({
 
 vi.mock("@/hooks/useWindowSize", () => ({
   useWindowSize: () => ({ resizeWindowIfChanged }),
+  // FloatingBar resets the resize baseline whenever it moves the window outside
+  // the resize path (well snap, display hop, launch restore). The mock must
+  // expose it or those code paths throw at render time.
+  resetWindowAnchor: vi.fn(),
 }));
 
 vi.mock("@/hooks/useAgentSessions", () => ({

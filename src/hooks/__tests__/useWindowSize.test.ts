@@ -64,4 +64,24 @@ describe("anchoredTop", () => {
   it("falls back to the top edge when there is no previous state", () => {
     expect(anchoredTop(150, undefined, { physH: 460, anchor: 46, growUp: true }, 1)).toBe(150);
   });
+
+  // Regression: gravity-well drift. When the window is moved outside the resize
+  // path (a well snap, a display hop, the launch restore), the real top changes
+  // but the stored baseline does not. The next resize then corrects against a
+  // position that no longer exists and the pill drifts. resetWindowAnchor clears
+  // that baseline so the next resize is top-anchored from the real position;
+  // here that is the difference between the drifted top and the correct one.
+  it("would drift if a stale baseline survives an external move, and does not once cleared", () => {
+    // A resize was recorded while the window sat at top=200 (pill band 46 down).
+    const staleBaseline = { physH: 92, anchor: 46, growUp: false };
+    // The bar then snapped to a well at top=900 without the cache being reset.
+    const realTopAfterSnap = 900;
+    // A same-shape resize now runs. With the stale baseline the correction is
+    // zero here (same anchor), but a growUp resize exposes the drift:
+    const next = { physH: 460, anchor: 46, growUp: true };
+    const drifted = anchoredTop(realTopAfterSnap, staleBaseline, next, 1);
+    const corrected = anchoredTop(realTopAfterSnap, undefined, next, 1);
+    expect(corrected).toBe(realTopAfterSnap); // top-anchored from where it really is
+    expect(drifted).not.toBe(corrected); // the stale baseline moved it away from that
+  });
 });

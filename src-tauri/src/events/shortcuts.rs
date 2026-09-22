@@ -260,20 +260,44 @@ pub(crate) fn fire_trigger_edge(
 
     match target {
         TriggerTarget::Agent => {
-            let agent_mode = if method == TriggerMethod::PushToTalk {
-                state::AgentTriggerMode::Hold
-            } else {
-                state::AgentTriggerMode::Tap
-            };
-            let app_clone = app.clone();
-            tauri::async_runtime::spawn(async move {
-                if pressed {
-                    crate::agent_monitor::on_agent_input_pressed().await;
-                } else {
-                    crate::agent_monitor::on_agent_input_released_with_mode(&app_clone, agent_mode)
-                        .await;
+            match method {
+                TriggerMethod::PushToTalk => {
+                    let app_clone = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if pressed {
+                            crate::agent_monitor::on_agent_input_pressed().await;
+                        } else {
+                            crate::agent_monitor::on_agent_input_released_with_mode(
+                                &app_clone,
+                                state::AgentTriggerMode::Hold,
+                            )
+                            .await;
+                        }
+                    });
                 }
-            });
+                TriggerMethod::Toggle => {
+                    // Tap: act on the release edge only (press+release = one tap),
+                    // mirroring the dictation arm below. The press must NOT start
+                    // hold-tracking: the background monitor polls every 100ms and
+                    // `check_and_start_agent` fires at IMMEDIATE_START_MS (0ms), so
+                    // any tick landing inside the tap flipped `agent_started` true
+                    // and the release then took the cancel path instead of starting
+                    // the toggle. A natural tap is ~100ms, so the toggle was a coin
+                    // flip. Skipping the press keeps `hold_start_time` unset, the
+                    // poll never engages, and the release reliably toggles.
+                    if !pressed {
+                        let app_clone = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            crate::agent_monitor::on_agent_input_released_with_mode(
+                                &app_clone,
+                                state::AgentTriggerMode::Tap,
+                            )
+                            .await;
+                        });
+                    }
+                }
+                TriggerMethod::Voice => {} // voice never routes through key/mouse dispatch
+            }
         }
         TriggerTarget::Dictation => match method {
             TriggerMethod::PushToTalk => {

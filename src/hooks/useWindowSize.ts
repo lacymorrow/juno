@@ -39,6 +39,26 @@ interface AnchorState {
 const lastAnchorByLabel: Map<string, AnchorState> = new Map();
 
 /**
+ * Forget the last-resize baseline for a window.
+ *
+ * The anchor maths in `anchoredTop` keeps the pill's vertical centre fixed
+ * ACROSS A RESIZE by correcting the new top against what the previous resize
+ * left behind. That is only sound while the window moves for no reason other
+ * than our resizes. It also moves for reasons this cache never sees: gliding
+ * into a gravity well on drag release, hopping to another display, and the
+ * launch restore all call `setPosition` / `set_bar_frame` directly. After one
+ * of those the stored baseline describes where the window used to be, so the
+ * next resize applies a correction against a position that no longer exists
+ * and the pill drifts. Every such move must call this so the next resize
+ * starts fresh (top-anchored from the real, just-set position) instead of
+ * chasing a stale baseline.
+ */
+export function resetWindowAnchor(label: string): void {
+  lastAnchorByLabel.delete(label);
+  lastSizeByLabel.delete(label);
+}
+
+/**
  * The new physical top edge for a resize that keeps the pill's vertical centre
  * at the same screen position, whichever direction the window grows.
  *
@@ -85,7 +105,24 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
   const dx = physNextW - size.width;
   const newX = dx !== 0 ? Math.round(pos.x - dx / 2) : pos.x;
 
-  const prevAnchor = lastAnchorByLabel.get(appWindow.label);
+  // When the cache is empty (first resize, or the baseline was dropped after an
+  // external move: a glide into a well, a display hop, the launch restore) fall
+  // back to the window's LIVE measured frame as the baseline rather than to a
+  // top-anchored resize. The live frame is ground truth for where the pill sits
+  // right now, whatever moved the window there, so the pill stays put and a
+  // grow-up pane still opens upward. Top-anchoring here was the residual drift:
+  // the first resize after a snap is the pane opening with growUp, and with no
+  // baseline it grew the wrong way and the close drifted it further.
+  // We reuse next.anchorY as the current frame's anchor: it is the pill-centre
+  // offset (`l.pad + band/2`), identical in the compact and pane-open frames a
+  // post-move resize moves between. The warm-cache path is untouched, so the
+  // composer-growth case (where anchorY changes between resizes) still anchors
+  // against the previous frame's real anchor.
+  const prevAnchor =
+    lastAnchorByLabel.get(appWindow.label) ??
+    (next.anchorY !== undefined
+      ? { physH: size.height, anchor: next.anchorY, growUp: next.growUp ?? false }
+      : undefined);
   const anchoredY = anchoredTop(
     pos.y,
     prevAnchor,

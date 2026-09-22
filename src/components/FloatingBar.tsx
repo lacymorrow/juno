@@ -24,7 +24,7 @@ import {
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, Ear, EarOff, MessageSquare, Mic, Square, Type, X } from "lucide-react";
 
-import { useWindowSize } from "@/hooks/useWindowSize";
+import { useWindowSize, resetWindowAnchor } from "@/hooks/useWindowSize";
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
@@ -228,7 +228,13 @@ async function animateWindowTo(
         ),
       );
       if (t < 1) requestAnimationFrame(step);
-      else resolve();
+      else {
+        // The glide moved the window frame by frame without the resize cache
+        // seeing any of it. Drop the stale baseline so the next resize anchors
+        // from where the bar actually landed, not where it was before the drag.
+        resetWindowAnchor(win.label);
+        resolve();
+      }
     };
     requestAnimationFrame(step);
   });
@@ -1473,6 +1479,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           width: initial.width,
           height: initial.height,
         });
+        // Placed at launch outside the resize path; start the baseline here.
+        resetWindowAnchor(windowLabel);
         currentSlotRef.current = { fx: target.fx, fy: target.fy };
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
@@ -1655,6 +1663,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         const target = wellForSlot(slot, targetIdx, wells);
         if (!target) return;
         await win.setPosition(new PhysicalPosition(target.x, target.y));
+        // Moved to another display outside any resize; forget the baseline.
+        resetWindowAnchor(win.label);
         currentSlotRef.current = { fx: target.fx, fy: target.fy };
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
