@@ -183,6 +183,8 @@ Alternative to direct API keys — uses the locally installed `claude` binary (C
 - `--append-system-prompt` — Added alongside `--mcp-config`: steers the model toward the MCP tools instead of `cliclick`/`screencapture` via Bash
 - `--dangerously-skip-permissions` — Required because stdin is null; CLI can't prompt for tool permissions (MCP tools also run without prompting)
 
+**Persistent session (beta, default OFF)**: `cli_persistent_session_enabled` in the settings store, surfaced as a beta toggle under Settings → Advanced. Keeps one `claude` process alive per conversation (`--input-format stream-json`, messages over stdin), removing the 1.6–3.1s per-follow-up spawn overhead. Escape sends a `control_request`/`interrupt` instead of killing the process. Every user message carries a `uuid` the CLI echoes as `command_uuid` on `command_lifecycle` frames; a turn is rendered only if such a frame opened it, which is what makes turns the CLI starts on its own (observed: a finishing background Bash task) invisible rather than mistaken for answers. Any turn the persistent path does not complete kills the process and falls back to the one-shot `--resume` path with no context loss. `shutdown_all()` runs on `RunEvent::Exit`. Module: `src-tauri/src/agent/providers/claude_cli_session.rs`; spike with measurements: `docs/plans/cli-persistent-session-spike.md`.
+
 **Auth**: Checked once per session via `claude auth status --json`, cached with `AtomicBool`. Uses OAuth/keychain (not API key).
 
 **Models**: `opus`, `sonnet`, `haiku` (CLI aliases — resolves to latest versions automatically)
