@@ -8,7 +8,9 @@ pub mod runner;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
 const DEFAULT_MAX_ITERATIONS: u32 = 10;
 const DEFAULT_BATCH_PARALLELISM: u32 = 4;
-const DEFAULT_VOICE_TIMEOUT: u32 = 60;
+/// Longest a `juno voice query` recording runs before it stops on its own.
+/// Seconds, as the name says — the old `DEFAULT_VOICE_TIMEOUT` did not.
+const DEFAULT_VOICE_RECORDING_SECONDS: u32 = 60;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -227,8 +229,8 @@ pub enum VoiceCommands {
     /// Query using voice input
     #[command(about = "Submit query using voice input")]
     Query {
-        /// Maximum recording duration
-        #[arg(short, long, default_value_t = DEFAULT_VOICE_TIMEOUT, help = "Maximum recording duration")]
+        /// Maximum recording duration in seconds
+        #[arg(short, long, default_value_t = DEFAULT_VOICE_RECORDING_SECONDS, help = "Maximum recording duration in seconds")]
         duration: u32,
 
         /// Continue previous conversation

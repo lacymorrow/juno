@@ -409,7 +409,18 @@ impl Default for GeminiBrain {
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()
-                .unwrap_or_else(|_| Client::new()),
+                .unwrap_or_else(|e| {
+                    // `Default` cannot fail, so the fallback is an untimed
+                    // client — which is exactly the hang this timeout exists
+                    // to prevent. Say so loudly rather than degrade in
+                    // silence; only a TLS backend failure gets here.
+                    tracing::error!(
+                        "Gemini HTTP client could not be built with a timeout ({}); \
+                         falling back to a client with NO request timeout",
+                        e
+                    );
+                    Client::new()
+                }),
             api_key: String::new(),
             model: "gemini-1.5-flash".to_string(),
             max_tokens: 8192,
