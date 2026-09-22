@@ -46,8 +46,17 @@ export default defineConfig(async (): Promise<UserConfig> => ({
 			}
 			: undefined,
 		watch: {
-			// 3. tell vite to ignore watching `src-tauri`
-			ignored: ["**/src-tauri/**"],
+			// 3. tell vite to ignore watching `src-tauri`, and the agent worktree /
+			//    scratch dirs that live INSIDE the repo. Agents editing files in
+			//    `.claude/worktrees/*`, `.paperclip/worktrees/*`, or `.cursor/*` were
+			//    triggering full page reloads and tsconfig cache-clears during QA.
+			//    (Vite always keeps its built-in ignores and merges these on top.)
+			ignored: [
+				"**/src-tauri/**",
+				"**/.claude/**",
+				"**/.paperclip/**",
+				"**/.cursor/**",
+			],
 		},
 	},
 }));
