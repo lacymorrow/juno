@@ -333,8 +333,12 @@ pacing behaviour under parallel sessions; left alone.
 
 ## Not verified
 
-- **Nothing here was compiled, linted or tested.** `cargo check`, `cargo test`,
-  `npx tsc` and `npm test` were all off-limits. In particular:
+- **Nothing here was compiled, type-checked, linted or tested.** `cargo check`,
+  `cargo test`, `npx tsc` and `npm test` were all off-limits (a demo was being
+  recorded). All eleven edited Rust files were run through
+  `rustfmt --edition 2021 --check`, which parses them: all eleven parse and are
+  already rustfmt-clean. That catches syntax, and nothing else. In particular
+  these are unverified:
   `std::sync::LazyLock<std::time::Instant>` initialised with the `Instant::now`
   fn item (D1); the `pub(super)` visibility of `schedule_seconds` /
   `MAX_SCHEDULE_SECONDS` from the file-level test module (D2); and the f64
