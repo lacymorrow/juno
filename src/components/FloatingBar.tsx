@@ -29,6 +29,7 @@ import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useEventListener } from "@/hooks/useEventListener";
+import { BarFlameBorder } from "@/components/bar/BarFlameBorder";
 import { cn } from "@/lib/utils";
 import { COMMANDS, EVENTS, UI } from "@/lib/constants.generated";
 import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
@@ -1249,6 +1250,38 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const { sessions: agentSessions, focusSession } = useAgentSessions();
   const showRosterStrip = agentSessions.length >= 2;
 
+  // === ACTIVITY INDICATOR (bar flame border) ===
+  // A quick flash when dictation / transcription starts, a steady low ember
+  // while the agent works. The colour follows the focused session, so parallel
+  // agents read apart and the border eases between their colours; a bare capture
+  // flash is system blue. Mounted only while active, so idle costs no GPU.
+  const CAPTURE_STATES: string[] = [
+    UI.BAR_STATES_LISTENING,
+    UI.BAR_STATES_DICTATING,
+    UI.BAR_STATES_TRANSCRIBING,
+  ];
+  const focusedSessionColor =
+    agentSessions.find((s) => s.focused)?.display_color ?? "#0A84FF";
+  const [flameFlash, setFlameFlash] = useState(false);
+  const prevBarStateRef = useRef(currentUiState);
+  useEffect(() => {
+    const entered =
+      CAPTURE_STATES.includes(currentUiState) &&
+      !CAPTURE_STATES.includes(prevBarStateRef.current);
+    prevBarStateRef.current = currentUiState;
+    if (!entered) return;
+    setFlameFlash(true);
+    const t = setTimeout(() => setFlameFlash(false), 450);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUiState]);
+
+  const flameActive = isWorking || flameFlash;
+  // A capture flash before any agent work is system blue; once she is working,
+  // the border takes the focused session's colour.
+  const flameColor = flameFlash && !isWorking ? "#0A84FF" : focusedSessionColor;
+  const flameIntensity = flameFlash ? 0.5 : 0.15;
+
   const layout = pickLayout({
     state: currentUiState,
     hovered,
@@ -1848,7 +1881,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         data-layout={layout}
         data-driving={isDriving ? "" : undefined}
         className={cn(
-          "relative flex shrink-0 items-center rounded-full",
+          // `isolate` scopes the flame border's z-index -1 to the pill, so it
+          // sits above the pill's dark face but behind its content.
+          "relative isolate flex shrink-0 items-center rounded-full",
           "border border-white/10 bg-neutral-950/90 text-white backdrop-blur-xl",
           // Juno has the pointer: a hairline in system blue, nothing louder.
           isDriving && "border-[#0A84FF]/70",
@@ -1862,6 +1897,17 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         )}
         style={{ width: pill.width, height: pill.height }}
       >
+        {/* Activity indicator: a flash on dictation/transcription start, a
+            steady low ember while the agent works. Behind the content, mounted
+            only while active. */}
+        {flameActive && (
+          <BarFlameBorder
+            color={flameColor}
+            intensity={flameIntensity}
+            radius={pill.height / 2}
+          />
+        )}
+
         {/* The status dot lives in the compact idle pill and in the layouts
             that carry real status (voice, working, input). Hover shows only
             the buttons, so nothing shifts sideways when the pill grows. */}
