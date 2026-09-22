@@ -299,6 +299,26 @@ pub fn is_computer_toolset_member(name: &str) -> bool {
     COMPUTER_TOOLSET_MEMBERS.contains(&name)
 }
 
+/// Pull the base64 image out of a screenshot result, whatever shape it arrived in.
+///
+/// The `screenshot` action returns a *serialised struct* — `base64_image`
+/// alongside the dimensions — not a bare string. Calling `as_str()` on that
+/// object yields `None`, which is how the chat window quietly stopped showing
+/// screenshots: no error, no log, just a missing image. Browser and
+/// `capture_screenshot` results use their own key names, so all three are
+/// tried before falling back to treating the value as a bare string.
+///
+/// `agent_runner` already extracts screenshots this way for the tools it logs;
+/// the `computer` tool self-logs here and needs the same handling.
+fn extract_screenshot_base64(output: &Value) -> Option<String> {
+    for key in ["base64_image", "base64", "data"] {
+        if let Some(encoded) = output.get(key).and_then(Value::as_str) {
+            return Some(encoded.to_string());
+        }
+    }
+    output.as_str().map(|s| s.to_string())
+}
+
 /// Route a tool call that arrived with a `toolset_name` to Juno's computer tool.
 ///
 /// **Dispatch is on the pair (`name`, `toolset_name`), never on `name` alone.**
@@ -2679,7 +2699,7 @@ pub async fn execute_computer_tool(
     // Get screenshot from result if applicable AND operation was successful
     let screenshot_base64 = if success && action == "screenshot" {
         match &result {
-            Ok(output) => output.as_str().map(|s| s.to_string()),
+            Ok(output) => extract_screenshot_base64(output),
             Err(_) => None,
         }
     } else {

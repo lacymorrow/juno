@@ -431,11 +431,17 @@ export function ChatMessageComponent({
 
   // Tool call requests — with inline approval if pending
   if (msg.role === "tool_call_request") {
+    // One row per tool call. `success` is undefined until the result folds in,
+    // so the same message carries the call through running -> done/failed
+    // instead of spawning a second row underneath it.
+    const hasResult = msg.success !== undefined;
     const toolState = msg.approval_state === "pending"
       ? "approval-requested" as const
       : msg.approval_state === "denied"
         ? "output-denied" as const
-        : "input-available" as const;
+        : hasResult
+          ? (msg.success ? "output-available" as const : "output-error" as const)
+          : "input-available" as const;
 
     return (
       <div className="flex justify-start w-full">
@@ -444,10 +450,25 @@ export function ChatMessageComponent({
             type="dynamic-tool"
             state={toolState}
             toolName={msg.tool_name || "unknown"}
-            title={msg.tool_name}
+            title={formatAxActionTitle(msg) ?? msg.tool_name}
           />
           <ToolContent>
             {msg.tool_args && <ToolInput input={msg.tool_args} />}
+            {hasResult && (
+              <ToolOutput
+                output={msg.tool_output}
+                errorText={msg.success ? undefined : msg.result_content}
+              />
+            )}
+            {msg.screenshot_base64 && (
+              <div className="mt-2">
+                <img
+                  src={`data:image/png;base64,${msg.screenshot_base64}`}
+                  alt="Tool screenshot"
+                  className="max-h-[300px] rounded-lg border border-border/30"
+                />
+              </div>
+            )}
             {msg.tool_id && (
               <Confirmation
                 state={
@@ -569,10 +590,19 @@ export function ChatMessageComponent({
         )}
 
         {/* TTS spoken content — expanded when it's the only response */}
-        {msg.role === "assistant" && !msg.isStreaming && (
+        {/*
+          Shown whenever there is spoken content, streaming or not. Gating this
+          on `!isStreaming` meant a turn that kept going — consecutive tool
+          calls, an agent loop — never showed what it had already said aloud,
+          because the bubble stays open for the whole turn. TTSContentDisplay
+          renders nothing when there is no spoken content, so this is safe.
+        */}
+        {msg.role === "assistant" && (
           <TTSContentDisplay
             ttsMetadata={msg.tts_metadata}
-            defaultExpanded={!msg.content || msg.content.trim() === ""}
+            defaultExpanded={
+              !msg.isStreaming && (!msg.content || msg.content.trim() === "")
+            }
           />
         )}
 
