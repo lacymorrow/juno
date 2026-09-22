@@ -205,7 +205,11 @@ fn extract_coordinate(input: &Value) -> Option<(f64, f64)> {
 
 /// Returns true if the action modifies the UI (click, type, key, scroll, drag).
 /// Read-only actions (screenshot, cursor_position, wait) skip the cooldown.
-fn is_ui_modifying_action(action: &str) -> bool {
+///
+/// This is the single list of physically-mutating actions. It drives both the
+/// inter-action cooldown and [`failure_halts_batch`] — add new mutating actions
+/// here, never to a second copy.
+pub(crate) fn is_ui_modifying_action(action: &str) -> bool {
     matches!(
         action,
         "left_click"
@@ -222,6 +226,232 @@ fn is_ui_modifying_action(action: &str) -> bool {
             | "type"
             | "scroll"
     )
+}
+
+// --- computer_toolset_20260801 member dispatch ---
+
+/// The 17 member tools of the `computer_toolset_20260801` toolset, in the order
+/// the documentation lists them.
+///
+/// The toolset replaces the single `computer` tool's `action` argument with one
+/// tool per action: Claude sends `{"name": "left_click", "toolset_name":
+/// "computer", "input": {...}}` where it used to send `{"name": "computer",
+/// "input": {"action": "left_click", ...}}`.
+///
+/// Every member name here is identical to the `action` string Juno's executor
+/// already dispatches on, which is why the port is a rename at the wire
+/// boundary rather than a rewrite of the executor: `left_click` the member and
+/// `left_click` the action are the same operation with the same input fields.
+///
+/// <https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool>
+pub const COMPUTER_TOOLSET_MEMBERS: &[&str] = &[
+    "screenshot",
+    "zoom",
+    "left_click",
+    "right_click",
+    "middle_click",
+    "double_click",
+    "triple_click",
+    "left_click_drag",
+    "mouse_move",
+    "left_mouse_down",
+    "left_mouse_up",
+    "cursor_position",
+    "scroll",
+    "type",
+    "key",
+    "hold_key",
+    "wait",
+];
+
+/// Whether `name` is a member tool of the computer toolset.
+pub fn is_computer_toolset_member(name: &str) -> bool {
+    COMPUTER_TOOLSET_MEMBERS.contains(&name)
+}
+
+/// Route a tool call that arrived with a `toolset_name` to Juno's computer tool.
+///
+/// **Dispatch is on the pair (`name`, `toolset_name`), never on `name` alone.**
+/// That pairing is the whole point of the toolset: `type` and `key` are
+/// plausible names for an unrelated custom tool, and only the `toolset_name`
+/// says the call came from the computer toolset. A member name arriving without
+/// the toolset marker is left alone, and a toolset marker on a name that is not
+/// a member is refused rather than guessed at.
+///
+/// On a match this returns the `(tool_name, input)` pair the rest of Juno
+/// already understands — `("computer", {"action": <member>, ...rest})` — so the
+/// executor, the approval flow, the risk classifier, the cooldown and the batch
+/// halt all keep working against one shape. The alternative, teaching 17 new
+/// tool names to every one of those call sites, would have been 17 chances to
+/// miss one.
+///
+/// Returns `None` when the call is not a computer-toolset member call.
+pub fn route_toolset_call(
+    name: &str,
+    toolset_name: Option<&str>,
+    input: &Value,
+) -> Option<(String, Value)> {
+    // Both halves must agree. `toolset_name` absent => legacy/custom tool.
+    if toolset_name? != crate::constants::api::computer_use_api_types::COMPUTER_TOOLSET_NAME {
+        return None;
+    }
+    if !is_computer_toolset_member(name) {
+        log::warn!(
+            "Tool call '{}' carries toolset_name='computer' but is not one of the {} known members; \
+             passing it through unrouted",
+            name,
+            COMPUTER_TOOLSET_MEMBERS.len()
+        );
+        return None;
+    }
+
+    // Carry the member's own input across untouched and add the `action` the
+    // executor dispatches on. An `action` already in the input would be a
+    // contradiction between the two halves of the call; the member name is the
+    // authoritative one under this contract, so it wins.
+    let mut routed = match input {
+        Value::Object(map) => map.clone(),
+        // `screenshot`, `cursor_position`, `left_mouse_down` and `left_mouse_up`
+        // take no arguments, and an argument-less member can arrive as `{}`,
+        // `null`, or omitted entirely.
+        Value::Null => serde_json::Map::new(),
+        other => {
+            log::warn!(
+                "Toolset member '{}' has a non-object input ({}); treating it as empty",
+                name,
+                other
+            );
+            serde_json::Map::new()
+        }
+    };
+    routed.insert("action".to_string(), Value::String(name.to_string()));
+    // Keep the toolset marker on the call. It is what later stages read to know
+    // this call came from the toolset rather than the legacy `computer` tool:
+    // [`failure_halts_batch`] uses it to apply the documented halt rule, and the
+    // provider uses it to echo `toolset_name` back on the `tool_result`. Without
+    // it, neither stage could tell the two paths apart, because routing has
+    // deliberately made them look identical.
+    routed.insert(
+        TOOLSET_MARKER_KEY.to_string(),
+        Value::String(
+            crate::constants::api::computer_use_api_types::COMPUTER_TOOLSET_NAME.to_string(),
+        ),
+    );
+
+    Some(("computer".to_string(), Value::Object(routed)))
+}
+
+/// The key under which [`route_toolset_call`] records the originating toolset on
+/// a routed call's input. Matches the wire field name it carries.
+pub const TOOLSET_MARKER_KEY: &str = "toolset_name";
+
+/// The toolset a tool call came from, if it was routed from one.
+///
+/// `None` means the legacy single-`computer`-tool path, which must keep
+/// behaving exactly as it did before the toolset existed.
+pub fn call_toolset_name(input: &Value) -> Option<&str> {
+    input.get(TOOLSET_MARKER_KEY).and_then(Value::as_str)
+}
+
+/// The exact inverse of [`route_toolset_call`], for replaying an assistant turn.
+///
+/// **This has to exist, and forgetting it is a silent protocol break.** Every
+/// request after the first replays the previous assistant turn's `tool_use`
+/// blocks, and they must go back as Claude sent them: the member name plus
+/// `toolset_name`. Replaying a routed call as `{"name": "computer", "input":
+/// {"action": "left_click"}}` names a tool that is not in the request at all —
+/// the toolset replaced it — so the turn no longer matches the tools on offer.
+///
+/// Returns `(name, toolset_name, input)` with the routing undone: the member
+/// name restored, and both keys [`route_toolset_call`] added removed from the
+/// input so what goes back out is byte-for-byte what came in. A call that was
+/// never routed is returned untouched with `toolset_name: None`.
+pub fn unroute_toolset_call(name: &str, input: &Value) -> (String, Option<String>, Value) {
+    let untouched = || (name.to_string(), None, input.clone());
+
+    if name != "computer" {
+        return untouched();
+    }
+    let Some(toolset_name) = call_toolset_name(input).map(str::to_string) else {
+        // Legacy `computer` tool call — nothing was routed, nothing to undo.
+        return untouched();
+    };
+    let Some(map) = input.as_object() else {
+        return untouched();
+    };
+    let Some(member) = map
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        log::warn!(
+            "Routed toolset call has no 'action' to restore a member name from; replaying as-is"
+        );
+        return untouched();
+    };
+
+    let mut original = map.clone();
+    original.remove("action");
+    original.remove(TOOLSET_MARKER_KEY);
+
+    (member, Some(toolset_name), Value::Object(original))
+}
+
+/// Whether a failed tool call should stop the rest of the batch it belongs to.
+///
+/// **The scope is deliberately narrow — read this before widening or narrowing it.**
+///
+/// A batch of physical desktop actions is an ordered plan: `left_click`, then
+/// `type`, then `key Return`. If the click missed, the remaining actions land in
+/// whatever window happens to be focused, so they must not run. That is a real
+/// safety problem, and it is the reason the halt exists.
+///
+/// Nothing else in a batch has that property. Two failed file reads are
+/// independent; halting the second because the first failed costs a model
+/// round trip and buys no safety. Read-only computer actions are the same:
+/// a failed `screenshot` or `cursor_position` changes nothing on screen, the
+/// model still receives the error, and the clicks that follow were already
+/// planned against an earlier screenshot — so a failing `screenshot` does *not*
+/// halt the clicks behind it.
+///
+/// The action name is taken from `input.action` for the `computer` tool, and
+/// from the tool's own name otherwise, then matched against
+/// [`is_ui_modifying_action`]. Reusing that one list is the point: a new
+/// mutating action added there is covered here for free, and no file, browser
+/// or shell tool can ever match it.
+///
+/// A `computer` call whose action is missing or not a string halts. Such a call
+/// may already have moved the pointer or typed, and halting costs a round trip
+/// while continuing can type into the wrong window.
+/// ## Toolset calls are the exception, and they halt unconditionally
+///
+/// Everything above describes Juno's own judgement, and it still governs the
+/// legacy `computer_20251124` / `computer_20250124` path unchanged.
+///
+/// A call routed from `computer_toolset_20260801` is different, because there
+/// the halt is not Juno's judgement to make — Anthropic publishes the contract:
+/// "Execute blocks sequentially in order. Stop at first failure: don't run
+/// remaining blocks after a failure." It draws no distinction between a failed
+/// `left_click` and a failed `screenshot`. So a routed call halts on any
+/// failure, and the narrower rule is not applied to it.
+///
+/// This is a deliberate, documented divergence between the two paths rather
+/// than a contradiction of LAC-3999: that issue reasoned about batches Juno
+/// itself assembles under the old single-tool contract, where nothing external
+/// specifies the behaviour. Where a published contract does specify it, the
+/// contract wins.
+pub(crate) fn failure_halts_batch(tool_name: &str, input: &Value) -> bool {
+    // The toolset's own rule, applied before Juno's.
+    if call_toolset_name(input).is_some() {
+        return true;
+    }
+    if tool_name == "computer" {
+        return match input.get("action").and_then(Value::as_str) {
+            Some(action) => is_ui_modifying_action(action),
+            None => true,
+        };
+    }
+    is_ui_modifying_action(tool_name)
 }
 
 /// If the action is UI-modifying and the cooldown hasn't elapsed, sleep briefly.
@@ -1172,9 +1402,14 @@ fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
             format!("computer/press_key({})", key)
         }
         "hold_key" => {
-            let key = input["text"].as_str().unwrap_or("");
-            let duration = input["duration"].as_u64().unwrap_or(1000);
-            format!("computer/hold_key({}, {}ms)", key, duration)
+            let key = input["key"]
+                .as_str()
+                .or_else(|| input["text"].as_str())
+                .unwrap_or("");
+            match resolve_hold_key_duration_ms(input) {
+                Ok(duration_ms) => format!("computer/hold_key({}, {}ms)", key, duration_ms),
+                Err(_) => format!("computer/hold_key({})", key),
+            }
         }
         "wait" => {
             let duration = input["duration"].as_u64().unwrap_or(1);
@@ -1227,6 +1462,88 @@ pub fn extract_anthropic_error_message(value: &Value) -> Option<String> {
     } else {
         None
     }
+}
+
+/// The toolset's `key` member caps `repeat` at 100.
+pub const MAX_KEY_REPEAT: u64 = 100;
+
+/// How many times a `key` action should press its key.
+///
+/// `repeat` arrives only on the `computer_toolset_20260801` path, where the
+/// `key` member documents it as 1-100 with a default of 1. The legacy schema
+/// has no such field, so an absent value means one press and nothing about the
+/// old path changes.
+///
+/// Clamped rather than refused at the edges: a value above the cap still says
+/// unambiguously "press it many times", and erroring would halt the batch over
+/// a number. A value below 1, or a non-integer, is a genuine contradiction —
+/// "press this zero times" is not a press — so that returns `Err` for the model
+/// to read.
+pub fn resolve_key_repeat(input: &Value) -> Result<u64, String> {
+    let Some(repeat) = input.get("repeat") else {
+        return Ok(1);
+    };
+    // `null` is how an omitted optional often arrives; treat it as absent.
+    if repeat.is_null() {
+        return Ok(1);
+    }
+    let Some(repeat) = repeat.as_u64() else {
+        return Err(format!(
+            "Invalid 'repeat': expected a whole number from 1 to {}",
+            MAX_KEY_REPEAT
+        ));
+    };
+    if repeat == 0 {
+        return Err("Invalid 'repeat': must be at least 1".to_string());
+    }
+    Ok(repeat.min(MAX_KEY_REPEAT))
+}
+
+/// Anthropic's computer tool caps `hold_key` at 300 seconds.
+pub const MAX_HOLD_KEY_MS: u64 = 300_000;
+
+/// Resolve a `hold_key` duration to milliseconds.
+///
+/// The unit depends on which parameter the model sent, because the two request
+/// paths see two different schemas:
+///
+/// - `duration` — Anthropic's canonical computer-tool schema, in **seconds**
+///   (max 300). The direct Anthropic API path uses this schema because built-in
+///   tools are serialized as `ApiTool::BuiltIn`, which sends no `description`
+///   and no `input_schema` — the model never sees Juno's wording. Reading this
+///   as milliseconds turned a 2-second hold into 2ms, a silent no-op.
+///   It also makes `hold_key` consistent with `wait`, which already reads
+///   `duration` as seconds.
+/// - `duration_ms` — Juno's own schema, in **milliseconds**. This is what the
+///   Claude CLI path sees, since MCP tools carry their own schema.
+///
+/// `duration_ms` wins when both are present. Returns `Err` with a
+/// model-readable message when the value is missing, non-numeric, or not
+/// greater than zero; values above the 300-second cap are clamped.
+pub fn resolve_hold_key_duration_ms(input: &Value) -> Result<u64, String> {
+    let millis = match input.get("duration_ms").and_then(Value::as_f64) {
+        Some(ms) => ms,
+        None => match input.get("duration").and_then(Value::as_f64) {
+            Some(seconds) => seconds * 1000.0,
+            None => {
+                return Err(
+                    "Missing hold duration: provide 'duration' in seconds (max 300), or 'duration_ms' in milliseconds"
+                        .to_string(),
+                )
+            }
+        },
+    };
+
+    if !millis.is_finite() || millis <= 0.0 {
+        return Err(
+            "Invalid hold duration: must be greater than zero ('duration' is in seconds, 'duration_ms' is in milliseconds)"
+                .to_string(),
+        );
+    }
+
+    // Float-to-int casts saturate in Rust, so an absurd value lands on u64::MAX
+    // and is then clamped by `min` rather than wrapping.
+    Ok((millis.round() as u64).min(MAX_HOLD_KEY_MS))
 }
 
 /// Convert error messages to Anthropic Computer Use API compliant format
@@ -1871,24 +2188,53 @@ pub async fn execute_computer_tool(
                         }
                     };
 
+                    // `repeat` is part of the toolset's `key` member (1-100,
+                    // default 1). It has no equivalent on the legacy schema, so
+                    // an absent value means one press and the legacy path is
+                    // unaffected. Out-of-range values are clamped rather than
+                    // refused: the intent is unambiguous, and failing the whole
+                    // action over it would halt the batch for nothing.
+                    let repeat = match resolve_key_repeat(&input) {
+                        Ok(repeat) => repeat,
+                        Err(message) => {
+                            return Ok(create_anthropic_error_response(message));
+                        }
+                    };
+
                     emit_key_visualization(app_handle, key, None);
 
                     // Keyboard events posted to a process are only routed there
                     // once the WindowServer's input focus has been pointed at it
                     // without raising it, which is what the no-warp path does.
-                    let outcome = handle_anthropic_result!(
-                        run_background_first(
-                            app_handle,
-                            action,
-                            target_app.as_deref(),
-                            |allow_physical| {
-                                state_manager
-                                    .desktop
-                                    .press_key_no_warp(key, None, allow_physical)
-                            },
-                        )
-                        .await
-                    );
+                    let mut outcome = None;
+                    for _ in 0..repeat {
+                        outcome = Some(handle_anthropic_result!(
+                            run_background_first(
+                                app_handle,
+                                action,
+                                target_app.as_deref(),
+                                |allow_physical| {
+                                    state_manager.desktop.press_key_no_warp(
+                                        key,
+                                        None,
+                                        allow_physical,
+                                    )
+                                },
+                            )
+                            .await
+                        ));
+                    }
+                    let outcome = match outcome {
+                        Some(outcome) => outcome,
+                        // `repeat` is clamped to at least 1, so the loop always
+                        // runs; this arm exists so the code cannot panic if that
+                        // ever changes.
+                        None => {
+                            return Ok(create_anthropic_error_response(
+                                "Key press did not run: repeat resolved to zero".to_string(),
+                            ))
+                        }
+                    };
 
                     Ok(with_input_tier(json!({ "success": true }), &outcome))
                 }
@@ -1903,17 +2249,12 @@ pub async fn execute_computer_tool(
                         }
                     };
 
-                    // Support both 'duration_ms' and 'duration' parameters for backward compatibility
-                    let duration_ms = match input["duration_ms"]
-                        .as_u64()
-                        .or_else(|| input["duration"].as_u64())
-                    {
-                        Some(duration) => duration,
-                        None => {
-                            return Ok(create_anthropic_error_response(
-                                "Missing 'duration_ms' or 'duration' parameter".to_string(),
-                            ))
-                        }
+                    // 'duration' is SECONDS (Anthropic's canonical schema, which the
+                    // direct API path uses); 'duration_ms' is milliseconds (Juno's
+                    // own schema, which the MCP/Claude CLI path sees).
+                    let duration_ms = match resolve_hold_key_duration_ms(&input) {
+                        Ok(duration_ms) => duration_ms,
+                        Err(message) => return Ok(create_anthropic_error_response(message)),
                     };
 
                     emit_key_visualization(
@@ -2543,7 +2884,7 @@ The computer tool accepts these actions:
 - left_mouse_down: Press and hold left mouse button at coordinates
 - left_mouse_up: Release left mouse button at coordinates
 - key: Press a key (supports modifiers like 'cmd+c', 'ctrl+v', etc.)
-- hold_key: Hold a key for specified duration in milliseconds
+- hold_key: Hold a key down for a duration ('duration' in seconds, max 300; or 'duration_ms' in milliseconds)
 - type: Type text at current cursor position
 - scroll: Scroll at coordinates in specified direction
 - cursor_position: Get current mouse cursor position
@@ -2576,11 +2917,11 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 },
                 "duration_ms": {
                     "type": "number",
-                    "description": "Duration in milliseconds for hold_key action. Preferred parameter name."
+                    "description": "Duration in MILLISECONDS for hold_key action. Preferred parameter name when you want sub-second precision."
                 },
                 "duration": {
                     "type": "number",
-                    "description": "Duration in milliseconds for hold_key action, or seconds for wait action (backward compatibility)"
+                    "description": "Duration in SECONDS — for hold_key (max 300) and for wait. Use duration_ms instead to give a hold_key duration in milliseconds."
                 },
                 "scroll_direction": {
                     "type": "string",
@@ -2829,4 +3170,314 @@ pub async fn register_anthropic_computer_use_tools_with_version(
         tool_count
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod hold_key_duration_tests {
+    use super::*;
+
+    #[test]
+    fn duration_is_seconds() {
+        // Anthropic's canonical schema, which the direct API path uses.
+        // A 2-second hold must be 2000ms, not 2ms.
+        let input = json!({ "action": "hold_key", "key": "shift", "duration": 2 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(2000));
+    }
+
+    #[test]
+    fn fractional_seconds_are_supported() {
+        let input = json!({ "action": "hold_key", "key": "shift", "duration": 0.25 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(250));
+    }
+
+    #[test]
+    fn duration_ms_is_milliseconds() {
+        // Juno's own schema, which the MCP / Claude CLI path sees.
+        let input = json!({ "action": "hold_key", "key": "shift", "duration_ms": 2000 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(2000));
+    }
+
+    #[test]
+    fn duration_ms_wins_over_duration() {
+        let input = json!({ "key": "shift", "duration_ms": 500, "duration": 30 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(500));
+    }
+
+    #[test]
+    fn duration_is_clamped_to_the_300_second_maximum() {
+        let input = json!({ "key": "shift", "duration": 600 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(MAX_HOLD_KEY_MS));
+
+        let input_ms = json!({ "key": "shift", "duration_ms": 900_000u64 });
+        assert_eq!(resolve_hold_key_duration_ms(&input_ms), Ok(MAX_HOLD_KEY_MS));
+
+        // A float-to-int cast saturates rather than wrapping, so an absurd value
+        // still lands on the cap.
+        let absurd = json!({ "key": "shift", "duration": 1e30 });
+        assert_eq!(resolve_hold_key_duration_ms(&absurd), Ok(MAX_HOLD_KEY_MS));
+    }
+
+    #[test]
+    fn missing_duration_is_an_error() {
+        let input = json!({ "action": "hold_key", "key": "shift" });
+        assert!(resolve_hold_key_duration_ms(&input).is_err());
+    }
+
+    #[test]
+    fn zero_and_negative_durations_are_errors() {
+        // A zero-length hold is a silent no-op; tell the model instead.
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration": 0 })).is_err());
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration_ms": 0 })).is_err());
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration": -1 })).is_err());
+    }
+
+    #[test]
+    fn non_numeric_duration_is_an_error() {
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration": "2" })).is_err());
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration": null })).is_err());
+    }
+
+    #[test]
+    fn error_messages_name_both_units() {
+        let message = resolve_hold_key_duration_ms(&json!({ "key": "shift" }))
+            .err()
+            .unwrap_or_default();
+        assert!(message.contains("seconds"));
+        assert!(message.contains("milliseconds"));
+    }
+}
+
+#[cfg(test)]
+mod computer_toolset_dispatch_tests {
+    use super::*;
+
+    // --- The member roster ---
+
+    #[test]
+    fn there_are_exactly_seventeen_members_and_no_duplicates() {
+        assert_eq!(COMPUTER_TOOLSET_MEMBERS.len(), 17);
+        let mut sorted = COMPUTER_TOOLSET_MEMBERS.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 17, "member names must be unique");
+    }
+
+    /// Every member name is also an action string the executor already
+    /// dispatches on. That equivalence is what makes routing a rename rather
+    /// than a rewrite, so it is asserted rather than assumed.
+    #[test]
+    fn every_member_maps_onto_a_known_action() {
+        for member in COMPUTER_TOOLSET_MEMBERS {
+            let (name, input) = route_toolset_call(member, Some("computer"), &json!({}))
+                .unwrap_or_else(|| panic!("{member} should route"));
+            assert_eq!(name, "computer");
+            assert_eq!(input["action"], json!(member));
+        }
+    }
+
+    // --- Dispatch is on (name, toolset_name), never on name alone ---
+
+    #[test]
+    fn a_member_name_without_a_toolset_name_is_not_routed() {
+        // `type` and `key` are plausible names for an unrelated custom tool.
+        // Only `toolset_name` says the call came from the computer toolset.
+        for member in ["type", "key", "left_click", "screenshot"] {
+            assert!(
+                route_toolset_call(member, None, &json!({"text": "hi"})).is_none(),
+                "{member} without a toolset_name must not be routed"
+            );
+        }
+    }
+
+    #[test]
+    fn a_foreign_toolset_name_is_not_routed() {
+        assert!(route_toolset_call("left_click", Some("text_editor"), &json!({})).is_none());
+        assert!(route_toolset_call("left_click", Some(""), &json!({})).is_none());
+    }
+
+    #[test]
+    fn an_unknown_member_under_the_computer_toolset_is_not_routed() {
+        // Better to pass an unrecognised name through than to guess an action
+        // and drive the mouse from it.
+        assert!(route_toolset_call("teleport", Some("computer"), &json!({})).is_none());
+        assert!(route_toolset_call("computer", Some("computer"), &json!({})).is_none());
+    }
+
+    #[test]
+    fn ordinary_tools_are_untouched() {
+        for name in [
+            "read_file",
+            "bash",
+            "browser_navigate",
+            "capture_screenshot",
+        ] {
+            assert!(route_toolset_call(name, None, &json!({"path": "/tmp/x"})).is_none());
+            assert!(route_toolset_call(name, Some("computer"), &json!({})).is_none());
+        }
+    }
+
+    // --- Input handling ---
+
+    #[test]
+    fn member_input_is_carried_across_untouched() {
+        let (_, input) = route_toolset_call(
+            "scroll",
+            Some("computer"),
+            &json!({"coordinate": [100, 200], "scroll_direction": "down", "scroll_amount": 3}),
+        )
+        .expect("routes");
+        assert_eq!(input["coordinate"], json!([100, 200]));
+        assert_eq!(input["scroll_direction"], json!("down"));
+        assert_eq!(input["scroll_amount"], json!(3));
+        assert_eq!(input["action"], json!("scroll"));
+    }
+
+    #[test]
+    fn argument_free_members_accept_empty_null_and_missing_input() {
+        for input in [json!({}), json!(null)] {
+            let (name, routed) = route_toolset_call("screenshot", Some("computer"), &input)
+                .unwrap_or_else(|| panic!("screenshot should route for {input}"));
+            assert_eq!(name, "computer");
+            assert_eq!(routed["action"], json!("screenshot"));
+        }
+    }
+
+    #[test]
+    fn a_non_object_input_is_treated_as_empty_rather_than_dropped() {
+        let (_, routed) =
+            route_toolset_call("cursor_position", Some("computer"), &json!("garbage"))
+                .expect("routes");
+        assert_eq!(routed["action"], json!("cursor_position"));
+    }
+
+    /// The member name is the authoritative half of the pair, so a
+    /// contradicting `action` in the input does not win.
+    #[test]
+    fn the_member_name_beats_a_contradicting_action_in_the_input() {
+        let (_, routed) = route_toolset_call(
+            "left_click",
+            Some("computer"),
+            &json!({"action": "type", "text": "rm -rf /"}),
+        )
+        .expect("routes");
+        assert_eq!(routed["action"], json!("left_click"));
+    }
+
+    // --- The toolset marker ---
+
+    #[test]
+    fn routing_records_the_toolset_on_the_call() {
+        let (_, routed) = route_toolset_call("key", Some("computer"), &json!({"text": "Return"}))
+            .expect("routes");
+        assert_eq!(call_toolset_name(&routed), Some("computer"));
+    }
+
+    #[test]
+    fn a_legacy_call_carries_no_toolset_marker() {
+        assert_eq!(
+            call_toolset_name(&json!({"action": "left_click", "coordinate": [1, 2]})),
+            None
+        );
+    }
+
+    // --- Round trip ---
+
+    #[test]
+    fn route_then_unroute_is_the_identity() {
+        for (member, input) in [
+            ("left_click", json!({"coordinate": [5, 6]})),
+            ("type", json!({"text": "hello"})),
+            ("key", json!({"text": "cmd+c", "repeat": 2})),
+            ("hold_key", json!({"text": "shift", "duration": 2})),
+            ("wait", json!({"duration": 1.5})),
+            ("zoom", json!({"region": [0, 0, 100, 100]})),
+            (
+                "left_click_drag",
+                json!({"start_coordinate": [1, 2], "coordinate": [3, 4]}),
+            ),
+            ("screenshot", json!({})),
+        ] {
+            let (name, routed) =
+                route_toolset_call(member, Some("computer"), &input).expect("routes");
+            let (back_name, toolset_name, back_input) = unroute_toolset_call(&name, &routed);
+            assert_eq!(back_name, member);
+            assert_eq!(toolset_name.as_deref(), Some("computer"));
+            assert_eq!(
+                back_input, input,
+                "{member} did not survive the round trip unchanged"
+            );
+        }
+    }
+
+    // --- key repeat ---
+
+    #[test]
+    fn repeat_defaults_to_one_press_when_absent_or_null() {
+        assert_eq!(resolve_key_repeat(&json!({"text": "Return"})), Ok(1));
+        assert_eq!(
+            resolve_key_repeat(&json!({"text": "Return", "repeat": null})),
+            Ok(1)
+        );
+    }
+
+    #[test]
+    fn repeat_is_honoured_and_clamped_to_the_documented_maximum() {
+        assert_eq!(resolve_key_repeat(&json!({"repeat": 3})), Ok(3));
+        assert_eq!(resolve_key_repeat(&json!({"repeat": 100})), Ok(100));
+        assert_eq!(
+            resolve_key_repeat(&json!({"repeat": 5000})),
+            Ok(MAX_KEY_REPEAT)
+        );
+    }
+
+    #[test]
+    fn a_meaningless_repeat_is_refused_rather_than_guessed_at() {
+        assert!(resolve_key_repeat(&json!({"repeat": 0})).is_err());
+        assert!(resolve_key_repeat(&json!({"repeat": -2})).is_err());
+        assert!(resolve_key_repeat(&json!({"repeat": "three"})).is_err());
+    }
+
+    /// The legacy path never sends `repeat`, so it always presses exactly once.
+    #[test]
+    fn the_legacy_key_action_still_presses_once() {
+        assert_eq!(
+            resolve_key_repeat(&json!({"action": "key", "text": "cmd+c"})),
+            Ok(1)
+        );
+    }
+
+    // --- Batch halt ---
+
+    /// The documented contract for the toolset draws no distinction between a
+    /// failed click and a failed screenshot: stop at the first failure.
+    #[test]
+    fn any_failed_toolset_member_halts_the_batch() {
+        for member in COMPUTER_TOOLSET_MEMBERS {
+            let (name, routed) =
+                route_toolset_call(member, Some("computer"), &json!({})).expect("routes");
+            assert!(
+                failure_halts_batch(&name, &routed),
+                "a failed {member} must halt the rest of the toolset batch"
+            );
+        }
+    }
+
+    /// The legacy path keeps LAC-3999's narrower rule exactly as it was: only
+    /// UI-mutating actions halt, so a failed read-only action does not strand
+    /// the clicks planned behind it.
+    #[test]
+    fn the_legacy_halt_rule_is_unchanged() {
+        for action in ["screenshot", "cursor_position", "wait", "zoom"] {
+            assert!(
+                !failure_halts_batch("computer", &json!({"action": action})),
+                "legacy {action} must not halt the batch"
+            );
+        }
+        for action in ["left_click", "type", "key", "scroll"] {
+            assert!(
+                failure_halts_batch("computer", &json!({"action": action})),
+                "legacy {action} must halt the batch"
+            );
+        }
+    }
 }

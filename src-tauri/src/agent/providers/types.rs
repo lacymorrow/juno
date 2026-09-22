@@ -87,18 +87,6 @@ pub enum ComputerUse {
     /// Supported through Anthropic's built-in computer-use tools at this
     /// tool version, which also selects the matching beta flag.
     AnthropicTool(ApiVersion),
-    /// The model drives the computer, but only through the current
-    /// `computer_toolset_20260801` client toolset — it rejects every earlier
-    /// `computer_*` tool with a 400. Juno still sends the earlier tools, so it
-    /// sends this model none at all rather than a request the API refuses.
-    ///
-    /// Source (Claude Opus 5.5): "On the Claude API and Google Cloud, Claude
-    /// Opus 5.5 supports only the toolset: a request that declares a
-    /// `computer_20251124` tool returns a 400 `invalid_request_error`."
-    /// <https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5#computer-20251124-is-not-supported>
-    ///
-    /// This becomes `AnthropicTool`-equivalent once Juno ports to the toolset.
-    ToolsetOnly,
     /// Supported through Juno's own function tools (OpenAI, Gemini, Rig) or
     /// the `juno-cua` MCP server (Claude CLI). Capable, but no Anthropic tool
     /// version applies, so no Anthropic beta flag is sent.
@@ -108,14 +96,26 @@ pub enum ComputerUse {
 impl ComputerUse {
     /// Whether *Juno* can drive the computer with this model today.
     ///
-    /// `ToolsetOnly` is false here on purpose: the model is capable, but every
-    /// tool Juno knows how to send it is rejected, so offering computer use
-    /// would only produce 400s.
+    /// There is no longer a "capable but unusable" case: Juno sends both the
+    /// legacy `computer_*` tools and the `computer_toolset_20260801` toolset,
+    /// so every model that can drive the computer has a tool version Juno can
+    /// actually send it.
     pub fn is_supported(&self) -> bool {
-        matches!(
-            self,
-            ComputerUse::AnthropicTool(_) | ComputerUse::FunctionTools
-        )
+        !matches!(self, ComputerUse::No)
+    }
+
+    /// Whether this model drives the computer through the
+    /// `computer_toolset_20260801` toolset rather than a single `computer`
+    /// tool.
+    ///
+    /// This is the one switch between the two wire formats. Everything the
+    /// toolset changes — no `name` on the request entry, no beta header, member
+    /// tool names instead of `input.action`, `toolset_name` echoed on results —
+    /// hangs off this answer, and it is read from the tool version the model
+    /// declares, never from `availability` or `toolset_ga`.
+    pub fn uses_toolset(&self) -> bool {
+        self.anthropic_version()
+            .is_some_and(|version| version.is_toolset())
     }
 
     /// The Anthropic computer-use tool version this model takes, if any.
@@ -185,9 +185,15 @@ pub struct ModelDefinition {
     /// `computer_toolset_20260801` client toolset, at
     /// <https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool>.
     ///
-    /// Recorded, not acted on: Juno has not ported to the toolset yet. It is
-    /// what tells you which rows change when it does, and it is false for every
-    /// non-Anthropic provider.
+    /// This is the documented fact. What Juno *sends* is the tool version in
+    /// `computer_use`, and for every Anthropic row the two must agree — a model
+    /// listed as toolset-GA declares `ApiVersion::ComputerToolset20260801`, and
+    /// one that is not declares an earlier version. `catalog_toolset_ga_agrees_with_the_declared_tool_version`
+    /// asserts exactly that, so the documented fact and the wire format cannot
+    /// drift apart. False for every non-Anthropic provider.
+    ///
+    /// Ask `uses_computer_toolset()` when you need to know which request shape
+    /// to build; this field is the citation, that method is the behaviour.
     pub toolset_ga: bool,
     /// The image size tier, which decides screenshot capture resolution.
     pub image_tier: ImageTier,
@@ -208,6 +214,13 @@ impl ModelDefinition {
     /// supports computer use.
     pub fn supports_computer_use(&self) -> bool {
         self.computer_use.is_supported()
+    }
+
+    /// Whether this model drives the computer through the
+    /// `computer_toolset_20260801` toolset. Derived from the declared tool
+    /// version, never from `availability` and never from `toolset_ga`.
+    pub fn uses_computer_toolset(&self) -> bool {
+        self.computer_use.uses_toolset()
     }
 
     /// The category this model falls into, derived from its capability.
@@ -231,10 +244,6 @@ pub struct ModelInfo {
     /// True when the provider lists the model as legacy. The picker hides
     /// these unless advanced settings are on, or the model is the active one.
     pub is_legacy: bool,
-    /// True when the model drives the computer but only through a tool version
-    /// Juno does not send yet. Distinct from chat-only: the limit is Juno's,
-    /// not the model's, so the picker must not call it a chat model.
-    pub needs_newer_tools: bool,
 }
 
 impl From<&ModelDefinition> for ModelInfo {
@@ -246,7 +255,6 @@ impl From<&ModelDefinition> for ModelInfo {
             supports_computer_use: def.supports_computer_use(),
             is_recommended: def.is_recommended,
             is_legacy: def.availability == Availability::Legacy,
-            needs_newer_tools: def.computer_use == ComputerUse::ToolsetOnly,
         }
     }
 }
@@ -318,7 +326,26 @@ impl Provider {
     pub fn computer_use_beta_flag(&self, model: &str) -> Option<&'static str> {
         self.computer_use(model)
             .anthropic_version()
-            .map(|version| version.beta_flag())
+            .and_then(|version| version.beta_flag())
+    }
+
+    /// Whether `model` drives the computer through the
+    /// `computer_toolset_20260801` toolset rather than a single `computer` tool.
+    ///
+    /// The one question the provider asks to pick a wire format. An unknown
+    /// model answers `false` and keeps the legacy path, which is the safe
+    /// direction: the worst case is an older tool version, not a rejected
+    /// request.
+    pub fn uses_computer_toolset(&self, model: &str) -> bool {
+        self.computer_use(model).uses_toolset()
+    }
+
+    /// The `toolset_name` that `model`'s computer tool calls carry, if it uses
+    /// a toolset. `None` on the legacy path, where tool calls have no toolset.
+    pub fn computer_toolset_name(&self, model: &str) -> Option<&'static str> {
+        self.computer_use(model)
+            .anthropic_version()
+            .and_then(|version| version.toolset_name())
     }
 
     /// Resolve the correct tool API type for the given model.
@@ -364,7 +391,19 @@ impl Provider {
     ///
     /// Do not edit these from memory. Re-read those pages.
     pub fn model_definitions(&self) -> &'static [ModelDefinition] {
-        // The two Anthropic computer-use tool versions Juno sends today.
+        // The Anthropic computer-use tool versions Juno sends today.
+        //
+        // `CU_20251124` is the DEFAULT. `CU_TOOLSET` is the current GA toolset,
+        // and a model gets it only when it accepts nothing earlier — today that
+        // is Opus 5.5 alone. The toolset is not an upgrade to reach for: it
+        // costs roughly 2x the input-token overhead on every request (4,530 vs
+        // 2,152 on an identical call, measured against the live API
+        // 2026-09-22) because it ships 17 member tool definitions instead of
+        // one. `toolset_ga` records which models *could* take it;
+        // `catalog_toolset_ga_agrees_with_the_declared_tool_version` asserts
+        // Juno never sends it to a model that is not on that list.
+        const CU_TOOLSET: ComputerUse =
+            ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801);
         const CU_20251124: ComputerUse = ComputerUse::AnthropicTool(ApiVersion::Computer20251124);
         const CU_20250124: ComputerUse = ComputerUse::AnthropicTool(ApiVersion::Computer20250124);
 
@@ -381,19 +420,18 @@ impl Provider {
                         image_tier: ImageTier::HighResolution,
                         adaptive_thinking: true,
                         server_side_fallback: true,
-                        // The recommended default: the most capable model in
-                        // the current lineup that Juno can actually drive the
-                        // desktop with today. Opus 5.5 takes this over the
-                        // moment Juno sends `computer_toolset_20260801`.
+                        // The recommended default. Opus 5.5 takes this over in
+                        // the follow-up commit, now that Juno sends
+                        // `computer_toolset_20260801`.
                         is_recommended: true,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_5_5,
                         name: "Claude Opus 5.5",
                         // Toolset-only on the Claude API: a `computer_20251124`
-                        // tool returns a 400, so Juno sends it no computer-use
-                        // tools until the toolset port lands.
-                        computer_use: ComputerUse::ToolsetOnly,
+                        // tool returns a 400. Juno now sends the toolset, so
+                        // this model drives the computer like any other.
+                        computer_use: CU_TOOLSET,
                         availability: Availability::Current,
                         toolset_ga: true,
                         image_tier: ImageTier::HighResolution,
@@ -725,17 +763,11 @@ impl Provider {
             .find(|def| def.id == model)
             .map(|def| def.name)
             .unwrap_or(model);
-        Some(if self.computer_use(model) == ComputerUse::ToolsetOnly {
-            // Not chat-only — the model drives the computer, just not through
-            // any tool version Juno sends yet. Say that, rather than something
-            // untrue about the model.
-            format!(
-                "{} drives the computer only through Anthropic's \
-                 computer_toolset_20260801 toolset, which Juno does not send yet. \
-                 Pick another computer-use model in Settings > AI Provider.",
-                name
-            )
-        } else if self.knows_model(model) {
+        // There is no longer a "capable but Juno cannot send it a tool it
+        // accepts" case: Juno sends both the legacy computer tools and the
+        // computer_toolset_20260801 toolset, so anything that reaches here is
+        // genuinely chat-only or unknown.
+        Some(if self.knows_model(model) {
             format!(
                 "{} is a chat-only model and cannot control the computer. \
                  Switch to a computer-use model in Settings > AI Provider.",
@@ -967,6 +999,8 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_SONNET_5,
         );
+        // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
+        // what Juno sends. Only Opus 5.5 takes the toolset.
         assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
@@ -984,6 +1018,8 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_OPUS_5,
         );
+        // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
+        // what Juno sends. Only Opus 5.5 takes the toolset.
         assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
@@ -1025,9 +1061,8 @@ mod tests {
 
     /// And Juno's own constraint on top of that: the Anthropic default must be
     /// a model Juno can actually drive the desktop with. Opus 5.5 is the
-    /// current lineup's headline model but takes only
-    /// `computer_toolset_20260801`, which Juno does not send yet, so the
-    /// default is Fable 5.1 until that port lands.
+    /// current lineup's headline model; the follow-up commit makes it the
+    /// default now that Juno sends `computer_toolset_20260801`.
     #[test]
     fn anthropic_default_can_drive_the_computer() {
         assert_eq!(
@@ -1040,11 +1075,12 @@ mod tests {
         );
     }
 
-    /// Claude Opus 5.5 is in the catalog and current, but Juno sends it no
-    /// computer-use tools and no beta flag, because a `computer_20251124` tool
-    /// returns a 400 on it. Recorded honestly: not chat-only, toolset-only.
+    /// Claude Opus 5.5 accepts computer use ONLY through the toolset on the
+    /// Claude API — `computer_20251124` returns a 400. Now that Juno sends the
+    /// toolset it is fully drivable, and it must resolve to the toolset type
+    /// with no beta flag.
     #[test]
-    fn opus_5_5_is_toolset_only_not_chat_only() {
+    fn opus_5_5_drives_the_computer_through_the_toolset() {
         let def = Provider::Anthropic
             .model_definitions()
             .iter()
@@ -1053,13 +1089,24 @@ mod tests {
 
         assert_eq!(def.availability, Availability::Current);
         assert!(def.toolset_ga);
-        assert_eq!(def.computer_use, ComputerUse::ToolsetOnly);
+        assert_eq!(
+            def.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
+        );
+        assert!(def.uses_computer_toolset());
         assert!(def.adaptive_thinking);
         assert!(def.server_side_fallback);
         assert_eq!(def.image_tier, ImageTier::HighResolution);
 
-        // Nothing computer-use-shaped reaches the wire for it.
-        assert!(!Provider::Anthropic.model_supports_computer_use(model_ids::CLAUDE_OPUS_5_5));
+        // It is drivable, and the toolset is what reaches the wire.
+        assert!(Provider::Anthropic.model_supports_computer_use(model_ids::CLAUDE_OPUS_5_5));
+        assert!(Provider::Anthropic.uses_computer_toolset(model_ids::CLAUDE_OPUS_5_5));
+        assert_eq!(
+            Provider::Anthropic.computer_toolset_name(model_ids::CLAUDE_OPUS_5_5),
+            Some("computer")
+        );
+        // GA: a beta flag here would name a tool version the request does not
+        // contain.
         assert_eq!(
             Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_OPUS_5_5),
             None
@@ -1067,19 +1114,18 @@ mod tests {
         assert_eq!(
             Provider::Anthropic.resolve_tool_type(
                 "computer",
-                "computer_20250124",
+                "computer_20251124",
                 model_ids::CLAUDE_OPUS_5_5
             ),
-            "computer_20250124",
-            "no remap applies — the tool is never sent"
+            "computer_toolset_20260801",
+            "the legacy type it would otherwise send is exactly what it 400s on"
         );
 
-        // And the message says the true reason, not "chat-only".
-        let refusal = Provider::Anthropic
-            .computer_use_refusal(model_ids::CLAUDE_OPUS_5_5)
-            .expect("Juno cannot drive the computer with it yet");
-        assert!(refusal.contains("computer_toolset_20260801"));
-        assert!(!refusal.contains("chat-only"));
+        // Nothing to refuse any more.
+        assert_eq!(
+            Provider::Anthropic.computer_use_refusal(model_ids::CLAUDE_OPUS_5_5),
+            None
+        );
     }
 
     #[test]
@@ -1089,10 +1135,12 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_FABLE_5_1,
         );
+        // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
+        // what Juno sends. Only Opus 5.5 takes the toolset.
         assert_eq!(computer, "computer_20251124");
         assert_eq!(
             Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_FABLE_5_1),
-            Some(crate::constants::api::beta_flags::COMPUTER_USE_2025_11_24)
+            Some("computer-use-2025-11-24")
         );
     }
 
@@ -1134,6 +1182,8 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_FABLE_5,
         );
+        // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
+        // what Juno sends. Only Opus 5.5 takes the toolset.
         assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
@@ -1173,15 +1223,21 @@ mod tests {
             model_ids::CLAUDE_HAIKU_4_5,
         ];
 
-        // Opus 5.5 takes only `computer_toolset_20260801` on the Claude API.
-        let toolset_only = [model_ids::CLAUDE_OPUS_5_5];
-
         // The docs list exactly these two under `computer_20250124`; every
         // other model Juno offers is listed under `computer_20251124`.
         let earlier_tool = [model_ids::CLAUDE_SONNET_4_5, model_ids::CLAUDE_HAIKU_4_5];
 
+        // The models Juno actually SENDS the toolset to: the ones that accept
+        // no earlier tool type, so the toolset's ~2x input-token overhead buys
+        // the only working path. Verified against the live API 2026-09-22 —
+        // every other toolset-GA model below returned HTTP 200 for
+        // `computer_20251124`, and only Opus 5.5 returned
+        // "does not support tool types: computer_20251124".
+        let toolset_only = [model_ids::CLAUDE_OPUS_5_5];
+
         // `supportedModels` for computer_toolset_20260801, intersected with
-        // what Juno offers. (The docs also list claude-mythos-5 and
+        // what Juno offers — the documented capability, which is broader than
+        // what Juno sends. (The docs also list claude-mythos-5 and
         // claude-mythos-5-1, which are invite-only and not in Juno's catalog.)
         let toolset_ga = [
             model_ids::CLAUDE_FABLE_5_1,
@@ -1213,7 +1269,7 @@ mod tests {
 
         for def in Provider::Anthropic.model_definitions() {
             let expected_computer_use = if toolset_only.contains(&def.id) {
-                ComputerUse::ToolsetOnly
+                ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
             } else if earlier_tool.contains(&def.id) {
                 ComputerUse::AnthropicTool(ApiVersion::Computer20250124)
             } else {
@@ -1243,6 +1299,21 @@ mod tests {
                 def.name
             );
 
+            // The citation bounds the behaviour in one direction: Juno may
+            // only send the toolset to a model Anthropic lists as toolset-GA.
+            // The converse is deliberately NOT asserted — most toolset-GA
+            // models also accept `computer_20251124`, and Juno prefers it
+            // because the toolset costs roughly 2x the input-token overhead
+            // (4,530 vs 2,152 on an identical request, measured 2026-09-22).
+            // Only a model with no legacy option is worth that.
+            if def.uses_computer_toolset() {
+                assert!(
+                    def.toolset_ga,
+                    "{} sends the toolset but is not documented as toolset-GA",
+                    def.name
+                );
+            }
+
             let expected_tier = if high_res.contains(&def.id) {
                 ImageTier::HighResolution
             } else {
@@ -1259,6 +1330,151 @@ mod tests {
     /// Lifecycle and toolset GA are separate axes, and #580 conflated them.
     /// Opus 4.8 is toolset-GA yet legacy; Haiku 4.5 is current yet not
     /// toolset-GA. Either direction must be representable.
+    #[test]
+    fn the_toolset_path_is_selected_per_model_and_leaves_the_rest_alone() {
+        for (model, expected_type, expected_flag) in [
+            (
+                model_ids::CLAUDE_OPUS_5_5,
+                "computer_toolset_20260801",
+                None,
+            ),
+            // Toolset-GA, but they accept the cheaper legacy tool too, so
+            // that is the path Juno picks for them.
+            (
+                model_ids::CLAUDE_FABLE_5_1,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_SONNET_5,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_FABLE_5,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_OPUS_5,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_OPUS_4_8,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_OPUS_4_7,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_OPUS_4_6,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_SONNET_4_6,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_OPUS_4_5,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_SONNET_4_5,
+                "computer_20250124",
+                Some("computer-use-2025-01-24"),
+            ),
+            (
+                model_ids::CLAUDE_HAIKU_4_5,
+                "computer_20250124",
+                Some("computer-use-2025-01-24"),
+            ),
+        ] {
+            let uses_toolset = expected_type == "computer_toolset_20260801";
+            assert_eq!(
+                Provider::Anthropic.uses_computer_toolset(model),
+                uses_toolset,
+                "{model} picked the wrong path"
+            );
+            assert_eq!(
+                Provider::Anthropic.resolve_tool_type("computer", expected_type, model),
+                expected_type,
+                "{model} resolved the wrong computer tool type"
+            );
+            assert_eq!(
+                Provider::Anthropic.computer_use_beta_flag(model),
+                expected_flag,
+                "{model} sent the wrong beta flag"
+            );
+            assert_eq!(
+                Provider::Anthropic.computer_toolset_name(model),
+                if uses_toolset { Some("computer") } else { None },
+                "{model} reported the wrong toolset name"
+            );
+
+            // The editor and bash tools are identical on both paths.
+            assert_eq!(
+                Provider::Anthropic.resolve_tool_type(
+                    "str_replace_based_edit_tool",
+                    "text_editor_20250728",
+                    model
+                ),
+                "text_editor_20250728"
+            );
+            assert_eq!(
+                Provider::Anthropic.resolve_tool_type("bash", "bash_20250124", model),
+                "bash_20250124"
+            );
+
+            // Every Anthropic model drives the computer; none is chat-only now
+            // that the toolset placeholder is gone.
+            assert!(Provider::Anthropic.model_supports_computer_use(model));
+        }
+    }
+
+    /// Providers that drive the desktop with Juno's own function tools have no
+    /// Anthropic tool version at all, so a `Current` lifecycle can never pull
+    /// them onto the toolset path.
+    #[test]
+    fn function_tool_providers_are_never_on_the_toolset_path() {
+        for provider in [
+            Provider::OpenAI,
+            Provider::Gemini,
+            Provider::Rig,
+            Provider::ClaudeCli,
+        ] {
+            for def in provider.model_definitions() {
+                assert!(
+                    !def.uses_computer_toolset(),
+                    "{} on {:?} must not claim the Anthropic toolset",
+                    def.name,
+                    provider
+                );
+                assert!(!def.toolset_ga, "{} must not record toolset GA", def.name);
+                assert!(!provider.uses_computer_toolset(def.id));
+                assert_eq!(provider.computer_toolset_name(def.id), None);
+            }
+        }
+    }
+
+    /// An unknown model falls back to the legacy path, never the toolset. Too
+    /// old a tool version degrades; a toolset the model does not support is a
+    /// hard rejection.
+    #[test]
+    fn an_unknown_model_does_not_get_the_toolset() {
+        assert!(!Provider::Anthropic.uses_computer_toolset("claude-does-not-exist"));
+        assert_eq!(
+            Provider::Anthropic.computer_toolset_name("claude-does-not-exist"),
+            None
+        );
+    }
+
     #[test]
     fn lifecycle_is_not_inferred_from_toolset_ga() {
         let by_id = |id: &str| {

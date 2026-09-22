@@ -264,12 +264,12 @@ export default function AssistantModelPicker({
                             )}
                             {/* Absence is the signal: computer use is what Juno
                                 is for, so only a model that cannot do it is
-                                marked. A model Juno just cannot drive yet is
-                                not a chat model, so it gets its own mark. */}
+                                marked. There is no longer a "Juno cannot drive
+                                this yet" case — Juno sends both the legacy
+                                computer tools and the current toolset, so a
+                                model that is unmarked here can be driven. */}
                             {provider.is_available && !model.supports_computer_use && (
-                              <span className="text-xs text-muted-foreground">
-                                {model.needs_newer_tools ? "Chat only in Juno" : "Chat only"}
-                              </span>
+                              <span className="text-xs text-muted-foreground">Chat only</span>
                             )}
                             {isActive && <Check className="size-4 text-primary" />}
                           </ModelSelectorItem>
@@ -282,9 +282,7 @@ export default function AssistantModelPicker({
             </ModelSelector>
             {selectedModel && !selectedModel.model.supports_computer_use && (
               <div className="text-xs text-muted-foreground">
-                {selectedModel.model.needs_newer_tools
-                  ? `${selectedModel.model.name} can answer questions. It controls the computer only through Anthropic's newer tool format, which Juno does not send yet — pick another model for that.`
-                  : `${selectedModel.model.name} can answer questions, but it cannot control the computer. Pick another model for that.`}
+                {`${selectedModel.model.name} can answer questions, but it cannot control the computer. Pick another model for that.`}
               </div>
             )}
           </div>

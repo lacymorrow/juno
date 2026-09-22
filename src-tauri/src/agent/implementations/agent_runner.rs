@@ -16,6 +16,34 @@ use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvide
 use crate::constants::events;
 use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing app state
 
+/// Result recorded for tool calls that never ran because an earlier tool in the
+/// same batch failed.
+///
+/// Wording matches the Anthropic `computer_toolset_20260801` contract for
+/// actions the client declined to execute after a failure.
+pub(crate) const BATCH_HALT_SKIPPED_MESSAGE: &str =
+    "Not executed: an earlier computer action in this turn failed.";
+
+/// True when a tool call should be treated as a failure.
+///
+/// Two failure shapes exist and both must halt the batch:
+/// 1. A Rust-level `Err(_)` from the tool provider.
+/// 2. An `Ok(_)` whose output is an Anthropic error response
+///    (`{"is_error": true, "error": "..."}`). The `computer` tool reports every
+///    failure this way — `run_computer_action` returns
+///    `Ok(create_anthropic_error_response(msg))` — so `matches!(r, Err(_))`
+///    alone never catches a failed click.
+pub(crate) fn tool_result_is_failure(
+    tool_result: &Result<crate::agent::core::ToolResult, AgentError>,
+) -> bool {
+    match tool_result {
+        Ok(result) => {
+            crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&result.output)
+        }
+        Err(_) => true,
+    }
+}
+
 /// Default implementation of the AgentRunnable trait.
 /// Orchestrates the agent's execution flow using the provided components.
 pub struct DefaultAgentRunner<M, T>
@@ -367,13 +395,18 @@ where
                 self.wait_for_mouse_movement_completion(tool_call).await;
             }
 
+            // Failure detection runs for EVERY tool, including `computer`.
+            // It must sit outside the logging block below: that block deliberately
+            // skips `computer` (which self-logs with richer metadata), and a failed
+            // click is exactly the case that has to halt the rest of the batch.
+            let tool_failed = tool_result_is_failure(&tool_result);
+
             // Skip runner-level result logging for "computer" tool — it self-logs
             // with enhanced metadata inside anthropic_computer_use.rs
             if tool_call.name != "computer" {
                 match &tool_result {
                     Ok(result) => {
-                        let is_error = crate::agent::tools::anthropic_computer_use::is_anthropic_error_response(&result.output);
-                        let success = !is_error;
+                        let success = !tool_failed;
 
                         let screenshot_base64 = if success
                             && (tool_call.name == "capture_screenshot"
@@ -425,9 +458,112 @@ where
             tool_results_cache[start_index + i].1 = Some(tool_result.clone());
             self.add_tool_result_to_memory(tool_call, tool_result)
                 .await?;
+
+            // Halt the rest of the batch when a UI-mutating action failed. A batch
+            // of physical actions is an ordered plan — `left_click` then `type`
+            // then `key Return` — so a missed click must not be followed by typing
+            // into whatever window happens to be focused. Independent tools (file
+            // reads, read-only computer actions) keep going: the model still gets
+            // the error, and stopping them would cost a round trip for no safety.
+            // `failure_halts_batch` owns that trade and documents it.
+            //
+            // No retry here on purpose: `run_computer_action` already retries
+            // internally (AX-grounded click with a coordinate fallback). A second
+            // retry layer would hide the failure from the model and risk clicking
+            // the wrong thing twice.
+            if tool_failed {
+                let halt = crate::agent::tools::anthropic_computer_use::failure_halts_batch(
+                    &tool_call.name,
+                    &tool_call.input,
+                );
+                log::warn!(
+                    "Tool '{}' failed at {}/{} in batch — {}",
+                    tool_call.name,
+                    i + 1,
+                    batch.len(),
+                    if halt {
+                        format!(
+                            "halting the remaining {} tool call(s)",
+                            batch.len().saturating_sub(i + 1)
+                        )
+                    } else {
+                        "continuing: the failure is not order-sensitive".to_string()
+                    }
+                );
+                if halt {
+                    self.record_unexecuted_after_failure(batch, start_index, i, tool_results_cache)
+                        .await?;
+                    // A failure halt is NOT a cancellation. `Ok(false)` means
+                    // "cancelled" and makes the caller raise `AgentError::Terminated`,
+                    // ending the run. Here the agent loop must keep going so the model
+                    // sees the error plus the skipped results and decides what to do.
+                    return Ok(true);
+                }
+            }
         }
 
         Ok(true)
+    }
+
+    /// Record results for the tool calls that a failure halt skipped.
+    ///
+    /// Every tool_use block the model sent needs a matching tool_result, or the
+    /// Anthropic API rejects the next request. Mirrors the shape used by
+    /// [`Self::handle_batch_cancellation`], with wording that tells the model the
+    /// action was declined rather than attempted and failed.
+    async fn record_unexecuted_after_failure(
+        &mut self,
+        batch: &[crate::agent::core::ToolCall],
+        start_index: usize,
+        failed_index: usize,
+        tool_results_cache: &mut [(
+            crate::agent::core::ToolCall,
+            Option<Result<crate::agent::core::ToolResult, AgentError>>,
+        )],
+    ) -> Result<(), AgentError> {
+        let first_skipped = failed_index + 1;
+        if first_skipped >= batch.len() {
+            return Ok(());
+        }
+
+        // Fill the cache first, with no lock held. Each skipped slot becomes
+        // `Some(..)` carrying the Anthropic error shape, so a later
+        // `handle_batch_cancellation` — which keys off `result.is_none()` — can
+        // never mistake a failure halt for a cancellation and double-report it.
+        for (i, tool_call) in batch.iter().enumerate().skip(first_skipped) {
+            if let Some(slot) = tool_results_cache.get_mut(start_index + i) {
+                slot.1 = Some(Ok(crate::agent::core::ToolResult {
+                    call_id: tool_call.id.clone(),
+                    output: serde_json::json!({
+                        "is_error": true,
+                        "error": BATCH_HALT_SKIPPED_MESSAGE,
+                    }),
+                }));
+            }
+        }
+
+        let mut skipped_count = 0usize;
+        {
+            let mut mem = self.memory.lock().await;
+            for tool_call in batch.iter().skip(first_skipped) {
+                mem.add_message(crate::agent::core::Message {
+                    role: crate::agent::core::Role::Tool,
+                    content: BATCH_HALT_SKIPPED_MESSAGE.to_string(),
+                    tool_calls: None,
+                    tool_call_id: Some(tool_call.id.clone()),
+                    name: Some(tool_call.name.clone()),
+                    images: None,
+                })
+                .await?;
+                skipped_count += 1;
+            }
+        }
+
+        log::info!(
+            "Recorded skipped results for {} tool(s) after a batch failure halt",
+            skipped_count
+        );
+        Ok(())
     }
 
     /// Check approval for a batch of tools.
@@ -1663,5 +1799,136 @@ mod tests {
 
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod batch_halt_tests {
+    use super::*;
+    use crate::agent::core::ToolResult;
+
+    fn ok_result(output: serde_json::Value) -> Result<ToolResult, AgentError> {
+        Ok(ToolResult {
+            call_id: "call_1".to_string(),
+            output,
+        })
+    }
+
+    #[test]
+    fn rust_level_error_is_a_failure() {
+        let result: Result<ToolResult, AgentError> = Err(AgentError::ToolError("boom".to_string()));
+        assert!(tool_result_is_failure(&result));
+    }
+
+    #[test]
+    fn anthropic_error_payload_is_a_failure() {
+        // The shape the computer tool actually returns on a failed click:
+        // Ok(..) at the Rust level, with the error inside the payload.
+        let result = ok_result(serde_json::json!({
+            "is_error": true,
+            "error": "Click failed: no element at (100, 200)"
+        }));
+        assert!(tool_result_is_failure(&result));
+    }
+
+    #[test]
+    fn successful_payload_is_not_a_failure() {
+        assert!(!tool_result_is_failure(&ok_result(
+            serde_json::json!({ "success": true })
+        )));
+    }
+
+    #[test]
+    fn is_error_false_is_not_a_failure() {
+        assert!(!tool_result_is_failure(&ok_result(
+            serde_json::json!({ "is_error": false, "success": true })
+        )));
+    }
+
+    #[test]
+    fn non_object_payload_is_not_a_failure() {
+        assert!(!tool_result_is_failure(&ok_result(
+            serde_json::Value::String("plain text output".to_string())
+        )));
+        assert!(!tool_result_is_failure(&ok_result(serde_json::Value::Null)));
+    }
+
+    #[test]
+    fn skipped_message_matches_the_toolset_contract() {
+        assert_eq!(
+            BATCH_HALT_SKIPPED_MESSAGE,
+            "Not executed: an earlier computer action in this turn failed."
+        );
+    }
+
+    // --- Which failures halt the batch ---
+
+    use crate::agent::tools::anthropic_computer_use::failure_halts_batch;
+
+    fn computer(action: &str) -> serde_json::Value {
+        serde_json::json!({ "action": action, "coordinate": [100, 200] })
+    }
+
+    #[test]
+    fn ui_mutating_computer_actions_halt() {
+        for action in [
+            "left_click",
+            "right_click",
+            "middle_click",
+            "double_click",
+            "triple_click",
+            "left_click_drag",
+            "mouse_move",
+            "left_mouse_down",
+            "left_mouse_up",
+            "key",
+            "hold_key",
+            "type",
+            "scroll",
+        ] {
+            assert!(
+                failure_halts_batch("computer", &computer(action)),
+                "{action} should halt the batch"
+            );
+        }
+    }
+
+    #[test]
+    fn read_only_computer_actions_do_not_halt() {
+        // A failed screenshot changes nothing on screen, and the clicks behind it
+        // were planned against an earlier screenshot. The model gets the error.
+        for action in ["screenshot", "cursor_position", "wait", "zoom"] {
+            assert!(
+                !failure_halts_batch("computer", &computer(action)),
+                "{action} should not halt the batch"
+            );
+        }
+    }
+
+    #[test]
+    fn independent_tools_do_not_halt() {
+        for name in [
+            "read_file",
+            "bash",
+            "capture_screenshot",
+            "browser_navigate",
+            "str_replace_based_edit_tool",
+        ] {
+            assert!(
+                !failure_halts_batch(name, &serde_json::json!({ "path": "/tmp/x" })),
+                "{name} should not halt the batch"
+            );
+        }
+    }
+
+    #[test]
+    fn computer_call_with_unreadable_action_halts() {
+        // Safe direction: the call may already have moved the pointer or typed.
+        assert!(failure_halts_batch("computer", &serde_json::json!({})));
+        assert!(failure_halts_batch(
+            "computer",
+            &serde_json::json!({ "action": 7 })
+        ));
+        assert!(failure_halts_batch("computer", &serde_json::Value::Null));
     }
 }

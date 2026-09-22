@@ -135,6 +135,16 @@ struct ApiContentBlock {
     name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     input: Option<Value>,
+    /// The toolset a `tool_use` block belongs to, and the value that must be
+    /// echoed back on the matching `tool_result`.
+    ///
+    /// Present only on the `computer_toolset_20260801` path, in both
+    /// directions: Claude sets it on every member `tool_use`, and the API
+    /// requires it back on every corresponding `tool_result`. `None` on the
+    /// legacy path, where `skip_serializing_if` keeps it off the wire entirely
+    /// so those requests are byte-identical to what they were before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    toolset_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_use_id: Option<String>, // For tool result blocks
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -174,6 +184,7 @@ impl ApiContentBlock {
             id: None,
             name: None,
             input: None,
+            toolset_name: None,
             tool_use_id: None,
             content: None,
             thinking: None,
@@ -214,6 +225,34 @@ enum ApiTool {
         /// specific screen regions at full native resolution (critical for Retina displays)
         #[serde(skip_serializing_if = "Option::is_none")]
         enable_zoom: Option<bool>,
+        /// Cache control for the last tool in the list to enable prompt caching
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
+    },
+    /// The `computer_toolset_20260801` toolset.
+    ///
+    /// Format: `{"type": "computer_toolset_20260801"}` — and that is the whole
+    /// entry. Three fields that `BuiltIn` carries are **absent on purpose**, and
+    /// each one is a request-level rejection if added:
+    ///
+    /// - **no `name`.** A toolset is not a tool; it expands server-side into 17
+    ///   member tools which supply their own names. This is the single most
+    ///   likely thing to get wrong, because every other entry in the array has a
+    ///   `name`, so it is a separate variant rather than an `Option` on
+    ///   `BuiltIn` — you cannot forget to clear a field that does not exist.
+    /// - **no `display_width_px` / `display_height_px`.** The toolset takes no
+    ///   display dimensions and the API does not downscale for you, so an
+    ///   oversized `tool_result` image is rejected. Juno sizes its own
+    ///   screenshots instead (see `ImageTier`).
+    /// - **no `enable_zoom`.** Zoom is a member tool, on by default; it is
+    ///   turned off through `configs`, not a top-level flag.
+    Toolset {
+        #[serde(rename = "type")]
+        tool_type: String,
+        /// Per-member settings, keyed by member name. Omitted entirely when
+        /// every member keeps its default, which is Juno's case today.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        configs: Option<Value>,
         /// Cache control for the last tool in the list to enable prompt caching
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<CacheControl>,
@@ -395,6 +434,50 @@ impl AnthropicBrain {
     /// model must not advertise a computer-use beta it cannot honour.
     fn resolve_computer_use_beta_header(&self) -> Option<&'static str> {
         Provider::Anthropic.computer_use_beta_flag(&self.model)
+    }
+
+    /// Whether the selected model drives the computer through the
+    /// `computer_toolset_20260801` toolset instead of a single `computer` tool.
+    ///
+    /// Answered from the one capability table, per model. This is the only
+    /// question that selects between the two wire formats; there is no model-ID
+    /// list here or anywhere else.
+    fn uses_computer_toolset(&self) -> bool {
+        Provider::Anthropic.uses_computer_toolset(&self.model)
+    }
+
+    /// The `toolset_name` this model's computer tool calls arrive with, if any.
+    fn computer_toolset_name(&self) -> Option<&'static str> {
+        Provider::Anthropic.computer_toolset_name(&self.model)
+    }
+
+    /// Route a raw `(name, toolset_name, input)` triple from the wire into the
+    /// `(name, input)` pair Juno executes.
+    ///
+    /// Applied at both response-parsing sites (streaming and non-streaming) so
+    /// the two cannot drift. On the legacy path `toolset_name` is always absent,
+    /// so this is the identity function and the old behaviour is untouched.
+    fn route_tool_call(
+        &self,
+        name: String,
+        toolset_name: Option<&str>,
+        input: Value,
+    ) -> (String, Value) {
+        match crate::agent::tools::anthropic_computer_use::route_toolset_call(
+            &name,
+            toolset_name,
+            &input,
+        ) {
+            Some((routed_name, routed_input)) => {
+                log::debug!(
+                    "Routed toolset member '{}' (toolset_name={:?}) to the computer tool",
+                    name,
+                    toolset_name
+                );
+                (routed_name, routed_input)
+            }
+            None => (name, input),
+        }
     }
 
     /// Full `anthropic-beta` header value for the selected model.
@@ -612,7 +695,11 @@ impl AnthropicBrain {
         let mut response_stream_started = false;
 
         // Track content blocks and partial data
-        let mut current_tool_call: Option<(String, String, String)> = None; // (id, name, partial_json)
+        // (id, name, partial_json, toolset_name)
+        // `toolset_name` arrives on the `content_block_start` event alongside
+        // the name and must survive until `content_block_stop`, where the call
+        // is finalised — it is what routes a member tool onto the computer tool.
+        let mut current_tool_call: Option<(String, String, String, Option<String>)> = None;
 
         // Track thinking content blocks (for extended thinking models via API)
         let mut current_thinking_content: Option<String> = None;
@@ -689,12 +776,18 @@ impl AnthropicBrain {
                                                 .and_then(|v| v.as_str())
                                                 .unwrap_or("")
                                                 .to_string();
+                                            let toolset_name = content_block
+                                                .get("toolset_name")
+                                                .and_then(|v| v.as_str())
+                                                .map(str::to_string);
                                             log::debug!(
-                                                "Stream: started tool call {} ({})",
+                                                "Stream: started tool call {} ({}) toolset={:?}",
                                                 name,
-                                                id
+                                                id,
+                                                toolset_name
                                             );
-                                            current_tool_call = Some((id, name, String::new()));
+                                            current_tool_call =
+                                                Some((id, name, String::new(), toolset_name));
                                         }
                                         "thinking" => {
                                             // Start tracking a thinking block (extended thinking models)
@@ -856,7 +949,7 @@ impl AnthropicBrain {
                                                 delta.get("partial_json").and_then(|t| t.as_str())
                                             {
                                                 // Accumulate JSON for tool call
-                                                if let Some((_, _, ref mut json_accumulator)) =
+                                                if let Some((_, _, ref mut json_accumulator, _)) =
                                                     current_tool_call
                                                 {
                                                     json_accumulator.push_str(partial_json);
@@ -875,37 +968,38 @@ impl AnthropicBrain {
                         }
                         "content_block_stop" => {
                             // Complete current tool call if we have one
-                            if let Some((id, name, json_str)) = current_tool_call.take() {
-                                // Check if we have any JSON content before parsing
-                                if json_str.trim().is_empty() {
+                            if let Some((id, name, json_str, toolset_name)) =
+                                current_tool_call.take()
+                            {
+                                // Resolve the input first, then route once. The
+                                // three ways an input can arrive (empty, parsed,
+                                // unparseable) used to each push their own
+                                // ToolCall, which meant three places to add the
+                                // toolset routing and two of them easy to miss.
+                                let input = if json_str.trim().is_empty() {
                                     log::debug!("Tool call {} ({}) has empty JSON input, using empty object", name, id);
-                                    // Use empty object as fallback
-                                    tool_calls.push(ToolCall {
-                                        id,
-                                        name,
-                                        input: serde_json::json!({}),
-                                    });
+                                    serde_json::json!({})
                                 } else {
-                                    // Parse the complete JSON
                                     match serde_json::from_str(&json_str) {
                                         Ok(input) => {
-                                            tool_calls.push(ToolCall { id, name, input });
                                             log::debug!(
                                                 "Stream: completed tool call with input: {}",
                                                 json_str
                                             );
+                                            input
                                         }
                                         Err(e) => {
                                             log::warn!("Failed to parse tool call input JSON: {}, json: '{}'. Using empty object as fallback.", e, json_str);
-                                            // Use empty object as fallback instead of failing
-                                            tool_calls.push(ToolCall {
-                                                id,
-                                                name,
-                                                input: serde_json::json!({}),
-                                            });
+                                            serde_json::json!({})
                                         }
                                     }
-                                }
+                                };
+
+                                // Dispatch on (name, toolset_name), exactly as
+                                // the non-streaming path does.
+                                let (name, input) =
+                                    self.route_tool_call(name, toolset_name.as_deref(), input);
+                                tool_calls.push(ToolCall { id, name, input });
                             }
 
                             // Emit thinking_end for API thinking blocks
@@ -1236,6 +1330,7 @@ impl AnthropicBrain {
                 id: None,
                 name: None,
                 input: None,
+                toolset_name: None,
                 tool_use_id: None,
                 content: None,
                 thinking: None,
@@ -1253,11 +1348,20 @@ impl AnthropicBrain {
                 ));
             }
             for tool_call in tool_calls {
+                // Undo the toolset routing before replay. Claude sent this as a
+                // member name plus `toolset_name`; that is what has to go back,
+                // not the `computer` shape Juno executes internally.
+                let (name, toolset_name, input) =
+                    crate::agent::tools::anthropic_computer_use::unroute_toolset_call(
+                        &tool_call.name,
+                        &tool_call.input,
+                    );
                 content_blocks.push(ApiContentBlock {
                     block_type: "tool_use".to_string(),
                     id: Some(tool_call.id.clone()),
-                    name: Some(tool_call.name.clone()),
-                    input: Some(tool_call.input.clone()),
+                    name: Some(name),
+                    input: Some(input),
+                    toolset_name,
                     text: None,
                     tool_use_id: None,
                     content: None,
@@ -1529,6 +1633,23 @@ impl AgentBrain for AnthropicBrain {
                         }
                     };
 
+                    // Echo `toolset_name` on results for calls that came from a
+                    // toolset. The API requires it on every `tool_result` whose
+                    // `tool_use` carried one, and a missing echo is an
+                    // `invalid_request_error` for the whole request, not a
+                    // degraded single result.
+                    //
+                    // Model + tool name is an exact test, not a guess: a model
+                    // on the toolset path is never sent the legacy `computer`
+                    // tool, so every `computer` result it produces belongs to
+                    // the toolset. On the legacy path this stays `None` and
+                    // `skip_serializing_if` keeps the field off the wire.
+                    let result_toolset_name = if tool_name == "computer" {
+                        self.computer_toolset_name().map(str::to_string)
+                    } else {
+                        None
+                    };
+
                     api_messages.push(ApiMessage {
                         role: "user".to_string(), // Tool results have role "user"
                         content: ApiContent::Blocks(vec![ApiContentBlock {
@@ -1538,6 +1659,7 @@ impl AgentBrain for AnthropicBrain {
                             id: None,
                             name: None,
                             input: None,
+                            toolset_name: result_toolset_name,
                             content: Some(result_content),
                             thinking: None,
                             signature: None,
@@ -1592,6 +1714,52 @@ impl AgentBrain for AnthropicBrain {
                 .iter()
                 .filter_map(|t| {
                     if let Some(api_type) = &t.api_type {
+                        // The computer *toolset* replaces the computer *tool*.
+                        // It is a different entry shape, not a different type
+                        // string on the same shape, so it forks first — before
+                        // any of the display-dimension work below, which the
+                        // toolset must not carry.
+                        //
+                        // Only the `computer` tool is replaced. `bash` and
+                        // `str_replace_based_edit_tool` keep their own named
+                        // entries and fall through to `BuiltIn` unchanged.
+                        if t.name == "computer" && self.uses_computer_toolset() {
+                            // Juno still needs a known display size to map the
+                            // model's screenshot-pixel coordinates back onto the
+                            // real screen. The toolset does not take the size,
+                            // but Juno's own coordinate transform does, and a
+                            // wrong transform clicks the wrong place — so the
+                            // same guard as the legacy path applies.
+                            match crate::utils::coordinates::get_current_standard_resolution() {
+                                Ok((w, h)) if w > 0 && h > 0 => {
+                                    log::info!(
+                                        "Computer toolset enabled for model {} (screen {}x{}, no display dims sent — \
+                                         the toolset takes none and Juno sizes its own screenshots)",
+                                        self.model, w, h
+                                    );
+                                }
+                                Ok((w, h)) => {
+                                    log::warn!(
+                                        "Standard resolution not yet initialized ({}x{}), skipping computer toolset to prevent coordinate mismatch",
+                                        w, h
+                                    );
+                                    return None;
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Cannot determine display resolution: {}, skipping computer toolset to prevent coordinate mismatch",
+                                        e
+                                    );
+                                    return None;
+                                }
+                            }
+                            return Some(ApiTool::Toolset {
+                                tool_type: self.resolve_tool_api_type(&t.name, api_type),
+                                // Every member keeps its default, zoom included.
+                                configs: None,
+                                cache_control: None, // Set on last tool below
+                            });
+                        }
                         // Built-in Anthropic tool (computer, bash, text_editor)
                         let (dw, dh) = if t.name == "computer" {
                             match crate::utils::coordinates::get_current_standard_resolution() {
@@ -1646,16 +1814,27 @@ impl AgentBrain for AnthropicBrain {
                 })
                 .collect();
             // Add cache_control to the last tool to enable prompt caching of the tool definitions.
-            // When Anthropic caches tools, subsequent turns skip re-processing ~2,146 tokens of
-            // tool definitions, reducing latency by 50-80% for the cached portion.
+            // When Anthropic caches tools, subsequent turns skip re-processing the tool
+            // definitions, reducing latency by 50-80% for the cached portion.
+            //
+            // This matters more on the toolset path, and the breakpoint must keep covering it.
+            // Measured against the live API on otherwise-identical one-token requests:
+            //
+            //   computer_toolset_20260801 on opus-5-5   4,532 input tokens
+            //   computer_20251124 on fable-5-1          2,154 input tokens
+            //
+            // The 17 member definitions are what roughly doubles the overhead, and they are
+            // paid on every uncached request. Prompt caching is a prefix cache, so a breakpoint
+            // on the LAST tool covers every tool before it, the toolset entry included.
+            // `ApiTool::Toolset` also carries its own `cache_control` so a breakpoint can be
+            // placed directly on it. Do not move the toolset entry after the final breakpoint,
+            // and do not drop that field — LAC-4007 builds the real caching strategy on top of
+            // this, and either change would architect it out.
             if let Some(last_tool) = tools.last_mut() {
                 match last_tool {
-                    ApiTool::BuiltIn { cache_control, .. } => {
-                        *cache_control = Some(CacheControl {
-                            cache_type: "ephemeral".to_string(),
-                        });
-                    }
-                    ApiTool::Custom { cache_control, .. } => {
+                    ApiTool::BuiltIn { cache_control, .. }
+                    | ApiTool::Toolset { cache_control, .. }
+                    | ApiTool::Custom { cache_control, .. } => {
                         *cache_control = Some(CacheControl {
                             cache_type: "ephemeral".to_string(),
                         });
@@ -1901,6 +2080,12 @@ impl AgentBrain for AnthropicBrain {
                             AgentError::LlmError(format!("Tool call {} missing 'input' field", id))
                         })?;
 
+                        // Dispatch on (name, toolset_name). A toolset member is
+                        // routed onto the computer tool; anything else passes
+                        // through untouched.
+                        let (name, input) =
+                            self.route_tool_call(name, block.toolset_name.as_deref(), input);
+
                         // Add to the list of tool calls to execute
                         tool_calls_to_execute.push(ToolCall { id, name, input });
                     }
@@ -1962,5 +2147,280 @@ impl StreamingAgentBrain for AnthropicBrain {
 
     fn set_streaming_enabled(&mut self, enabled: bool) {
         self.streaming_enabled = enabled;
+    }
+}
+
+#[cfg(test)]
+mod computer_toolset_request_tests {
+    use super::*;
+    use crate::agent::providers::types::model_ids;
+    use crate::agent::tools::anthropic_computer_use::{route_toolset_call, unroute_toolset_call};
+
+    fn brain(model: &str) -> AnthropicBrain {
+        AnthropicBrain::new("test-key".to_string(), Some(model.to_string()), None, None)
+            .expect("brain construction only builds an HTTP client")
+    }
+
+    fn to_json(tool: &ApiTool) -> Value {
+        serde_json::to_value(tool).expect("ApiTool serializes")
+    }
+
+    // --- The toolset request entry ---
+
+    /// The single most breakable part of the contract: the toolset entry is
+    /// `{"type": ...}` and nothing else. A stray `name` makes the API reject
+    /// every request, which is worse than not shipping the port at all.
+    #[test]
+    fn toolset_entry_is_type_only_and_carries_no_name() {
+        let json = to_json(&ApiTool::Toolset {
+            tool_type: "computer_toolset_20260801".to_string(),
+            configs: None,
+            cache_control: None,
+        });
+
+        assert_eq!(
+            json,
+            serde_json::json!({"type": "computer_toolset_20260801"})
+        );
+
+        let obj = json.as_object().expect("object");
+        assert!(!obj.contains_key("name"), "a toolset must not carry a name");
+        assert!(!obj.contains_key("display_width_px"));
+        assert!(!obj.contains_key("display_height_px"));
+        assert!(!obj.contains_key("enable_zoom"));
+        assert!(
+            !obj.contains_key("configs"),
+            "omitted when every member is default"
+        );
+    }
+
+    #[test]
+    fn toolset_entry_includes_configs_only_when_set() {
+        let json = to_json(&ApiTool::Toolset {
+            tool_type: "computer_toolset_20260801".to_string(),
+            configs: Some(serde_json::json!({"zoom": {"enabled": false}})),
+            cache_control: None,
+        });
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "computer_toolset_20260801",
+                "configs": {"zoom": {"enabled": false}}
+            })
+        );
+        assert!(!json.as_object().expect("object").contains_key("name"));
+    }
+
+    // --- Regression guard: the legacy entry is byte-identical to today ---
+
+    /// The safety net for every model that is NOT toolset-GA. These blobs are
+    /// what Juno sent before the toolset existed; if this test ever needs
+    /// updating, a legacy model's requests have changed, and that is a
+    /// regression rather than a refactor.
+    #[test]
+    fn legacy_computer_entry_is_unchanged() {
+        let json = to_json(&ApiTool::BuiltIn {
+            tool_type: "computer_20251124".to_string(),
+            name: "computer".to_string(),
+            display_width_px: Some(1920),
+            display_height_px: Some(1080),
+            enable_zoom: Some(true),
+            cache_control: None,
+        });
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "computer_20251124",
+                "name": "computer",
+                "display_width_px": 1920,
+                "display_height_px": 1080,
+                "enable_zoom": true
+            })
+        );
+
+        let older = to_json(&ApiTool::BuiltIn {
+            tool_type: "computer_20250124".to_string(),
+            name: "computer".to_string(),
+            display_width_px: Some(1280),
+            display_height_px: Some(800),
+            enable_zoom: None,
+            cache_control: None,
+        });
+        assert_eq!(
+            older,
+            serde_json::json!({
+                "type": "computer_20250124",
+                "name": "computer",
+                "display_width_px": 1280,
+                "display_height_px": 800
+            })
+        );
+    }
+
+    /// bash and the text editor are untouched by the toolset — they stay named
+    /// entries in the same array on both paths.
+    #[test]
+    fn bash_and_editor_entries_are_unchanged_on_both_paths() {
+        for (tool_type, name) in [
+            ("bash_20250124", "bash"),
+            ("text_editor_20250728", "str_replace_based_edit_tool"),
+        ] {
+            let json = to_json(&ApiTool::BuiltIn {
+                tool_type: tool_type.to_string(),
+                name: name.to_string(),
+                display_width_px: None,
+                display_height_px: None,
+                enable_zoom: None,
+                cache_control: None,
+            });
+            assert_eq!(json, serde_json::json!({"type": tool_type, "name": name}));
+        }
+    }
+
+    // --- Per-model path selection, from the one capability table ---
+
+    #[test]
+    fn toolset_only_models_select_the_toolset_path() {
+        // Opus 5.5 accepts no earlier tool type, so it is the one model worth
+        // the toolset's ~2x input-token overhead. Every other toolset-GA model
+        // stays on `computer_20251124` and is covered by the test below.
+        let model = model_ids::CLAUDE_OPUS_5_5;
+        let b = brain(model);
+        assert!(b.uses_computer_toolset(), "{model} should use the toolset");
+        assert_eq!(b.computer_toolset_name(), Some("computer"));
+        assert_eq!(
+            b.resolve_tool_api_type("computer", "computer_20251124"),
+            "computer_toolset_20260801",
+            "{model} should resolve the computer tool to the toolset type"
+        );
+    }
+
+    #[test]
+    fn legacy_models_keep_their_single_computer_tool() {
+        for (model, expected) in [
+            // Toolset-GA but cheaper on the legacy tool, so Juno sends that.
+            (model_ids::CLAUDE_FABLE_5_1, "computer_20251124"),
+            (model_ids::CLAUDE_SONNET_5, "computer_20251124"),
+            (model_ids::CLAUDE_OPUS_5, "computer_20251124"),
+            (model_ids::CLAUDE_FABLE_5, "computer_20251124"),
+            (model_ids::CLAUDE_OPUS_4_8, "computer_20251124"),
+            // Never toolset-GA at all.
+            (model_ids::CLAUDE_OPUS_4_7, "computer_20251124"),
+            (model_ids::CLAUDE_OPUS_4_6, "computer_20251124"),
+            (model_ids::CLAUDE_SONNET_4_6, "computer_20251124"),
+            (model_ids::CLAUDE_OPUS_4_5, "computer_20251124"),
+            (model_ids::CLAUDE_SONNET_4_5, "computer_20250124"),
+            (model_ids::CLAUDE_HAIKU_4_5, "computer_20250124"),
+        ] {
+            let b = brain(model);
+            assert!(
+                !b.uses_computer_toolset(),
+                "{model} must stay on the legacy path"
+            );
+            assert_eq!(b.computer_toolset_name(), None);
+            assert_eq!(b.resolve_tool_api_type("computer", expected), expected);
+        }
+    }
+
+    // --- Beta headers ---
+
+    /// GA means no computer-use beta flag. The header still carries the
+    /// unrelated flags (prompt caching, and server-side fallback where the
+    /// model supports it), so this asserts the absence of the computer-use one
+    /// rather than an exact string.
+    #[test]
+    fn toolset_models_send_no_computer_use_beta_flag() {
+        let model = model_ids::CLAUDE_OPUS_5_5;
+        let b = brain(model);
+        assert_eq!(b.resolve_computer_use_beta_header(), None, "{model}");
+        let header = b.beta_header_value();
+        assert!(
+            !header.contains("computer-use"),
+            "{model} sent a computer-use beta flag in {header:?}"
+        );
+        assert!(
+            header.contains(crate::constants::api::beta_flags::PROMPT_CACHING),
+            "{model} lost prompt caching"
+        );
+    }
+
+    /// The legacy regression guard for headers: each older model still sends
+    /// exactly the flag it sent before, still leading the header.
+    #[test]
+    fn legacy_models_keep_their_exact_beta_flags() {
+        for (model, flag) in [
+            (model_ids::CLAUDE_OPUS_4_7, "computer-use-2025-11-24"),
+            (model_ids::CLAUDE_OPUS_4_6, "computer-use-2025-11-24"),
+            (model_ids::CLAUDE_SONNET_4_6, "computer-use-2025-11-24"),
+            (model_ids::CLAUDE_OPUS_4_5, "computer-use-2025-11-24"),
+            (model_ids::CLAUDE_SONNET_4_5, "computer-use-2025-01-24"),
+            (model_ids::CLAUDE_HAIKU_4_5, "computer-use-2025-01-24"),
+        ] {
+            let b = brain(model);
+            assert_eq!(b.resolve_computer_use_beta_header(), Some(flag), "{model}");
+            assert!(
+                b.beta_header_value().starts_with(flag),
+                "{model} header was {:?}",
+                b.beta_header_value()
+            );
+        }
+    }
+
+    // --- tool_result echo ---
+
+    #[test]
+    fn tool_result_omits_toolset_name_on_the_legacy_path() {
+        let mut block = ApiContentBlock::empty("tool_result");
+        block.tool_use_id = Some("toolu_1".to_string());
+        block.content = Some(ApiToolResultContent::Text("OK".to_string()));
+        let json = serde_json::to_value(&block).expect("serializes");
+        assert!(
+            !json
+                .as_object()
+                .expect("object")
+                .contains_key("toolset_name"),
+            "legacy tool_result must not gain a toolset_name field"
+        );
+    }
+
+    #[test]
+    fn tool_result_echoes_toolset_name_on_the_toolset_path() {
+        let mut block = ApiContentBlock::empty("tool_result");
+        block.tool_use_id = Some("toolu_1".to_string());
+        block.toolset_name = Some("computer".to_string());
+        block.content = Some(ApiToolResultContent::Text("OK".to_string()));
+        let json = serde_json::to_value(&block).expect("serializes");
+        assert_eq!(json["toolset_name"], serde_json::json!("computer"));
+    }
+
+    // --- Replay round trip ---
+
+    /// A routed call must go back out as the member name plus `toolset_name`,
+    /// not as the internal `computer` shape. This round trip is what keeps
+    /// multi-turn computer use working.
+    #[test]
+    fn replaying_a_routed_call_restores_the_member_shape() {
+        let (name, input) = route_toolset_call(
+            "left_click",
+            Some("computer"),
+            &serde_json::json!({"coordinate": [512, 742]}),
+        )
+        .expect("routes");
+        assert_eq!(name, "computer");
+
+        let (replay_name, toolset_name, replay_input) = unroute_toolset_call(&name, &input);
+
+        assert_eq!(replay_name, "left_click");
+        assert_eq!(toolset_name.as_deref(), Some("computer"));
+        assert_eq!(replay_input, serde_json::json!({"coordinate": [512, 742]}));
+    }
+
+    #[test]
+    fn replaying_a_legacy_call_changes_nothing() {
+        let input = serde_json::json!({"action": "left_click", "coordinate": [10, 20]});
+        let (name, toolset_name, out) = unroute_toolset_call("computer", &input);
+        assert_eq!(name, "computer");
+        assert_eq!(toolset_name, None);
+        assert_eq!(out, input, "legacy replay must be byte-identical");
     }
 }
