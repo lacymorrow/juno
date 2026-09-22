@@ -15,7 +15,6 @@ export interface ProviderInfo {
     is_legacy: boolean;
     /** Drives the computer, but only through a tool version Juno does not
      * send yet. Not a chat-only model — say so accurately. */
-    needs_newer_tools: boolean;
   }[];
   is_available: boolean;
   is_default: boolean;
