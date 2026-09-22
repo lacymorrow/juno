@@ -89,12 +89,15 @@ export function NowPlayingCard({
   const mounted = useRef(true);
   const appLabel = mediaAppLabel(app);
 
-  const refresh = useCallback(async () => {
+  // `keepError` is set by the post-failure refresh in `act`: the state read
+  // usually succeeds, and clearing the error there would wipe the message
+  // before the user ever sees it. The next poll clears it as usual.
+  const refresh = useCallback(async (opts?: { keepError?: boolean }) => {
     try {
       const next = await getMediaState(app);
       if (!mounted.current) return;
       setState(next);
-      setError(null);
+      if (!opts?.keepError) setError(null);
     } catch (err) {
       if (!mounted.current) return;
       setError(String(err));
@@ -153,7 +156,7 @@ export function NowPlayingCard({
       } catch (err) {
         if (!mounted.current) return;
         setError(String(err));
-        void refresh();
+        void refresh({ keepError: true });
       } finally {
         if (mounted.current) setPending(null);
       }
