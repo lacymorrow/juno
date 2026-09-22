@@ -168,8 +168,13 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
             streamed token. */}
         <ConversationScrollOnSend signal={sentCount} />
         {!hasExchange ? (
-          <ConversationEmptyState>
-            <div className="flex flex-col items-center justify-center space-y-6 py-12">
+          // Scrolls, and centres with auto margins rather than flex centring:
+          // flex centring clips both ends once the content is taller than the
+          // box, which in the bar's 360px pane it is as soon as the dev
+          // commands drawer opens. Auto margins centre when there is room and
+          // fall back to a normal scroll when there is not.
+          <ConversationEmptyState className="justify-start overflow-y-auto">
+            <div className="m-auto flex flex-col items-center justify-center space-y-6 py-6">
               <div className="space-y-2 text-center">
                 <h1 className="text-2xl font-semibold tracking-tight text-foreground">
                   What can I help you with?

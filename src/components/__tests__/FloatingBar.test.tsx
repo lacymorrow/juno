@@ -892,6 +892,27 @@ describe("FloatingBar", () => {
     expect(invoke).not.toHaveBeenCalledWith("dispatch_query", expect.anything());
   });
 
+  it("sends a development test command from the pane the same way as a production prompt", async () => {
+    invoke.mockImplementation((command: unknown) => {
+      if (command === "check_server_status") return Promise.resolve({ backend_running: true });
+      // A debug build: the dev commands drawer is offered under the prompts.
+      if (command === "get_debug_mode") return Promise.resolve(true);
+      return Promise.resolve();
+    });
+    await openEmptyPane();
+
+    fireEvent.click(await screen.findByText("Development test commands"));
+    fireEvent.click(screen.getByRole("button", { name: "Mouse Square" }));
+    await act(async () => {});
+
+    expect(invoke).toHaveBeenCalledWith(
+      "ui_handle_interaction",
+      interaction("submit", {
+        value: "Move your mouse in a perfect square pattern on the screen, then return to center",
+      }),
+    );
+  });
+
   it("holds the example prompts behind a loader until the backend answers, then lets them send", async () => {
     let connected: (status: { backend_running: boolean }) => void = () => {};
     invoke.mockImplementation((command: unknown) =>
