@@ -2280,29 +2280,31 @@ mod computer_toolset_request_tests {
     // --- Per-model path selection, from the one capability table ---
 
     #[test]
-    fn toolset_ga_models_select_the_toolset_path() {
-        for model in [
-            model_ids::CLAUDE_OPUS_5_5,
-            model_ids::CLAUDE_OPUS_5,
-            model_ids::CLAUDE_FABLE_5_1,
-            model_ids::CLAUDE_FABLE_5,
-            model_ids::CLAUDE_SONNET_5,
-            model_ids::CLAUDE_OPUS_4_8,
-        ] {
-            let b = brain(model);
-            assert!(b.uses_computer_toolset(), "{model} should use the toolset");
-            assert_eq!(b.computer_toolset_name(), Some("computer"));
-            assert_eq!(
-                b.resolve_tool_api_type("computer", "computer_20251124"),
-                "computer_toolset_20260801",
-                "{model} should resolve the computer tool to the toolset type"
-            );
-        }
+    fn toolset_only_models_select_the_toolset_path() {
+        // Opus 5.5 accepts no earlier tool type, so it is the one model worth
+        // the toolset's ~2x input-token overhead. Every other toolset-GA model
+        // stays on `computer_20251124` and is covered by the test below.
+        let model = model_ids::CLAUDE_OPUS_5_5;
+        let b = brain(model);
+        assert!(b.uses_computer_toolset(), "{model} should use the toolset");
+        assert_eq!(b.computer_toolset_name(), Some("computer"));
+        assert_eq!(
+            b.resolve_tool_api_type("computer", "computer_20251124"),
+            "computer_toolset_20260801",
+            "{model} should resolve the computer tool to the toolset type"
+        );
     }
 
     #[test]
     fn legacy_models_keep_their_single_computer_tool() {
         for (model, expected) in [
+            // Toolset-GA but cheaper on the legacy tool, so Juno sends that.
+            (model_ids::CLAUDE_FABLE_5_1, "computer_20251124"),
+            (model_ids::CLAUDE_SONNET_5, "computer_20251124"),
+            (model_ids::CLAUDE_OPUS_5, "computer_20251124"),
+            (model_ids::CLAUDE_FABLE_5, "computer_20251124"),
+            (model_ids::CLAUDE_OPUS_4_8, "computer_20251124"),
+            // Never toolset-GA at all.
             (model_ids::CLAUDE_OPUS_4_7, "computer_20251124"),
             (model_ids::CLAUDE_OPUS_4_6, "computer_20251124"),
             (model_ids::CLAUDE_SONNET_4_6, "computer_20251124"),
@@ -2328,25 +2330,18 @@ mod computer_toolset_request_tests {
     /// rather than an exact string.
     #[test]
     fn toolset_models_send_no_computer_use_beta_flag() {
-        for model in [
-            model_ids::CLAUDE_OPUS_5_5,
-            model_ids::CLAUDE_OPUS_5,
-            model_ids::CLAUDE_FABLE_5_1,
-            model_ids::CLAUDE_SONNET_5,
-            model_ids::CLAUDE_OPUS_4_8,
-        ] {
-            let b = brain(model);
-            assert_eq!(b.resolve_computer_use_beta_header(), None, "{model}");
-            let header = b.beta_header_value();
-            assert!(
-                !header.contains("computer-use"),
-                "{model} sent a computer-use beta flag in {header:?}"
-            );
-            assert!(
-                header.contains(crate::constants::api::beta_flags::PROMPT_CACHING),
-                "{model} lost prompt caching"
-            );
-        }
+        let model = model_ids::CLAUDE_OPUS_5_5;
+        let b = brain(model);
+        assert_eq!(b.resolve_computer_use_beta_header(), None, "{model}");
+        let header = b.beta_header_value();
+        assert!(
+            !header.contains("computer-use"),
+            "{model} sent a computer-use beta flag in {header:?}"
+        );
+        assert!(
+            header.contains(crate::constants::api::beta_flags::PROMPT_CACHING),
+            "{model} lost prompt caching"
+        );
     }
 
     /// The legacy regression guard for headers: each older model still sends

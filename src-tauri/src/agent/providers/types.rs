@@ -391,10 +391,17 @@ impl Provider {
     ///
     /// Do not edit these from memory. Re-read those pages.
     pub fn model_definitions(&self) -> &'static [ModelDefinition] {
-        // The two Anthropic computer-use tool versions Juno sends today.
-        // `CU_TOOLSET` is the current GA toolset. A model gets it when the
-        // Compatibility table lists it under "Claude API" — the same fact the
-        // `toolset_ga` field records, asserted to agree in the tests below.
+        // The Anthropic computer-use tool versions Juno sends today.
+        //
+        // `CU_20251124` is the DEFAULT. `CU_TOOLSET` is the current GA toolset,
+        // and a model gets it only when it accepts nothing earlier — today that
+        // is Opus 5.5 alone. The toolset is not an upgrade to reach for: it
+        // costs roughly 2x the input-token overhead on every request (4,530 vs
+        // 2,152 on an identical call, measured against the live API
+        // 2026-09-22) because it ships 17 member tool definitions instead of
+        // one. `toolset_ga` records which models *could* take it;
+        // `catalog_toolset_ga_agrees_with_the_declared_tool_version` asserts
+        // Juno never sends it to a model that is not on that list.
         const CU_TOOLSET: ComputerUse =
             ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801);
         const CU_20251124: ComputerUse = ComputerUse::AnthropicTool(ApiVersion::Computer20251124);
@@ -407,7 +414,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_FABLE_5_1,
                         name: "Claude Fable 5.1",
-                        computer_use: CU_TOOLSET,
+                        computer_use: CU_20251124,
                         availability: Availability::Current,
                         toolset_ga: true,
                         image_tier: ImageTier::HighResolution,
@@ -435,7 +442,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_5,
                         name: "Claude Sonnet 5",
-                        computer_use: CU_TOOLSET,
+                        computer_use: CU_20251124,
                         availability: Availability::Current,
                         toolset_ga: true,
                         image_tier: ImageTier::HighResolution,
@@ -464,7 +471,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_FABLE_5,
                         name: "Claude Fable 5",
-                        computer_use: CU_TOOLSET,
+                        computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: true,
                         image_tier: ImageTier::HighResolution,
@@ -475,7 +482,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_5,
                         name: "Claude Opus 5",
-                        computer_use: CU_TOOLSET,
+                        computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: true,
                         image_tier: ImageTier::HighResolution,
@@ -486,7 +493,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_8,
                         name: "Claude Opus 4.8",
-                        computer_use: CU_TOOLSET,
+                        computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: true,
                         image_tier: ImageTier::HighResolution,
@@ -992,7 +999,9 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_SONNET_5,
         );
-        assert_eq!(computer, "computer_toolset_20260801");
+        // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
+        // what Juno sends. Only Opus 5.5 takes the toolset.
+        assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
             "str_replace_based_edit_tool",
@@ -1009,7 +1018,9 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_OPUS_5,
         );
-        assert_eq!(computer, "computer_toolset_20260801");
+        // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
+        // what Juno sends. Only Opus 5.5 takes the toolset.
+        assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
             "str_replace_based_edit_tool",
@@ -1124,11 +1135,12 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_FABLE_5_1,
         );
-        assert_eq!(computer, "computer_toolset_20260801");
+        // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
+        // what Juno sends. Only Opus 5.5 takes the toolset.
+        assert_eq!(computer, "computer_20251124");
         assert_eq!(
-            // Toolset-GA now, so no computer-use beta flag at all.
             Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_FABLE_5_1),
-            None
+            Some("computer-use-2025-11-24")
         );
     }
 
@@ -1170,7 +1182,9 @@ mod tests {
             "computer_20250124",
             model_ids::CLAUDE_FABLE_5,
         );
-        assert_eq!(computer, "computer_toolset_20260801");
+        // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
+        // what Juno sends. Only Opus 5.5 takes the toolset.
+        assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
             "str_replace_based_edit_tool",
@@ -1213,8 +1227,17 @@ mod tests {
         // other model Juno offers is listed under `computer_20251124`.
         let earlier_tool = [model_ids::CLAUDE_SONNET_4_5, model_ids::CLAUDE_HAIKU_4_5];
 
+        // The models Juno actually SENDS the toolset to: the ones that accept
+        // no earlier tool type, so the toolset's ~2x input-token overhead buys
+        // the only working path. Verified against the live API 2026-09-22 —
+        // every other toolset-GA model below returned HTTP 200 for
+        // `computer_20251124`, and only Opus 5.5 returned
+        // "does not support tool types: computer_20251124".
+        let toolset_only = [model_ids::CLAUDE_OPUS_5_5];
+
         // `supportedModels` for computer_toolset_20260801, intersected with
-        // what Juno offers. (The docs also list claude-mythos-5 and
+        // what Juno offers — the documented capability, which is broader than
+        // what Juno sends. (The docs also list claude-mythos-5 and
         // claude-mythos-5-1, which are invite-only and not in Juno's catalog.)
         let toolset_ga = [
             model_ids::CLAUDE_FABLE_5_1,
@@ -1245,7 +1268,7 @@ mod tests {
         }
 
         for def in Provider::Anthropic.model_definitions() {
-            let expected_computer_use = if toolset_ga.contains(&def.id) {
+            let expected_computer_use = if toolset_only.contains(&def.id) {
                 ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
             } else if earlier_tool.contains(&def.id) {
                 ComputerUse::AnthropicTool(ApiVersion::Computer20250124)
@@ -1276,17 +1299,20 @@ mod tests {
                 def.name
             );
 
-            // The citation and the behaviour cannot drift: a row documented as
-            // toolset-GA must actually send the toolset, and one that is not
-            // must not.
-            assert_eq!(
-                def.uses_computer_toolset(),
-                def.toolset_ga,
-                "{} records toolset_ga={} but sends {:?}",
-                def.name,
-                def.toolset_ga,
-                def.computer_use
-            );
+            // The citation bounds the behaviour in one direction: Juno may
+            // only send the toolset to a model Anthropic lists as toolset-GA.
+            // The converse is deliberately NOT asserted — most toolset-GA
+            // models also accept `computer_20251124`, and Juno prefers it
+            // because the toolset costs roughly 2x the input-token overhead
+            // (4,530 vs 2,152 on an identical request, measured 2026-09-22).
+            // Only a model with no legacy option is worth that.
+            if def.uses_computer_toolset() {
+                assert!(
+                    def.toolset_ga,
+                    "{} sends the toolset but is not documented as toolset-GA",
+                    def.name
+                );
+            }
 
             let expected_tier = if high_res.contains(&def.id) {
                 ImageTier::HighResolution
@@ -1312,22 +1338,32 @@ mod tests {
                 "computer_toolset_20260801",
                 None,
             ),
+            // Toolset-GA, but they accept the cheaper legacy tool too, so
+            // that is the path Juno picks for them.
             (
                 model_ids::CLAUDE_FABLE_5_1,
-                "computer_toolset_20260801",
-                None,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
             ),
             (
                 model_ids::CLAUDE_SONNET_5,
-                "computer_toolset_20260801",
-                None,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
             ),
-            (model_ids::CLAUDE_FABLE_5, "computer_toolset_20260801", None),
-            (model_ids::CLAUDE_OPUS_5, "computer_toolset_20260801", None),
+            (
+                model_ids::CLAUDE_FABLE_5,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
+            (
+                model_ids::CLAUDE_OPUS_5,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
+            ),
             (
                 model_ids::CLAUDE_OPUS_4_8,
-                "computer_toolset_20260801",
-                None,
+                "computer_20251124",
+                Some("computer-use-2025-11-24"),
             ),
             (
                 model_ids::CLAUDE_OPUS_4_7,
