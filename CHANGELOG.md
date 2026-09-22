@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Whisper large-v3 joins the model catalog
 - Settings > Models is one dictation-model list with a single action per row: Download, progress with cancel, Use, Active. The full catalog sits under Advanced, trash appears only on downloaded inactive models, and the bundled tiny.en is never deletable. Onboarding offers the download. (#578)
 - Dictation can insert text without touching your clipboard, through unicode events posted to the focused process, with paste and per-character fallbacks. Copy to clipboard is now its own toggle. (LAC-3993, #571)
+- Claude Opus 5.5 joins the model catalog. Anthropic serves its computer use only through a newer tool format that Juno does not send yet, so for now it answers questions but cannot drive the desktop, and the model list says exactly that rather than calling it a chat model.
 
 ### Changed
 
@@ -26,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Each model carries one capability table, verified against the provider docs, replacing four hand-maintained model-ID lists and a `supports_computer_use` flag that was true for every model in the catalog and put a Computer Use badge on every row. (#580)
 - The frontend moves to React 19, TypeScript 7, and Vite 8. No version bump and no tag: the release is held for one production build and a full QA pass. (#574)
 - The Vite dev server stops watching in-repo agent worktrees, so another agent editing files there no longer spams a QA session with reloads. (#575)
+- The assistant defaults to Claude Fable 5.1 again. The previous default, Claude Opus 5, is one of Anthropic's legacy models, and the capability table could not tell "legacy" apart from "supports the newer computer-use toolset" because both lived in one field. They are separate now, every row was re-checked against Anthropic's docs, and the model list follows Anthropic's own split: Fable 5.1, Opus 5.5, Sonnet 5 and Haiku 4.5 are offered, and Fable 5, Opus 5, Opus 4.8 and the 4.x models sit behind Advanced.
+- OpenAI's computer-use-preview model is gone from the model list. OpenAI shut it down on 2026-07-23.
 
 ### Fixed
 
