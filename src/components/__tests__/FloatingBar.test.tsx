@@ -453,6 +453,43 @@ describe("FloatingBar", () => {
     expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "cancel" });
   });
 
+  it("renders a live partial as dimmed provisional text, then solid on final", async () => {
+    await renderBar();
+
+    setBarState({ barState: "listening", isDictationMode: true, audioLevel: 0.4 });
+
+    // With live transcription on, the backend sets transcribing with the
+    // cumulative provisional text every ~600ms while the mic is still open.
+    setBarState({
+      barState: "transcribing",
+      isDictationMode: true,
+      transcriptionText: "hello there",
+      transcriptionProvisional: true,
+    });
+    const status = screen.getByTestId("floating-bar-status");
+    expect(status).toHaveTextContent("hello there");
+    expect(status).toHaveClass("italic");
+
+    // A later partial replaces, never appends, and stays provisional.
+    setBarState({
+      barState: "transcribing",
+      isDictationMode: true,
+      transcriptionText: "hello there world",
+      transcriptionProvisional: true,
+    });
+    expect(status).toHaveTextContent("hello there world");
+    expect(status).not.toHaveTextContent("hello there hello there");
+
+    // The final result swaps the same span to solid.
+    setBarState({
+      barState: "transcribing",
+      transcriptionText: "hello there world",
+      transcriptionProvisional: false,
+    });
+    expect(status).toHaveTextContent("hello there world");
+    expect(status).not.toHaveClass("italic");
+  });
+
   it("shows a processing state, not the listening look, once the mic closes", async () => {
     await renderBar();
 

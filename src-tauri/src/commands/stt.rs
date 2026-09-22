@@ -4,7 +4,7 @@
 //! re-applied at startup.
 
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Listener, Manager};
 use tracing::{error, info, warn};
 
 use tauri_plugin_voice_transcription::VoiceController;
@@ -44,8 +44,33 @@ pub async fn set_live_partial_transcription(enabled: bool, app: AppHandle) -> Re
         .await
         .map_err(|e| format!("Failed to save voice settings: {}", e))?;
 
-    apply_live_partial(&app, enabled);
+    apply_live_partial(&app, enabled).await;
     Ok(())
+}
+
+/// Re-apply the persisted live-partial mode when the voice plugin reports its
+/// engine ready, on top of the startup pass in `lib.rs`.
+///
+/// The plugin installs a *fresh* `VoiceController` from a background task once
+/// its engine has loaded. Applying the saved flag only on a fixed timer raced
+/// that swap: whenever the model loaded slowly, the flag landed on the
+/// placeholder controller and the swap threw it away, so live transcription
+/// stayed off for every recording until the toggle was flipped by hand. The
+/// controller now carries the flag across the swap (`VoiceController::adopt`),
+/// and this listener covers the opposite order — engine ready before the flag
+/// was ever read. Applying it twice is idempotent.
+pub fn apply_persisted_live_partial_when_engine_ready(app: &AppHandle) {
+    let ready_app = app.clone();
+    app.listen(
+        crate::constants::events::voice_trigger::ENGINE_READY,
+        move |_| {
+            let app = ready_app.clone();
+            tauri::async_runtime::spawn(async move {
+                info!("[STT] Voice engine ready - re-applying persisted live-partial mode");
+                apply_persisted_live_partial(&app).await;
+            });
+        },
+    );
 }
 
 /// Apply the persisted live-partial mode at startup (best effort).
@@ -58,21 +83,27 @@ pub async fn apply_persisted_live_partial(app: &AppHandle) {
         }
     };
     match settings_manager.get_voice_transcription_settings().await {
-        Ok(s) => apply_live_partial(app, s.live_partial_transcription),
+        Ok(s) => apply_live_partial(app, s.live_partial_transcription).await,
         Err(e) => warn!("[STT] Could not read voice settings at startup: {}", e),
     }
 }
 
-fn apply_live_partial(app: &AppHandle, enabled: bool) {
-    if let Some(vc_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-        match vc_state.try_lock() {
-            Ok(mut vc) => vc.set_live_partial(enabled),
-            Err(std::sync::TryLockError::WouldBlock) => {
-                warn!("[STT] VoiceController busy - live-partial applies on next recording");
-            }
-            Err(std::sync::TryLockError::Poisoned(e)) => {
-                error!("[STT] VoiceController mutex poisoned: {}", e);
-            }
-        }
+/// Set the live-partial flag on the voice controller. Waits for the lock off
+/// the async runtime rather than giving up on a busy controller: the lock is
+/// only held for long while a recording stops (the final decode), and a flag
+/// dropped on `WouldBlock` was a toggle that quietly never took effect.
+async fn apply_live_partial(app: &AppHandle, enabled: bool) {
+    let Some(vc_state) = app.try_state::<Arc<Mutex<VoiceController>>>() else {
+        warn!("[STT] VoiceController not managed - live-partial not applied");
+        return;
+    };
+    let controller = Arc::clone(vc_state.inner());
+    let applied = tauri::async_runtime::spawn_blocking(move || match controller.lock() {
+        Ok(mut vc) => vc.set_live_partial(enabled),
+        Err(e) => error!("[STT] VoiceController mutex poisoned: {}", e),
+    })
+    .await;
+    if let Err(e) = applied {
+        error!("[STT] Applying live-partial flag panicked: {}", e);
     }
 }
