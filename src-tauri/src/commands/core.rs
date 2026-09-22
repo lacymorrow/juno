@@ -891,28 +891,28 @@ pub(crate) async fn wait(
         duration_sec, duration_ms
     );
 
-    let desktop = state.get_desktop()?;
-    match desktop.wait(duration_ms) {
-        Ok(_) => {
-            info!("Successfully completed wait for {} seconds", duration_sec);
+    // The availability check is kept so this command's contract is unchanged:
+    // it still fails when accessibility was never granted. The sleep itself is
+    // `tokio::time::sleep`, not `Desktop::wait`, because that one is a
+    // `std::thread::sleep` and parks a tokio worker thread for the whole
+    // duration when called from an async Tauri command. Nothing bounds
+    // `duration_sec` in a release build (`validate_inputs` is debug-only), so
+    // the wait that parks the worker is the one nobody caps.
+    state.get_desktop()?;
+    tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
 
-            // Send debug notification if enabled
-            if debug_config.send_notifications {
-                let _ = send_debug_notification(
-                    &app,
-                    "Wait",
-                    &format!("Waited for {} seconds", duration_sec),
-                );
-            }
+    info!("Successfully completed wait for {} seconds", duration_sec);
 
-            Ok(())
-        }
-        Err(e) => {
-            let error_msg = format!("Error during wait: {}", e);
-            error!("{}", error_msg);
-            Err(error_msg)
-        }
+    // Send debug notification if enabled
+    if debug_config.send_notifications {
+        let _ = send_debug_notification(
+            &app,
+            "Wait",
+            &format!("Waited for {} seconds", duration_sec),
+        );
     }
+
+    Ok(())
 }
 
 #[tauri::command]
