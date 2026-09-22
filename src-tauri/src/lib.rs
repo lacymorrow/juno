@@ -900,6 +900,11 @@ pub fn run() {
                 crate::commands::stt::apply_persisted_live_partial(&stt_app_handle).await;
                 crate::commands::stt_models::apply_persisted_stt_model(&stt_app_handle).await;
             });
+            // The timer above can fire before OR after the plugin swaps its
+            // placeholder controller for the real one; this covers the second
+            // order, so the live-partial flag reaches the controller that the
+            // next recording actually uses.
+            crate::commands::stt::apply_persisted_live_partial_when_engine_ready(&app_handle);
 
             // --- Initialize Application State Management ---
             let state_app_handle = app_handle.clone();

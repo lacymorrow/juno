@@ -40,6 +40,62 @@ fn sinc_resampling_params() -> SincInterpolationParameters {
     }
 }
 
+/// How often the live-partial window is re-decoded, at most.
+const LIVE_PARTIAL_CADENCE: Duration = Duration::from_millis(600);
+/// How much audio the live-partial window keeps; caps the per-decode cost.
+const LIVE_PARTIAL_WINDOW_SECS: u64 = 10;
+
+/// The bounded sliding window behind live streaming partials. Audio is
+/// appended as it arrives and the oldest samples fall off past `capacity`;
+/// `take_due` hands back the whole window when it is time to decode again.
+/// Pure state with no I/O, so the window math is testable without a mic.
+struct LivePartialWindow {
+    buffer: Vec<f32>,
+    capacity: usize,
+    cadence: Duration,
+    last_emit: Option<Instant>,
+}
+
+impl LivePartialWindow {
+    fn new(capacity: usize, cadence: Duration) -> Self {
+        Self {
+            buffer: Vec::with_capacity(capacity),
+            capacity,
+            cadence,
+            last_emit: None,
+        }
+    }
+
+    fn push(&mut self, chunk: &[f32]) {
+        self.buffer.extend_from_slice(chunk);
+        if self.buffer.len() > self.capacity {
+            let overflow = self.buffer.len() - self.capacity;
+            self.buffer.drain(0..overflow);
+        }
+    }
+
+    fn samples(&self) -> &[f32] {
+        &self.buffer
+    }
+
+    /// The cumulative window to decode now, or None when nothing is due:
+    /// no audio yet, or the cadence has not elapsed since the last decode.
+    /// The first chunk is due immediately; the decode itself is what waits
+    /// for enough speech to say something.
+    fn take_due(&mut self, now: Instant) -> Option<&[f32]> {
+        if self.buffer.is_empty() {
+            return None;
+        }
+        if let Some(last) = self.last_emit {
+            if now.duration_since(last) < self.cadence {
+                return None;
+            }
+        }
+        self.last_emit = Some(now);
+        Some(&self.buffer)
+    }
+}
+
 enum AudioThreadMessage {
     /// Finish: transcribe what was captured and emit the result.
     Stop,
@@ -128,6 +184,27 @@ impl VoiceController {
             enabled
         );
         self.live_partial = enabled;
+    }
+
+    /// Whether live streaming partial transcription is on for the next session.
+    pub fn live_partial(&self) -> bool {
+        self.live_partial
+    }
+
+    /// Replace this controller with `replacement`, keeping the user-facing
+    /// settings that the constructors do not know about.
+    ///
+    /// The plugin builds a fresh controller from a background task once the
+    /// STT engine has loaded, and the app applies the persisted live-partial
+    /// flag on its own schedule. Whichever runs second used to win: a plain
+    /// `*slot = new` silently reset `live_partial` to false, so a flag applied
+    /// before the engine finished loading never reached a recording.
+    pub fn adopt(&mut self, mut replacement: VoiceController) {
+        if self.live_partial {
+            info!("[VoiceController] Carrying live_partial=true across controller replacement");
+        }
+        replacement.live_partial = self.live_partial;
+        *self = replacement;
     }
 
     /// Get the initialization error if any
@@ -570,18 +647,22 @@ impl VoiceController {
 
         // Live streaming partial mode: emit cumulative provisional text on a fast
         // cadence and keep a bounded sliding window so decode cost stays capped.
-        let live_partial_cadence = Duration::from_millis(600);
-        let mut last_live_partial_emit = Instant::now() - live_partial_cadence;
-        let live_window_capacity_samples = (actual_rate as u64 * 10) as usize;
+        let mut live_window = LivePartialWindow::new(
+            (actual_rate as u64 * LIVE_PARTIAL_WINDOW_SECS) as usize,
+            LIVE_PARTIAL_CADENCE,
+        );
 
         loop {
             // Check for control messages
             match control_rx.try_recv() {
                 Ok(AudioThreadMessage::Stop) => {
                     info!("[AudioThread] Stop message received.");
+                    // In live mode the chunk buffer stays empty: the window was
+                    // already shown, so the final decode starts straight away.
                     info!(
-                        "[AudioThread] Final audio buffer size: {} samples",
-                        audio_buffer_for_whisper_chunks.len()
+                        "[AudioThread] Final audio buffer size: {} samples (live window: {} samples)",
+                        audio_buffer_for_whisper_chunks.len(),
+                        live_window.samples().len()
                     );
                     info!(
                         "[AudioThread] Raw session audio size: {} samples ({:.2} seconds)",
@@ -633,7 +714,11 @@ impl VoiceController {
             // Process audio data
             if let Ok(audio_chunk) = audio_data_rx.recv_timeout(Duration::from_millis(100)) {
                 raw_full_session_audio.extend_from_slice(&audio_chunk);
-                audio_buffer_for_whisper_chunks.extend_from_slice(&audio_chunk);
+                if live_partial {
+                    live_window.push(&audio_chunk);
+                } else {
+                    audio_buffer_for_whisper_chunks.extend_from_slice(&audio_chunk);
+                }
 
                 // Emit audio level at ~70ms intervals for waveform visualization
                 if last_level_emit.elapsed() >= level_emit_interval {
@@ -649,25 +734,17 @@ impl VoiceController {
 
                 // Process partial transcriptions
                 if live_partial {
-                    // Live mode: keep a bounded sliding window (never cleared) and
-                    // emit the cumulative decode as provisional text. Display-only.
-                    if audio_buffer_for_whisper_chunks.len() > live_window_capacity_samples {
-                        let overflow =
-                            audio_buffer_for_whisper_chunks.len() - live_window_capacity_samples;
-                        audio_buffer_for_whisper_chunks.drain(0..overflow);
-                    }
-                    if last_live_partial_emit.elapsed() >= live_partial_cadence
-                        && !audio_buffer_for_whisper_chunks.is_empty()
-                    {
+                    // Live mode: decode the whole bounded window (never cleared)
+                    // and emit the cumulative text as provisional. Display-only.
+                    if let Some(window) = live_window.take_due(Instant::now()) {
                         Self::process_partial_transcription(
                             session.as_mut(),
-                            &audio_buffer_for_whisper_chunks,
+                            window,
                             actual_rate,
                             chunk_resampler.as_mut(),
                             &app_handle,
                             true,
                         );
-                        last_live_partial_emit = Instant::now();
                     }
                 } else if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
                     info!("[AudioThread] Processing partial transcription. Buffer size: {} samples, threshold: {} samples",
@@ -713,6 +790,13 @@ impl VoiceController {
 
         match session.transcribe_partial(&audio_to_transcribe) {
             Ok(Some(text)) if !text.is_empty() => {
+                if provisional {
+                    tracing::debug!(
+                        "[AudioThread] Live partial ({} samples): '{}'",
+                        audio_to_transcribe.len(),
+                        text
+                    );
+                }
                 let _ = app_handle.emit(
                     constants::voice_transcription::PARTIAL_RESULT,
                     serde_json::json!({ "text": text, "provisional": provisional }),
@@ -910,3 +994,92 @@ impl Drop for VoiceController {
 // We do NOT impl Sync because mutable fields (is_dictating, audio_thread) lack interior
 // mutability — the wrapping Mutex handles thread safety.
 unsafe impl Send for VoiceController {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_window_keeps_only_the_newest_samples() {
+        let mut window = LivePartialWindow::new(5, LIVE_PARTIAL_CADENCE);
+        window.push(&[1.0, 2.0, 3.0, 4.0]);
+        window.push(&[5.0, 6.0, 7.0]);
+        assert_eq!(window.samples(), &[3.0, 4.0, 5.0, 6.0, 7.0][..]);
+    }
+
+    #[test]
+    fn live_window_at_mic_rate_is_capped_at_ten_seconds() {
+        let rate = 16_000usize;
+        let mut window = LivePartialWindow::new(
+            rate * LIVE_PARTIAL_WINDOW_SECS as usize,
+            LIVE_PARTIAL_CADENCE,
+        );
+        // Thirty seconds of audio in cpal-sized chunks.
+        for _ in 0..(30 * rate / 512) {
+            window.push(&[0.25; 512]);
+        }
+        assert_eq!(window.samples().len(), rate * 10);
+    }
+
+    #[test]
+    fn live_window_never_decodes_an_empty_window() {
+        let mut window = LivePartialWindow::new(10, LIVE_PARTIAL_CADENCE);
+        assert!(window.take_due(Instant::now()).is_none());
+    }
+
+    #[test]
+    fn live_window_decodes_at_most_once_per_cadence_and_always_cumulatively() {
+        let cadence = Duration::from_millis(600);
+        let mut window = LivePartialWindow::new(100, cadence);
+        let t0 = Instant::now();
+
+        window.push(&[0.1; 8]);
+        assert!(
+            window.take_due(t0).is_some(),
+            "the first chunk is decoded right away"
+        );
+        assert!(window.take_due(t0 + Duration::from_millis(100)).is_none());
+
+        window.push(&[0.1; 8]);
+        assert!(window.take_due(t0 + Duration::from_millis(599)).is_none());
+        let due = window
+            .take_due(t0 + cadence)
+            .expect("due again once the cadence has elapsed");
+        assert_eq!(
+            due.len(),
+            16,
+            "the cumulative window, not only the new chunk"
+        );
+    }
+
+    #[test]
+    fn adopt_carries_live_partial_across_controller_replacement() {
+        let mut slot = VoiceController::new_uninitialized("models/a.bin", "loading".into());
+        slot.set_live_partial(true);
+
+        // What the plugin does once its background engine load finishes.
+        slot.adopt(VoiceController::new_uninitialized(
+            "models/b.bin",
+            "still loading".into(),
+        ));
+
+        assert!(
+            slot.live_partial(),
+            "the flag applied before the swap survives it"
+        );
+        assert_eq!(
+            slot.model_path, "models/b.bin",
+            "everything else is the replacement's"
+        );
+
+        let mut off = VoiceController::new_uninitialized("models/a.bin", "loading".into());
+        off.adopt(VoiceController::new_uninitialized(
+            "models/b.bin",
+            "x".into(),
+        ));
+        assert!(
+            !off.live_partial(),
+            "a flag that was never on does not turn on"
+        );
+    }
+}
