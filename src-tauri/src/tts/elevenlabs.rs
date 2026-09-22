@@ -49,7 +49,19 @@ pub async fn invoke_elevenlabs_tts(text: String) -> Result<String, String> {
 
     let url = format!("https://api.elevenlabs.io/v1/text-to-speech/{}", voice_id);
 
-    let client = Client::new();
+    // `Client::new()` has no request timeout at all. A TTS call that stalls
+    // mid-response then never returns, and the caller is left holding a future
+    // that will not resolve — no error, no log line, just a voice that never
+    // speaks. Same 120-second budget the AI providers use.
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            crate::constants::timeouts::HTTP_REQUEST_TIMEOUT_SECONDS,
+        ))
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::constants::timeouts::HTTP_CONNECT_TIMEOUT_SECONDS,
+        ))
+        .build()
+        .map_err(|e| format!("Failed to create ElevenLabs HTTP client: {}", e))?;
     let payload = ElevenLabsPayload {
         text: text.clone(),
         voice_settings: ElevenLabsVoiceSettings {

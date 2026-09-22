@@ -88,7 +88,16 @@ pub async fn invoke_replicate_tts(text: String) -> Result<String, String> {
         info!("Using speaker WAV URL: {:?}", speaker_wav_url);
     }
 
-    let client = Client::new();
+    // `Client::new()` has no request timeout. The poll loop below is bounded by
+    // REPLICATE_TIMEOUT_SECONDS, but that bound only starts once this initial
+    // POST returns — an untimed POST that stalls hangs before the deadline is
+    // ever armed. The sibling client further down this file already sets 120s;
+    // this makes the two agree.
+    let client = Client::builder()
+        .timeout(Duration::from_secs(timeouts::HTTP_REQUEST_TIMEOUT_SECONDS))
+        .connect_timeout(Duration::from_secs(timeouts::HTTP_CONNECT_TIMEOUT_SECONDS))
+        .build()
+        .map_err(|e| format!("Failed to create Replicate HTTP client: {}", e))?;
     let start_url = "https://api.replicate.com/v1/predictions";
 
     let request_payload = ReplicateRequest {
