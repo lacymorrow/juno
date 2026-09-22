@@ -991,6 +991,7 @@ async fn execute_agent_internal(
                     .unwrap_or_else(|_| prompt_manager.get_default_system_prompt());
 
                 let system_prompt = inject_persistent_memory(system_prompt, &app_handle);
+                let system_prompt = inject_chat_only_notice(system_prompt, &app_handle);
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
             };
             let brain = match brain_result {
@@ -1277,6 +1278,7 @@ async fn execute_agent_internal(
                     .unwrap_or_else(|_| prompt_manager.get_orchestrator_personality_prompt());
 
                 let system_prompt = inject_persistent_memory(system_prompt, &app_handle);
+                let system_prompt = inject_chat_only_notice(system_prompt, &app_handle);
                 BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
             };
             let orchestrator_brain = match orchestrator_brain_result {
@@ -1928,6 +1930,7 @@ async fn execute_specialized_agent_task(
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
     let system_prompt = inject_persistent_memory(system_prompt, &app_handle);
+    let system_prompt = inject_chat_only_notice(system_prompt, &app_handle);
     let specialist_brain =
         match BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle)) {
             Ok(brain) => brain,
@@ -2045,6 +2048,31 @@ fn inject_persistent_memory(system_prompt: String, app_handle: &tauri::AppHandle
             warn!("Failed to load persistent memory for injection: {}", e);
             system_prompt
         }
+    }
+}
+
+/// What a model that cannot drive the computer needs to know about where it is
+/// running, so it answers plainly instead of narrating clicks it cannot make.
+const CHAT_ONLY_PROMPT_ADDENDUM: &str = "\n\n\
+You are running inside Juno, a computer-use app for macOS. Juno can take \
+screenshots, move the mouse, type, and run commands. You cannot. In this setup \
+you are a text-only model: you cannot see the screen, move the pointer, press \
+keys, or run anything.\n\n\
+When someone asks for something that needs the computer, give them what you do \
+have: the answer, the steps to follow, the command to run, or your reasoning \
+about it. Then tell them that picking a computer-use model in Settings > AI \
+Provider will let Juno carry it out. Say that once and move on. Do not \
+apologize repeatedly, and do not claim to have done anything on screen.";
+
+/// Append the chat-only notice when the configured model cannot drive the
+/// computer. Capable models' prompts are returned untouched.
+fn inject_chat_only_notice(system_prompt: String, app_handle: &tauri::AppHandle) -> String {
+    match BrainFactory::active_computer_use_refusal(app_handle) {
+        Some(reason) => {
+            info!("Adding chat-only system prompt notice: {}", reason);
+            format!("{}{}", system_prompt, CHAT_ONLY_PROMPT_ADDENDUM)
+        }
+        None => system_prompt,
     }
 }
 

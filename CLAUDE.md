@@ -88,9 +88,9 @@ The frontend may ONLY:
 
 ## Model Policy
 
-- **Default model: `claude-fable-5-1`** (Anthropic provider). Juno is built around Anthropic's most capable model; do not downgrade the default for cost.
+- **Default model: `claude-opus-5`** (Anthropic provider). Juno defaults to a current, top-tier model; do not downgrade the default for cost. `claude-fable-5-1` remains available and is the choice when a task needs the most capable model Anthropic ships.
 - The Anthropic provider (`src-tauri/src/agent/providers/anthropic.rs`) sends `thinking: {type: "adaptive", display: "summarized"}` on 4.6+ models, `fallbacks: "default"` on Fable/Opus 5 tier (server-side retry on a safety refusal), and replays the previous turn's thinking blocks on tool-use turns (the API rejects tool-use turns whose thinking blocks were dropped).
-- Model IDs and capability lists live in `src-tauri/src/agent/providers/types.rs` (`model_ids`, `OPUS_4_5_PLUS_MODELS`, `ADAPTIVE_THINKING_MODELS`, `SERVER_SIDE_FALLBACK_MODELS`). Verify new IDs against the live Anthropic docs, never from memory (LAC-3106).
+- Model IDs and capabilities live in **one table**: `Provider::model_definitions()` in `src-tauri/src/agent/providers/types.rs`. Each model declares its computer-use tool version, whether it is Current or Legacy, its image tier, adaptive thinking, and server-side fallbacks. Every call site derives from that table — do not add a `&[&str]` model list anywhere, which is the drift this replaced. Verify new IDs and capabilities against the live provider docs, never from memory (LAC-3106).
 
 ## Architecture
 
