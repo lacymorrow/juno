@@ -64,7 +64,7 @@ if nc -z localhost 1420 2>/dev/null; then
     ./test-qa.sh
 else
     echo "ℹ️ Tauri app not running. To run QA tests:"
-    echo "   1. Start the app in another terminal with 'pnpm tauri dev'"
+    echo "   1. Start the app in another terminal with 'bun run tauri:dev'"
     echo "   2. Run './test-qa.sh' manually"
 fi
 
