@@ -264,7 +264,10 @@ export default function AssistantModelPicker({
                             )}
                             {/* Absence is the signal: computer use is what Juno
                                 is for, so only a model that cannot do it is
-                                marked. */}
+                                marked. There is no longer a "Juno cannot drive
+                                this yet" case — Juno sends both the legacy
+                                computer tools and the current toolset, so a
+                                model that is unmarked here can be driven. */}
                             {provider.is_available && !model.supports_computer_use && (
                               <span className="text-xs text-muted-foreground">Chat only</span>
                             )}
@@ -279,8 +282,7 @@ export default function AssistantModelPicker({
             </ModelSelector>
             {selectedModel && !selectedModel.model.supports_computer_use && (
               <div className="text-xs text-muted-foreground">
-                {selectedModel.model.name} can answer questions, but it cannot
-                control the computer. Pick another model for that.
+                {`${selectedModel.model.name} can answer questions, but it cannot control the computer. Pick another model for that.`}
               </div>
             )}
           </div>

@@ -1182,6 +1182,12 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
 
 **CRITICAL**: Use ONLY the official Anthropic Computer Use API for ALL computer operations. Do NOT use any redundant tools.
 
+**WHICH SHAPE TO USE**: Read it off the tools you were actually given, not off this document.
+- If you have a single `computer` tool, it takes an `action` field, and the `{"action": ...}` shapes below are the reference.
+- If you were given individual tools instead (`left_click`, `type`, `screenshot`, `key`, and so on, part of a toolset), call those tools directly by name with their own documented inputs. The `{"action": ...}` wrapper below does NOT apply to them — the action name IS the tool name, and the remaining fields carry over unchanged.
+
+Everything below about WHEN to use each action, coordinate discipline, and verification applies either way.
+
 ## **✅ OFFICIAL MOUSE ACTIONS** (via `computer` tool):
 
 1. **`{"action": "left_click", "coordinate": [x, y]}`** - Left click at coordinates
