@@ -1187,13 +1187,22 @@ impl LocalToolProvider {
                         }
                     }
                     "wait" => {
-                        if let Some(duration) = args.get("duration").and_then(|d| d.as_u64()) {
-                            if duration > 30000 {
-                                // Max 30 seconds
-                                return Err(AgentError::InvalidInput(
-                                    "Computer tool wait duration too long (max 30000ms)"
-                                        .to_string(),
-                                ));
+                        // The computer tool's wait takes SECONDS, under either
+                        // parameter name (`seconds` preferred, `duration` accepted).
+                        // This guard used to cap it at 30000 "ms", which read as a
+                        // 30-second limit but actually allowed a 30000-second wait,
+                        // and skipped fractional values entirely by parsing as u64.
+                        const MAX_WAIT_SECONDS: f64 = 30.0;
+                        let seconds = args
+                            .get("seconds")
+                            .and_then(|d| d.as_f64())
+                            .or_else(|| args.get("duration").and_then(|d| d.as_f64()));
+                        if let Some(seconds) = seconds {
+                            if !seconds.is_finite() || seconds > MAX_WAIT_SECONDS {
+                                return Err(AgentError::InvalidInput(format!(
+                                    "Computer tool wait duration too long (max {} seconds)",
+                                    MAX_WAIT_SECONDS
+                                )));
                             }
                         }
                     }
