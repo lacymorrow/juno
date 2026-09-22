@@ -1,5 +1,5 @@
 /// <reference types="vitest" />
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
 import { vi } from 'vitest';
 
 // jsdom implements none of the audio APIs. These stubs are environment

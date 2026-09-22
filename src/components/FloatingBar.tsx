@@ -748,7 +748,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     if (moveFrameRef.current !== null) return;
     moveFrameRef.current = requestAnimationFrame(() => {
       moveFrameRef.current = null;
-      const hit = (ref: React.RefObject<HTMLButtonElement>) => {
+      const hit = (ref: React.RefObject<HTMLButtonElement | null>) => {
         const el = ref.current;
         if (!el) return false;
         const r = el.getBoundingClientRect();

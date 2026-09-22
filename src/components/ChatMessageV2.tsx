@@ -251,7 +251,7 @@ type RiskLevel = "low" | "medium" | "high" | "critical";
 
 const RISK_CONFIG: Record<
   RiskLevel,
-  { label: string; className: string; Icon: React.ElementType }
+  { label: string; className: string; Icon: React.ComponentType<{ className?: string }> }
 > = {
   low: {
     label: "Low risk",
