@@ -3,9 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
 import { EVENTS, UI } from "@/lib/constants.generated";
-import type { AgentState } from "@/components/ui/orb";
-import { Orb } from "@/components/ui/orb";
-import { mapToOrbState, getStatusLabel } from "./bar-state-mapper";
+import type { AgentState } from "@/components/ui/elevenlabs-orb";
+import { ElevenLabsOrb } from "@/components/ui/elevenlabs-orb";
+import {
+  mapToOrbState,
+  mapToElevenLabsOrbColors,
+  getStatusLabel,
+} from "./bar-state-mapper";
 import { useWindowSize } from "@/hooks/useWindowSize";
 
 interface BarStateData {
@@ -33,33 +37,21 @@ interface UIInteractionEvent {
 const COMPONENT_ID = "floating-bar";
 const ORB_SIZE = 200;
 
-// State-driven color palettes — each pair is [primary, secondary]
-const STATE_COLORS = {
-  idle: ["#6366F1", "#8B5CF6"] as [string, string],
-  listening: ["#3B82F6", "#6366F1"] as [string, string],
-  thinking: ["#F59E0B", "#EF4444"] as [string, string],
-  talking: ["#10B981", "#06B6D4"] as [string, string],
-  error: ["#EF4444", "#DC2626"] as [string, string],
-};
+// The orb's documented default gradient (periwinkle). Used as the Canvas's
+// initial colors; per-state colors come from mapToElevenLabsOrbColors and are
+// pushed through colorsRef so the orb eases between them instead of snapping.
+const DEFAULT_COLORS: [string, string] = ["#CADCFC", "#A0B9D1"];
 
-function getColorsForOrbState(
-  orbState: AgentState,
-  isError: boolean
-): [string, string] {
-  if (isError) return STATE_COLORS.error;
-  if (orbState === "listening") return STATE_COLORS.listening;
-  if (orbState === "thinking") return STATE_COLORS.thinking;
-  if (orbState === "talking") return STATE_COLORS.talking;
-  return STATE_COLORS.idle;
-}
-
-interface OrbBarProps {
+interface ElevenLabsOrbBarProps {
   barAppearance?: string;
 }
 
-export function OrbBar({ barAppearance: _barAppearance }: OrbBarProps) {
+export function ElevenLabsOrbBar({
+  barAppearance: _barAppearance,
+}: ElevenLabsOrbBarProps) {
   // Orb-specific state
   const [agentState, setAgentState] = useState<AgentState>(null);
+  const [barState, setBarState] = useState<string>(UI.BAR_STATES_DEFAULT);
   const [audioLevel, setAudioLevel] = useState(0);
   const [statusLabel, setStatusLabel] = useState("Ready");
   const [currentError, setCurrentError] = useState<string | null>(null);
@@ -67,12 +59,13 @@ export function OrbBar({ barAppearance: _barAppearance }: OrbBarProps) {
 
   const { resizeWindowIfChanged } = useWindowSize("floating-bar");
 
-  // Dynamic colors via ref — avoids re-rendering the Canvas on color changes
-  const colorsRef = useRef<[string, string]>(STATE_COLORS.idle);
+  // Dynamic colors via ref — avoids re-rendering the Canvas on color changes.
+  // The orb eases toward colorsRef internally (lerp), so state changes glide.
+  const colorsRef = useRef<[string, string]>(DEFAULT_COLORS);
 
   useEffect(() => {
-    colorsRef.current = getColorsForOrbState(agentState, hasError);
-  }, [agentState, hasError]);
+    colorsRef.current = mapToElevenLabsOrbColors(barState);
+  }, [barState]);
 
   // Resize window to fit the orb
   useEffect(() => {
@@ -92,6 +85,7 @@ export function OrbBar({ barAppearance: _barAppearance }: OrbBarProps) {
             if (!mounted) return;
             const payload = event.payload;
             if (payload && typeof payload.barState === "string") {
+              setBarState(payload.barState);
               setAgentState(mapToOrbState(payload.barState));
               setAudioLevel(payload.audioLevel);
               setStatusLabel(getStatusLabel(payload.barState));
@@ -103,7 +97,7 @@ export function OrbBar({ barAppearance: _barAppearance }: OrbBarProps) {
         if (mounted) unlisten = fn;
         else fn();
       } catch (error) {
-        console.error("OrbBar: Failed to setup event listener:", error);
+        console.error("ElevenLabsOrbBar: Failed to setup event listener:", error);
       }
     };
 
@@ -128,7 +122,7 @@ export function OrbBar({ barAppearance: _barAppearance }: OrbBarProps) {
         elementId: COMPONENT_ID,
         interaction,
       }).catch((error) => {
-        console.error("OrbBar: Interaction failed:", error);
+        console.error("ElevenLabsOrbBar: Interaction failed:", error);
       });
     },
     []
@@ -146,10 +140,7 @@ export function OrbBar({ barAppearance: _barAppearance }: OrbBarProps) {
   const manualOutput = isTalking ? audioLevel : 0;
 
   // Initial colors for the Canvas (colorsRef handles dynamic updates)
-  const initialColors = useMemo<[string, string]>(
-    () => STATE_COLORS.idle,
-    []
-  );
+  const initialColors = useMemo<[string, string]>(() => DEFAULT_COLORS, []);
 
   const dragHandlers = useDragWindowWithThreshold();
 
@@ -159,7 +150,7 @@ export function OrbBar({ barAppearance: _barAppearance }: OrbBarProps) {
       onClick={handleClick}
       {...dragHandlers}
     >
-      <Orb
+      <ElevenLabsOrb
         agentState={agentState}
         volumeMode="manual"
         manualInput={manualInput}

@@ -149,6 +149,8 @@ pub mod input_control {
     pub const SET_BACKGROUND_MODE: &str = "set_background_mode";
     pub const GET_DOCK_ICON_VISIBLE: &str = "get_dock_icon_visible";
     pub const SET_DOCK_ICON_VISIBLE: &str = "set_dock_icon_visible";
+    pub const GET_TRAY_ICON_VISIBLE: &str = "get_tray_icon_visible";
+    pub const SET_TRAY_ICON_VISIBLE: &str = "set_tray_icon_visible";
 }
 
 /// Utility command names
