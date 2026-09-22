@@ -1029,39 +1029,20 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
 /// It does not require focusing a specific UI element beforehand.
 /// How long after Cmd+V the pasted text stays on the clipboard before the previous
 /// contents are restored. Electron and JVM apps read the pasteboard well after the key
-/// event, so an immediate restore pastes the *old* clipboard into them.
-const PASTE_CLIPBOARD_RESTORE_DELAY_MS: u64 = 600;
-/// Pasteboard write-to-visible settle time.
+/// event, so an immediate restore pastes the *old* clipboard into them. The restore
+/// only runs when the pasteboard's changeCount is unchanged since the write, so a
+/// copy the user makes in this window is never clobbered.
+const PASTE_CLIPBOARD_RESTORE_DELAY_MS: u64 = 500;
+/// Pasteboard write-to-visible settle time (HID path only; a PID-targeted
+/// paste delivers after the write by construction).
 const PASTE_CLIPBOARD_SETTLE_MS: u64 = 20;
 /// Cmd+V key down/up spacing.
 const PASTE_KEY_GAP_MS: u64 = 8;
 
-/// Restore `original` after a delay, but only if the clipboard still holds `pasted`
-/// (i.e. nothing else has claimed it since).
-fn restore_clipboard_later(original: Option<String>, pasted: String) {
-    let Some(original) = original else { return };
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(PASTE_CLIPBOARD_RESTORE_DELAY_MS));
-        let current = NativeClipboard::new().and_then(|c| c.read()).ok();
-        if current.as_deref() != Some(pasted.as_str()) {
-            debug!("Clipboard changed since paste; leaving it alone");
-            return;
-        }
-        match NativeClipboard::new() {
-            Ok(mut clipboard) => {
-                if let Err(e) = clipboard.write(original) {
-                    warn!("Failed to restore clipboard after paste: {:?}", e);
-                }
-            }
-            Err(e) => warn!("Failed to access clipboard for restore: {:?}", e),
-        }
-    });
-}
-
 pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
     // "Global" means the frontmost app. Dictation types where the user is
     // looking, so this path must stay on the HID tap even in background mode.
-    paste_text(text, None)
+    paste_text(text, None, false)
 }
 
 /// Put `text` on the clipboard and paste it with Cmd+V.
@@ -1069,51 +1050,54 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
 /// `target_pid` decides where the paste lands: `Some(pid)` posts it to that
 /// process after pointing input focus at it without raising it, `None` sends it
 /// through the HID tap to whatever application is frontmost.
-fn paste_text(text: &str, target_pid: Option<i32>) -> Result<(), AutomationError> {
+///
+/// With `retain_clipboard` false, the previous pasteboard contents — every
+/// representation of every item — are snapshotted before the write and
+/// restored off the critical path after [`PASTE_CLIPBOARD_RESTORE_DELAY_MS`],
+/// guarded by the pasteboard changeCount so a copy the user makes in between
+/// wins; the temporary item is marked transient/auto-generated so clipboard
+/// managers skip it. With `retain_clipboard` true, the text is written as an
+/// ordinary item and stays on the clipboard: no snapshot, no markers, no
+/// restore (dictation's "leave the transcript on the clipboard").
+pub(crate) fn paste_text(
+    text: &str,
+    target_pid: Option<i32>,
+    retain_clipboard: bool,
+) -> Result<(), AutomationError> {
     debug!("Typing text via clipboard paste: {}", text);
 
-    let original = NativeClipboard::new().and_then(|c| c.read()).ok();
+    let snapshot = if retain_clipboard {
+        None
+    } else {
+        super::text_insertion::snapshot_pasteboard()
+    };
+    let change_count_after_write =
+        super::text_insertion::write_string_to_pasteboard(text, !retain_clipboard)?;
 
-    // Set clipboard
-    match NativeClipboard::new() {
-        Ok(mut clipboard) => {
-            if let Err(e) = clipboard.write(text.to_string()) {
-                return Err(AutomationError::PlatformError(format!(
-                    "Failed to write to clipboard before global paste: {:?}",
-                    e
-                )));
-            }
-            debug!("Successfully set clipboard content for global paste.");
-        }
-        Err(e) => {
-            return Err(AutomationError::PlatformError(format!(
-                "Failed to access clipboard before global paste: {:?}",
-                e
-            )))
-        }
-    }
-
-    // Give the pasteboard server a moment to publish the new contents
-    thread::sleep(Duration::from_millis(PASTE_CLIPBOARD_SETTLE_MS));
-
-    // Simulate Cmd+V
-    let source = get_pooled_event_source().map_err(|e| {
-        AutomationError::PlatformError(format!(
-            "Failed to create event source for global paste: {}",
-            e
-        ))
-    })?;
-
-    let key_code_v = KEY_V;
+    // Cmd+V's key code depends on the layout's Command layer
+    // (Dvorak-QWERTY-Command differs from the unmodified layout).
+    let key_code_v = super::text_insertion::cmd_v_keycode();
     let cmd_flag = MODIFIER_COMMAND;
 
     if let Some(pid) = target_pid {
+        // The write already round-tripped through the pasteboard server, and a
+        // PID-targeted paste cannot race the user's typing, so no settle delay.
         let _focus = prepare_background_keyboard_target(pid);
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, true)?;
         thread::sleep(Duration::from_millis(PASTE_KEY_GAP_MS));
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, false)?;
         debug!("Posted Cmd+V paste to PID {}", pid);
     } else {
+        // Give the pasteboard server a moment to publish the new contents
+        thread::sleep(Duration::from_millis(PASTE_CLIPBOARD_SETTLE_MS));
+
+        let source = get_pooled_event_source().map_err(|e| {
+            AutomationError::PlatformError(format!(
+                "Failed to create event source for global paste: {}",
+                e
+            ))
+        })?;
+
         // Press Cmd+V
         let key_down =
             CGEvent::new_keyboard_event(source.clone(), key_code_v, true).map_err(|_| {
@@ -1122,6 +1106,7 @@ fn paste_text(text: &str, target_pid: Option<i32>) -> Result<(), AutomationError
                 )
             })?;
         key_down.set_flags(cmd_flag);
+        super::text_insertion::tag_synthesized_event(&key_down);
         key_down.post(CGEventTapLocation::HID);
         thread::sleep(Duration::from_millis(PASTE_KEY_GAP_MS));
 
@@ -1132,13 +1117,20 @@ fn paste_text(text: &str, target_pid: Option<i32>) -> Result<(), AutomationError
             )
         })?;
         key_up.set_flags(cmd_flag);
+        super::text_insertion::tag_synthesized_event(&key_up);
         key_up.post(CGEventTapLocation::HID);
 
         debug!("Successfully simulated global Cmd+V paste.");
     }
 
-    // Restore the previous clipboard on a timer, off the hot path.
-    restore_clipboard_later(original, text.to_string());
+    // Restore the previous pasteboard on a timer, off the hot path, only if
+    // nothing else has claimed the pasteboard since the write. When the
+    // clipboard is retained there is no snapshot and nothing to restore.
+    super::text_insertion::schedule_snapshot_restore(
+        snapshot,
+        change_count_after_write,
+        Duration::from_millis(PASTE_CLIPBOARD_RESTORE_DELAY_MS),
+    );
     Ok(())
 }
 
@@ -1155,7 +1147,7 @@ pub(crate) fn type_text_no_warp(
     if let Some(pid) = background::target_pid() {
         // `paste_text` holds the input-focus guard for the duration of the
         // paste, so focus is handed back here without a second guard.
-        paste_text(text, Some(pid))?;
+        paste_text(text, Some(pid), false)?;
         return Ok(Some(InputOutcome::process_targeted(post_method_label())));
     }
 
@@ -1163,7 +1155,7 @@ pub(crate) fn type_text_no_warp(
         return Ok(None);
     }
 
-    paste_text(text, None)?;
+    paste_text(text, None, false)?;
     Ok(Some(InputOutcome::physical_cursor("HID")))
 }
 
@@ -2186,7 +2178,7 @@ fn get_sl_event_post_to_pid() -> Option<SLEventPostToPidFn> {
 ///
 /// `CGEvent` is a `foreign_type!` wrapper. `ForeignType::as_ptr` gives the raw
 /// `*mut sys::CGEvent` which is the `CGEventRef` the C API expects.
-fn post_cg_event_to_pid(pid: i32, event: &CGEvent) {
+pub(crate) fn post_cg_event_to_pid(pid: i32, event: &CGEvent) {
     let event_ptr = ForeignType::as_ptr(event) as *mut c_void;
     unsafe {
         if let Some(sl_post) = get_sl_event_post_to_pid() {
@@ -2252,6 +2244,7 @@ pub(crate) fn post_key_event_to_pid(
         )
     })?;
 
+    super::text_insertion::tag_synthesized_event(&event);
     post_cg_event_to_pid(pid, &event);
     Ok(())
 }
@@ -2280,6 +2273,7 @@ pub(crate) fn post_key_event_with_flags_to_pid(
         event.set_flags(flags);
     }
 
+    super::text_insertion::tag_synthesized_event(&event);
     post_cg_event_to_pid(pid, &event);
     Ok(())
 }

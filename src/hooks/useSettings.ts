@@ -42,6 +42,7 @@ interface WhisperDownloadProgress {
 interface SettingsCache {
 	ttsProvider?: CachedValue<string>;
 	dictationClipboardEnabled?: CachedValue<boolean>;
+	dictationInsertionMode?: CachedValue<string>;
 	dictationTriggerMode?: CachedValue<string>;
 	soundEnabled?: CachedValue<boolean>;
 	toolConfigurations?: CachedValue<Record<string, ToolCategory>>;
@@ -154,6 +155,7 @@ export function useSettings() {
 
 	// Dictation Settings
 	const [dictationClipboardEnabled, setDictationClipboardEnabled] = useState<boolean>(true);
+	const [dictationInsertionMode, setDictationInsertionMode] = useState<string>("paste");
 	const [dictationTriggerMode, setDictationTriggerMode] = useState<string>("hold"); // Default to existing hold behavior
 
 	// Sound Settings
@@ -414,6 +416,7 @@ export function useSettings() {
 				currentAgentMode,
 				currentAgentTriggerMode,
 				currentClipboardEnabled,
+				currentInsertionMode,
 				currentDictationTriggerMode,
 				currentSoundEnabled,
 				currentPerformanceMonitoringEnabled,
@@ -427,6 +430,7 @@ export function useSettings() {
 				getCachedOrFetch('agentMode', () => invokeCommand<string>("get_agent_mode")),
 				getCachedOrFetch('agentTriggerMode', () => invokeCommand<string>("get_agent_trigger_mode")),
 				getCachedOrFetch('dictationClipboardEnabled', () => invokeCommand<boolean>("get_dictation_clipboard_enabled")),
+				getCachedOrFetch('dictationInsertionMode', () => invokeCommand<string>("get_dictation_insertion_mode")),
 				getCachedOrFetch('dictationTriggerMode', () => invokeCommand<string>("get_dictation_trigger_mode")),
 				getCachedOrFetch('soundEnabled', () => invokeCommand<boolean>("get_sound_enabled")),
 				getCachedOrFetch('performanceMonitoringEnabled', () => invokeCommand<boolean>("get_performance_monitoring")),
@@ -442,6 +446,7 @@ export function useSettings() {
 			setAgentMode(currentAgentMode);
 			setAgentTriggerMode(currentAgentTriggerMode);
 			setDictationClipboardEnabled(currentClipboardEnabled);
+			setDictationInsertionMode(currentInsertionMode);
 			setDictationTriggerMode(currentDictationTriggerMode);
 			setSoundEnabled(currentSoundEnabled);
 			setPerformanceMonitoringEnabled(currentPerformanceMonitoringEnabled);
@@ -861,9 +866,21 @@ export function useSettings() {
 			await invoke("set_dictation_clipboard_enabled", { enabled });
 			invalidateCache('dictationClipboardEnabled');
 			setDictationClipboardEnabled(enabled);
-			toast.success(`Dictation clipboard ${enabled ? "enabled" : "disabled"}`);
+			toast.success(`Copy to clipboard ${enabled ? "enabled" : "disabled"}`);
 		} catch (error) {
 			console.error("Failed to set dictation clipboard:", error);
+			toast.error("Failed to update dictation setting");
+		}
+	};
+
+	const handleDictationInsertionModeChange = async (mode: string) => {
+		try {
+			await invoke("set_dictation_insertion_mode", { mode });
+			invalidateCache('dictationInsertionMode');
+			setDictationInsertionMode(mode);
+			toast.success(mode === "clipboard_free" ? "Clipboard-free insertion enabled" : "Clipboard paste insertion enabled");
+		} catch (error) {
+			console.error("Failed to set dictation insertion mode:", error);
 			toast.error("Failed to update dictation setting");
 		}
 	};
@@ -1047,6 +1064,7 @@ export function useSettings() {
 		agentMode,
 		agentTriggerMode,
 		dictationClipboardEnabled,
+		dictationInsertionMode,
 		dictationTriggerMode,
 		soundEnabled,
 		performanceMonitoringEnabled,
@@ -1095,6 +1113,7 @@ export function useSettings() {
 		handleAgentModeChange,
 		handleAgentTriggerModeChange,
 		handleDictationClipboardChange,
+		handleDictationInsertionModeChange,
 		handleDictationTriggerModeChange,
 		handleAlwaysListeningToggle,
 		handleSensitivityChange,

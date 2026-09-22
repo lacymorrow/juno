@@ -563,25 +563,16 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
                                     "[AlwaysListening] Voice dictation -> typing: '{}'",
                                     trimmed_text
                                 );
-                                if app_state.get_dictation_clipboard_enabled().unwrap_or(true) {
-                                    if let Err(e) = crate::commands::core::set_clipboard(
-                                        trimmed_text.to_string(),
-                                        app_handle.clone(),
-                                        app_state.clone(),
-                                    )
-                                    .await
-                                    {
-                                        error!("[AlwaysListening] Failed to set clipboard: {}", e);
-                                    }
-                                }
-                                if let Err(e) = crate::commands::keyboard::global_type_text(
-                                    trimmed_text.to_string(),
-                                    app_handle.clone(),
-                                    app_state.clone(),
+                                if let Err(e) = crate::commands::dictation::insert_dictation_text(
+                                    app_handle,
+                                    trimmed_text,
                                 )
                                 .await
                                 {
-                                    error!("[AlwaysListening] Failed to type dictated text: {}", e);
+                                    error!(
+                                        "[AlwaysListening] Failed to insert dictated text: {}",
+                                        e
+                                    );
                                 }
                             }
                             crate::triggers::TriggerTarget::Agent => {

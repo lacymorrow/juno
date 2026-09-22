@@ -7,6 +7,7 @@ pub mod ffi;
 pub mod interaction;
 pub mod memory_safety;
 pub mod permissions;
+pub mod text_insertion;
 pub mod utils;
 pub mod wrappers;
 

@@ -212,7 +212,11 @@ pub struct AudioSettings {
     /// [`voice_session::VoiceSessionRegistry`], which records what the session
     /// was started for and keeps that answer past the stop.
     pub dictation_active: bool,
+    /// Copy-to-clipboard toggle for dictation (post-insert copy). The name
+    /// predates the insertion-mode split; it never gated the insert itself.
     pub dictation_clipboard_enabled: bool,
+    /// "paste" or "clipboard_free"; see `constants::settings::dictation_insertion_modes`.
+    pub dictation_insertion_mode: String,
     pub sound_enabled: bool,
     pub always_listening_active: bool,
     pub always_listening_sensitivity: f32,
@@ -242,6 +246,8 @@ impl Default for AudioSettings {
             supertonic_speed: crate::tts::supertonic::DEFAULT_SPEED,
             dictation_active: false,
             dictation_clipboard_enabled: true,
+            dictation_insertion_mode:
+                crate::constants::settings::defaults::dictation_insertion_mode(),
             sound_enabled: true,
             always_listening_active: false,
             always_listening_sensitivity: 0.5,
@@ -745,6 +751,20 @@ impl AppState {
             .lock()
             .map(|mut settings| settings.dictation_clipboard_enabled = enabled)
             .map_err(|e| format_error(templates::FAILED_TO_SET, "dictation clipboard enabled", e))
+    }
+
+    pub fn get_dictation_insertion_mode(&self) -> Result<String, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.dictation_insertion_mode.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "dictation insertion mode", e))
+    }
+
+    pub fn set_dictation_insertion_mode(&self, mode: String) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.dictation_insertion_mode = mode)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "dictation insertion mode", e))
     }
 
     pub fn get_sound_enabled(&self) -> Result<bool, String> {
