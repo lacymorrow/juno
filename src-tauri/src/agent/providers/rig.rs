@@ -57,8 +57,24 @@ impl AgentBrain for RigBrain {
         messages: &[Message],
         available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
-        // We'll use reqwest directly instead of the rig_core library to avoid compatibility issues
-        let client = reqwest::Client::new();
+        // We'll use reqwest directly instead of the rig_core library to avoid compatibility issues.
+        //
+        // The timeouts are not optional. `reqwest::Client::new()` has none at
+        // all, so a provider built on it waits forever on a server that
+        // accepts the connection and then never answers — the agent loop
+        // simply stops, with no error and nothing in the log. Same constants
+        // as the Anthropic and Gemini brains so all three agree.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(
+                crate::constants::timeouts::HTTP_REQUEST_TIMEOUT_SECONDS,
+            ))
+            .connect_timeout(std::time::Duration::from_secs(
+                crate::constants::timeouts::HTTP_CONNECT_TIMEOUT_SECONDS,
+            ))
+            .build()
+            .map_err(|e| {
+                AgentError::ConfigurationError(format!("Failed to create HTTP client: {}", e))
+            })?;
 
         // Format messages for OpenAI API
         let mut openai_messages = Vec::new();

@@ -251,7 +251,7 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                 properties: {
                     let mut props = HashMap::new();
                     props.insert("command".to_string(), ToolParameter { type_: "string".to_string(), description: "Command line to execute.".to_string() });
-                    props.insert("timeout_seconds".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional timeout.".to_string() });
+                    props.insert("timeout_seconds".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional timeout in SECONDS.".to_string() });
                     props.insert("restart".to_string(), ToolParameter { type_: "boolean".to_string(), description: "Optional: Specify true to restart the shell state before running the command.".to_string() });
                     props
                 },

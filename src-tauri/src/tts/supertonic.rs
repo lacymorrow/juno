@@ -18,7 +18,18 @@ fn get_http_client() -> &'static Client {
         Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
-            .unwrap_or_else(|_| Client::new())
+            .unwrap_or_else(|e| {
+                // `get_or_init` cannot fail, so the fallback is an untimed
+                // client — precisely the hang REQUEST_TIMEOUT_SECS exists to
+                // prevent. Say so loudly rather than degrade in silence; only
+                // a TLS backend failure reaches here.
+                error!(
+                    "Supertonic HTTP client could not be built with a timeout ({}); \
+                     falling back to a client with NO request timeout",
+                    e
+                );
+                Client::new()
+            })
     })
 }
 
