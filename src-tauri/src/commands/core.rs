@@ -50,8 +50,8 @@ pub(crate) async fn capture_screenshot_command(
     state: State<'_, AppState>,
 ) -> Result<ScreenshotResult, String> {
     use base64::Engine;
-    use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
-    use image::ImageReader;
+    use computer_use_ai_sdk::platforms::macos::utils::capture_screenshot_buffer;
+    use image::DynamicImage;
     use std::io::Cursor;
 
     // Rate limiting check for screenshot operations
@@ -59,215 +59,181 @@ pub(crate) async fn capture_screenshot_command(
         return Err(e.to_user_message());
     }
 
-    match capture_and_encode_screenshot() {
-        Ok(base64_string) => {
-            // Parse the screenshot to get its dimensions
-            let engine = base64::engine::general_purpose::STANDARD;
-            if let Ok(image_data) = engine.decode(&base64_string) {
-                if let Ok(reader) = ImageReader::new(Cursor::new(&image_data))
-                    .with_guessed_format()
-                    .map_err(|e| format!("Failed to read image format: {}", e))
-                {
-                    if let Ok(img) = reader
-                        .decode()
-                        .map_err(|e| format!("Failed to decode image: {}", e))
-                    {
-                        let original_width = img.width();
-                        let original_height = img.height();
+    // Capture straight to the raw RGBA buffer. The previous path PNG-encoded and
+    // base64-encoded here only for this command to base64-decode and PNG-decode it right
+    // back again before resizing — roughly 180ms of throwaway work on a 1920x1080 display,
+    // paid on nearly every turn of a computer-use loop. Screen capture blocks, so it runs
+    // on the blocking pool instead of an async worker thread.
+    let buffer = tokio::task::spawn_blocking(capture_screenshot_buffer)
+        .await
+        .map_err(|e| format!("Screenshot capture task failed: {}", e))?
+        .map_err(|e| format!("Failed to capture screenshot: {}", e))?;
 
-                        // Get display information to calculate proper scaling
-                        match get_display_dimensions() {
-                            Ok((display_width, display_height, origin_x, origin_y, display_id)) => {
-                                // Select the best standard resolution for this display, model-aware.
-                                // This MUST match the resolution used inside update_standard_resolution_scaling_with_display
-                                // so the image Claude receives matches the declared display_width_px/display_height_px.
-                                use crate::constants::ui::standard_resolutions;
-                                let model = coordinates::get_current_model();
-                                let display_aspect = display_width as f64 / display_height as f64;
-                                let (standard_width, standard_height) = if model.is_empty() {
-                                    standard_resolutions::select_best_resolution(
-                                        display_width,
-                                        display_height,
-                                    )
-                                } else {
-                                    standard_resolutions::select_best_resolution_for_model(
-                                        display_width,
-                                        display_height,
-                                        &model,
-                                    )
-                                };
-                                info!(
-                                "Resolution selection: display {}x{} (aspect {:.3}) → standard {}x{} (model: {})",
-                                display_width, display_height, display_aspect,
-                                standard_width, standard_height,
-                                if model.is_empty() { "unknown/legacy" } else { &model }
-                            );
+    // The old path decoded an RGBA8 PNG, so `img` was a `DynamicImage::ImageRgba8` holding
+    // exactly these pixels. Wrapping the buffer reproduces that value without the encode /
+    // decode round-trip; every resize, encode and coordinate call below is unchanged.
+    let img = DynamicImage::ImageRgba8(buffer);
+    let original_width = img.width();
+    let original_height = img.height();
 
-                                // Determine if we need to scale the screenshot to match standard resolution
-                                let needs_scaling = original_width != standard_width
-                                    || original_height != standard_height;
-
-                                let final_base64 = if needs_scaling {
-                                    info!("Scaling screenshot from {}x{} to standard resolution {}x{} for Anthropic Computer Use API compliance",
-                                    original_width, original_height, standard_width, standard_height);
-
-                                    // Scale the image to the standard resolution
-                                    let scaled_img = img.resize_exact(
-                                        standard_width,
-                                        standard_height,
-                                        image::imageops::FilterType::Lanczos3,
-                                    );
-
-                                    // Encode the scaled image as JPEG (quality 85) — ~60% smaller than PNG
-                                    let mut scaled_buffer = Cursor::new(Vec::new());
-                                    let jpeg_encoder =
-                                        image::codecs::jpeg::JpegEncoder::new_with_quality(
-                                            &mut scaled_buffer,
-                                            85,
-                                        );
-                                    scaled_img.write_with_encoder(jpeg_encoder).map_err(|e| {
-                                        format!("Failed to encode scaled image as JPEG: {}", e)
-                                    })?;
-
-                                    engine.encode(scaled_buffer.into_inner())
-                                } else {
-                                    info!("Screenshot already at standard resolution {}x{}, re-encoding as JPEG",
-                                    original_width, original_height);
-                                    // Re-encode as JPEG even when no scaling needed (saves ~60% vs PNG)
-                                    let mut jpeg_buffer = Cursor::new(Vec::new());
-                                    let jpeg_encoder =
-                                        image::codecs::jpeg::JpegEncoder::new_with_quality(
-                                            &mut jpeg_buffer,
-                                            85,
-                                        );
-                                    img.write_with_encoder(jpeg_encoder).map_err(|e| {
-                                        format!("Failed to encode image as JPEG: {}", e)
-                                    })?;
-                                    engine.encode(jpeg_buffer.into_inner())
-                                };
-
-                                // Update scaling information with standard resolution data AND display origin
-                                coordinates::update_standard_resolution_scaling_with_display(
-                                    display_width,
-                                    display_height,
-                                    standard_width, // The screenshot is now at standard resolution
-                                    standard_height,
-                                    origin_x,
-                                    origin_y,
-                                    Some(display_id),
-                                );
-
-                                info!("Screenshot scaling updated: display {}x{} at origin ({}, {}) → standard resolution {}x{} (Anthropic Computer Use API compliant)",
-                                display_width, display_height, origin_x, origin_y, standard_width, standard_height);
-
-                                // Send notification on success
-                                send_dev_tool_notification(&app, "Screenshot", &format!(
-                                "Screenshot captured at standard resolution {}x{} (scaled from display {}x{} at origin ({}, {}))",
-                                standard_width, standard_height, display_width, display_height, origin_x, origin_y
-                            ))?;
-
-                                Ok(ScreenshotResult {
-                                    base64_image: final_base64,
-                                    original_width: display_width,
-                                    original_height: display_height,
-                                    resized_width: standard_width,
-                                    resized_height: standard_height,
-                                    output: get_cursor_position_text(),
-                                })
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to get display dimensions for standard resolution scaling: {}", e);
-
-                                // Fallback: assume the screenshot is already properly sized
-                                // This maintains some level of functionality even if display detection fails
-                                let (_fallback_standard_width, _fallback_standard_height) =
-                                    crate::constants::ui::standard_resolutions::XGA; // Default to XGA
-
-                                coordinates::update_standard_resolution_scaling(
-                                    original_width, // Use screenshot dimensions as display dimensions
-                                    original_height,
-                                    original_width, // Assume screenshot is at correct size
-                                    original_height,
-                                );
-
-                                tracing::warn!(
-                                    "Using fallback scaling with screenshot dimensions {}x{}",
-                                    original_width,
-                                    original_height
-                                );
-
-                                send_dev_tool_notification(&app, "Screenshot", "Screenshot captured (display detection failed, using fallback scaling)")?;
-                                Ok(ScreenshotResult {
-                                    base64_image: base64_string,
-                                    original_width,
-                                    original_height,
-                                    resized_width: original_width, // Fallback: no resize
-                                    resized_height: original_height,
-                                    output: get_cursor_position_text(),
-                                })
-                            }
-                        }
-                    } else {
-                        let error_msg =
-                            "Failed to decode screenshot image for standard resolution scaling";
-                        tracing::warn!("{}", error_msg);
-
-                        // Still return the screenshot but without proper scaling
-                        send_dev_tool_notification(
-                            &app,
-                            "Screenshot",
-                            "Screenshot captured (scaling unavailable)",
-                        )?;
-                        Ok(ScreenshotResult {
-                            base64_image: base64_string,
-                            original_width: 0,  // Unknown
-                            original_height: 0, // Unknown
-                            resized_width: 0,
-                            resized_height: 0,
-                            output: None,
-                        })
-                    }
-                } else {
-                    let error_msg = "Failed to read image format for standard resolution scaling";
-                    tracing::warn!("{}", error_msg);
-
-                    // Still return the screenshot but without proper scaling
-                    send_dev_tool_notification(
-                        &app,
-                        "Screenshot",
-                        "Screenshot captured (format reading unavailable)",
-                    )?;
-                    Ok(ScreenshotResult {
-                        base64_image: base64_string,
-                        original_width: 0,  // Unknown
-                        original_height: 0, // Unknown
-                        resized_width: 0,
-                        resized_height: 0,
-                        output: None,
-                    })
-                }
+    // Get display information to calculate proper scaling
+    match get_display_dimensions() {
+        Ok((display_width, display_height, origin_x, origin_y, display_id)) => {
+            // Select the best standard resolution for this display, model-aware.
+            // This MUST match the resolution used inside update_standard_resolution_scaling_with_display
+            // so the image Claude receives matches the declared display_width_px/display_height_px.
+            use crate::constants::ui::standard_resolutions;
+            let model = coordinates::get_current_model();
+            let display_aspect = display_width as f64 / display_height as f64;
+            let (standard_width, standard_height) = if model.is_empty() {
+                standard_resolutions::select_best_resolution(display_width, display_height)
             } else {
-                let error_msg =
-                    "Failed to decode base64 screenshot for standard resolution scaling";
-                tracing::warn!("{}", error_msg);
+                standard_resolutions::select_best_resolution_for_model(
+                    display_width,
+                    display_height,
+                    &model,
+                )
+            };
+            info!(
+                "Resolution selection: display {}x{} (aspect {:.3}) → standard {}x{} (model: {})",
+                display_width,
+                display_height,
+                display_aspect,
+                standard_width,
+                standard_height,
+                if model.is_empty() {
+                    "unknown/legacy"
+                } else {
+                    &model
+                }
+            );
 
-                // Still return the screenshot but without proper scaling
-                send_dev_tool_notification(
-                    &app,
-                    "Screenshot",
-                    "Screenshot captured (scaling unavailable)",
-                )?;
-                Ok(ScreenshotResult {
-                    base64_image: base64_string,
-                    original_width: 0,  // Unknown
-                    original_height: 0, // Unknown
-                    resized_width: 0,
-                    resized_height: 0,
-                    output: None,
-                })
+            // Determine if we need to scale the screenshot to match standard resolution
+            let needs_scaling =
+                original_width != standard_width || original_height != standard_height;
+
+            if needs_scaling {
+                info!("Scaling screenshot from {}x{} to standard resolution {}x{} for Anthropic Computer Use API compliance",
+                    original_width, original_height, standard_width, standard_height);
+            } else {
+                info!(
+                    "Screenshot already at standard resolution {}x{}, re-encoding as JPEG",
+                    original_width, original_height
+                );
             }
+
+            // Lanczos3 resize + JPEG encode are CPU-bound; keep them off the async workers.
+            let final_base64 = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                let engine = base64::engine::general_purpose::STANDARD;
+                if needs_scaling {
+                    // Scale the image to the standard resolution
+                    let scaled_img = img.resize_exact(
+                        standard_width,
+                        standard_height,
+                        image::imageops::FilterType::Lanczos3,
+                    );
+
+                    // Encode the scaled image as JPEG (quality 85) — ~60% smaller than PNG
+                    let mut scaled_buffer = Cursor::new(Vec::new());
+                    let jpeg_encoder =
+                        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut scaled_buffer, 85);
+                    scaled_img
+                        .write_with_encoder(jpeg_encoder)
+                        .map_err(|e| format!("Failed to encode scaled image as JPEG: {}", e))?;
+
+                    Ok(engine.encode(scaled_buffer.into_inner()))
+                } else {
+                    // Re-encode as JPEG even when no scaling needed (saves ~60% vs PNG)
+                    let mut jpeg_buffer = Cursor::new(Vec::new());
+                    let jpeg_encoder =
+                        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_buffer, 85);
+                    img.write_with_encoder(jpeg_encoder)
+                        .map_err(|e| format!("Failed to encode image as JPEG: {}", e))?;
+                    Ok(engine.encode(jpeg_buffer.into_inner()))
+                }
+            })
+            .await
+            .map_err(|e| format!("Screenshot encode task failed: {}", e))??;
+
+            // Update scaling information with standard resolution data AND display origin
+            coordinates::update_standard_resolution_scaling_with_display(
+                display_width,
+                display_height,
+                standard_width, // The screenshot is now at standard resolution
+                standard_height,
+                origin_x,
+                origin_y,
+                Some(display_id),
+            );
+
+            info!("Screenshot scaling updated: display {}x{} at origin ({}, {}) → standard resolution {}x{} (Anthropic Computer Use API compliant)",
+                display_width, display_height, origin_x, origin_y, standard_width, standard_height);
+
+            // Send notification on success
+            send_dev_tool_notification(&app, "Screenshot", &format!(
+                "Screenshot captured at standard resolution {}x{} (scaled from display {}x{} at origin ({}, {}))",
+                standard_width, standard_height, display_width, display_height, origin_x, origin_y
+            ))?;
+
+            Ok(ScreenshotResult {
+                base64_image: final_base64,
+                original_width: display_width,
+                original_height: display_height,
+                resized_width: standard_width,
+                resized_height: standard_height,
+                output: get_cursor_position_text(),
+            })
         }
-        Err(e) => Err(format!("Failed to capture screenshot: {}", e)),
+        Err(e) => {
+            tracing::warn!(
+                "Failed to get display dimensions for standard resolution scaling: {}",
+                e
+            );
+
+            // Fallback: assume the screenshot is already properly sized
+            // This maintains some level of functionality even if display detection fails
+            let (_fallback_standard_width, _fallback_standard_height) =
+                crate::constants::ui::standard_resolutions::XGA; // Default to XGA
+
+            // This path always returned the unscaled capture as base64 PNG, so it still
+            // does — the PNG encode just moved here, off the hot path, and is only paid
+            // when display detection fails.
+            let base64_string = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                let mut png_buffer = Cursor::new(Vec::new());
+                img.write_to(&mut png_buffer, image::ImageFormat::Png)
+                    .map_err(|e| format!("Failed to encode image as PNG: {}", e))?;
+                Ok(base64::engine::general_purpose::STANDARD.encode(png_buffer.into_inner()))
+            })
+            .await
+            .map_err(|e| format!("Screenshot encode task failed: {}", e))??;
+
+            coordinates::update_standard_resolution_scaling(
+                original_width, // Use screenshot dimensions as display dimensions
+                original_height,
+                original_width, // Assume screenshot is at correct size
+                original_height,
+            );
+
+            tracing::warn!(
+                "Using fallback scaling with screenshot dimensions {}x{}",
+                original_width,
+                original_height
+            );
+
+            send_dev_tool_notification(
+                &app,
+                "Screenshot",
+                "Screenshot captured (display detection failed, using fallback scaling)",
+            )?;
+            Ok(ScreenshotResult {
+                base64_image: base64_string,
+                original_width,
+                original_height,
+                resized_width: original_width, // Fallback: no resize
+                resized_height: original_height,
+                output: get_cursor_position_text(),
+            })
+        }
     }
 }
 
