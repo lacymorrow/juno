@@ -189,12 +189,29 @@ pub mod standard_resolutions {
         [XGA, WXGA, FWXGA, HD_WXGA, HD_1080, ULTRA_HD, UW_1080];
 
     /// Whether a model supports high-resolution screenshots (2,576px).
-    /// Returns true for Opus 4.5+ models that use computer_20251124.
-    /// Also matches Claude CLI aliases ("opus", "sonnet") which resolve
-    /// to current-gen models that support high-res.
+    ///
+    /// This keeps no model list of its own. It reads the `image_tier` each
+    /// model declares in `agent::providers::types`, which comes from the
+    /// resolution tier table in Anthropic's vision docs ("Claude 4.7 and later
+    /// models" are high-resolution; everything else is standard).
+    ///
+    /// The tier is deliberately NOT inferred from the computer-use tool
+    /// version. Opus 4.6 and Opus 4.5 take the same `computer_20251124` tool as
+    /// Opus 4.7 but sit on the standard 1,568px tier, so tying the two together
+    /// is what sent oversized screenshots to those models.
     pub fn supports_high_res(model: &str) -> bool {
-        use crate::agent::providers::types::model_ids;
-        model_ids::OPUS_4_5_PLUS_MODELS.contains(&model) || matches!(model, "opus" | "sonnet")
+        use crate::agent::providers::types::{ImageTier, Provider};
+
+        // A model can be offered by more than one provider (the Claude CLI
+        // aliases, for one), so take the best tier any provider declares.
+        [
+            Provider::Anthropic,
+            Provider::ClaudeCli,
+            Provider::OpenAI,
+            Provider::Gemini,
+        ]
+        .iter()
+        .any(|provider| provider.image_tier(model) == ImageTier::HighResolution)
     }
 
     /// Select the best standard resolution for a given display and model.

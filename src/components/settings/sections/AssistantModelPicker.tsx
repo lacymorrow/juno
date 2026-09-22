@@ -18,9 +18,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Check, CheckCircle } from "lucide-react";
+import { Check } from "lucide-react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
+import { useAdvancedSettings } from "../AdvancedSettingsContext";
 import { useCallback, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS } from "@/lib/constants.generated";
@@ -48,18 +49,44 @@ export default function AssistantModelPicker({
     (p) => p.id === settings.activeProvider
   );
 
-  // Build sorted provider list: active provider first, then others with models
+  const { advanced: showAdvanced } = useAdvancedSettings();
+
+  const currentModelId =
+    settings.formData.model || settings.providerSettings?.model || "";
+
+  // Build sorted provider list: active provider first, then others with models.
+  // A provider whose models are all hidden drops out rather than rendering an
+  // empty group.
   const sortedProviders = useMemo(() => {
     const withModels = settings.providers.filter(
-      (p) => p.model_info && p.model_info.length > 0
+      (p) =>
+        p.model_info &&
+        p.model_info.some(
+          (m) => showAdvanced || !m.is_legacy || m.id === currentModelId
+        )
     );
     const active = withModels.filter((p) => p.id === settings.activeProvider);
     const rest = withModels.filter((p) => p.id !== settings.activeProvider);
     return [...active, ...rest];
-  }, [settings.providers, settings.activeProvider]);
+  }, [
+    settings.providers,
+    settings.activeProvider,
+    showAdvanced,
+    currentModelId,
+  ]);
 
-  const currentModelId =
-    settings.formData.model || settings.providerSettings?.model || "";
+  // Juno offers the current generation and nothing else, the way an Apple
+  // product does. Models that only drive the computer through an older tool
+  // version stay out of the list unless you ask for them — with one exception:
+  // whatever is selected right now is always shown, so the list can never hide
+  // what Juno is actually running, and you can always switch off it.
+  const visibleModels = useCallback(
+    (models: typeof settings.providers[number]["model_info"]) =>
+      models.filter(
+        (model) => showAdvanced || !model.is_legacy || model.id === currentModelId
+      ),
+    [showAdvanced, currentModelId]
+  );
 
   const selectedModel = useMemo(() => {
     for (const provider of settings.providers) {
@@ -115,19 +142,12 @@ export default function AssistantModelPicker({
         label="Active Provider"
         below={
           currentProvider && (
-            <div className="space-y-2">
-              <p className="text-sm text-muted-foreground">
-                {currentProvider.description}
-              </p>
-              {currentProvider.computer_use_supported && (
-                <div className="flex items-center gap-2 text-sm">
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                  <span className="text-green-700">
-                    Computer use capabilities available
-                  </span>
-                </div>
-              )}
-            </div>
+            // Every provider Juno ships can drive the computer, so a green
+            // "capabilities available" line under each one was decoration.
+            // The exception is marked in the list instead.
+            <p className="text-sm text-muted-foreground">
+              {currentProvider.description}
+            </p>
           )
         }
       >
@@ -158,12 +178,12 @@ export default function AssistantModelPicker({
                         : "No API key"}
                     </Badge>
                   )}
-                  {provider.is_available && provider.computer_use_supported && (
-                    <Badge
-                      variant="secondary"
-                      className="text-xs bg-blue-100 text-blue-800"
-                    >
-                      Computer Use
+                  {/* Every provider Juno ships has computer-use models, so a
+                      "Computer Use" badge on each row said nothing. Only the
+                      exception is worth marking. */}
+                  {provider.is_available && !provider.computer_use_supported && (
+                    <Badge variant="secondary" className="text-xs text-muted-foreground">
+                      Chat only
                     </Badge>
                   )}
                 </div>
@@ -215,7 +235,7 @@ export default function AssistantModelPicker({
                       }
                       className={!provider.is_available ? "opacity-50" : undefined}
                     >
-                      {provider.model_info.map((model) => {
+                      {visibleModels(provider.model_info).map((model) => {
                         const isActive =
                           model.id === currentModelId &&
                           provider.id === settings.activeProvider;
@@ -240,10 +260,13 @@ export default function AssistantModelPicker({
                               </span>
                             )}
                             {provider.is_available && model.is_recommended && (
-                              <span className="text-xs text-green-600">Recommended</span>
+                              <span className="text-xs text-muted-foreground">Recommended</span>
                             )}
-                            {provider.is_available && model.supports_computer_use && (
-                              <span className="text-xs text-blue-600">Computer Use</span>
+                            {/* Absence is the signal: computer use is what Juno
+                                is for, so only a model that cannot do it is
+                                marked. */}
+                            {provider.is_available && !model.supports_computer_use && (
+                              <span className="text-xs text-muted-foreground">Chat only</span>
                             )}
                             {isActive && <Check className="size-4 text-primary" />}
                           </ModelSelectorItem>
@@ -254,17 +277,10 @@ export default function AssistantModelPicker({
                 </ModelSelectorList>
               </ModelSelectorContent>
             </ModelSelector>
-            {selectedModel && (
+            {selectedModel && !selectedModel.model.supports_computer_use && (
               <div className="text-xs text-muted-foreground">
-                {selectedModel.model.supports_computer_use ? (
-                  <span className="text-green-700">
-                    ✅ This model supports computer use automation
-                  </span>
-                ) : (
-                  <span className="text-amber-700">
-                    ⚠️ This model is for general chat only
-                  </span>
-                )}
+                {selectedModel.model.name} can answer questions, but it cannot
+                control the computer. Pick another model for that.
               </div>
             )}
           </div>
