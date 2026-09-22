@@ -57,6 +57,9 @@ pub struct ProviderInfo {
     pub is_available: bool,
     pub is_default: bool,
     pub computer_use_supported: bool, // Whether this provider supports computer use at all
+    /// Installed, but signed out — the one unavailability the person fixes in
+    /// a terminal rather than by pasting a key. Only ever true for the CLI.
+    pub needs_sign_in: bool,
 }
 
 /// Factory for creating provider-specific AgentBrain implementations
@@ -226,6 +229,8 @@ impl BrainFactory {
             Provider::ClaudeCli,
         ];
         let config = Some(load_provider_config(app_handle));
+        // One filesystem probe for the whole listing.
+        let cli_installed = crate::agent::providers::claude_cli::is_claude_cli_available();
 
         providers
             .into_iter()
@@ -271,10 +276,26 @@ impl BrainFactory {
                                 .is_some_and(|k| !k.is_empty())
                     }
                     Provider::ClaudeCli => {
-                        // Claude CLI availability = binary exists on PATH (fast check)
-                        crate::agent::providers::claude_cli::is_claude_cli_available()
+                        // The binary existing is not the same as it being able
+                        // to answer, and this listing is what Settings offers
+                        // people. A logged-out CLI shown as ready is a provider
+                        // you can select and then watch fail.
+                        //
+                        // Only a *confirmed* signed-out greys it out. This
+                        // function is synchronous and runs on every render, so
+                        // it reads the last answer rather than spawning
+                        // `claude auth status` for a fresh one, and an answer
+                        // nobody has asked for yet — or one the CLI gave in a
+                        // form we could not read — leaves the listing alone.
+                        use crate::agent::providers::claude_cli::{last_known_sign_in, SignIn};
+                        cli_installed && last_known_sign_in() != SignIn::SignedOut
                     }
                 };
+                // The one unavailability you fix in a terminal rather than by
+                // pasting a key.
+                let needs_sign_in =
+                    provider == Provider::ClaudeCli && cli_installed && !is_available;
+
                 ProviderInfo {
                     id: provider_id.to_string(),
                     name: provider.display_name().to_string(),
@@ -285,6 +306,7 @@ impl BrainFactory {
                     is_available,
                     is_default: provider == current_provider,
                     computer_use_supported: provider.supports_computer_use(),
+                    needs_sign_in,
                 }
             })
             .collect()

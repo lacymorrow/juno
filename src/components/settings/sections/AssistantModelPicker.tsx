@@ -11,6 +11,7 @@ import {
 } from "@/components/ai-elements/model-selector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { providerUnavailableReason } from "@/lib/provider-status";
 import {
   Select,
   SelectContent,
@@ -173,9 +174,7 @@ export default function AssistantModelPicker({
                       variant="outline"
                       className="text-xs text-muted-foreground"
                     >
-                      {provider.id === "claude_cli"
-                        ? "CLI not found"
-                        : "No API key"}
+                      {providerUnavailableReason(provider)}
                     </Badge>
                   )}
                   {/* Every provider Juno ships has computer-use models, so a
@@ -225,10 +224,7 @@ export default function AssistantModelPicker({
                           {provider.name}
                           {!provider.is_available && (
                             <span className="text-[10px] text-muted-foreground/60">
-                              —{" "}
-                              {provider.id === "claude_cli"
-                                ? "CLI not found"
-                                : "No API key"}
+                              — {providerUnavailableReason(provider)}
                             </span>
                           )}
                         </span>
@@ -254,9 +250,7 @@ export default function AssistantModelPicker({
                             <ModelSelectorName>{model.name}</ModelSelectorName>
                             {!provider.is_available && (
                               <span className="text-xs text-muted-foreground">
-                                {provider.id === "claude_cli"
-                                  ? "CLI not found"
-                                  : "No API key"}
+                                {providerUnavailableReason(provider)}
                               </span>
                             )}
                             {provider.is_available && model.is_recommended && (
