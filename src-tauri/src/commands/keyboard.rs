@@ -234,7 +234,7 @@ pub(crate) async fn hold_key(
     if debug_config.validate_inputs {
         validators::non_empty_text(&key)?;
         if let Some(duration) = duration_ms {
-            validators::reasonable_duration(duration)?;
+            validators::reasonable_hold_key_duration_ms(duration)?;
         }
     }
 
