@@ -46,7 +46,13 @@ pub mod bar_appearances {
     pub const APP: &str = "app";
     pub const VOICE_AI: &str = "voice_ai";
     pub const DYNAMIC: &str = "dynamic";
+    /// The ElevenLabs orb appearance (three.js / react-three-fiber orb from
+    /// ui.elevenlabs.io). The value stays "orb" so saved configs keep working;
+    /// the UI label was renamed to "ElevenLabs Orb".
     pub const ORB: &str = "orb";
+    /// The React Bits orb appearance (ogl WebGL shader from reactbits.dev,
+    /// recolored per state via hue).
+    pub const REACT_ORB: &str = "react_orb";
     pub const PERSONA: &str = "persona";
 }
 

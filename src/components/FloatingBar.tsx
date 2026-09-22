@@ -1313,6 +1313,34 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     agentSessions.find((s) => s.focused)?.display_color ?? "#0A84FF";
   const flame = flameForState(currentUiState, isWorking, focusedSessionColor);
 
+  // Whether the glowing border shows at all. Read from the same bar config the
+  // settings window writes, and kept current from the config-changed event so
+  // the toggle takes effect without a restart. On by default.
+  const [showGlowBorder, setShowGlowBorder] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    void invoke<{ show_glow_border?: boolean }>("ui_get_bar_config")
+      .then((config) => {
+        if (!cancelled && typeof config?.show_glow_border === "boolean") {
+          setShowGlowBorder(config.show_glow_border);
+        }
+      })
+      .catch((error) =>
+        console.debug("FloatingBar: could not read the glow-border setting:", error),
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  useEventListener<{ show_glow_border?: boolean } | null>(
+    EVENTS.BAR_CONFIG_CHANGED,
+    (payload) => {
+      if (typeof payload?.show_glow_border === "boolean") {
+        setShowGlowBorder(payload.show_glow_border);
+      }
+    },
+  );
+
   const layout = pickLayout({
     state: currentUiState,
     hovered,
@@ -1960,7 +1988,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         {/* Activity indicator: a lit border whose colour + intensity name the
             mode (dictation, transcription, listening, working, error). Behind
             the content, mounted only while active. */}
-        {flame && (
+        {flame && showGlowBorder && (
           <BarFlameBorder
             color={flame.color}
             intensity={flame.intensity}

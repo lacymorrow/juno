@@ -8,8 +8,11 @@
  *   pulse      = a slow breathe for ongoing work (thinking / processing)
  *
  * Both are ANIMATED toward their targets, never switched, so the border eases
- * between meanings as the mode changes. Heat shimmer (distortion) and edge melt
- * are turned off — this is a clean glowing outline, not fire eating the pill.
+ * between meanings as the mode changes. Heat shimmer (distortion) is off, and
+ * melt is fully off: with melt = 0 the flame front sits exactly on the pill's
+ * border with NO inward bite, so it only licks outward. The molten edge glow
+ * (rim) and the outward licks stay — this is a clean glowing outline, not fire
+ * eating the pill.
  *
  * It sits absolutely behind the pill content at z-index -1 (the pill is
  * `isolate`), licking outward past the opaque face so it reads as a border. It
@@ -99,8 +102,9 @@ export function BarFlameBorder({ color, intensity, radius, pulse = false }: BarF
       turbulenceReach={8}
       smoke={0.35}
       ember={0.75}
-      // No heat shimmer, no edge melt: a clean glowing outline, not fire eating
-      // the pill.
+      // No heat shimmer, no edge melt: melt = 0 keeps the flame front on the
+      // border (zero inward bite), so it only licks outward. A clean glowing
+      // outline, not fire eating the pill.
       distortion={0}
       melt={0}
       // z-index -1 (pill is isolated) keeps the flame above the pill's dark face

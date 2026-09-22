@@ -114,6 +114,8 @@ pub struct FloatingBarConfig {
     pub auto_hide_delay: u32,
     pub opacity: f32,
     pub bar_appearance: String,
+    /// Show the glowing activity border (the flame wrap) around the bar.
+    pub show_glow_border: bool,
 }
 
 impl Default for FloatingBarConfig {
@@ -125,6 +127,7 @@ impl Default for FloatingBarConfig {
             auto_hide_delay: timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
             opacity: 0.95,
             bar_appearance: ui::bar_appearances::FLOATING.to_string(),
+            show_glow_border: crate::constants::settings::defaults::show_glow_border(),
         }
     }
 }
@@ -206,6 +209,7 @@ impl UIManager {
             auto_hide_delay: settings.auto_hide_delay,
             opacity: settings.opacity,
             bar_appearance: settings.bar_appearance.clone(),
+            show_glow_border: settings.show_glow_border,
         }
     }
 
@@ -228,6 +232,7 @@ impl UIManager {
             opacity: self.bar_config.opacity,
             bar_appearance: self.bar_config.bar_appearance.clone(),
             follow_cursor_display,
+            show_glow_border: self.bar_config.show_glow_border,
         };
 
         settings_manager

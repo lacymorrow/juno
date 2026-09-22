@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef } from "react"
 import { useTexture } from "@react-three/drei"
 import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import * as THREE from "three"
+// Vendored so the orb renders offline. Previously fetched from the ElevenLabs
+// public CDN, which failed with no network.
+import perlinNoiseUrl from "@/assets/perlin-noise.png"
 
 export type AgentState = null | "thinking" | "listening" | "talking"
 
@@ -21,7 +24,7 @@ type OrbProps = {
   className?: string
 }
 
-export function Orb({
+export function ElevenLabsOrb({
   colors = ["#CADCFC", "#A0B9D1"],
   colorsRef,
   resizeDebounce = 100,
@@ -96,9 +99,7 @@ function Scene({
   const targetColor1Ref = useRef(new THREE.Color(colors[0]))
   const targetColor2Ref = useRef(new THREE.Color(colors[1]))
   const animSpeedRef = useRef(0.1)
-  const perlinNoiseTexture = useTexture(
-    "https://storage.googleapis.com/eleven-public-cdn/images/perlin-noise.png"
-  )
+  const perlinNoiseTexture = useTexture(perlinNoiseUrl)
 
   const agentRef = useRef<AgentState>(agentState)
   const modeRef = useRef<"auto" | "manual">(volumeMode)

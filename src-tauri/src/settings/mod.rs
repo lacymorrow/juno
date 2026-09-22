@@ -75,6 +75,10 @@ pub struct FloatingBarSettings {
     /// slot on whichever display the cursor is on. On by default.
     #[serde(default = "defaults::follow_cursor_display")]
     pub follow_cursor_display: bool,
+    /// Show the glowing activity border (the flame wrap) around the bar. Off
+    /// hides it in every state. On by default; older stores lack the key.
+    #[serde(default = "defaults::show_glow_border")]
+    pub show_glow_border: bool,
 }
 
 /// Agent behavior and execution settings
@@ -104,6 +108,10 @@ pub struct AgentSettings {
     /// (accessory) app that never becomes the frontmost application.
     #[serde(default = "defaults::dock_icon_visible")]
     pub dock_icon_visible: bool,
+    /// Show Juno's menu-bar (tray) icon. Off hides it entirely; the app still
+    /// runs and its other surfaces (Dock, floating bar) stay reachable.
+    #[serde(default = "defaults::show_tray_icon")]
+    pub show_tray_icon: bool,
 }
 
 /// AI provider configurations
@@ -365,6 +373,7 @@ impl Default for FloatingBarSettings {
             opacity: 0.95,
             bar_appearance: ui::bar_appearances::FLOATING.to_string(),
             follow_cursor_display: defaults::follow_cursor_display(),
+            show_glow_border: defaults::show_glow_border(),
         }
     }
 }
@@ -379,6 +388,7 @@ impl Default for AgentSettings {
             mouse_control: defaults::MOUSE_CONTROL.to_string(),
             mouse_control_prompt_dismissed: false,
             dock_icon_visible: defaults::DOCK_ICON_VISIBLE,
+            show_tray_icon: defaults::SHOW_TRAY_ICON,
         }
     }
 }

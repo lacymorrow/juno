@@ -246,14 +246,20 @@ void main () {
     1.0
   );
 
-  float meltPx = max(uMelt, 1.0);
-  float biteTop = (3.0 + meltPx * 1.4) * (0.35 + 0.65 * tongue)
-    + 2.0 * snoise(vec2(px * 5.0 * detail, t * 1.1 + 5.0));
+  // melt == 0 means ZERO inward bite: the flame front sits exactly on the
+  // border and only licks outward. Gate the constant bite base, the floored
+  // melt reach, and the top jitter on melt being present, so melt > 0 behaves
+  // byte-for-byte as before while melt == 0 collapses biteTop/biteSB to 0.
+  float meltOn = step(0.0001, uMelt);
+  float meltBase = 3.0 * meltOn;
+  float meltPx = meltOn * max(uMelt, 1.0);
+  float biteTop = (meltBase + meltPx * 1.4) * (0.35 + 0.65 * tongue)
+    + 2.0 * snoise(vec2(px * 5.0 * detail, t * 1.1 + 5.0)) * meltOn;
   float yF = uRectHalf.y - biteTop;
   float frontTop = rel.y - yF;
 
   float perim = fbm2(rel * (1.9 / unit) * detail + vec2(0.0, t * 0.4) + 31.0);
-  float biteSB = 3.0 + meltPx * (0.25 + 0.75 * perim);
+  float biteSB = meltBase + meltPx * (0.25 + 0.75 * perim);
   float frontSB = d0 + biteSB;
 
   float wTop = S(-0.62 * unit, -0.1 * unit, rel.y - uRectHalf.y)

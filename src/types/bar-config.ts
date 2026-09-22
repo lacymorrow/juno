@@ -11,4 +11,5 @@ export interface FloatingBarConfig {
   auto_hide_delay: number;
   opacity: number;
   bar_appearance: BarAppearance;
+  show_glow_border: boolean;
 }

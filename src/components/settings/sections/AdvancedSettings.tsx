@@ -88,6 +88,7 @@ export default function AdvancedSettings({
   const [backgroundMode, setBackgroundMode] = useState(true);
   const [mouseControl, setMouseControl] = useState<MouseControlMode>("ask");
   const [dockIconVisible, setDockIconVisible] = useState(true);
+  const [showTrayIcon, setShowTrayIcon] = useState(true);
   const [backgroundLoading, setBackgroundLoading] = useState(true);
   const [backgroundError, setBackgroundError] = useState(false);
 
@@ -116,11 +117,13 @@ export default function AdvancedSettings({
           background_mode?: boolean;
           mouse_control?: string;
           dock_icon_visible?: boolean;
+          show_tray_icon?: boolean;
         }>(COMMANDS.SETTINGS_GET_AGENT_SETTINGS);
         if (!mounted) return;
         setBackgroundMode(agent?.background_mode ?? true);
         setMouseControl(agent?.mouse_control === "always" ? "always" : "ask");
         setDockIconVisible(agent?.dock_icon_visible ?? true);
+        setShowTrayIcon(agent?.show_tray_icon ?? true);
         setBackgroundError(false);
       } catch (error) {
         console.error("Failed to load background settings:", error);
@@ -179,6 +182,18 @@ export default function AdvancedSettings({
     }
   };
 
+  const handleTrayIconChange = async (visible: boolean) => {
+    const previous = showTrayIcon;
+    setShowTrayIcon(visible);
+    try {
+      await invoke(COMMANDS.INPUT_CONTROL_SET_TRAY_ICON_VISIBLE, { visible });
+    } catch (error) {
+      console.error("Failed to update the tray icon setting:", error);
+      setShowTrayIcon(previous);
+      toast.error("Could not change that setting");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <SettingsGroup
@@ -225,6 +240,19 @@ export default function AdvancedSettings({
             id="dock-icon-visible"
             checked={dockIconVisible}
             onCheckedChange={handleDockIconChange}
+            disabled={backgroundLoading || backgroundError}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          htmlFor="show-tray-icon"
+          label="Show system tray icon"
+          description="Show Juno's icon in the menu bar at the top of your screen. Turn it off to hide the icon; Juno keeps running and stays reachable from the Dock and the floating bar."
+        >
+          <Switch
+            id="show-tray-icon"
+            checked={showTrayIcon}
+            onCheckedChange={handleTrayIconChange}
             disabled={backgroundLoading || backgroundError}
           />
         </SettingsRow>

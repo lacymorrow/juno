@@ -9,8 +9,15 @@ import { AppBar } from "@/components/bar/app-bar";
 import { DynamicBar } from "@/components/bar/dynamic-bar";
 import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
 // Lazy-load heavy components to avoid pulling Three.js/Rive into shared bundles
-const OrbBar = lazy(() =>
-  import("@/components/bar/orb-bar").then((m) => ({ default: m.OrbBar }))
+const ElevenLabsOrbBar = lazy(() =>
+  import("@/components/bar/elevenlabs-orb-bar").then((m) => ({
+    default: m.ElevenLabsOrbBar,
+  }))
+);
+const ReactOrbBar = lazy(() =>
+  import("@/components/bar/react-orb-bar").then((m) => ({
+    default: m.ReactOrbBar,
+  }))
 );
 const PersonaBar = lazy(() =>
   import("@/components/bar/persona-bar").then((m) => ({
@@ -39,6 +46,7 @@ export function BarHost() {
             auto_hide_delay: TIMEOUTS.UI_NOTIFICATION_DISPLAY_MS,
             opacity: 0.95,
             bar_appearance: UI.BAR_APPEARANCES_FLOATING,
+            show_glow_border: true,
           });
         }
       }
@@ -79,7 +87,13 @@ export function BarHost() {
       case UI.BAR_APPEARANCES_ORB:
         return () => (
           <Suspense fallback={null}>
-            <OrbBar barAppearance={appearance} />
+            <ElevenLabsOrbBar barAppearance={appearance} />
+          </Suspense>
+        );
+      case UI.BAR_APPEARANCES_REACT_ORB:
+        return () => (
+          <Suspense fallback={null}>
+            <ReactOrbBar barAppearance={appearance} />
           </Suspense>
         );
       case UI.BAR_APPEARANCES_PERSONA:

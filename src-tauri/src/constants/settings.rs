@@ -22,6 +22,8 @@ pub mod store_keys {
     pub const BACKGROUND_MODE: &str = "background_mode";
     pub const MOUSE_CONTROL: &str = "mouse_control";
     pub const DOCK_ICON_VISIBLE: &str = "dock_icon_visible";
+    pub const SHOW_TRAY_ICON: &str = "show_tray_icon";
+    pub const SHOW_GLOW_BORDER: &str = "show_glow_border";
     pub const CLI: &str = "cli";
     pub const VOICE_TRANSCRIPTION: &str = "voice_transcription";
     pub const TRIGGERS: &str = "triggers";
@@ -146,6 +148,8 @@ pub mod defaults {
     pub const MOUSE_CONTROL_ALWAYS: &str = "always";
     /// Juno starts as a normal Dock app; the menu-bar-only mode is opt-in.
     pub const DOCK_ICON_VISIBLE: bool = true;
+    /// Juno shows its menu-bar (tray) icon by default; hiding it is opt-in.
+    pub const SHOW_TRAY_ICON: bool = true;
 
     pub fn background_mode() -> bool {
         BACKGROUND_MODE
@@ -156,6 +160,9 @@ pub mod defaults {
     pub fn dock_icon_visible() -> bool {
         DOCK_ICON_VISIBLE
     }
+    pub fn show_tray_icon() -> bool {
+        SHOW_TRAY_ICON
+    }
 
     pub fn advanced_settings_enabled() -> bool {
         ADVANCED_SETTINGS_ENABLED
@@ -165,6 +172,12 @@ pub mod defaults {
     pub const FOLLOW_CURSOR_DISPLAY: bool = true;
     pub fn follow_cursor_display() -> bool {
         FOLLOW_CURSOR_DISPLAY
+    }
+    /// The floating bar wears its glowing activity border by default. Off makes
+    /// the bar show no flame border in any state; older stores lack the key.
+    pub const SHOW_GLOW_BORDER: bool = true;
+    pub fn show_glow_border() -> bool {
+        SHOW_GLOW_BORDER
     }
 
     // Default keyboard shortcuts (cross-platform)
