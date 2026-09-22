@@ -451,13 +451,13 @@ impl ClaudeCliBrain {
 
         let msg_id = message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        // Emit stream start once, before any spawn. The old-CLI retry below
-        // can run the query twice, and the frontend appends a fresh assistant
-        // bubble on every start it sees — a second one would leave an empty
-        // message stranded above the answer.
-        if let Some(ref handle) = app_handle {
-            crate::agent::tool_logger::emit_stream_start(handle, msg_id.clone());
-        }
+        // Open the bubble once, before any spawn. The old-CLI retry below can
+        // run the query twice, and the frontend appends a fresh assistant
+        // message on every start it sees — a second one would leave an empty
+        // bubble stranded above the answer. Being above the spawn also puts
+        // it above two failure exits, which is why this is a guard: it closes
+        // on drop, so no exit from here on can strand a spinner.
+        let mut stream = StreamSurface::open(&app_handle, msg_id.clone());
 
         // Prefer the run's cancellation channel (for session-tracked runs this
         // is the merged session+global receiver — escape cancels only the
@@ -537,15 +537,19 @@ impl ClaudeCliBrain {
                     if !include_partial_messages {
                         strip_partial_messages(&mut fresh);
                     }
-                    spawn(&fresh).map_err(|e| {
-                        AgentError::LlmError(format!("Failed to spawn Claude CLI: {}", e))
-                    })?
+                    match spawn(&fresh) {
+                        Ok(child) => child,
+                        Err(e) => {
+                            let failure = format!("Failed to spawn Claude CLI: {}", e);
+                            stream.close(format!("Error: {}", failure));
+                            return Err(AgentError::LlmError(failure));
+                        }
+                    }
                 }
                 Err(e) => {
-                    return Err(AgentError::LlmError(format!(
-                        "Failed to spawn Claude CLI: {}",
-                        e
-                    )))
+                    let failure = format!("Failed to spawn Claude CLI: {}", e);
+                    stream.close(format!("Error: {}", failure));
+                    return Err(AgentError::LlmError(failure));
                 }
             };
 
@@ -581,23 +585,11 @@ impl ClaudeCliBrain {
                         match result {
                             Ok(Ok(r)) => r,
                             Ok(Err(e)) => {
-                                if let Some(ref handle) = app_handle {
-                                    crate::agent::tool_logger::emit_stream_end(
-                                        handle,
-                                        msg_id.clone(),
-                                        format!("Error: {}", e),
-                                    );
-                                }
+                                stream.close(format!("Error: {}", e));
                                 return Err(e);
                             }
                             Err(_elapsed) => {
-                                if let Some(ref handle) = app_handle {
-                                    crate::agent::tool_logger::emit_stream_end(
-                                        handle,
-                                        msg_id.clone(),
-                                        "Claude CLI timed out".to_string(),
-                                    );
-                                }
+                                stream.close("Claude CLI timed out".to_string());
                                 return Err(AgentError::Timeout(format!(
                                     "Claude CLI timed out after {} seconds",
                                     CLI_TIMEOUT.as_secs()
@@ -618,13 +610,7 @@ impl ClaudeCliBrain {
                     } => {
                         info!("Claude CLI cancelled via escape key, killing subprocess");
                         let _ = child.kill().await;
-                        if let Some(ref handle) = app_handle {
-                            crate::agent::tool_logger::emit_stream_end(
-                                handle,
-                                msg_id.clone(),
-                                "Cancelled".to_string(),
-                            );
-                        }
+                        stream.close("Cancelled".to_string());
                         return Err(AgentError::Terminated);
                     }
                 }
@@ -633,23 +619,11 @@ impl ClaudeCliBrain {
                 match stream_future.await {
                     Ok(Ok(r)) => r,
                     Ok(Err(e)) => {
-                        if let Some(ref handle) = app_handle {
-                            crate::agent::tool_logger::emit_stream_end(
-                                handle,
-                                msg_id.clone(),
-                                format!("Error: {}", e),
-                            );
-                        }
+                        stream.close(format!("Error: {}", e));
                         return Err(e);
                     }
                     Err(_elapsed) => {
-                        if let Some(ref handle) = app_handle {
-                            crate::agent::tool_logger::emit_stream_end(
-                                handle,
-                                msg_id.clone(),
-                                "Claude CLI timed out".to_string(),
-                            );
-                        }
+                        stream.close("Claude CLI timed out".to_string());
                         return Err(AgentError::Timeout(format!(
                             "Claude CLI timed out after {} seconds",
                             CLI_TIMEOUT.as_secs()
@@ -668,13 +642,7 @@ impl ClaudeCliBrain {
             {
                 info!("Claude CLI cancelled after stream completion, discarding response");
                 let _ = child.kill().await;
-                if let Some(ref handle) = app_handle {
-                    crate::agent::tool_logger::emit_stream_end(
-                        handle,
-                        msg_id.clone(),
-                        "Cancelled".to_string(),
-                    );
-                }
+                stream.close("Cancelled".to_string());
                 return Err(AgentError::Terminated);
             }
 
@@ -759,10 +727,9 @@ impl ClaudeCliBrain {
         // Use final_result if available, otherwise accumulated_text
         let complete_text = final_result.unwrap_or(accumulated_text);
 
-        // Emit stream end
-        if let Some(ref handle) = app_handle {
-            crate::agent::tool_logger::emit_stream_end(handle, msg_id, complete_text.clone());
-        }
+        // Close the bubble on the answer. The guard would close it empty if
+        // we did not, which is the whole point of it being a guard.
+        stream.close(complete_text.clone());
 
         if complete_text.is_empty() && !status.success() {
             return Err(AgentError::LlmError(format!(
@@ -1345,6 +1312,62 @@ impl AgentBrain for ClaudeCliBrain {
             .run_streaming(&query, app_handle, message_id, cancel_rx)
             .await?;
         Ok(AgentAction::Finish(result))
+    }
+}
+
+/// The assistant bubble for one run: opened on construction, guaranteed to be
+/// closed however the run ends.
+///
+/// `run_streaming` leaves by roughly eight different doors — cancellation
+/// before and after the stream, timeout, stream error, two spawn failures,
+/// success, and whatever gets added next. The frontend appends a message on
+/// `stream_start` and only stops its spinner on `stream_end`, so a door that
+/// forgets to close leaves a bubble spinning in the conversation forever.
+/// Pairing them by hand worked while the start sat below the spawn; once it
+/// moved above the retry loop it stopped working, and the fix that scales is
+/// to make the close impossible to forget rather than to remember it in eight
+/// places.
+struct StreamSurface {
+    /// A clone, so the caller keeps using its own `app_handle` freely.
+    app_handle: Option<tauri::AppHandle>,
+    msg_id: String,
+    open: bool,
+}
+
+impl StreamSurface {
+    /// Open the bubble. From here on it closes no matter how the run ends.
+    fn open(app_handle: &Option<tauri::AppHandle>, msg_id: String) -> Self {
+        if let Some(handle) = app_handle {
+            crate::agent::tool_logger::emit_stream_start(handle, msg_id.clone());
+        }
+        Self {
+            app_handle: app_handle.clone(),
+            msg_id,
+            open: true,
+        }
+    }
+
+    /// Close it on the text the person should be left looking at. Idempotent,
+    /// so a path that closes explicitly and then drops emits once.
+    fn close(&mut self, text: String) {
+        if !self.open {
+            return;
+        }
+        self.open = false;
+        if let Some(ref handle) = self.app_handle {
+            crate::agent::tool_logger::emit_stream_end(handle, self.msg_id.clone(), text);
+        }
+    }
+}
+
+impl Drop for StreamSurface {
+    fn drop(&mut self) {
+        if self.open {
+            // An exit that did not say what to show. Better an empty bubble
+            // than one that spins for the rest of the session.
+            warn!("Claude CLI run ended without closing its stream; closing it empty");
+            self.close(String::new());
+        }
     }
 }
 
@@ -2064,6 +2087,27 @@ mod tests {
         // Only valid alongside --print and stream-json, both of which we pass.
         assert!(args.contains(&"-p".to_string()));
         assert!(args.contains(&"stream-json".to_string()));
+    }
+
+    /// The bubble opens once and closes once, however many times it is asked.
+    ///
+    /// The idempotence is what lets every exit path close explicitly while
+    /// `Drop` still backstops the ones that cannot (the `?` returns). Drop
+    /// the guard and a path that closes explicitly would emit a second,
+    /// empty `stream_end` and wipe the answer off the screen.
+    #[test]
+    fn a_stream_surface_closes_exactly_once() {
+        // No AppHandle in tests, so nothing is emitted; the state machine
+        // that decides whether to emit is the part under test.
+        let mut surface = StreamSurface::open(&None, "msg-1".to_string());
+        assert!(surface.open, "opening arms the guard");
+
+        surface.close("the answer".to_string());
+        assert!(!surface.open, "closing disarms it");
+
+        // A second close, and the one Drop would attempt, must both no-op.
+        surface.close(String::new());
+        assert!(!surface.open);
     }
 
     #[test]
