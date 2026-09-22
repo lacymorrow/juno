@@ -80,6 +80,30 @@ struct SystemContentBlock {
 struct CacheControl {
     #[serde(rename = "type")]
     cache_type: String,
+    /// Cache lifetime. Omitted entirely for the default 5-minute cache; `Some("1h")` opts
+    /// into the extended 1-hour cache. Skipped when `None` so a default breakpoint
+    /// serializes byte-for-byte as it did before this field existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ttl: Option<String>,
+}
+
+impl CacheControl {
+    /// A default breakpoint: ephemeral, 5-minute TTL (expressed by omitting `ttl`).
+    fn ephemeral() -> Self {
+        CacheControl {
+            cache_type: "ephemeral".to_string(),
+            ttl: None,
+        }
+    }
+
+    /// A breakpoint with the extended 1-hour TTL. See `CACHE_TTL_EXTENDED` for when this
+    /// earns its higher write price.
+    fn ephemeral_extended() -> Self {
+        CacheControl {
+            cache_type: "ephemeral".to_string(),
+            ttl: Some(CACHE_TTL_EXTENDED.to_string()),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -342,14 +366,60 @@ const PRUNED_SCREENSHOT_PLACEHOLDER: &str =
 // Anthropic allows at most 4 `cache_control` breakpoints per request, and the request hashes in
 // the order tools -> system -> messages. Juno's budget, in prefix order:
 //
-//   1. last tool definition   — caches the tool schemas (~2.1k tokens)            [always]
-//   2. system prompt block    — caches tools + system prompt                      [when set]
-//   3. message anchor         — a long-lived breakpoint on an older tool_result   [see below]
-//   4. latest tool_result     — caches the whole history through the current turn [always]
+//   | # | breakpoint         | caches                                  | TTL | set in                        |
+//   |---|--------------------|-----------------------------------------|-----|-------------------------------|
+//   | 1 | last tool def      | the tool schemas (~2.1k tokens)         | 1h  | tools build site  [always]    |
+//   | 2 | system prompt block| tools + system prompt                   | 1h  | system build site [when set]  |
+//   | 3 | message anchor     | history through an older tool_result    | 1h  | apply_message_cache_breakpoints |
+//   | 4 | latest tool_result | history through the current turn        | 5m  | apply_message_cache_breakpoints |
 //
-// 1 and 2 are set where the tools / system blocks are built. 3 and 4 are set by
-// `apply_message_cache_breakpoints`. Anything that wants another breakpoint has to take one of
-// these four away — there is no fifth.
+// Anything that wants another breakpoint has to take one of these four away — there is no fifth.
+//
+// WHY THREE OF THEM ARE 1-HOUR. Juno is two workloads wearing one coat. In the computer-use
+// loop, turns are seconds apart and the default 5-minute cache never gets cold. But Juno is also
+// an interactive voice and chat app, and there the user says a command, watches it run, and then
+// thinks for a while before the next one. At the default TTL every one of those turns is a cold
+// start — and because batch pruning deliberately lets the retained screenshot count grow to
+// SCREENSHOT_PRUNE_HIGH_WATER - 1, a cold start now reprocesses up to 11 screenshots where the
+// old per-turn pruning would have reprocessed 3. A 1-hour TTL removes that tail outright, which
+// is what lets the high-water mark stay where it is instead of being tuned down to buy back the
+// interactive case at the loop's expense.
+//
+// COST SHAPE. A 1-hour cache write costs ~2x the base input price; a 5-minute write ~1.25x;
+// reads are ~0.1x either way (~0.025x on Fable 5.1, Juno's default model). So a 1h write pays
+// for itself the moment it is read even once more than a cold request would have been — the
+// break-even is about 1.1 reads — while a 5-minute write that expires before it is ever read is
+// strictly worse than not caching at all (1.25x for nothing).
+//
+// WHY THE LATEST BREAKPOINT STAYS AT 5 MINUTES. It moves every turn: written at turn N, read at
+// turn N+1, then superseded within seconds. Buying it an hour of life is paying the 2x premium
+// for something that is thrown away immediately. It is also the one breakpoint whose extra cost
+// would be paid on every single turn rather than occasionally.
+//
+// ORDERING IS A HARD API RULE, NOT A PREFERENCE. Every 1-hour breakpoint must appear before
+// every 5-minute breakpoint in the prefix. The table above is in prefix order and the three 1h
+// entries all precede the single 5m one, which is why `apply_message_cache_breakpoints` pushes
+// the anchor before the latest. Do not reorder them, and do not give the anchor a 5m TTL while
+// anything earlier keeps 1h.
+//
+// WHEN THE 1-HOUR PREMIUM IS ACTUALLY PAID. Billing walks three positions: A = the longest cache
+// hit, B = the last 1h breakpoint after A, C = the last breakpoint; you pay a read for A, a 1h
+// write for (B - A), and a 5m write for (C - B). In a warm loop the previous turn's latest
+// breakpoint is the hit, so A already sits past the anchor, B == A, and the 1h write is zero —
+// the loop pays 1.25x on one turn's delta and nothing more. B only moves ahead of A on the turns
+// where the anchor advances (every CACHE_ANCHOR_STRIDE turns, when anchor and latest coincide
+// and a single 1h breakpoint is written). That is the whole premium: 2x on one turn's delta,
+// once per stride, in exchange for an entry that survives the user going away for an hour.
+
+/// `ttl` value for Anthropic's extended cache duration. The default 5-minute cache is expressed
+/// by omitting `ttl` entirely rather than by sending `"5m"`.
+///
+/// Verified against the live docs on 2026-09-22:
+/// <https://platform.claude.com/docs/en/build-with-claude/prompt-caching> — `ttl` sits inside
+/// `cache_control` alongside `type`, the accepted values are `"5m"` and `"1h"`, the feature is
+/// generally available on all active models, and it needs **no** `anthropic-beta` header.
+/// (Per LAC-3106: check this against the live docs, never from memory or a cached catalog.)
+const CACHE_TTL_EXTENDED: &str = "1h";
 
 /// Hard API limit on `cache_control` breakpoints in a single request.
 const MAX_CACHE_BREAKPOINTS: usize = 4;
@@ -748,12 +818,16 @@ impl AnthropicBrain {
     /// though the tools and system prompt are cached.
     ///
     /// Two breakpoints are placed:
-    ///   * the latest tool_result turn, so the *next* request gets a hit covering the whole
-    ///     history through this turn;
-    ///   * an anchor quantised to `CACHE_ANCHOR_STRIDE`, which stays on the same message for
-    ///     several turns and therefore keeps one longer-lived entry warm as a fallback.
+    ///   * an anchor quantised to `CACHE_ANCHOR_STRIDE`, given the **1-hour** TTL. It stays on
+    ///     the same message for a whole stride, so it is the entry that survives a user who
+    ///     stops to think between voice commands;
+    ///   * the latest tool_result turn, left at the default **5-minute** TTL, so the *next*
+    ///     request gets a hit covering the whole history through this turn.
     ///
-    /// When there are fewer turns than the stride the two coincide and only one is written.
+    /// The anchor is pushed first because it sits earlier in the prefix and the API requires
+    /// every 1h breakpoint to precede every 5m one. When the two coincide — which happens
+    /// exactly on the turns where the anchor advances — only the 1h breakpoint is written, and
+    /// that is the one turn per stride on which the extended-TTL write premium is paid.
     fn apply_message_cache_breakpoints(api_messages: &mut [ApiMessage]) {
         // Indices of messages that contain at least one tool_result block, in order.
         let tool_result_msgs: Vec<usize> = api_messages
@@ -775,19 +849,24 @@ impl AnthropicBrain {
         // Quantised anchor: advances only once every CACHE_ANCHOR_STRIDE tool-result turns.
         let anchor_pos = latest_pos / CACHE_ANCHOR_STRIDE * CACHE_ANCHOR_STRIDE;
 
-        let mut targets: Vec<usize> = Vec::with_capacity(MESSAGE_CACHE_BREAKPOINTS);
-        for pos in [anchor_pos, latest_pos] {
-            if let Some(&msg_idx) = tool_result_msgs.get(pos) {
-                if !targets.contains(&msg_idx) {
-                    targets.push(msg_idx);
-                }
+        // (message index, extended TTL?). The anchor is pushed first so that, in prefix order,
+        // the 1h breakpoint always precedes the 5m one — an API requirement, not a style choice.
+        let mut targets: Vec<(usize, bool)> = Vec::with_capacity(MESSAGE_CACHE_BREAKPOINTS);
+        if let Some(&msg_idx) = tool_result_msgs.get(anchor_pos) {
+            targets.push((msg_idx, true));
+        }
+        if let Some(&msg_idx) = tool_result_msgs.get(latest_pos) {
+            // When the anchor has just advanced onto the latest turn the two coincide; keep the
+            // single breakpoint at 1h rather than downgrading it to 5m.
+            if !targets.iter().any(|(idx, _)| *idx == msg_idx) {
+                targets.push((msg_idx, false));
             }
         }
         // Belt and braces: never exceed the share of the 4-breakpoint budget reserved for
         // messages, whatever the stride arithmetic above does.
         targets.truncate(MESSAGE_CACHE_BREAKPOINTS);
 
-        for msg_idx in targets {
+        for (msg_idx, extended) in targets {
             if let Some(msg) = api_messages.get_mut(msg_idx) {
                 if let ApiContent::Blocks(blocks) = &mut msg.content {
                     // The breakpoint goes on the LAST tool_result block of the turn, so the
@@ -797,8 +876,10 @@ impl AnthropicBrain {
                         .filter(|b| b.block_type == "tool_result")
                         .next_back()
                     {
-                        block.cache_control = Some(CacheControl {
-                            cache_type: "ephemeral".to_string(),
+                        block.cache_control = Some(if extended {
+                            CacheControl::ephemeral_extended()
+                        } else {
+                            CacheControl::ephemeral()
                         });
                     }
                 }
@@ -2017,10 +2098,13 @@ impl AgentBrain for AnthropicBrain {
                     }
                 })
                 .collect();
-            // Breakpoint 1 of 4 (see the cache breakpoint budget at the top of this file).
-            // Add cache_control to the last tool to enable prompt caching of the tool definitions.
-            // When Anthropic caches tools, subsequent turns skip re-processing the tool
-            // definitions, reducing latency by 50-80% for the cached portion.
+            // Breakpoint 1 of 4, 1-hour TTL (see the cache breakpoint budget at the top of this
+            // file). Add cache_control to the last tool to enable prompt caching of the tool
+            // definitions. When Anthropic caches tools, subsequent turns skip re-processing the
+            // tool definitions, reducing latency by 50-80% for the cached portion. The tool list
+            // is byte-identical on every turn of every session, so this is the single strongest
+            // candidate for the extended TTL: written once, read for an hour, and it survives the
+            // user closing and reopening the app.
             //
             // This matters more on the toolset path, and the breakpoint must keep covering it.
             // Measured against the live API on otherwise-identical one-token requests:
@@ -2040,9 +2124,7 @@ impl AgentBrain for AnthropicBrain {
                     ApiTool::BuiltIn { cache_control, .. }
                     | ApiTool::Toolset { cache_control, .. }
                     | ApiTool::Custom { cache_control, .. } => {
-                        *cache_control = Some(CacheControl {
-                            cache_type: "ephemeral".to_string(),
-                        });
+                        *cache_control = Some(CacheControl::ephemeral_extended());
                     }
                 }
             }
@@ -2053,15 +2135,15 @@ impl AgentBrain for AnthropicBrain {
             }
         };
 
-        // Breakpoint 2 of 4 (see the cache breakpoint budget at the top of this file).
-        // Convert system prompt to content block array with cache_control for prompt caching
+        // Breakpoint 2 of 4, 1-hour TTL (see the cache breakpoint budget at the top of this
+        // file). Convert system prompt to content block array with cache_control for prompt
+        // caching. Like the tool list, the system prompt is stable across every turn, so the
+        // extended TTL is written once and read for an hour.
         let system_blocks = self.system_prompt.as_ref().map(|prompt| {
             vec![SystemContentBlock {
                 block_type: "text".to_string(),
                 text: prompt.clone(),
-                cache_control: Some(CacheControl {
-                    cache_type: "ephemeral".to_string(),
-                }),
+                cache_control: Some(CacheControl::ephemeral_extended()),
             }]
         });
 
@@ -2742,6 +2824,21 @@ mod tests {
             .collect()
     }
 
+    /// Every breakpoint as (message index, ttl), in prefix order.
+    fn breakpoints(msgs: &[ApiMessage]) -> Vec<(usize, Option<String>)> {
+        let mut out = Vec::new();
+        for (idx, msg) in msgs.iter().enumerate() {
+            if let ApiContent::Blocks(blocks) = &msg.content {
+                for block in blocks {
+                    if let Some(cc) = &block.cache_control {
+                        out.push((idx, cc.ttl.clone()));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     fn serialize_each(msgs: &[ApiMessage]) -> Vec<String> {
         msgs.iter()
             .map(|m| serde_json::to_string(m).unwrap_or_default())
@@ -3083,6 +3180,7 @@ mod tests {
         let mut msgs = conversation(2);
         AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
         let json = serde_json::to_string(&msgs).unwrap_or_default();
+        // The latest breakpoint keeps the default TTL, which is expressed by omitting `ttl`.
         assert!(
             json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"),
             "{}",
@@ -3092,5 +3190,101 @@ mod tests {
         let clean = conversation(2);
         let json = serde_json::to_string(&clean).unwrap_or_default();
         assert!(!json.contains("cache_control"), "{}", json);
+    }
+
+    // --- Extended (1-hour) cache TTL ---------------------------------------------------------
+
+    #[test]
+    fn default_cache_control_omits_ttl_entirely() {
+        // Adding the `ttl` field must not change the bytes of a breakpoint that does not set
+        // it — an existing 5-minute breakpoint has to serialize exactly as it did before.
+        let json = serde_json::to_string(&CacheControl::ephemeral()).unwrap_or_default();
+        assert_eq!(json, r#"{"type":"ephemeral"}"#);
+    }
+
+    #[test]
+    fn extended_cache_control_serializes_the_documented_shape() {
+        // Verified against the live docs 2026-09-22: `ttl` lives inside `cache_control`
+        // next to `type`, and the extended value is the string "1h".
+        let json = serde_json::to_string(&CacheControl::ephemeral_extended()).unwrap_or_default();
+        assert_eq!(json, r#"{"type":"ephemeral","ttl":"1h"}"#);
+        assert_eq!(CACHE_TTL_EXTENDED, "1h");
+    }
+
+    #[test]
+    fn anchor_gets_the_extended_ttl_and_latest_keeps_the_default() {
+        let mut msgs = conversation(10); // latest_pos 9, anchor_pos 8 — two distinct breakpoints
+        AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+        let bps = breakpoints(&msgs);
+        assert_eq!(bps.len(), 2, "{:?}", bps);
+        assert_eq!(bps[0].1.as_deref(), Some("1h"), "anchor must be extended");
+        assert_eq!(bps[1].1, None, "latest must keep the default 5m TTL");
+        assert!(bps[0].0 < bps[1].0, "anchor must precede latest");
+    }
+
+    #[test]
+    fn coincident_anchor_and_latest_keep_the_extended_ttl() {
+        // The anchor lands on the latest turn exactly when it advances (latest_pos a multiple
+        // of the stride). That single breakpoint is the one 1h write per stride — it must not
+        // be downgraded to 5m.
+        for turns in [1usize, CACHE_ANCHOR_STRIDE + 1, 2 * CACHE_ANCHOR_STRIDE + 1] {
+            let mut msgs = conversation(turns);
+            AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+            let bps = breakpoints(&msgs);
+            assert_eq!(bps.len(), 1, "turns={} bps={:?}", turns, bps);
+            assert_eq!(bps[0].1.as_deref(), Some("1h"), "turns={}", turns);
+        }
+    }
+
+    #[test]
+    fn every_extended_breakpoint_precedes_every_default_one() {
+        // Hard API rule: a 1-hour cache entry must appear before any 5-minute entry. Tools and
+        // the system prompt are both 1h and both sit ahead of `messages`, so checking the
+        // message breakpoints is sufficient to prove the whole request is ordered correctly.
+        for turns in 1..=40usize {
+            let mut msgs = conversation(turns);
+            AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+            let bps = breakpoints(&msgs);
+            let last_extended = bps.iter().rposition(|(_, ttl)| ttl.is_some());
+            let first_default = bps.iter().position(|(_, ttl)| ttl.is_none());
+            if let (Some(last_ext), Some(first_def)) = (last_extended, first_default) {
+                assert!(
+                    last_ext < first_def,
+                    "turns={} a 5m breakpoint precedes a 1h one: {:?}",
+                    turns,
+                    bps
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn at_most_one_default_ttl_message_breakpoint_per_request() {
+        // Only the latest turn is allowed to be 5m; anything else would put a short TTL on a
+        // prefix that outlives it, and would risk violating the ordering rule.
+        for turns in 1..=40usize {
+            let mut msgs = conversation(turns);
+            AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+            let defaults = breakpoints(&msgs)
+                .into_iter()
+                .filter(|(_, ttl)| ttl.is_none())
+                .count();
+            assert!(defaults <= 1, "turns={} defaults={}", turns, defaults);
+        }
+    }
+
+    #[test]
+    fn extended_ttl_write_is_paid_once_per_stride() {
+        // The 1h write premium lands only on the turns where anchor and latest coincide, i.e.
+        // once every CACHE_ANCHOR_STRIDE turns. Count them over three full strides.
+        let span = 3 * CACHE_ANCHOR_STRIDE;
+        let coincident = (1..=span)
+            .filter(|&turns| {
+                let mut msgs = conversation(turns);
+                AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+                breakpoints(&msgs).len() == 1
+            })
+            .count();
+        assert_eq!(coincident, 3, "expected one 1h write per stride");
     }
 }
