@@ -79,6 +79,58 @@ pub const SYNTHESIZED_EVENT_MARKER: i64 = 0x4A55_4E4F;
 /// caller-supplied timeout.
 const BASH_POLL_INTERVAL_MS: u64 = 50;
 
+/// How long the two pipe readers get to hand their buffers over once the
+/// command's process group has been killed. SIGKILL closes the pipes at once,
+/// so this is slack for thread scheduling, not time for the command to work in.
+const BASH_PIPE_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// Kill everything the command started, then reap the direct child.
+///
+/// `run_shell_command` spawns the shell as the leader of its own process group,
+/// so one `killpg` reaches the grandchildren too. Killing only the shell is not
+/// enough: `sh -c 'a; b'` forks rather than execs, and the grandchild inherits
+/// the write ends of our stdout/stderr pipes. It would keep them open — and the
+/// reader threads blocked — for as long as it felt like running, which is how a
+/// one-second budget used to take thirty seconds.
+fn kill_shell_process_group(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // The child is its own group leader, so its pid is the group id. It has
+        // not been reaped yet, so the id still belongs to this group and cannot
+        // have been recycled onto an unrelated one. Guard the sign anyway: for
+        // `killpg`, 0 means "the caller's own group".
+        if let Ok(pgid) = i32::try_from(child.id()) {
+            if pgid > 0 {
+                // SAFETY: `killpg` is a plain signal syscall with no memory
+                // effects. `pgid` is a live, unreaped group we created above.
+                unsafe {
+                    libc::killpg(pgid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+    // Covers non-unix targets, and the case where the group was already gone.
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Wait for one reader thread's buffer, giving up at `deadline`.
+///
+/// `None` means the reader is still blocked on a pipe that some process other
+/// than the one we waited on is holding open.
+fn take_pipe_output(
+    receiver: &std::sync::mpsc::Receiver<Vec<u8>>,
+    deadline: Instant,
+) -> Option<Vec<u8>> {
+    match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(buffer) => Some(buffer),
+        // The reader already handed its buffer over, or panicked. Either way
+        // nothing more is coming and nothing is blocking.
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Some(Vec::new()),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+    }
+}
+
 /// Run a shell command, bounded by `timeout_seconds` when the caller supplied one.
 ///
 /// `timeout_seconds: None` is the path this tool has always taken: run to
@@ -86,8 +138,11 @@ const BASH_POLL_INTERVAL_MS: u64 = 50;
 /// substituted, because imposing one would newly kill slow-but-working commands
 /// that work today.
 ///
-/// `Some(seconds)` kills the child once that much wall-clock time has passed and
-/// reports `timed_out: true` alongside whatever output was produced first. The
+/// `Some(seconds)` bounds the whole call, not just the shell's own lifetime. On
+/// expiry the shell's entire process group is killed, which closes the pipes the
+/// shell's children inherited and lets the reader threads finish; without that,
+/// a forked grandchild holds the pipes and the call returns when *it* is done.
+/// Whatever output arrived first is returned alongside `timed_out: true`. The
 /// two pipes are drained on their own threads: polling `try_wait` while a chatty
 /// command fills a pipe buffer would deadlock, since nothing would be reading.
 fn run_shell_command(
@@ -111,34 +166,46 @@ fn run_shell_command(
         };
     };
 
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            AutomationError::Internal(format!(
-                "Failed to execute bash command '{}': {}",
-                args.join(" "),
-                e
-            ))
-        })?;
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Give the shell a process group of its own, with itself as leader, so
+        // everything it forks can be killed as one unit when the budget runs
+        // out. The side effect is that the command is no longer in our
+        // terminal's foreground group, which for a non-interactive tool is what
+        // we want anyway: it can no longer steal our stdin.
+        command.process_group(0);
+    }
+    let mut child = command.spawn().map_err(|e| {
+        AutomationError::Internal(format!(
+            "Failed to execute bash command '{}': {}",
+            args.join(" "),
+            e
+        ))
+    })?;
 
+    let (stdout_sender, stdout_receiver) = std::sync::mpsc::channel();
+    let (stderr_sender, stderr_receiver) = std::sync::mpsc::channel();
     let mut stdout_pipe = child.stdout.take();
     let mut stderr_pipe = child.stderr.take();
-    let stdout_reader = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut buffer = Vec::new();
         if let Some(pipe) = stdout_pipe.as_mut() {
             let _ = pipe.read_to_end(&mut buffer);
         }
-        buffer
+        let _ = stdout_sender.send(buffer);
     });
-    let stderr_reader = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut buffer = Vec::new();
         if let Some(pipe) = stderr_pipe.as_mut() {
             let _ = pipe.read_to_end(&mut buffer);
         }
-        buffer
+        let _ = stderr_sender.send(buffer);
     });
 
     // Elapsed time is measured against `Instant`, and compared as an elapsed
@@ -146,7 +213,7 @@ fn run_shell_command(
     // cannot overflow the addition.
     let budget = Duration::from_secs(timeout_seconds);
     let started_at = Instant::now();
-    let exit_status = loop {
+    let mut exit_status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) => {}
@@ -159,17 +226,47 @@ fn run_shell_command(
             }
         }
         if started_at.elapsed() >= budget {
-            let _ = child.kill();
-            let _ = child.wait();
             break None;
         }
         std::thread::sleep(Duration::from_millis(BASH_POLL_INTERVAL_MS));
     };
 
-    // Joined only after the child exited or was killed, so both pipes are
-    // closed by now and neither reader can block.
-    let stdout = String::from_utf8_lossy(&stdout_reader.join().unwrap_or_default()).to_string();
-    let stderr = String::from_utf8_lossy(&stderr_reader.join().unwrap_or_default()).to_string();
+    let mut timeout_error = None;
+    if exit_status.is_none() {
+        // Budget spent. Killing the group (not just the shell) is what closes
+        // the pipes, which is what lets the readers below return.
+        kill_shell_process_group(&mut child);
+        timeout_error = Some(format!(
+            "bash command exceeded its {}s timeout and was killed",
+            timeout_seconds
+        ));
+    }
+
+    // The readers get whatever is left of the budget, and never less than the
+    // handover grace, since after a kill there is no budget left to give them.
+    let drain_deadline = Instant::now()
+        + budget
+            .saturating_sub(started_at.elapsed())
+            .max(BASH_PIPE_DRAIN_GRACE);
+    let stdout_buffer = take_pipe_output(&stdout_receiver, drain_deadline);
+    let stderr_buffer = take_pipe_output(&stderr_receiver, drain_deadline);
+
+    if stdout_buffer.is_none() || stderr_buffer.is_none() {
+        // The shell is gone but a process it started still holds a pipe open —
+        // it escaped the group, by calling `setsid` or similar. Waiting on it is
+        // the unbounded wait this timeout exists to prevent, so stop waiting.
+        // The reader threads are left to finish and exit on their own; nothing
+        // else is holding them.
+        exit_status = None;
+        timeout_error = Some(format!(
+            "bash command exceeded its {}s timeout; a process it started outlived it \
+             and is still holding its output pipes open, so this output may be incomplete",
+            timeout_seconds
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&stdout_buffer.unwrap_or_default()).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_buffer.unwrap_or_default()).to_string();
 
     match exit_status {
         Some(status) => Ok(json!({
@@ -185,10 +282,7 @@ fn run_shell_command(
             "exit_code": Value::Null,
             "success": false,
             "timed_out": true,
-            "error": format!(
-                "bash command exceeded its {}s timeout and was killed",
-                timeout_seconds
-            )
+            "error": timeout_error
         })),
     }
 }
@@ -2111,9 +2205,49 @@ impl Desktop {
 #[cfg(test)]
 mod shell_timeout_tests {
     use super::run_shell_command;
+    use serde_json::Value;
+    use std::time::{Duration, Instant};
+
+    /// How far past its budget a timed-out call may return and still count as
+    /// bounded.
+    ///
+    /// The real cost after the budget expires is one poll interval (50ms), a
+    /// `killpg`, and a thread handover: a few milliseconds. Five seconds is
+    /// roughly a hundred times that, so the assertion will not flake on a box
+    /// running several builds at once — while still catching the defect these
+    /// tests exist for, where a 1s budget took 30.3s.
+    const TIMEOUT_SLACK: Duration = Duration::from_secs(5);
 
     fn sh(command: &str) -> Vec<String> {
         vec!["-c".to_string(), command.to_string()]
+    }
+
+    /// Run `command` with a timeout and return the result with how long the
+    /// call actually took.
+    fn run_timed(command: &str, timeout_seconds: u64) -> (Value, Duration) {
+        let started_at = Instant::now();
+        let result = run_shell_command("sh", &sh(command), Some(timeout_seconds))
+            .expect("a killed command still returns a result, not an error");
+        (result, started_at.elapsed())
+    }
+
+    fn assert_within_budget(elapsed: Duration, timeout_seconds: u64) {
+        let ceiling = Duration::from_secs(timeout_seconds) + TIMEOUT_SLACK;
+        assert!(
+            elapsed < ceiling,
+            "a {}s timeout must bound the call: it returned after {:.2?}, past the {:.2?} ceiling",
+            timeout_seconds,
+            elapsed,
+            ceiling
+        );
+    }
+
+    /// Whether `pid` still names a live process.
+    #[cfg(unix)]
+    fn process_is_alive(pid: i32) -> bool {
+        // SAFETY: signal 0 performs the permission and existence checks without
+        // delivering anything. No memory is touched.
+        unsafe { libc::kill(pid, 0) == 0 }
     }
 
     #[test]
@@ -2139,19 +2273,56 @@ mod shell_timeout_tests {
 
     #[test]
     fn a_command_that_outlives_its_timeout_is_killed() {
-        let result = run_shell_command("sh", &sh("sleep 30"), Some(1))
-            .expect("a killed command still returns a result, not an error");
+        // `sh -c 'sleep 30'` execs: the shell *becomes* the sleep, so killing
+        // the direct child has always been enough here.
+        let (result, elapsed) = run_timed("sleep 30", 1);
         assert_eq!(result["timed_out"], true);
         assert_eq!(result["success"], false);
         assert!(result["exit_code"].is_null());
+        assert_within_budget(elapsed, 1);
     }
 
     #[test]
     fn output_written_before_the_timeout_survives_the_kill() {
-        let result = run_shell_command("sh", &sh("printf early; sleep 30"), Some(1))
-            .expect("a killed command still returns a result, not an error");
+        // Two commands, so the shell forks instead of exec'ing. The grandchild
+        // inherits the write end of our stdout pipe; if it is left running, the
+        // reader blocks on that pipe and the call returns in 30s, not 1s.
+        let (result, elapsed) = run_timed("printf early; sleep 30", 1);
         assert_eq!(result["timed_out"], true);
         assert_eq!(result["stdout"], "early");
+        assert_within_budget(elapsed, 1);
+    }
+
+    /// The shape the original tests missed: the budget has to bound the call
+    /// even when what outlives it is a grandchild rather than the shell itself,
+    /// and that grandchild has to actually die.
+    #[cfg(unix)]
+    #[test]
+    fn a_forked_grandchild_is_killed_with_the_shell() {
+        // The shell reports the pid of the process it forked, then waits on it,
+        // so the grandchild is both identifiable and holding our pipes open.
+        let (result, elapsed) = run_timed(r#"sleep 30 & printf '%s' "$!"; wait"#, 1);
+        assert_eq!(result["timed_out"], true);
+        assert_within_budget(elapsed, 1);
+
+        let grandchild: i32 = result["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .parse()
+            .expect("the shell should have printed the pid of the process it forked");
+
+        // Reparenting to launchd and reaping is not instant; poll rather than
+        // guess a single sleep long enough to cover a loaded machine.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while process_is_alive(grandchild) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            !process_is_alive(grandchild),
+            "grandchild {} outlived the timeout that killed its shell",
+            grandchild
+        );
     }
 
     #[test]
