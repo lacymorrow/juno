@@ -134,7 +134,14 @@ field was documented rather than renamed.
 
 ## Reported, deliberately not changed
 
-### R1 — Every input validator in `commands/` is debug-only (systemic)
+**Update, 2026-09-22 (later the same day).** Six of these were reviewed and
+fixed on `integration/perf-2026-09-22`: R2, R3, R4, R5, R6 and R7, one commit
+each, with the reasoning in the commit messages. R1 and R8 stay unfixed by
+decision and are tracked as LAC-4004 and LAC-4010. Each heading below says
+which. The original text is left intact underneath, because what was believed
+at audit time is the useful record.
+
+### R1 — Every input validator in `commands/` is debug-only (systemic) — STILL OPEN (LAC-4004)
 
 `commands/debug_utils.rs:37-46` — `DebugConfig::production_mode()` sets
 `validate_inputs: false`, and every `commands/*` validator is gated on it. In a
@@ -153,7 +160,16 @@ Not changed: making validation unconditional alters production behaviour across
 a large number of commands and is a security/robustness decision, not a units
 fix. Worth its own issue.
 
-### R2 — `commands::core::wait` blocks a tokio worker
+### R2 — `commands::core::wait` blocks a tokio worker — FIXED
+
+The command now sleeps on `tokio::time::sleep` and no longer reaches
+`Desktop::wait`. The desktop availability check is kept, so the command fails
+the same way when accessibility was never granted. `DesktopWrapper::wait`,
+which had the same blocking call and no callers, is async for the same reason.
+Note the interaction with R1: because `validate_inputs` is false in release
+there is no upper bound on the sleep either, so this was an unbounded park of a
+worker thread, not a 30-second one. The bound is R1's problem; the parking is
+closed regardless of what happens to it.
 
 `commands/core.rs:928` → `desktop.wait(duration_ms)` →
 `platforms/macos/interaction.rs:2009` → `std::thread::sleep`. Called from an
@@ -163,7 +179,13 @@ blocking operations. Not changed: the desktop wrapper is synchronous by design
 and the right fix (a `tokio::time::sleep` at the command layer, or
 `spawn_blocking`) is a behaviour call, and this path is on the demo.
 
-### R3 — Cloud backoff's declared cap is not the cap
+### R3 — Cloud backoff's declared cap is not the cap — FIXED
+
+`backoff_delay` now applies the exponent limit and then clamps to
+`MAX_RETRY_INTERVAL_MS`, with `saturating_mul` so an over-large base cannot
+overflow before the clamp runs. No behaviour change at today's values — the
+clamp is not reached — which is the point: the bound held by coincidence and
+would have stopped holding the moment either feeding constant was raised.
 
 `constants/api.rs:132` declares `MAX_RETRY_INTERVAL_MS = 300000` ("5 minutes").
 Nothing reads it. The real backoff in `cloud/connector.rs:507-512` is
@@ -171,7 +193,16 @@ Nothing reads it. The real backoff in `cloud/connector.rs:507-512` is
 *under* the declared one — but a constant that names a bound nobody enforces is
 the shape of the `wait` bug, and someone will eventually trust it.
 
-### R4 — Two different defaults for the same cloud field
+### R4 — Two different defaults for the same cloud field — FIXED
+
+One source: `defaults::CLOUD_COMMAND_TIMEOUT_SECONDS`, read by both
+`CloudConfig::default()` and `CloudSettings::default()`. **30 seconds kept, not
+600.** It is the value that was already running on every install, so nothing
+changes underneath anyone, and giving up on a hung cloud command in half a
+minute is the safer of the two answers. Also corrected: both doc comments
+claimed this field is validated as `1..=3600`. That range belongs to
+`CLISettings::command_timeout`, a different field with the same name;
+`set_cloud_settings` validates only the heartbeat interval.
 
 `cloud/config.rs:124` has `command_timeout: 600`; `settings/mod.rs:416` has
 `command_timeout: 30`, and `cloud/config.rs:401` builds the config *from*
@@ -179,7 +210,13 @@ settings. So the effective value is 30 seconds, not the 600 the config's own
 default advertises. Same story for the pair as a whole. Judgment call about
 which is correct; not a unit error.
 
-### R5 — Divergent hold_key caps
+### R5 — Divergent hold_key caps — FIXED
+
+`reasonable_duration` is now `reasonable_hold_key_duration_ms` and reads
+`MAX_HOLD_KEY_MS` instead of carrying its own `30_000`. Renamed because the
+bare name invited a 300-second ceiling to be borrowed for an unrelated value.
+Behaviour change, deliberate: a 60-second hold is now accepted by the debug
+validator, as it already was on the agent path and in every release build.
 
 `resolve_hold_key_duration_ms` clamps at `MAX_HOLD_KEY_MS = 300_000`
 (Anthropic's 300s), while `debug_utils.rs:253` `reasonable_duration` rejects
@@ -187,7 +224,27 @@ anything over `30_000`ms. Both are internally consistent and in their stated
 units; they simply disagree with each other, and per R1 the second only runs in
 debug.
 
-### R6 — Accepted-and-ignored timeout knobs
+### R6 — Accepted-and-ignored timeout knobs — FIXED
+
+Each now honours a supplied value and **applies no default when one is
+absent**. That asymmetry is deliberate: honouring the knob unconditionally
+would newly kill slow-but-working operations, so callers that send nothing get
+exactly today's behaviour.
+
+- `browser_extract_content` / `browser_interact`: a supplied `timeout` waits
+  for the selector to appear, which is what the schema always promised. Absent,
+  the page is queried once. A selector that never appears still produces the
+  usual "not found" result rather than a new error.
+- `browser_navigate` was mis-reported above: it *does* read `timeout`, and it
+  is the one browser tool that already applied a default. Unchanged in
+  behaviour; it now reads the value through the same helper, which rounds a
+  float instead of dropping it (`as_u64()` returned `None` for `2500.5`).
+- MCP `bash`: a supplied timeout kills the command and reports
+  `timed_out: true` with whatever output arrived first. `call_tool` is
+  synchronous, so it is a `try_wait` poll against an `Instant` budget with both
+  pipes drained on their own threads. `timeout: 0` is rejected.
+- The two schemas that advertised a default nobody applied no longer do; the
+  bash schema now declares the `timeout` it has always accepted.
 
 - `agent/tools/browser_tools.rs:70, 106, 152` — three `"timeout"` schema
   properties, each correctly described as milliseconds, none of which the
@@ -199,7 +256,12 @@ debug.
 Not a unit defect, but the same failure mode: the caller's instruction is
 silently discarded.
 
-### R7 — File monitor's `Modified` check compares against the wrong baseline
+### R7 — File monitor's `Modified` check compares against the wrong baseline — FIXED
+
+The baseline is now the mtime read on the previous tick, updated every tick
+alongside `last_size`, which is how `SizeChanged` always worked. This also
+removed the loop's wall-clock stamp: two mtimes are only ever compared against
+each other now, never against "now".
 
 `timer_tools.rs` (file monitor, `FileMonitorType::Modified`) compares the
 file's mtime against the *monitor's start time*, not the previous tick. It
@@ -207,7 +269,7 @@ therefore only ever fires for a file modified within `check_interval + 1`
 seconds of the monitor starting. A logic bug, not a units bug; flagged here
 because it lives inside the code D2 touched.
 
-### R8 — `enforce_action_cooldown`'s load/store is not atomic
+### R8 — `enforce_action_cooldown`'s load/store is not atomic — STILL OPEN (LAC-4010)
 
 Two concurrent sessions can both read a stale `LAST_UI_ACTION_MS` and skip the
 cooldown. In practice `InputArbiter` serializes all coordinate-based physical
