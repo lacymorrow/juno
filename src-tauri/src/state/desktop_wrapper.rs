@@ -80,11 +80,18 @@ impl DesktopWrapper {
         }
     }
 
-    pub fn wait(&self, duration_ms: u64) -> Result<(), String> {
-        match &self.desktop {
-            Some(desktop) => desktop.wait(duration_ms).map_err(|e| e.to_string()),
-            None => Err("Desktop automation is not available. Please grant accessibility permissions and restart the app.".to_string()),
+    /// Sleep for `duration_ms` milliseconds without blocking the async runtime.
+    ///
+    /// Deliberately not a call through to `Desktop::wait`: that one is a
+    /// `std::thread::sleep`, so every caller inside an async context would park
+    /// a tokio worker thread for the whole duration. The availability check is
+    /// kept so this behaves like every other wrapper method.
+    pub async fn wait(&self, duration_ms: u64) -> Result<(), String> {
+        if self.desktop.is_none() {
+            return Err(DESKTOP_UNAVAILABLE.to_string());
         }
+        tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
+        Ok(())
     }
 
     pub fn get_clipboard_content(&self) -> Result<String, String> {
