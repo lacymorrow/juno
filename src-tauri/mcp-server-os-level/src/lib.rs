@@ -10,9 +10,11 @@ use serde_json::Value;
 use serde_json::{self, from_value, json};
 use std::collections::HashMap;
 use std::fs;
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tracing::{error, info};
 
 // Make element module public
@@ -72,6 +74,124 @@ pub struct ToolDefinition {
 /// event-source user-data field, so the host app's own key monitors and
 /// hotkey paths can recognise and ignore them. Spells "JUNO".
 pub const SYNTHESIZED_EVENT_MARKER: i64 = 0x4A55_4E4F;
+
+/// How often the `bash` tool checks on a child process while waiting out a
+/// caller-supplied timeout.
+const BASH_POLL_INTERVAL_MS: u64 = 50;
+
+/// Run a shell command, bounded by `timeout_seconds` when the caller supplied one.
+///
+/// `timeout_seconds: None` is the path this tool has always taken: run to
+/// completion, no limit, a hung command hangs the caller. No default is
+/// substituted, because imposing one would newly kill slow-but-working commands
+/// that work today.
+///
+/// `Some(seconds)` kills the child once that much wall-clock time has passed and
+/// reports `timed_out: true` alongside whatever output was produced first. The
+/// two pipes are drained on their own threads: polling `try_wait` while a chatty
+/// command fills a pipe buffer would deadlock, since nothing would be reading.
+fn run_shell_command(
+    program: &str,
+    args: &[String],
+    timeout_seconds: Option<u64>,
+) -> Result<Value, AutomationError> {
+    let Some(timeout_seconds) = timeout_seconds else {
+        return match Command::new(program).args(args).output() {
+            Ok(output) => Ok(json!({
+                "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+                "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
+                "exit_code": output.status.code(),
+                "success": output.status.success()
+            })),
+            Err(e) => Err(AutomationError::Internal(format!(
+                "Failed to execute bash command '{}': {}",
+                args.join(" "),
+                e
+            ))),
+        };
+    };
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            AutomationError::Internal(format!(
+                "Failed to execute bash command '{}': {}",
+                args.join(" "),
+                e
+            ))
+        })?;
+
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+    let stdout_reader = std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        if let Some(pipe) = stdout_pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut buffer);
+        }
+        buffer
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        if let Some(pipe) = stderr_pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut buffer);
+        }
+        buffer
+    });
+
+    // Elapsed time is measured against `Instant`, and compared as an elapsed
+    // value rather than a precomputed deadline, so an absurd `timeout_seconds`
+    // cannot overflow the addition.
+    let budget = Duration::from_secs(timeout_seconds);
+    let started_at = Instant::now();
+    let exit_status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) => {}
+            Err(e) => {
+                return Err(AutomationError::Internal(format!(
+                    "Failed to poll bash command '{}': {}",
+                    args.join(" "),
+                    e
+                )))
+            }
+        }
+        if started_at.elapsed() >= budget {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(BASH_POLL_INTERVAL_MS));
+    };
+
+    // Joined only after the child exited or was killed, so both pipes are
+    // closed by now and neither reader can block.
+    let stdout = String::from_utf8_lossy(&stdout_reader.join().unwrap_or_default()).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_reader.join().unwrap_or_default()).to_string();
+
+    match exit_status {
+        Some(status) => Ok(json!({
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": status.code(),
+            "success": status.success(),
+            "timed_out": false
+        })),
+        None => Ok(json!({
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": Value::Null,
+            "success": false,
+            "timed_out": true,
+            "error": format!(
+                "bash command exceeded its {}s timeout and was killed",
+                timeout_seconds
+            )
+        })),
+    }
+}
 
 /// Insert text into the focused app without touching the pasteboard.
 ///
@@ -685,6 +805,13 @@ impl Desktop {
                             ToolParameter {
                                 type_: "boolean".to_string(),
                                 description: "Set to true to restart the bash environment".to_string(),
+                            },
+                        );
+                        props.insert(
+                            "timeout".to_string(),
+                            ToolParameter {
+                                type_: "integer".to_string(),
+                                description: "Optional wall-clock limit in SECONDS (minimum 1). The command is killed when it is exceeded. Omit it to run the command to completion with no limit.".to_string(),
                             },
                         );
                         props
@@ -1535,15 +1662,22 @@ impl Desktop {
                 #[derive(Deserialize)]
                 struct BashArgs {
                     command: String,
+                    /// Wall-clock limit in SECONDS. `None` means the command runs
+                    /// to completion with no limit, which is what this tool has
+                    /// always done and what callers that send nothing still get.
                     timeout: Option<u64>,
-                } // Timeout in seconds
+                }
                 let parsed_args: BashArgs = from_value(args).map_err(|e| {
                     AutomationError::InvalidArgument(format!("Error parsing bash args: {}", e))
                 })?;
 
-                // Basic implementation without timeout handling for now
-                if parsed_args.timeout.is_some() {
-                    info!("Bash tool timeout parameter specified but not yet implemented.");
+                // A zero-second budget can only ever kill the command before it
+                // does anything, so it is a caller error, not a request.
+                if parsed_args.timeout == Some(0) {
+                    return Err(AutomationError::InvalidArgument(
+                        "bash 'timeout' must be at least 1 second; omit it to run without a timeout"
+                            .to_string(),
+                    ));
                 }
 
                 // Determine shell based on OS
@@ -1554,24 +1688,7 @@ impl Desktop {
                     ("sh", vec!["-c".to_string(), parsed_args.command])
                 };
 
-                match Command::new(shell_cmd.0).args(&shell_cmd.1).output() {
-                    Ok(output) => {
-                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                        let status_code = output.status.code();
-                        Ok(json!({
-                            "stdout": stdout,
-                            "stderr": stderr,
-                            "exit_code": status_code,
-                            "success": output.status.success()
-                        }))
-                    }
-                    Err(e) => Err(AutomationError::Internal(format!(
-                        "Failed to execute bash command '{}': {}",
-                        shell_cmd.1.join(" "),
-                        e
-                    ))),
-                }
+                run_shell_command(shell_cmd.0, &shell_cmd.1, parsed_args.timeout)
             }
             // --- End Bash Handler ---
 
@@ -1989,4 +2106,60 @@ impl Desktop {
     // --- End Screenshot Functionality ---
 
     // --- End New Methods ---
+}
+
+#[cfg(test)]
+mod shell_timeout_tests {
+    use super::run_shell_command;
+
+    fn sh(command: &str) -> Vec<String> {
+        vec!["-c".to_string(), command.to_string()]
+    }
+
+    #[test]
+    fn no_timeout_runs_to_completion_and_reports_no_timeout_field() {
+        let result = run_shell_command("sh", &sh("printf hello"), None)
+            .expect("command without a timeout should run");
+        assert_eq!(result["stdout"], "hello");
+        assert_eq!(result["success"], true);
+        assert_eq!(result["exit_code"], 0);
+        // The untimed path is byte-for-byte what it always was: no timeout was
+        // asked for, so no timeout is reported and none was applied.
+        assert!(result.get("timed_out").is_none());
+    }
+
+    #[test]
+    fn a_timeout_the_command_beats_is_reported_as_not_timed_out() {
+        let result = run_shell_command("sh", &sh("printf done"), Some(30))
+            .expect("fast command should finish inside its budget");
+        assert_eq!(result["stdout"], "done");
+        assert_eq!(result["success"], true);
+        assert_eq!(result["timed_out"], false);
+    }
+
+    #[test]
+    fn a_command_that_outlives_its_timeout_is_killed() {
+        let result = run_shell_command("sh", &sh("sleep 30"), Some(1))
+            .expect("a killed command still returns a result, not an error");
+        assert_eq!(result["timed_out"], true);
+        assert_eq!(result["success"], false);
+        assert!(result["exit_code"].is_null());
+    }
+
+    #[test]
+    fn output_written_before_the_timeout_survives_the_kill() {
+        let result = run_shell_command("sh", &sh("printf early; sleep 30"), Some(1))
+            .expect("a killed command still returns a result, not an error");
+        assert_eq!(result["timed_out"], true);
+        assert_eq!(result["stdout"], "early");
+    }
+
+    #[test]
+    fn a_nonzero_exit_is_reported_as_failure_not_as_a_timeout() {
+        let result = run_shell_command("sh", &sh("exit 3"), Some(30))
+            .expect("a failing command is still a result");
+        assert_eq!(result["exit_code"], 3);
+        assert_eq!(result["success"], false);
+        assert_eq!(result["timed_out"], false);
+    }
 }
