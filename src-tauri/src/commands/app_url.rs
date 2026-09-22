@@ -111,8 +111,7 @@ pub async fn open_application(
     debug_mode: Option<bool>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        send_debug_notification, should_enable_debug, validators::non_empty_text, DebugConfig,
-        DebugOperation,
+        send_debug_notification, should_enable_debug, DebugConfig, DebugOperation,
     };
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
@@ -122,18 +121,6 @@ pub async fn open_application(
     };
 
     let debug_op = DebugOperation::start("open_application", debug_config.clone());
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        if let Err(e) = non_empty_text(&app_name) {
-            let err_msg = format!("Invalid app name: {}", e);
-            if debug_config.send_notifications {
-                send_debug_notification(&app_handle, "Open Application Error", &err_msg)?;
-            }
-            debug_op.complete(Some(&app_handle), false);
-            return Err(err_msg);
-        }
-    }
 
     if debug_config.log_operations {
         info!("[APP] Opening application: {}", app_name);
@@ -260,8 +247,7 @@ pub async fn open_url(
     debug_mode: Option<bool>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        send_debug_notification, should_enable_debug, validators::non_empty_text, DebugConfig,
-        DebugOperation,
+        send_debug_notification, should_enable_debug, DebugConfig, DebugOperation,
     };
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
@@ -271,34 +257,6 @@ pub async fn open_url(
     };
 
     let debug_op = DebugOperation::start("open_url", debug_config.clone());
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        if let Err(e) = non_empty_text(&url) {
-            let err_msg = format!("Invalid URL: {}", e);
-            if debug_config.send_notifications {
-                send_debug_notification(&app_handle, "Open URL Error", &err_msg)?;
-            }
-            debug_op.complete(Some(&app_handle), false);
-            return Err(err_msg);
-        }
-
-        // Basic URL validation
-        if !url.starts_with("http://")
-            && !url.starts_with("https://")
-            && !url.starts_with("file://")
-            && !url.starts_with("ftp://")
-        {
-            let err_msg =
-                "URL must start with a valid protocol (http://, https://, file://, or ftp://)"
-                    .to_string();
-            if debug_config.send_notifications {
-                send_debug_notification(&app_handle, "Open URL Error", &err_msg)?;
-            }
-            debug_op.complete(Some(&app_handle), false);
-            return Err(err_msg);
-        }
-    }
 
     if debug_config.log_operations {
         info!("[APP] Opening URL: {}", url);

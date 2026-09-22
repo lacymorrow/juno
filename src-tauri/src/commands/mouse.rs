@@ -1,7 +1,7 @@
 // Commands related to mouse actions (clicks, movement, position)
 
 use crate::commands::debug_utils::{
-    log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+    log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
 };
 use crate::constants::events;
 use crate::constants::mouse::movement;
@@ -349,11 +349,6 @@ pub(crate) async fn left_click(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_coordinates(x, y)?;
-    }
-
     log_debug_operation(
         "left_click",
         &format!("Clicking at ({}, {}) with modifier: {:?}", x, y, modifier),
@@ -403,11 +398,6 @@ pub(crate) async fn right_click(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_coordinates(x, y)?;
-    }
 
     log_debug_operation(
         "right_click",
@@ -460,11 +450,6 @@ pub(crate) async fn mouse_move(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_coordinates(x, y)?;
-    }
 
     // Check if smooth mouse movement is enabled (default: true)
     let use_smooth_movement = {
@@ -560,11 +545,6 @@ pub(crate) async fn middle_click(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_coordinates(x, y)?;
-    }
-
     log_debug_operation(
         "middle_click",
         &format!(
@@ -618,11 +598,6 @@ pub(crate) async fn double_click(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_coordinates(x, y)?;
-    }
-
     log_debug_operation(
         "double_click",
         &format!(
@@ -675,11 +650,6 @@ pub(crate) async fn triple_click(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_coordinates(x, y)?;
-    }
 
     log_debug_operation(
         "triple_click",
@@ -737,9 +707,6 @@ pub(crate) async fn left_mouse_down(
     let (target_x, target_y) = match (x, y) {
         (Some(x_val), Some(y_val)) => {
             // Both coordinates provided
-            if debug_config.validate_inputs {
-                validators::valid_coordinates(x_val, y_val)?;
-            }
             (x_val, y_val)
         }
         (Some(x_val), None) => {
@@ -750,9 +717,6 @@ pub(crate) async fn left_mouse_down(
                     e
                 )
             })?;
-            if debug_config.validate_inputs {
-                validators::valid_coordinates(x_val, cursor_pos.1)?;
-            }
             (x_val, cursor_pos.1)
         }
         (None, Some(y_val)) => {
@@ -763,9 +727,6 @@ pub(crate) async fn left_mouse_down(
                     e
                 )
             })?;
-            if debug_config.validate_inputs {
-                validators::valid_coordinates(cursor_pos.0, y_val)?;
-            }
             (cursor_pos.0, y_val)
         }
         (None, None) => {
@@ -776,9 +737,6 @@ pub(crate) async fn left_mouse_down(
                     e
                 )
             })?;
-            if debug_config.validate_inputs {
-                validators::valid_coordinates(cursor_pos.0, cursor_pos.1)?;
-            }
             cursor_pos
         }
     };
@@ -849,9 +807,6 @@ pub(crate) async fn left_mouse_up(
     let (target_x, target_y) = match (x, y) {
         (Some(x_val), Some(y_val)) => {
             // Both coordinates provided
-            if debug_config.validate_inputs {
-                validators::valid_coordinates(x_val, y_val)?;
-            }
             (x_val, y_val)
         }
         (Some(x_val), None) => {
@@ -862,9 +817,6 @@ pub(crate) async fn left_mouse_up(
                     e
                 )
             })?;
-            if debug_config.validate_inputs {
-                validators::valid_coordinates(x_val, cursor_pos.1)?;
-            }
             (x_val, cursor_pos.1)
         }
         (None, Some(y_val)) => {
@@ -875,9 +827,6 @@ pub(crate) async fn left_mouse_up(
                     e
                 )
             })?;
-            if debug_config.validate_inputs {
-                validators::valid_coordinates(cursor_pos.0, y_val)?;
-            }
             (cursor_pos.0, y_val)
         }
         (None, None) => {
@@ -888,9 +837,6 @@ pub(crate) async fn left_mouse_up(
                     e
                 )
             })?;
-            if debug_config.validate_inputs {
-                validators::valid_coordinates(cursor_pos.0, cursor_pos.1)?;
-            }
             cursor_pos
         }
     };
@@ -958,12 +904,6 @@ pub(crate) async fn left_click_drag(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_coordinates(start_x, start_y)?;
-        validators::valid_coordinates(end_x, end_y)?;
-    }
 
     log_debug_operation(
         "left_click_drag",

@@ -58,7 +58,7 @@ pub(crate) async fn scroll_window(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -67,25 +67,6 @@ pub(crate) async fn scroll_window(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        let valid_directions = ["up", "down", "left", "right"];
-        if !valid_directions.contains(&direction.as_str()) {
-            return Err(format!(
-                "Invalid scroll direction: '{}'. Must be one of: {:?}",
-                direction, valid_directions
-            ));
-        }
-
-        if scroll_amount <= 0.0 {
-            return Err("Scroll amount must be greater than 0".to_string());
-        }
-
-        if let (Some(px), Some(py)) = (x, y) {
-            validators::valid_coordinates(px, py)?;
-        }
-    }
 
     let operation_desc = match (x, y) {
         (Some(px), Some(py)) => format!(
@@ -241,7 +222,7 @@ pub(crate) async fn get_window_info(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -250,11 +231,6 @@ pub(crate) async fn get_window_info(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&window_id)?;
-    }
 
     log_debug_operation(
         "get_window_info",
@@ -312,7 +288,7 @@ pub(crate) async fn focus_window(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -321,11 +297,6 @@ pub(crate) async fn focus_window(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&window_id)?;
-    }
 
     log_debug_operation(
         "focus_window",
@@ -379,7 +350,7 @@ pub(crate) async fn resize_window(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -388,17 +359,6 @@ pub(crate) async fn resize_window(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&window_id)?;
-        if width <= 0 {
-            return Err("Width must be greater than 0".to_string());
-        }
-        if height <= 0 {
-            return Err("Height must be greater than 0".to_string());
-        }
-    }
 
     log_debug_operation(
         "resize_window",
@@ -508,7 +468,7 @@ pub(crate) async fn move_window(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -517,11 +477,6 @@ pub(crate) async fn move_window(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&window_id)?;
-    }
 
     log_debug_operation(
         "move_window",
@@ -626,7 +581,7 @@ pub(crate) async fn close_window(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -635,11 +590,6 @@ pub(crate) async fn close_window(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&window_id)?;
-    }
 
     log_debug_operation(
         "close_window",

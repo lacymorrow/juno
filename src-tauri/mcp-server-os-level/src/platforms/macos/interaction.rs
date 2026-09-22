@@ -1997,7 +1997,13 @@ pub(crate) fn post_mouse_event(
     Ok(())
 }
 
-/// Wait for a specified duration in milliseconds
+/// Wait for a specified duration in milliseconds.
+///
+/// Blocks the calling thread (`std::thread::sleep`). Only call this from
+/// synchronous contexts (e.g. the juno-cua CLI). From async code, use
+/// `tokio::time::sleep` instead — the Tauri `wait` command does exactly that
+/// (LAC-4013): routing through this function pinned a Tokio worker for the
+/// whole duration.
 pub(crate) fn wait(duration_ms: u64) -> Result<(), AutomationError> {
     debug!("Waiting for {} ms", duration_ms);
 
