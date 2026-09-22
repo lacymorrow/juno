@@ -13,7 +13,8 @@ import {
 // ── Tauri + hook mocks ───────────────────────────────────────────────
 
 const { invoke, listenHandlers, eventHandlers, resizeWindowIfChanged } = vi.hoisted(() => ({
-  invoke: vi.fn((..._args: unknown[]) => Promise.resolve()),
+  // Resolves to nothing unless a test teaches it a command's answer.
+  invoke: vi.fn((..._args: unknown[]): Promise<unknown> => Promise.resolve()),
   // Bar-state and hover events arrive through `listen` directly; conversation
   // events arrive through useEventListener. Both are captured by event name
   // so a test can play the backend. Hoisted: module-level services call
@@ -235,6 +236,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  // A test may teach invoke to answer a command; the next one starts mute.
+  invoke.mockImplementation(() => Promise.resolve());
 });
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -852,6 +855,72 @@ describe("FloatingBar", () => {
 
     submitUserMessage("Again");
     expect(screen.getByText("Again")).toBeInTheDocument();
+  });
+
+  /** A pane open on an empty conversation: the only route to the example prompts. */
+  async function openEmptyPane() {
+    await renderBar();
+    submitUserMessage("Hello");
+    streamAssistant("m1", "Hi.");
+    fire("agent-active", false);
+    setBarState({ barState: "default" });
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await act(async () => {});
+  }
+
+  it("sends an example prompt from the pane's empty state the way a typed follow-up goes", async () => {
+    // The bar's own connectivity probe; the mock returns nothing by default,
+    // which reads as an error.
+    invoke.mockImplementation((command: unknown) =>
+      Promise.resolve(command === "check_server_status" ? { backend_running: true } : undefined),
+    );
+    await openEmptyPane();
+
+    const screenshot = screen.getByRole("button", { name: "Screenshot" });
+    expect(screenshot).toBeEnabled();
+    expect(screen.queryByTestId("example-prompts-connecting")).not.toBeInTheDocument();
+
+    fireEvent.click(screenshot);
+    await act(async () => {});
+
+    // The same ui_handle_interaction submit the pill input dispatches; this
+    // used to be a deliberate no-op, so the buttons did nothing in the bar.
+    expect(invoke).toHaveBeenCalledWith(
+      "ui_handle_interaction",
+      interaction("submit", { value: "Take a screenshot and open System Preferences" }),
+    );
+    expect(invoke).not.toHaveBeenCalledWith("dispatch_query", expect.anything());
+  });
+
+  it("holds the example prompts behind a loader until the backend answers, then lets them send", async () => {
+    let connected: (status: { backend_running: boolean }) => void = () => {};
+    invoke.mockImplementation((command: unknown) =>
+      command === "check_server_status"
+        ? new Promise<{ backend_running: boolean }>((resolve) => {
+            connected = resolve;
+          })
+        : Promise.resolve(),
+    );
+    await openEmptyPane();
+
+    const screenshot = () => screen.getByRole("button", { name: "Screenshot" });
+    expect(screenshot()).toBeDisabled();
+    expect(screen.getByTestId("example-prompts-connecting")).toHaveTextContent("Connecting…");
+    fireEvent.click(screenshot());
+    expect(invoke).not.toHaveBeenCalledWith("ui_handle_interaction", interaction("submit"));
+
+    await act(async () => {
+      connected({ backend_running: true });
+    });
+
+    expect(screenshot()).toBeEnabled();
+    expect(screen.queryByTestId("example-prompts-connecting")).not.toBeInTheDocument();
+    fireEvent.click(screenshot());
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledWith(
+      "ui_handle_interaction",
+      interaction("submit", { value: "Take a screenshot and open System Preferences" }),
+    );
   });
 
   it("always offers a way into the chat from the idle bar", async () => {

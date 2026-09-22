@@ -9,7 +9,7 @@ import {
 import { ChatMessageComponent } from "@/components/ChatMessageV2";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 import type { ShareAnchor } from "@/hooks/useConversation";
-import { ExamplePrompts } from "@/components/ExamplePrompts";
+import { ExamplePrompts, type BackendStatus } from "@/components/ExamplePrompts";
 import { InputControlNotices } from "@/components/input-control/InputControlNotices";
 import { PermissionNotice } from "@/components/permissions/PermissionNotice";
 import { cn } from "@/lib/utils";
@@ -65,6 +65,8 @@ interface ChatContainerProps {
   onCopyResponse: (response: ResponseExportInput, messageIndex: number) => void;
   onShareResponse: (response: ResponseExportInput, anchor: ShareAnchor) => void;
   onExamplePromptSelect: (prompt: string) => void;
+  /** Gates the example prompts: a loader while connecting, live once connected. */
+  backendStatus?: BackendStatus;
   onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
   onContinuationUpdate?: (requestId: string, state: "stopped" | "continued") => void;
   /** Extra classes for the scroll container (e.g. a tighter pane in the bar). */
@@ -79,6 +81,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   onCopyResponse,
   onShareResponse,
   onExamplePromptSelect,
+  backendStatus = "connected",
   onApprovalUpdate,
   onContinuationUpdate,
   className,
@@ -88,6 +91,15 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   // conversation should jump to the bottom whatever the reader was doing.
   const sentCount = React.useMemo(
     () => conversation.filter((m) => m.role === "user").length,
+    [conversation],
+  );
+
+  // Empty means nobody has said anything yet. Status notes the app writes to
+  // itself ("Connected…") do not count: they used to replace the example
+  // prompts the moment the backend came up, so in the main window the buttons
+  // only ever existed while nothing could be sent.
+  const hasExchange = React.useMemo(
+    () => conversation.some((m) => m.role === "user" || m.role === "assistant"),
     [conversation],
   );
 
@@ -155,7 +167,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
             changes exactly once per send, while the array changes on every
             streamed token. */}
         <ConversationScrollOnSend signal={sentCount} />
-        {conversation.length === 0 ? (
+        {!hasExchange ? (
           <ConversationEmptyState>
             <div className="flex flex-col items-center justify-center space-y-6 py-12">
               <div className="space-y-2 text-center">
@@ -167,7 +179,10 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
                 </p>
               </div>
 
-              <ExamplePrompts onPromptSelect={onExamplePromptSelect} />
+              <ExamplePrompts
+                onPromptSelect={onExamplePromptSelect}
+                backendStatus={backendStatus}
+              />
             </div>
           </ConversationEmptyState>
         ) : (

@@ -388,14 +388,11 @@ function App() {
   // 2. Backend emits events → Frontend receives and stops audio/UI
   // 3. No frontend state checks needed - escape universally stops everything
 
-  // Example prompt selection. A click must always land: at a fresh app start
-  // the empty state (and these buttons) is only on screen while the backend is
-  // still connecting — the exact window where `canSubmit` is false — because
-  // once it connects a system message is appended and the empty state is gone.
-  // So we always drop the prompt into the input first (the user sees their
-  // words land), then submit it through the same path as typed input when we
-  // can. If the backend isn't ready yet the text waits in the input instead of
-  // being silently dropped.
+  // Example prompt selection. A click must always land: the prompt is dropped
+  // into the input first (the user sees their words land), then submitted
+  // through the same path as typed input when we can. The buttons are disabled
+  // while the backend is connecting, but if it is in error the text waits in
+  // the input instead of being silently dropped.
   const handleExamplePromptSelect = useCallback(
     (prompt: string) => {
       const trimmedPrompt = prompt.trim();
@@ -482,6 +479,7 @@ function App() {
                       onCopyResponse={handleCopyResponse}
                       onShareResponse={conversation.handleShareResponse}
                       onExamplePromptSelect={handleExamplePromptSelect}
+                      backendStatus={appState.serverStatus}
                       onApprovalUpdate={handleApprovalUpdate}
                       onContinuationUpdate={handleContinuationUpdate}
                     />
