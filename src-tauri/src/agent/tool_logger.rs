@@ -660,6 +660,57 @@ pub fn emit_thinking_end(app_handle: &AppHandle, message_id: String, complete_te
     }
 }
 
+/// Announce a tool the model is about to run, before it runs.
+///
+/// This is the transient "what is about to happen" indicator, NOT the durable
+/// conversation row — tools log that themselves when they execute, through
+/// `log_tool_call_request`. Emitting this as arguments stream in is what turns
+/// several silent seconds into "Clicking 640, 60". Safe to call repeatedly as
+/// the description sharpens: the payload replaces, it does not append.
+pub fn emit_tool_pending(
+    app_handle: &AppHandle,
+    message_id: &str,
+    tool_use_id: &str,
+    tool_name: &str,
+    description: &str,
+) {
+    let event_data = serde_json::json!({
+        "message_id": message_id,
+        "tool_use_id": tool_use_id,
+        "tool_name": tool_name,
+        "description": description,
+    });
+
+    if let Err(e) = app_handle.emit(
+        crate::constants::events::streaming::TOOL_PENDING,
+        event_data,
+    ) {
+        warn!("Failed to emit agent-tool-pending event: {}", e);
+    }
+}
+
+/// Clear a pending-tool indicator: its result arrived, or the stream ended.
+/// Always paired with `emit_tool_pending` so no spinner is left hanging.
+pub fn emit_tool_pending_cleared(
+    app_handle: &AppHandle,
+    message_id: &str,
+    tool_use_id: &str,
+    tool_name: &str,
+) {
+    let event_data = serde_json::json!({
+        "message_id": message_id,
+        "tool_use_id": tool_use_id,
+        "tool_name": tool_name,
+    });
+
+    if let Err(e) = app_handle.emit(
+        crate::constants::events::streaming::TOOL_PENDING_CLEARED,
+        event_data,
+    ) {
+        warn!("Failed to emit agent-tool-pending-cleared event: {}", e);
+    }
+}
+
 // Example usage for emitting a tool call request:
 pub fn log_tool_call_request(
     app_handle: &AppHandle,

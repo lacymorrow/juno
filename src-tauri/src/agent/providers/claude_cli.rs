@@ -269,6 +269,10 @@ pub struct ClaudeCliBrain {
     binary_path: PathBuf,
     model: String,
     system_prompt: Option<String>,
+    /// How hard the CLI thinks per turn — its `--effort` flag. Resolved once
+    /// at construction from the hidden `providers[].effort` setting, so the
+    /// stream loop never has to reach for the store.
+    effort: String,
     /// The session id the CLI reported during the current run.
     ///
     /// Filled by the stream reader and read once the run finishes, so the
@@ -289,16 +293,20 @@ impl ClaudeCliBrain {
             .clone()
             .unwrap_or_else(|| model_aliases::SONNET.to_string());
 
+        let effort = resolve_effort(config.effort.as_deref());
+
         info!(
-            "Initializing Claude CLI brain (binary: {}, model: {})",
+            "Initializing Claude CLI brain (binary: {}, model: {}, effort: {})",
             binary_path.display(),
-            model
+            model,
+            effort
         );
 
         Ok(Self {
             binary_path,
             model,
             system_prompt: config.system_prompt.clone(),
+            effort,
             observed_session: std::sync::Mutex::new(None),
         })
     }
@@ -320,6 +328,17 @@ impl ClaudeCliBrain {
             "stream-json".to_string(),
             "--model".to_string(),
             self.model.clone(),
+            // How hard to think per turn. Hidden advanced setting; see
+            // `resolve_effort`.
+            "--effort".to_string(),
+            self.effort.clone(),
+            // Ask for the raw streaming events, not just the finished
+            // messages. Without this the CLI says nothing between "thinking"
+            // and the final answer: on a measured 8.5s task the first visible
+            // pixel landed at t+7.1s, because a tool-only `assistant` message
+            // extracts to the empty string and everything before it — the
+            // tool call, its arguments, the reasoning — was never sent.
+            "--include-partial-messages".to_string(),
             // --strict-mcp-config limits MCP servers to exactly what we pass
             // via --mcp-config (or none) — user-level servers never load.
             // We can't use --bare because it blocks OAuth/keychain auth.
@@ -329,6 +348,12 @@ impl ClaudeCliBrain {
             // Note: this also lets juno-cua MCP tools run without prompting —
             // matching this provider's existing trust model.
             "--dangerously-skip-permissions".to_string(),
+            // The CLI's own toolset (Bash, Read, Edit, WebFetch) stays on
+            // deliberately. It augments Juno's computer tool rather than
+            // competing with it — reading a file beats screenshotting a text
+            // editor — so it is not worth narrowing with `--tools ""` today.
+            // May be revisited if the model starts reaching for Bash to drive
+            // the desktop despite MCP_TOOL_GUIDANCE.
         ];
 
         // Continue the session this conversation is already running in. The
@@ -688,6 +713,30 @@ impl ClaudeCliBrain {
         let mut tts_stream = crate::agent::tts_tags::TtsTagStream::new();
         let mut spoken_blocks: Vec<String> = Vec::new();
 
+        // Open content blocks in the partial-message stream, keyed by the
+        // index the CLI stamps on every delta belonging to them.
+        let mut blocks: std::collections::HashMap<u64, StreamBlock> =
+            std::collections::HashMap::new();
+        // Assistant message ids whose text has already gone out one
+        // `text_delta` at a time. The whole-message `assistant` event for
+        // those ids must stay silent — see the `assistant` arm below.
+        let mut streamed_messages: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        // The message the partial stream is currently inside. Deltas do not
+        // carry a message id, only the enclosing `message_start` does.
+        let mut partial_message_id: Option<String> = None;
+        // Has the partial stream produced any text at all? Belt and braces
+        // for the id-less case: if a `text_delta` ever arrived, the fast path
+        // is working, so an `assistant` message we cannot match by id must
+        // still be assumed already shown rather than emitted twice.
+        let mut saw_text_delta = false;
+        // Announced tools with no result yet: tool_use_id -> display label.
+        let mut pending_tools: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        // Which assistant message `previous_char_count` is counting. A run of
+        // tool calls produces several, each starting from zero.
+        let mut fallback_message_id: Option<String> = None;
+
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
@@ -722,36 +771,117 @@ impl ClaudeCliBrain {
                     }
 
                     match event_type {
-                        "assistant" => {
-                            // Extract text content from the assistant message
-                            if let Some(message) = parsed.get("message") {
-                                let text = extract_text_from_message(message);
-                                let char_count = text.chars().count();
-
-                                if char_count > previous_char_count {
-                                    // Compute delta using char offsets (safe for multi-byte UTF-8)
-                                    let delta: String =
-                                        text.chars().skip(previous_char_count).collect();
-                                    previous_char_count = char_count;
-
-                                    // Split the spoken channel out of the delta
-                                    let (display_delta, tts_blocks) = tts_stream.push(&delta);
-                                    for spoken in &tts_blocks {
-                                        info!(
-                                            "Extracted TTS content from Claude CLI: '{}'",
-                                            spoken
-                                        );
+                        // The raw streaming events, one step ahead of the
+                        // finished messages. This is where reasoning, tool
+                        // names and tool arguments become visible while the
+                        // model is still working rather than after it stops.
+                        "stream_event" => {
+                            if let Some(event) = parsed.get("event") {
+                                Self::handle_stream_event(
+                                    event,
+                                    app_handle,
+                                    msg_id,
+                                    &mut blocks,
+                                    &mut pending_tools,
+                                    &mut streamed_messages,
+                                    &mut partial_message_id,
+                                    &mut saw_text_delta,
+                                    &mut tts_stream,
+                                    &mut accumulated_text,
+                                    &mut spoken_blocks,
+                                );
+                            }
+                        }
+                        // Tool results come back as a `user` turn. The action
+                        // is over, so whatever indicator it raised comes down
+                        // — otherwise a finished tool spins forever.
+                        "user" => {
+                            if let Some(content) = parsed
+                                .get("message")
+                                .and_then(|m| m.get("content"))
+                                .and_then(|c| c.as_array())
+                            {
+                                for block in content {
+                                    if block.get("type").and_then(|v| v.as_str())
+                                        != Some("tool_result")
+                                    {
+                                        continue;
                                     }
-                                    accumulated_text.push_str(&display_delta);
+                                    let tool_use_id = block
+                                        .get("tool_use_id")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let label = pending_tools
+                                        .remove(tool_use_id)
+                                        .unwrap_or_else(|| "tool".to_string());
                                     if let Some(ref handle) = app_handle {
-                                        Self::emit_chunk_with_tts(
+                                        crate::agent::tool_logger::emit_tool_pending_cleared(
                                             handle,
-                                            display_delta,
                                             msg_id,
-                                            &tts_blocks,
+                                            tool_use_id,
+                                            &label,
                                         );
                                     }
-                                    spoken_blocks.extend(tts_blocks);
+                                }
+                            }
+                        }
+                        "assistant" => {
+                            // Fallback path. Kept for CLI builds that do not
+                            // support --include-partial-messages, where this
+                            // whole-message diff is the only source of text.
+                            if let Some(message) = parsed.get("message") {
+                                let message_id = message
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+
+                                // When the partial stream is live it has
+                                // already put every word of this message on
+                                // screen. Running the diff as well would
+                                // render each word twice and, worse, push the
+                                // whole text through the TTS splitter a
+                                // second time — the answer spoken twice over.
+                                let already_streamed = match message_id.as_ref() {
+                                    Some(id) => streamed_messages.contains(id),
+                                    // No id to match on. If the partial
+                                    // stream has produced text at all, it is
+                                    // the live path and this is a replay.
+                                    None => saw_text_delta,
+                                };
+
+                                if already_streamed {
+                                    debug!(
+                                        "Claude CLI assistant message already streamed as deltas; skipping whole-message diff"
+                                    );
+                                } else {
+                                    // Each assistant message diffs from its
+                                    // own zero. Without this reset the second
+                                    // message in a tool loop is measured
+                                    // against the first one's length and its
+                                    // opening words never appear.
+                                    if fallback_message_id != message_id {
+                                        fallback_message_id = message_id.clone();
+                                        previous_char_count = 0;
+                                    }
+
+                                    let text = extract_text_from_message(message);
+                                    let char_count = text.chars().count();
+
+                                    if char_count > previous_char_count {
+                                        // Char offsets, not bytes — safe for
+                                        // multi-byte UTF-8.
+                                        let delta: String =
+                                            text.chars().skip(previous_char_count).collect();
+                                        previous_char_count = char_count;
+                                        Self::emit_display_text(
+                                            app_handle,
+                                            msg_id,
+                                            &delta,
+                                            &mut tts_stream,
+                                            &mut accumulated_text,
+                                            &mut spoken_blocks,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -794,6 +924,13 @@ impl ClaudeCliBrain {
             }
         }
 
+        // Nothing may be left spinning once the stream is over. A tool that
+        // was cancelled, errored, or whose result never arrived has no
+        // `tool_result` to clear it, and a thinking block the CLI never
+        // stopped would stay open in the UI forever.
+        close_open_thinking(app_handle, &mut blocks);
+        clear_pending_tools(app_handle, msg_id, &mut pending_tools);
+
         // Flush the parser: a partial tag becomes display text, an unterminated
         // block is still spoken.
         let (tail_display, tail_spoken) = tts_stream.finish();
@@ -809,8 +946,10 @@ impl ClaudeCliBrain {
         // it for display and speak any block the assistant events did not
         // already cover (older CLI builds emit no assistant events).
         let final_result = final_result.map(|raw| {
-            let (display, blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
-            let unspoken: Vec<String> = blocks
+            // Named apart from the content-block map above, which is a
+            // different `blocks` entirely.
+            let (display, tts_blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
+            let unspoken: Vec<String> = tts_blocks
                 .into_iter()
                 .filter(|b| !spoken_blocks.contains(b))
                 .collect();
@@ -827,6 +966,242 @@ impl ClaudeCliBrain {
         });
 
         Ok((accumulated_text, final_result))
+    }
+
+    /// Handle one inner event from a `stream_event` line.
+    ///
+    /// The inner event mirrors the Anthropic streaming API exactly, so the
+    /// shapes here are the same ones `anthropic.rs` parses.
+    #[allow(clippy::too_many_arguments)]
+    fn handle_stream_event(
+        event: &Value,
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        blocks: &mut std::collections::HashMap<u64, StreamBlock>,
+        pending_tools: &mut std::collections::HashMap<String, String>,
+        streamed_messages: &mut std::collections::HashSet<String>,
+        partial_message_id: &mut Option<String>,
+        saw_text_delta: &mut bool,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        accumulated_text: &mut String,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        let inner_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        match inner_type {
+            "message_start" => {
+                *partial_message_id = event
+                    .get("message")
+                    .and_then(|m| m.get("id"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                // Block indices restart at zero for every message, so
+                // anything still open belongs to the previous one.
+                close_open_thinking(app_handle, blocks);
+            }
+            "content_block_start" => {
+                let block = event.get("content_block");
+                let block_type = block
+                    .and_then(|b| b.get("type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                match block_type {
+                    "thinking" | "redacted_thinking" => {
+                        // A fresh id, never `msg_id`: the frontend's
+                        // text-stream handler matches on message id alone,
+                        // so sharing one would append the answer's text to
+                        // the reasoning surface as well.
+                        let thinking_id = uuid::Uuid::new_v4().to_string();
+                        if let Some(handle) = app_handle {
+                            crate::agent::tool_logger::emit_thinking_start(
+                                handle,
+                                thinking_id.clone(),
+                            );
+                        }
+                        blocks.insert(
+                            index,
+                            StreamBlock::Thinking {
+                                thinking_id,
+                                text: String::new(),
+                            },
+                        );
+                    }
+                    "tool_use" | "server_tool_use" | "mcp_tool_use" => {
+                        let name = block
+                            .and_then(|b| b.get("name"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("tool")
+                            .to_string();
+                        let tool_use_id = block
+                            .and_then(|b| b.get("id"))
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("block-{}", index));
+                        let label = friendly_tool_name(&name).to_string();
+                        // The name arrives a full beat before the arguments.
+                        // Say what is coming now, sharpen it as the
+                        // arguments land.
+                        let announced = format!("Using {}", label);
+                        if let Some(handle) = app_handle {
+                            crate::agent::tool_logger::emit_tool_pending(
+                                handle,
+                                msg_id,
+                                &tool_use_id,
+                                &label,
+                                &announced,
+                            );
+                        }
+                        pending_tools.insert(tool_use_id.clone(), label.clone());
+                        blocks.insert(
+                            index,
+                            StreamBlock::ToolUse {
+                                tool_use_id,
+                                name,
+                                label,
+                                partial_json: String::new(),
+                                announced,
+                            },
+                        );
+                    }
+                    // Plain text needs no bookkeeping: its deltas go straight
+                    // out, and nothing has to be closed when it stops.
+                    _ => {}
+                }
+            }
+            "content_block_delta" => {
+                let delta = match event.get("delta") {
+                    Some(delta) => delta,
+                    None => return,
+                };
+
+                match delta.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+                    "text_delta" => {
+                        if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
+                            // Mark the message as served by this path so the
+                            // whole-message `assistant` event stays quiet.
+                            *saw_text_delta = true;
+                            if let Some(id) = partial_message_id.as_ref() {
+                                streamed_messages.insert(id.clone());
+                            }
+                            Self::emit_display_text(
+                                app_handle,
+                                msg_id,
+                                text,
+                                tts_stream,
+                                accumulated_text,
+                                spoken_blocks,
+                            );
+                        }
+                    }
+                    "thinking_delta" => {
+                        if let Some(text) = delta.get("thinking").and_then(|v| v.as_str()) {
+                            if let Some(StreamBlock::Thinking {
+                                thinking_id,
+                                text: accumulated,
+                            }) = blocks.get_mut(&index)
+                            {
+                                accumulated.push_str(text);
+                                if let Some(handle) = app_handle {
+                                    crate::agent::tool_logger::emit_thinking_chunk(
+                                        handle,
+                                        text.to_string(),
+                                        Some(thinking_id.clone()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    "input_json_delta" => {
+                        if let Some(fragment) = delta.get("partial_json").and_then(|v| v.as_str()) {
+                            if let Some(StreamBlock::ToolUse {
+                                tool_use_id,
+                                name,
+                                label,
+                                partial_json,
+                                announced,
+                            }) = blocks.get_mut(&index)
+                            {
+                                partial_json.push_str(fragment);
+                                // Read the arguments while they are still
+                                // arriving, so "Clicking 640, 60" shows
+                                // before the pointer moves rather than after.
+                                if let Some(input) = parse_partial_json(partial_json.as_str()) {
+                                    if let Some(description) =
+                                        describe_tool_call(name.as_str(), &input)
+                                    {
+                                        if description != *announced {
+                                            announced.clear();
+                                            announced.push_str(&description);
+                                            if let Some(handle) = app_handle {
+                                                crate::agent::tool_logger::emit_tool_pending(
+                                                    handle,
+                                                    msg_id,
+                                                    tool_use_id.as_str(),
+                                                    label.as_str(),
+                                                    &description,
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // `signature_delta` and friends carry nothing the UI
+                    // shows; the Anthropic provider ignores them here too.
+                    other => {
+                        debug!("Claude CLI stream delta '{}': skipped", other);
+                    }
+                }
+            }
+            "content_block_stop" => {
+                // A tool block stays in `pending_tools` on purpose: its
+                // arguments are complete but the action has not run yet.
+                if let Some(StreamBlock::Thinking { thinking_id, text }) = blocks.remove(&index) {
+                    if let Some(handle) = app_handle {
+                        crate::agent::tool_logger::emit_thinking_end(handle, thinking_id, text);
+                    }
+                }
+            }
+            "message_stop" => {
+                close_open_thinking(app_handle, blocks);
+                *partial_message_id = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// The single funnel for assistant display text.
+    ///
+    /// Both the `text_delta` fast path and the whole-message `assistant`
+    /// fallback come through here, in stream order, so the spoken channel is
+    /// split out of the text exactly once and in sequence. Routing either one
+    /// around this would silently break voice output: `TtsTagStream` is a
+    /// running parser, and text that skips it takes its `<TTS>` tags along
+    /// into the visible answer.
+    fn emit_display_text(
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        delta: &str,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        accumulated_text: &mut String,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        if delta.is_empty() {
+            return;
+        }
+
+        let (display_delta, tts_blocks) = tts_stream.push(delta);
+        for spoken in &tts_blocks {
+            info!("Extracted TTS content from Claude CLI: '{}'", spoken);
+        }
+        accumulated_text.push_str(&display_delta);
+        if let Some(handle) = app_handle {
+            Self::emit_chunk_with_tts(handle, display_delta, msg_id, &tts_blocks);
+        }
+        spoken_blocks.extend(tts_blocks);
     }
 
     /// Emit one display chunk plus every spoken block. The first block rides on
@@ -888,6 +1263,324 @@ impl AgentBrain for ClaudeCliBrain {
             .await?;
         Ok(AgentAction::Finish(result))
     }
+}
+
+/// One open content block in the partial-message stream.
+///
+/// `content_block_stop` carries only an index, never the kind of block it is
+/// closing, so the kind has to be remembered from its `content_block_start`.
+/// Plain text blocks are not tracked: their deltas go straight to the UI and
+/// there is nothing to close.
+enum StreamBlock {
+    Thinking {
+        /// The reasoning surface this block is streaming into. Always its own
+        /// id, never the run's `msg_id`.
+        thinking_id: String,
+        /// Everything streamed so far, replayed on `thinking_end`.
+        text: String,
+    },
+    ToolUse {
+        tool_use_id: String,
+        /// The tool as the CLI names it, e.g. `mcp__juno__computer`.
+        name: String,
+        /// The same tool as a person would say it, e.g. `computer`.
+        label: String,
+        /// Arguments so far. Arrives a few characters per delta.
+        partial_json: String,
+        /// The last description sent for this tool, so a sharper reading of
+        /// the same arguments replaces it and an identical one does not.
+        announced: String,
+    },
+}
+
+/// Close every reasoning surface still open.
+///
+/// Called when a message ends and when the stream does: a thinking block the
+/// CLI never stopped would otherwise sit spinning in the UI for good.
+fn close_open_thinking(
+    app_handle: &Option<tauri::AppHandle>,
+    blocks: &mut std::collections::HashMap<u64, StreamBlock>,
+) {
+    let open: Vec<StreamBlock> = blocks.drain().map(|(_, block)| block).collect();
+    if let Some(handle) = app_handle {
+        for block in open {
+            if let StreamBlock::Thinking { thinking_id, text } = block {
+                crate::agent::tool_logger::emit_thinking_end(handle, thinking_id, text);
+            }
+        }
+    }
+}
+
+/// Take down every pending-tool indicator that never got a result — a
+/// cancelled run, a tool that errored, a stream that simply ended.
+fn clear_pending_tools(
+    app_handle: &Option<tauri::AppHandle>,
+    msg_id: &str,
+    pending_tools: &mut std::collections::HashMap<String, String>,
+) {
+    let stale: Vec<(String, String)> = pending_tools.drain().collect();
+    if let Some(handle) = app_handle {
+        for (tool_use_id, label) in stale {
+            crate::agent::tool_logger::emit_tool_pending_cleared(
+                handle,
+                msg_id,
+                &tool_use_id,
+                &label,
+            );
+        }
+    }
+}
+
+/// Resolve the `--effort` level to pass the CLI.
+///
+/// Hidden advanced setting: `providers[].effort` in the Tauri settings store,
+/// with no UI that reads or writes it. A value the CLI would not accept is
+/// dropped rather than passed through, so a stale or hand-edited store cannot
+/// make every single spawn fail on an unknown argument.
+fn resolve_effort(configured: Option<&str>) -> String {
+    use crate::constants::settings::defaults::{CLAUDE_CLI_EFFORT, CLAUDE_CLI_EFFORT_LEVELS};
+
+    match configured {
+        Some(level) if CLAUDE_CLI_EFFORT_LEVELS.contains(&level) => level.to_string(),
+        Some(other) => {
+            warn!(
+                "Ignoring unknown Claude CLI effort level '{}'; using '{}'",
+                other, CLAUDE_CLI_EFFORT
+            );
+            CLAUDE_CLI_EFFORT.to_string()
+        }
+        None => CLAUDE_CLI_EFFORT.to_string(),
+    }
+}
+
+/// The tool as a person would say it.
+///
+/// MCP tools reach the CLI as `mcp__<server>__<tool>`; nobody needs to read
+/// the plumbing, they need to read "computer".
+fn friendly_tool_name(raw: &str) -> &str {
+    raw.rsplit("__").next().unwrap_or(raw)
+}
+
+/// Shorten text for a one-line indicator without ever byte-slicing it.
+fn truncate_for_display(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    format!(
+        "{}...",
+        trimmed
+            .chars()
+            .take(max_chars.saturating_sub(3))
+            .collect::<String>()
+    )
+}
+
+/// The last path segment of a file path, for a shorter indicator.
+fn file_label(path: &str) -> String {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let name = if name.is_empty() { path } else { name };
+    truncate_for_display(name, 40)
+}
+
+/// Best-effort parse of tool arguments that are still arriving.
+///
+/// `input_json_delta` hands the arguments over a few characters at a time,
+/// and waiting for the closing brace is waiting for the action itself. So we
+/// close whatever is still open and parse that. A fragment too early to mean
+/// anything yields None, and the next delta is tried instead.
+fn parse_partial_json(partial: &str) -> Option<Value> {
+    let trimmed = partial.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return Some(value);
+    }
+    if let Some(value) = close_open_json(trimmed) {
+        return Some(value);
+    }
+    // A field cut mid-value cannot be closed into anything valid, so fall
+    // back to everything before it: `"action":"left_click","coordinate":[64`
+    // still tells us a click is coming.
+    let shorter = truncate_at_last_comma(trimmed)?;
+    close_open_json(&shorter)
+}
+
+/// Append the closers for every string, array and object left open, then
+/// parse. Returns None if the result is still not valid JSON.
+fn close_open_json(fragment: &str) -> Option<Value> {
+    let mut stack: Vec<char> = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for ch in fragment.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => stack.push('}'),
+            '[' => stack.push(']'),
+            '}' | ']' => {
+                stack.pop();
+            }
+            _ => {}
+        }
+    }
+
+    let mut repaired = fragment.to_string();
+    // A trailing backslash would escape the quote we are about to add.
+    if escaped {
+        repaired.push('\\');
+    }
+    if in_string {
+        repaired.push('"');
+    }
+    while let Some(closer) = stack.pop() {
+        repaired.push(closer);
+    }
+
+    serde_json::from_str::<Value>(&repaired).ok()
+}
+
+/// Everything before the last comma that is not inside a string — where the
+/// half-arrived field begins.
+fn truncate_at_last_comma(fragment: &str) -> Option<String> {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut last_comma: Option<usize> = None;
+
+    for (position, ch) in fragment.chars().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            ',' => last_comma = Some(position),
+            _ => {}
+        }
+    }
+
+    last_comma.map(|position| fragment.chars().take(position).collect())
+}
+
+/// Say what a tool is about to do, in the words a person would use.
+///
+/// Returns None only when there is nothing useful to say yet, which leaves
+/// whatever was announced at `content_block_start` standing.
+fn describe_tool_call(tool_name: &str, input: &Value) -> Option<String> {
+    let label = friendly_tool_name(tool_name);
+
+    if label == "computer" {
+        return describe_computer_action(input);
+    }
+
+    fn field<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
+        input.get(key).and_then(|v| v.as_str())
+    }
+
+    let described = match label {
+        "Bash" => field(input, "command")
+            .map(|command| format!("Running {}", truncate_for_display(command, 60))),
+        "Read" => field(input, "file_path").map(|path| format!("Reading {}", file_label(path))),
+        "Write" => field(input, "file_path").map(|path| format!("Writing {}", file_label(path))),
+        "Edit" | "NotebookEdit" => {
+            field(input, "file_path").map(|path| format!("Editing {}", file_label(path)))
+        }
+        "Glob" | "Grep" => field(input, "pattern")
+            .map(|pattern| format!("Searching for {}", truncate_for_display(pattern, 40))),
+        "WebFetch" => {
+            field(input, "url").map(|url| format!("Fetching {}", truncate_for_display(url, 60)))
+        }
+        "WebSearch" => field(input, "query")
+            .map(|query| format!("Searching the web for {}", truncate_for_display(query, 40))),
+        "Task" => field(input, "description").map(|what| truncate_for_display(what, 60)),
+        _ => None,
+    };
+
+    // No recognised arguments is not nothing: the tool's own name is still
+    // more than the blank screen this replaces.
+    Some(described.unwrap_or_else(|| format!("Using {}", label)))
+}
+
+/// Say what Juno's own desktop tool is about to do. Action names match the
+/// vocabulary in `agent::tools::anthropic_computer_use`.
+fn describe_computer_action(input: &Value) -> Option<String> {
+    let action = input.get("action").and_then(|v| v.as_str())?;
+
+    let point = |key: &str| -> Option<String> {
+        let coordinate = input.get(key)?.as_array()?;
+        let x = coordinate.first()?.as_f64()?;
+        let y = coordinate.get(1)?.as_f64()?;
+        Some(format!("({}, {})", x.round() as i64, y.round() as i64))
+    };
+    let at = point("coordinate");
+    // "Clicking (640, 60)" once the point has arrived, plain "Clicking"
+    // until then.
+    let with_point = |verb: &str| match &at {
+        Some(place) => format!("{} {}", verb, place),
+        None => verb.to_string(),
+    };
+    let text = input.get("text").and_then(|v| v.as_str());
+
+    let described = match action {
+        "screenshot" => "Taking a screenshot".to_string(),
+        "cursor_position" => "Finding the cursor".to_string(),
+        "mouse_move" => with_point("Moving to"),
+        "left_click" => with_point("Clicking"),
+        "right_click" => with_point("Right-clicking"),
+        "middle_click" => with_point("Middle-clicking"),
+        "double_click" => with_point("Double-clicking"),
+        "triple_click" => with_point("Triple-clicking"),
+        "left_mouse_down" => with_point("Pressing the mouse at"),
+        "left_mouse_up" => with_point("Releasing the mouse at"),
+        "left_click_drag" => {
+            let from = point("start_coordinate").or_else(|| point("coordinate"));
+            match (from, point("end_coordinate")) {
+                (Some(start), Some(end)) => format!("Dragging {} to {}", start, end),
+                _ => with_point("Dragging to"),
+            }
+        }
+        "scroll" => {
+            let direction = input
+                .get("scroll_direction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("down");
+            format!("Scrolling {}", direction)
+        }
+        "type" => match text {
+            Some(typed) => format!("Typing \"{}\"", truncate_for_display(typed, 30)),
+            None => "Typing".to_string(),
+        },
+        "key" => match text {
+            Some(key) => format!("Pressing {}", truncate_for_display(key, 30)),
+            None => "Pressing a key".to_string(),
+        },
+        "hold_key" => match text {
+            Some(key) => format!("Holding {}", truncate_for_display(key, 30)),
+            None => "Holding a key".to_string(),
+        },
+        "wait" => "Waiting".to_string(),
+        "zoom" => "Zooming in".to_string(),
+        other => format!("Running {}", other),
+    };
+
+    Some(described)
 }
 
 /// Extract text content from a Claude CLI assistant message JSON object.
@@ -1016,6 +1709,7 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
+            effort: "high".to_string(),
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("test query", None, None);
@@ -1038,6 +1732,7 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "opus".to_string(),
             system_prompt: Some("You are helpful.".to_string()),
+            effort: "high".to_string(),
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("test query", None, None);
@@ -1057,6 +1752,7 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
+            effort: "high".to_string(),
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("and what about the other one?", Some("abc-123"), None);
@@ -1073,6 +1769,7 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
+            effort: "high".to_string(),
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("hello", None, None);
@@ -1097,6 +1794,7 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
+            effort: "high".to_string(),
             observed_session: std::sync::Mutex::new(None),
         };
         let config = PathBuf::from("/tmp/juno-mcp-test.json");
@@ -1125,6 +1823,7 @@ mod tests {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
+            effort: "high".to_string(),
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("hello", None, None);
@@ -1160,6 +1859,7 @@ mod tests {
             binary_path,
             model: "sonnet".to_string(),
             system_prompt: None,
+            effort: "high".to_string(),
             observed_session: std::sync::Mutex::new(None),
         }
     }
@@ -1244,6 +1944,117 @@ mod tests {
 
         assert_eq!(result.expect("run should succeed"), "hello from cli");
         let _ = std::fs::remove_file(&script);
+    }
+
+    /// The flag that makes any of this possible. Without it the CLI reports
+    /// only finished messages and the user watches a blank pane.
+    #[test]
+    fn partial_messages_are_requested() {
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        let args = brain.build_args("what is on screen", None, None);
+        assert!(args.contains(&"--include-partial-messages".to_string()));
+        // Only valid alongside --print and stream-json, both of which we pass.
+        assert!(args.contains(&"-p".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+    }
+
+    #[test]
+    fn effort_is_passed_and_defaults_sanely() {
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        let args = brain.build_args("hello", None, None);
+        let idx = args
+            .iter()
+            .position(|a| a == "--effort")
+            .expect("--effort is always passed");
+        assert_eq!(args[idx + 1], "high");
+    }
+
+    #[test]
+    fn an_unknown_effort_level_is_dropped_not_forwarded() {
+        // A hand-edited or stale store must not make every spawn fail on an
+        // argument the CLI rejects.
+        assert_eq!(resolve_effort(Some("xhigh")), "xhigh");
+        assert_eq!(resolve_effort(Some("banana")), "high");
+        assert_eq!(resolve_effort(None), "high");
+    }
+
+    #[test]
+    fn mcp_plumbing_is_stripped_from_tool_names() {
+        assert_eq!(friendly_tool_name("mcp__juno__computer"), "computer");
+        assert_eq!(friendly_tool_name("Bash"), "Bash");
+    }
+
+    #[test]
+    fn a_half_arrived_tool_call_still_reads() {
+        // The exact shape the CLI streams: arguments a few characters at a
+        // time. Each prefix must say as much as it can.
+        let complete = r#"{"action":"left_click","coordinate":[640,60]}"#;
+        let parsed = parse_partial_json(complete).expect("complete JSON parses");
+        assert_eq!(
+            describe_tool_call("mcp__juno__computer", &parsed).as_deref(),
+            Some("Clicking (640, 60)")
+        );
+
+        // Mid-coordinate: the point is not knowable yet, the action is.
+        let mid = r#"{"action":"left_click","coordinate":[64"#;
+        let parsed = parse_partial_json(mid).expect("partial JSON is repaired");
+        assert_eq!(
+            describe_tool_call("mcp__juno__computer", &parsed).as_deref(),
+            Some("Clicking")
+        );
+
+        // Mid-string: the open quote is closed before parsing.
+        let mid_string = r#"{"action":"scroll","scroll_direction":"do"#;
+        let parsed = parse_partial_json(mid_string).expect("open string is closed");
+        assert_eq!(
+            describe_tool_call("mcp__juno__computer", &parsed).as_deref(),
+            Some("Scrolling do")
+        );
+
+        // Too early to mean anything: a key with no value cannot be closed
+        // into valid JSON, so we say nothing rather than guess.
+        assert!(parse_partial_json("{\"ac").is_none());
+        assert!(parse_partial_json("").is_none());
+    }
+
+    #[test]
+    fn partial_json_never_panics_on_multibyte_text() {
+        // A truncation that lands inside a multi-byte character would panic
+        // if any of this byte-sliced.
+        let fragment = r#"{"action":"type","text":"héllo 🌍 世界"#;
+        let parsed = parse_partial_json(fragment).expect("multibyte fragment is repaired");
+        let described = describe_tool_call("mcp__juno__computer", &parsed)
+            .expect("a type action always describes");
+        assert!(described.starts_with("Typing"), "got {}", described);
+    }
+
+    #[test]
+    fn the_cli_tools_are_described_too() {
+        let bash = serde_json::json!({"command": "ls -la /tmp"});
+        assert_eq!(
+            describe_tool_call("Bash", &bash).as_deref(),
+            Some("Running ls -la /tmp")
+        );
+
+        let read = serde_json::json!({"file_path": "/Users/x/repo/src/main.rs"});
+        assert_eq!(
+            describe_tool_call("Read", &read).as_deref(),
+            Some("Reading main.rs")
+        );
+
+        // An unrecognised tool still beats a blank screen.
+        assert_eq!(
+            describe_tool_call("Mystery", &serde_json::json!({})).as_deref(),
+            Some("Using Mystery")
+        );
+    }
+
+    #[test]
+    fn long_text_is_truncated_by_characters_not_bytes() {
+        let long = "🌍".repeat(50);
+        let shortened = truncate_for_display(&long, 10);
+        assert_eq!(shortened.chars().count(), 10);
+        assert!(shortened.ends_with("..."));
     }
 
     #[test]

@@ -130,6 +130,15 @@ pub struct ProviderConfig {
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub system_prompt: Option<String>,
+    /// How hard the model thinks per turn, for providers that expose it — at
+    /// present only the Claude CLI, whose `--effort` flag this becomes.
+    ///
+    /// Deliberately hidden: no settings UI reads or writes it, so it stays a
+    /// store-only escape hatch. `None` means "use Juno's default"
+    /// (`defaults::CLAUDE_CLI_EFFORT`), which is also what older stores that
+    /// predate the key deserialize to.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 /// Cloud connectivity settings
