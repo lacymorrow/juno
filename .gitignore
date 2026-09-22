@@ -59,7 +59,6 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
 lerna-debug.log*
 bun-debug.log*
 
@@ -120,9 +119,6 @@ temp/
 yarn.lock
 .yarn/
 .pnp.*
-
-# PNPM (not used but common)
-pnpm-lock.yaml
 
 # NPM (not used but common)
 package-lock.json

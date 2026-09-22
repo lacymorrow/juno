@@ -132,7 +132,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
       }
 
       // Standard MCP format (Claude Desktop format) where server name is the key
-      // Example: { "mcp-server-firecrawl": { "command": "pnpm dlx", "args": ["firecrawl-mcp"], "env": { "FIRECRAWL_API_KEY": "..." } } }
+      // Example: { "mcp-server-firecrawl": { "command": "npx", "args": ["firecrawl-mcp"], "env": { "FIRECRAWL_API_KEY": "..." } } }
       const serverEntries = Object.entries(parsedConfig);
 
       if (
@@ -225,7 +225,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 onChange={(e) => setNewServerJson(e.target.value)}
                 placeholder={`{
   "mcp-server-firecrawl": {
-    "command": "pnpm dlx",
+    "command": "npx",
     "args": ["firecrawl-mcp"],
     "env": {
       "FIRECRAWL_API_KEY": "your-api-key-here"

@@ -103,7 +103,7 @@ echo "--------------------------------------------"
 
 echo "QA tests require the application to be running."
 echo "If you want to run QA tests, please:"
-echo "1. Start the app with 'pnpm tauri dev' in a separate terminal"
+echo "1. Start the app with 'bun run tauri:dev' in a separate terminal"
 echo "2. Run ./test-qa.sh manually after the app is running"
 
 echo ""
