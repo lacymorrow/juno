@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::fs;
 use tokio::sync::Mutex;
@@ -270,6 +270,43 @@ mod timer_tools_impl {
     use super::*;
     use crate::agent::core::ToolDefinition;
 
+    /// Upper bound, in seconds, on any schedule an agent can ask for (30 days).
+    ///
+    /// The tool schemas declare `"minimum": 1` and no maximum, and a JSON
+    /// Schema `minimum` is advisory — nothing on the request path enforced it.
+    /// Two silent failures followed from that:
+    ///
+    /// - `now + delay_seconds` overflowed. Rust's float-to-int casts saturate,
+    ///   so `delay_seconds: 1e30` became `u64::MAX` and the addition panicked
+    ///   in a debug build or wrapped in a release build — a wrap producing a
+    ///   `trigger_time` in the past, so the timer fired at once.
+    /// - `check_interval_seconds: 0` reached `tokio::time::interval`, which
+    ///   panics on a zero period and killed the monitoring task outright.
+    ///
+    /// Thirty days is far longer than any plausible agent timer and leaves no
+    /// room for either.
+    pub(super) const MAX_SCHEDULE_SECONDS: u64 = 30 * 24 * 60 * 60;
+
+    /// Read a count of **seconds** from an agent-supplied `input[key]`.
+    ///
+    /// Returns `None` only when the key is absent or is not a number, so the
+    /// caller can distinguish "not asked for" from "asked for badly".
+    ///
+    /// Fractional JSON numbers are accepted and rounded. These sites used
+    /// `as_u64()`, which returns `None` for `2.5` — so a model that asked for
+    /// a 2.5-second interval silently got the default instead, with nothing
+    /// said about it. That is the same class of defect as a wrong unit: the
+    /// request was ignored and the log looked fine.
+    ///
+    /// The result is clamped into `1..=MAX_SCHEDULE_SECONDS`. Saturating casts
+    /// put negatives and NaN on `0` and absurd values on `u64::MAX`; the clamp
+    /// catches both ends, which is what keeps `now.saturating_add(..)` inside
+    /// a sane range and keeps a zero period away from `tokio::time::interval`.
+    pub(super) fn schedule_seconds(input: &Value, key: &str) -> Option<u64> {
+        let raw = input.get(key)?.as_f64()?;
+        Some((raw.round() as u64).clamp(1, MAX_SCHEDULE_SECONDS))
+    }
+
     /// Creates the tool definition for the `set_timer` tool.
     ///
     /// Used by: Tool registration system, agent tool discovery
@@ -320,9 +357,9 @@ mod timer_tools_impl {
     /// # Returns
     /// Success response with timer details or error message
     pub async fn set_timer_exec(input: Value, app_handle: AppHandle) -> Result<Value, String> {
-        let delay_seconds = input["delay_seconds"].as_f64().ok_or_else(|| {
+        let delay_seconds = schedule_seconds(&input, "delay_seconds").ok_or_else(|| {
             error_messages::tool_errors::MISSING_DELAY_SECONDS_PARAMETER.to_string()
-        })? as u64;
+        })?;
 
         let context = input["context"]
             .as_object()
@@ -341,7 +378,7 @@ mod timer_tools_impl {
                 error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())
             })?
             .as_secs();
-        let trigger_time = now + delay_seconds;
+        let trigger_time = now.saturating_add(delay_seconds);
 
         let timer_task = TimerTask {
             id: timer_id.clone(),
@@ -489,8 +526,9 @@ mod timer_tools_impl {
         });
 
         let threshold = input["threshold"].as_f64().unwrap_or(0.1) as f32;
-        let check_interval_seconds = input["check_interval_seconds"].as_u64().unwrap_or(2);
-        let max_duration_seconds = input["max_duration_seconds"].as_u64();
+        let check_interval_seconds =
+            schedule_seconds(&input, "check_interval_seconds").unwrap_or(2);
+        let max_duration_seconds = schedule_seconds(&input, "max_duration_seconds");
 
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
@@ -502,7 +540,7 @@ mod timer_tools_impl {
 
         let timer_task = TimerTask {
             id: timer_id.clone(),
-            trigger_time: max_duration_seconds.map(|d| now + d).unwrap_or(u64::MAX),
+            trigger_time: max_duration_seconds.map(|d| now.saturating_add(d)).unwrap_or(u64::MAX),
             context: Value::Object(context),
             description: description.clone(),
             created_at: now,
@@ -536,22 +574,20 @@ mod timer_tools_impl {
         let monitoring_task = tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(check_interval_seconds));
             let mut previous_screenshot = initial_screenshot;
-            let start_time = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            // Monotonic. This value only ever measures elapsed time, so it
+            // must not come from the wall clock: `SystemTime` here meant a
+            // backward step made `now - start_time` underflow (a panic in a
+            // debug build, a wrap in a release build that read as a huge
+            // elapsed time and stopped the monitor at once).
+            let monitor_started_at = Instant::now();
 
             loop {
                 interval.tick().await;
 
                 // Check if we've exceeded max duration
-                if let Some(max_duration) = max_duration_seconds {
-                    let elapsed = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs()
-                        - start_time;
-                    if elapsed >= max_duration {
+                if let Some(max_duration_seconds) = max_duration_seconds {
+                    let elapsed_seconds = monitor_started_at.elapsed().as_secs();
+                    if elapsed_seconds >= max_duration_seconds {
                         info!(
                             "Screen monitor {} reached max duration, stopping",
                             timer_id_clone
@@ -735,8 +771,9 @@ mod timer_tools_impl {
             .ok_or_else(|| error_messages::tool_errors::MISSING_DESCRIPTION_PARAMETER.to_string())?
             .to_string();
 
-        let check_interval_seconds = input["check_interval_seconds"].as_u64().unwrap_or(5);
-        let max_duration_seconds = input["max_duration_seconds"].as_u64();
+        let check_interval_seconds =
+            schedule_seconds(&input, "check_interval_seconds").unwrap_or(5);
+        let max_duration_seconds = schedule_seconds(&input, "max_duration_seconds");
 
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
@@ -748,7 +785,7 @@ mod timer_tools_impl {
 
         let timer_task = TimerTask {
             id: timer_id.clone(),
-            trigger_time: max_duration_seconds.map(|d| now + d).unwrap_or(u64::MAX),
+            trigger_time: max_duration_seconds.map(|d| now.saturating_add(d)).unwrap_or(u64::MAX),
             context: Value::Object(context),
             description: description.clone(),
             created_at: now,
@@ -788,22 +825,25 @@ mod timer_tools_impl {
             let mut interval = tokio::time::interval(Duration::from_secs(check_interval_seconds));
             let mut last_exists = initial_exists;
             let mut last_size = initial_size;
-            let start_time = SystemTime::now()
+            // Wall clock, deliberately: this one is compared against a file's
+            // modification time further down, which is also wall clock.
+            let started_at_unix_seconds = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
+            // Monotonic, for measuring elapsed time only. Keeping the two
+            // apart is the point: the wall clock answers "when", the
+            // monotonic clock answers "how long since", and a clock step must
+            // not be able to underflow the second question.
+            let monitor_started_at = Instant::now();
 
             loop {
                 interval.tick().await;
 
                 // Check if we've exceeded max duration
-                if let Some(max_duration) = max_duration_seconds {
-                    let elapsed = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs()
-                        - start_time;
-                    if elapsed >= max_duration {
+                if let Some(max_duration_seconds) = max_duration_seconds {
+                    let elapsed_seconds = monitor_started_at.elapsed().as_secs();
+                    if elapsed_seconds >= max_duration_seconds {
                         info!(
                             "File monitor {} reached max duration, stopping",
                             timer_id_clone
@@ -842,12 +882,14 @@ mod timer_tools_impl {
                             match fs::metadata(&path).await {
                                 Ok(metadata) => match metadata.modified() {
                                     Ok(modified_time) => {
-                                        let start_time_sys =
-                                            UNIX_EPOCH + Duration::from_secs(start_time);
+                                        let started_at_sys = UNIX_EPOCH
+                                            + Duration::from_secs(started_at_unix_seconds);
                                         modified_time
-                                            .duration_since(start_time_sys)
+                                            .duration_since(started_at_sys)
                                             .unwrap_or(Duration::ZERO)
-                                            < Duration::from_secs(check_interval_seconds + 1)
+                                            < Duration::from_secs(
+                                                check_interval_seconds.saturating_add(1),
+                                            )
                                     }
                                     Err(_) => false,
                                 },
@@ -1210,4 +1252,85 @@ pub async fn register_timer_tools(provider: &mut LocalToolProvider, app_handle: 
         .await;
 
     info!("Registered enhanced timer tools: set_timer, set_screen_monitor, set_file_monitor, cancel_timer, list_timers, check_expired_timers");
+}
+
+/// Every number of seconds these tools take comes from a model, so the reader
+/// of `schedule_seconds` is an adversary by default: fractional, negative,
+/// zero, absurd and non-numeric all have to land somewhere safe.
+#[cfg(test)]
+mod schedule_seconds_tests {
+    use super::timer_tools_impl::{schedule_seconds, MAX_SCHEDULE_SECONDS};
+    use serde_json::json;
+
+    #[test]
+    fn a_whole_number_of_seconds_passes_through() {
+        assert_eq!(schedule_seconds(&json!({ "s": 30 }), "s"), Some(30));
+    }
+
+    #[test]
+    fn fractional_seconds_are_rounded_not_discarded() {
+        // `as_u64()` returned None for these, so the caller silently fell back
+        // to its default and the model's request vanished without a word.
+        assert_eq!(schedule_seconds(&json!({ "s": 2.4 }), "s"), Some(2));
+        assert_eq!(schedule_seconds(&json!({ "s": 2.6 }), "s"), Some(3));
+    }
+
+    #[test]
+    fn zero_becomes_one_second() {
+        // A zero period panics `tokio::time::interval`, which killed the
+        // monitoring task outright.
+        assert_eq!(schedule_seconds(&json!({ "s": 0 }), "s"), Some(1));
+        assert_eq!(schedule_seconds(&json!({ "s": 0.2 }), "s"), Some(1));
+    }
+
+    #[test]
+    fn negative_values_become_one_second() {
+        assert_eq!(schedule_seconds(&json!({ "s": -5 }), "s"), Some(1));
+        assert_eq!(schedule_seconds(&json!({ "s": -1e30 }), "s"), Some(1));
+    }
+
+    #[test]
+    fn absurd_values_are_capped_rather_than_overflowing_the_deadline() {
+        // The saturating float cast puts these on u64::MAX; without the clamp
+        // `now + seconds` overflows, panicking in debug and wrapping in
+        // release to a deadline in the past.
+        assert_eq!(
+            schedule_seconds(&json!({ "s": 1e30 }), "s"),
+            Some(MAX_SCHEDULE_SECONDS)
+        );
+        assert_eq!(
+            schedule_seconds(&json!({ "s": u64::MAX }), "s"),
+            Some(MAX_SCHEDULE_SECONDS)
+        );
+        assert_eq!(
+            schedule_seconds(&json!({ "s": MAX_SCHEDULE_SECONDS + 1 }), "s"),
+            Some(MAX_SCHEDULE_SECONDS)
+        );
+    }
+
+    #[test]
+    fn nan_lands_at_the_floor_rather_than_panicking() {
+        // serde_json cannot hold NaN, so this arrives as a very large finite
+        // number or not at all; the guard is that nothing here can panic.
+        assert_eq!(
+            schedule_seconds(&json!({ "s": f64::MAX }), "s"),
+            Some(MAX_SCHEDULE_SECONDS)
+        );
+    }
+
+    #[test]
+    fn a_missing_or_non_numeric_key_is_none_not_a_default() {
+        // `None` has to stay distinguishable from a clamped value, because the
+        // caller uses it to tell "not asked for" from "asked for badly".
+        assert_eq!(schedule_seconds(&json!({}), "s"), None);
+        assert_eq!(schedule_seconds(&json!({ "s": "30" }), "s"), None);
+        assert_eq!(schedule_seconds(&json!({ "s": null }), "s"), None);
+    }
+
+    #[test]
+    fn the_cap_is_expressed_in_the_unit_it_claims() {
+        // Thirty days, stated in seconds. If this ever disagrees with the doc
+        // comment, that is the `wait` bug again.
+        assert_eq!(MAX_SCHEDULE_SECONDS, 2_592_000);
+    }
 }
