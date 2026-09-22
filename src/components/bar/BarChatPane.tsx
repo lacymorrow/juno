@@ -4,6 +4,7 @@ import { ChatContainerV2 } from "@/components/chat/ChatContainerV2";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 import type { ShareAnchor } from "@/hooks/useConversation";
 import { cn } from "@/lib/utils";
+import { BAR_DEPTH_GLOW } from "@/components/bar/barAppearance";
 
 interface BarChatPaneProps {
   messages: ChatMessage[];
@@ -66,9 +67,11 @@ export function BarChatPane({
       data-testid="bar-chat-pane"
       className={cn(
         "dark flex w-[419px] flex-col overflow-hidden rounded-2xl",
-        "border border-white/10 bg-neutral-950/90 text-foreground shadow-2xl backdrop-blur-xl",
+        "border border-white/10 bg-neutral-950/90 text-foreground backdrop-blur-xl",
       )}
-      style={{ height, animation: "fbar-content-in 0.25s ease-out both" }}
+      // Same depth glow as the pill so the pane never vanishes on a dark
+      // background either.
+      style={{ height, boxShadow: BAR_DEPTH_GLOW, animation: "fbar-content-in 0.25s ease-out both" }}
     >
       <header className="flex h-8 shrink-0 select-none items-center justify-between border-b border-white/[0.06] pl-4 pr-2">
         <span

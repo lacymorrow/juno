@@ -27,6 +27,18 @@ import { ArrowDownIcon, DownloadIcon } from "lucide-react";
  */
 const AT_BOTTOM_TOLERANCE_PX = 48;
 
+/**
+ * How long after one of our own scroll writes to keep treating scroll events as
+ * our echo rather than the reader moving. A single write raises one scroll
+ * event, but a tall block laying out (a streamed reply, a generated component,
+ * an image) makes us write several times in quick succession, and only one flag
+ * can be consumed per event — the rest then read as "the reader scrolled away"
+ * and the list unpins one row in. A time window absorbs the whole burst. The
+ * cost is that a genuine reader scroll within this window is ignored and they
+ * simply scroll again, which is the same trade the old single-shot flag made.
+ */
+const SELF_SCROLL_GRACE_MS = 150;
+
 const distanceFromBottom = (el: HTMLElement) =>
   el.scrollHeight - el.scrollTop - el.clientHeight;
 
@@ -74,26 +86,25 @@ function useConversationAutoScroll(): ConversationContextValue {
   /** Whether new content pulls the view down. Off only once the reader scrolls away. */
   const pinned = useRef(true);
   /**
-   * Set while a scroll we performed has not yet raised its event.
+   * When we last performed a scroll ourselves (performance.now()). Scroll
+   * events within SELF_SCROLL_GRACE_MS of it are our own echo, not the reader.
    *
    * This used to record the scrollTop we wrote and compare the event against
    * it. That comparison loses the race it exists to win: a streamed token
    * landing between the write and the event a frame later changes scrollHeight,
    * so the position no longer matches, our own write is read as the reader
-   * scrolling away, and the list unpins mid-reply. Which is exactly what
-   * "it scrolls to the bottom but does not stay there" was.
-   *
-   * A flag cannot drift that way. The cost is that a genuine scroll arriving in
-   * the same frame as ours is ignored, and the reader simply scrolls again.
+   * scrolling away, and the list unpins mid-reply. A single boolean flag fixed
+   * that but only covered one write, so a burst of writes (a tall generated
+   * component laying out) still unpinned. A time window covers the whole burst.
    */
-  const selfScrollPending = useRef(false);
+  const selfScrollAt = useRef(0);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollElement.current;
     if (!el) return;
     pinned.current = true;
-    selfScrollPending.current = true;
+    selfScrollAt.current = performance.now();
     el.scrollTop = el.scrollHeight;
     setIsAtBottom(true);
   }, []);
@@ -123,9 +134,9 @@ function useConversationAutoScroll(): ConversationContextValue {
     const el = scrollElement.current;
     if (!el) return;
 
-    if (selfScrollPending.current) {
-      // Our own write, echoed back. The reader did not move, so stay pinned.
-      selfScrollPending.current = false;
+    if (performance.now() - selfScrollAt.current < SELF_SCROLL_GRACE_MS) {
+      // Our own write(s), echoed back. A tall block laying out makes several in
+      // a row; the whole burst is inside the window, so stay pinned.
       return;
     }
 
