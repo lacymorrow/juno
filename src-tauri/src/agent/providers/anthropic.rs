@@ -390,17 +390,19 @@ impl AnthropicBrain {
         self.streaming_enabled = enabled;
     }
 
-    /// Determine the correct computer-use beta header for the selected model
-    fn resolve_computer_use_beta_header(&self) -> &'static str {
+    /// The computer-use beta header for the selected model, or `None` when the
+    /// model declares no computer-use tool version — a chat-only or unknown
+    /// model must not advertise a computer-use beta it cannot honour.
+    fn resolve_computer_use_beta_header(&self) -> Option<&'static str> {
         Provider::Anthropic.computer_use_beta_flag(&self.model)
     }
 
     /// Full `anthropic-beta` header value for the selected model.
     fn beta_header_value(&self) -> String {
-        let mut flags = vec![
-            self.resolve_computer_use_beta_header(),
-            crate::constants::api::beta_flags::PROMPT_CACHING,
-        ];
+        let mut flags = vec![crate::constants::api::beta_flags::PROMPT_CACHING];
+        if let Some(computer_use) = self.resolve_computer_use_beta_header() {
+            flags.insert(0, computer_use);
+        }
         if Provider::Anthropic.supports_server_side_fallbacks(&self.model) {
             flags.push(crate::constants::api::beta_flags::SERVER_SIDE_FALLBACK);
         }

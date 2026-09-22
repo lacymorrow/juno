@@ -30,22 +30,14 @@ pub mod endpoints {
 
 // Anthropic Computer Use API Type Definitions (Official Specification)
 pub mod computer_use_api_types {
-    /// Computer Use API Version 2024-10-22
-    pub const COMPUTER_20241022: &str = "computer_20241022";
-
     /// Computer Use API Version 2025-01-24
     pub const COMPUTER_20250124: &str = "computer_20250124";
 
     /// Computer Use API Version 2025-11-24 (Opus 4.5+)
     pub const COMPUTER_20251124: &str = "computer_20251124";
 
-    /// Text Editor API Type
-    pub const EDIT_TOOL_20250124: &str = "text_editor_20250124";
-
-    /// Enhanced Text Editor API Type with undo support
-    pub const EDIT_TOOL_20250429: &str = "text_editor_20250429";
-
-    /// Text Editor API Type for Opus 4.5+ models
+    /// Text Editor API Type. Current for every computer-use version Juno
+    /// supports — the text editor docs list no per-model restriction on it.
     pub const EDIT_TOOL_20250728: &str = "text_editor_20250728";
 
     /// Bash Command Execution API Type
@@ -54,9 +46,6 @@ pub mod computer_use_api_types {
 
 // Beta Flags for Tool Groups (Official Anthropic Specification)
 pub mod beta_flags {
-    /// Beta flag for computer use 2024-10-22
-    pub const COMPUTER_USE_2024_10_22: &str = "computer-use-2024-10-22";
-
     /// Beta flag for computer use 2025-01-24
     pub const COMPUTER_USE_2025_01_24: &str = "computer-use-2025-01-24";
 
@@ -75,13 +64,9 @@ pub mod beta_flags {
 pub mod tool_version_groups {
     use super::computer_use_api_types::*;
 
-    /// Tools available in computer use 2024-10-22
-    pub const COMPUTER_USE_2024_10_22_TOOLS: &[&str] =
-        &[COMPUTER_20241022, EDIT_TOOL_20250124, BASH_20250124];
-
     /// Tools available in computer use 2025-01-24
     pub const COMPUTER_USE_2025_01_24_TOOLS: &[&str] =
-        &[COMPUTER_20250124, EDIT_TOOL_20250429, BASH_20250124];
+        &[COMPUTER_20250124, EDIT_TOOL_20250728, BASH_20250124];
 
     /// Tools available in computer use 2025-11-24 (Opus 4.5+)
     pub const COMPUTER_USE_2025_11_24_TOOLS: &[&str] =

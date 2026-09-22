@@ -43,6 +43,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::agent::core::AgentError;
 use crate::agent::tools::anthropic_computer_use::{create_versioned_tools, run_computer_action};
+use crate::agent::tools::tool_versioning::{ApiVersion, ToolVersionConfig};
 
 /// The MCP protocol revision this server speaks.
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -192,7 +193,9 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
 /// would add a hop for nothing. What Juno has that the CLI does not is a
 /// pointer people can see.
 fn tool_list() -> Vec<Value> {
-    create_versioned_tools(None)
+    // Only the schema is served here. The CLI picks its own tool types, so the
+    // Anthropic tool version on these definitions is never sent anywhere.
+    create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124))
         .into_iter()
         .filter(|tool| tool.name == "computer")
         .map(|tool| {
