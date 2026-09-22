@@ -48,6 +48,16 @@ const CHAT_ONLY: Model = {
   is_legacy: false,
 };
 
+/** Drives the computer through `computer_toolset_20260801`. Juno now sends
+ * that toolset, so this is an ordinary capable model with no special mark. */
+const TOOLSET: Model = {
+  id: "claude-opus-5-5",
+  name: "Claude Opus 5.5",
+  supports_computer_use: true,
+  is_recommended: false,
+  is_legacy: false,
+};
+
 const settingsWith = (models: Model[], selectedId = models[0].id) =>
   ({
     activeProvider: "anthropic",
@@ -87,6 +97,19 @@ describe("AssistantModelPicker computer-use marking", () => {
     render(<AssistantModelPicker settings={settingsWith([CHAT_ONLY])} />);
 
     expect(screen.getByText(/cannot\s+control the computer/i)).toBeInTheDocument();
+  });
+
+  it("treats a toolset model as an ordinary capable model", () => {
+    advanced.on = false;
+    render(<AssistantModelPicker settings={settingsWith([TOOLSET])} />);
+
+    // Juno sends the toolset now, so there is no "Juno cannot drive this"
+    // caveat left to show, and it must not be called a chat model either.
+    expect(screen.queryByText(/newer tool format/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Chat only")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/cannot\s+control the computer/i)
+    ).not.toBeInTheDocument();
   });
 
   it("says nothing about the limit when the selected model is capable", () => {

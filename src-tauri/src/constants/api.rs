@@ -36,6 +36,24 @@ pub mod computer_use_api_types {
     /// Computer Use API Version 2025-11-24 (Opus 4.5+)
     pub const COMPUTER_20251124: &str = "computer_20251124";
 
+    /// The computer-use *toolset*, GA on the Claude API since 2026-08-01.
+    ///
+    /// Unlike the entries above this is not a single `computer` tool with an
+    /// `action` argument: it expands server-side into 17 member tools, and the
+    /// request entry carries **no `name` field** — `{"type": "computer_toolset_20260801"}`
+    /// and nothing else (plus optional `configs`). It also takes no
+    /// `display_width_px`/`display_height_px`, so the client owns screenshot
+    /// sizing and coordinate scaling.
+    ///
+    /// <https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool>
+    pub const COMPUTER_TOOLSET_20260801: &str = "computer_toolset_20260801";
+
+    /// The `toolset_name` every member tool of [`COMPUTER_TOOLSET_20260801`]
+    /// carries, on the `tool_use` blocks Claude sends and on the `tool_result`
+    /// blocks Juno sends back. Dispatch is on (`name`, `toolset_name`), so this
+    /// string is load-bearing in both directions.
+    pub const COMPUTER_TOOLSET_NAME: &str = "computer";
+
     /// Text Editor API Type. Current for every computer-use version Juno
     /// supports — the text editor docs list no per-model restriction on it.
     pub const EDIT_TOOL_20250728: &str = "text_editor_20250728";
@@ -71,6 +89,14 @@ pub mod tool_version_groups {
     /// Tools available in computer use 2025-11-24 (Opus 4.5+)
     pub const COMPUTER_USE_2025_11_24_TOOLS: &[&str] =
         &[COMPUTER_20251124, EDIT_TOOL_20250728, BASH_20250124];
+
+    /// Tools sent alongside the `computer_toolset_20260801` toolset.
+    ///
+    /// The toolset replaces only the `computer` tool. The text editor and bash
+    /// tools are unchanged and still go in the same `tools` array as their own
+    /// named entries, exactly as they do on the earlier versions.
+    pub const COMPUTER_TOOLSET_20260801_TOOLS: &[&str] =
+        &[COMPUTER_TOOLSET_20260801, EDIT_TOOL_20250728, BASH_20250124];
 }
 
 // HTTP headers

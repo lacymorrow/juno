@@ -22,6 +22,14 @@ pub enum ApiVersion {
     Computer20250124,
     /// Computer Use API 2025-11-24 (Opus 4.5 and the 5 generation)
     Computer20251124,
+    /// The `computer_toolset_20260801` toolset — GA on the Claude API, so it
+    /// takes **no beta header**, and it is a toolset rather than a single tool:
+    /// 17 member tools, dispatched on (`name`, `toolset_name`) instead of
+    /// `input.action`, and a request entry with no `name` field.
+    ///
+    /// Claude Opus 5.5 accepts computer use *only* through this toolset on the
+    /// Claude API and returns an error for `computer_20251124`.
+    ComputerToolset20260801,
 }
 
 impl ApiVersion {
@@ -31,10 +39,38 @@ impl ApiVersion {
     }
 
     /// The `computer` tool type for this version.
+    ///
+    /// For [`ApiVersion::ComputerToolset20260801`] this is the *toolset* type,
+    /// which is sent with no `name` field — see [`ApiVersion::is_toolset`].
     pub fn computer_tool_type(&self) -> &'static str {
         match self {
             ApiVersion::Computer20250124 => computer_use_api_types::COMPUTER_20250124,
             ApiVersion::Computer20251124 => computer_use_api_types::COMPUTER_20251124,
+            ApiVersion::ComputerToolset20260801 => {
+                computer_use_api_types::COMPUTER_TOOLSET_20260801
+            }
+        }
+    }
+
+    /// Whether this version is the toolset rather than a single `computer` tool.
+    ///
+    /// The toolset differs on the wire in four ways, and every one of them is a
+    /// hard `invalid_request_error` if it is got wrong:
+    /// 1. the request entry carries no `name` and no display dimensions,
+    /// 2. no beta header,
+    /// 3. tool calls arrive as 17 member names plus a `toolset_name`,
+    /// 4. every `tool_result` must echo that `toolset_name` back.
+    pub fn is_toolset(&self) -> bool {
+        matches!(self, ApiVersion::ComputerToolset20260801)
+    }
+
+    /// The `toolset_name` member tools of this version carry, if it is a toolset.
+    pub fn toolset_name(&self) -> Option<&'static str> {
+        match self {
+            ApiVersion::ComputerToolset20260801 => {
+                Some(computer_use_api_types::COMPUTER_TOOLSET_NAME)
+            }
+            _ => None,
         }
     }
 
@@ -51,11 +87,22 @@ impl ApiVersion {
         computer_use_api_types::BASH_20250124
     }
 
-    /// Get the beta flag for this version
-    pub fn beta_flag(&self) -> &'static str {
+    /// The beta flag for this version, or `None` when the version needs none.
+    ///
+    /// `computer_toolset_20260801` is GA on the Claude API and is documented as
+    /// "The request needs no beta header", so it returns `None`. Sending a
+    /// computer-use beta alongside it is not merely redundant — the flag names
+    /// a tool version the request does not contain.
+    ///
+    /// Note this is a Claude-API statement. The same toolset is still *beta* on
+    /// Amazon Bedrock, Claude Platform on AWS and Microsoft Foundry. Juno talks
+    /// only to `api.anthropic.com` (see `ANTHROPIC_API_URL`), so no flag is
+    /// correct here; a future Bedrock path would need its own.
+    pub fn beta_flag(&self) -> Option<&'static str> {
         match self {
-            ApiVersion::Computer20250124 => beta_flags::COMPUTER_USE_2025_01_24,
-            ApiVersion::Computer20251124 => beta_flags::COMPUTER_USE_2025_11_24,
+            ApiVersion::Computer20250124 => Some(beta_flags::COMPUTER_USE_2025_01_24),
+            ApiVersion::Computer20251124 => Some(beta_flags::COMPUTER_USE_2025_11_24),
+            ApiVersion::ComputerToolset20260801 => None,
         }
     }
 
@@ -64,6 +111,9 @@ impl ApiVersion {
         match self {
             ApiVersion::Computer20250124 => tool_version_groups::COMPUTER_USE_2025_01_24_TOOLS,
             ApiVersion::Computer20251124 => tool_version_groups::COMPUTER_USE_2025_11_24_TOOLS,
+            ApiVersion::ComputerToolset20260801 => {
+                tool_version_groups::COMPUTER_TOOLSET_20260801_TOOLS
+            }
         }
     }
 }
@@ -120,10 +170,13 @@ impl ToolVersionConfig {
         }
     }
 
-    /// Get the beta flag for the current version (if beta is enabled)
+    /// Get the beta flag for the current version (if beta is enabled).
+    ///
+    /// `None` when beta is disabled *or* when the version needs no flag at all,
+    /// which is the case for the GA `computer_toolset_20260801` toolset.
     pub fn get_beta_flag(&self) -> Option<String> {
         if self.enable_beta {
-            Some(self.current_version.beta_flag().to_string())
+            self.current_version.beta_flag().map(str::to_string)
         } else {
             None
         }
@@ -156,11 +209,8 @@ impl ToolVersionConfig {
     pub fn get_api_headers(&self) -> HashMap<String, String> {
         let mut headers = HashMap::new();
 
-        if self.enable_beta {
-            headers.insert(
-                "anthropic-beta".to_string(),
-                self.current_version.beta_flag().to_string(),
-            );
+        if let Some(flag) = self.get_beta_flag() {
+            headers.insert("anthropic-beta".to_string(), flag);
         }
 
         headers
@@ -232,6 +282,43 @@ mod tests {
     fn test_api_version_strings() {
         assert_eq!(ApiVersion::Computer20250124.as_str(), "computer_20250124");
         assert_eq!(ApiVersion::Computer20251124.as_str(), "computer_20251124");
+        assert_eq!(
+            ApiVersion::ComputerToolset20260801.as_str(),
+            "computer_toolset_20260801"
+        );
+    }
+
+    /// The toolset is GA on the Claude API, so it must carry no beta flag.
+    /// Sending one names a tool version the request does not contain.
+    #[test]
+    fn the_toolset_is_ga_and_carries_no_beta_flag() {
+        assert_eq!(ApiVersion::ComputerToolset20260801.beta_flag(), None);
+        assert!(ApiVersion::ComputerToolset20260801.is_toolset());
+        assert_eq!(
+            ApiVersion::ComputerToolset20260801.toolset_name(),
+            Some("computer")
+        );
+
+        // Beta stays enabled by default; the version, not the switch, is what
+        // decides there is no computer-use flag to send.
+        let config = ToolVersionConfig::new(ApiVersion::ComputerToolset20260801);
+        assert!(config.enable_beta);
+        assert_eq!(config.get_beta_flag(), None);
+        assert!(!config.get_api_headers().contains_key("anthropic-beta"));
+    }
+
+    /// The earlier versions are unchanged: still a single `computer` tool, still
+    /// beta-flagged. This is the legacy-path guard.
+    #[test]
+    fn earlier_versions_are_not_toolsets_and_keep_their_beta_flags() {
+        for version in [ApiVersion::Computer20250124, ApiVersion::Computer20251124] {
+            assert!(!version.is_toolset(), "{version:?} must not be a toolset");
+            assert_eq!(version.toolset_name(), None);
+            assert!(
+                version.beta_flag().is_some(),
+                "{version:?} must keep its beta flag"
+            );
+        }
     }
 
     /// Each version's beta flag and tool types come from the version itself, so
@@ -240,14 +327,18 @@ mod tests {
     fn each_version_carries_its_own_flag_and_tools() {
         assert_eq!(
             ApiVersion::Computer20250124.beta_flag(),
-            "computer-use-2025-01-24"
+            Some("computer-use-2025-01-24")
         );
         assert_eq!(
             ApiVersion::Computer20251124.beta_flag(),
-            "computer-use-2025-11-24"
+            Some("computer-use-2025-11-24")
         );
 
-        for version in [ApiVersion::Computer20250124, ApiVersion::Computer20251124] {
+        for version in [
+            ApiVersion::Computer20250124,
+            ApiVersion::Computer20251124,
+            ApiVersion::ComputerToolset20260801,
+        ] {
             let tools = version.available_tools();
             assert!(tools.contains(&version.computer_tool_type()));
             assert!(tools.contains(&version.editor_tool_type()));

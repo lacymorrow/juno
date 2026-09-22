@@ -10,9 +10,11 @@ export interface ProviderInfo {
     name: string;
     supports_computer_use: boolean;
     is_recommended: boolean;
-    /** Only drives the computer through an older tool version. Hidden unless
-     * advanced settings are on, or it is the model currently in use. */
+    /** The provider lists this model as legacy. Hidden unless advanced
+     * settings are on, or it is the model currently in use. */
     is_legacy: boolean;
+    /** Drives the computer, but only through a tool version Juno does not
+     * send yet. Not a chat-only model — say so accurately. */
   }[];
   is_available: boolean;
   is_default: boolean;
