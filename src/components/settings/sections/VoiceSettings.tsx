@@ -14,6 +14,13 @@ import { useState } from "react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 
+// The insertion-mode row re-explains itself: its subtitle is the selected
+// option's own one-line description.
+const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
+  paste: "Pastes with Cmd+V. Most compatible.",
+  clipboard_free: "Types the transcript directly. Never touches your clipboard.",
+};
+
 export default function VoiceSettings({ settings }: SettingsSectionProps) {
   const {
     whisperModels,
@@ -210,12 +217,35 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
 
       <SettingsGroup
         title="Dictation Settings"
-        footer="Configure voice input and transcription"
+        advanced
+        footer="Configure how dictation delivers text"
       >
         <SettingsRow
+          htmlFor="dictation-insertion-mode"
+          label="Text Insertion"
+          description={
+            INSERTION_MODE_DESCRIPTIONS[settings.dictationInsertionMode] ??
+            INSERTION_MODE_DESCRIPTIONS.paste
+          }
+        >
+          <Select
+            value={settings.dictationInsertionMode}
+            onValueChange={settings.handleDictationInsertionModeChange}
+          >
+            <SelectTrigger id="dictation-insertion-mode" className="w-[190px]">
+              <SelectValue placeholder="Select insertion mode" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="paste">Clipboard Paste</SelectItem>
+              <SelectItem value="clipboard_free">Clipboard-Free</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+
+        <SettingsRow
           htmlFor="dictation-clipboard"
-          label="Enable Clipboard Integration"
-          description="Automatically copy dictated text to clipboard"
+          label="Copy to Clipboard"
+          description="Leave the transcript on the clipboard after inserting"
         >
           <Switch
             id="dictation-clipboard"

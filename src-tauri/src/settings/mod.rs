@@ -168,7 +168,19 @@ pub struct AudioSettings {
     #[serde(default = "AudioSettings::default_supertonic_speed")]
     pub supertonic_speed: f64,
     pub sound_enabled: bool,
+    /// Legacy single clipboard knob, kept so older stores migrate cleanly.
+    /// Read through [`AudioSettings::dictation_copy_to_clipboard`], which
+    /// prefers the explicit `dictation_copy_to_clipboard` field.
     pub dictation_clipboard_enabled: bool,
+    /// "paste" or "clipboard_free"; see `constants::settings::dictation_insertion_modes`.
+    #[serde(default = "defaults::dictation_insertion_mode")]
+    pub dictation_insertion_mode: String,
+    /// Whether the transcript is copied to the clipboard after a successful
+    /// insert. `None` means the store predates the split from
+    /// `dictation_clipboard_enabled`; the accessor falls back to that flag so
+    /// existing installs keep their choice.
+    #[serde(default)]
+    pub dictation_copy_to_clipboard: Option<bool>,
     pub dictation_trigger_mode: String, // "tap" or "hold"
     pub always_listening_active: bool,
     pub always_listening_sensitivity: f32,
@@ -177,6 +189,21 @@ pub struct AudioSettings {
 }
 
 impl AudioSettings {
+    /// Resolved copy-to-clipboard toggle: the explicit field when set, the
+    /// legacy `dictation_clipboard_enabled` flag otherwise (existing installs
+    /// keep whatever they had before the settings were split).
+    pub fn dictation_copy_to_clipboard(&self) -> bool {
+        self.dictation_copy_to_clipboard
+            .unwrap_or(self.dictation_clipboard_enabled)
+    }
+
+    /// Set the copy-to-clipboard toggle, keeping the legacy flag in sync for
+    /// anything that still reads it.
+    pub fn set_dictation_copy_to_clipboard(&mut self, enabled: bool) {
+        self.dictation_copy_to_clipboard = Some(enabled);
+        self.dictation_clipboard_enabled = enabled;
+    }
+
     fn default_kokoro_voice() -> String {
         "af_bella".to_string()
     }
@@ -433,6 +460,8 @@ impl Default for AudioSettings {
             supertonic_speed: Self::default_supertonic_speed(),
             sound_enabled: defaults::SOUND_ENABLED,
             dictation_clipboard_enabled: defaults::DICTATION_CLIPBOARD_ENABLED,
+            dictation_insertion_mode: defaults::dictation_insertion_mode(),
+            dictation_copy_to_clipboard: Some(defaults::DICTATION_CLIPBOARD_ENABLED),
             dictation_trigger_mode: "hold".to_string(),
             always_listening_active: defaults::ALWAYS_LISTENING_ACTIVE,
             always_listening_sensitivity: defaults::ALWAYS_LISTENING_SENSITIVITY,
@@ -500,5 +529,69 @@ impl Default for VoiceTranscriptionSettings {
             enable_partial_transcription: true,
             enable_playback: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An audio-settings JSON as an older install would have stored it:
+    /// no `dictation_insertion_mode`, no `dictation_copy_to_clipboard`.
+    fn legacy_store_json(clipboard_enabled: bool) -> serde_json::Value {
+        let mut value = serde_json::to_value(AudioSettings::default())
+            .expect("default AudioSettings serializes");
+        let map = value.as_object_mut().expect("AudioSettings is an object");
+        map.remove("dictation_insertion_mode");
+        map.remove("dictation_copy_to_clipboard");
+        map.insert(
+            "dictation_clipboard_enabled".to_string(),
+            serde_json::Value::Bool(clipboard_enabled),
+        );
+        value
+    }
+
+    #[test]
+    fn legacy_store_defaults_to_paste_mode() {
+        let settings: AudioSettings =
+            serde_json::from_value(legacy_store_json(true)).expect("legacy store deserializes");
+        assert_eq!(
+            settings.dictation_insertion_mode,
+            crate::constants::settings::dictation_insertion_modes::PASTE
+        );
+    }
+
+    #[test]
+    fn legacy_store_copy_toggle_inherits_old_clipboard_flag() {
+        for old_value in [true, false] {
+            let settings: AudioSettings = serde_json::from_value(legacy_store_json(old_value))
+                .expect("legacy store deserializes");
+            assert_eq!(
+                settings.dictation_copy_to_clipboard(),
+                old_value,
+                "existing installs keep their clipboard choice"
+            );
+        }
+    }
+
+    #[test]
+    fn new_install_defaults_paste_with_copy_on() {
+        let settings = AudioSettings::default();
+        assert_eq!(
+            settings.dictation_insertion_mode,
+            crate::constants::settings::dictation_insertion_modes::PASTE
+        );
+        assert!(settings.dictation_copy_to_clipboard());
+    }
+
+    #[test]
+    fn setting_copy_toggle_keeps_legacy_flag_in_sync() {
+        let mut settings = AudioSettings::default();
+        settings.set_dictation_copy_to_clipboard(false);
+        assert!(!settings.dictation_copy_to_clipboard());
+        assert!(!settings.dictation_clipboard_enabled);
+        settings.set_dictation_copy_to_clipboard(true);
+        assert!(settings.dictation_copy_to_clipboard());
+        assert!(settings.dictation_clipboard_enabled);
     }
 }

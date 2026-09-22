@@ -71,10 +71,20 @@ pub mod audio_keys {
     pub const TTS_PROVIDER: &str = "tts_provider";
     pub const SOUND_ENABLED: &str = "sound_enabled";
     pub const DICTATION_CLIPBOARD_ENABLED: &str = "dictation_clipboard_enabled";
+    pub const DICTATION_INSERTION_MODE: &str = "dictation_insertion_mode";
+    pub const DICTATION_COPY_TO_CLIPBOARD: &str = "dictation_copy_to_clipboard";
     pub const ALWAYS_LISTENING_ACTIVE: &str = "always_listening_active";
     pub const ALWAYS_LISTENING_SENSITIVITY: &str = "always_listening_sensitivity";
     pub const ALWAYS_LISTENING_WAKE_WORDS: &str = "always_listening_wake_words";
     pub const PERFORMANCE_MONITORING_ENABLED: &str = "performance_monitoring_enabled";
+}
+
+/// How dictation delivers the transcript into the focused app
+pub mod dictation_insertion_modes {
+    /// Copy to the pasteboard and synthesize Cmd+V. Most compatible.
+    pub const PASTE: &str = "paste";
+    /// Post unicode keyboard events directly; never touches the pasteboard.
+    pub const CLIPBOARD_FREE: &str = "clipboard_free";
 }
 
 /// Tool configuration keys
@@ -129,6 +139,15 @@ pub mod defaults {
     pub const TTS_PROVIDER: &str = "system";
     pub const SOUND_ENABLED: bool = true;
     pub const DICTATION_CLIPBOARD_ENABLED: bool = true;
+    /// Paste stays the default while clipboard-free proves itself in the field.
+    /// Literal (not a re-export of `dictation_insertion_modes::PASTE`) because
+    /// the TS constants generator only understands string literals; a test
+    /// keeps the two in sync.
+    pub const DICTATION_INSERTION_MODE: &str = "paste";
+
+    pub fn dictation_insertion_mode() -> String {
+        DICTATION_INSERTION_MODE.to_string()
+    }
     pub const ALWAYS_LISTENING_ACTIVE: bool = false;
     pub const ALWAYS_LISTENING_SENSITIVITY: f32 = 0.5;
     pub const PERFORMANCE_MONITORING_ENABLED: bool = true;
@@ -225,4 +244,17 @@ pub mod events {
     pub const PROMPT_SETTINGS_CHANGED: &str = "prompt_settings_changed";
     pub const CLI_SETTINGS_CHANGED: &str = "cli_settings_changed";
     pub const VOICE_TRANSCRIPTION_SETTINGS_CHANGED: &str = "voice_transcription_settings_changed";
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn default_insertion_mode_matches_the_paste_mode_constant() {
+        // `defaults::DICTATION_INSERTION_MODE` is a literal for the TS
+        // constants generator's sake; it must stay the paste mode.
+        assert_eq!(
+            super::defaults::DICTATION_INSERTION_MODE,
+            super::dictation_insertion_modes::PASTE
+        );
+    }
 }

@@ -143,6 +143,12 @@ mod imp {
         if event == nil {
             return;
         }
+        // Keystrokes Juno itself synthesizes (dictation insertion, agent
+        // typing, Cmd+V paste) must never fire a modifier trigger.
+        // SAFETY: `event` is a live NSEvent for the duration of the handler.
+        if unsafe { crate::platform::synthetic_events::is_juno_synthesized_event(event) } {
+            return;
+        }
         // SAFETY: `event` is a live NSEvent handed to us by AppKit for the
         // duration of the handler; these selectors are plain getters.
         let (key_code, flags): (u16, usize) = unsafe {

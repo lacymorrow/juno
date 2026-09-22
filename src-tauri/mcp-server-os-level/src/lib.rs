@@ -68,6 +68,49 @@ pub struct ToolDefinition {
 
 // --- End Tool Definition Structures ---
 
+/// Events synthesized by this crate carry this value in the CGEvent
+/// event-source user-data field, so the host app's own key monitors and
+/// hotkey paths can recognise and ignore them. Spells "JUNO".
+pub const SYNTHESIZED_EVENT_MARKER: i64 = 0x4A55_4E4F;
+
+/// Insert text into the focused app without touching the pasteboard.
+///
+/// Posts the text as unicode keyboard events to the AX-focused process
+/// (frontmost app, then the HID tap, when no PID is known), falling back to
+/// AX insert at the selection, then clipboard paste, then per-character
+/// typing. Apps that reject unicode keystrokes (Ghostty) are pasted into
+/// directly. Returns a label naming the path that succeeded, for logging.
+#[cfg(target_os = "macos")]
+pub fn insert_text_clipboard_free(text: &str) -> Result<&'static str, AutomationError> {
+    platforms::macos::text_insertion::insert_text_clipboard_free(text)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn insert_text_clipboard_free(_text: &str) -> Result<&'static str, AutomationError> {
+    Err(AutomationError::UnsupportedOperation(
+        "Clipboard-free text insertion is only implemented on macOS".to_string(),
+    ))
+}
+
+/// Paste `text` into the frontmost app with Cmd+V.
+///
+/// With `retain_clipboard` false the previous pasteboard contents are
+/// snapshotted and restored after ~500 ms (changeCount-guarded), and the
+/// temporary item is marked transient so clipboard managers skip it. With
+/// true, the text is written as an ordinary pasteboard item and stays there —
+/// dictation's "leave the transcript on the clipboard".
+#[cfg(target_os = "macos")]
+pub fn paste_text_global(text: &str, retain_clipboard: bool) -> Result<(), AutomationError> {
+    platforms::macos::interaction::paste_text(text, None, retain_clipboard)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn paste_text_global(_text: &str, _retain_clipboard: bool) -> Result<(), AutomationError> {
+    Err(AutomationError::UnsupportedOperation(
+        "Global paste is only implemented on macOS".to_string(),
+    ))
+}
+
 // Define a new struct to hold click result information - move to module level
 #[derive(Debug)]
 pub struct ClickResult {
