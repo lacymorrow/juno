@@ -105,7 +105,24 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
   const dx = physNextW - size.width;
   const newX = dx !== 0 ? Math.round(pos.x - dx / 2) : pos.x;
 
-  const prevAnchor = lastAnchorByLabel.get(appWindow.label);
+  // When the cache is empty (first resize, or the baseline was dropped after an
+  // external move: a glide into a well, a display hop, the launch restore) fall
+  // back to the window's LIVE measured frame as the baseline rather than to a
+  // top-anchored resize. The live frame is ground truth for where the pill sits
+  // right now, whatever moved the window there, so the pill stays put and a
+  // grow-up pane still opens upward. Top-anchoring here was the residual drift:
+  // the first resize after a snap is the pane opening with growUp, and with no
+  // baseline it grew the wrong way and the close drifted it further.
+  // We reuse next.anchorY as the current frame's anchor: it is the pill-centre
+  // offset (`l.pad + band/2`), identical in the compact and pane-open frames a
+  // post-move resize moves between. The warm-cache path is untouched, so the
+  // composer-growth case (where anchorY changes between resizes) still anchors
+  // against the previous frame's real anchor.
+  const prevAnchor =
+    lastAnchorByLabel.get(appWindow.label) ??
+    (next.anchorY !== undefined
+      ? { physH: size.height, anchor: next.anchorY, growUp: next.growUp ?? false }
+      : undefined);
   const anchoredY = anchoredTop(
     pos.y,
     prevAnchor,
