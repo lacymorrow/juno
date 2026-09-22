@@ -448,6 +448,32 @@ impl BrainFactory {
         }
     }
 
+    /// The provider and model Juno will actually run with, as configured.
+    ///
+    /// The configured model string is used verbatim — nothing validates it
+    /// against the catalog — so this can legitimately return a model ID Juno
+    /// no longer ships, left behind in settings by an earlier version.
+    pub fn active_provider_and_model(
+        app_handle: Option<&tauri::AppHandle>,
+    ) -> Option<(Provider, String)> {
+        let config = load_provider_config(app_handle);
+        let provider_id =
+            env::var("AI_PROVIDER").unwrap_or_else(|_| config.active_provider.clone());
+        let provider = Provider::from_str(&provider_id)?;
+        let model = config
+            .resolve_provider(provider.clone())
+            .and_then(|c| c.model)
+            .unwrap_or_else(|| provider.default_model().to_string());
+        Some((provider, model))
+    }
+
+    /// Why the configured model cannot drive the computer, phrased for the
+    /// person using it. `None` when it can — which is the common case.
+    pub fn active_computer_use_refusal(app_handle: &tauri::AppHandle) -> Option<String> {
+        let (provider, model) = Self::active_provider_and_model(Some(app_handle))?;
+        provider.computer_use_refusal(&model)
+    }
+
     /// Register all available computer use tools for the agent
     pub async fn register_computer_use_tools(
         provider: &mut LocalToolProvider,
@@ -487,6 +513,14 @@ impl BrainFactory {
         // Set up MCP manager in the tool provider (per-provider instance)
         let mcp_manager = state_manager.get_mcp_manager().await;
         provider.set_mcp_manager(mcp_manager);
+
+        // A model that cannot drive the computer gets no computer-use tools at
+        // all, rather than tools it will reject at request time. MCP tools above
+        // still register, so the model keeps everything it can actually use.
+        if let Some(reason) = Self::active_computer_use_refusal(&app_handle) {
+            info!("Skipping computer-use tool registration: {}", reason);
+            return Ok(());
+        }
 
         // Register the official Anthropic Computer Use tools (per-provider instance)
         match session {

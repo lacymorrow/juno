@@ -10,6 +10,9 @@ export interface ProviderInfo {
     name: string;
     supports_computer_use: boolean;
     is_recommended: boolean;
+    /** Only drives the computer through an older tool version. Hidden unless
+     * advanced settings are on, or it is the model currently in use. */
+    is_legacy: boolean;
   }[];
   is_available: boolean;
   is_default: boolean;

@@ -9,31 +9,51 @@ use crate::constants::api::{beta_flags, computer_use_api_types, tool_version_gro
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Supported API versions for tool groups
+/// Computer-use tool versions Anthropic still serves.
+///
+/// Source: the "Earlier tool versions" table at
+/// <https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool#earlier-tool-versions>.
+/// The 2024-10-22 version is gone from that table and from every model Juno
+/// offers, so there is no variant for it. Which models take which version is
+/// declared per model in `agent::providers::types` — not duplicated here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiVersion {
-    /// Computer Use API 2024-10-22
-    Computer20241022,
-    /// Computer Use API 2025-01-24
+    /// Computer Use API 2025-01-24 (Sonnet 4.5, Haiku 4.5)
     Computer20250124,
-    /// Computer Use API 2025-11-24 (Opus 4.5+)
+    /// Computer Use API 2025-11-24 (Opus 4.5 and the 5 generation)
     Computer20251124,
 }
 
 impl ApiVersion {
     /// Get the API version string
     pub fn as_str(&self) -> &'static str {
+        self.computer_tool_type()
+    }
+
+    /// The `computer` tool type for this version.
+    pub fn computer_tool_type(&self) -> &'static str {
         match self {
-            ApiVersion::Computer20241022 => computer_use_api_types::COMPUTER_20241022,
             ApiVersion::Computer20250124 => computer_use_api_types::COMPUTER_20250124,
             ApiVersion::Computer20251124 => computer_use_api_types::COMPUTER_20251124,
         }
     }
 
+    /// The text editor tool type to pair with this computer version.
+    ///
+    /// Both versions Juno supports take `text_editor_20250728`: the text editor
+    /// docs list it as the current version with no per-model restriction.
+    pub fn editor_tool_type(&self) -> &'static str {
+        computer_use_api_types::EDIT_TOOL_20250728
+    }
+
+    /// The `bash` tool type, which is the same across every version Juno supports.
+    pub fn bash_tool_type(&self) -> &'static str {
+        computer_use_api_types::BASH_20250124
+    }
+
     /// Get the beta flag for this version
     pub fn beta_flag(&self) -> &'static str {
         match self {
-            ApiVersion::Computer20241022 => beta_flags::COMPUTER_USE_2024_10_22,
             ApiVersion::Computer20250124 => beta_flags::COMPUTER_USE_2025_01_24,
             ApiVersion::Computer20251124 => beta_flags::COMPUTER_USE_2025_11_24,
         }
@@ -42,7 +62,6 @@ impl ApiVersion {
     /// Get all tools available for this API version
     pub fn available_tools(&self) -> &'static [&'static str] {
         match self {
-            ApiVersion::Computer20241022 => tool_version_groups::COMPUTER_USE_2024_10_22_TOOLS,
             ApiVersion::Computer20250124 => tool_version_groups::COMPUTER_USE_2025_01_24_TOOLS,
             ApiVersion::Computer20251124 => tool_version_groups::COMPUTER_USE_2025_11_24_TOOLS,
         }
@@ -58,16 +77,6 @@ pub struct ToolVersionConfig {
     pub enable_beta: bool,
     /// Override specific tool versions (tool_name -> api_type)
     pub tool_overrides: HashMap<String, String>,
-}
-
-impl Default for ToolVersionConfig {
-    fn default() -> Self {
-        Self {
-            current_version: ApiVersion::Computer20250124, // Use latest by default
-            enable_beta: true,
-            tool_overrides: HashMap::new(),
-        }
-    }
 }
 
 impl ToolVersionConfig {
@@ -99,26 +108,13 @@ impl ToolVersionConfig {
             return Some(override_type.clone());
         }
 
-        // Use version-specific defaults
-        match (&self.current_version, tool_name) {
-            (ApiVersion::Computer20241022, "computer") => {
-                Some(computer_use_api_types::COMPUTER_20241022.to_string())
-            }
-            (ApiVersion::Computer20250124, "computer") => {
-                Some(computer_use_api_types::COMPUTER_20250124.to_string())
-            }
-            (ApiVersion::Computer20251124, "computer") => {
-                Some(computer_use_api_types::COMPUTER_20251124.to_string())
-            }
-            (_, "bash") => Some(computer_use_api_types::BASH_20250124.to_string()),
-            (ApiVersion::Computer20241022, "str_replace_based_edit_tool") => {
-                Some(computer_use_api_types::EDIT_TOOL_20250124.to_string())
-            }
-            (ApiVersion::Computer20250124, "str_replace_based_edit_tool") => {
-                Some(computer_use_api_types::EDIT_TOOL_20250429.to_string())
-            }
-            (ApiVersion::Computer20251124, "str_replace_based_edit_tool") => {
-                Some(computer_use_api_types::EDIT_TOOL_20250728.to_string())
+        // Derived from the version itself, so this can never disagree with
+        // what the provider sends at request time.
+        match tool_name {
+            "computer" => Some(self.current_version.computer_tool_type().to_string()),
+            "bash" => Some(self.current_version.bash_tool_type().to_string()),
+            "str_replace_based_edit_tool" => {
+                Some(self.current_version.editor_tool_type().to_string())
             }
             _ => None,
         }
@@ -177,13 +173,6 @@ pub struct ToolVersionManager {
 }
 
 impl ToolVersionManager {
-    /// Create a new version manager with default configuration
-    pub fn new() -> Self {
-        Self {
-            config: ToolVersionConfig::default(),
-        }
-    }
-
     /// Create a version manager with specific configuration
     pub fn with_config(config: ToolVersionConfig) -> Self {
         Self { config }
@@ -235,20 +224,35 @@ impl ToolVersionManager {
     }
 }
 
-impl Default for ToolVersionManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_api_version_strings() {
-        assert_eq!(ApiVersion::Computer20241022.as_str(), "computer_20241022");
         assert_eq!(ApiVersion::Computer20250124.as_str(), "computer_20250124");
+        assert_eq!(ApiVersion::Computer20251124.as_str(), "computer_20251124");
+    }
+
+    /// Each version's beta flag and tool types come from the version itself, so
+    /// a request can never pair one version's tools with another's flag.
+    #[test]
+    fn each_version_carries_its_own_flag_and_tools() {
+        assert_eq!(
+            ApiVersion::Computer20250124.beta_flag(),
+            "computer-use-2025-01-24"
+        );
+        assert_eq!(
+            ApiVersion::Computer20251124.beta_flag(),
+            "computer-use-2025-11-24"
+        );
+
+        for version in [ApiVersion::Computer20250124, ApiVersion::Computer20251124] {
+            let tools = version.available_tools();
+            assert!(tools.contains(&version.computer_tool_type()));
+            assert!(tools.contains(&version.editor_tool_type()));
+            assert!(tools.contains(&version.bash_tool_type()));
+        }
     }
 
     #[test]
@@ -278,7 +282,8 @@ mod tests {
 
     #[test]
     fn test_version_manager() {
-        let manager = ToolVersionManager::new();
+        let manager =
+            ToolVersionManager::with_config(ToolVersionConfig::new(ApiVersion::Computer20250124));
 
         let tool = ToolDefinition {
             name: "computer".to_string(),
