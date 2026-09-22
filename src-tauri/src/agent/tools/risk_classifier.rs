@@ -50,6 +50,16 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
             classify_form_fill_risk(tool_input)
         }
 
+        // The browser tool that actually types is `browser_interact`, which
+        // carries the verb in `action` rather than in the tool name. Without
+        // this arm it fell through to `RiskLevel::Low` and typing a password
+        // into a page never reached the approval gate — every name in the arm
+        // above is a tool Juno does not register.
+        "browser_interact" => match tool_input.get("action").and_then(Value::as_str) {
+            Some("type") | Some("select") => classify_form_fill_risk(tool_input),
+            _ => RiskLevel::Low,
+        },
+
         // Agent self-scheduling — creates a persistent automation that
         // re-executes unattended with full tool access after this session
         // ends, so creation requires human confirmation
@@ -366,5 +376,53 @@ mod tests {
     fn relative_system_path_is_critical() {
         let r = classify_risk("write_file", &json!({"path": "etc/passwd"}));
         assert_eq!(r, RiskLevel::Critical);
+    }
+
+    /// Typing a password into a web form must reach the approval gate. This
+    /// regressed silently because the classifier matched tool names Juno does
+    /// not register (`browser_fill`, `browser_type`), while the tool that
+    /// actually types is `browser_interact` with `action: "type"`.
+    #[test]
+    fn browser_interact_typing_a_password_requires_approval() {
+        let r = classify_risk(
+            "browser_interact",
+            &json!({
+                "action": "type",
+                "selector": "input#password",
+                "value": "hunter2"
+            }),
+        );
+        assert_eq!(r, RiskLevel::Critical);
+        assert!(needs_approval(&r));
+    }
+
+    /// The verb matters: clicking and scrolling are not form fills, so they
+    /// must not start demanding approval just because the selector mentions a
+    /// sensitive field.
+    #[test]
+    fn browser_interact_clicking_stays_low_risk() {
+        let r = classify_risk(
+            "browser_interact",
+            &json!({"action": "click", "selector": "input#password"}),
+        );
+        assert_eq!(r, RiskLevel::Low);
+        assert!(!needs_approval(&r));
+    }
+
+    /// Every tool name the form-fill arm claims to cover should be a tool Juno
+    /// actually registers, or the arm is dead code pretending to be a control.
+    /// `safari_type_text` is registered by the Safari tools; the rest of the
+    /// names in that arm were not, which is how the gap opened.
+    #[test]
+    fn the_registered_browser_typing_tool_is_classified() {
+        let names = crate::agent::tools::browser_tools::get_browser_tool_definitions()
+            .iter()
+            .map(|d| d.name.clone())
+            .collect::<Vec<_>>();
+        assert!(
+            names.iter().any(|n| n == "browser_interact"),
+            "browser_interact is the tool that types; if it was renamed, update \
+             the risk classifier arm in this file. Registered: {names:?}"
+        );
     }
 }
