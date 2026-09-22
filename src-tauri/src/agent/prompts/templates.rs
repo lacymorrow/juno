@@ -1214,9 +1214,9 @@ Remember: You're the conductor of a performance orchestra. Every millisecond mat
    - Examples: `"Return"`, `"Tab"`, `"Escape"`, `"cmd+c"`, `"shift+Tab"`
    - Use for: Single key presses, key combinations, shortcuts
 
-2. **`{"action": "hold_key", "text": "shift", "duration": 2000}`** - Hold key for duration
+2. **`{"action": "hold_key", "text": "shift", "duration": 2}`** - Hold key for duration
    - Examples: `"shift"`, `"cmd"`, `"ctrl"`, `"alt"`
-   - Duration in milliseconds
+   - `duration` is in SECONDS (max 300). For milliseconds use `duration_ms`.
    - Use for: Modifier keys that need to be held
 
 3. **`{"action": "type", "text": "hello world"}`** - Type text

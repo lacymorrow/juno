@@ -1163,9 +1163,14 @@ fn get_descriptive_tool_name(action: &str, input: &Value) -> String {
             format!("computer/press_key({})", key)
         }
         "hold_key" => {
-            let key = input["text"].as_str().unwrap_or("");
-            let duration = input["duration"].as_u64().unwrap_or(1000);
-            format!("computer/hold_key({}, {}ms)", key, duration)
+            let key = input["key"]
+                .as_str()
+                .or_else(|| input["text"].as_str())
+                .unwrap_or("");
+            match resolve_hold_key_duration_ms(input) {
+                Ok(duration_ms) => format!("computer/hold_key({}, {}ms)", key, duration_ms),
+                Err(_) => format!("computer/hold_key({})", key),
+            }
         }
         "wait" => {
             let duration = input["duration"].as_u64().unwrap_or(1);
@@ -1218,6 +1223,53 @@ pub fn extract_anthropic_error_message(value: &Value) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Anthropic's computer tool caps `hold_key` at 300 seconds.
+pub const MAX_HOLD_KEY_MS: u64 = 300_000;
+
+/// Resolve a `hold_key` duration to milliseconds.
+///
+/// The unit depends on which parameter the model sent, because the two request
+/// paths see two different schemas:
+///
+/// - `duration` — Anthropic's canonical computer-tool schema, in **seconds**
+///   (max 300). The direct Anthropic API path uses this schema because built-in
+///   tools are serialized as `ApiTool::BuiltIn`, which sends no `description`
+///   and no `input_schema` — the model never sees Juno's wording. Reading this
+///   as milliseconds turned a 2-second hold into 2ms, a silent no-op.
+///   It also makes `hold_key` consistent with `wait`, which already reads
+///   `duration` as seconds.
+/// - `duration_ms` — Juno's own schema, in **milliseconds**. This is what the
+///   Claude CLI path sees, since MCP tools carry their own schema.
+///
+/// `duration_ms` wins when both are present. Returns `Err` with a
+/// model-readable message when the value is missing, non-numeric, or not
+/// greater than zero; values above the 300-second cap are clamped.
+pub fn resolve_hold_key_duration_ms(input: &Value) -> Result<u64, String> {
+    let millis = match input.get("duration_ms").and_then(Value::as_f64) {
+        Some(ms) => ms,
+        None => match input.get("duration").and_then(Value::as_f64) {
+            Some(seconds) => seconds * 1000.0,
+            None => {
+                return Err(
+                    "Missing hold duration: provide 'duration' in seconds (max 300), or 'duration_ms' in milliseconds"
+                        .to_string(),
+                )
+            }
+        },
+    };
+
+    if !millis.is_finite() || millis <= 0.0 {
+        return Err(
+            "Invalid hold duration: must be greater than zero ('duration' is in seconds, 'duration_ms' is in milliseconds)"
+                .to_string(),
+        );
+    }
+
+    // Float-to-int casts saturate in Rust, so an absurd value lands on u64::MAX
+    // and is then clamped by `min` rather than wrapping.
+    Ok((millis.round() as u64).min(MAX_HOLD_KEY_MS))
 }
 
 /// Convert error messages to Anthropic Computer Use API compliant format
@@ -1894,17 +1946,12 @@ pub async fn execute_computer_tool(
                         }
                     };
 
-                    // Support both 'duration_ms' and 'duration' parameters for backward compatibility
-                    let duration_ms = match input["duration_ms"]
-                        .as_u64()
-                        .or_else(|| input["duration"].as_u64())
-                    {
-                        Some(duration) => duration,
-                        None => {
-                            return Ok(create_anthropic_error_response(
-                                "Missing 'duration_ms' or 'duration' parameter".to_string(),
-                            ))
-                        }
+                    // 'duration' is SECONDS (Anthropic's canonical schema, which the
+                    // direct API path uses); 'duration_ms' is milliseconds (Juno's
+                    // own schema, which the MCP/Claude CLI path sees).
+                    let duration_ms = match resolve_hold_key_duration_ms(&input) {
+                        Ok(duration_ms) => duration_ms,
+                        Err(message) => return Ok(create_anthropic_error_response(message)),
                     };
 
                     emit_key_visualization(
@@ -2538,7 +2585,7 @@ The computer tool accepts these actions:
 - left_mouse_down: Press and hold left mouse button at coordinates
 - left_mouse_up: Release left mouse button at coordinates
 - key: Press a key (supports modifiers like 'cmd+c', 'ctrl+v', etc.)
-- hold_key: Hold a key for specified duration in milliseconds
+- hold_key: Hold a key down for a duration ('duration' in seconds, max 300; or 'duration_ms' in milliseconds)
 - type: Type text at current cursor position
 - scroll: Scroll at coordinates in specified direction
 - cursor_position: Get current mouse cursor position
@@ -2571,11 +2618,11 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 },
                 "duration_ms": {
                     "type": "number",
-                    "description": "Duration in milliseconds for hold_key action. Preferred parameter name."
+                    "description": "Duration in MILLISECONDS for hold_key action. Preferred parameter name when you want sub-second precision."
                 },
                 "duration": {
                     "type": "number",
-                    "description": "Duration in milliseconds for hold_key action, or seconds for wait action (backward compatibility)"
+                    "description": "Duration in SECONDS — for hold_key (max 300) and for wait. Use duration_ms instead to give a hold_key duration in milliseconds."
                 },
                 "scroll_direction": {
                     "type": "string",
@@ -2815,4 +2862,79 @@ pub async fn register_anthropic_computer_use_tools_with_version(
         tool_count
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod hold_key_duration_tests {
+    use super::*;
+
+    #[test]
+    fn duration_is_seconds() {
+        // Anthropic's canonical schema, which the direct API path uses.
+        // A 2-second hold must be 2000ms, not 2ms.
+        let input = json!({ "action": "hold_key", "key": "shift", "duration": 2 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(2000));
+    }
+
+    #[test]
+    fn fractional_seconds_are_supported() {
+        let input = json!({ "action": "hold_key", "key": "shift", "duration": 0.25 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(250));
+    }
+
+    #[test]
+    fn duration_ms_is_milliseconds() {
+        // Juno's own schema, which the MCP / Claude CLI path sees.
+        let input = json!({ "action": "hold_key", "key": "shift", "duration_ms": 2000 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(2000));
+    }
+
+    #[test]
+    fn duration_ms_wins_over_duration() {
+        let input = json!({ "key": "shift", "duration_ms": 500, "duration": 30 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(500));
+    }
+
+    #[test]
+    fn duration_is_clamped_to_the_300_second_maximum() {
+        let input = json!({ "key": "shift", "duration": 600 });
+        assert_eq!(resolve_hold_key_duration_ms(&input), Ok(MAX_HOLD_KEY_MS));
+
+        let input_ms = json!({ "key": "shift", "duration_ms": 900_000u64 });
+        assert_eq!(resolve_hold_key_duration_ms(&input_ms), Ok(MAX_HOLD_KEY_MS));
+
+        // A float-to-int cast saturates rather than wrapping, so an absurd value
+        // still lands on the cap.
+        let absurd = json!({ "key": "shift", "duration": 1e30 });
+        assert_eq!(resolve_hold_key_duration_ms(&absurd), Ok(MAX_HOLD_KEY_MS));
+    }
+
+    #[test]
+    fn missing_duration_is_an_error() {
+        let input = json!({ "action": "hold_key", "key": "shift" });
+        assert!(resolve_hold_key_duration_ms(&input).is_err());
+    }
+
+    #[test]
+    fn zero_and_negative_durations_are_errors() {
+        // A zero-length hold is a silent no-op; tell the model instead.
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration": 0 })).is_err());
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration_ms": 0 })).is_err());
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration": -1 })).is_err());
+    }
+
+    #[test]
+    fn non_numeric_duration_is_an_error() {
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration": "2" })).is_err());
+        assert!(resolve_hold_key_duration_ms(&json!({ "duration": null })).is_err());
+    }
+
+    #[test]
+    fn error_messages_name_both_units() {
+        let message = resolve_hold_key_duration_ms(&json!({ "key": "shift" }))
+            .err()
+            .unwrap_or_default();
+        assert!(message.contains("seconds"));
+        assert!(message.contains("milliseconds"));
+    }
 }
