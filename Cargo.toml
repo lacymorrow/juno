@@ -47,3 +47,10 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# `block` 0.1.6 (unmaintained, pulled in by cocoa/objc) trips the
+# `uninhabited_static` future-incompat lint that will become a hard error
+# (rust-lang/rust#74840). vendor/block is the same crate with a one-line fix.
+# Remove once cocoa/objc are migrated to objc2 + block2.
+[patch.crates-io]
+block = { path = "vendor/block" }

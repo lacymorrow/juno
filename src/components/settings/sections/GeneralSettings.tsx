@@ -28,6 +28,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [barAppearanceLoading, setBarAppearanceLoading] = useState(false);
   const [followCursorDisplay, setFollowCursorDisplay] = useState(true);
   const [followCursorLoading, setFollowCursorLoading] = useState(false);
+  const [showGlowBorder, setShowGlowBorder] = useState(true);
+  const [showGlowBorderLoading, setShowGlowBorderLoading] = useState(false);
 
   // Load auto-launch status and onboarding info on component mount
   useEffect(() => {
@@ -41,12 +43,16 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         const info = await invoke("get_onboarding_info");
         setOnboardingInfo(info);
 
-        // Load current bar appearance
+        // Load current bar appearance and glow-border preference
         const barConfig = await invoke<{
           bar_appearance?: string;
+          show_glow_border?: boolean;
         }>("ui_get_bar_config");
         if (barConfig?.bar_appearance) {
           setBarAppearance(barConfig.bar_appearance);
+        }
+        if (typeof barConfig?.show_glow_border === "boolean") {
+          setShowGlowBorder(barConfig.show_glow_border);
         }
 
         // Load "follow cursor across displays"
@@ -166,7 +172,25 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-
+  const handleShowGlowBorderChange = async (enabled: boolean) => {
+    if (showGlowBorderLoading) return;
+    setShowGlowBorderLoading(true);
+    const previous = showGlowBorder;
+    setShowGlowBorder(enabled);
+    try {
+      // Read-modify-write the whole bar config, like the appearance dropdown.
+      const currentConfig = await invoke<FloatingBarConfig>("ui_get_bar_config");
+      await invoke("ui_set_bar_config", {
+        config: { ...currentConfig, show_glow_border: enabled },
+      });
+    } catch (error) {
+      console.error("Failed to update glowing border setting:", error);
+      setShowGlowBorder(previous);
+      toast.error("Could not change that setting");
+    } finally {
+      setShowGlowBorderLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -249,7 +273,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
               <SelectItem value={UI.BAR_APPEARANCES_APP}>App Bar</SelectItem>
               <SelectItem value={UI.BAR_APPEARANCES_VOICE_AI}>Voice AI</SelectItem>
               <SelectItem value={UI.BAR_APPEARANCES_DYNAMIC}>Dynamic</SelectItem>
-              <SelectItem value={UI.BAR_APPEARANCES_ORB}>Orb (3D)</SelectItem>
+              <SelectItem value={UI.BAR_APPEARANCES_ORB}>ElevenLabs Orb</SelectItem>
+              <SelectItem value={UI.BAR_APPEARANCES_REACT_ORB}>React Orb</SelectItem>
               <SelectItem value={UI.BAR_APPEARANCES_PERSONA}>
                 Persona (AI Avatar)
               </SelectItem>
@@ -266,6 +291,18 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
             checked={followCursorDisplay}
             onCheckedChange={handleFollowCursorChange}
             disabled={followCursorLoading}
+          />
+        </SettingsRow>
+        <SettingsRow
+          htmlFor="show-glow-border"
+          label="Show glowing border"
+          description="Wrap the floating bar in a glowing border that lights up while Juno is listening or working"
+        >
+          <Switch
+            id="show-glow-border"
+            checked={showGlowBorder}
+            onCheckedChange={handleShowGlowBorderChange}
+            disabled={showGlowBorderLoading}
           />
         </SettingsRow>
       </SettingsGroup>

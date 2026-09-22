@@ -216,6 +216,17 @@ impl TrayIconManager {
         self.tray_icon = Some(tray_icon);
     }
 
+    /// Show or hide the menu-bar icon. Inert when no tray icon exists yet.
+    pub fn set_visible(&self, visible: bool) {
+        let Some(tray_icon) = &self.tray_icon else {
+            warn!("No tray icon available to show or hide");
+            return;
+        };
+        if let Err(e) = tray_icon.set_visible(visible) {
+            warn!("[TrayIcon] Failed to set visibility to {}: {}", visible, e);
+        }
+    }
+
     /// Set the disabled menu row that shows the state word
     pub fn set_status_item(&mut self, item: MenuItem<tauri::Wry>) {
         self.status_item = Some(item);
@@ -355,6 +366,32 @@ pub async fn current_tray_icon_state() -> TrayIconState {
     let manager = get_tray_icon_manager().await;
     let guard = manager.lock().await;
     *guard.current_state()
+}
+
+/// Show or hide the menu-bar icon to match the "Show system tray icon" setting.
+pub async fn set_tray_icon_visible_now(visible: bool) {
+    let manager = get_tray_icon_manager().await;
+    let guard = manager.lock().await;
+    guard.set_visible(visible);
+}
+
+/// The saved "show tray icon" preference, defaulting to shown when it cannot
+/// be read: an icon that quietly vanished is the worse surprise.
+pub async fn read_tray_icon_visible(app: &AppHandle) -> bool {
+    let manager = match crate::settings::manager::SettingsManager::new(app.clone()) {
+        Ok(manager) => manager,
+        Err(e) => {
+            warn!("[TrayIcon] Failed to open settings: {}", e);
+            return true;
+        }
+    };
+    match manager.get_agent_settings().await {
+        Ok(settings) => settings.show_tray_icon,
+        Err(e) => {
+            warn!("[TrayIcon] Failed to read the tray icon setting: {}", e);
+            true
+        }
+    }
 }
 
 /// Load tray icon from embedded data
@@ -571,6 +608,12 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         manager_guard.set_tray_icon(tray_icon);
         manager_guard.set_status_item(status_item);
         manager_guard.set_chat_toggle_item(chat_toggle_item);
+        // Honour the saved "show tray icon" preference. Shown is the default,
+        // so only a hidden icon needs applying.
+        let visible = read_tray_icon_visible(&app_handle).await;
+        if !visible {
+            manager_guard.set_visible(false);
+        }
         drop(manager_guard);
 
         // Start monitoring app state for tray icon updates

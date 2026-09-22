@@ -5,9 +5,11 @@
 //! state through the listeners in `menu::tray_menu`.
 
 use crate::menu::tray_menu::{
-    current_tray_icon_state, set_tray_icon_state, update_tray_icon_state, TrayIconState,
+    current_tray_icon_state, set_tray_icon_state, set_tray_icon_visible_now,
+    update_tray_icon_state, TrayIconState,
 };
-use tauri::command;
+use crate::settings::manager::SettingsManager;
+use tauri::{command, State};
 use tracing::info;
 
 /// Set the tray icon to idle
@@ -105,4 +107,31 @@ pub async fn test_all_tray_icon_states() -> Result<(), String> {
 #[command]
 pub async fn get_current_tray_icon_state() -> Result<String, String> {
     Ok(current_tray_icon_state().await.label().to_string())
+}
+
+/// Is Juno's menu-bar (tray) icon currently shown?
+#[command]
+pub async fn get_tray_icon_visible(
+    settings_manager: State<'_, SettingsManager>,
+) -> Result<bool, String> {
+    let agent_settings = settings_manager.get_agent_settings().await?;
+    Ok(agent_settings.show_tray_icon)
+}
+
+/// Show or hide Juno's menu-bar (tray) icon, and remember the choice.
+#[command]
+pub async fn set_tray_icon_visible(
+    settings_manager: State<'_, SettingsManager>,
+    visible: bool,
+) -> Result<(), String> {
+    let mut agent_settings = settings_manager.get_agent_settings().await?;
+    agent_settings.show_tray_icon = visible;
+    settings_manager.set_agent_settings(&agent_settings).await?;
+
+    set_tray_icon_visible_now(visible).await;
+    info!(
+        "[TrayIcon] Menu bar icon is now {}",
+        if visible { "shown" } else { "hidden" }
+    );
+    Ok(())
 }

@@ -788,6 +788,8 @@ pub fn run() {
             commands::tray_commands::update_tray_icon_from_state,
             commands::tray_commands::test_all_tray_icon_states,
             commands::tray_commands::get_current_tray_icon_state,
+            commands::tray_commands::get_tray_icon_visible,
+            commands::tray_commands::set_tray_icon_visible,
             // Testing commands
             commands::testing::run_test_suite,
             commands::testing::run_human_comparison_benchmark,
