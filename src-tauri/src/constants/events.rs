@@ -85,6 +85,17 @@ pub mod streaming {
     pub const THINKING_START: &str = "agent-thinking-start";
     pub const THINKING_STREAM: &str = "agent-thinking-stream";
     pub const THINKING_END: &str = "agent-thinking-end";
+
+    /// A tool the model is about to run, announced from the provider's partial
+    /// message stream while its arguments are still arriving — so the UI can
+    /// say "Clicking 640, 60" before the pointer moves rather than after.
+    /// Payload has `message_id`, `tool_use_id`, `tool_name` and `description`.
+    /// Re-sent as the arguments sharpen, so treat it as a replace, not append.
+    pub const TOOL_PENDING: &str = "agent-tool-pending";
+    /// The pending tool is over — its result arrived, or the stream ended
+    /// without one. Clear the indicator so no spinner is left hanging.
+    /// Payload has `message_id`, `tool_use_id` and `tool_name`.
+    pub const TOOL_PENDING_CLEARED: &str = "agent-tool-pending-cleared";
 }
 
 /// Dictation and voice events
