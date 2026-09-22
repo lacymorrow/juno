@@ -876,6 +876,38 @@ pub async fn set_audio_level_monitoring<R: tauri::Runtime>(
     Ok(())
 }
 
+/// Enable or disable live streaming partial transcription on the voice
+/// controller. Takes effect on the next dictation session. Display-only: live
+/// partials are rendered in Juno's own bar and are never typed into the app.
+#[tauri::command]
+pub async fn set_live_partial_transcription(
+    enabled: bool,
+    controller: State<'_, Arc<Mutex<VoiceController>>>,
+) -> Result<(), Error> {
+    info!(
+        "[Plugin] set_live_partial_transcription command called with enabled: {}",
+        enabled
+    );
+
+    let mut voice_controller = match controller.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(Error::LockError(
+                "VoiceController is busy - please try again".to_string(),
+            ));
+        }
+        Err(std::sync::TryLockError::Poisoned(e)) => {
+            return Err(Error::LockError(format!(
+                "VoiceController mutex is poisoned: {}",
+                e
+            )));
+        }
+    };
+
+    voice_controller.set_live_partial(enabled);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn test_whisper_model(
     controller: State<'_, Arc<Mutex<AlwaysListeningController>>>,

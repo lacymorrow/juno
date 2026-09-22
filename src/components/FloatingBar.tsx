@@ -78,6 +78,8 @@ interface BarStateData {
   lastSubmittedValue: string;
   currentError: string | null;
   transcriptionText: string;
+  /** True while transcriptionText is a live streaming partial (render dimmed). */
+  transcriptionProvisional?: boolean;
   spokenText: string;
   voiceMode: string;
   audioLevel: number;
@@ -2166,6 +2168,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                   : currentUiState === UI.BAR_STATES_ERROR
                     ? "text-[#e8866a]/80"
                     : "text-white/55",
+                // Live streaming partial: render provisional, swap to solid on final.
+                currentUiState === UI.BAR_STATES_TRANSCRIBING &&
+                  barState.transcriptionProvisional &&
+                  "italic text-white/40",
               )}
               data-testid="floating-bar-status"
             >

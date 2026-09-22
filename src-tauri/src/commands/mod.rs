@@ -59,6 +59,7 @@ pub mod skills; // Skill discovery for slash-command autocomplete (LAC-3031)
 pub mod sound;
 pub mod stop_coordinator;
 pub mod stop_operations;
+pub mod stt;
 pub mod testing;
 pub mod text_editor;
 pub mod tools;
@@ -126,6 +127,10 @@ pub use self::shell::*;
 pub use self::shortcuts::*;
 pub use self::sound::*;
 pub use self::stop_operations::*;
+pub use self::stt::{
+    get_live_partial_transcription, get_stt_provider, get_system_arch,
+    set_live_partial_transcription, set_stt_provider,
+};
 pub use self::triggers::*;
 pub use self::whisper_model::{
     download_whisper_model, get_current_whisper_model, get_whisper_download_status,
