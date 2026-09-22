@@ -170,6 +170,16 @@ pub mod defaults {
     /// Juno shows its menu-bar (tray) icon by default; hiding it is opt-in.
     pub const SHOW_TRAY_ICON: bool = true;
 
+    /// How hard the Claude CLI provider thinks per turn — its `--effort` flag.
+    /// Hidden advanced setting with no UI: it trades latency for depth, and
+    /// Juno's policy is capability first, so "high" rather than "medium".
+    /// Anything outside `CLAUDE_CLI_EFFORT_LEVELS` is ignored and this is used.
+    pub const CLAUDE_CLI_EFFORT: &str = "high";
+    /// The levels the CLI accepts. A store value outside this list is dropped
+    /// rather than passed through, so a stale setting cannot make every spawn
+    /// fail on an unknown argument.
+    pub const CLAUDE_CLI_EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
     pub fn background_mode() -> bool {
         BACKGROUND_MODE
     }

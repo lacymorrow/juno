@@ -73,6 +73,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             max_tokens: Some(crate::constants::agent::config::DEFAULT_MAX_TOKENS_ANTHROPIC),
             temperature: Some(0.7),
             system_prompt: None,
+            effort: None,
         },
         CentralizedProviderConfig {
             id: Provider::OpenAI.id().to_string(),
@@ -81,6 +82,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             max_tokens: Some(4096),
             temperature: Some(0.7),
             system_prompt: None,
+            effort: None,
         },
         CentralizedProviderConfig {
             id: Provider::Rig.id().to_string(),
@@ -89,6 +91,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             max_tokens: Some(4096),
             temperature: Some(0.7),
             system_prompt: None,
+            effort: None,
         },
         CentralizedProviderConfig {
             id: Provider::Gemini.id().to_string(),
@@ -97,6 +100,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             max_tokens: Some(4096),
             temperature: Some(0.7),
             system_prompt: None,
+            effort: None,
         },
         CentralizedProviderConfig {
             id: Provider::ClaudeCli.id().to_string(),
@@ -105,6 +109,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             max_tokens: Some(4096),
             temperature: Some(0.7),
             system_prompt: None,
+            effort: None,
         },
     ]
 }
