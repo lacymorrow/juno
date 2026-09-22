@@ -763,6 +763,10 @@ pub fn run() {
             commands::settings::set_autostart_enabled,
             commands::settings::get_advanced_settings_enabled,
             commands::settings::set_advanced_settings_enabled,
+            // Experimental: one long-lived `claude` process per conversation.
+            // Off by default — docs/plans/cli-persistent-session-spike.md
+            agent::providers::claude_cli_session::get_cli_persistent_session_enabled,
+            agent::providers::claude_cli_session::set_cli_persistent_session_enabled,
             commands::bar_position::get_bar_position,
             commands::bar_position::set_bar_position,
             commands::bar_position::set_bar_frame,
