@@ -466,6 +466,10 @@ pub fn is_tts_playing() -> bool {
 // Set TTS playing state
 fn set_tts_playing(playing: bool) {
     TTS_PLAYING.store(playing, Ordering::SeqCst);
+    // Echo guard: mute the always-listening mic while Juno speaks so she never
+    // wakes on her own TTS, and unmute the instant playback ends. This is the
+    // single choke point for both (start at play, stop when playback finishes).
+    tauri_plugin_voice_transcription::set_capture_suppressed(playing);
 }
 
 // Register escape key for TTS cancellation - CENTRALIZED
