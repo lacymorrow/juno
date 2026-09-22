@@ -249,10 +249,26 @@ pub mod validators {
         }
     }
 
-    /// Validate duration is reasonable
-    pub fn reasonable_duration(duration_ms: u64) -> Result<(), String> {
-        if duration_ms > 30000 {
-            Err(format!("Duration {}ms seems very long", duration_ms))
+    /// Validate a `hold_key` duration, in milliseconds.
+    ///
+    /// The cap is `MAX_HOLD_KEY_MS`, the same 300-second ceiling
+    /// `resolve_hold_key_duration_ms` clamps the agent path to, so the two
+    /// entry points into `hold_key` agree on how long a key may be held.
+    /// They used to disagree: this one rejected anything over 30_000ms while
+    /// the agent path happily clamped to 300_000ms, so the same request was
+    /// legal or not depending on which door it came through — and, since this
+    /// validator is debug-only, on the build.
+    ///
+    /// Named for `hold_key` rather than "duration" so the 300-second ceiling
+    /// cannot be borrowed for an unrelated value that has no business being
+    /// five minutes long.
+    pub fn reasonable_hold_key_duration_ms(duration_ms: u64) -> Result<(), String> {
+        let max_ms = crate::agent::tools::anthropic_computer_use::MAX_HOLD_KEY_MS;
+        if duration_ms > max_ms {
+            Err(format!(
+                "hold_key duration {}ms exceeds the {}ms maximum",
+                duration_ms, max_ms
+            ))
         } else {
             Ok(())
         }
@@ -309,4 +325,38 @@ pub mod validators {
 /// Helper function to determine if debug mode should be enabled
 pub fn should_enable_debug(debug_mode: bool, state: &crate::state::AppState) -> bool {
     debug_mode || state.is_debug_mode() || cfg!(debug_assertions)
+}
+
+#[cfg(test)]
+mod hold_key_cap_tests {
+    use super::validators::reasonable_hold_key_duration_ms;
+    use crate::agent::tools::anthropic_computer_use::{
+        resolve_hold_key_duration_ms, MAX_HOLD_KEY_MS,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn the_validator_and_the_agent_path_share_one_ceiling() {
+        // The whole point: whatever the agent path clamps to must be a value
+        // this validator accepts. Two caps meant the same request was legal or
+        // not depending on which entry point it arrived through.
+        let clamped = resolve_hold_key_duration_ms(&json!({ "duration": 9_999 }));
+        assert_eq!(clamped, Ok(MAX_HOLD_KEY_MS));
+        assert!(reasonable_hold_key_duration_ms(MAX_HOLD_KEY_MS).is_ok());
+    }
+
+    #[test]
+    fn a_duration_the_old_cap_rejected_is_now_accepted() {
+        // 60 seconds: over the old bare 30_000ms limit, well inside the
+        // 300-second ceiling Anthropic's computer tool actually allows.
+        assert!(reasonable_hold_key_duration_ms(60_000).is_ok());
+    }
+
+    #[test]
+    fn a_duration_past_the_shared_ceiling_is_rejected() {
+        let error = reasonable_hold_key_duration_ms(MAX_HOLD_KEY_MS + 1)
+            .expect_err("a hold longer than the cap must be rejected");
+        // The message names the unit and the bound, not just "seems very long".
+        assert!(error.contains("300000ms"), "unexpected message: {}", error);
+    }
 }
