@@ -30,6 +30,7 @@ import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useEventListener } from "@/hooks/useEventListener";
 import { BarFlameBorder } from "@/components/bar/BarFlameBorder";
+import { BAR_DEPTH_GLOW } from "@/components/bar/barAppearance";
 import { cn } from "@/lib/utils";
 import { COMMANDS, EVENTS, UI } from "@/lib/constants.generated";
 import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
@@ -1941,7 +1942,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           // Juno has the pointer: a hairline in system blue, nothing louder.
           isDriving && "border-[#0A84FF]/70",
           "transition-[width,height,padding] duration-200 ease-out",
-          layout === "compact" ? "shadow-lg" : "shadow-2xl",
         )}
         // Horizontal origin: the dot is absolute at its fixed home, and every
         // flowing block starts at CONTENT_LEAD so it clears the dot. No layout
@@ -1954,6 +1954,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           height: pill.height,
           paddingLeft: CONTENT_LEAD,
           paddingRight: layout === "full" ? 16 : layout === "compact" ? 0 : 8,
+          boxShadow: BAR_DEPTH_GLOW,
         }}
       >
         {/* Activity indicator: a lit border whose colour + intensity name the

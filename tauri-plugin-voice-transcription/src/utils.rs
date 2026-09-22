@@ -30,6 +30,25 @@ static WHOLE_UTTERANCE_ARTIFACT_RE: Lazy<Option<Regex>> = Lazy::new(|| {
         .ok()
 });
 
+/// "Juneau" is what Whisper reliably hears when someone says "Juno": the Alaska
+/// capital is in its vocabulary, the assistant's name is not. Rewrite the whole
+/// word back (case-insensitively) so addressing Juno by name works. Juno is an
+/// assistant, so a genuine dictation about the city is rare enough that the
+/// name recognition is the right trade.
+static JUNEAU_RE: Lazy<Option<Regex>> = Lazy::new(|| {
+    Regex::new(r"(?i)\bjuneau\b")
+        .map_err(|e| tracing::error!("Failed to compile JUNEAU_RE: {}", e))
+        .ok()
+});
+
+/// Fix known mishearings of Juno's own name in a cleaned transcript.
+fn correct_name_mishearings(text: &str) -> String {
+    match &*JUNEAU_RE {
+        Some(re) => re.replace_all(text, "Juno").into_owned(),
+        None => text.to_string(),
+    }
+}
+
 /// Remove Whisper audio marker artifacts from transcription text.
 ///
 /// Strips tokens like `[BLANK_AUDIO]`, `[BLANK AUDIO]`, `[SILENCE]`, `[INAUDIBLE]`, `[MUSIC]`,
@@ -47,13 +66,14 @@ pub fn filter_transcription_text(text: &str) -> String {
         }
     }
 
-    match &*WHISPER_ARTIFACT_RE {
+    let cleaned = match &*WHISPER_ARTIFACT_RE {
         Some(re) => {
-            let cleaned = re.replace_all(text, " ");
-            cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+            let stripped = re.replace_all(text, " ");
+            stripped.split_whitespace().collect::<Vec<_>>().join(" ")
         }
         None => text.to_string(),
-    }
+    };
+    correct_name_mishearings(&cleaned)
 }
 
 /// Resolve model path to an absolute path using production-ready path resolution
@@ -302,6 +322,18 @@ mod transcription_filter_tests {
             filter_transcription_text("I said (quietly) that it was fine"),
             "I said (quietly) that it was fine"
         );
+    }
+
+    #[test]
+    fn juneau_is_rewritten_to_juno() {
+        // Whisper hears the assistant's name as the Alaska capital.
+        assert_eq!(filter_transcription_text("hey juneau"), "hey Juno");
+        assert_eq!(
+            filter_transcription_text("Juneau, what time is it"),
+            "Juno, what time is it"
+        );
+        // Whole word only: a word that merely contains the letters is untouched.
+        assert_eq!(filter_transcription_text("juneaus"), "juneaus");
     }
 
     #[test]
