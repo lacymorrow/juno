@@ -72,16 +72,15 @@ pub async fn list_files(
 
     let debug_op = DebugOperation::start("list_files", debug_config.clone());
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        if let Err(e) = valid_file_path(&path_str) {
-            let err_msg = format!("Invalid path: {}", e);
-            if debug_config.send_notifications {
-                send_debug_notification(&app, "List Files Error", &err_msg)?;
-            }
-            debug_op.complete(Some(&app), false);
-            return Err(err_msg);
+    // Unconditional path check (LAC-4013). Interim until this command is
+    // wired to path_security::resolve_within_default_roots (Fix B).
+    if let Err(e) = valid_file_path(&path_str) {
+        let err_msg = format!("Invalid path: {}", e);
+        if debug_config.send_notifications {
+            send_debug_notification(&app, "List Files Error", &err_msg)?;
         }
+        debug_op.complete(Some(&app), false);
+        return Err(err_msg);
     }
 
     if debug_config.log_operations {
@@ -210,16 +209,15 @@ pub async fn get_file_content(
 
     let debug_op = DebugOperation::start("get_file_content", debug_config.clone());
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        if let Err(e) = valid_file_path(&path_str) {
-            let err_msg = format!("Invalid path: {}", e);
-            if debug_config.send_notifications {
-                send_debug_notification(&app, "Get File Content Error", &err_msg)?;
-            }
-            debug_op.complete(Some(&app), false);
-            return Err(err_msg);
+    // Unconditional path check (LAC-4013). Interim until this command is
+    // wired to path_security::resolve_within_default_roots (Fix B).
+    if let Err(e) = valid_file_path(&path_str) {
+        let err_msg = format!("Invalid path: {}", e);
+        if debug_config.send_notifications {
+            send_debug_notification(&app, "Get File Content Error", &err_msg)?;
         }
+        debug_op.complete(Some(&app), false);
+        return Err(err_msg);
     }
 
     if debug_config.log_operations {
@@ -313,16 +311,15 @@ pub async fn set_file_content(
 
     let debug_op = DebugOperation::start("set_file_content", debug_config.clone());
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        if let Err(e) = valid_file_path(&path_str) {
-            let err_msg = format!("Invalid path: {}", e);
-            if debug_config.send_notifications {
-                send_debug_notification(&app, "Set File Content Error", &err_msg)?;
-            }
-            debug_op.complete(Some(&app), false);
-            return Err(err_msg);
+    // Unconditional path check (LAC-4013). Interim until this command is
+    // wired to path_security::resolve_within_default_roots (Fix B).
+    if let Err(e) = valid_file_path(&path_str) {
+        let err_msg = format!("Invalid path: {}", e);
+        if debug_config.send_notifications {
+            send_debug_notification(&app, "Set File Content Error", &err_msg)?;
         }
+        debug_op.complete(Some(&app), false);
+        return Err(err_msg);
     }
 
     if debug_config.log_operations {

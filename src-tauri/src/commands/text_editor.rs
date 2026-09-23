@@ -50,11 +50,9 @@ pub(crate) async fn text_editor_view(path: String) -> Result<String, String> {
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&path)?;
-        validators::valid_file_path(&path)?;
-    }
+    // Unconditional path check (LAC-4013) — this used to be skipped entirely
+    // in release builds. Interim until wired to path_security (Fix B).
+    validators::valid_file_path(&path)?;
 
     log_debug_operation(
         "text_editor_view",
@@ -94,11 +92,9 @@ pub(crate) async fn text_editor_create(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&path)?;
-        validators::valid_file_path(&path)?;
-    }
+    // Unconditional path check (LAC-4013). Interim until wired to
+    // path_security::resolve_within_default_roots (Fix B).
+    validators::valid_file_path(&path)?;
 
     let path_buf: PathBuf = path.into();
     log_debug_operation(
@@ -209,12 +205,14 @@ pub(crate) async fn text_editor_str_replace(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&path)?;
-        validators::valid_file_path(&path)?;
-        validators::non_empty_text(&find)?;
-    }
+    // Unconditional checks (LAC-4013). The path check is interim until wired
+    // to path_security (Fix B). The empty-`find` check is load-bearing:
+    // `content.replace("", …)` inserts the replacement between every
+    // character and corrupts the whole file.
+    validators::valid_file_path(&path)?;
+    validators::non_empty_text(&find).map_err(|_| {
+        "Find string cannot be empty: replacing an empty string would corrupt the file".to_string()
+    })?;
 
     let path_buf: PathBuf = path.into();
     log_debug_operation(
@@ -305,14 +303,10 @@ pub(crate) async fn text_editor_insert(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&path)?;
-        validators::valid_file_path(&path)?;
-        if line_number == 0 {
-            return Err("Line number must be greater than 0".to_string());
-        }
-    }
+    // Unconditional path check (LAC-4013). Interim until wired to
+    // path_security::resolve_within_default_roots (Fix B). A `line_number`
+    // of 0 is handled below via `saturating_sub`, so no check needed here.
+    validators::valid_file_path(&path)?;
 
     let path_buf: PathBuf = path.into();
     log_debug_operation(

@@ -874,10 +874,10 @@ pub(crate) async fn wait(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::valid_duration_seconds(duration_sec)?;
-    }
+    // Duration cap is enforced unconditionally: `wait` is reachable from
+    // agent tool calls and this is the only bound on how long one call can
+    // sleep (LAC-4013).
+    validators::valid_duration_seconds(duration_sec)?;
 
     let duration_ms = (duration_sec * 1000.0).max(0.0) as u64; // Convert seconds to ms, ensure non-negative
 
@@ -895,9 +895,9 @@ pub(crate) async fn wait(
     // it still fails when accessibility was never granted. The sleep itself is
     // `tokio::time::sleep`, not `Desktop::wait`, because that one is a
     // `std::thread::sleep` and parks a tokio worker thread for the whole
-    // duration when called from an async Tauri command. Nothing bounds
-    // `duration_sec` in a release build (`validate_inputs` is debug-only), so
-    // the wait that parks the worker is the one nobody caps.
+    // duration when called from an async Tauri command. The duration itself is
+    // capped above by `valid_duration_seconds`, which runs unconditionally now
+    // rather than behind the debug-only `validate_inputs` gate (LAC-4013).
     state.get_desktop()?;
     tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
 
@@ -973,7 +973,7 @@ pub(crate) async fn set_clipboard(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -982,11 +982,6 @@ pub(crate) async fn set_clipboard(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&content)?;
-    }
 
     log_debug_operation(
         "set_clipboard",

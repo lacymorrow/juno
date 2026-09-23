@@ -23,18 +23,6 @@ pub(crate) async fn type_text(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&text)?;
-        if text.len() > crate::constants::text::limits::MAX_KEYBOARD_INPUT_LENGTH {
-            log_debug_operation(
-                "type_text",
-                &format!("Very long text ({} chars) - may be slow", text.len()),
-                &debug_config,
-            );
-        }
-    }
-
     log_debug_operation(
         "type_text",
         &format!("Typing text length: {}", text.len()),
@@ -88,11 +76,6 @@ pub(crate) async fn press_key(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&key)?;
-    }
 
     log_debug_operation(
         "press_key",
@@ -177,11 +160,6 @@ pub(crate) async fn global_type_text(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&text)?;
-    }
-
     log_debug_operation(
         "global_type_text",
         &format!("Global typing text length: {}", text.len()),
@@ -230,12 +208,12 @@ pub(crate) async fn hold_key(
         DebugConfig::production_mode()
     };
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&key)?;
-        if let Some(duration) = duration_ms {
-            validators::reasonable_hold_key_duration_ms(duration)?;
-        }
+    // The hold duration cap is load-bearing: it is the only bound on how long
+    // `hold_key` pins a modifier down, so it runs unconditionally rather than
+    // behind the debug-only `validate_inputs` gate (LAC-4013). The companion
+    // non-empty-key check was dev-sanity only and is gone with the gate.
+    if let Some(duration) = duration_ms {
+        validators::reasonable_hold_key_duration_ms(duration)?;
     }
 
     log_debug_operation(
@@ -298,11 +276,6 @@ pub(crate) async fn release_key(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&key)?;
-    }
 
     log_debug_operation("release_key", &format!("Key: '{}'", key), &debug_config);
     info!("Executing release_key for key: '{}'", key);

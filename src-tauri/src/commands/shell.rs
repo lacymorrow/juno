@@ -690,6 +690,25 @@ pub fn init_shell_state(app_state: &AppState) {
 // ANTHROPIC COMPUTER USE API COMPLIANT BASH COMMAND
 // ============================================================================
 
+/// Upper bound on a caller-supplied bash timeout (1 hour).
+const MAX_BASH_TIMEOUT_SECONDS: u64 = 3600;
+
+/// Validate a caller-supplied bash timeout.
+///
+/// Runs unconditionally (LAC-4013): without it, a caller can pin a shell
+/// session with `timeout_seconds: 0` (never completes) or an absurdly large
+/// value. `None` is fine — `DEFAULT_TIMEOUT` applies downstream.
+fn validate_bash_timeout(timeout_seconds: Option<u64>) -> Result<(), String> {
+    match timeout_seconds {
+        Some(0) => Err("Timeout must be greater than 0 seconds".to_string()),
+        Some(t) if t > MAX_BASH_TIMEOUT_SECONDS => Err(format!(
+            "Timeout cannot exceed {} seconds (1 hour)",
+            MAX_BASH_TIMEOUT_SECONDS
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Anthropic Computer Use API compliant bash tool implementation
 /// Returns structured BashResult - eliminates string comparison anti-patterns
 /// Fixed: Secure implementation following official specification
@@ -703,8 +722,7 @@ pub async fn bash_command(
     debug_mode: Option<bool>,
 ) -> Result<BashResult, String> {
     use crate::commands::debug_utils::{
-        send_debug_notification, should_enable_debug, validators::non_empty_text, DebugConfig,
-        DebugOperation,
+        send_debug_notification, should_enable_debug, DebugConfig, DebugOperation,
     };
     use tracing::{error, info};
 
@@ -726,37 +744,15 @@ pub async fn bash_command(
 
     let debug_op = DebugOperation::start("bash_command", debug_config.clone());
 
-    // Debug validation
-    if debug_config.validate_inputs {
-        if let Err(e) = non_empty_text(&command) {
-            let err_msg = format!("Invalid command: {}", e);
-            if debug_config.send_notifications {
-                send_debug_notification(&app, "Bash Command Error", &err_msg)?;
-            }
-            debug_op.complete(Some(&app), false);
-            return Err(err_msg);
+    // Timeout bounds are enforced unconditionally: this is the only cap on
+    // how long a bash session can be pinned, and the primary agent path calls
+    // this command without debug mode (LAC-4013).
+    if let Err(err_msg) = validate_bash_timeout(timeout_seconds) {
+        if debug_config.send_notifications {
+            send_debug_notification(&app, "Bash Command Error", &err_msg)?;
         }
-
-        // Validate timeout if provided
-        if let Some(timeout) = timeout_seconds {
-            if timeout == 0 {
-                let err_msg = "Timeout must be greater than 0 seconds".to_string();
-                if debug_config.send_notifications {
-                    send_debug_notification(&app, "Bash Command Error", &err_msg)?;
-                }
-                debug_op.complete(Some(&app), false);
-                return Err(err_msg);
-            }
-            if timeout > 3600 {
-                // 1 hour max
-                let err_msg = "Timeout cannot exceed 3600 seconds (1 hour)".to_string();
-                if debug_config.send_notifications {
-                    send_debug_notification(&app, "Bash Command Error", &err_msg)?;
-                }
-                debug_op.complete(Some(&app), false);
-                return Err(err_msg);
-            }
-        }
+        debug_op.complete(Some(&app), false);
+        return Err(err_msg);
     }
 
     let effective_restart = restart.unwrap_or(false);
@@ -898,6 +894,26 @@ pub async fn bash_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- bash timeout bounds run unconditionally (LAC-4013) ---
+
+    #[test]
+    fn bash_timeout_rejects_zero() {
+        assert!(validate_bash_timeout(Some(0)).is_err());
+    }
+
+    #[test]
+    fn bash_timeout_rejects_above_cap() {
+        assert!(validate_bash_timeout(Some(MAX_BASH_TIMEOUT_SECONDS + 1)).is_err());
+        assert!(validate_bash_timeout(Some(u64::MAX)).is_err());
+    }
+
+    #[test]
+    fn bash_timeout_accepts_boundary_and_default() {
+        assert!(validate_bash_timeout(Some(1)).is_ok());
+        assert!(validate_bash_timeout(Some(MAX_BASH_TIMEOUT_SECONDS)).is_ok());
+        assert!(validate_bash_timeout(None).is_ok());
+    }
 
     // --- The debug-mode bypass is gone: these must fail in ALL build modes ---
     // (These tests run under cfg(debug_assertions); before the fix,

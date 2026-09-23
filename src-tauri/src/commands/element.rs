@@ -224,9 +224,7 @@ pub(crate) async fn find_element_by_selector(
     selector_str: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    use crate::commands::debug_utils::{
-        log_debug_operation, should_enable_debug, validators, DebugConfig,
-    };
+    use crate::commands::debug_utils::{log_debug_operation, should_enable_debug, DebugConfig};
 
     let debug_enabled = should_enable_debug(false, &state);
     let debug_config = if debug_enabled {
@@ -234,11 +232,6 @@ pub(crate) async fn find_element_by_selector(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&selector_str)?;
-    }
 
     log_debug_operation(
         "find_element_by_selector",
@@ -301,7 +294,7 @@ pub(crate) async fn click_element_by_selector(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -310,11 +303,6 @@ pub(crate) async fn click_element_by_selector(
     } else {
         DebugConfig::production_mode()
     };
-
-    // Debug validation
-    if debug_config.validate_inputs {
-        validators::non_empty_text(&selector_str)?;
-    }
 
     log_debug_operation(
         "click_element_by_selector",
