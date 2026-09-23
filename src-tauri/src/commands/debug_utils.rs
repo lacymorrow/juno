@@ -9,13 +9,25 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, info, warn};
 
-/// Configuration for debug behavior
+/// Configuration for debug behavior.
+///
+/// This config controls dev-only telemetry: logging, notifications, timing,
+/// and visualization events. Every flag here may be (and in release builds is)
+/// turned off wholesale, so NOTHING security- or correctness-critical may ever
+/// be gated on it.
+///
+/// History (LAC-4004 / LAC-4013): this struct used to carry a
+/// `validate_inputs` flag that gated input validation in every command
+/// handler. Because the factories below disable all flags together in release,
+/// that silently disabled load-bearing checks (bash timeout bounds, wait
+/// duration caps, file-path checks) in production builds. Input validation now
+/// runs unconditionally inside each command (or via
+/// `agent::tools::path_security`). Do not re-introduce a validation flag here.
 #[derive(Debug, Clone)]
 pub struct DebugConfig {
     pub enabled: bool,
     pub log_operations: bool,
     pub send_notifications: bool,
-    pub validate_inputs: bool,
     pub time_operations: bool,
     pub emit_visualizations: bool,
 }
@@ -27,7 +39,6 @@ impl DebugConfig {
             enabled: cfg!(debug_assertions),
             log_operations: cfg!(debug_assertions),
             send_notifications: cfg!(debug_assertions),
-            validate_inputs: cfg!(debug_assertions),
             time_operations: cfg!(debug_assertions),
             emit_visualizations: cfg!(debug_assertions),
         }
@@ -39,7 +50,6 @@ impl DebugConfig {
             enabled: false,
             log_operations: false,
             send_notifications: false,
-            validate_inputs: false,
             time_operations: false,
             emit_visualizations: false,
         }
@@ -51,7 +61,6 @@ impl DebugConfig {
             enabled: true,
             log_operations: true,
             send_notifications: true,
-            validate_inputs: true,
             time_operations: true,
             emit_visualizations: true,
         }
@@ -153,32 +162,6 @@ where
     result
 }
 
-/// Enhanced input validation for debug mode
-pub fn validate_debug_input<T>(
-    input: &T,
-    validation_name: &str,
-    config: &DebugConfig,
-    validator: impl Fn(&T) -> Result<(), String>,
-) -> Result<(), String> {
-    if !config.validate_inputs {
-        return Ok(());
-    }
-
-    match validator(input) {
-        Ok(()) => {
-            debug!("[DEBUG] ✅ {} validation passed", validation_name);
-            Ok(())
-        }
-        Err(e) => {
-            warn!("[DEBUG] ❌ {} validation failed: {}", validation_name, e);
-            Err(format!(
-                "Debug validation failed for {}: {}",
-                validation_name, e
-            ))
-        }
-    }
-}
-
 /// Emit visualization events for debug mode
 pub fn emit_debug_visualization(
     app_handle: &AppHandle,
@@ -225,25 +208,16 @@ macro_rules! debug_operation_anthropic {
     }};
 }
 
-/// Common debug validators
+/// Input validators.
+///
+/// Despite living in `debug_utils`, these run UNCONDITIONALLY at their call
+/// sites — they are enforcement, not diagnostics (LAC-4013). Do not gate calls
+/// to them on `DebugConfig` or build mode.
 pub mod validators {
     /// Validate text input is not empty
     pub fn non_empty_text(text: &str) -> Result<(), String> {
         if text.trim().is_empty() {
             Err("Text cannot be empty".to_string())
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Validate coordinates are reasonable
-    pub fn valid_coordinates(x: f64, y: f64) -> Result<(), String> {
-        if x < crate::constants::mouse::testing::MIN_COORDINATE_VALUE
-            || y < crate::constants::mouse::testing::MIN_COORDINATE_VALUE
-            || x > crate::constants::mouse::testing::MAX_COORDINATE_VALUE
-            || y > crate::constants::mouse::testing::MAX_COORDINATE_VALUE
-        {
-            Err(format!("Coordinates ({}, {}) seem unreasonable", x, y))
         } else {
             Ok(())
         }
@@ -256,8 +230,8 @@ pub mod validators {
     /// entry points into `hold_key` agree on how long a key may be held.
     /// They used to disagree: this one rejected anything over 30_000ms while
     /// the agent path happily clamped to 300_000ms, so the same request was
-    /// legal or not depending on which door it came through — and, since this
-    /// validator is debug-only, on the build.
+    /// legal or not depending on which door it came through. It also used to
+    /// depend on the build; LAC-4013 made this validator unconditional.
     ///
     /// Named for `hold_key` rather than "duration" so the 300-second ceiling
     /// cannot be borrowed for an unrelated value that has no business being
@@ -274,18 +248,14 @@ pub mod validators {
         }
     }
 
-    /// Validate file path is safe
-    pub fn safe_file_path(path: &str) -> Result<(), String> {
-        if path.contains("..") || path.starts_with('/') && !path.starts_with("/Users") {
-            Err("File path appears unsafe".to_string())
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Validate duration in seconds is reasonable
+    /// Validate duration in seconds is within the allowed cap.
+    ///
+    /// Load-bearing: `core::wait` is reachable from agent tool calls and this
+    /// cap is the only bound on how long a single call can sleep.
     pub fn valid_duration_seconds(duration_sec: f64) -> Result<(), String> {
-        if duration_sec < 0.0 {
+        if !duration_sec.is_finite() {
+            Err("Duration must be a finite number".to_string())
+        } else if duration_sec < 0.0 {
             Err("Duration cannot be negative".to_string())
         } else if duration_sec > crate::constants::text::validation::MAX_OPERATION_DURATION_SECONDS
         {
@@ -299,7 +269,14 @@ pub mod validators {
         }
     }
 
-    /// Validate file path is valid and safe
+    /// Validate file path is valid and safe.
+    ///
+    /// Interim enforcement: rejects empty paths and `..` traversal. LAC-4013
+    /// Fix B replaces the command-level call sites with
+    /// `agent::tools::path_security::resolve_within_default_roots` once the
+    /// allowed-roots product decision lands. Until then this is the only path
+    /// check on the `commands/filesystem.rs` and `commands/text_editor.rs`
+    /// surfaces — keep it unconditional.
     pub fn valid_file_path(path: &str) -> Result<(), String> {
         use std::path::Path;
 
@@ -358,5 +335,62 @@ mod hold_key_cap_tests {
             .expect_err("a hold longer than the cap must be rejected");
         // The message names the unit and the bound, not just "seems very long".
         assert!(error.contains("300000ms"), "unexpected message: {}", error);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validators::{non_empty_text, valid_duration_seconds, valid_file_path};
+
+    // Regression tests for LAC-4013: these validators are load-bearing and run
+    // unconditionally in release builds. Exercise the boundary values.
+
+    #[test]
+    fn duration_accepts_zero_and_cap() {
+        assert!(valid_duration_seconds(0.0).is_ok());
+        assert!(valid_duration_seconds(1.5).is_ok());
+        assert!(valid_duration_seconds(
+            crate::constants::text::validation::MAX_OPERATION_DURATION_SECONDS
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn duration_rejects_out_of_bounds() {
+        assert!(valid_duration_seconds(-0.001).is_err());
+        assert!(valid_duration_seconds(
+            crate::constants::text::validation::MAX_OPERATION_DURATION_SECONDS + 0.001
+        )
+        .is_err());
+        // The worker-starvation vector from LAC-4004: enormous durations.
+        assert!(valid_duration_seconds(1e12).is_err());
+    }
+
+    #[test]
+    fn duration_rejects_non_finite() {
+        assert!(valid_duration_seconds(f64::NAN).is_err());
+        assert!(valid_duration_seconds(f64::INFINITY).is_err());
+        assert!(valid_duration_seconds(f64::NEG_INFINITY).is_err());
+    }
+
+    #[test]
+    fn file_path_rejects_empty_and_traversal() {
+        assert!(valid_file_path("").is_err());
+        assert!(valid_file_path("   ").is_err());
+        assert!(valid_file_path("/tmp/../etc/passwd").is_err());
+        assert!(valid_file_path("../secrets").is_err());
+    }
+
+    #[test]
+    fn file_path_accepts_normal_paths() {
+        assert!(valid_file_path("/Users/someone/Documents/notes.txt").is_ok());
+        assert!(valid_file_path("relative/dir/file.rs").is_ok());
+    }
+
+    #[test]
+    fn non_empty_text_boundaries() {
+        assert!(non_empty_text("").is_err());
+        assert!(non_empty_text("  \t").is_err());
+        assert!(non_empty_text("x").is_ok());
     }
 }
