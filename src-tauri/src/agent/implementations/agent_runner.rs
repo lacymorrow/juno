@@ -1931,4 +1931,15 @@ mod batch_halt_tests {
         ));
         assert!(failure_halts_batch("computer", &serde_json::Value::Null));
     }
+
+    #[test]
+    fn a_non_computer_tool_carrying_an_action_field_does_not_halt() {
+        // Guards the dispatch key. The rule is scoped by *tool name*, not by
+        // the presence of an `action` field, so a custom tool that happens to
+        // take one must not inherit the computer tool's halt behaviour.
+        assert!(!failure_halts_batch(
+            "not_computer",
+            &serde_json::json!({ "action": "left_click" })
+        ));
+    }
 }
