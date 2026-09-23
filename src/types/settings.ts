@@ -21,6 +21,10 @@ export interface ProviderInfo {
   is_available: boolean;
   is_default: boolean;
   computer_use_supported: boolean;
+  /** Installed, but signed out. Only the Claude CLI can be in this state, and
+   * it is the one unavailability fixed in a terminal rather than by pasting a
+   * key, so it gets its own words. */
+  needs_sign_in: boolean;
 }
 
 export interface ProviderSettings {

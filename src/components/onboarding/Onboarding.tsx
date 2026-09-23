@@ -336,6 +336,13 @@ function firstPendingIndex(state: PermissionsState | null): number {
   return idx === -1 ? PERMISSION_FLOW.length : idx;
 }
 
+/** What the local Claude CLI can do right now, from the backend. */
+interface ClaudeCliStatus {
+  available: boolean;
+  authenticated: boolean;
+  email: string | null;
+}
+
 /** The dictation model onboarding offers, when the backend says to. */
 interface DictationOffer {
   modelId: string;
@@ -715,6 +722,12 @@ export default function OnboardingFlow({
   const [cliAuthenticated, setCliAuthenticated] = useState(false);
   const [cliChecking, setCliChecking] = useState(true);
   const [cliSelected, setCliSelected] = useState(false);
+  const [cliEmail, setCliEmail] = useState<string | null>(null);
+  // Which provider Juno is actually on. Read rather than assumed, because
+  // when the Claude CLI is signed in the backend selects it on launch and the
+  // "Connect Your AI" step never appears — so this screen is the only place
+  // that says so before Settings does.
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
 
   // Dictation model offer (see getOnboardingSteps). `sttDownload` tracks the
   // download this screen started; the download itself runs in the backend and
@@ -1189,15 +1202,24 @@ export default function OnboardingFlow({
         // Check Claude CLI availability and auth status
         try {
           setCliChecking(true);
-          const cliStatus = await invoke<{ available: boolean; authenticated: boolean }>("check_claude_cli_available");
+          const cliStatus = await invoke<ClaudeCliStatus>("check_claude_cli_available");
           if (mounted) {
             setCliAvailable(cliStatus.available);
             setCliAuthenticated(cliStatus.authenticated);
+            setCliEmail(cliStatus.email ?? null);
           }
         } catch (error) {
           console.warn("Failed to check Claude CLI availability:", error);
         } finally {
           if (mounted) setCliChecking(false);
+        }
+        if (!mounted) return;
+
+        try {
+          const active = await invoke<string>(COMMANDS.PROVIDERS_GET_ACTIVE_PROVIDER);
+          if (mounted) setActiveProvider(active);
+        } catch (error) {
+          console.warn("Failed to read the active provider:", error);
         }
         if (!mounted) return;
 
@@ -1238,10 +1260,12 @@ export default function OnboardingFlow({
       if (!mounted) return;
       await checkPermissionsStatus();
       try {
-        const cliStatus = await invoke<{ available: boolean; authenticated: boolean }>("check_claude_cli_available");
+        const cliStatus = await invoke<ClaudeCliStatus>("check_claude_cli_available");
         if (!mounted) return;
         setCliAvailable(cliStatus.available);
         setCliAuthenticated(cliStatus.authenticated);
+        setCliEmail(cliStatus.email ?? null);
+        setActiveProvider(await invoke<string>(COMMANDS.PROVIDERS_GET_ACTIVE_PROVIDER));
       } catch (error) {
         console.warn("Failed to refresh Claude CLI status on focus:", error);
       }
@@ -1951,6 +1975,19 @@ export default function OnboardingFlow({
                       </motion.div>
                     )}
                   </AnimatePresence>
+
+                  {/* The person on a Claude subscription is never asked to
+                      connect anything, so this is where they find out what
+                      they are connected to. One line, and where to change it.
+                      Shown only once the backend confirms it, so it can never
+                      claim a subscription that is not being used. */}
+                  {activeProvider === "claude_cli" && cliAuthenticated && (
+                    <p className="mt-4 text-[12px] leading-snug text-muted-foreground">
+                      {cliEmail
+                        ? `Using your Claude subscription (${cliEmail}). No API key needed. You can change this in Settings.`
+                        : "Using your Claude subscription. No API key needed. You can change this in Settings."}
+                    </p>
+                  )}
                 </div>
               )}
 

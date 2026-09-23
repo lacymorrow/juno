@@ -419,31 +419,29 @@ fn stop_listening_for_a_binding(app: &AppHandle) {
 pub struct ClaudeCliStatus {
     pub available: bool,
     pub authenticated: bool,
+    /// Which account, when the CLI says. Settings shows it so the person can
+    /// see whose Claude subscription Juno is spending.
+    pub email: Option<String>,
 }
 
-/// Check if Claude CLI is installed and optionally authenticated.
+/// What the local Claude CLI can do for this person right now.
+///
+/// Refreshes what synchronous callers see through
+/// [`claude_cli::last_known_sign_in`], so the Settings provider list stops
+/// guessing as soon as anyone has asked once.
 #[tauri::command]
 pub async fn check_claude_cli_available() -> Result<ClaudeCliStatus, String> {
-    let available = claude_cli::is_claude_cli_available();
-
-    if !available {
-        return Ok(ClaudeCliStatus {
-            available: false,
-            authenticated: false,
-        });
+    let status = claude_cli::cli_status().await;
+    if status.installed && !status.could_run() {
+        info!("Claude CLI is installed but not signed in");
     }
 
-    let authenticated = match claude_cli::check_cli_auth_status().await {
-        Ok(()) => true,
-        Err(e) => {
-            info!("Claude CLI found but not authenticated: {}", e);
-            false
-        }
-    };
-
     Ok(ClaudeCliStatus {
-        available,
-        authenticated,
+        available: status.installed,
+        // What a query would accept, so the card never tells someone to run
+        // `claude login` when their CLI is in fact answering.
+        authenticated: status.could_run(),
+        email: status.email,
     })
 }
 

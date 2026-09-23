@@ -173,6 +173,151 @@ pub fn is_claude_cli_available() -> bool {
     detect_claude_cli().is_ok()
 }
 
+/// What the last `claude auth status` said, for callers that cannot await.
+///
+/// Provider listing is synchronous and runs on every Settings render, so it
+/// cannot spawn a subprocess to ask. Before anything has asked, the answer is
+/// `Unknown` rather than "signed out" — claiming someone is logged out because
+/// nobody has checked is a lie the UI would repeat.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SignIn {
+    /// Nobody has asked yet, or the CLI answered in a way we could not read.
+    #[default]
+    Unknown,
+    /// `loggedIn: true`, in those words.
+    SignedIn,
+    /// `loggedIn: false`, in those words.
+    SignedOut,
+}
+
+/// `SignIn` as a `u8`, because atomics do not carry enums.
+static LAST_SIGN_IN: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn remember_sign_in(state: SignIn) {
+    let encoded = match state {
+        SignIn::Unknown => 0,
+        SignIn::SignedIn => 1,
+        SignIn::SignedOut => 2,
+    };
+    LAST_SIGN_IN.store(encoded, Ordering::Relaxed);
+}
+
+/// The most recent answer, without asking again.
+pub fn last_known_sign_in() -> SignIn {
+    match LAST_SIGN_IN.load(Ordering::Relaxed) {
+        1 => SignIn::SignedIn,
+        2 => SignIn::SignedOut,
+        _ => SignIn::Unknown,
+    }
+}
+
+/// Everything Juno knows about the local CLI, gathered in one pass.
+#[derive(Debug, Clone, Default)]
+pub struct CliStatus {
+    /// The `claude` binary exists.
+    pub installed: bool,
+    /// What `claude auth status` said, including that it said nothing usable.
+    pub sign_in: SignIn,
+    /// Which account, when it told us. Settings shows this so the person can
+    /// see whose quota Juno is spending.
+    pub email: Option<String>,
+}
+
+impl CliStatus {
+    /// Proof of a login. What Juno requires before choosing this provider for
+    /// somebody who never asked for it.
+    pub fn is_signed_in(&self) -> bool {
+        self.sign_in == SignIn::SignedIn
+    }
+
+    /// Not a *known* bad login — which is what an actual query accepts, since
+    /// [`check_auth_status`] lets an unreadable answer through rather than
+    /// blocking someone whose CLI works.
+    ///
+    /// This is the reading the UI uses. Greying the provider out on an answer
+    /// we merely could not parse would tell somebody they are signed out while
+    /// their queries keep succeeding, which is a worse lie than the one this
+    /// status was added to fix.
+    pub fn could_run(&self) -> bool {
+        self.installed && self.sign_in != SignIn::SignedOut
+    }
+}
+
+/// Ask the CLI about itself.
+///
+/// Reports three answers, not two, because the ambiguous one is real and the
+/// two callers want opposite things from it. An automatic switch onto this
+/// provider demands proof ([`CliStatus::is_signed_in`]); the UI demands only
+/// the absence of a confirmed negative ([`CliStatus::could_run`]). Collapsing
+/// "could not tell" into either one is what makes a status display lie.
+///
+/// Never returns an error: everything that could go wrong is one of the three
+/// answers.
+pub async fn cli_status() -> CliStatus {
+    let Ok(binary_path) = detect_claude_cli() else {
+        // Not installed is not the same as signed out, and recording it as
+        // signed out would outlive the fact: install the CLI, and until
+        // something probed again the provider list would say "sign in" to
+        // someone who already is.
+        remember_sign_in(SignIn::Unknown);
+        return CliStatus::default();
+    };
+
+    let output = tokio::process::Command::new(&binary_path)
+        .args(["auth", "status", "--json"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await;
+
+    // `None` means the CLI did not give us an answer we can read: a build too
+    // old to have `auth status --json` (non-zero exit), output that is not
+    // JSON, or a spawn that failed outright. None of those is evidence of
+    // being logged out.
+    let parsed = match output {
+        Ok(output) if output.status.success() => {
+            serde_json::from_slice::<Value>(&output.stdout).ok()
+        }
+        Ok(output) => {
+            debug!(
+                "[ClaudeCLI] `claude auth status` exited {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
+            );
+            None
+        }
+        Err(e) => {
+            warn!("[ClaudeCLI] Could not run `claude auth status`: {}", e);
+            None
+        }
+    };
+
+    let sign_in = match parsed
+        .as_ref()
+        .and_then(|json| json.get("loggedIn"))
+        .and_then(Value::as_bool)
+    {
+        Some(true) => SignIn::SignedIn,
+        Some(false) => SignIn::SignedOut,
+        None => SignIn::Unknown,
+    };
+    remember_sign_in(sign_in);
+
+    CliStatus {
+        installed: true,
+        sign_in,
+        email: parsed
+            .as_ref()
+            .and_then(|json| json.get("email"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    }
+}
+
 /// Write the `--mcp-config` file pointing the CLI at Juno's own tool server.
 ///
 /// With `--strict-mcp-config` this is the only MCP server the CLI loads, so
@@ -195,7 +340,7 @@ fn write_mcp_config(endpoint: &juno_mcp::Endpoint) -> Result<PathBuf, AgentError
     Ok(path)
 }
 
-/// System-prompt guidance appended when the juno-cua MCP server is wired in.
+/// System-prompt guidance appended when Juno's tool server is wired in.
 /// Without this, models tend to fall back to `cliclick`/`screencapture` via
 /// Bash even when MCP computer-use tools are available (LAC-3692).
 const MCP_TOOL_GUIDANCE: &str = "You have a desktop automation tool from the \"juno\" MCP \
@@ -252,17 +397,23 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
                     .unwrap_or("unknown");
                 info!("Claude CLI authenticated as: {}", email);
                 AUTH_VERIFIED.store(true, Ordering::Relaxed);
+                remember_sign_in(SignIn::SignedIn);
                 Ok(())
             } else {
+                remember_sign_in(SignIn::SignedOut);
                 Err(AgentError::ConfigurationError(
                     "Claude CLI is not logged in. Run `claude login` to authenticate.".to_string(),
                 ))
             }
         }
         Err(_) => {
-            // If we can't parse JSON but the command succeeded, assume OK
+            // If we can't parse JSON but the command succeeded, assume OK.
+            // Clear any confirmed-negative the cache is holding: we are about
+            // to let a query run, so the UI must not go on saying this person
+            // is signed out.
             warn!("Could not parse claude auth status output, assuming authenticated");
             AUTH_VERIFIED.store(true, Ordering::Relaxed);
+            remember_sign_in(SignIn::Unknown);
             Ok(())
         }
     }
@@ -273,7 +424,7 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
 /// Spawns `claude -p --output-format=stream-json` as a subprocess for each query,
 /// streaming the response back through Tauri events. The CLI handles its own tool
 /// execution: its built-in tools (Bash, Read, Edit, etc.) plus Juno's computer-use
-/// tools exposed through the juno-cua MCP server when installed (LAC-3696).
+/// Juno's own `computer` tool, served in-process over MCP (LAC-3696).
 ///
 /// The subprocess is cancellable via Juno's escape key: the `run_streaming` method
 /// races the streaming loop against the run's cancellation channel and kills the
@@ -363,8 +514,8 @@ impl ClaudeCliBrain {
             "--strict-mcp-config".to_string(),
             // In -p mode with stdin null, the CLI can't prompt for permission.
             // Allow tool execution since the user explicitly chose this provider.
-            // Note: this also lets juno-cua MCP tools run without prompting —
-            // matching this provider's existing trust model.
+            // Note: this also lets Juno's own MCP tool run without prompting
+            // — matching this provider's existing trust model.
             "--dangerously-skip-permissions".to_string(),
             // The CLI's own toolset (Bash, Read, Edit, WebFetch) stays on
             // deliberately. It augments Juno's computer tool rather than
@@ -1744,6 +1895,54 @@ fn extract_text_from_message(message: &Value) -> String {
 mod tests {
     use super::*;
 
+    /// A `CliStatus` in a given state, without running anything.
+    fn status(installed: bool, sign_in: SignIn) -> CliStatus {
+        CliStatus {
+            installed,
+            sign_in,
+            email: None,
+        }
+    }
+
+    #[test]
+    fn only_a_confirmed_login_is_proof() {
+        assert!(status(true, SignIn::SignedIn).is_signed_in());
+        assert!(!status(true, SignIn::SignedOut).is_signed_in());
+        // The case the distinction exists for: Juno must not move somebody
+        // onto this provider on the strength of an answer it could not read.
+        assert!(!status(true, SignIn::Unknown).is_signed_in());
+        assert!(!status(false, SignIn::Unknown).is_signed_in());
+    }
+
+    #[test]
+    fn only_a_confirmed_logout_stops_the_ui_offering_it() {
+        // `check_auth_status` lets an unreadable answer through and runs the
+        // query, so the provider list must not grey the CLI out on one.
+        assert!(status(true, SignIn::Unknown).could_run());
+        assert!(status(true, SignIn::SignedIn).could_run());
+        assert!(!status(true, SignIn::SignedOut).could_run());
+        assert!(!status(false, SignIn::SignedIn).could_run());
+    }
+
+    #[test]
+    fn an_unasked_question_is_not_a_no() {
+        // The provider listing is synchronous and reads this before anything
+        // has probed. Defaulting to SignedOut would tell every user with a
+        // working CLI to go and sign in.
+        assert_eq!(SignIn::default(), SignIn::Unknown);
+        assert!(status(true, SignIn::default()).could_run());
+    }
+
+    #[test]
+    fn the_sign_in_cache_round_trips_every_state() {
+        // It crosses an AtomicU8, so a bad encoding would silently read back
+        // as Unknown and quietly disable the whole distinction.
+        for state in [SignIn::Unknown, SignIn::SignedIn, SignIn::SignedOut] {
+            remember_sign_in(state);
+            assert_eq!(last_known_sign_in(), state);
+        }
+    }
+
     #[test]
     fn test_detect_claude_cli() {
         // This test is environment-dependent — just verify it doesn't panic
@@ -1850,7 +2049,7 @@ mod tests {
         assert!(args.contains(&"test query".to_string()));
         // No --system-prompt when None
         assert!(!args.contains(&"--system-prompt".to_string()));
-        // No MCP flags when juno-cua isn't wired
+        // No MCP flags when Juno's tool server isn't wired
         assert!(!args.contains(&"--mcp-config".to_string()));
         assert!(!args.contains(&"--append-system-prompt".to_string()));
         // User-level MCP servers stay disabled either way
@@ -1871,10 +2070,10 @@ mod tests {
         assert!(args.contains(&"You are helpful.".to_string()));
     }
 
-    /// Regression test for LAC-3696: when juno-cua is available, the CLI must
-    /// be given our MCP config (computer-use tools) while --strict-mcp-config
-    /// still blocks user-level servers, and the model must be steered toward
-    /// the MCP tools via --append-system-prompt.
+    /// Regression test for LAC-3696: when Juno's tool server is up, the CLI
+    /// must be given our MCP config (the `computer` tool) while
+    /// --strict-mcp-config still blocks user-level servers, and the model must
+    /// be steered toward it via --append-system-prompt.
     #[test]
     fn resuming_passes_the_session_to_the_cli() {
         // Without this flag every message was a new CLI session, so Juno

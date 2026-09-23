@@ -120,6 +120,20 @@ pub struct AgentSettings {
 pub struct ProviderSettings {
     pub active_provider: String,
     pub providers: Vec<ProviderConfig>,
+    /// Whether a human ever picked `active_provider`, as opposed to Juno
+    /// choosing it for them.
+    ///
+    /// Juno defaults someone with a signed-in Claude CLI onto it rather than
+    /// asking for an API key they would be buying twice
+    /// ([`crate::agent::providers::default_selection`]). That is only allowed
+    /// while this is false. Every path a person can pick a provider through
+    /// sets it, and from then on their choice stands.
+    ///
+    /// Absent from settings files written before this existed, and `false` is
+    /// the right reading of those: the rule still refuses to move anyone whose
+    /// active provider has a key.
+    #[serde(default)]
+    pub provider_chosen_by_user: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -464,6 +478,9 @@ impl Default for ProviderSettings {
         Self {
             active_provider: DEFAULT_PROVIDER.id().to_string(),
             providers: default_provider_entries(),
+            // Nobody has chosen anything yet, which is exactly when Juno is
+            // allowed to choose well on their behalf.
+            provider_chosen_by_user: false,
         }
     }
 }

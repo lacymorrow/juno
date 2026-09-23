@@ -58,6 +58,9 @@ pub struct ProviderConfig {
     pub agent_mode: AgentMode,
     /// Configuration for each provider (uses centralized type)
     pub providers: Vec<CentralizedProviderConfig>,
+    /// Whether a human picked `active_provider`. See
+    /// [`crate::settings::ProviderSettings::provider_chosen_by_user`].
+    pub provider_chosen_by_user: bool,
 }
 
 /// The default AI provider. Use `.id()` when a string is needed.
@@ -120,6 +123,7 @@ impl Default for ProviderConfig {
             active_provider: DEFAULT_PROVIDER.id().to_string(),
             agent_mode: AgentMode::Multi,
             providers: default_provider_entries(),
+            provider_chosen_by_user: false,
         }
     }
 }
@@ -218,6 +222,7 @@ impl ProviderConfig {
             active_provider: settings.active_provider.clone(),
             agent_mode,
             providers: final_providers,
+            provider_chosen_by_user: settings.provider_chosen_by_user,
         })
     }
 
@@ -229,6 +234,7 @@ impl ProviderConfig {
         Ok(CentralizedProviderSettings {
             active_provider: self.active_provider.clone(),
             providers,
+            provider_chosen_by_user: self.provider_chosen_by_user,
         })
     }
 
@@ -258,7 +264,10 @@ impl ProviderConfig {
         }
     }
 
-    /// Set active provider
+    /// Set active provider because a person asked for it.
+    ///
+    /// This is the deliberate act, so it also records that the choice is
+    /// theirs: from here on Juno's own default-picking leaves it alone.
     pub fn set_active_provider(&mut self, provider_id: String) -> Result<(), AgentError> {
         // Verify the provider exists
         if !self.providers.iter().any(|p| p.id == provider_id) {
@@ -268,6 +277,7 @@ impl ProviderConfig {
             )));
         }
         self.active_provider = provider_id;
+        self.provider_chosen_by_user = true;
         Ok(())
     }
 

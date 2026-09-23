@@ -24,8 +24,16 @@ interface DemoInfo {
   cohort: string | null;
 }
 
+/** What the local Claude CLI can do right now, from the backend. */
+interface ClaudeCliStatus {
+  available: boolean;
+  authenticated: boolean;
+  email: string | null;
+}
+
 export default function AIProviderSettings({ settings }: SettingsSectionProps) {
   const [demo, setDemo] = useState<DemoInfo | null>(null);
+  const [cli, setCli] = useState<ClaudeCliStatus | null>(null);
 
   // A demo build answers with its own key, so say so rather than letting the
   // person wonder why Juno works without one.
@@ -38,6 +46,31 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
       .catch((error) => console.debug("Demo info unavailable:", error));
     return () => {
       mounted = false;
+    };
+  }, []);
+
+  // Asked on open, and again whenever this window comes back. Somebody reading
+  // "sign in to Claude Code", switching to a terminal to do exactly that, and
+  // returning to the same sentence would have no way to know it worked.
+  useEffect(() => {
+    let mounted = true;
+    // Focus, blur, focus fires two probes, and the slower one can land last.
+    // Only the newest request is allowed to write, so a stale answer cannot
+    // put "not signed in" back on screen after a fresh one cleared it.
+    let latest = 0;
+    const check = () => {
+      const request = ++latest;
+      invoke<ClaudeCliStatus>("check_claude_cli_available")
+        .then((status) => {
+          if (mounted && request === latest) setCli(status);
+        })
+        .catch((error) => console.debug("Claude CLI status unavailable:", error));
+    };
+    check();
+    window.addEventListener("focus", check);
+    return () => {
+      mounted = false;
+      window.removeEventListener("focus", check);
     };
   }, []);
 
@@ -78,14 +111,38 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
               settings.activeProvider === "claude_cli" ? (
                 <div className="rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
                   <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                    No API key needed
+                    {cli && !cli.available
+                      ? "Claude Code is not installed"
+                      : cli && !cli.authenticated
+                        ? "Claude Code is not signed in"
+                        : "No API key needed"}
                   </p>
+                  {/* Said as a fact about this machine, not as a hedge. The old
+                      copy ended "if not authenticated", which left the person
+                      to work out which half of the sentence applied to them. */}
                   <p className="mt-1 text-sm text-blue-700 dark:text-blue-300">
-                    Claude CLI uses your existing authentication. Run{" "}
-                    <code className="rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900">
-                      claude login
-                    </code>{" "}
-                    in your terminal if not authenticated.
+                    {cli && !cli.available ? (
+                      <>
+                        Juno runs on your Claude subscription through Claude Code.
+                        Install it from{" "}
+                        <code className="rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900">
+                          claude.ai/code
+                        </code>
+                        , or choose another provider above.
+                      </>
+                    ) : cli && !cli.authenticated ? (
+                      <>
+                        Run{" "}
+                        <code className="rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900">
+                          claude login
+                        </code>{" "}
+                        in your terminal, then come back to this window.
+                      </>
+                    ) : cli?.email ? (
+                      <>Juno is using your Claude subscription, signed in as {cli.email}.</>
+                    ) : (
+                      <>Juno is using your Claude subscription. Nothing else to set up.</>
+                    )}
                   </p>
                 </div>
               ) : (

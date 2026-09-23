@@ -180,15 +180,19 @@ Alternative to direct API keys — uses the locally installed `claude` binary (C
 - `--include-partial-messages` — Raw streaming events, not just finished messages. This is what makes reasoning, tool names and tool arguments visible *while* Claude works; without it the first visible text lands only at the end of the turn. A `claude` too old to accept it exits non-zero with empty stdout, so `run_streaming` retries once with the flag stripped and latches `PARTIAL_MESSAGES_UNSUPPORTED` for the session (degraded, never failed).
 - `--effort <low|medium|high|xhigh|max>` — Hidden advanced setting (`providers[].effort` in the settings store, no UI), default `high`. An unrecognised value is dropped rather than forwarded.
 - `--strict-mcp-config` — Only MCP servers from `--mcp-config` load; user-level servers never do
-- `--mcp-config <path>` — Added when `juno-cua` is detected: wires Juno's computer-use tools (screenshot, click, mouse_move, type, scroll) in via the `juno-cua serve-mcp` stdio server (LAC-3696)
-- `--append-system-prompt` — Added alongside `--mcp-config`: steers the model toward the MCP tools instead of `cliclick`/`screencapture` via Bash
+- `--mcp-config <path>` — Points the CLI at Juno's **own** computer tool, served from inside the running app (`agent/providers/juno_mcp.rs`): streamable HTTP on loopback, a bearer token minted per app run, one `computer` tool backed by the same `run_computer_action` the API provider calls. Written to a pid-scoped temp file so the token never appears in `ps`.
+- `--append-system-prompt` — Added alongside `--mcp-config`: steers the model toward the MCP tool instead of `cliclick`/`screencapture` via Bash
 - `--dangerously-skip-permissions` — Required because stdin is null; CLI can't prompt for tool permissions (MCP tools also run without prompting)
 
 **Auth**: Checked once per session via `claude auth status --json`, cached with `AtomicBool`. Uses OAuth/keychain (not API key).
 
 **Models**: `opus`, `sonnet`, `haiku` (CLI aliases — resolves to latest versions automatically)
 
-**Limitations**: Computer-use tools require the `juno-cua` binary (the same cargo `target/` dir in dev, or an installed copy). Without it the CLI falls back to its built-in tools (Bash, Read, Edit, etc.). Because `juno-cua` drives the desktop directly via the CUA SDK, the app-integrated niceties do not apply on this provider: no agent cursor overlay session, no AX click verification, no screenshot limiting or caching. `juno-cua` needs its own macOS Accessibility grant in whatever context the CLI spawns it. Escape cancels a running CLI query by killing the subprocess (LAC-3697).
+**Computer use is not degraded on this path, and the note that used to say it was is wrong.** Desktop automation used to be delegated to the separate `juno-cua` binary, which meant the mouse moved without Juno knowing: the smooth-movement setting went unread and the cursor overlay went untold. It is now served in-process, so the cursor overlay (`systemPink`, identity `claude-cli`), the smooth-movement setting, and AX click verification all apply exactly as they do on the API provider. **`juno-cua` is not involved, and does not ship in the bundle** — `tauri.conf.json` declares no `externalBin` and its `resources` do not include it. Bash, Read and Edit remain the CLI's own tools, deliberately: they need no desktop, and routing them through Juno would add a hop for nothing.
+
+**Limitations**: Without an `AppHandle` (headless and test paths) no tool server is started and the CLI runs toolless. Escape cancels a running CLI query by killing the subprocess (LAC-3697).
+
+**Default provider**: When nobody has picked a provider, the provider that would otherwise run has no credential, and the CLI is installed *and* signed in, Juno selects the Claude CLI at launch rather than asking for an API key — someone on Claude Max already pays for this. The rule, and its reverse (Juno gives the CLI up if it made the choice and the CLI later disappears or signs out), lives in `agent/providers/default_selection.rs` as a pure function; the I/O around it is `agent/providers/startup_default.rs`, spawned unawaited so launch never waits on a subprocess. A choice made in Settings or in setup sets `ProviderSettings::provider_chosen_by_user` and is never overruled.
 
 ## Critical Development Rules
 

@@ -89,8 +89,12 @@ pub(crate) async fn set_active_provider(
         }
     }
 
-    // Update active provider
-    config.active_provider = provider_id.clone();
+    // Update active provider. Goes through the setter rather than the field
+    // because picking one here is a person's decision, and the setter is what
+    // records that — from now on Juno's own default-picking leaves it alone.
+    config
+        .set_active_provider(provider_id.clone())
+        .map_err(|e| e.to_string())?;
 
     // Save to centralized settings
     config
@@ -229,8 +233,16 @@ pub(crate) async fn update_provider_api_key(
     Ok(())
 }
 
-/// Check if any AI provider API key is available (from store or environment variables).
-/// Used by onboarding to skip the API key step when keys are already configured.
+/// Whether Juno can already talk to a model without asking for anything.
+///
+/// Onboarding asks this to decide whether the "Connect Your AI" step is worth
+/// showing. A signed-in Claude CLI counts: that person is not missing a
+/// credential, they are holding one Juno can use, and putting an API key field
+/// in front of them asks them to pay twice for what they have.
+///
+/// The CLI is asked last, and only once the cheap checks have all said no, so
+/// the subprocess runs exactly in the case where the alternative is showing
+/// somebody a wall.
 #[tauri::command]
 pub(crate) async fn check_api_keys_available(app_handle: tauri::AppHandle) -> Result<bool, String> {
     use std::env;
@@ -272,7 +284,19 @@ pub(crate) async fn check_api_keys_available(app_handle: tauri::AppHandle) -> Re
         }
     }
 
-    info!("No API keys found in store or environment");
+    // Last, and only now: the subscription they may already be paying for.
+    // Proof required — this answer decides whether setup hides the key step
+    // entirely, and hiding it on a maybe would leave somebody finished and
+    // unable to ask Juno anything.
+    if crate::agent::providers::claude_cli::cli_status()
+        .await
+        .is_signed_in()
+    {
+        info!("No API keys, but the Claude CLI is signed in");
+        return Ok(true);
+    }
+
+    info!("No API keys found in store or environment, and no signed-in Claude CLI");
     Ok(false)
 }
 
