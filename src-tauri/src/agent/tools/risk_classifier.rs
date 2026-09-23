@@ -46,9 +46,18 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
         // injects an escaped string literal into a fixed script (not
         // caller-supplied code), so it is parameterized as JS, but the
         // *content* can still be sensitive form data.
-        "browser_fill" | "fill_form" | "type_in_element" | "browser_type" | "safari_type_text" => {
-            classify_form_fill_risk(tool_input)
-        }
+        // Only names that exist belong here. This arm used to carry
+        // `browser_fill`, `fill_form` and `type_in_element`, none of which Juno
+        // registers or ever has, which is how it went unnoticed that the
+        // browser tool that actually types was missing from it entirely (#586).
+        // A classifier full of fictional names cannot be read for what it
+        // covers, so the fictional ones are gone.
+        //
+        // `browser_type` is NOT registered either, but it is kept deliberately:
+        // `agents/browser_agent.rs` routes it to the same controller call as
+        // `browser_interact`, so a call arriving under that alias still types.
+        // `alias_names_are_still_reachable` pins that reasoning.
+        "browser_type" | "safari_type_text" => classify_form_fill_risk(tool_input),
 
         // The browser tool that actually types is `browser_interact`, which
         // carries the verb in `action` rather than in the tool name. Without
@@ -424,5 +433,43 @@ mod tests {
             "browser_interact is the tool that types; if it was renamed, update \
              the risk classifier arm in this file. Registered: {names:?}"
         );
+    }
+
+    /// `browser_type` is not a registered tool, so a later cleanup will be
+    /// tempted to delete it as dead the way the fictional names were. It is
+    /// not dead: `agents/browser_agent.rs` routes it to the same controller
+    /// call as `browser_interact`, so a call under that alias types for real
+    /// and must stay gated. If that routing goes away, this test is the place
+    /// that says the classifier arm can go too.
+    #[test]
+    fn alias_names_are_still_reachable() {
+        let agent_src = include_str!("../../agents/browser_agent.rs");
+        assert!(
+            agent_src.contains("\"browser_type\""),
+            "browser_agent no longer routes browser_type; drop it from the \
+             form-fill arm in risk_classifier.rs and delete this test"
+        );
+
+        let r = classify_risk(
+            "browser_type",
+            &json!({"selector": "input#pw", "value": "hunter2", "field": "password"}),
+        );
+        assert_eq!(r, RiskLevel::Critical);
+        assert!(needs_approval(&r));
+    }
+
+    /// The names removed in this change must not creep back. Each sat in the
+    /// form-fill arm for a tool Juno has never registered, which is what made
+    /// the arm unreadable and hid the real gap (#586).
+    #[test]
+    fn retired_fictional_tool_names_are_not_classified() {
+        for name in ["browser_fill", "fill_form", "type_in_element"] {
+            assert_eq!(
+                classify_risk(name, &json!({"value": "hunter2", "field": "password"})),
+                RiskLevel::Low,
+                "{name} is classified but is not a tool Juno registers — either \
+                 register it or leave it out of the classifier"
+            );
+        }
     }
 }
