@@ -357,17 +357,27 @@ mod tests {
     /// after it.
     #[tokio::test]
     async fn arbiter_imposes_nothing_after_ax_only_work() {
-        let arbiter = InputArbiter::new(Duration::from_millis(60));
+        // The cooldown is deliberately far larger than any plausible
+        // scheduling delay. This test can only distinguish "the arbiter slept"
+        // from "the machine was busy" by the gap between the two, and it used
+        // to allow just 30ms of slack against a 60ms cooldown — close enough
+        // that a loaded CI runner tipped it. Either the arbiter imposes the
+        // full cooldown, which is seconds and unmissable, or it imposes
+        // nothing and only scheduling noise is left.
+        let cooldown = Duration::from_secs(5);
+        let arbiter = InputArbiter::new(cooldown);
 
         // No guard has ever been taken (all work went down the AX path).
         let start = Instant::now();
         {
             let _g = arbiter.acquire(None).await;
         }
+        let elapsed = start.elapsed();
         assert!(
-            start.elapsed() < Duration::from_millis(30),
-            "arbiter unexpectedly paced the first guard-taking action; the \
-             300 ms action-cooldown floor is what covers AX-path spacing"
+            elapsed < cooldown / 5,
+            "arbiter unexpectedly paced the first guard-taking action \
+             ({elapsed:?} against a {cooldown:?} cooldown); the 300 ms \
+             action-cooldown floor is what covers AX-path spacing"
         );
     }
 
