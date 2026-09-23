@@ -130,7 +130,17 @@ package-lock.json
 # Rust build artifacts
 target/
 **/target/
-Cargo.lock
+# Cargo.lock IS committed at the workspace root. Juno is an application, not a
+# library, so the lock is what makes a release build reproducible: without it
+# every fresh checkout re-resolves to the newest compatible versions and two
+# machines can ship different dependency trees from the same tag. It is also
+# how `tauri-plugin-updater` silently drifted to 2.12.0 against a JS side
+# pinned at 2.11.0 and broke `tauri:dev` (#585).
+#
+# The crates below are workspace members and share the root lock; a Cargo.lock
+# inside one is a leftover from before it joined the workspace and is ignored.
+src-tauri/mcp-server-os-level/Cargo.lock
+tauri-plugin-voice-transcription/Cargo.lock
 
 # Rust procedural macros
 *.pdb
