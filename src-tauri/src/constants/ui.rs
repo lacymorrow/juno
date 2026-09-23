@@ -425,8 +425,7 @@ pub mod standard_resolutions {
         const ANTHROPIC_HIGH_RES_TOKEN_CEILING: u32 = 4784;
 
         fn visual_token_cost(w: u32, h: u32) -> u32 {
-            w.div_ceil(ANTHROPIC_HIGH_RES_PATCH_SIZE)
-                * h.div_ceil(ANTHROPIC_HIGH_RES_PATCH_SIZE)
+            w.div_ceil(ANTHROPIC_HIGH_RES_PATCH_SIZE) * h.div_ceil(ANTHROPIC_HIGH_RES_PATCH_SIZE)
         }
 
         #[test]
