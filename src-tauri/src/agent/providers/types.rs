@@ -88,7 +88,7 @@ pub enum ComputerUse {
     /// tool version, which also selects the matching beta flag.
     AnthropicTool(ApiVersion),
     /// Supported through Juno's own function tools (OpenAI, Gemini, Rig) or
-    /// the `juno-cua` MCP server (Claude CLI). Capable, but no Anthropic tool
+    /// Juno's own in-process MCP server (Claude CLI). Capable, but no Anthropic tool
     /// version applies, so no Anthropic beta flag is sent.
     FunctionTools,
 }
@@ -677,10 +677,11 @@ impl Provider {
                     is_recommended: false,
                 },
             ],
-            // The CLI drives the desktop through the juno-cua MCP server rather
-            // than Anthropic's built-in computer tool, so it picks its own tool
-            // versions and Juno sends no Anthropic beta flag. The aliases track
-            // the current generation, which is the high-resolution image tier.
+            // The CLI drives the desktop through Juno's own in-process MCP
+            // server rather than Anthropic's built-in computer tool, so it
+            // picks its own tool versions and Juno sends no Anthropic beta
+            // flag. The aliases track the current generation, which is the
+            // high-resolution image tier.
             Provider::ClaudeCli => &[
                 ModelDefinition {
                     id: "sonnet",

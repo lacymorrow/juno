@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { Check, User, Users } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { providerUnavailableReason } from "@/lib/provider-status";
 import type { ChatStatus } from "ai";
 import {
   PromptInput,
@@ -226,7 +227,7 @@ export const ChatInput = React.memo(function ChatInput({
                         {provider.name}
                         {!provider.is_available && (
                           <span className="text-[10px] text-muted-foreground/60">
-                            — setup required
+                            — {providerUnavailableReason(provider)}
                           </span>
                         )}
                       </span>
@@ -251,7 +252,9 @@ export const ChatInput = React.memo(function ChatInput({
                           <ModelSelectorLogo provider={provider.id} />
                           <ModelSelectorName>{model.name}</ModelSelectorName>
                           {!provider.is_available && (
-                            <span className="text-xs text-muted-foreground">No API key</span>
+                            <span className="text-xs text-muted-foreground">
+                              {providerUnavailableReason(provider)}
+                            </span>
                           )}
                           {provider.is_available && model.is_recommended && (
                             <span className="text-xs text-green-600">Recommended</span>
