@@ -415,5 +415,62 @@ pub mod standard_resolutions {
                 "UW_1080 should have a smaller aspect diff ({:.3}) than HD_1080 ({:.3}) for 3440×1440",
                 uw_diff, hd_diff);
         }
+
+        // Anthropic packs images into 28×28 patches for high-res-tier vision;
+        // token cost is `ceil(w/28) * ceil(h/28)` and the server rejects a
+        // `tool_result` image whose cost exceeds the ceiling with a 400 (no
+        // silent down-scale). These guards catch the class of "resolution
+        // constant drifts above the ceiling" before it ships (LAC-4000).
+        const ANTHROPIC_HIGH_RES_PATCH_SIZE: u32 = 28;
+        const ANTHROPIC_HIGH_RES_TOKEN_CEILING: u32 = 4784;
+
+        fn visual_token_cost(w: u32, h: u32) -> u32 {
+            w.div_ceil(ANTHROPIC_HIGH_RES_PATCH_SIZE) * h.div_ceil(ANTHROPIC_HIGH_RES_PATCH_SIZE)
+        }
+
+        #[test]
+        fn every_standard_resolution_except_ultra_hd_fits_visual_token_ceiling() {
+            // ULTRA_HD is a known overflow tracked in LAC-4000. It is skipped
+            // here and asserted-negative in
+            // `ultra_hd_currently_exceeds_visual_token_ceiling_lac_4000` so
+            // this guard stays green on main until the replacement constant
+            // lands. When ULTRA_HD is replaced, delete that companion test and
+            // remove this `continue` so the guard covers every entry.
+            for (w, h) in ALL_RESOLUTIONS {
+                if (w, h) == ULTRA_HD {
+                    continue;
+                }
+                let tokens = visual_token_cost(w, h);
+                assert!(
+                    tokens <= ANTHROPIC_HIGH_RES_TOKEN_CEILING,
+                    "{}×{} costs {} visual tokens, exceeds Anthropic's {}-token high-res ceiling",
+                    w,
+                    h,
+                    tokens,
+                    ANTHROPIC_HIGH_RES_TOKEN_CEILING,
+                );
+            }
+        }
+
+        #[test]
+        fn ultra_hd_currently_exceeds_visual_token_ceiling_lac_4000() {
+            // Documents the LAC-4000 overflow so the file self-describes the
+            // known bug. When the fix lands and ULTRA_HD is compliant, delete
+            // this test AND the `continue` in
+            // `every_standard_resolution_except_ultra_hd_fits_visual_token_ceiling`.
+            let (w, h) = ULTRA_HD;
+            let tokens = visual_token_cost(w, h);
+            assert!(
+                tokens > ANTHROPIC_HIGH_RES_TOKEN_CEILING,
+                "LAC-4000 appears fixed: ULTRA_HD {}×{} now costs {} tokens (≤ {}). \
+                 Remove this test and the `continue` in \
+                 `every_standard_resolution_except_ultra_hd_fits_visual_token_ceiling` \
+                 so the guard covers every entry.",
+                w,
+                h,
+                tokens,
+                ANTHROPIC_HIGH_RES_TOKEN_CEILING,
+            );
+        }
     }
 }
