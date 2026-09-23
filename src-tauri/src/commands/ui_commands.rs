@@ -761,6 +761,13 @@ impl UIManager {
                             let ns_window_addr = ns_window as usize;
                             let ignore_events: BOOL = if enabled { YES } else { NO };
 
+                            // NOTE: this catches a Rust panic only. An
+                            // Objective-C exception raised by the runtime (bad
+                            // selector, deallocated window) is NOT a Rust panic
+                            // and unwinds straight past this guard, so the null
+                            // check above is what actually protects the call.
+                            // Kept because the release profile unwinds again and
+                            // a panic here should not kill the app.
                             let result = std::panic::catch_unwind(|| {
                                 Queue::main().exec_sync(|| unsafe {
                                     let ns_window = ns_window_addr as cocoa_id;
@@ -820,6 +827,13 @@ impl UIManager {
                                 _ => 3, // Default to floating level
                             };
 
+                            // NOTE: this catches a Rust panic only. An
+                            // Objective-C exception raised by the runtime (bad
+                            // selector, deallocated window) is NOT a Rust panic
+                            // and unwinds straight past this guard, so the null
+                            // check above is what actually protects the call.
+                            // Kept because the release profile unwinds again and
+                            // a panic here should not kill the app.
                             let result = std::panic::catch_unwind(|| {
                                 Queue::main().exec_sync(|| unsafe {
                                     let ns_window = ns_window_addr as cocoa_id;

@@ -284,6 +284,23 @@ where
     // Log tool invocation with enhanced formatting using new log formatter
     crate::utils::log_formatter::log_tool_start(tool_name, None);
 
+    // A panicking tool must not take the app down with it: the panic is caught
+    // here and reported as a failed tool call, which the agent loop can show
+    // and recover from.
+    //
+    // This only works while the build unwinds. Under `panic = "abort"` the
+    // process dies before `catch_unwind` can return `Err`, so the guard below
+    // compiles, reads as protection, and does nothing — which is exactly what
+    // shipped until the release profile was corrected. Fail the build instead
+    // of failing silently.
+    #[cfg(panic = "abort")]
+    compile_error!(
+        "tool_logger relies on unwinding to contain a panicking tool, but this \
+         build sets panic = \"abort\". Either restore panic = \"unwind\" in the \
+         workspace Cargo.toml, or remove this catch_unwind and accept that any \
+         tool panic aborts the whole app."
+    );
+
     let result = std::panic::AssertUnwindSafe(execution_future)
         .catch_unwind()
         .await;
