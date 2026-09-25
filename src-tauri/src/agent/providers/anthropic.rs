@@ -871,10 +871,7 @@ impl AnthropicBrain {
                 if let ApiContent::Blocks(blocks) = &mut msg.content {
                     // The breakpoint goes on the LAST tool_result block of the turn, so the
                     // cached prefix covers the whole turn.
-                    if let Some(block) = blocks
-                        .iter_mut()
-                        .filter(|b| b.block_type == "tool_result")
-                        .next_back()
+                    if let Some(block) = blocks.iter_mut().rfind(|b| b.block_type == "tool_result")
                     {
                         block.cache_control = Some(if extended {
                             CacheControl::ephemeral_extended()
