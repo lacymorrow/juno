@@ -984,7 +984,8 @@ mod tests {
         assert!(lifecycle_frame_is_ours(&ours, uuid));
 
         // An unsolicited turn: same shape, someone else's uuid.
-        let theirs = json!({ "type": "command_lifecycle", "command_uuid": "other", "state": "started" });
+        let theirs =
+            json!({ "type": "command_lifecycle", "command_uuid": "other", "state": "started" });
         assert!(!lifecycle_frame_is_ours(&theirs, uuid));
 
         // An older CLI without msg_lifecycle_v1 omits the field entirely.
@@ -992,7 +993,8 @@ mod tests {
         assert!(!lifecycle_frame_is_ours(&missing, uuid));
 
         // A uuid that is present but not a string must not match.
-        let wrong_type = json!({ "type": "command_lifecycle", "command_uuid": 42, "state": "started" });
+        let wrong_type =
+            json!({ "type": "command_lifecycle", "command_uuid": 42, "state": "started" });
         assert!(!lifecycle_frame_is_ours(&wrong_type, uuid));
 
         // Our uuid on a non-lifecycle frame opens nothing.
