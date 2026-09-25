@@ -91,7 +91,7 @@ describe("Persistent Claude session (beta) toggle", () => {
     const description = screen.getByText(/keeps one Claude CLI process/i);
     expect(description).toHaveTextContent(/1\.6–3\.1s faster/);
     expect(description).toHaveTextContent(/stall|hang/i);
-    expect(description).toHaveTextContent(/next conversation/i);
+    expect(description).toHaveTextContent(/next message/i);
   });
 
   it("saves the flag through the backend", async () => {
