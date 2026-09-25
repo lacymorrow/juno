@@ -49,8 +49,10 @@ async function mount() {
       <AdvancedSettings settings={settingsStub} />
     </AdvancedSettingsProvider>,
   );
+  // The switch is disabled until the mount-time GET resolves; a click that
+  // lands before then is a silent no-op, so wait for enabled, not present.
   await waitFor(() =>
-    expect(screen.getByLabelText(/Persistent Claude session/)).toBeInTheDocument(),
+    expect(screen.getByLabelText(/Persistent Claude session/)).toBeEnabled(),
   );
 }
 
@@ -116,9 +118,12 @@ describe("Persistent Claude session (beta) toggle", () => {
 
     await click(screen.getByLabelText(/Persistent Claude session/));
 
+    // The toast is the last step of the rollback, so waiting on it (rather
+    // than on the unchecked state, which is also the *initial* state) proves
+    // the optimistic update was actually reverted and not merely never drawn.
     await waitFor(() =>
-      expect(screen.getByLabelText(/Persistent Claude session/)).not.toBeChecked(),
+      expect(toast.error).toHaveBeenCalledWith("Could not change that setting"),
     );
-    expect(toast.error).toHaveBeenCalledWith("Could not change that setting");
+    expect(screen.getByLabelText(/Persistent Claude session/)).not.toBeChecked();
   });
 });
