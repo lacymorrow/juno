@@ -190,8 +190,7 @@ pub mod standard_resolutions {
     pub const LEGACY_RESOLUTIONS: [(u32, u32); 3] = [XGA, WXGA, FWXGA];
 
     /// High-resolution options for high-res-tier models (Claude 4.7+)
-    pub const HIGH_RES_RESOLUTIONS: [(u32, u32); 4] =
-        [HD_WXGA, HD_1080, HIGH_RES_16_10, UW_1080];
+    pub const HIGH_RES_RESOLUTIONS: [(u32, u32); 4] = [HD_WXGA, HD_1080, HIGH_RES_16_10, UW_1080];
 
     /// All supported standard resolutions (legacy + high-res)
     pub const ALL_RESOLUTIONS: [(u32, u32); 7] =
