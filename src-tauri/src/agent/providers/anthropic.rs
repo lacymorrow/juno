@@ -80,6 +80,30 @@ struct SystemContentBlock {
 struct CacheControl {
     #[serde(rename = "type")]
     cache_type: String,
+    /// Cache lifetime. Omitted entirely for the default 5-minute cache; `Some("1h")` opts
+    /// into the extended 1-hour cache. Skipped when `None` so a default breakpoint
+    /// serializes byte-for-byte as it did before this field existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ttl: Option<String>,
+}
+
+impl CacheControl {
+    /// A default breakpoint: ephemeral, 5-minute TTL (expressed by omitting `ttl`).
+    fn ephemeral() -> Self {
+        CacheControl {
+            cache_type: "ephemeral".to_string(),
+            ttl: None,
+        }
+    }
+
+    /// A breakpoint with the extended 1-hour TTL. See `CACHE_TTL_EXTENDED` for when this
+    /// earns its higher write price.
+    fn ephemeral_extended() -> Self {
+        CacheControl {
+            cache_type: "ephemeral".to_string(),
+            ttl: Some(CACHE_TTL_EXTENDED.to_string()),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -159,6 +183,11 @@ struct ApiContentBlock {
     // --- Image blocks (a picture the person attached to their message) ---
     #[serde(skip_serializing_if = "Option::is_none")]
     source: Option<ApiImageSource>,
+    /// Cache breakpoint for Anthropic prompt caching. Set on the last `tool_result` block of
+    /// selected turns so the conversation history — which is where the screenshot tokens live —
+    /// is cached rather than reprocessed every turn. See `apply_message_cache_breakpoints`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
 }
 
 /// Split a `data:` URL into the media type and payload Anthropic wants.
@@ -191,6 +220,7 @@ impl ApiContentBlock {
             signature: None,
             data: None,
             source: None,
+            cache_control: None,
         }
     }
 }
@@ -280,7 +310,133 @@ const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 /// Older screenshots are replaced with text placeholders to reduce token usage.
 /// Following the pattern from Cua (only_n_most_recent_images=3).
 /// Each 1024x768 screenshot costs ~1,049 tokens — limiting from 10 to 3 saves ~7,000 tokens/step.
+///
+/// NOTE: this is the *floor* a batch prune drops back to, not a per-turn cap. See
+/// `SCREENSHOT_PRUNE_HIGH_WATER` for why pruning is batched instead of run every turn.
 const MAX_RECENT_SCREENSHOTS: usize = 3;
+
+// --- Prompt-cache-aware screenshot pruning ---------------------------------------------------
+//
+// WHY THIS IS BATCHED AND NOT PER-TURN. Anthropic prompt caching is an *exact prefix match*:
+// the request hashes as tools -> system -> messages, and a cache entry is only usable up to the
+// first byte that differs from the cached request. The conversation history is by far the bulk
+// of a computer-use payload (every screenshot is thousands of tokens), so keeping that prefix
+// byte-identical between turns is worth far more than the tokens any pruning saves.
+//
+// The old scheduler kept "the N most recent screenshots" and rewrote everything older into a
+// placeholder. Because a new screenshot arrives every turn, that rewrote a *different* message
+// in the middle of the prefix on *every* turn:
+//
+//   turn 10:  msg1..msg5 = placeholder   msg6=IMG  msg7=IMG  msg8=IMG
+//   turn 11:  msg1..msg5 = placeholder   msg6=placeholder  msg7=IMG  msg8=IMG  msg9=IMG
+//                                             ^ mutated mid-prefix, cache dead from here on
+//
+// So the prefix diverged at msg6 every single turn and essentially nothing was ever cached.
+//
+// The fix: the prefix must be APPEND-ONLY between prunes. Pruning now happens in one batch
+// when the retained screenshot count reaches the high-water mark, dropping back to the
+// low-water mark; in between, no existing message is touched at all, so every turn extends the
+// previous turn's prefix and hits the cache. Anthropic's own computer-use guidance says the
+// same thing: prune batches of old screenshots every ~25 turns, never every turn.
+//
+// DO NOT "optimise" this back into per-turn pruning. It looks like it saves tokens and it
+// costs roughly an order of magnitude more, because cached input tokens bill at ~10% of
+// uncached ones and per-turn pruning makes every turn uncached.
+
+/// Screenshot count at which one batch prune runs. Reaching this many retained screenshots
+/// triggers a single pass that prunes the oldest ones down to `MAX_RECENT_SCREENSHOTS`.
+/// Between prunes the message prefix is append-only, so 8 of every 9 turns are full cache hits.
+const SCREENSHOT_PRUNE_HIGH_WATER: usize = 12;
+
+/// Screenshots that survive a batch prune (the low-water mark). Same value, and same meaning,
+/// as `MAX_RECENT_SCREENSHOTS`: it is how many real images the model is guaranteed to still
+/// see immediately after a prune. Between prunes the model sees more (up to
+/// `SCREENSHOT_PRUNE_HIGH_WATER - 1`), which is strictly better grounding for the same money,
+/// because those extra images are served from cache.
+const SCREENSHOT_PRUNE_LOW_WATER: usize = MAX_RECENT_SCREENSHOTS;
+
+/// Placeholder that replaces a pruned screenshot. Deliberately carries NO numbers or other
+/// varying text: the placeholder is part of the cached prefix, so any turn-dependent content in
+/// it would change the bytes of an already-sent message and invalidate the cache.
+const PRUNED_SCREENSHOT_PLACEHOLDER: &str =
+    "[Older screenshot removed to save context. Take a new screenshot if you need to see the screen.]";
+
+// --- Cache breakpoint budget -----------------------------------------------------------------
+//
+// Anthropic allows at most 4 `cache_control` breakpoints per request, and the request hashes in
+// the order tools -> system -> messages. Juno's budget, in prefix order:
+//
+//   | # | breakpoint         | caches                                  | TTL | set in                        |
+//   |---|--------------------|-----------------------------------------|-----|-------------------------------|
+//   | 1 | last tool def      | the tool schemas (~2.1k tokens)         | 1h  | tools build site  [always]    |
+//   | 2 | system prompt block| tools + system prompt                   | 1h  | system build site [when set]  |
+//   | 3 | message anchor     | history through an older tool_result    | 1h  | apply_message_cache_breakpoints |
+//   | 4 | latest tool_result | history through the current turn        | 5m  | apply_message_cache_breakpoints |
+//
+// Anything that wants another breakpoint has to take one of these four away — there is no fifth.
+//
+// WHY THREE OF THEM ARE 1-HOUR. Juno is two workloads wearing one coat. In the computer-use
+// loop, turns are seconds apart and the default 5-minute cache never gets cold. But Juno is also
+// an interactive voice and chat app, and there the user says a command, watches it run, and then
+// thinks for a while before the next one. At the default TTL every one of those turns is a cold
+// start — and because batch pruning deliberately lets the retained screenshot count grow to
+// SCREENSHOT_PRUNE_HIGH_WATER - 1, a cold start now reprocesses up to 11 screenshots where the
+// old per-turn pruning would have reprocessed 3. A 1-hour TTL removes that tail outright, which
+// is what lets the high-water mark stay where it is instead of being tuned down to buy back the
+// interactive case at the loop's expense.
+//
+// COST SHAPE. A 1-hour cache write costs ~2x the base input price; a 5-minute write ~1.25x;
+// reads are ~0.1x either way (~0.025x on Fable 5.1, Juno's default model). So a 1h write pays
+// for itself the moment it is read even once more than a cold request would have been — the
+// break-even is about 1.1 reads — while a 5-minute write that expires before it is ever read is
+// strictly worse than not caching at all (1.25x for nothing).
+//
+// WHY THE LATEST BREAKPOINT STAYS AT 5 MINUTES. It moves every turn: written at turn N, read at
+// turn N+1, then superseded within seconds. Buying it an hour of life is paying the 2x premium
+// for something that is thrown away immediately. It is also the one breakpoint whose extra cost
+// would be paid on every single turn rather than occasionally.
+//
+// ORDERING IS A HARD API RULE, NOT A PREFERENCE. Every 1-hour breakpoint must appear before
+// every 5-minute breakpoint in the prefix. The table above is in prefix order and the three 1h
+// entries all precede the single 5m one, which is why `apply_message_cache_breakpoints` pushes
+// the anchor before the latest. Do not reorder them, and do not give the anchor a 5m TTL while
+// anything earlier keeps 1h.
+//
+// WHEN THE 1-HOUR PREMIUM IS ACTUALLY PAID. Billing walks three positions: A = the longest cache
+// hit, B = the last 1h breakpoint after A, C = the last breakpoint; you pay a read for A, a 1h
+// write for (B - A), and a 5m write for (C - B). In a warm loop the previous turn's latest
+// breakpoint is the hit, so A already sits past the anchor, B == A, and the 1h write is zero —
+// the loop pays 1.25x on one turn's delta and nothing more. B only moves ahead of A on the turns
+// where the anchor advances (every CACHE_ANCHOR_STRIDE turns, when anchor and latest coincide
+// and a single 1h breakpoint is written). That is the whole premium: 2x on one turn's delta,
+// once per stride, in exchange for an entry that survives the user going away for an hour.
+
+/// `ttl` value for Anthropic's extended cache duration. The default 5-minute cache is expressed
+/// by omitting `ttl` entirely rather than by sending `"5m"`.
+///
+/// Verified against the live docs on 2026-09-22:
+/// <https://platform.claude.com/docs/en/build-with-claude/prompt-caching> — `ttl` sits inside
+/// `cache_control` alongside `type`, the accepted values are `"5m"` and `"1h"`, the feature is
+/// generally available on all active models, and it needs **no** `anthropic-beta` header.
+/// (Per LAC-3106: check this against the live docs, never from memory or a cached catalog.)
+const CACHE_TTL_EXTENDED: &str = "1h";
+
+/// Hard API limit on `cache_control` breakpoints in a single request.
+const MAX_CACHE_BREAKPOINTS: usize = 4;
+
+/// Breakpoints spent outside `messages` (the last tool definition and the system prompt).
+const PREFIX_CACHE_BREAKPOINTS: usize = 2;
+
+/// Breakpoints left over for the conversation history.
+const MESSAGE_CACHE_BREAKPOINTS: usize = MAX_CACHE_BREAKPOINTS - PREFIX_CACHE_BREAKPOINTS;
+
+/// How often (measured in tool-result turns) the "anchor" message breakpoint advances.
+///
+/// The newest breakpoint always sits on the latest tool_result, so the next turn gets a full
+/// history hit. The anchor is quantised to this stride so it stays on the *same* message for
+/// several turns, keeping one longer-lived cache entry alive (each read refreshes its 5-minute
+/// TTL) as insurance when the newest entry misses — e.g. on the turn right after a batch prune.
+const CACHE_ANCHOR_STRIDE: usize = 8;
 
 #[derive(Clone)]
 pub struct AnthropicBrain {
@@ -551,12 +707,49 @@ impl AnthropicBrain {
         Provider::Anthropic.resolve_tool_type(tool_name, registered_type, &self.model)
     }
 
-    /// Limit screenshot history to keep only the N most recent screenshots.
-    /// Older screenshots are replaced with a text placeholder to dramatically reduce token usage.
+    /// How many of the oldest screenshots to prune, given how many are in the history.
     ///
-    /// This scans tool_result blocks for image content, counts them from the end (most recent),
-    /// and replaces any beyond the limit with "[Screenshot removed — older than N most recent]".
-    fn limit_screenshot_history(api_messages: &mut [ApiMessage], max_recent: usize) {
+    /// This is the whole scheduler, kept pure so it can be reasoned about (and tested) on its
+    /// own. The contract that matters is **append-only between prunes**: for every `total` in
+    /// the band between two prune points this returns the *same* count, so the same oldest
+    /// screenshots are replaced by the same placeholder bytes and the serialized prefix of the
+    /// request is byte-identical to the previous turn's. That is what makes the Anthropic
+    /// prefix cache hit.
+    ///
+    /// With low=3, high=12 (batch = 9) the schedule is:
+    ///
+    /// | total screenshots | pruned | retained |
+    /// |-------------------|--------|----------|
+    /// | 0..=11            | 0      | 0..=11   |
+    /// | 12                | 9      | 3        |  <- prune pass
+    /// | 13..=20           | 9      | 4..=11   |
+    /// | 21                | 18     | 3        |  <- prune pass
+    ///
+    /// i.e. one prune every 9 turns instead of one every turn.
+    fn screenshots_to_prune(total: usize, low_water: usize, high_water: usize) -> usize {
+        // A degenerate configuration must never prune, or the "batch" would be zero-sized and
+        // we would be back to rewriting the prefix on every turn.
+        let batch = high_water.saturating_sub(low_water);
+        if batch == 0 || total < high_water {
+            return 0;
+        }
+        // Quantise to whole batches: constant across the whole band, jumps by `batch` at each
+        // prune point, and never prunes more than exist.
+        let pruned = (total - low_water) / batch * batch;
+        pruned.min(total.saturating_sub(low_water))
+    }
+
+    /// Batch-prune old screenshots out of the conversation history.
+    ///
+    /// Scans tool_result blocks for image content and replaces the oldest ones with a text
+    /// placeholder — but only on the turns where `screenshots_to_prune` says a batch is due.
+    /// On every other turn this is a no-op and the history stays append-only, which is what
+    /// keeps Anthropic's prompt cache alive (see the module constants above).
+    fn limit_screenshot_history(
+        api_messages: &mut [ApiMessage],
+        low_water: usize,
+        high_water: usize,
+    ) {
         // First pass: find all screenshots and their exact locations
         let mut screenshot_locations: Vec<(usize, usize, usize)> = Vec::new(); // (msg_idx, block_idx, result_block_idx)
 
@@ -577,16 +770,20 @@ impl AnthropicBrain {
         }
 
         let total_screenshots = screenshot_locations.len();
-        if total_screenshots <= max_recent {
-            return; // Nothing to trim
+        let to_remove_count = Self::screenshots_to_prune(total_screenshots, low_water, high_water);
+        if to_remove_count == 0 {
+            // Below the high-water mark, or already pruned for this band: leave the history
+            // untouched so the prefix stays byte-identical to the previous request.
+            return;
         }
-
-        let to_remove_count = total_screenshots - max_recent;
-        let locations_to_remove = &screenshot_locations[..to_remove_count];
+        let locations_to_remove = match screenshot_locations.get(..to_remove_count) {
+            Some(slice) => slice,
+            None => return,
+        };
 
         log::info!(
-            "Screenshot history limiting: {} total screenshots, keeping {} most recent, removing {} older ones",
-            total_screenshots, max_recent, to_remove_count
+            "Screenshot batch prune: {} screenshots in history (high-water {}), pruning {} oldest down to {} retained",
+            total_screenshots, high_water, to_remove_count, total_screenshots - to_remove_count
         );
 
         // Second pass: replace old screenshots with text placeholders
@@ -602,13 +799,85 @@ impl AnthropicBrain {
                                 *result_block = ApiToolResultBlock {
                                     block_type: "text".to_string(),
                                     source: None,
-                                    text: Some(format!(
-                                        "[Screenshot removed — older than {} most recent]",
-                                        max_recent
-                                    )),
+                                    text: Some(PRUNED_SCREENSHOT_PLACEHOLDER.to_string()),
                                 };
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Place the message-level cache breakpoints (slots 3 and 4 of the four-breakpoint budget
+    /// documented at the top of this file).
+    ///
+    /// Anthropic's guidance for computer use is to put a breakpoint on the *last* `tool_result`
+    /// block of recent turns. Without these, `messages` — which holds every screenshot and every
+    /// tool result, i.e. almost the entire payload — is reprocessed uncached on every turn even
+    /// though the tools and system prompt are cached.
+    ///
+    /// Two breakpoints are placed:
+    ///   * an anchor quantised to `CACHE_ANCHOR_STRIDE`, given the **1-hour** TTL. It stays on
+    ///     the same message for a whole stride, so it is the entry that survives a user who
+    ///     stops to think between voice commands;
+    ///   * the latest tool_result turn, left at the default **5-minute** TTL, so the *next*
+    ///     request gets a hit covering the whole history through this turn.
+    ///
+    /// The anchor is pushed first because it sits earlier in the prefix and the API requires
+    /// every 1h breakpoint to precede every 5m one. When the two coincide — which happens
+    /// exactly on the turns where the anchor advances — only the 1h breakpoint is written, and
+    /// that is the one turn per stride on which the extended-TTL write premium is paid.
+    fn apply_message_cache_breakpoints(api_messages: &mut [ApiMessage]) {
+        // Indices of messages that contain at least one tool_result block, in order.
+        let tool_result_msgs: Vec<usize> = api_messages
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, msg)| match &msg.content {
+                ApiContent::Blocks(blocks) => blocks
+                    .iter()
+                    .any(|b| b.block_type == "tool_result")
+                    .then_some(idx),
+                ApiContent::Text(_) => None,
+            })
+            .collect();
+
+        let Some(latest_pos) = tool_result_msgs.len().checked_sub(1) else {
+            return; // No tool results yet — nothing worth a message breakpoint.
+        };
+
+        // Quantised anchor: advances only once every CACHE_ANCHOR_STRIDE tool-result turns.
+        let anchor_pos = latest_pos / CACHE_ANCHOR_STRIDE * CACHE_ANCHOR_STRIDE;
+
+        // (message index, extended TTL?). The anchor is pushed first so that, in prefix order,
+        // the 1h breakpoint always precedes the 5m one — an API requirement, not a style choice.
+        let mut targets: Vec<(usize, bool)> = Vec::with_capacity(MESSAGE_CACHE_BREAKPOINTS);
+        if let Some(&msg_idx) = tool_result_msgs.get(anchor_pos) {
+            targets.push((msg_idx, true));
+        }
+        if let Some(&msg_idx) = tool_result_msgs.get(latest_pos) {
+            // When the anchor has just advanced onto the latest turn the two coincide; keep the
+            // single breakpoint at 1h rather than downgrading it to 5m.
+            if !targets.iter().any(|(idx, _)| *idx == msg_idx) {
+                targets.push((msg_idx, false));
+            }
+        }
+        // Belt and braces: never exceed the share of the 4-breakpoint budget reserved for
+        // messages, whatever the stride arithmetic above does.
+        targets.truncate(MESSAGE_CACHE_BREAKPOINTS);
+
+        for (msg_idx, extended) in targets {
+            if let Some(msg) = api_messages.get_mut(msg_idx) {
+                if let ApiContent::Blocks(blocks) = &mut msg.content {
+                    // The breakpoint goes on the LAST tool_result block of the turn, so the
+                    // cached prefix covers the whole turn.
+                    if let Some(block) = blocks.iter_mut().rfind(|b| b.block_type == "tool_result")
+                    {
+                        block.cache_control = Some(if extended {
+                            CacheControl::ephemeral_extended()
+                        } else {
+                            CacheControl::ephemeral()
+                        });
                     }
                 }
             }
@@ -1337,6 +1606,7 @@ impl AnthropicBrain {
                 signature: None,
                 data: None,
                 source: None,
+                cache_control: None,
             });
         }
 
@@ -1369,6 +1639,7 @@ impl AnthropicBrain {
                     signature: None,
                     data: None,
                     source: None,
+                    cache_control: None,
                 });
             }
         }
@@ -1665,6 +1936,7 @@ impl AgentBrain for AnthropicBrain {
                             signature: None,
                             data: None,
                             source: None,
+                            cache_control: None, // Set by apply_message_cache_breakpoints below
                         }]),
                     });
                 }
@@ -1701,11 +1973,21 @@ impl AgentBrain for AnthropicBrain {
             api_messages.len()
         );
 
-        // --- Screenshot History Limiting ---
-        // Keep only the N most recent screenshots in the conversation to reduce token usage.
-        // Older screenshots are replaced with a text placeholder. This follows the pattern
-        // used by Cua (only_n_most_recent_images=3) and reduces costs by ~60-70%.
-        Self::limit_screenshot_history(&mut api_messages, MAX_RECENT_SCREENSHOTS);
+        // --- Screenshot History Pruning (batched, cache-prefix safe) ---
+        // Prune the oldest screenshots in one batch when the retained count reaches the
+        // high-water mark, then leave the history alone until the next batch is due. Between
+        // prunes the message array is append-only, which is the precondition for Anthropic's
+        // exact-prefix prompt cache to hit. See the constants at the top of this file.
+        Self::limit_screenshot_history(
+            &mut api_messages,
+            SCREENSHOT_PRUNE_LOW_WATER,
+            SCREENSHOT_PRUNE_HIGH_WATER,
+        );
+
+        // --- Message Cache Breakpoints ---
+        // Breakpoints 3 and 4 of the 4-breakpoint budget (1 = last tool, 2 = system prompt).
+        // Must run AFTER pruning so a breakpoint never lands on bytes that pruning then edits.
+        Self::apply_message_cache_breakpoints(&mut api_messages);
 
         let api_tools = if available_tools.is_empty() {
             None
@@ -1813,9 +2095,13 @@ impl AgentBrain for AnthropicBrain {
                     }
                 })
                 .collect();
-            // Add cache_control to the last tool to enable prompt caching of the tool definitions.
-            // When Anthropic caches tools, subsequent turns skip re-processing the tool
-            // definitions, reducing latency by 50-80% for the cached portion.
+            // Breakpoint 1 of 4, 1-hour TTL (see the cache breakpoint budget at the top of this
+            // file). Add cache_control to the last tool to enable prompt caching of the tool
+            // definitions. When Anthropic caches tools, subsequent turns skip re-processing the
+            // tool definitions, reducing latency by 50-80% for the cached portion. The tool list
+            // is byte-identical on every turn of every session, so this is the single strongest
+            // candidate for the extended TTL: written once, read for an hour, and it survives the
+            // user closing and reopening the app.
             //
             // This matters more on the toolset path, and the breakpoint must keep covering it.
             // Measured against the live API on otherwise-identical one-token requests:
@@ -1835,9 +2121,7 @@ impl AgentBrain for AnthropicBrain {
                     ApiTool::BuiltIn { cache_control, .. }
                     | ApiTool::Toolset { cache_control, .. }
                     | ApiTool::Custom { cache_control, .. } => {
-                        *cache_control = Some(CacheControl {
-                            cache_type: "ephemeral".to_string(),
-                        });
+                        *cache_control = Some(CacheControl::ephemeral_extended());
                     }
                 }
             }
@@ -1848,14 +2132,15 @@ impl AgentBrain for AnthropicBrain {
             }
         };
 
-        // Convert system prompt to content block array with cache_control for prompt caching
+        // Breakpoint 2 of 4, 1-hour TTL (see the cache breakpoint budget at the top of this
+        // file). Convert system prompt to content block array with cache_control for prompt
+        // caching. Like the tool list, the system prompt is stable across every turn, so the
+        // extended TTL is written once and read for an hour.
         let system_blocks = self.system_prompt.as_ref().map(|prompt| {
             vec![SystemContentBlock {
                 block_type: "text".to_string(),
                 text: prompt.clone(),
-                cache_control: Some(CacheControl {
-                    cache_type: "ephemeral".to_string(),
-                }),
+                cache_control: Some(CacheControl::ephemeral_extended()),
             }]
         });
 
@@ -2422,5 +2707,581 @@ mod computer_toolset_request_tests {
         assert_eq!(name, "computer");
         assert_eq!(toolset_name, None);
         assert_eq!(out, input, "legacy replay must be byte-identical");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Fixtures --------------------------------------------------------------------------
+
+    fn image_block(seed: usize) -> ApiToolResultBlock {
+        ApiToolResultBlock {
+            block_type: "image".to_string(),
+            source: Some(ApiImageSource {
+                source_type: "base64".to_string(),
+                media_type: "image/jpeg".to_string(),
+                data: format!("BASE64_SCREENSHOT_PAYLOAD_{}", seed),
+            }),
+            text: None,
+        }
+    }
+
+    /// One `user`/tool_result turn carrying a screenshot plus its sibling text output.
+    fn screenshot_turn(seed: usize) -> ApiMessage {
+        let mut block = ApiContentBlock::empty("tool_result");
+        block.tool_use_id = Some(format!("toolu_{}", seed));
+        block.content = Some(ApiToolResultContent::Blocks(vec![
+            image_block(seed),
+            ApiToolResultBlock {
+                block_type: "text".to_string(),
+                source: None,
+                text: Some(format!("screenshot output {}", seed)),
+            },
+        ]));
+        ApiMessage {
+            role: "user".to_string(),
+            content: ApiContent::Blocks(vec![block]),
+        }
+    }
+
+    /// The assistant turn that requested the screenshot.
+    fn assistant_turn(seed: usize) -> ApiMessage {
+        let mut block = ApiContentBlock::empty("tool_use");
+        block.id = Some(format!("toolu_{}", seed));
+        block.name = Some("computer".to_string());
+        block.input = Some(serde_json::json!({ "action": "screenshot" }));
+        ApiMessage {
+            role: "assistant".to_string(),
+            content: ApiContent::Blocks(vec![block]),
+        }
+    }
+
+    /// A conversation after `turns` screenshot turns. Deterministic: rebuilding it with a
+    /// larger `turns` reproduces exactly the same leading messages, which is precisely how the
+    /// real provider rebuilds the API payload from `Message` history on every request.
+    fn conversation(turns: usize) -> Vec<ApiMessage> {
+        let mut msgs = vec![ApiMessage {
+            role: "user".to_string(),
+            content: ApiContent::Text("open safari and find the docs".to_string()),
+        }];
+        for seed in 0..turns {
+            msgs.push(assistant_turn(seed));
+            msgs.push(screenshot_turn(seed));
+        }
+        msgs
+    }
+
+    fn count_images(msgs: &[ApiMessage]) -> usize {
+        let mut n = 0;
+        for msg in msgs {
+            if let ApiContent::Blocks(blocks) = &msg.content {
+                for block in blocks {
+                    if let Some(ApiToolResultContent::Blocks(rbs)) = &block.content {
+                        n += rbs
+                            .iter()
+                            .filter(|rb| rb.block_type == "image" && rb.source.is_some())
+                            .count();
+                    }
+                }
+            }
+        }
+        n
+    }
+
+    fn count_placeholders(msgs: &[ApiMessage]) -> usize {
+        let mut n = 0;
+        for msg in msgs {
+            if let ApiContent::Blocks(blocks) = &msg.content {
+                for block in blocks {
+                    if let Some(ApiToolResultContent::Blocks(rbs)) = &block.content {
+                        n += rbs
+                            .iter()
+                            .filter(|rb| rb.text.as_deref() == Some(PRUNED_SCREENSHOT_PLACEHOLDER))
+                            .count();
+                    }
+                }
+            }
+        }
+        n
+    }
+
+    /// Message indices carrying a `cache_control` breakpoint.
+    fn breakpoint_indices(msgs: &[ApiMessage]) -> Vec<usize> {
+        msgs.iter()
+            .enumerate()
+            .filter_map(|(idx, msg)| match &msg.content {
+                ApiContent::Blocks(blocks) => blocks
+                    .iter()
+                    .any(|b| b.cache_control.is_some())
+                    .then_some(idx),
+                ApiContent::Text(_) => None,
+            })
+            .collect()
+    }
+
+    /// Every breakpoint as (message index, ttl), in prefix order.
+    fn breakpoints(msgs: &[ApiMessage]) -> Vec<(usize, Option<String>)> {
+        let mut out = Vec::new();
+        for (idx, msg) in msgs.iter().enumerate() {
+            if let ApiContent::Blocks(blocks) = &msg.content {
+                for block in blocks {
+                    if let Some(cc) = &block.cache_control {
+                        out.push((idx, cc.ttl.clone()));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn serialize_each(msgs: &[ApiMessage]) -> Vec<String> {
+        msgs.iter()
+            .map(|m| serde_json::to_string(m).unwrap_or_default())
+            .collect()
+    }
+
+    // --- Scheduler: below the high-water mark, nothing is pruned ---------------------------
+
+    #[test]
+    fn prune_scheduler_is_a_no_op_below_high_water() {
+        for total in 0..SCREENSHOT_PRUNE_HIGH_WATER {
+            assert_eq!(
+                AnthropicBrain::screenshots_to_prune(
+                    total,
+                    SCREENSHOT_PRUNE_LOW_WATER,
+                    SCREENSHOT_PRUNE_HIGH_WATER
+                ),
+                0,
+                "expected no prune at total={}",
+                total
+            );
+        }
+    }
+
+    #[test]
+    fn prune_leaves_history_untouched_below_high_water() {
+        let turns = SCREENSHOT_PRUNE_HIGH_WATER - 1;
+        let before = conversation(turns);
+        let mut after = conversation(turns);
+        AnthropicBrain::limit_screenshot_history(
+            &mut after,
+            SCREENSHOT_PRUNE_LOW_WATER,
+            SCREENSHOT_PRUNE_HIGH_WATER,
+        );
+        assert_eq!(serialize_each(&before), serialize_each(&after));
+        assert_eq!(count_images(&after), turns);
+        assert_eq!(count_placeholders(&after), 0);
+    }
+
+    // --- Scheduler: crossing the high-water mark batch-prunes to the low-water mark ---------
+
+    #[test]
+    fn prune_scheduler_batches_down_to_low_water() {
+        let low = SCREENSHOT_PRUNE_LOW_WATER;
+        let high = SCREENSHOT_PRUNE_HIGH_WATER;
+        let batch = high - low;
+
+        // First prune point: the turn the count reaches the high-water mark.
+        let pruned = AnthropicBrain::screenshots_to_prune(high, low, high);
+        assert_eq!(pruned, batch);
+        assert_eq!(
+            high - pruned,
+            low,
+            "one batch must land exactly on low water"
+        );
+
+        // Second prune point, one batch later.
+        let second = high + batch;
+        let pruned = AnthropicBrain::screenshots_to_prune(second, low, high);
+        assert_eq!(pruned, batch * 2);
+        assert_eq!(second - pruned, low);
+    }
+
+    #[test]
+    fn prune_batch_replaces_oldest_images_only() {
+        let high = SCREENSHOT_PRUNE_HIGH_WATER;
+        let low = SCREENSHOT_PRUNE_LOW_WATER;
+        let mut msgs = conversation(high);
+        AnthropicBrain::limit_screenshot_history(&mut msgs, low, high);
+
+        assert_eq!(count_images(&msgs), low, "retained images");
+        assert_eq!(count_placeholders(&msgs), high - low, "pruned images");
+
+        // The sibling text block of every turn survives untouched — only the image block is
+        // replaced, and only inside tool_result blocks.
+        let mut text_outputs = 0;
+        for msg in &msgs {
+            if let ApiContent::Blocks(blocks) = &msg.content {
+                for block in blocks {
+                    if let Some(ApiToolResultContent::Blocks(rbs)) = &block.content {
+                        text_outputs += rbs
+                            .iter()
+                            .filter(|rb| {
+                                rb.text
+                                    .as_deref()
+                                    .is_some_and(|t| t.starts_with("screenshot output "))
+                            })
+                            .count();
+                    }
+                }
+            }
+        }
+        assert_eq!(text_outputs, high);
+
+        // The images that survived are the most recent ones.
+        let surviving: Vec<String> = msgs
+            .iter()
+            .filter_map(|msg| match &msg.content {
+                ApiContent::Blocks(blocks) => Some(blocks),
+                ApiContent::Text(_) => None,
+            })
+            .flat_map(|blocks| blocks.iter())
+            .filter_map(|b| match &b.content {
+                Some(ApiToolResultContent::Blocks(rbs)) => Some(rbs),
+                _ => None,
+            })
+            .flat_map(|rbs| rbs.iter())
+            .filter_map(|rb| rb.source.as_ref().map(|s| s.data.clone()))
+            .collect();
+        let expected: Vec<String> = ((high - low)..high)
+            .map(|seed| format!("BASE64_SCREENSHOT_PAYLOAD_{}", seed))
+            .collect();
+        assert_eq!(surviving, expected);
+    }
+
+    #[test]
+    fn prune_scheduler_holds_steady_between_prune_points() {
+        let low = SCREENSHOT_PRUNE_LOW_WATER;
+        let high = SCREENSHOT_PRUNE_HIGH_WATER;
+        let batch = high - low;
+        for total in high..(high + batch) {
+            assert_eq!(
+                AnthropicBrain::screenshots_to_prune(total, low, high),
+                batch,
+                "prune count must not move within a band (total={})",
+                total
+            );
+        }
+    }
+
+    #[test]
+    fn prune_scheduler_respects_its_water_marks() {
+        let low = SCREENSHOT_PRUNE_LOW_WATER;
+        let high = SCREENSHOT_PRUNE_HIGH_WATER;
+        for total in 0..200usize {
+            let pruned = AnthropicBrain::screenshots_to_prune(total, low, high);
+            assert!(
+                pruned <= total,
+                "cannot prune more than exist (total={})",
+                total
+            );
+            let retained = total - pruned;
+            assert!(
+                retained < high,
+                "retained {} must stay under high water",
+                retained
+            );
+            if total >= low {
+                assert!(
+                    retained >= low,
+                    "retained {} must stay at or above low water",
+                    retained
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prune_scheduler_never_prunes_on_a_degenerate_configuration() {
+        // A zero-sized batch would put us back to per-turn pruning, which is the bug this
+        // whole scheduler exists to prevent.
+        assert_eq!(AnthropicBrain::screenshots_to_prune(100, 5, 5), 0);
+        assert_eq!(AnthropicBrain::screenshots_to_prune(100, 9, 5), 0);
+    }
+
+    // --- The append-only property (the reason any of this exists) ---------------------------
+
+    #[test]
+    fn message_prefix_is_byte_identical_between_prunes() {
+        let low = SCREENSHOT_PRUNE_LOW_WATER;
+        let high = SCREENSHOT_PRUNE_HIGH_WATER;
+        let batch = high - low;
+
+        let mut previous: Option<Vec<String>> = None;
+        let mut turns_that_mutated_the_prefix: Vec<usize> = Vec::new();
+
+        for turns in 1..=(high + batch + 3) {
+            let mut msgs = conversation(turns);
+            AnthropicBrain::limit_screenshot_history(&mut msgs, low, high);
+            let serialized = serialize_each(&msgs);
+            assert!(
+                serialized.iter().all(|s| !s.is_empty()),
+                "fixture failed to serialize"
+            );
+
+            if let Some(prev) = &previous {
+                // Each turn appends exactly one assistant message and one tool_result message.
+                assert_eq!(
+                    serialized.len(),
+                    prev.len() + 2,
+                    "turn {} should append two messages",
+                    turns
+                );
+                // Every byte of every previously-sent message must be unchanged, otherwise
+                // Anthropic's exact-prefix cache is dead from the first differing message.
+                if prev
+                    .iter()
+                    .zip(serialized.iter())
+                    .any(|(before, after)| before != after)
+                {
+                    turns_that_mutated_the_prefix.push(turns);
+                }
+            }
+            previous = Some(serialized);
+        }
+
+        // Exactly two prune passes in this window, and nothing else ever rewrites the prefix.
+        // Under the old per-turn scheme this vector would have contained every turn from the
+        // fourth onward.
+        assert_eq!(turns_that_mutated_the_prefix, vec![high, high + batch]);
+    }
+
+    #[test]
+    fn pruned_placeholder_carries_no_turn_dependent_text() {
+        // Any number in the placeholder (e.g. "older than 3 most recent") would be a value
+        // that can change between builds and silently invalidate an already-cached prefix.
+        assert!(
+            !PRUNED_SCREENSHOT_PLACEHOLDER
+                .chars()
+                .any(|c| c.is_ascii_digit()),
+            "placeholder must not embed counts: {}",
+            PRUNED_SCREENSHOT_PLACEHOLDER
+        );
+    }
+
+    // --- Cache breakpoints -------------------------------------------------------------------
+
+    #[test]
+    fn cache_breakpoint_budget_adds_up() {
+        assert_eq!(
+            PREFIX_CACHE_BREAKPOINTS + MESSAGE_CACHE_BREAKPOINTS,
+            MAX_CACHE_BREAKPOINTS
+        );
+        assert_eq!(MESSAGE_CACHE_BREAKPOINTS, 2);
+    }
+
+    #[test]
+    fn message_breakpoints_never_exceed_their_share_of_the_budget() {
+        for turns in 1..=40usize {
+            let mut msgs = conversation(turns);
+            AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+            let placed = breakpoint_indices(&msgs).len();
+            assert!(
+                (1..=MESSAGE_CACHE_BREAKPOINTS).contains(&placed),
+                "turns={} placed={}",
+                turns,
+                placed
+            );
+        }
+    }
+
+    #[test]
+    fn no_message_breakpoint_without_tool_results() {
+        let mut msgs = vec![ApiMessage {
+            role: "user".to_string(),
+            content: ApiContent::Text("hello".to_string()),
+        }];
+        AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+        assert!(breakpoint_indices(&msgs).is_empty());
+    }
+
+    #[test]
+    fn latest_tool_result_always_carries_a_breakpoint() {
+        let mut msgs = conversation(10);
+        let last_idx = msgs.len() - 1;
+        AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+        assert!(
+            breakpoint_indices(&msgs).contains(&last_idx),
+            "the newest tool_result must be a breakpoint so the NEXT turn hits the cache"
+        );
+    }
+
+    #[test]
+    fn breakpoint_lands_on_the_last_tool_result_block_of_the_turn() {
+        // A turn that returns two tool results: the breakpoint belongs on the second one, so
+        // the cached prefix covers the whole turn.
+        let mut first = ApiContentBlock::empty("tool_result");
+        first.tool_use_id = Some("toolu_a".to_string());
+        first.content = Some(ApiToolResultContent::Text("a".to_string()));
+        let mut second = ApiContentBlock::empty("tool_result");
+        second.tool_use_id = Some("toolu_b".to_string());
+        second.content = Some(ApiToolResultContent::Text("b".to_string()));
+
+        let mut msgs = vec![
+            ApiMessage {
+                role: "user".to_string(),
+                content: ApiContent::Text("go".to_string()),
+            },
+            ApiMessage {
+                role: "user".to_string(),
+                content: ApiContent::Blocks(vec![first, second]),
+            },
+        ];
+        AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+
+        let ApiContent::Blocks(blocks) = &msgs[1].content else {
+            panic!("expected block content");
+        };
+        assert!(blocks[0].cache_control.is_none());
+        assert!(blocks[1].cache_control.is_some());
+    }
+
+    #[test]
+    fn anchor_breakpoint_stays_put_for_a_whole_stride() {
+        // The anchor is quantised so it keeps one longer-lived cache entry warm instead of
+        // moving (and re-writing) every turn.
+        let mut anchors: Vec<usize> = Vec::new();
+        for turns in 1..=CACHE_ANCHOR_STRIDE {
+            let mut msgs = conversation(turns);
+            AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+            let indices = breakpoint_indices(&msgs);
+            let first = indices.first().copied().unwrap_or_default();
+            anchors.push(first);
+        }
+        assert!(
+            anchors.windows(2).all(|w| w[0] == w[1]),
+            "anchor moved within a single stride: {:?}",
+            anchors
+        );
+    }
+
+    #[test]
+    fn breakpoints_are_only_placed_on_tool_result_blocks() {
+        let mut msgs = conversation(12);
+        AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+        for msg in &msgs {
+            if let ApiContent::Blocks(blocks) = &msg.content {
+                for block in blocks {
+                    if block.cache_control.is_some() {
+                        assert_eq!(block.block_type, "tool_result");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cache_control_serializes_as_ephemeral_and_is_omitted_otherwise() {
+        let mut msgs = conversation(2);
+        AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+        let json = serde_json::to_string(&msgs).unwrap_or_default();
+        // The latest breakpoint keeps the default TTL, which is expressed by omitting `ttl`.
+        assert!(
+            json.contains("\"cache_control\":{\"type\":\"ephemeral\"}"),
+            "{}",
+            json
+        );
+
+        let clean = conversation(2);
+        let json = serde_json::to_string(&clean).unwrap_or_default();
+        assert!(!json.contains("cache_control"), "{}", json);
+    }
+
+    // --- Extended (1-hour) cache TTL ---------------------------------------------------------
+
+    #[test]
+    fn default_cache_control_omits_ttl_entirely() {
+        // Adding the `ttl` field must not change the bytes of a breakpoint that does not set
+        // it — an existing 5-minute breakpoint has to serialize exactly as it did before.
+        let json = serde_json::to_string(&CacheControl::ephemeral()).unwrap_or_default();
+        assert_eq!(json, r#"{"type":"ephemeral"}"#);
+    }
+
+    #[test]
+    fn extended_cache_control_serializes_the_documented_shape() {
+        // Verified against the live docs 2026-09-22: `ttl` lives inside `cache_control`
+        // next to `type`, and the extended value is the string "1h".
+        let json = serde_json::to_string(&CacheControl::ephemeral_extended()).unwrap_or_default();
+        assert_eq!(json, r#"{"type":"ephemeral","ttl":"1h"}"#);
+        assert_eq!(CACHE_TTL_EXTENDED, "1h");
+    }
+
+    #[test]
+    fn anchor_gets_the_extended_ttl_and_latest_keeps_the_default() {
+        let mut msgs = conversation(10); // latest_pos 9, anchor_pos 8 — two distinct breakpoints
+        AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+        let bps = breakpoints(&msgs);
+        assert_eq!(bps.len(), 2, "{:?}", bps);
+        assert_eq!(bps[0].1.as_deref(), Some("1h"), "anchor must be extended");
+        assert_eq!(bps[1].1, None, "latest must keep the default 5m TTL");
+        assert!(bps[0].0 < bps[1].0, "anchor must precede latest");
+    }
+
+    #[test]
+    fn coincident_anchor_and_latest_keep_the_extended_ttl() {
+        // The anchor lands on the latest turn exactly when it advances (latest_pos a multiple
+        // of the stride). That single breakpoint is the one 1h write per stride — it must not
+        // be downgraded to 5m.
+        for turns in [1usize, CACHE_ANCHOR_STRIDE + 1, 2 * CACHE_ANCHOR_STRIDE + 1] {
+            let mut msgs = conversation(turns);
+            AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+            let bps = breakpoints(&msgs);
+            assert_eq!(bps.len(), 1, "turns={} bps={:?}", turns, bps);
+            assert_eq!(bps[0].1.as_deref(), Some("1h"), "turns={}", turns);
+        }
+    }
+
+    #[test]
+    fn every_extended_breakpoint_precedes_every_default_one() {
+        // Hard API rule: a 1-hour cache entry must appear before any 5-minute entry. Tools and
+        // the system prompt are both 1h and both sit ahead of `messages`, so checking the
+        // message breakpoints is sufficient to prove the whole request is ordered correctly.
+        for turns in 1..=40usize {
+            let mut msgs = conversation(turns);
+            AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+            let bps = breakpoints(&msgs);
+            let last_extended = bps.iter().rposition(|(_, ttl)| ttl.is_some());
+            let first_default = bps.iter().position(|(_, ttl)| ttl.is_none());
+            if let (Some(last_ext), Some(first_def)) = (last_extended, first_default) {
+                assert!(
+                    last_ext < first_def,
+                    "turns={} a 5m breakpoint precedes a 1h one: {:?}",
+                    turns,
+                    bps
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn at_most_one_default_ttl_message_breakpoint_per_request() {
+        // Only the latest turn is allowed to be 5m; anything else would put a short TTL on a
+        // prefix that outlives it, and would risk violating the ordering rule.
+        for turns in 1..=40usize {
+            let mut msgs = conversation(turns);
+            AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+            let defaults = breakpoints(&msgs)
+                .into_iter()
+                .filter(|(_, ttl)| ttl.is_none())
+                .count();
+            assert!(defaults <= 1, "turns={} defaults={}", turns, defaults);
+        }
+    }
+
+    #[test]
+    fn extended_ttl_write_is_paid_once_per_stride() {
+        // The 1h write premium lands only on the turns where anchor and latest coincide, i.e.
+        // once every CACHE_ANCHOR_STRIDE turns. Count them over three full strides.
+        let span = 3 * CACHE_ANCHOR_STRIDE;
+        let coincident = (1..=span)
+            .filter(|&turns| {
+                let mut msgs = conversation(turns);
+                AnthropicBrain::apply_message_cache_breakpoints(&mut msgs);
+                breakpoints(&msgs).len() == 1
+            })
+            .count();
+        assert_eq!(coincident, 3, "expected one 1h write per stride");
     }
 }
