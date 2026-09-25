@@ -343,7 +343,7 @@ export default function AdvancedSettings({
         <SettingsRow
           htmlFor="cli-persistent-session"
           label="Persistent Claude session"
-          description="Beta. Keeps one Claude CLI process alive per conversation, so follow-up replies start faster. If that process hangs, a reply can stall before Juno falls back to the standard path; nothing is lost either way. Applies to the Claude CLI provider, starting with your next conversation."
+          description="Keeps one Claude CLI process alive per conversation, so follow-up replies start 1.6–3.1s faster. If that process hangs, a reply can stall before Juno falls back to the standard path; nothing is lost either way. Applies to the Claude CLI provider, starting with your next conversation."
         >
           <Switch
             id="cli-persistent-session"

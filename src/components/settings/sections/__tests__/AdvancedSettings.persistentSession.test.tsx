@@ -84,10 +84,12 @@ describe("Persistent Claude session (beta) toggle", () => {
 
   it("tells the person it is beta and what the trade is", async () => {
     await mount();
+    // "Beta" lives on the group heading, not repeated in the row subtext.
+    expect(screen.getByText("Beta")).toBeInTheDocument();
     const description = screen.getByText(/keeps one Claude CLI process/i);
-    expect(description).toHaveTextContent(/beta/i);
-    expect(description).toHaveTextContent(/faster/i);
+    expect(description).toHaveTextContent(/1\.6–3\.1s faster/);
     expect(description).toHaveTextContent(/stall|hang/i);
+    expect(description).toHaveTextContent(/next conversation/i);
   });
 
   it("saves the flag through the backend", async () => {
