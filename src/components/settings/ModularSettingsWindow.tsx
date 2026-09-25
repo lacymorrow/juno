@@ -212,6 +212,7 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "advanced", rowId: "background-mode", label: "Work in the background", keywords: "background quiet no interruption cursor focus other apps" },
   { sectionId: "advanced", rowId: "mouse-control", label: "Mouse control", keywords: "mouse pointer cursor permission ask always takeover control" },
   { sectionId: "advanced", rowId: "dock-icon-visible", label: "Show in Dock", keywords: "dock icon menu bar menubar hide accessory app switcher missing disappeared" },
+  { sectionId: "advanced", rowId: "cli-persistent-session", label: "Persistent Claude session", keywords: "beta claude cli persistent session process faster follow-ups experimental" },
   { sectionId: "advanced", rowId: "debug-mode", label: "Debug Mode", keywords: "debug logs verbose developer" },
   { sectionId: "advanced", rowId: "performance-monitoring", label: "Performance Monitoring", keywords: "performance monitoring metrics profiling" },
   { sectionId: "advanced", rowId: "reset-all-settings", label: "Reset all settings", keywords: "reset factory defaults erase wipe" },

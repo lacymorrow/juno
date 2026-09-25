@@ -92,6 +92,10 @@ export default function AdvancedSettings({
   const [backgroundLoading, setBackgroundLoading] = useState(true);
   const [backgroundError, setBackgroundError] = useState(false);
 
+  // Beta: one long-lived Claude CLI process per conversation.
+  const [persistentSession, setPersistentSession] = useState(false);
+  const [persistentSessionLoading, setPersistentSessionLoading] = useState(true);
+
   // Suppress unused parameter warning for onNavigateToPermissions
   void onNavigateToPermissions;
 
@@ -137,6 +141,41 @@ export default function AdvancedSettings({
       mounted = false;
     };
   }, []);
+
+  // Load the beta persistent-session flag on mount.
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const enabled = await invoke<boolean>(
+          COMMANDS.SETTINGS_GET_CLI_PERSISTENT_SESSION_ENABLED,
+        );
+        if (mounted) setPersistentSession(enabled === true);
+      } catch (error) {
+        console.error("Failed to load the persistent session flag:", error);
+      } finally {
+        if (mounted) setPersistentSessionLoading(false);
+      }
+    };
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handlePersistentSessionChange = async (enabled: boolean) => {
+    const previous = persistentSession;
+    setPersistentSession(enabled);
+    try {
+      await invoke(COMMANDS.SETTINGS_SET_CLI_PERSISTENT_SESSION_ENABLED, {
+        enabled,
+      });
+    } catch (error) {
+      console.error("Failed to update the persistent session flag:", error);
+      setPersistentSession(previous);
+      toast.error("Could not change that setting");
+    }
+  };
 
   const handleBackgroundModeChange = async (enabled: boolean) => {
     const previous = backgroundMode;
@@ -293,6 +332,24 @@ export default function AdvancedSettings({
             id="performance-monitoring"
             checked={settings.performanceMonitoringEnabled}
             onCheckedChange={settings.handlePerformanceMonitoringChange}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Beta"
+        footer="Beta features are still being proven out. They can be turned off here at any time."
+      >
+        <SettingsRow
+          htmlFor="cli-persistent-session"
+          label="Persistent Claude session"
+          description="Keeps one Claude CLI process alive per conversation, so follow-up replies start 1.6–3.1s faster. If that process hangs, a reply can stall before Juno falls back to the standard path; nothing is lost either way. Applies to the Claude CLI provider, from your next message."
+        >
+          <Switch
+            id="cli-persistent-session"
+            checked={persistentSession}
+            onCheckedChange={handlePersistentSessionChange}
+            disabled={persistentSessionLoading}
           />
         </SettingsRow>
       </SettingsGroup>

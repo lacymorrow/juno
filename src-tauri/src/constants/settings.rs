@@ -25,6 +25,10 @@ pub mod store_keys {
     pub const SHOW_TRAY_ICON: &str = "show_tray_icon";
     pub const SHOW_GLOW_BORDER: &str = "show_glow_border";
     pub const CLI: &str = "cli";
+    /// Experimental. Reuse one long-lived `claude` process per conversation instead
+    /// of spawning one per query. Off unless explicitly set.
+    /// See docs/plans/cli-persistent-session-spike.md
+    pub const CLI_PERSISTENT_SESSION_ENABLED: &str = "cli_persistent_session_enabled";
     pub const VOICE_TRANSCRIPTION: &str = "voice_transcription";
     pub const TRIGGERS: &str = "triggers";
 }
