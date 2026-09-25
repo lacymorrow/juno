@@ -19,9 +19,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # The repo pins its toolchain in rust-toolchain.toml. Installing the cross
+      # targets on @stable put them on a toolchain cargo never used (rustup
+      # honors the pin and auto-installs it with only the host target), which
+      # broke the x86_64 build. Read the pin so both stay in lockstep.
+      # Same fix as release-tauri.yml.
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          [ -n "$channel" ] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust (pinned toolchain)
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Build arm64
