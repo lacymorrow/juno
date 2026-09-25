@@ -145,9 +145,11 @@ pub mod text_display {
 /// Standard resolution constants for Anthropic Computer Use API compliance.
 /// Screenshots must be scaled to these standard resolutions per specification.
 ///
-/// Opus 4.5+ models support up to 2,576px on the long edge with 1:1 pixel
-/// coordinates (no scale-factor conversion needed), so we offer a high-res
-/// tier alongside the legacy low-res resolutions for older models.
+/// High-resolution-tier models (Claude 4.7 and later, per the resolution tier
+/// table in Anthropic's vision docs) support up to 2,576px on the long edge
+/// AND at most 4,784 visual tokens (`ceil(w/28) * ceil(h/28)`) with 1:1 pixel
+/// coordinates, so we offer a high-res tier alongside the legacy low-res
+/// resolutions for standard-tier models.
 pub mod standard_resolutions {
     /// Extended Graphics Array - 1024x768
     pub const XGA: (u32, u32) = (1024, 768);
@@ -158,11 +160,14 @@ pub mod standard_resolutions {
     /// Full Wide Extended Graphics Array - 1366x768
     pub const FWXGA: (u32, u32) = (1366, 768);
 
-    // --- High-resolution tier (Opus 4.5+ / computer_20251124) ---
-    // Anthropic docs: "Opus 4.7 supports up to 2576 pixels on the long edge,
-    // and its coordinates are 1:1 with image pixels (no scale-factor
-    // conversion required)."  These apply to all models using the
-    // computer_20251124 tool type.
+    // --- High-resolution tier (Claude 4.7 and later models) ---
+    // Anthropic's vision docs put "Claude 4.7 and later models" on the
+    // high-resolution tier: max 2,576px long edge, max 4,784 visual tokens,
+    // coordinates 1:1 with image pixels (no scale-factor conversion). Both
+    // limits apply — every candidate here must satisfy the token ceiling too,
+    // because the API rejects an oversized `tool_result` screenshot with a
+    // 400 instead of downscaling it. Tier membership lives in
+    // `agent::providers::types` (`ImageTier`), not in the tool version.
 
     /// High-res 16:10 — matches MacBook Pro 14" logical resolution
     pub const HD_WXGA: (u32, u32) = (1680, 1050);
@@ -170,23 +175,27 @@ pub mod standard_resolutions {
     /// High-res 16:9 — standard 1080p
     pub const HD_1080: (u32, u32) = (1920, 1080);
 
-    /// Max Anthropic resolution — 2,576px long edge, 16:10 aspect
-    pub const ULTRA_HD: (u32, u32) = (2576, 1610);
+    /// Largest 16:10 candidate under the 4,784 visual-token ceiling
+    /// (86 × 54 patches = 4,644 tokens). The former `ULTRA_HD` (2576×1610)
+    /// maxed out the long edge but cost 5,336 tokens, so the API rejected
+    /// every screenshot at that size (LAC-4000).
+    pub const HIGH_RES_16_10: (u32, u32) = (2400, 1500);
 
     /// Ultra-wide 21:9 — 2560x1080, just under the 2576px long-edge cap.
     /// Aspect ratio 2.370 matches 21:9 monitors (2.333) far better than
     /// any 16:9 or 16:10 candidate (which have diff ≈ 0.55).
     pub const UW_1080: (u32, u32) = (2560, 1080);
 
-    /// Legacy resolutions for older models (pre-Opus 4.5)
+    /// Legacy resolutions for standard-tier models
     pub const LEGACY_RESOLUTIONS: [(u32, u32); 3] = [XGA, WXGA, FWXGA];
 
-    /// High-resolution options for Opus 4.5+ models
-    pub const HIGH_RES_RESOLUTIONS: [(u32, u32); 4] = [HD_WXGA, HD_1080, ULTRA_HD, UW_1080];
+    /// High-resolution options for high-res-tier models (Claude 4.7+)
+    pub const HIGH_RES_RESOLUTIONS: [(u32, u32); 4] =
+        [HD_WXGA, HD_1080, HIGH_RES_16_10, UW_1080];
 
     /// All supported standard resolutions (legacy + high-res)
     pub const ALL_RESOLUTIONS: [(u32, u32); 7] =
-        [XGA, WXGA, FWXGA, HD_WXGA, HD_1080, ULTRA_HD, UW_1080];
+        [XGA, WXGA, FWXGA, HD_WXGA, HD_1080, HIGH_RES_16_10, UW_1080];
 
     /// Whether a model supports high-resolution screenshots (2,576px).
     ///
@@ -216,9 +225,9 @@ pub mod standard_resolutions {
 
     /// Select the best standard resolution for a given display and model.
     ///
-    /// For high-res capable models (Opus 4.5+), picks the largest resolution
-    /// that fits within 2,576px on the long edge while matching aspect ratio.
-    /// For legacy models, picks from the original XGA/WXGA/FWXGA set.
+    /// For high-res-tier models (Claude 4.7+), picks the largest resolution
+    /// that fits the tier's limits while matching aspect ratio. For
+    /// standard-tier models, picks from the original XGA/WXGA/FWXGA set.
     pub fn select_best_resolution(display_width: u32, display_height: u32) -> (u32, u32) {
         // Default to legacy — callers that are model-aware should use
         // select_best_resolution_for_model() instead.
@@ -342,7 +351,7 @@ pub mod standard_resolutions {
 
         #[test]
         fn test_high_res_16_10_selects_hd_wxga_for_opus() {
-            // Opus 4.5+ on 16:10 should get HD_WXGA (1680×1050) over legacy WXGA
+            // A high-res-tier model on 16:10 should get HD_WXGA (1680×1050) over legacy WXGA
             let res = select_best_resolution_for_model(1728, 1080, "opus");
             assert_eq!(
                 res, HD_WXGA,
@@ -352,7 +361,7 @@ pub mod standard_resolutions {
 
         #[test]
         fn test_high_res_16_9_selects_hd_1080_for_opus() {
-            // Opus 4.5+ on a 16:9 4K display should get HD_1080 (1920×1080)
+            // A high-res-tier model on a 16:9 4K display should get HD_1080 (1920×1080)
             let res = select_best_resolution_for_model(3840, 2160, "opus");
             assert_eq!(
                 res, HD_1080,
@@ -414,6 +423,33 @@ pub mod standard_resolutions {
             assert!(uw_diff < hd_diff,
                 "UW_1080 should have a smaller aspect diff ({:.3}) than HD_1080 ({:.3}) for 3440×1440",
                 uw_diff, hd_diff);
+        }
+
+        // Anthropic packs images into 28×28 patches for high-res-tier vision;
+        // token cost is `ceil(w/28) * ceil(h/28)` and the server rejects a
+        // `tool_result` image whose cost exceeds the ceiling with a 400 (no
+        // silent down-scale). These guards catch the class of "resolution
+        // constant drifts above the ceiling" before it ships (LAC-4000).
+        const ANTHROPIC_HIGH_RES_PATCH_SIZE: u32 = 28;
+        const ANTHROPIC_HIGH_RES_TOKEN_CEILING: u32 = 4784;
+
+        fn visual_token_cost(w: u32, h: u32) -> u32 {
+            w.div_ceil(ANTHROPIC_HIGH_RES_PATCH_SIZE) * h.div_ceil(ANTHROPIC_HIGH_RES_PATCH_SIZE)
+        }
+
+        #[test]
+        fn every_standard_resolution_fits_visual_token_ceiling() {
+            for (w, h) in ALL_RESOLUTIONS {
+                let tokens = visual_token_cost(w, h);
+                assert!(
+                    tokens <= ANTHROPIC_HIGH_RES_TOKEN_CEILING,
+                    "{}×{} costs {} visual tokens, exceeds Anthropic's {}-token high-res ceiling",
+                    w,
+                    h,
+                    tokens,
+                    ANTHROPIC_HIGH_RES_TOKEN_CEILING,
+                );
+            }
         }
     }
 }

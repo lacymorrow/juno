@@ -45,7 +45,14 @@ overflow-checks = false
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+# MUST stay "unwind". `agent/tool_logger.rs` wraps every tool execution in
+# `catch_unwind` so a panicking tool surfaces as "Tool <name> panicked: ..."
+# instead of taking the whole app down with it, and `catch_unwind` is a no-op
+# under `panic = "abort"` — the process aborts before it can return `Err`.
+# This was set to "abort", so that firewall worked in dev and silently did
+# nothing in the builds people actually run. `tool_logger.rs` now fails the
+# build if this is changed back.
+panic = "unwind"
 strip = true
 
 # `block` 0.1.6 (unmaintained, pulled in by cocoa/objc) trips the

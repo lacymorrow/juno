@@ -34,15 +34,10 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
 
     // Browser tools
     map.insert(tool_names::BROWSER_NAVIGATE, ToolCategory::Browser);
-    map.insert(tool_names::BROWSER_CLICK, ToolCategory::Browser);
-    map.insert(tool_names::BROWSER_TYPE, ToolCategory::Browser);
-    map.insert(tool_names::BROWSER_SCROLL, ToolCategory::Browser);
     map.insert(tool_names::BROWSER_SCREENSHOT, ToolCategory::Browser);
-    map.insert(tool_names::BROWSER_GET_CONTENT, ToolCategory::Browser);
     map.insert(tool_names::BROWSER_INTERACT, ToolCategory::Browser);
     map.insert(tool_names::BROWSER_EXTRACT_CONTENT, ToolCategory::Browser);
     map.insert(tool_names::BROWSER_GET_CURRENT_URL, ToolCategory::Browser);
-    map.insert(tool_names::BROWSER_FORM, ToolCategory::Browser);
 
     // Safari tools (specialized browser automation for Safari)
     map.insert(tool_names::SAFARI_EXTRACT_DOM, ToolCategory::Browser);
@@ -536,5 +531,185 @@ mod tests {
                 &AgentType::BrowserExpert
             ) > confidence_scores::NO_CONFIDENCE
         );
+    }
+}
+
+/// Keeps declared tool names honest against the tools actually registered.
+///
+/// A settings toggle or a category entry that names a tool with no definition
+/// behind it looks right on inspection and does nothing at runtime. So does a
+/// real tool that never reaches the settings list: the person cannot turn it
+/// off, and believes they can. Both directions are asserted here.
+///
+/// Scoped to the tool families whose registration is a plain
+/// `Vec<ToolDefinition>` and whose names carry a stable prefix, which today is
+/// browser plus Safari. The Anthropic computer-use, desktop and basic families
+/// build their tool lists inline at several call sites rather than from one
+/// function, so there is nothing to compare them against without first
+/// refactoring registration; that is a bigger change than this fix, and a test
+/// that guessed at their registration would be worse than none.
+#[cfg(test)]
+mod tool_name_truth {
+    use super::*;
+    use crate::agent::core::ToolDefinition;
+    use crate::agent::tools::browser_tools::get_browser_tool_definitions;
+    use crate::agent::tools::safari_tools::get_safari_tool_definitions;
+    use crate::agent::tools::tool_config::ToolConfigManager;
+    use std::collections::BTreeSet;
+
+    struct ToolFamily {
+        /// Human label used in failure messages.
+        label: &'static str,
+        /// Shared name prefix that identifies the family.
+        prefix: &'static str,
+        /// The single source of truth: what the app actually registers.
+        registered: fn() -> Vec<ToolDefinition>,
+        /// Where a reader should go to add or remove a real tool.
+        registration_site: &'static str,
+    }
+
+    fn families() -> Vec<ToolFamily> {
+        vec![
+            ToolFamily {
+                label: "browser",
+                prefix: tool_prefixes::BROWSER,
+                registered: get_browser_tool_definitions,
+                registration_site: "src-tauri/src/agent/tools/browser_tools.rs \
+                     (get_browser_tool_definitions)",
+            },
+            ToolFamily {
+                label: "Safari",
+                prefix: tool_prefixes::SAFARI,
+                registered: get_safari_tool_definitions,
+                registration_site: "src-tauri/src/agent/tools/safari_tools.rs \
+                     (get_safari_tool_definitions)",
+            },
+        ]
+    }
+
+    fn registered_names(family: &ToolFamily) -> BTreeSet<String> {
+        (family.registered)()
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect()
+    }
+
+    fn names_with_prefix<'a>(
+        names: impl Iterator<Item = &'a str>,
+        prefix: &str,
+    ) -> BTreeSet<String> {
+        names
+            .filter(|name| name.starts_with(prefix))
+            .map(|name| name.to_string())
+            .collect()
+    }
+
+    /// Direction 1: nothing may name a tool that does not exist.
+    #[test]
+    fn every_declared_tool_name_resolves_to_a_registered_tool() {
+        let config = ToolConfigManager::default();
+
+        for family in families() {
+            let registered = registered_names(&family);
+            assert!(
+                !registered.is_empty(),
+                "{} registers no tools at all, so this test proves nothing. \
+                 Check {}.",
+                family.label,
+                family.registration_site
+            );
+
+            let in_settings =
+                names_with_prefix(config.tools.keys().map(String::as_str), family.prefix);
+            let phantom_settings: Vec<&String> = in_settings.difference(&registered).collect();
+            assert!(
+                phantom_settings.is_empty(),
+                "tool_config.rs shows settings toggles for {} {} tool(s) that are \
+                 never registered: {:?}.\n\
+                 A person can switch these on and off and nothing happens.\n\
+                 Fix it one of two ways: delete the entry from \
+                 `add_default_browser_tools` in \
+                 src-tauri/src/agent/tools/tool_config.rs (and its constant in \
+                 src-tauri/src/constants/agent.rs, then run \
+                 `npm run generate-constants`), or add a real ToolDefinition in {}.\n\
+                 Registered {} tools are: {:?}",
+                phantom_settings.len(),
+                family.label,
+                phantom_settings,
+                family.registration_site,
+                family.label,
+                registered
+            );
+
+            let in_mapping = names_with_prefix(TOOL_CATEGORY_MAP.keys().copied(), family.prefix);
+            let phantom_mapping: Vec<&String> = in_mapping.difference(&registered).collect();
+            assert!(
+                phantom_mapping.is_empty(),
+                "tool_mapping.rs categorizes {} {} tool name(s) that are never \
+                 registered: {:?}.\n\
+                 Routing decisions are being made for tools that cannot be called.\n\
+                 Fix it by deleting the `map.insert` line in \
+                 src-tauri/src/agent/tools/tool_mapping.rs (and the constant in \
+                 src-tauri/src/constants/agent.rs, then run \
+                 `npm run generate-constants`), or by adding a real ToolDefinition \
+                 in {}.\n\
+                 Registered {} tools are: {:?}",
+                phantom_mapping.len(),
+                family.label,
+                phantom_mapping,
+                family.registration_site,
+                family.label,
+                registered
+            );
+        }
+    }
+
+    /// Direction 2: every real tool must be something the person can turn off.
+    #[test]
+    fn every_registered_tool_can_be_turned_off_in_settings() {
+        let config = ToolConfigManager::default();
+
+        for family in families() {
+            let registered = registered_names(&family);
+            let in_settings =
+                names_with_prefix(config.tools.keys().map(String::as_str), family.prefix);
+
+            let untoggleable: Vec<&String> = registered.difference(&in_settings).collect();
+            assert!(
+                untoggleable.is_empty(),
+                "{} {} tool(s) are registered but missing from tool_config.rs: {:?}.\n\
+                 The agent can call them and the person has no way to switch them \
+                 off.\n\
+                 Fix it by adding each one to `add_default_browser_tools` in \
+                 src-tauri/src/agent/tools/tool_config.rs with a plain description \
+                 of what the person gets, plus a constant in \
+                 src-tauri/src/constants/agent.rs and a \
+                 `map.insert(.., ToolCategory::Browser)` in tool_mapping.rs, then run \
+                 `npm run generate-constants`.\n\
+                 Registered in {}: {:?}",
+                untoggleable.len(),
+                family.label,
+                untoggleable,
+                family.registration_site,
+                registered
+            );
+
+            let unmapped: Vec<String> = registered
+                .iter()
+                .filter(|name| {
+                    ToolMappingService::get_tool_category(name) != Some(ToolCategory::Browser)
+                })
+                .cloned()
+                .collect();
+            assert!(
+                unmapped.is_empty(),
+                "{} {} tool(s) do not map to ToolCategory::Browser: {:?}.\n\
+                 Add a `map.insert(tool_names::.., ToolCategory::Browser)` line to \
+                 TOOL_CATEGORY_MAP in src-tauri/src/agent/tools/tool_mapping.rs.",
+                unmapped.len(),
+                family.label,
+                unmapped
+            );
+        }
     }
 }

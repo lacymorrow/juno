@@ -307,6 +307,24 @@ async fn initialize_mcp_state(app_handle: AppHandle) -> Result<(), String> {
 async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String> {
     debug!("[State] Initializing onboarding state...");
 
+    // Settle which provider runs BEFORE the onboarding window can open.
+    //
+    // Setup skips the "Connect Your AI" step when Juno already has a way to
+    // answer, and a signed-in Claude CLI is one. If that were still being
+    // decided while the window was asking, someone could have the step
+    // skipped on the strength of a CLI that had not actually been selected
+    // yet, and land in a finished setup on a provider with no key.
+    //
+    // This whole function already runs off the launch path, so awaiting here
+    // holds up nothing the person can see.
+    if let Err(e) =
+        crate::agent::providers::startup_default::apply_for_app(app_handle.clone()).await
+    {
+        // Not fatal: they keep whatever provider was already set, and setup
+        // falls back to asking, which is the pre-existing behaviour.
+        warn!("Could not settle the default provider: {}", e);
+    }
+
     if let Err(e) =
         crate::commands::onboarding::initialize_onboarding_system(app_handle.clone()).await
     {

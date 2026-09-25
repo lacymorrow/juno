@@ -88,7 +88,7 @@ pub enum ComputerUse {
     /// tool version, which also selects the matching beta flag.
     AnthropicTool(ApiVersion),
     /// Supported through Juno's own function tools (OpenAI, Gemini, Rig) or
-    /// the `juno-cua` MCP server (Claude CLI). Capable, but no Anthropic tool
+    /// Juno's own in-process MCP server (Claude CLI). Capable, but no Anthropic tool
     /// version applies, so no Anthropic beta flag is sent.
     FunctionTools,
 }
@@ -244,6 +244,11 @@ pub struct ModelInfo {
     /// True when the provider lists the model as legacy. The picker hides
     /// these unless advanced settings are on, or the model is the active one.
     pub is_legacy: bool,
+    /// True when the model can only do computer use through
+    /// `computer_toolset_20260801`. Hidden like a legacy model: the toolset is
+    /// newer, costs roughly 2x the input-token overhead per request, and is not
+    /// what Juno drives by default, so opting into it is an advanced choice.
+    pub requires_computer_toolset: bool,
 }
 
 impl From<&ModelDefinition> for ModelInfo {
@@ -255,6 +260,7 @@ impl From<&ModelDefinition> for ModelInfo {
             supports_computer_use: def.supports_computer_use(),
             is_recommended: def.is_recommended,
             is_legacy: def.availability == Availability::Legacy,
+            requires_computer_toolset: def.uses_computer_toolset(),
         }
     }
 }
@@ -671,10 +677,11 @@ impl Provider {
                     is_recommended: false,
                 },
             ],
-            // The CLI drives the desktop through the juno-cua MCP server rather
-            // than Anthropic's built-in computer tool, so it picks its own tool
-            // versions and Juno sends no Anthropic beta flag. The aliases track
-            // the current generation, which is the high-resolution image tier.
+            // The CLI drives the desktop through Juno's own in-process MCP
+            // server rather than Anthropic's built-in computer tool, so it
+            // picks its own tool versions and Juno sends no Anthropic beta
+            // flag. The aliases track the current generation, which is the
+            // high-resolution image tier.
             Provider::ClaudeCli => &[
                 ModelDefinition {
                     id: "sonnet",
