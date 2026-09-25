@@ -612,6 +612,18 @@ pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
     }
 }
 
+/// Whether a frame is the `command_lifecycle` acknowledgement of *our* turn.
+///
+/// This is the correlation the whole persistent path hangs on: a turn is rendered
+/// if and only if a `command_lifecycle` frame carrying the exact `uuid` we put on
+/// the user message opens it. Anything else — a different uuid, a missing uuid, a
+/// non-string uuid, another frame type — is a turn the CLI started on its own
+/// (observed: a finishing background Bash task) and must stay invisible.
+fn lifecycle_frame_is_ours(frame: &Value, command_uuid: &str) -> bool {
+    frame.get("type").and_then(Value::as_str) == Some("command_lifecycle")
+        && frame.get("command_uuid").and_then(Value::as_str) == Some(command_uuid)
+}
+
 /// Read the turn off the stream, emitting as it goes.
 ///
 /// Split out from [`run_turn`] so every exit path there can decide whether the
@@ -745,9 +757,7 @@ async fn stream_turn(
         let frame_type = frame.get("type").and_then(Value::as_str).unwrap_or("");
 
         if frame_type == "command_lifecycle" {
-            let belongs_to_us =
-                frame.get("command_uuid").and_then(Value::as_str) == Some(command_uuid);
-            if !belongs_to_us {
+            if !lifecycle_frame_is_ours(&frame, command_uuid) {
                 continue;
             }
             match frame.get("state").and_then(Value::as_str) {
@@ -840,10 +850,12 @@ async fn stream_turn(
             }
             // `system/init` arrives at the head of every turn, not once per process.
             // Nothing to do with it beyond noting the subtype.
-            "system" => debug!(
-                "[CliSession] system/{}",
-                frame.get("subtype").and_then(Value::as_str).unwrap_or("?")
-            ),
+            "system" => {
+                // Hoisted out of the macro: tracing's expansion shadows `Value`
+                // with its own field trait of the same name (E0782).
+                let subtype = frame.get("subtype").and_then(Value::as_str).unwrap_or("?");
+                debug!("[CliSession] system/{subtype}");
+            }
             other => debug!("[CliSession] frame '{other}' skipped"),
         }
     }
@@ -963,6 +975,29 @@ mod tests {
         let first = now_secs();
         assert!(first > 0);
         assert!(now_secs() >= first);
+    }
+
+    #[test]
+    fn lifecycle_correlation_accepts_only_our_exact_uuid() {
+        let uuid = "3f2a77aa-0000-4000-8000-000000000001";
+        let ours = json!({ "type": "command_lifecycle", "command_uuid": uuid, "state": "started" });
+        assert!(lifecycle_frame_is_ours(&ours, uuid));
+
+        // An unsolicited turn: same shape, someone else's uuid.
+        let theirs = json!({ "type": "command_lifecycle", "command_uuid": "other", "state": "started" });
+        assert!(!lifecycle_frame_is_ours(&theirs, uuid));
+
+        // An older CLI without msg_lifecycle_v1 omits the field entirely.
+        let missing = json!({ "type": "command_lifecycle", "state": "started" });
+        assert!(!lifecycle_frame_is_ours(&missing, uuid));
+
+        // A uuid that is present but not a string must not match.
+        let wrong_type = json!({ "type": "command_lifecycle", "command_uuid": 42, "state": "started" });
+        assert!(!lifecycle_frame_is_ours(&wrong_type, uuid));
+
+        // Our uuid on a non-lifecycle frame opens nothing.
+        let not_lifecycle = json!({ "type": "assistant", "command_uuid": uuid });
+        assert!(!lifecycle_frame_is_ours(&not_lifecycle, uuid));
     }
 
     #[test]

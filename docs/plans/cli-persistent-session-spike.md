@@ -438,15 +438,17 @@ await invoke('get_cli_persistent_session_enabled')
 
 Everything below was out of reach in this spike because compiling was not allowed.
 
-- **The Rust module in this branch has never been compiled.** `cargo check` and
-  `cargo clippy` are required before any of it is trusted. `rustfmt --check` parses it
-  cleanly, which proves the syntax and nothing more — not types, not borrows, not
-  trait bounds.
+- ~~**The Rust module in this branch has never been compiled.**~~ Resolved for
+  LAC-4025: `cargo check` passes (after fixing one real E0782 — `Value::as_str`
+  inside a `tracing::debug!` macro resolves to tracing's `Value` field trait, not
+  `serde_json::Value`). The original warning was earned: `rustfmt --check` had
+  parsed it cleanly, which proved the syntax and nothing more.
 - Real macOS suspend / laptop sleep across a persistent child. SIGSTOP/SIGCONT for 6 s
   was fine; App Nap and a closed lid are a different thing.
-- Orphan behaviour when Juno itself is SIGKILLed. `kill_on_drop` does not cover it, and
-  `shutdown_all()` exists but is **not yet wired into an app exit handler** — that is a
-  deliberate gap, since wiring it means touching app setup, and the feature is off.
+- Orphan behaviour when Juno itself is SIGKILLed. `kill_on_drop` does not cover it.
+  (`shutdown_all()` has since been wired into `RunEvent::Exit` in `lib.rs` for LAC-4025,
+  which covers normal quits — SIGKILL never delivers that event, so this line item is
+  still open for QA.)
 - Interaction with LAC-1432 parallel sessions under real concurrent load.
 - Whether Juno's cursor overlay and AX verification behave across a turn that was
   interrupted rather than killed. On the one-shot path the process dies and everything
