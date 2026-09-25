@@ -477,3 +477,49 @@ binary:
 
 Each one is a `subprocess.Popen` with `stdin=PIPE` kept open, a reader thread parsing
 NDJSON off stdout, and `json.dumps(msg) + "\n"` written to stdin per turn.
+
+## Rebase blocker, found 2026-09-24
+
+This branch no longer rebases mechanically, and the reason is worth writing down
+because the naive resolution reintroduces a bug main went out of its way to fix.
+
+`run_streaming` was refactored under us. The spawn now lives inside a retry
+`loop` that handles the `--include-partial-messages` and `--resume` fallbacks,
+and above that loop sits:
+
+```rust
+let mut stream = StreamSurface::open(&app_handle, msg_id.clone());
+```
+
+That guard is deliberate. Its comment says the old-CLI retry can run the query
+twice, and the frontend appends a fresh assistant message on every start it
+sees, so a second start strands an empty bubble above the answer.
+
+`claude_cli_session::run_turn` emits its own `emit_stream_start`. So dropping
+the persistent-session block in at the conflict site — after the surface is
+open — produces exactly the duplicate empty bubble the guard exists to prevent.
+Two starts, one answer.
+
+Either resolution works; pick one deliberately rather than by merge order:
+
+1. **Attempt the persistent turn before `StreamSurface::open`.** Cheapest. The
+   persistent path then owns its own stream start, as it does today, and the
+   one-shot path opens the surface only when it is actually going to spawn.
+   Watch the early-return paths: `run_turn` returning `Err` must not leave the
+   caller without a surface to close.
+2. **Thread the open `StreamSurface` into `TurnRequest`** and delete
+   `emit_stream_start` from the session module. More invasive, but it leaves one
+   owner for the bubble and makes a third caller impossible to get wrong.
+
+Option 1 is the smaller change and the one to try first.
+
+Two other things the rebase surfaced:
+
+- `TurnRequest.message_id` takes `Option<String>`, but main has already consumed
+  `message_id` into a non-optional `msg_id` by that point. Pass `msg_id`.
+- `cancel_rx` is now the merged session+global receiver (LAC-3697), resolved
+  above the loop. The persistent path must use that one, not the raw parameter,
+  or escape will not cancel a persistent turn.
+
+Nothing here changes the spike's conclusion or its measurements. It is purely
+what integration costs now that main has moved.
