@@ -1,0 +1,85 @@
+# Ship whatever lands on main, without anyone remembering to push a tag.
+#
+# The release machinery already worked: `release-tauri.yml` builds, signs,
+# notarizes and publishes on a `v*` tag, and Zero's updater polls the
+# `latest.json` that produces. The only manual link left was someone running
+# `bun run release` (shipx) to create the tag.
+#
+# This closes that link from the other end. It watches the version in
+# `src-tauri/Cargo.toml` — the one shipx already treats as canonical — and
+# tags whenever it changes on main, whoever changed it and however. Running
+# shipx locally still works and is still the way to choose a minor or major
+# bump; this only catches the case where a bump lands without a tag behind it.
+#
+# It deliberately does not bump the version itself. That would mean copying
+# shipx's list of seven version files into a second place, which drifts the
+# first time shipx learns an eighth.
+name: Release on version change
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/Cargo.toml"
+
+concurrency:
+  group: release-on-version-change
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Read the version on main
+        id: v
+        run: |
+          version=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
+          if [ -z "$version" ]; then
+            echo "::error::No version found in src-tauri/Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      # A push that touches Cargo.toml without changing the version — a
+      # dependency bump, a profile tweak — must not re-release the version
+      # that is already out. Nor must a re-run of an older commit.
+      - name: Skip if this version is already tagged
+        id: check
+        run: |
+          if git rev-parse "refs/tags/${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
+            echo "${{ steps.v.outputs.tag }} already exists; nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tag the release
+        if: steps.check.outputs.release == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.v.outputs.tag }}" -m "Juno ${{ steps.v.outputs.tag }}"
+          git push origin "${{ steps.v.outputs.tag }}"
+
+      # A tag pushed with GITHUB_TOKEN does not start other workflows — GitHub
+      # suppresses that on purpose so automation cannot loop. `release-tauri`
+      # also accepts `workflow_dispatch`, so ask for it by name against the tag
+      # we just made rather than adding a personal token to do it implicitly.
+      - name: Start the release build
+        if: steps.check.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run release-tauri.yml \
+            --repo "${{ github.repository }}" \
+            --ref "${{ steps.v.outputs.tag }}"
+          echo "Release build requested for ${{ steps.v.outputs.tag }}."
