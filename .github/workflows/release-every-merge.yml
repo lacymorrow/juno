@@ -46,6 +46,13 @@ jobs:
         with:
           bun-version: latest
 
+      # shipx bumps the Cargo workspace with `cargo set-version`, which lives
+      # in cargo-edit and is not on the runner image. Installed as a prebuilt
+      # binary rather than `cargo install`, which would compile it every run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-edit
+
       - name: Identify the committer
         run: |
           git config user.name "github-actions[bot]"
