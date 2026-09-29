@@ -157,9 +157,19 @@ build_branch() {
     done
     [[ -n "$run" ]] || die "the build was requested but did not show up; see https://github.com/$repo/actions/workflows/build-branch.yml"
     say "Watching https://github.com/$repo/actions/runs/$run (Ctrl-C stops watching, not the build)"
-    if ! gh run watch "$run" --repo "$repo" --exit-status --compact --interval 30 >&2; then
+    # The watcher is only a progress display. It also exits non-zero when the
+    # network drops or the Mac sleeps, so ask GitHub how the run ended.
+    gh run watch "$run" --repo "$repo" --compact --interval 30 >&2 || true
+    local status="" conclusion=""
+    while :; do
+      IFS=$'\t' read -r status conclusion < <(gh run view "$run" --repo "$repo" \
+        --json status,conclusion -q '[.status, .conclusion] | @tsv' 2>/dev/null || printf 'unknown\t\n')
+      [[ "$status" == "completed" ]] && break
+      sleep 30
+    done
+    if [[ "$conclusion" != "success" ]]; then
       say ""
-      say "The build failed. Last lines of the failing step:"
+      say "The build ended with: $conclusion. Last lines of the failing step:"
       gh run view "$run" --repo "$repo" --log-failed 2>/dev/null | tail -30 >&2 || true
       die "full log: https://github.com/$repo/actions/runs/$run"
     fi
