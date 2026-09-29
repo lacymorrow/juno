@@ -88,7 +88,8 @@ jobs:
         run: |
           gh workflow run release-tauri.yml \
             --repo "${{ github.repository }}" \
-            --ref "${{ steps.release.outputs.tag }}" \
+            --ref main \
+            -f tag="${{ steps.release.outputs.tag }}" \
             -f prerelease=true
           echo "Requested a signed prerelease build of ${{ steps.release.outputs.tag }}."
 
