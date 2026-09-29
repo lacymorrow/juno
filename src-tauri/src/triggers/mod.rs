@@ -51,12 +51,13 @@ impl TriggerMethod {
         }
     }
 
-    /// How the row names itself on screen.
+    /// How the row names itself on screen: the gesture, so that with the
+    /// target it reads as one sentence ("Hold to dictate").
     pub fn label(self) -> &'static str {
         match self {
-            Self::PushToTalk => "Push to talk",
-            Self::Toggle => "Toggle",
-            Self::Voice => "Voice",
+            Self::PushToTalk => "Hold",
+            Self::Toggle => "Press",
+            Self::Voice => "Say a phrase",
         }
     }
 }
@@ -70,11 +71,11 @@ impl TriggerTarget {
         }
     }
 
-    /// How the row names itself on screen.
+    /// How the row names itself on screen, as the outcome the gesture has.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Agent => "Agent",
-            Self::Dictation => "Dictation",
+            Self::Agent => "to talk to Juno",
+            Self::Dictation => "to dictate",
         }
     }
 }
@@ -288,9 +289,11 @@ impl Trigger {
         format!("{}:{}", self.method.as_str(), self.target.as_str())
     }
 
-    /// How this row reads on screen, e.g. `"Push to talk to Dictation"`.
+    /// How this row reads on screen, e.g. `"Hold to dictate"`. Conflict
+    /// messages quote it, so a refusal names the row in the same words the
+    /// window does.
     pub fn label(&self) -> String {
-        format!("{} to {}", self.method.label(), self.target.label())
+        format!("{} {}", self.method.label(), self.target.label())
     }
 
     pub fn is_voice(&self) -> bool {
@@ -713,7 +716,7 @@ mod tests {
         .key_str();
         let msg = combo_conflict(&ts, "Option+Space", Some(&other), &[])
             .expect("a combo held by another enabled row is taken");
-        assert!(msg.contains("Push to talk to Agent"), "got: {msg}");
+        assert!(msg.contains("Hold to talk to Juno"), "got: {msg}");
     }
 
     #[test]

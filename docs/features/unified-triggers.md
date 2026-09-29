@@ -17,7 +17,12 @@ A trigger is unique by `(method, target)`, so the set is bounded to six:
 | Toggle       | key / mouse, tap      | key / mouse, tap            |
 | Voice        | phrase (e.g. "juno")  | phrase (e.g. "transcribe")  |
 
-- **Push-to-talk**: activate while held, stop on release.
+- **Push-to-talk**: activate while held, stop on release. A tap (under 400 ms,
+  `monitor_sessions::HOLD_DURATION_MS`) keeps the session running hands-free
+  until the next press of the same key, so one key covers both a quick
+  correction and a long message. Dictation converts in
+  `dictation_monitor::on_dictation_input_released`; the agent hands the open
+  session to the bar-voice guard in `agent_monitor`.
 - **Toggle**: press once to start, again to stop.
 - **Voice**: speak a wake phrase. Optional "hey" prefix ("juno" or "hey juno";
   require the prefixed form with the toggle).

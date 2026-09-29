@@ -28,7 +28,8 @@ import { useEventListener } from "@/hooks/useEventListener";
 
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup } from "../ui";
-import ShortcutInput from "../ShortcutInput";
+import { ShortcutRecorder } from "../ShortcutRecorder";
+import { KeyCaps } from "../KeyCaps";
 
 /* -------------------------------------------------------------------------- */
 /* Backend contract (frozen — mirror the serde shape exactly)                 */
@@ -74,7 +75,8 @@ const TARGET_LABEL: Record<TriggerTarget, string> = {
 };
 
 const METHOD_HINT: Record<TriggerMethod, string> = {
-  push_to_talk: "Hold the key while you speak, let go to finish.",
+  push_to_talk:
+    "Hold the key while you speak, let go to finish. Tap it instead and it keeps listening until the next tap.",
   toggle: "Press once to start, again to stop.",
   voice: "Say the phrase out loud and Juno listens.",
 };
@@ -143,6 +145,15 @@ function browserButtonToAppKit(button: number): number {
   const map: Record<number, number> = { 0: 0, 1: 2, 2: 1 };
   return map[button] ?? button;
 }
+
+/**
+ * The factory bindings, mirroring `triggers::defaults` in Rust. Rows without
+ * one have nothing to reset to.
+ */
+const DEFAULT_BINDINGS: Partial<Record<string, string>> = {
+  "toggle:agent": "Option+D",
+  "push_to_talk:dictation": "Option+Space",
+};
 
 function defaultsFor(method: TriggerMethod, target: TriggerTarget): Trigger {
   if (method === "voice") {
@@ -220,7 +231,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
    * Persist the whole list. Optimistic: `triggers` already reflects `next`.
    * On success we adopt the backend's normalized list; on a conflict we revert
    * to the last accepted list and surface the error on `editedKey`, then
-   * rethrow so callers (e.g. ShortcutInput) can react.
+   * rethrow so callers (the recorder) can show the reason.
    */
   const applyTriggers = useCallback(
     async (next: Trigger[], editedKey: string) => {
@@ -557,15 +568,12 @@ function TriggerRow({
         </span>
 
         <div className={cn("min-w-0 flex-1", !trigger.enabled && "opacity-55")}>
-          <div className="flex items-baseline gap-1.5">
-            <span className="truncate text-[13px] font-medium">
-              {METHOD_LABEL[trigger.method]}
-            </span>
-            <span className="shrink-0 text-[13px] text-muted-foreground">
-              → {TARGET_LABEL[trigger.target]}
-            </span>
+          {/* One sentence: the gesture, then what it does. */}
+          <div className="flex items-baseline gap-1 text-[13px]">
+            <span className="font-medium">{METHOD_LABEL[trigger.method]}</span>
+            <span className="text-muted-foreground">{TARGET_LABEL[trigger.target]}</span>
           </div>
-          <p className="truncate text-[12px] leading-snug text-muted-foreground">
+          <p className="text-[12px] leading-snug text-muted-foreground">
             {METHOD_HINT[trigger.method]}
           </p>
         </div>
@@ -586,11 +594,18 @@ function TriggerRow({
             )}
           >
             {trigger.binding?.kind === "mouse" ? (
-              <MousePointer2 className="size-3" />
+              <>
+                <MousePointer2 className="size-3" />
+                {bindingLabel(trigger.binding)}
+              </>
+            ) : trigger.binding?.kind === "keyboard" && trigger.binding.shortcut ? (
+              <KeyCaps shortcut={trigger.binding.shortcut} />
             ) : (
-              <Keyboard className="size-3" />
+              <>
+                <Keyboard className="size-3" />
+                {bindingLabel(trigger.binding)}
+              </>
             )}
-            {bindingLabel(trigger.binding)}
           </Button>
         )}
 
@@ -703,23 +718,18 @@ function TriggerRow({
 
           {bindingTab === "keyboard" ? (
             <div className="space-y-2">
-              <ShortcutInput
-                label="Keyboard shortcut"
-                description="Press the keys you want. They save when you let go."
+              <ShortcutRecorder
                 value={
                   trigger.binding?.kind === "keyboard"
                     ? trigger.binding.shortcut
                     : ""
                 }
                 shortcutName={`trigger_${key}`}
-                isSystemManaged={false}
-                isLoading={false}
-                onSave={async (_name, value) => {
-                  await setBindingNow(
-                    value ? { kind: "keyboard", shortcut: value } : null,
-                  );
-                  onCloseEditor();
-                }}
+                defaultShortcut={DEFAULT_BINDINGS[key] ?? null}
+                onSave={(shortcut) =>
+                  setBindingNow({ kind: "keyboard", shortcut })
+                }
+                onCancel={onCloseEditor}
               />
               {/* The globe key is a key, so it is recorded by pressing it like
                   any other. It just never reaches this page, so the press is

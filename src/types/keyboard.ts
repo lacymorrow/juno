@@ -17,15 +17,6 @@ export interface AgentTriggerModeConfig {
     description: string;
 }
 
-export interface ShortcutInputProps {
-    label: string;
-    description: string;
-    value: string;
-    onChange: (value: string) => void;
-    placeholder?: string;
-    disabled?: boolean;
-}
-
 export interface ShortcutValidationResult {
     isValid: boolean;
     error?: string;
