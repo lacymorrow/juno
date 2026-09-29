@@ -1,6 +1,6 @@
 # Human-forward Settings (spec)
 
-**Status:** Slice 1 merged (PR #604, v0.8.6). Slice 2 merged (PR #606). Slice 3 on `feat/settings-slice3`.
+**Status:** Slice 1 merged (PR #604, v0.8.6). Slice 2 merged (PR #606). Slice 3 is PR #611.
 **DRI:** Frontend Engineer for slices 1 and 2. Founding Engineer for slice 3 (Rust).
 **Reference:** `docs/design/settings-ux-reference.md` (research, principles, skills).
 
@@ -95,7 +95,7 @@ Considered and cut: changing the theme's `--primary` to system blue (touches eve
 
 ## Slice 3: triggers the Wispr way (Rust + frontend)
 
-**Status:** built on `feat/settings-slice3`.
+**Status:** PR #611.
 
 Backend (`dictation_monitor.rs`, `agent_monitor.rs`, `constants/agent.rs`, `triggers/mod.rs`):
 - A tap on a hold key keeps the session running hands-free until the next press of the same key. Dictation: the release converts the session instead of cancelling it, the next press stops it with the usual cue, and that press's release is swallowed. Agent: the release hands the open spoken query to the bar-voice guard, which finalises it on the next press exactly as a toggle does. Watchdogs that exist for a stuck hold stand down while a session is hands-free.
