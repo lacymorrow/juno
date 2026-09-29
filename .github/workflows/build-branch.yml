@@ -8,9 +8,10 @@
 # browser, and `gh run download` does not quarantine what it saves.
 name: Build branch
 
-# Also on every push to main: that run saves the release build cache on main,
-# where tag builds (release-tauri.yml) and branch builds can restore it. A
-# cache saved on a tag or a branch is invisible to everything else.
+# Also on every push to main: that run saves the ci-test build cache on main,
+# where every branch build can restore it (a cache saved on a branch is
+# visible only to that branch). It also leaves a downloadable app for each
+# main commit, which `juno-build main` reuses without building.
 on:
   workflow_dispatch:
   push:
@@ -51,10 +52,9 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           # Cargo workspace root is the repo root, so the build lands in ./target.
-          # Shared with the other aarch64 release build: build-branch saves it
-          # on main, and tag and branch builds restore it from there.
+          # Saved on main by the push-to-main run, restored by branch builds.
           workspaces: ". -> target"
-          shared-key: tauri-release-aarch64
+          shared-key: tauri-ci-test-aarch64
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -93,13 +93,16 @@ jobs:
           rm -f "$cert_path"
 
       # Only the .app: no DMG, and no updater artifacts (those need the updater
-      # key, and a branch build is never offered as an update).
+      # key, and a branch build is never offered as an update). The ci-test
+      # profile (Cargo.toml) trades release's single codegen unit and LTO for
+      # a build several times faster.
       - name: Build Juno.app
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           bunx tauri build --target aarch64-apple-darwin --bundles app \
-            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+            --config '{"bundle":{"createUpdaterArtifacts":false}}' \
+            -- --profile ci-test
 
       # An artifact is a zip, which drops the executable bits and symlinks an
       # .app depends on. Tar it first.
@@ -107,7 +110,7 @@ jobs:
         id: pkg
         run: |
           set -euo pipefail
-          app="target/aarch64-apple-darwin/release/bundle/macos/Juno.app"
+          app="target/aarch64-apple-darwin/ci-test/bundle/macos/Juno.app"
           [ -d "$app" ] || { echo "no Juno.app at $app" >&2; exit 1; }
           codesign --verify --deep --strict "$app"
           tar -czf Juno.app.tar.gz -C "$(dirname "$app")" Juno.app

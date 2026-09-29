@@ -55,6 +55,15 @@ codegen-units = 1
 panic = "unwind"
 strip = true
 
+# Branch builds from CI (build-branch.yml, `juno-build`). Same optimization
+# level and panic strategy as release, minus the single codegen unit and LTO
+# that make the juno crate compile mostly on one core: 23 of a 24-minute warm
+# build. Never used for anything a user downloads.
+[profile.ci-test]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 # `block` 0.1.6 (unmaintained, pulled in by cocoa/objc) trips the
 # `uninhabited_static` future-incompat lint that will become a hard error
 # (rust-lang/rust#74840). vendor/block is the same crate with a one-line fix.
