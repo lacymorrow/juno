@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-09-29
+
+### Changed
+
+- **anthropic:** cache the conversation prefix, with a 1-hour TTL on the stable breakpoints (#598) (3944d4f9)
+
 ## [0.8.7] - 2026-09-29
 
 ### Added
@@ -503,7 +509,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.7...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.9...HEAD
+[0.8.9]: https://github.com/lacymorrow/juno/compare/cua-v0.8.8...v0.8.9
 [0.8.7]: https://github.com/lacymorrow/juno/compare/cua-v0.8.6...v0.8.7
 [0.8.6]: https://github.com/lacymorrow/juno/compare/cua-v0.8.5...v0.8.6
 [0.8.5]: https://github.com/lacymorrow/juno/compare/cua-v0.8.4...v0.8.5
