@@ -171,7 +171,12 @@ impl ParakeetEngine {
         // dependencies.
         let write_to = optimized.clone();
         let config = ExecutionConfig::new()
-            .with_custom_configure(move |b| b.with_optimized_model_path(&write_to));
+            // `with_optimized_model_path` returns `Error<SessionBuilder>`, which
+            // hands the builder back on failure; `with_custom_configure` wants
+            // the plain `Error<()>`. ort provides the conversion.
+            .with_custom_configure(move |b| {
+                b.with_optimized_model_path(&write_to).map_err(Into::into)
+            });
 
         match Parakeet::from_pretrained(model_dir, Some(config)) {
             Ok(model) => {
