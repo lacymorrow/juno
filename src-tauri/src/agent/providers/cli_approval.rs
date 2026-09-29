@@ -154,7 +154,7 @@ pub fn verdict_for(tool_name: &str) -> Verdict {
         // `mcp__<server>__<tool>` — split off the server, judge the tool name.
         if let Some((_server, tool)) = rest.split_once("__") {
             let lowered: Vec<String> = tool
-                .split(|c: char| c == '_' || c == '-')
+                .split(['_', '-'])
                 .filter(|s| !s.is_empty())
                 .map(str::to_lowercase)
                 .collect();
