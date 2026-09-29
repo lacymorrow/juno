@@ -2,7 +2,7 @@
 
 Read `CLAUDE.md` first. It is the single source of truth for architecture rules,
 the backend-owns-logic / frontend-is-display boundary, build and test commands,
-and the mandatory `cargo check` after any Rust change.
+and the rule that Rust is compiled and checked in CI, not locally.
 
 Then, depending on the task:
 

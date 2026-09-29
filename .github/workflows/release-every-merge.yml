@@ -103,12 +103,15 @@ jobs:
 
       # A tag pushed with GITHUB_TOKEN does not start other workflows, which
       # GitHub enforces so automation cannot loop. Ask for the build by name
-      # against the tag shipx just made.
+      # against the tag shipx just made. It lands as a prerelease: users on the
+      # auto-updater only see it once someone promotes it with
+      # `scripts/juno-build.sh promote`.
       - name: Start the release build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh workflow run release-tauri.yml \
             --repo "${{ github.repository }}" \
-            --ref "${{ steps.release.outputs.tag }}"
-          echo "Requested a signed build of ${{ steps.release.outputs.tag }}."
+            --ref "${{ steps.release.outputs.tag }}" \
+            -f prerelease=true
+          echo "Requested a signed prerelease build of ${{ steps.release.outputs.tag }}."

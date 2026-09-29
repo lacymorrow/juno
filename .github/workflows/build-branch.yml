@@ -1,0 +1,112 @@
+# Build any pushed branch into a runnable Juno.app, so nobody has to compile
+# on their own Mac. `scripts/juno-build.sh` dispatches this, waits, downloads
+# the artifact and installs it.
+#
+# Signed with the Developer ID so macOS keeps its Accessibility, Microphone
+# and Screen Recording grants across builds (they are tied to the signature).
+# Not notarized: notarization only matters for a file downloaded through a
+# browser, and `gh run download` does not quarantine what it saves.
+name: Build branch
+
+on:
+  workflow_dispatch:
+
+# A second request for the same branch replaces the first.
+concurrency:
+  group: build-branch-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      # Full history so build.rs can stamp the build number (commit count).
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          [ -n "$channel" ] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust (pinned toolchain)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: aarch64-apple-darwin
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      # Same throwaway-keychain import as demo-build.yml, minus the notary
+      # profile.
+      - name: Import the signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD; do
+            if [ -z "${!var:-}" ]; then
+              echo "missing required secret: $var" >&2
+              exit 1
+            fi
+          done
+
+          keychain="$RUNNER_TEMP/juno-signing.keychain-db"
+          keychain_pw="$(openssl rand -base64 24)"
+          cert_path="$RUNNER_TEMP/certificate.p12"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$cert_path"
+          security create-keychain -p "$keychain_pw" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_pw" "$keychain"
+          security import "$cert_path" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_pw" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security default-keychain -s "$keychain"
+          rm -f "$cert_path"
+
+      # Only the .app: no DMG, and no updater artifacts (those need the updater
+      # key, and a branch build is never offered as an update).
+      - name: Build Juno.app
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          bunx tauri build --target aarch64-apple-darwin --bundles app \
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      # An artifact is a zip, which drops the executable bits and symlinks an
+      # .app depends on. Tar it first.
+      - name: Package
+        id: pkg
+        run: |
+          set -euo pipefail
+          app="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Juno.app"
+          [ -d "$app" ] || { echo "no Juno.app at $app" >&2; exit 1; }
+          codesign --verify --deep --strict "$app"
+          tar -czf Juno.app.tar.gz -C "$(dirname "$app")" Juno.app
+          echo "name=juno-$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.name }}
+          path: Juno.app.tar.gz
+          if-no-files-found: error
+          retention-days: 7

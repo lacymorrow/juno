@@ -31,12 +31,13 @@ Rust-based Tauri v2 backend implementing a sophisticated multi-agent AI system w
 ## Development Commands
 
 ```bash
-cargo check --manifest-path src-tauri/Cargo.toml  # CRITICAL: Run after every Rust change (NOTE: requires 15m timeout)
-cargo build --manifest-path src-tauri/Cargo.toml  # Build backend
-cargo test --manifest-path src-tauri/Cargo.toml   # Run tests
-bun run tauri dev                                  # Full app development
-bun run tauri:build                                # Build production app (signs + notarizes)
+cargo fmt --manifest-path src-tauri/Cargo.toml --all  # Only cargo command to run locally
+gh pr checks --watch                                  # CI runs fmt + clippy + test on the PR
+scripts/juno-build.sh                                 # CI builds this branch, installs + opens it
 ```
+
+Compiling happens in CI, not on this Mac. See "Rust: CI Compiles, Not Your
+Mac" in the root `CLAUDE.md`.
 
 **In a fresh clone or a new git worktree, build the frontend before any cargo
 command:**
@@ -404,7 +405,7 @@ async fn test_with_mock() {
 ## Critical Development Rules
 
 ### Compilation Check
-**MANDATORY**: Run `cargo check --manifest-path src-tauri/Cargo.toml` after every Rust change. Project MUST compile with exit code 0.
+**MANDATORY**: every Rust change must pass CI (`fmt`, `clippy -D warnings`, `test`) before merge. Push a draft PR and let CI compile it; don't run cargo builds locally.
 
 ### macOS: main-thread-only APIs
 

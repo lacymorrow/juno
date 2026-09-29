@@ -108,6 +108,9 @@ jobs:
             juno-cua-darwin-universal.tar.gz
           draft: false
           prerelease: false
+          # The app's auto-updater and juno-www both read /releases/latest,
+          # so a CLI release must never become Latest.
+          make_latest: false
 
       - name: Update Homebrew formula
         if: github.event_name == 'push'
