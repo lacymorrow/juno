@@ -143,6 +143,8 @@ export type EnvironmentVariableProps = Omit<ComponentProps<"div">, "onChange"> &
   name: string;
   value: string;
   onChange?: (value: string) => void;
+  /** Called when editing ends (blur or Enter), for owners that save on commit. */
+  onCommit?: () => void;
   required?: boolean;
 };
 
@@ -150,6 +152,7 @@ export const EnvironmentVariable = ({
   name,
   value,
   onChange,
+  onCommit,
   required,
   className,
   ...props
@@ -176,7 +179,13 @@ export const EnvironmentVariable = ({
             type={showValues ? "text" : "password"}
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            onBlur={() => setEditing(false)}
+            onBlur={() => {
+              setEditing(false);
+              onCommit?.();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
             className="h-7 text-xs font-mono"
             autoFocus
           />

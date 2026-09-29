@@ -8,6 +8,7 @@ import {
 } from "@/components/ai-elements/conversation";
 import { ChatMessageComponent } from "@/components/ChatMessageV2";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
+import { formatTurnSummary, summarizeTurn } from "@/lib/turn-summary";
 import type { ShareAnchor } from "@/hooks/useConversation";
 import { ExamplePrompts, type BackendStatus } from "@/components/ExamplePrompts";
 import { InputControlNotices } from "@/components/input-control/InputControlNotices";
@@ -145,6 +146,19 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
               onApprovalUpdate={onApprovalUpdate}
               onContinuationUpdate={onContinuationUpdate}
             />
+
+            {/* What the turn cost, for turns that spent anything. A reply that
+                used no tools returns null and renders nothing, so ordinary
+                chat stays clean and only real work reports itself. */}
+            {(() => {
+              const summary = summarizeTurn(conversation, index);
+              if (!summary) return null;
+              return (
+                <div className="mt-1 text-[11px] text-muted-foreground/60 cursor-default tabular-nums">
+                  {formatTurnSummary(summary)}
+                </div>
+              );
+            })()}
           </div>
         );
       }),

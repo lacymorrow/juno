@@ -19,6 +19,9 @@ import { BarHost } from "./components/bar/BarHost";
 // installed only when the (unlinked) /__bar-harness route is opened directly,
 // never on a normal launch.
 const BarStateHarness = lazy(() => import("./bar-harness/BarStateHarness"));
+// Live preview of one bar appearance, framed by the settings window's picker.
+// Same stand-in layer as the harness, so it never touches a real window.
+const AppearancePreview = lazy(() => import("./bar-harness/AppearancePreview"));
 
 import "./styles/globals.css";
 
@@ -49,6 +52,14 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
               <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
               <Route path="/snap-wells-overlay" element={<SnapWellsOverlay />} />
               <Route path="/listening-overlay" element={<ListeningGlow />} />
+              <Route
+                path="/__bar-preview"
+                element={
+                  <Suspense fallback={null}>
+                    <AppearancePreview />
+                  </Suspense>
+                }
+              />
               {/* Unlinked diagnostic bench; not reachable through normal UI. */}
               <Route
                 path="/__bar-harness"

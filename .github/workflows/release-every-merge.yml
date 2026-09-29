@@ -1,0 +1,90 @@
+# Cut a version for every merge to main, so history is a usable bisect trail.
+#
+# The rule is Lacy's and it is the ordinary one: bump on every merge, so any
+# regression can be walked backwards to the exact version that introduced it.
+# A version that covers three merges cannot do that.
+#
+# What made this possible only now: shipx prompted for confirmation even when
+# the bump level was given, so it could not run unattended (lacymorrow/shipx#64).
+# 0.1.24 added --yes. Everything downstream of the tag already worked.
+#
+# This replaces `release-on-version-change.yml` (#599) rather than joining it.
+# That one fired on a push touching src-tauri/Cargo.toml and tagged whatever
+# version it found. This fires on every push to main, which is a strict
+# superset, and the two would have raced: a merged PR that happened to touch
+# Cargo.toml triggered both, in separate concurrency groups, one tagging the
+# current version while the other bumped past it. One mechanism, not two.
+name: Release every merge
+
+on:
+  push:
+    branches: [main]
+
+# Serial, and never cancelled. Two releases racing would fight over the version
+# in Cargo.toml, and a cancelled one could leave a tag with no build behind it.
+concurrency:
+  group: release-every-merge
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    # shipx's own commit lands on main and would otherwise re-trigger this
+    # forever. The message it writes is the loop breaker.
+    if: ${{ !startsWith(github.event.head_commit.message, 'release:') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # shipx bumps the Cargo workspace with `cargo set-version`, which lives
+      # in cargo-edit and is not on the runner image. Installed as a prebuilt
+      # binary rather than `cargo install`, which would compile it every run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-edit
+
+      - name: Identify the committer
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # No NPM_TOKEN is not a failure. shipx reports the missing credential and
+      # skips the publish rather than prompting (shipx#66), so the app still
+      # ships and only juno-cua lags. Add the secret and it catches up.
+      - name: Bump, tag and push
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+          else
+            echo "::warning::NPM_TOKEN is not set; juno-cua will not be published this run."
+          fi
+          bunx @lacymorrow/shipx@latest patch --yes --no-tests
+          version=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      # A tag pushed with GITHUB_TOKEN does not start other workflows, which
+      # GitHub enforces so automation cannot loop. Ask for the build by name
+      # against the tag shipx just made.
+      - name: Start the release build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run release-tauri.yml \
+            --repo "${{ github.repository }}" \
+            --ref "${{ steps.release.outputs.tag }}"
+          echo "Requested a signed build of ${{ steps.release.outputs.tag }}."

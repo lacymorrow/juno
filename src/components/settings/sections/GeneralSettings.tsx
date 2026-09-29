@@ -15,6 +15,8 @@ import { Check, Copy, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { UI } from "@/lib/constants.generated";
 import type { FloatingBarConfig } from "@/types/bar-config";
+import type { BarAppearance } from "@/components/bar/barAppearance";
+import { AppearancePicker } from "../AppearancePicker";
 
 export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
@@ -28,8 +30,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [barAppearanceLoading, setBarAppearanceLoading] = useState(false);
   const [followCursorDisplay, setFollowCursorDisplay] = useState(true);
   const [followCursorLoading, setFollowCursorLoading] = useState(false);
-  const [showGlowBorder, setShowGlowBorder] = useState(true);
-  const [showGlowBorderLoading, setShowGlowBorderLoading] = useState(false);
 
   // Load auto-launch status and onboarding info on component mount
   useEffect(() => {
@@ -46,13 +46,9 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         // Load current bar appearance and glow-border preference
         const barConfig = await invoke<{
           bar_appearance?: string;
-          show_glow_border?: boolean;
         }>("ui_get_bar_config");
         if (barConfig?.bar_appearance) {
           setBarAppearance(barConfig.bar_appearance);
-        }
-        if (typeof barConfig?.show_glow_border === "boolean") {
-          setShowGlowBorder(barConfig.show_glow_border);
         }
 
         // Load "follow cursor across displays"
@@ -135,11 +131,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         settings: { ...current, follow_cursor_display: enabled },
       });
       setFollowCursorDisplay(enabled);
-      toast.success(
-        enabled
-          ? "Bar will follow your cursor across displays"
-          : "Bar will stay on its display",
-      );
     } catch (error) {
       console.error("Failed to update follow-cursor setting:", error);
       toast.error("Failed to update setting", {
@@ -150,9 +141,13 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  const handleBarAppearanceChange = async (newAppearance: string) => {
+  // No success toast: the bar itself changes on screen, and the picker's stage
+  // shows the new look. A toast would be a second, later, weaker signal.
+  const handleBarAppearanceChange = async (newAppearance: BarAppearance) => {
     if (barAppearanceLoading) return;
     setBarAppearanceLoading(true);
+    const previous = barAppearance;
+    setBarAppearance(newAppearance);
     try {
       const currentConfig = await invoke<FloatingBarConfig>("ui_get_bar_config");
       const updatedConfig = {
@@ -160,9 +155,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         bar_appearance: newAppearance,
       };
       await invoke("ui_set_bar_config", { config: updatedConfig });
-      setBarAppearance(newAppearance);
-      toast.success("Bar appearance updated");
     } catch (error) {
+      setBarAppearance(previous);
       console.error("Failed to update bar appearance:", error);
       toast.error("Failed to update bar appearance", {
         description: error as string,
@@ -172,33 +166,13 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  const handleShowGlowBorderChange = async (enabled: boolean) => {
-    if (showGlowBorderLoading) return;
-    setShowGlowBorderLoading(true);
-    const previous = showGlowBorder;
-    setShowGlowBorder(enabled);
-    try {
-      // Read-modify-write the whole bar config, like the appearance dropdown.
-      const currentConfig = await invoke<FloatingBarConfig>("ui_get_bar_config");
-      await invoke("ui_set_bar_config", {
-        config: { ...currentConfig, show_glow_border: enabled },
-      });
-    } catch (error) {
-      console.error("Failed to update glowing border setting:", error);
-      setShowGlowBorder(previous);
-      toast.error("Could not change that setting");
-    } finally {
-      setShowGlowBorderLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <SettingsGroup title="Startup">
         <SettingsRow
           htmlFor="auto-launch"
-          label="Launch at login"
-          description="Automatically start Juno when you log in to your computer"
+          label="Open at login"
+          description="Juno is in the menu bar as soon as you log in."
         >
           <Switch
             id="auto-launch"
@@ -212,8 +186,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
       <SettingsGroup title="Sound">
         <SettingsRow
           htmlFor="sound-enabled"
-          label="Sound effects"
-          description="Play sounds for notifications and feedback"
+          label="Play sounds"
+          description="A soft cue when dictation starts and stops."
         >
           <Switch
             id="sound-enabled"
@@ -250,59 +224,28 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
 
       <SettingsGroup
         title="Appearance"
-        advanced
-        footer="Bar windows switch styles immediately when changed."
+        footer="Your bar changes as you browse. Every look goes through the same moments: resting, listening, dictating, done."
       >
         <SettingsRow
-          htmlFor="bar-appearance"
-          label="Bar appearance"
-          description="Which bar UI style to use in bar windows"
-        >
-          <Select
-            value={barAppearance}
-            onValueChange={handleBarAppearanceChange}
-            disabled={barAppearanceLoading}
-          >
-            <SelectTrigger id="bar-appearance" className="w-[190px]">
-              <SelectValue placeholder="Select bar appearance" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={UI.BAR_APPEARANCES_FLOATING}>
-                Floating (Standard)
-              </SelectItem>
-              <SelectItem value={UI.BAR_APPEARANCES_APP}>App Bar</SelectItem>
-              <SelectItem value={UI.BAR_APPEARANCES_VOICE_AI}>Voice AI</SelectItem>
-              <SelectItem value={UI.BAR_APPEARANCES_DYNAMIC}>Dynamic</SelectItem>
-              <SelectItem value={UI.BAR_APPEARANCES_ORB}>ElevenLabs Orb</SelectItem>
-              <SelectItem value={UI.BAR_APPEARANCES_REACT_ORB}>React Orb</SelectItem>
-              <SelectItem value={UI.BAR_APPEARANCES_PERSONA}>
-                Persona (AI Avatar)
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingsRow>
+          id="bar-appearance"
+          below={
+            <AppearancePicker
+              value={barAppearance}
+              onChange={handleBarAppearanceChange}
+              disabled={barAppearanceLoading}
+            />
+          }
+        />
         <SettingsRow
           htmlFor="follow-cursor-display"
-          label="Follow cursor across displays"
-          description="Keep the bar on whichever display your cursor is on, so you never hunt for it"
+          label="Follow me across displays"
+          description="The bar moves to whichever display your cursor is on."
         >
           <Switch
             id="follow-cursor-display"
             checked={followCursorDisplay}
             onCheckedChange={handleFollowCursorChange}
             disabled={followCursorLoading}
-          />
-        </SettingsRow>
-        <SettingsRow
-          htmlFor="show-glow-border"
-          label="Show glowing border"
-          description="Wrap the floating bar in a glowing border that lights up while Juno is listening or working"
-        >
-          <Switch
-            id="show-glow-border"
-            checked={showGlowBorder}
-            onCheckedChange={handleShowGlowBorderChange}
-            disabled={showGlowBorderLoading}
           />
         </SettingsRow>
       </SettingsGroup>

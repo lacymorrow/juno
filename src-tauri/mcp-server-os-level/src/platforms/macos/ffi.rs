@@ -81,9 +81,6 @@ extern "C" {
     /// Property key: `CFDataRef` holding the 'uchr' keyboard layout data.
     pub(crate) static kTISPropertyUnicodeKeyLayoutData: core_foundation::string::CFStringRef;
 
-    /// Property key: `CFStringRef` uniquely identifying the input source.
-    pub(crate) static kTISPropertyInputSourceID: core_foundation::string::CFStringRef;
-
     /// Translate a virtual key code + modifier state to the characters it
     /// would produce under the given 'uchr' layout data.
     pub(crate) fn UCKeyTranslate(

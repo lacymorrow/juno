@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-09-29
+
+### Added
+
+- **settings:** fewer switches, immediate apply, reachable search (slice 2) (#606) (56d94f36)
+
+## [0.8.6] - 2026-09-29
+
+### Added
+
+- **settings:** live appearance picker and outcome-first copy (#604) (7119fda7)
+
+## [0.8.5] - 2026-09-29
+
+### Changed
+
+- **startup:** stop ONNX Runtime burying the log, and write down two traps (#605) (318c74d7)
+
+## [0.8.4] - 2026-09-29
+
+### Fixed
+
+- **dictation:** stop Text Input Services killing the app on paste (#603) (62b33d4b)
+
+## [0.8.2] - 2026-09-28
+
 ### Added
 
 - The floating bar has a React Orb appearance, built on ogl, with per-state hue, intensity, and audio reactivity (#570)
@@ -477,7 +503,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/lacymorrow/juno/compare/cua-v0.8.6...v0.8.7
+[0.8.6]: https://github.com/lacymorrow/juno/compare/cua-v0.8.5...v0.8.6
+[0.8.5]: https://github.com/lacymorrow/juno/compare/cua-v0.8.4...v0.8.5
+[0.8.4]: https://github.com/lacymorrow/juno/compare/cua-v0.8.3...v0.8.4
+[0.8.2]: https://github.com/lacymorrow/juno/compare/cua-v0.8.1...v0.8.2
 [0.7.3]: https://github.com/lacymorrow/juno/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/lacymorrow/juno/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/lacymorrow/juno/compare/v0.7.0...v0.7.1
