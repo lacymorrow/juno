@@ -9,8 +9,9 @@
 name: Build branch
 
 # Also on every push to main: that run saves the release build cache on main,
-# where tag builds (release-tauri.yml) and branch builds can restore it. A
-# cache saved on a tag or a branch is invisible to everything else.
+# where every branch build can restore it (a cache saved on a branch is
+# visible only to that branch). It also leaves a downloadable app for each
+# main commit, which `juno-build main` reuses without building.
 on:
   workflow_dispatch:
   push:
@@ -51,8 +52,8 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           # Cargo workspace root is the repo root, so the build lands in ./target.
-          # Shared with the other aarch64 release build: build-branch saves it
-          # on main, and tag and branch builds restore it from there.
+          # Same key as release-tauri.yml. Both save it on main (this on push,
+          # that on every merge's release build); branch builds restore it.
           workspaces: ". -> target"
           shared-key: tauri-release-aarch64
 
@@ -94,6 +95,10 @@ jobs:
 
       # Only the .app: no DMG, and no updater artifacts (those need the updater
       # key, and a branch build is never offered as an update).
+      # Built with the release profile, so what you try is what ships. A
+      # cheaper profile was measured and rejected: with dependencies cached,
+      # ~20 min is rustc's front end on the juno crate, which opt-level, LTO
+      # and codegen-units do not touch (22m, 21.6m, 20.6m).
       - name: Build Juno.app
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
