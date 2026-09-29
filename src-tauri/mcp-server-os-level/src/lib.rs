@@ -318,6 +318,20 @@ pub fn paste_text_global(text: &str, retain_clipboard: bool) -> Result<(), Autom
     platforms::macos::interaction::paste_text(text, None, retain_clipboard)
 }
 
+/// Resolve the cmd-V keycode for the current keyboard layout and cache it.
+///
+/// **Main thread only.** Text Input Services traps the process when called
+/// from anywhere else, and `paste_text_global` runs on a blocking worker, so
+/// the layout has to be read here instead. Call once during app setup; a
+/// no-op on non-macOS.
+#[cfg(target_os = "macos")]
+pub fn prime_cmd_v_keycode() {
+    platforms::macos::text_insertion::prime_cmd_v_keycode()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn prime_cmd_v_keycode() {}
+
 #[cfg(not(target_os = "macos"))]
 pub fn paste_text_global(_text: &str, _retain_clipboard: bool) -> Result<(), AutomationError> {
     Err(AutomationError::UnsupportedOperation(

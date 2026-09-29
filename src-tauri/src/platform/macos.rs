@@ -52,6 +52,12 @@ pub fn apply_macos_setup(app_handle: &AppHandle) {
         // Setup desktop cursor overlay (pre-created in config as visible:false)
         setup_desktop_cursor_overlay_window(app_handle);
 
+        // Read the keyboard layout while we are still on the main thread.
+        // Paste insertion runs on a blocking worker and Text Input Services
+        // traps the process if asked from there, so this is the only place
+        // the layout can be learned.
+        computer_use_ai_sdk::prime_cmd_v_keycode();
+
         info!("macOS specific setup completed");
     }
 

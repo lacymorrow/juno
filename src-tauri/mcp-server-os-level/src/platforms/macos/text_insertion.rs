@@ -30,10 +30,9 @@ use core_foundation_sys::base::CFRelease;
 use core_graphics::event::{CGEvent, CGEventTapLocation, EventField};
 use objc::runtime::{Object, BOOL, NO};
 use objc::{class, msg_send, sel, sel_impl};
-use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_void;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, warn};
@@ -41,6 +40,13 @@ use tracing::{debug, warn};
 type Id = *mut Object;
 
 /// Maximum UTF-16 code units carried by a single unicode keyboard event.
+/// Sentinel for "no main-thread caller has resolved the layout yet".
+/// A real CGKeyCode never reaches u16::MAX.
+const UNRESOLVED: u16 = u16::MAX;
+
+/// Cmd-V's keycode in the layout as of the last main-thread resolution.
+static CMD_V_KEYCODE: AtomicU16 = AtomicU16::new(UNRESOLVED);
+
 const MAX_UTF16_UNITS_PER_EVENT: usize = 200;
 
 /// Settle delay between per-character events on the last-resort typing path.
@@ -556,44 +562,69 @@ const UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK: u32 = 1;
 const UC_CMD_MODIFIER_STATE: u32 = 1;
 
 /// The virtual key code that produces "v" under the Command modifier in the
-/// current keyboard layout, cached per input source. Dvorak-QWERTY-Command
-/// maps the Command layer differently from the unmodified layout, so this is
-/// resolved with UCKeyTranslate under Command rather than assumed to be the
-/// ANSI V position.
+/// current keyboard layout. Dvorak-QWERTY-Command maps the Command layer
+/// differently from the unmodified layout, so this is resolved with
+/// UCKeyTranslate under Command rather than assumed to be the ANSI V position.
+///
+/// **This never touches Text Input Services off the main thread.** The TIS
+/// functions behind the lookup (`TISCopyCurrentKeyboardLayoutInputSource`,
+/// `TISGetInputSourceProperty`) run `dispatch_assert_queue(main)` inside
+/// HIToolbox and `__builtin_trap()` when it fails. That is SIGTRAP, not a
+/// Rust panic: no unwind, no `catch_unwind`, no log line, the process is just
+/// gone. Dictation reaches this from `spawn_blocking`, so calling TIS here
+/// killed the app on the first paste of every run.
+///
+/// Off the main thread this returns the value `prime_cmd_v_keycode` cached,
+/// or ANSI V if nothing primed it. A layout changed since the last
+/// main-thread call is therefore not seen by an off-main caller until the
+/// next one — wrong key in a rare case beats trapping in the common one.
 pub(crate) fn cmd_v_keycode() -> u16 {
-    static CACHE: OnceLock<Mutex<HashMap<String, u16>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if is_main_thread() {
+        // On the main thread the layout can be read safely, so read it every
+        // time and keep the cache current. This is the path the agent's paste
+        // takes, and it costs one TIS lookup.
+        let code = resolve_cmd_v_keycode().unwrap_or(super::constants::KEY_V);
+        CMD_V_KEYCODE.store(code, Ordering::Relaxed);
+        return code;
+    }
 
-    let source_id = current_input_source_id().unwrap_or_default();
-    if let Ok(cached) = cache.lock() {
-        if let Some(&code) = cached.get(&source_id) {
-            return code;
+    match CMD_V_KEYCODE.load(Ordering::Relaxed) {
+        UNRESOLVED => {
+            // Nothing primed this yet and we cannot ask from here. ANSI V is
+            // right for every layout except the Dvorak-QWERTY-Command family,
+            // so the fallback types the right character almost everywhere and
+            // never takes the process down.
+            debug!("[TextInsertion] cmd-V keycode not primed; assuming ANSI V");
+            super::constants::KEY_V
         }
+        code => code,
     }
-
-    let code = resolve_cmd_v_keycode().unwrap_or(super::constants::KEY_V);
-    if let Ok(mut cached) = cache.lock() {
-        cached.insert(source_id, code);
-    }
-    code
 }
 
-fn current_input_source_id() -> Option<String> {
+/// Resolve and cache the cmd-V keycode. **Must be called on the main thread.**
+///
+/// Call this once during app setup. Off the main thread `cmd_v_keycode`
+/// cannot resolve anything, so without a prime it falls back to ANSI V and
+/// Dvorak-QWERTY-Command users get the wrong key.
+pub fn prime_cmd_v_keycode() {
+    if !is_main_thread() {
+        warn!("[TextInsertion] prime_cmd_v_keycode called off the main thread; ignoring");
+        return;
+    }
+    let code = resolve_cmd_v_keycode().unwrap_or(super::constants::KEY_V);
+    CMD_V_KEYCODE.store(code, Ordering::Relaxed);
+    debug!("[TextInsertion] cmd-V keycode primed to {}", code);
+}
+
+/// Whether the caller is on the main thread.
+///
+/// `dispatch::Queue::main().is_current()` does not exist in this binding, so
+/// this asks AppKit, which is the check the HIToolbox assertion is really
+/// making.
+fn is_main_thread() -> bool {
     unsafe {
-        let source = ffi::TISCopyCurrentKeyboardLayoutInputSource();
-        if source.is_null() {
-            return None;
-        }
-        let id_ref = ffi::TISGetInputSourceProperty(source, ffi::kTISPropertyInputSourceID);
-        let result = if id_ref.is_null() {
-            None
-        } else {
-            let cf_string =
-                CFString::wrap_under_get_rule(id_ref as core_foundation::string::CFStringRef);
-            Some(cf_string.to_string())
-        };
-        CFRelease(source as CFTypeRef);
-        result
+        let is_main: BOOL = msg_send![class!(NSThread), isMainThread];
+        is_main != NO
     }
 }
 
@@ -713,5 +744,55 @@ mod tests {
     #[test]
     fn ghostty_is_on_the_forced_paste_list() {
         assert!(FORCED_PASTE_BUNDLE_IDS.contains(&"com.mitchellh.ghostty"));
+    }
+}
+
+#[cfg(test)]
+mod cmd_v_keycode_thread_safety {
+    use super::*;
+
+    /// The regression this file exists to prevent.
+    ///
+    /// `cmd_v_keycode` used to call Text Input Services unconditionally.
+    /// HIToolbox runs `dispatch_assert_queue(main)` inside those calls and
+    /// traps when it fails, so reaching this from a worker killed the process
+    /// with SIGTRAP — no panic, no unwind, nothing `catch_unwind` could see.
+    /// Dictation reaches it from `spawn_blocking`, which is how it shipped.
+    ///
+    /// The assertion is only that this *returns*. Before the fix the test
+    /// binary died here and reported nothing.
+    #[test]
+    fn returns_from_a_worker_thread_instead_of_trapping() {
+        let code = std::thread::spawn(cmd_v_keycode)
+            .join()
+            .expect("cmd_v_keycode must not kill the thread it runs on");
+        assert!(code > 0, "a keycode of 0 would mean no key at all");
+    }
+
+    /// Concurrent callers race on the cache; none of them may touch TIS.
+    #[test]
+    fn many_workers_agree_and_survive() {
+        let handles: Vec<_> = (0..8).map(|_| std::thread::spawn(cmd_v_keycode)).collect();
+        let codes: Vec<u16> = handles
+            .into_iter()
+            .map(|h| h.join().expect("no worker may trap"))
+            .collect();
+        assert!(
+            codes.windows(2).all(|w| w[0] == w[1]),
+            "every worker reads the same cached keycode: {codes:?}"
+        );
+    }
+
+    /// Priming is main-thread-only and declines rather than trapping.
+    ///
+    /// Rust's test harness runs each test on a spawned thread, so this call
+    /// is off-main by construction.
+    #[test]
+    fn priming_off_the_main_thread_is_refused_quietly() {
+        prime_cmd_v_keycode();
+        assert!(
+            cmd_v_keycode() > 0,
+            "a refused prime must leave the fallback intact"
+        );
     }
 }
