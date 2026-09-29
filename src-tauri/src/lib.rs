@@ -292,11 +292,16 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         )) // Add autostart plugin
-        .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
+        // The store plugin comes before the voice plugin on purpose: plugin setup
+        // hooks run in registration order, and the voice plugin reads the saved
+        // STT provider out of the store inside its own hook.
+        .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
+        .plugin(tauri_plugin_voice_transcription::init_with_saved_provider(
+            crate::commands::stt_models::saved_stt_provider,
+        )) // Add the voice transcription plugin, booting the engine the person saved
         .plugin(tauri_plugin_updater::Builder::new().build()) // Add the updater plugin
         .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
         .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
-        .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {

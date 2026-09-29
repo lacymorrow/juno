@@ -365,8 +365,12 @@ async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::
     let app = tauri::Builder::default()
         // Make `AppState` available to plugins that may access it during initialization
         .manage(app_state)
+        // Store first: the voice plugin reads the saved STT provider out of it
+        // during its own setup hook, and hooks run in registration order.
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_voice_transcription::init())
+        .plugin(tauri_plugin_voice_transcription::init_with_saved_provider(
+            crate::commands::stt_models::saved_stt_provider,
+        ))
         .plugin(tauri_plugin_process::init())
         .setup(|_app| {
             // Additional setup not required for headless mode
