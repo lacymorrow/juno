@@ -267,7 +267,12 @@ pub mod config {
 
 // Monitor session settings
 pub mod monitor_sessions {
-    pub const HOLD_DURATION_MS: u64 = 300;
+    /// How long a press must last to count as a hold. Under this it is a tap,
+    /// and a tap on a push-to-talk key keeps the session running hands-free
+    /// until the next tap. 400 ms is where a deliberate hold and a quick tap
+    /// separate cleanly on hardware; 300 ms cancelled short holds that people
+    /// meant.
+    pub const HOLD_DURATION_MS: u64 = 400;
     pub const IMMEDIATE_START_MS: u64 = 15;
 
     // Max durations

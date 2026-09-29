@@ -12,7 +12,8 @@ export { default as TriggersSettings } from './sections/TriggersSettings';
 export { default as AutomationsSettings } from './sections/AutomationsSettings';
 
 // Export shared components
-export { default as ShortcutInput } from './ShortcutInput';
+export { ShortcutRecorder } from './ShortcutRecorder';
+export { KeyCaps } from './KeyCaps';
 export {
   AdvancedSettingsProvider,
   AdvancedOnly,
