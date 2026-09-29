@@ -277,7 +277,7 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
     setIsCapturing(true);
     setPressedKeys([]);
     setCurrentValue("");
-    setValidationMessage("Press the key combination you want to use...");
+    setValidationMessage("Press the keys you want. They save when you let go.");
     setValidationError("");
 
     // Auto-cancel capture after 10 seconds to prevent UI getting stuck

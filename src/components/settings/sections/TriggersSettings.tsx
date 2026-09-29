@@ -60,21 +60,23 @@ interface Trigger {
 /* Labels + helpers                                                           */
 /* -------------------------------------------------------------------------- */
 
+// A trigger reads as one sentence about the gesture and what it does:
+// "Hold to dictate", "Say a phrase to talk to Juno". Never the mechanism.
 const METHOD_LABEL: Record<TriggerMethod, string> = {
-  push_to_talk: "Push-to-talk",
-  toggle: "Toggle",
-  voice: "Voice",
+  push_to_talk: "Hold",
+  toggle: "Press",
+  voice: "Say a phrase",
 };
 
 const TARGET_LABEL: Record<TriggerTarget, string> = {
-  agent: "Agent",
-  dictation: "Dictation",
+  agent: "to talk to Juno",
+  dictation: "to dictate",
 };
 
 const METHOD_HINT: Record<TriggerMethod, string> = {
-  push_to_talk: "Hold the binding while you speak or type.",
+  push_to_talk: "Hold the key while you speak, let go to finish.",
   toggle: "Press once to start, again to stop.",
-  voice: "Say the phrase out loud to summon Juno.",
+  voice: "Say the phrase out loud and Juno listens.",
 };
 
 const ALL_METHODS: TriggerMethod[] = ["push_to_talk", "toggle", "voice"];
@@ -84,7 +86,7 @@ const triggerKey = (t: Pick<Trigger, "method" | "target">) =>
   `${t.method}:${t.target}`;
 
 const comboLabel = (method: TriggerMethod, target: TriggerTarget) =>
-  `${METHOD_LABEL[method]} → ${TARGET_LABEL[target]}`;
+  `${METHOD_LABEL[method]} ${TARGET_LABEL[target]}`;
 
 const errStr = (e: unknown) =>
   typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
@@ -425,7 +427,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
             <div className="space-y-1">
               <p className="text-[14px] font-semibold">No triggers yet</p>
               <p className="text-[12px] leading-snug text-muted-foreground">
-                A trigger is how you summon Juno — a hotkey, a mouse button, or
+                A trigger is how you summon Juno: a key, a mouse button, or
                 your voice.
               </p>
             </div>
@@ -442,7 +444,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
     <div className="space-y-6">
       <SettingsGroup
         title="Triggers"
-        footer="Each way to summon Juno is one trigger. Add one of each method for the agent and for dictation."
+        footer="Each row is one way to summon Juno. Mix keys, a mouse button and your voice however you like."
       >
         {triggers.map((trigger) => (
           <TriggerRow
@@ -703,7 +705,7 @@ function TriggerRow({
             <div className="space-y-2">
               <ShortcutInput
                 label="Keyboard shortcut"
-                description="Press the key combination that summons this trigger."
+                description="Press the keys you want. They save when you let go."
                 value={
                   trigger.binding?.kind === "keyboard"
                     ? trigger.binding.shortcut

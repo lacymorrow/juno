@@ -206,13 +206,13 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
       </SettingsGroup>
 
       <SettingsGroup
-        title="Dictation Settings"
+        title="After you finish speaking"
         advanced
-        footer="Configure how dictation delivers text"
+        footer="Juno puts the words where your cursor is."
       >
         <SettingsRow
           htmlFor="dictation-insertion-mode"
-          label="Text Insertion"
+          label="How the words get typed"
           description={
             INSERTION_MODE_DESCRIPTIONS[settings.dictationInsertionMode] ??
             INSERTION_MODE_DESCRIPTIONS.paste
@@ -226,16 +226,16 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
               <SelectValue placeholder="Select insertion mode" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="paste">Clipboard Paste</SelectItem>
-              <SelectItem value="clipboard_free">Clipboard-Free</SelectItem>
+              <SelectItem value="paste">Paste them</SelectItem>
+              <SelectItem value="clipboard_free">Type them</SelectItem>
             </SelectContent>
           </Select>
         </SettingsRow>
 
         <SettingsRow
           htmlFor="dictation-clipboard"
-          label="Copy to Clipboard"
-          description="Leave the transcript on the clipboard after inserting"
+          label="Keep a copy on the clipboard"
+          description="Paste the last dictation again anywhere with ⌘V."
         >
           <Switch
             id="dictation-clipboard"
@@ -247,8 +247,8 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
         <SettingsRow
           advanced
           htmlFor="live-partial-transcription"
-          label="Live transcription"
-          description="Show words as you speak, in Juno's bar. Display-only — provisional text is never typed into the app; the final result is."
+          label="Show words as I speak"
+          description="Provisional text appears in the bar. Only the final result is typed."
         >
           <Switch
             id="live-partial-transcription"

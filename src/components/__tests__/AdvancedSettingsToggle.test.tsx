@@ -385,10 +385,11 @@ describe("GeneralSettings in basic mode", () => {
       expect(invokeMock).toHaveBeenCalledWith(GET_ADVANCED_SETTINGS_ENABLED)
     );
 
-    expect(screen.getByText("Launch at login")).toBeInTheDocument();
-    expect(screen.getByText("Sound effects")).toBeInTheDocument();
+    expect(screen.getByText("Open at login")).toBeInTheDocument();
+    expect(screen.getByText("Play sounds")).toBeInTheDocument();
+    // How the bar looks is the first thing a person changes; it is never gated.
+    expect(screen.getByRole("group", { name: "Bar appearance" })).toBeInTheDocument();
     for (const hidden of [
-      "Bar appearance",
       "Agent mode",
       "Enable big cursor",
       "Restart onboarding",
@@ -406,9 +407,10 @@ describe("GeneralSettings in basic mode", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByText("Bar appearance")).toBeInTheDocument()
+      expect(screen.getByText("Agent mode")).toBeInTheDocument()
     );
-    expect(screen.getByText("Launch at login")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Bar appearance" })).toBeInTheDocument();
+    expect(screen.getByText("Open at login")).toBeInTheDocument();
     // Companion Mode has a single owner in Tools; two copies could disagree.
     expect(screen.queryByText("Enable Companion Mode")).not.toBeInTheDocument();
     // "Trigger mode" no longer lives here — trigger configuration moved to the

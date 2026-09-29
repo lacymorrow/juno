@@ -185,9 +185,9 @@ export interface SettingsRowEntry {
 
 export const settingsRowIndex: SettingsRowEntry[] = [
   // General
-  { sectionId: "general", rowId: "auto-launch", label: "Launch at login", keywords: "startup login boot autostart" },
+  { sectionId: "general", rowId: "auto-launch", label: "Open at login", keywords: "startup login boot autostart launch" },
   { sectionId: "general", rowId: "big-cursor-enabled", label: "Enable big cursor", keywords: "cursor pointer magnify enlarge big" },
-  { sectionId: "general", rowId: "bar-appearance", label: "Bar appearance", keywords: "bar appearance style pill orb persona floating" },
+  { sectionId: "general", rowId: "bar-appearance", label: "Bar appearance", keywords: "bar appearance look style pill bar studio island orb halo avatar persona floating preview" },
   { sectionId: "general", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup" },
   // Triggers
   { sectionId: "triggers", rowId: "add-trigger", label: "Add trigger", keywords: "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },

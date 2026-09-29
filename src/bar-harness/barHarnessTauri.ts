@@ -24,6 +24,13 @@ import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 /** The label the bar's window carries in the shipping app. */
 export const BAR_WINDOW_LABEL = "floating-bar";
 
+/**
+ * Every label a bar appearance may resolve through `Window.getByLabel`. The
+ * shim reports all of them so a bar that sizes a differently named window (the
+ * voice and dynamic bars do) still lands its resize in the store.
+ */
+const BAR_WINDOW_LABELS = [BAR_WINDOW_LABEL, "app-bar", "voice-bar", "dynamic-bar"];
+
 /** A monitor, in PHYSICAL pixels, matching Tauri's monitor geometry. */
 export interface HarnessMonitor {
   width: number;
@@ -53,6 +60,11 @@ interface HarnessState {
    * the lever for reproducing clip / overflow / snap-back bugs.
    */
   freezeAutoResize: boolean;
+  /**
+   * True once the mounted bar has sized its own window. Bars that never do
+   * (the app bar, the orbs) are laid out at their natural size instead.
+   */
+  driven: boolean;
 }
 
 // One monitor at the origin. Physical == logical at scaleFactor 1, which keeps
@@ -64,10 +76,22 @@ const DEFAULT_STATE: HarnessState = {
   requested: null,
   cursor: { x: -1000, y: -1000 },
   freezeAutoResize: false,
+  driven: false,
 };
 
 let state: HarnessState = DEFAULT_STATE;
 const listeners = new Set<() => void>();
+
+/**
+ * Which bar appearance `ui_get_bar_config` reports. The appearance preview
+ * route sets this from its query string before mounting `BarHost`, so the real
+ * host picks the same component the shipping app would for that setting.
+ */
+let previewAppearance: string = "floating";
+
+export function setPreviewAppearance(appearance: string): void {
+  previewAppearance = appearance;
+}
 
 function commit(next: HarnessState): void {
   state = next;
@@ -154,7 +178,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     case "plugin:window|get_all_windows":
       // useWindowSize resolves the window through getByLabel, which filters
       // this list; the label must be present or the resize silently no-ops.
-      return [BAR_WINDOW_LABEL];
+      return BAR_WINDOW_LABELS;
 
     // --- window moves the bar performs (snap animation, cursor-follow) ---
     case "plugin:window|set_position": {
@@ -167,7 +191,11 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     case "plugin:window|set_size": {
       const s = unwrapValue(args.value);
       if (s && typeof s.width === "number" && typeof s.height === "number") {
-        harness.setFrame({ width: Math.round(s.width), height: Math.round(s.height) });
+        commit({
+          ...state,
+          driven: true,
+          frame: { ...state.frame, width: Math.round(s.width), height: Math.round(s.height) },
+        });
       }
       return null;
     }
@@ -186,14 +214,29 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
       if (state.freezeAutoResize) {
         // Record what the bar wanted without applying it, so the panel can show
         // the divergence between the bar's desired frame and the frozen one.
-        commit({ ...state, requested });
+        commit({ ...state, requested, driven: true });
       } else {
-        commit({ ...state, frame: requested, requested });
+        commit({ ...state, frame: requested, requested, driven: true });
       }
       return null;
     }
 
     // --- reads that must return a usable shape (callers map/some over these) ---
+    case "ui_get_bar_config":
+      return {
+        show_voice_indicator: true,
+        enable_animations: true,
+        auto_hide: false,
+        auto_hide_delay: 3000,
+        opacity: 0.95,
+        bar_appearance: previewAppearance,
+        show_glow_border: true,
+      };
+    case "get_floating_bar_settings":
+      return { follow_cursor_display: true, show_glow_border: true };
+    // The preview dictates a sentence; showing it as it arrives is the point.
+    case "get_live_partial_transcription":
+      return true;
     case "get_bar_position":
       return null;
     case "get_triggers":
@@ -247,8 +290,9 @@ let installed = false;
 export function installBarHarnessTauri(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
-  // Sets metadata.currentWindow so getCurrentWindow().label works in render.
-  mockWindows(BAR_WINDOW_LABEL);
+  // Sets metadata.currentWindow so getCurrentWindow().label works in render,
+  // and registers the other bar labels so getByLabel finds them.
+  mockWindows(BAR_WINDOW_LABEL, ...BAR_WINDOW_LABELS.slice(1));
   // shouldMockEvents wires listen/emit/unlisten through an in-memory registry,
   // so the harness can drive the bar by emitting the same events Rust would.
   mockIPC((cmd, payload) => handleInvoke(cmd, (payload ?? {}) as Record<string, unknown>), {
