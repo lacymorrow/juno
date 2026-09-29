@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.14] - 2026-09-29
+
+### Added
+
+- **triggers:** tap to keep going hands-free, key caps, record-on-release (slice 3) (#611) (b00ddb5c)
+
 ## [0.8.12] - 2026-09-29
 
 ### Fixed
@@ -521,7 +527,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.12...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.14...HEAD
+[0.8.14]: https://github.com/lacymorrow/juno/compare/cua-v0.8.13...v0.8.14
 [0.8.12]: https://github.com/lacymorrow/juno/compare/cua-v0.8.11...v0.8.12
 [0.8.10]: https://github.com/lacymorrow/juno/compare/cua-v0.8.9...v0.8.10
 [0.8.9]: https://github.com/lacymorrow/juno/compare/cua-v0.8.8...v0.8.9
