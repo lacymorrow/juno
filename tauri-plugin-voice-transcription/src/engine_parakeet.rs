@@ -1,8 +1,8 @@
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
-use parakeet_rs::{Parakeet, Transcriber};
+use parakeet_rs::{ExecutionConfig, Parakeet, Transcriber};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// The HuggingFace repo the Parakeet CTC ONNX export is fetched from.
 pub const PARAKEET_HF_REPO: &str = "onnx-community/parakeet-ctc-0.6b-ONNX";
@@ -78,6 +78,14 @@ pub fn missing_parakeet_files(model_dir: &Path) -> Vec<&'static str> {
         .collect()
 }
 
+/// Where ONNX Runtime's optimised graph is kept, inside the model directory
+/// so `from_pretrained` finds `tokenizer.json` beside it in file mode.
+///
+/// Deliberately not one of the names `find_model_file` looks for
+/// (`model.onnx`, `model_fp16.onnx`, `model_int8.onnx`, `model_q4.onnx`), so
+/// a directory-mode load never picks it up by accident.
+const OPTIMIZED_MODEL_FILE: &str = "model_optimized.onnx";
+
 /// STT engine backed by NVIDIA Parakeet CTC 0.6B via ONNX Runtime.
 ///
 /// Model directory must contain every file in `PARAKEET_MODEL_FILES`; the app's
@@ -109,14 +117,98 @@ impl ParakeetEngine {
             ));
         }
 
-        let model = Parakeet::from_pretrained(model_dir, None)
-            .map_err(|e| format!("Failed to load Parakeet model from {:?}: {}", model_dir, e))?;
+        let model = Self::load_model(model_dir)?;
 
         info!("[ParakeetEngine] Parakeet model loaded successfully");
 
         Ok(Self {
             model: Arc::new(Mutex::new(Some(model))),
             model_dir: model_dir.to_path_buf(),
+        })
+    }
+
+    /// Load the model, reusing ONNX Runtime's optimised graph when one has
+    /// been written.
+    ///
+    /// ORT re-runs its entire optimisation pipeline on every launch — the
+    /// hundreds of `GraphTransformer ... modified` and `Removing initializer`
+    /// lines in a startup log are that work, and it dominates the ~17s before
+    /// dictation is usable. `with_optimized_model_path` makes ORT serialise
+    /// the result while it is already doing the work, costing nothing on the
+    /// run that writes it, so later launches can load the finished graph.
+    ///
+    /// Every failure here falls back to loading the model the original way. A
+    /// cache that cannot be read is deleted rather than retried: it is a
+    /// derived artefact and regenerating it is cheaper than reasoning about
+    /// why it went bad.
+    fn load_model(model_dir: &Path) -> Result<Parakeet, String> {
+        let optimized = model_dir.join(OPTIMIZED_MODEL_FILE);
+
+        if Self::cache_is_stale(&optimized, model_dir) {
+            info!("[ParakeetEngine] Source model is newer than the optimised graph; rebuilding");
+            let _ = std::fs::remove_file(&optimized);
+        }
+
+        if optimized.is_file() {
+            match Parakeet::from_pretrained(&optimized, None) {
+                Ok(model) => {
+                    info!("[ParakeetEngine] Loaded the pre-optimised graph");
+                    return Ok(model);
+                }
+                Err(e) => {
+                    warn!(
+                        "[ParakeetEngine] Optimised graph unusable ({}); rebuilding it",
+                        e
+                    );
+                    let _ = std::fs::remove_file(&optimized);
+                }
+            }
+        }
+
+        // Ask ORT to write the optimised graph out as a side effect of the
+        // optimising it does anyway. The closure's argument type is inferred
+        // from the trait bound, which is what keeps `ort` out of this crate's
+        // dependencies.
+        let write_to = optimized.clone();
+        let config = ExecutionConfig::new()
+            .with_custom_configure(move |b| b.with_optimized_model_path(&write_to));
+
+        match Parakeet::from_pretrained(model_dir, Some(config)) {
+            Ok(model) => {
+                info!(
+                    "[ParakeetEngine] Loaded and wrote an optimised graph to {:?}",
+                    optimized
+                );
+                Ok(model)
+            }
+            Err(e) => {
+                warn!(
+                    "[ParakeetEngine] Could not write an optimised graph ({}); loading plain",
+                    e
+                );
+                Parakeet::from_pretrained(model_dir, None).map_err(|e| {
+                    format!("Failed to load Parakeet model from {:?}: {}", model_dir, e)
+                })
+            }
+        }
+    }
+
+    /// True when the optimised graph predates the model it was built from.
+    ///
+    /// Re-downloading the model leaves a cache describing the old weights,
+    /// which would load happily and transcribe with whatever was there
+    /// before. Modification time is the cheap check; a missing timestamp on
+    /// either side counts as stale, because guessing wrong in that direction
+    /// only costs one slow launch.
+    fn cache_is_stale(optimized: &Path, model_dir: &Path) -> bool {
+        let Ok(cache_time) = std::fs::metadata(optimized).and_then(|m| m.modified()) else {
+            return false; // no cache at all is not staleness
+        };
+        PARAKEET_MODEL_FILES.iter().any(|f| {
+            std::fs::metadata(model_dir.join(f.name))
+                .and_then(|m| m.modified())
+                .map(|source_time| source_time > cache_time)
+                .unwrap_or(true)
         })
     }
 
@@ -283,6 +375,70 @@ mod tests {
 
     fn dirs_home() -> Option<PathBuf> {
         std::env::var_os("HOME").map(PathBuf::from)
+    }
+
+    #[test]
+    fn a_missing_cache_is_not_stale() {
+        // Nothing to invalidate. Reporting staleness here would make the
+        // first launch try to delete a file that was never written.
+        let dir = std::env::temp_dir().join("juno-stale-none");
+        let _ = std::fs::create_dir_all(&dir);
+        assert!(!ParakeetEngine::cache_is_stale(
+            &dir.join("model_optimized.onnx"),
+            &dir
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cache_older_than_the_model_is_stale() {
+        // The case that matters: the model was re-downloaded and the cache
+        // now describes weights that are gone. Loading it would transcribe
+        // with the old model and look entirely healthy.
+        let dir = std::env::temp_dir().join("juno-stale-old");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+
+        let cache = dir.join("model_optimized.onnx");
+        std::fs::write(&cache, b"old").expect("cache");
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        for f in PARAKEET_MODEL_FILES {
+            std::fs::write(dir.join(f.name), b"new").expect("model file");
+        }
+
+        assert!(ParakeetEngine::cache_is_stale(&cache, &dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cache_newer_than_the_model_is_fresh() {
+        let dir = std::env::temp_dir().join("juno-stale-fresh");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+
+        for f in PARAKEET_MODEL_FILES {
+            std::fs::write(dir.join(f.name), b"model").expect("model file");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let cache = dir.join("model_optimized.onnx");
+        std::fs::write(&cache, b"built after").expect("cache");
+
+        assert!(!ParakeetEngine::cache_is_stale(&cache, &dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_vanished_model_file_counts_as_stale() {
+        // Cannot prove the cache still matches, so rebuild. One slow launch
+        // is the whole cost of being wrong in this direction.
+        let dir = std::env::temp_dir().join("juno-stale-gone");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let cache = dir.join("model_optimized.onnx");
+        std::fs::write(&cache, b"cache").expect("cache");
+
+        assert!(ParakeetEngine::cache_is_stale(&cache, &dir));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The only guard against a silent transcription regression.
