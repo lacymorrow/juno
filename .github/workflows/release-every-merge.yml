@@ -77,6 +77,30 @@ jobs:
           version=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
 
+      # shipx does not fail the run when a publish fails: it reports and moves
+      # on, which is right locally where a person reads the output. Unattended,
+      # that becomes a green job and a release where the app shipped and
+      # juno-cua silently did not. Check the registry and go red if so. The tag
+      # and the app build are already done and stay done; this only makes the
+      # gap visible.
+      - name: Confirm juno-cua reached the registry
+        env:
+          EXPECTED: ${{ steps.release.outputs.tag }}
+        run: |
+          want="${EXPECTED#v}"
+          got=""
+          # The registry is not read-your-writes, so give it a moment.
+          for _ in 1 2 3 4 5 6; do
+            got=$(npm view juno-cua version 2>/dev/null || echo "")
+            if [ "$got" = "$want" ]; then
+              echo "juno-cua@$want is on npm."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::juno-cua@$want did not reach npm (registry reports '${got:-nothing}'). The app release is unaffected; publish by hand from packages/juno-cua."
+          exit 1
+
       # A tag pushed with GITHUB_TOKEN does not start other workflows, which
       # GitHub enforces so automation cannot loop. Ask for the build by name
       # against the tag shipx just made.
