@@ -130,6 +130,24 @@ const CLI_TIMEOUT: Duration = Duration::from_secs(300);
 /// CLI themselves, so there is no floor version to assume.
 const PARTIAL_MESSAGES_FLAG: &str = "--include-partial-messages";
 
+/// Start building a `claude` invocation, rooted at the user's home directory.
+///
+/// Every `claude` spawn goes through here, because the CLI keys its
+/// per-project auto-memory (and project skills) off the working directory.
+/// Launched from Finder or launchd the app inherits cwd `/`, which Claude
+/// Code maps to the empty `~/.claude/projects/-/` — so an inherited cwd
+/// silently loses the user's memory with no error anywhere (LAC-4057).
+/// Rooting at home loads the same memory an interactive `claude` run from a
+/// home-directory terminal would. If home cannot be resolved the cwd is left
+/// inherited: a memory-less answer still beats no answer.
+pub(crate) fn claude_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(binary);
+    if let Some(home) = dirs::home_dir() {
+        cmd.current_dir(home);
+    }
+    cmd
+}
+
 /// Detect the Claude CLI binary on PATH.
 /// Returns the path if found, or an error describing what to do.
 pub fn detect_claude_cli() -> Result<PathBuf, AgentError> {
@@ -263,7 +281,7 @@ pub async fn cli_status() -> CliStatus {
         return CliStatus::default();
     };
 
-    let output = tokio::process::Command::new(&binary_path)
+    let output = claude_command(&binary_path)
         .args(["auth", "status", "--json"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -365,7 +383,7 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
         return Ok(());
     }
 
-    let output = tokio::process::Command::new(binary_path)
+    let output = claude_command(binary_path)
         .args(["auth", "status", "--json"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -710,7 +728,7 @@ impl ClaudeCliBrain {
             }
 
             let spawn = |args: &Vec<String>| {
-                tokio::process::Command::new(&self.binary_path)
+                claude_command(&self.binary_path)
                     .args(args)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -1993,6 +2011,26 @@ mod tests {
             remember_sign_in(state);
             assert_eq!(last_known_sign_in(), state);
         }
+    }
+
+    #[test]
+    fn claude_spawns_from_the_home_directory() {
+        // Claude Code keys its per-project auto-memory off the cwd. A GUI
+        // launch inherits `/`, which maps to the empty `~/.claude/projects/-/`
+        // — the CLI would run with no memory and nothing would say so
+        // (LAC-4057). `as_std()` lets us assert on the configured command
+        // without spawning anything, so this runs on CI with no `claude`
+        // installed.
+        let cmd = claude_command("claude");
+        assert_eq!(cmd.as_std().get_current_dir(), dirs::home_dir().as_deref());
+        // The home lookup failing means "leave the cwd inherited", but a CI
+        // runner always has a home — if it resolved to None here, the
+        // assertion above passed vacuously and this test would be asserting
+        // nothing. Fail loudly instead.
+        assert!(
+            dirs::home_dir().is_some(),
+            "home directory unresolvable in test environment"
+        );
     }
 
     #[test]

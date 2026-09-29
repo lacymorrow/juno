@@ -67,6 +67,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 use tracing::{debug, info, warn};
 
+use super::claude_cli::claude_command;
 use crate::agent::core::AgentError;
 use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 
@@ -393,7 +394,7 @@ fn spawn_session(req: &TurnRequest<'_>, signature: String) -> Result<CliSession,
     );
     debug!("[CliSession] args: {}", args.join(" "));
 
-    let mut child = tokio::process::Command::new(req.binary)
+    let mut child = claude_command(req.binary)
         .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
