@@ -75,6 +75,7 @@ export function BarHost() {
   }, []);
 
   const appearance = barConfig?.bar_appearance ?? UI.BAR_APPEARANCES_FLOATING;
+  const loaded = barConfig !== null;
 
   const Component = useMemo(() => {
     switch (appearance) {
@@ -107,6 +108,11 @@ export function BarHost() {
         return () => <FloatingBar barAppearance={appearance} />;
     }
   }, [appearance]);
+
+  // Until the config arrives there is nothing to show. Painting the default
+  // look first would flash the wrong bar, and its effects would size the
+  // window for a component that is about to be replaced.
+  if (!loaded) return null;
 
   return <Component />;
 }
