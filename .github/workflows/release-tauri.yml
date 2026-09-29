@@ -4,7 +4,17 @@ on:
   push:
     tags:
       - "v*"
+  # Every merge to main dispatches this with prerelease=true (see
+  # release-every-merge.yml). A prerelease is invisible to the auto-updater
+  # and to juno-www, both of which read /releases/latest. A tag pushed by hand
+  # has no inputs, so it builds a full release as before.
   workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Publish as a prerelease (the auto-updater ignores it until promoted)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -103,5 +113,19 @@ jobs:
 
             See [CHANGELOG](https://github.com/lacymorrow/juno/blob/main/CHANGELOG.md) for details.
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ inputs.prerelease == true }}
           args: --target aarch64-apple-darwin
+
+      # GitHub marks whichever full release was created last as Latest, and the
+      # updater follows Latest. Builds finish out of order (v0.8.9 finished
+      # after v0.8.10 and stole Latest), so pin it to the highest version.
+      - name: Point Latest at the highest full release
+        if: ${{ inputs.prerelease != true }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          newest=$(gh release list --repo "${{ github.repository }}" --exclude-pre-releases --exclude-drafts --limit 100 --json tagName -q '.[].tagName' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+          newest="v${newest}"
+          gh release edit "$newest" --repo "${{ github.repository }}" --latest
+          echo "Latest is ${newest}."

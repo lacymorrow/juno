@@ -2,44 +2,40 @@
 
 How Juno gets shipped, and how the in-app updater works.
 
-## TL;DR — cutting a release
+## TL;DR: nothing builds on your Mac
 
-```bash
-cd ~/repo/juno
-bun run release patch   # or minor / major / explicit version
+```
+merge a PR to main
+  └── release-every-merge.yml (ubuntu)
+        shipx patch --yes: bump every version, commit "release: vX.Y.Z", tag, push
+        └── release-tauri.yml (macos-latest, prerelease=true)
+              signed + notarized build → GitHub prerelease with DMG,
+              .app.tar.gz, .sig, latest.json
+
+scripts/juno-build.sh vX.Y.Z          install that prerelease and try it
+scripts/juno-build.sh promote [vX.Y.Z]  make it a full release (default: newest prerelease)
 ```
 
-That single command does everything. The rest of this doc explains what's happening under the hood and how to fix things when they break.
+**A prerelease reaches nobody.** The auto-updater and juno-www both read
+`/releases/latest`, and GitHub never returns a prerelease there. Promoting
+flips the flag and marks it Latest, so the bytes users get are the bytes you
+tested. Nothing is rebuilt.
+
+**Trying a branch before it merges:** `scripts/juno-build.sh` (current branch)
+or `scripts/juno-build.sh <branch>`. It dispatches `build-branch.yml`, waits,
+downloads the signed `.app`, replaces `/Applications/Juno.app` (old copy goes
+to the Trash) and opens it. `--no-install` just downloads. A commit already
+built is downloaded again instead of rebuilt.
+
+**Pushing a `v*` tag by hand** (for example `bun run release minor` from a
+checkout) still builds a full release directly, skipping the prerelease step.
+
+**Latest is pinned to the highest version.** Builds finish out of order, and
+GitHub marks whichever full release was created last as Latest. After a full
+release build, `release-tauri.yml` points Latest at the highest `vX.Y.Z`, and
+`release-cua.yml` never marks a CLI release Latest.
 
 ---
-
-## Architecture
-
-Juno ships as a **universal macOS DMG** (arm64 + x86_64 lipo'd together). Two parallel pipelines run on every release:
-
-```
-bun run release patch
-  │
-  ├── 1. Local: bump versions across all Cargo.toml + package.json
-  ├── 2. Local: build juno-cua CLI (arm64 + x86_64 + universal lipo)
-  ├── 3. Local: git commit + tag (v0.X.Y + cua-v0.X.Y)
-  ├── 4. git push origin HEAD --tags
-  │       │
-  │       ├── triggers .github/workflows/release-tauri.yml on v0.X.Y
-  │       │     → universal macOS build (~30 min)
-  │       │     → publishes GitHub Release with DMG, .app.tar.gz,
-  │       │       .sig, and latest.json
-  │       │
-  │       └── triggers .github/workflows/release-cua.yml on cua-v0.X.Y
-  │             → publishes juno-cua binaries to its own release
-  │             → updates lacymorrow/homebrew-tap
-  │
-  ├── 5. Local: npm publish juno-cua
-  └── 6. Local: update homebrew-tap formula (for juno-cua)
-
-juno-www (marketing site) pulls the latest release from the GitHub API
-on demand — no sync step. See juno-www/app/api/release/route.ts.
-```
 
 Two GitHub Releases get created per version: `v0.X.Y` (the Tauri app) and `cua-v0.X.Y` (the CLI). They live in the same repo but represent different artifacts.
 
