@@ -57,3 +57,83 @@ pub trait TranscriptionEngine: Send + Sync {
     /// from shared weights); may involve model warm-up for Parakeet.
     fn create_session(&self) -> Result<Box<dyn TranscriptionSession>, String>;
 }
+
+/// Which engine to boot at startup.
+///
+/// `saved` is the provider name the host app has persisted (`None` when the
+/// setting is absent, unreadable, or the host handed us no reader at all).
+/// `parakeet_ready` says whether every Parakeet model file is on disk.
+///
+/// Anything unrecognised, and any Parakeet request we cannot honour, resolves
+/// to Whisper — the engine this plugin has always booted. Getting this right
+/// up front is the whole point: booting the wrong engine means loading a
+/// model, allocating its Metal buffers and warming it up, only to free all of
+/// it seconds later when the app applies the saved preference.
+pub fn startup_provider(saved: Option<&str>, parakeet_ready: bool) -> SttProvider {
+    match saved.map(str::trim) {
+        Some(name) if name.eq_ignore_ascii_case("parakeet") => {
+            if parakeet_ready {
+                SttProvider::Parakeet
+            } else {
+                SttProvider::Whisper
+            }
+        }
+        _ => SttProvider::Whisper,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_parakeet_boots_parakeet_when_the_model_is_on_disk() {
+        assert_eq!(
+            startup_provider(Some("parakeet"), true),
+            SttProvider::Parakeet
+        );
+    }
+
+    #[test]
+    fn saved_parakeet_falls_back_to_whisper_when_the_model_is_missing() {
+        assert_eq!(
+            startup_provider(Some("parakeet"), false),
+            SttProvider::Whisper
+        );
+    }
+
+    #[test]
+    fn saved_whisper_boots_whisper() {
+        assert_eq!(
+            startup_provider(Some("whisper"), true),
+            SttProvider::Whisper
+        );
+    }
+
+    #[test]
+    fn no_saved_preference_boots_whisper() {
+        assert_eq!(startup_provider(None, true), SttProvider::Whisper);
+    }
+
+    #[test]
+    fn unknown_or_empty_names_boot_whisper() {
+        for name in ["", "   ", "Parrakeet", "nvidia-parakeet", "null", "42"] {
+            assert_eq!(
+                startup_provider(Some(name), true),
+                SttProvider::Whisper,
+                "{name:?} should not have been recognised"
+            );
+        }
+    }
+
+    #[test]
+    fn casing_and_whitespace_do_not_lose_the_preference() {
+        for name in ["Parakeet", "PARAKEET", "  parakeet  "] {
+            assert_eq!(
+                startup_provider(Some(name), true),
+                SttProvider::Parakeet,
+                "{name:?} should have been recognised"
+            );
+        }
+    }
+}

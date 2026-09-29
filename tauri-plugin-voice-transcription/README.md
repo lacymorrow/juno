@@ -49,6 +49,23 @@ fn main() {
 }
 ```
 
+`init()` always boots Whisper. If your app remembers which engine the person
+picked, register it with `init_with_saved_provider` instead and the plugin
+boots that one directly, rather than loading Whisper and freeing it again a
+moment later:
+
+```rust
+.plugin(tauri_plugin_voice_transcription::init_with_saved_provider(
+    // Called once during setup, where an AppHandle exists.
+    // `None`, an unknown name, or a Parakeet choice whose model is not on
+    // disk all fall back to Whisper.
+    |app| read_my_saved_provider(app),
+))
+```
+
+Register whatever store or settings plugin the reader uses **before** this one
+— plugin setup hooks run in registration order.
+
 ### Configuration
 
 Add plugin configuration to your `tauri.conf.json`:

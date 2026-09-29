@@ -28,8 +28,10 @@ use tauri_plugin_voice_transcription::{
 };
 
 use crate::constants::events::stt_models as events;
+use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 use crate::settings::manager::SettingsManager;
 use crate::settings::VoiceTranscriptionSettings;
+use tauri_plugin_store::StoreExt;
 
 const WHISPER_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
@@ -1033,10 +1035,39 @@ pub async fn delete_stt_model(model_id: String, app: AppHandle) -> Result<(), St
 // Startup
 // ---------------------------------------------------------------------------
 
-/// Honour the saved model at startup. The plugin boots Whisper with its own
-/// default path; if settings name a different model that is on disk, load
-/// that one. Nothing is downloaded here: the Parakeet offer is an onboarding
-/// step, and the Models pane is the only other place a download starts.
+/// The STT provider the person saved, read straight out of the settings store.
+///
+/// Handed to the voice plugin at registration (`init_with_saved_provider`) so
+/// it boots the right engine instead of loading Whisper — 77 MB of weights,
+/// Metal buffers, a warm-up pass — and freeing all of it seconds later when
+/// [`apply_persisted_stt_model`] corrects the choice.
+///
+/// Requires the store plugin to be registered *before* the voice plugin:
+/// plugin setup hooks run in registration order, and this reads the store from
+/// inside the voice plugin's hook. Any problem reading it returns `None`, and
+/// the plugin then boots Whisper exactly as it always has.
+pub fn saved_stt_provider<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    let store = app.store(SETTINGS_STORE_FILE).ok()?;
+    stt_provider_from_settings(store.get(store_keys::VOICE_TRANSCRIPTION).as_ref())
+}
+
+/// Pure half of [`saved_stt_provider`]: pull `stt_provider` out of the stored
+/// voice-transcription blob. The name is passed through as written; deciding
+/// what an unrecognised one means belongs to the plugin, which is the only
+/// place that knows which engines exist.
+fn stt_provider_from_settings(value: Option<&serde_json::Value>) -> Option<String> {
+    value?
+        .get("stt_provider")?
+        .as_str()
+        .map(|name| name.to_string())
+}
+
+/// Honour the saved model at startup. The plugin boots the saved *engine*
+/// already (see [`saved_stt_provider`]); this covers the rest — a saved
+/// Whisper model file that is not the plugin's default — and is a no-op when
+/// the plugin got there first. Nothing is downloaded here: the Parakeet offer
+/// is an onboarding step, and the Models pane is the only other place a
+/// download starts.
 pub async fn apply_persisted_stt_model(app: &AppHandle) {
     let settings = match load_voice_settings(app).await {
         Ok(s) => s,
@@ -1188,5 +1219,48 @@ mod tests {
         assert!(spd("tiny-en") > spd("parakeet-ctc"));
         assert!(spd("parakeet-ctc") > spd("large-v3-turbo"));
         assert!(spd("large-v3-turbo") > spd("large-v3"));
+    }
+
+    #[test]
+    fn saved_provider_is_read_out_of_the_stored_blob() {
+        let stored =
+            serde_json::json!({ "model_path": "models/x.bin", "stt_provider": "parakeet" });
+        assert_eq!(
+            stt_provider_from_settings(Some(&stored)).as_deref(),
+            Some("parakeet")
+        );
+    }
+
+    #[test]
+    fn a_blob_without_the_key_reads_as_no_preference() {
+        let stored = serde_json::json!({ "model_path": "models/x.bin" });
+        assert_eq!(stt_provider_from_settings(Some(&stored)), None);
+        assert_eq!(stt_provider_from_settings(None), None);
+    }
+
+    #[test]
+    fn a_non_string_provider_reads_as_no_preference() {
+        for bad in [
+            serde_json::json!({ "stt_provider": 7 }),
+            serde_json::json!({ "stt_provider": null }),
+            serde_json::json!({ "stt_provider": ["parakeet"] }),
+            serde_json::json!("not an object"),
+        ] {
+            assert_eq!(stt_provider_from_settings(Some(&bad)), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_name_survives_the_read_and_the_plugin_falls_back() {
+        let stored = serde_json::json!({ "stt_provider": "banana" });
+        assert_eq!(
+            stt_provider_from_settings(Some(&stored)).as_deref(),
+            Some("banana")
+        );
+        // The plugin owns the decision, and it does not guess.
+        assert_eq!(
+            tauri_plugin_voice_transcription::startup_provider(Some("banana"), true),
+            SttProvider::Whisper
+        );
     }
 }
