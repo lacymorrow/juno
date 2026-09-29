@@ -173,13 +173,13 @@ Bun (uses `bun.lock`).
 
 Alternative to direct API keys — uses the locally installed `claude` binary (Claude Code) as a subprocess. Users with a Claude Max/Pro subscription can use Juno through their existing CLI authentication.
 
-**How it works**: Spawns `claude -p --output-format=stream-json --model <model> --strict-mcp-config --dangerously-skip-permissions "query"` per query. Parses NDJSON output and emits the same Tauri streaming events as the Anthropic API provider.
+**How it works**: Spawns `claude -p --output-format=stream-json --model <model> --dangerously-skip-permissions "query"` per query. Parses NDJSON output and emits the same Tauri streaming events as the Anthropic API provider.
 
 **Key flags**:
 - `-p` — Print mode (non-interactive, pipe-friendly)
 - `--include-partial-messages` — Raw streaming events, not just finished messages. This is what makes reasoning, tool names and tool arguments visible *while* Claude works; without it the first visible text lands only at the end of the turn. A `claude` too old to accept it exits non-zero with empty stdout, so `run_streaming` retries once with the flag stripped and latches `PARTIAL_MESSAGES_UNSUPPORTED` for the session (degraded, never failed).
 - `--effort <low|medium|high|xhigh|max>` — Hidden advanced setting (`providers[].effort` in the settings store, no UI), default `high`. An unrecognised value is dropped rather than forwarded.
-- `--strict-mcp-config` — Only MCP servers from `--mcp-config` load; user-level servers never do
+- `--strict-mcp-config` — Passed only when the "Load account MCP connectors" setting (advanced, `providers[].load_account_mcp`, default on) is **off**: then only MCP servers from `--mcp-config` load. By default the flag is omitted, so the person's claude.ai connectors (Slack, Gmail, Drive) and user-level servers load alongside Juno's tool server (LAC-4056)
 - `--mcp-config <path>` — Points the CLI at Juno's **own** computer tool, served from inside the running app (`agent/providers/juno_mcp.rs`): streamable HTTP on loopback, a bearer token minted per app run, one `computer` tool backed by the same `run_computer_action` the API provider calls. Written to a pid-scoped temp file so the token never appears in `ps`.
 - `--append-system-prompt` — Added alongside `--mcp-config`: steers the model toward the MCP tool instead of `cliclick`/`screencapture` via Bash
 - `--dangerously-skip-permissions` — Required because stdin is null; CLI can't prompt for tool permissions (MCP tools also run without prompting)

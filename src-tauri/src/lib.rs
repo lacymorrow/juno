@@ -466,6 +466,7 @@ pub fn run() {
             update_provider_max_tokens,
             update_provider_temperature,
             update_provider_system_prompt,
+            update_provider_load_account_mcp,
             get_agent_mode,
             set_agent_mode,
             // Agent Trigger Mode Commands
