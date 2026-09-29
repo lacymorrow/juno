@@ -772,6 +772,9 @@ pub fn run() {
             // Off by default — docs/plans/cli-persistent-session-spike.md
             agent::providers::claude_cli_session::get_cli_persistent_session_enabled,
             agent::providers::claude_cli_session::set_cli_persistent_session_enabled,
+            // Ask before Juno sends (LAC-4058): per-send approval for connector writes.
+            agent::providers::cli_approval::get_cli_ask_before_send_enabled,
+            agent::providers::cli_approval::set_cli_ask_before_send_enabled,
             commands::bar_position::get_bar_position,
             commands::bar_position::set_bar_position,
             commands::bar_position::set_bar_frame,

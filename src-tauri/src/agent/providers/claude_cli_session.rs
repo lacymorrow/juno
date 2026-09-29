@@ -133,6 +133,9 @@ pub struct TurnRequest<'a> {
     pub app_handle: &'a tauri::AppHandle,
     pub message_id: Option<String>,
     pub cancel_rx: Option<crate::state::CancelReceiver>,
+    /// Per-send approval (LAC-4058): route the CLI's permission prompts into
+    /// Juno's approval sheet instead of skipping permissions.
+    pub ask_before_send: bool,
 }
 
 /// Is the experimental persistent-session path turned on?
@@ -305,19 +308,27 @@ async fn evict(conversation_id: &str) {
 ///
 /// Separated by unit separators so a model named `a` with the prompt `b` cannot
 /// collide with a model literally named `a<US>b`.
-fn signature_parts(model: &str, system_prompt: Option<&str>, mcp_config: Option<&Path>) -> String {
+fn signature_parts(
+    model: &str,
+    system_prompt: Option<&str>,
+    mcp_config: Option<&Path>,
+    ask_before_send: bool,
+) -> String {
     format!(
-        "{}\u{1f}{}\u{1f}{}",
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
         model,
         system_prompt.unwrap_or_default(),
         mcp_config
             .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        // A live process keeps the permission posture it was born with, so
+        // flipping "Ask before Juno sends" must respawn it (LAC-4058).
+        ask_before_send,
     )
 }
 
 fn signature_of(req: &TurnRequest<'_>) -> String {
-    signature_parts(req.model, req.system_prompt, req.mcp_config)
+    signature_parts(req.model, req.system_prompt, req.mcp_config, req.ask_before_send)
 }
 
 /// The session for this conversation, spawning one if needed.
@@ -500,8 +511,14 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
         "--model".to_string(),
         req.model.to_string(),
         "--strict-mcp-config".to_string(),
-        "--dangerously-skip-permissions".to_string(),
     ];
+
+    // Permission posture (LAC-4058): same rule as the one-shot path's
+    // `build_args`, through the same seam.
+    args.extend(super::cli_approval::permission_args(
+        req.ask_before_send,
+        req.mcp_config.is_some(),
+    ));
 
     // A fresh id is pinned; one that already exists must be resumed. Getting this
     // backwards is a hard error from the CLI, not a fallback: it refuses to start
@@ -946,27 +963,31 @@ mod tests {
         // A model named "a" with the prompt "b" must not collide with a model
         // literally named "a<US>b", or a prompt change would go unnoticed.
         assert_ne!(
-            signature_parts("a", Some("b"), None),
-            signature_parts("a\u{1f}b", None, None)
+            signature_parts("a", Some("b"), None, true),
+            signature_parts("a\u{1f}b", None, None, true)
         );
     }
 
     #[test]
     fn signature_changes_with_every_spawn_time_argument() {
-        let base = signature_parts("sonnet", None, None);
-        assert_ne!(base, signature_parts("opus", None, None));
-        assert_ne!(base, signature_parts("sonnet", Some("be brief"), None));
+        let base = signature_parts("sonnet", None, None, true);
+        assert_ne!(base, signature_parts("opus", None, None, true));
+        assert_ne!(base, signature_parts("sonnet", Some("be brief"), None, true));
         assert_ne!(
             base,
-            signature_parts("sonnet", None, Some(Path::new("/tmp/a.json")))
+            signature_parts("sonnet", None, Some(Path::new("/tmp/a.json")), true)
         );
+        // Flipping "Ask before Juno sends" must respawn the process, or a
+        // live session would keep the permission posture it was born with
+        // (LAC-4058).
+        assert_ne!(base, signature_parts("sonnet", None, None, false));
     }
 
     #[test]
     fn signature_is_stable_for_identical_arguments() {
         assert_eq!(
-            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json"))),
-            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")))
+            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")), true),
+            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")), true)
         );
     }
 
