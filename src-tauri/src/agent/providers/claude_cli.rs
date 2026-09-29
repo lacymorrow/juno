@@ -610,9 +610,7 @@ impl ClaudeCliBrain {
         // permission prompts route into Juno's approval sheet instead of
         // being skipped. Read per run, so flipping the setting needs no
         // restart. Without an app handle there is no sheet to route to.
-        let ask_before_send = app_handle
-            .as_ref()
-            .is_some_and(cli_approval::is_enabled);
+        let ask_before_send = app_handle.as_ref().is_some_and(cli_approval::is_enabled);
 
         // Experimental (off by default): run this turn in one long-lived process
         // kept alive for the conversation, instead of spawning a fresh one here.
@@ -2158,7 +2156,12 @@ mod tests {
             effort: "high".to_string(),
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("and what about the other one?", Some("abc-123"), None, false);
+        let args = brain.build_args(
+            "and what about the other one?",
+            Some("abc-123"),
+            None,
+            false,
+        );
         let idx = args
             .iter()
             .position(|a| a == "--resume")

@@ -79,7 +79,10 @@ pub async fn set_cli_ask_before_send_enabled(
     let store = app_handle
         .store(SETTINGS_STORE_FILE)
         .map_err(|e| format!("Failed to access settings store: {e}"))?;
-    store.set(store_keys::CLI_ASK_BEFORE_SEND_ENABLED, Value::Bool(enabled));
+    store.set(
+        store_keys::CLI_ASK_BEFORE_SEND_ENABLED,
+        Value::Bool(enabled),
+    );
     store
         .save()
         .map_err(|e| format!("Failed to save settings store: {e}"))?;
@@ -130,10 +133,10 @@ const READ_VERBS: &[&str] = &[
 /// the name wins over a read verb: `mark_as_read` is a write, whatever
 /// "read" says.
 const WRITE_VERBS: &[&str] = &[
-    "send", "create", "update", "delete", "post", "reply", "draft", "schedule", "move",
-    "archive", "upload", "add", "remove", "set", "write", "edit", "insert", "invite",
-    "cancel", "mark", "publish", "submit", "execute", "run", "trigger", "patch", "put",
-    "share", "forward", "react", "pin", "star", "assign", "close", "merge", "approve",
+    "send", "create", "update", "delete", "post", "reply", "draft", "schedule", "move", "archive",
+    "upload", "add", "remove", "set", "write", "edit", "insert", "invite", "cancel", "mark",
+    "publish", "submit", "execute", "run", "trigger", "patch", "put", "share", "forward", "react",
+    "pin", "star", "assign", "close", "merge", "approve",
 ];
 
 /// Decide whether a call the CLI could not resolve on its own runs or asks.
@@ -372,7 +375,10 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
         }
         None => {
             record_denial(tool_name);
-            info!("[CliApproval] No answer in {}s: {}", APPROVAL_TIMEOUT_SECS, description);
+            info!(
+                "[CliApproval] No answer in {}s: {}",
+                APPROVAL_TIMEOUT_SECS, description
+            );
             deny_result(
                 "No answer within 60 seconds, so nothing was sent. Tell the person their \
                  approval was needed and no answer arrived; they can ask again.",
@@ -481,7 +487,10 @@ mod tests {
         record_denial("mcp__gmail__send_email");
         assert!(recently_denied("mcp__gmail__send_email", Instant::now()));
         // A different tool is its own question.
-        assert!(!recently_denied("mcp__slack__slack_send_message", Instant::now()));
+        assert!(!recently_denied(
+            "mcp__slack__slack_send_message",
+            Instant::now()
+        ));
         // Approval clears the cooldown so the next ask is a real ask.
         clear_denial("mcp__gmail__send_email");
         assert!(!recently_denied("mcp__gmail__send_email", Instant::now()));

@@ -328,7 +328,12 @@ fn signature_parts(
 }
 
 fn signature_of(req: &TurnRequest<'_>) -> String {
-    signature_parts(req.model, req.system_prompt, req.mcp_config, req.ask_before_send)
+    signature_parts(
+        req.model,
+        req.system_prompt,
+        req.mcp_config,
+        req.ask_before_send,
+    )
 }
 
 /// The session for this conversation, spawning one if needed.
@@ -972,7 +977,10 @@ mod tests {
     fn signature_changes_with_every_spawn_time_argument() {
         let base = signature_parts("sonnet", None, None, true);
         assert_ne!(base, signature_parts("opus", None, None, true));
-        assert_ne!(base, signature_parts("sonnet", Some("be brief"), None, true));
+        assert_ne!(
+            base,
+            signature_parts("sonnet", Some("be brief"), None, true)
+        );
         assert_ne!(
             base,
             signature_parts("sonnet", None, Some(Path::new("/tmp/a.json")), true)
