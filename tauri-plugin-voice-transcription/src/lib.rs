@@ -22,7 +22,7 @@ pub mod wake_word;
 pub use always_listening::AlwaysListeningController;
 pub use config::VoiceTranscriptionConfig;
 pub use controller::VoiceController;
-pub use engine::{SttProvider, TranscriptionEngine, TranscriptionSession};
+pub use engine::{startup_provider, SttProvider, TranscriptionEngine, TranscriptionSession};
 pub use engine_manager::EngineManager;
 pub use engine_parakeet::{
     missing_parakeet_files, parakeet_file_url, parakeet_total_bytes, ParakeetFile,
@@ -51,8 +51,43 @@ pub fn is_capture_suppressed() -> bool {
     CAPTURE_SUPPRESSED.load(AtomicOrdering::SeqCst)
 }
 
-/// Initialize the Voice Transcription plugin
+/// Reads the STT provider name the host app has persisted, e.g. `"parakeet"`.
+///
+/// The plugin is registered on the Tauri builder, long before any `AppHandle`
+/// exists, so the host cannot simply hand over a value — it hands over this,
+/// and the plugin calls it once inside its own setup hook, where an
+/// `AppHandle` finally does exist. `None` means "no saved preference", which
+/// boots Whisper. Keeping the reader on the host side is what keeps the
+/// settings-store layout (file name, key, schema) out of this crate.
+pub type SavedSttProviderReader<R> =
+    Arc<dyn Fn(&tauri::AppHandle<R>) -> Option<String> + Send + Sync>;
+
+/// Initialize the Voice Transcription plugin, always booting Whisper.
+///
+/// Prefer [`init_with_saved_provider`] in an app that persists a provider
+/// choice: this entry point has no way to know about it and will load Whisper
+/// even when the person picked Parakeet.
 pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
+    build_plugin(None)
+}
+
+/// Initialize the plugin so it boots the engine the person actually saved.
+///
+/// `read_saved_provider` is called once during setup; see
+/// [`SavedSttProviderReader`]. Anything it returns that is not a provider this
+/// plugin knows — and any Parakeet choice whose model is not on disk — falls
+/// back to Whisper. It never fails startup.
+pub fn init_with_saved_provider<R, F>(read_saved_provider: F) -> TauriPlugin<R>
+where
+    R: Runtime + 'static,
+    F: Fn(&tauri::AppHandle<R>) -> Option<String> + Send + Sync + 'static,
+{
+    build_plugin(Some(Arc::new(read_saved_provider)))
+}
+
+fn build_plugin<R: Runtime + 'static>(
+    read_saved_provider: Option<SavedSttProviderReader<R>>,
+) -> TauriPlugin<R> {
     Builder::<R>::new("voice-transcription")
         .invoke_handler(tauri::generate_handler![
             commands::start_dictation,
@@ -109,7 +144,6 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             // Get model path from config or use default
             let config = VoiceTranscriptionConfig::default();
             tracing::info!("Default config model path: {}", config.model_path);
-            tracing::info!("Default STT provider: {}", config.stt_provider);
 
             // Try to resolve the model path for both development and production
             let resolved_model_path = resolve_model_path(app, &config.model_path);
@@ -166,9 +200,24 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             app.manage(voice_arc.clone());
             app.manage(alc_arc.clone());
 
+            // Which engine to boot. `config.stt_provider` is only this crate's
+            // default (Whisper); the host app knows what the person saved, so ask
+            // it first. Booting the wrong engine is not free — it loads a model,
+            // allocates its Metal buffers and warms it up, and all of that is
+            // thrown away seconds later when the app applies the saved choice.
+            let saved_provider = read_saved_provider.as_ref().and_then(|read| read(app));
+            let parakeet_ready =
+                missing_parakeet_files(std::path::Path::new(&parakeet_model_dir)).is_empty();
+            let provider = startup_provider(saved_provider.as_deref(), parakeet_ready);
+            tracing::info!(
+                "[VoicePlugin] STT provider: {} (saved: {}, parakeet on disk: {})",
+                provider,
+                saved_provider.as_deref().unwrap_or("<none>"),
+                parakeet_ready
+            );
+
             // Load the STT model in a background task — model files can be >1 GB
             // and would freeze the Tauri startup if loaded on the setup thread.
-            let provider = config.stt_provider;
             let model_path_bg = active_model_path.clone();
             let parakeet_dir_bg = parakeet_model_dir.clone();
             let app_handle_bg = app.clone();
