@@ -25,15 +25,17 @@ interface AdvancedSettingsProps extends SettingsSectionProps {
   onNavigateToPermissions?: () => void;
 }
 
-/** The two-option picker the Mouse control row uses, sized like a macOS segment. */
+/** A short picker sized like a macOS segment. */
 function SegmentedChoice<T extends string>({
   id,
+  label,
   value,
   options,
   disabled,
   onChange,
 }: {
   id: string;
+  label: string;
   value: T;
   options: ReadonlyArray<{ value: T; label: string }>;
   disabled?: boolean;
@@ -43,7 +45,7 @@ function SegmentedChoice<T extends string>({
     <div
       id={id}
       role="radiogroup"
-      aria-label="Mouse control"
+      aria-label={label}
       className="inline-flex items-center gap-0.5 rounded-[7px] border border-border bg-muted/40 p-0.5"
     >
       {options.map((option) => {
@@ -76,6 +78,19 @@ const MOUSE_CONTROL_OPTIONS = [
   { value: "ask" as const, label: "Ask each time" },
   { value: "always" as const, label: "Always allow" },
 ];
+
+/**
+ * Where Juno shows up. Two switches used to allow "nowhere", which is the one
+ * state people regret; three named places cannot express it.
+ */
+type Presence = "menu_bar" | "dock" | "both";
+const PRESENCE_OPTIONS = [
+  { value: "menu_bar" as const, label: "Menu bar" },
+  { value: "dock" as const, label: "Dock" },
+  { value: "both" as const, label: "Both" },
+];
+const presenceOf = (dock: boolean, tray: boolean): Presence =>
+  dock && tray ? "both" : dock ? "dock" : "menu_bar";
 
 export default function AdvancedSettings({
   settings,
@@ -162,34 +177,33 @@ export default function AdvancedSettings({
     }
   };
 
-  const handleDockIconChange = async (visible: boolean) => {
-    const previous = dockIconVisible;
-    setDockIconVisible(visible);
+  const handlePresenceChange = async (next: Presence) => {
+    const previous = { dock: dockIconVisible, tray: showTrayIcon };
+    const dock = next !== "menu_bar";
+    const tray = next !== "dock";
+    setDockIconVisible(dock);
+    setShowTrayIcon(tray);
     try {
-      await invoke(COMMANDS.INPUT_CONTROL_SET_DOCK_ICON_VISIBLE, { visible });
-      if (!visible) {
-        // The one setting people regret. Say where Juno went, right now.
+      // Turn the new place on before the old one off, so Juno is never
+      // nowhere, even for the moment between the two calls.
+      const calls: Array<Promise<unknown>> = [];
+      if (dock && !previous.dock) calls.push(invoke(COMMANDS.INPUT_CONTROL_SET_DOCK_ICON_VISIBLE, { visible: true }));
+      if (tray && !previous.tray) calls.push(invoke(COMMANDS.INPUT_CONTROL_SET_TRAY_ICON_VISIBLE, { visible: true }));
+      await Promise.all(calls);
+      if (!dock && previous.dock) await invoke(COMMANDS.INPUT_CONTROL_SET_DOCK_ICON_VISIBLE, { visible: false });
+      if (!tray && previous.tray) await invoke(COMMANDS.INPUT_CONTROL_SET_TRAY_ICON_VISIBLE, { visible: false });
+      if (!dock && previous.dock) {
+        // The one change people regret. Say where Juno went, right now.
         toast("Juno is now in the menu bar only", {
           description:
-            "Click the Juno icon in the menu bar at the top of your screen to open it. Turn this setting back on any time to get the Dock icon back.",
+            "Click the Juno icon in the menu bar at the top of your screen to open it. Choose Dock or Both here any time to get the Dock icon back.",
           duration: 8000,
         });
       }
     } catch (error) {
-      console.error("Failed to update the Dock icon setting:", error);
-      setDockIconVisible(previous);
-      toast.error("Could not change that setting");
-    }
-  };
-
-  const handleTrayIconChange = async (visible: boolean) => {
-    const previous = showTrayIcon;
-    setShowTrayIcon(visible);
-    try {
-      await invoke(COMMANDS.INPUT_CONTROL_SET_TRAY_ICON_VISIBLE, { visible });
-    } catch (error) {
-      console.error("Failed to update the tray icon setting:", error);
-      setShowTrayIcon(previous);
+      console.error("Failed to change where Juno shows up:", error);
+      setDockIconVisible(previous.dock);
+      setShowTrayIcon(previous.tray);
       toast.error("Could not change that setting");
     }
   };
@@ -224,6 +238,7 @@ export default function AdvancedSettings({
         >
           <SegmentedChoice
             id="mouse-control"
+            label="Mouse control"
             value={mouseControl}
             options={MOUSE_CONTROL_OPTIONS}
             disabled={backgroundLoading || backgroundError}
@@ -232,28 +247,17 @@ export default function AdvancedSettings({
         </SettingsRow>
 
         <SettingsRow
-          htmlFor="dock-icon-visible"
-          label="Show in Dock"
-          description="Turn this off and Juno leaves the Dock and the app switcher, and lives only in the menu bar. To bring the Dock icon back, click the Juno icon in the menu bar and turn this on again. Opening Juno from your Applications folder also brings its window back."
+          id="show-juno-in"
+          label="Show Juno in"
+          description="Menu bar only keeps Juno out of the Dock and the app switcher. To get the Dock icon back, click the Juno icon in the menu bar and choose Dock or Both here. Opening Juno from your Applications folder also brings its window back."
         >
-          <Switch
-            id="dock-icon-visible"
-            checked={dockIconVisible}
-            onCheckedChange={handleDockIconChange}
+          <SegmentedChoice
+            id="show-juno-in"
+            label="Show Juno in"
+            value={presenceOf(dockIconVisible, showTrayIcon)}
+            options={PRESENCE_OPTIONS}
             disabled={backgroundLoading || backgroundError}
-          />
-        </SettingsRow>
-
-        <SettingsRow
-          htmlFor="show-tray-icon"
-          label="Show system tray icon"
-          description="Show Juno's icon in the menu bar at the top of your screen. Turn it off to hide the icon; Juno keeps running and stays reachable from the Dock and the floating bar."
-        >
-          <Switch
-            id="show-tray-icon"
-            checked={showTrayIcon}
-            onCheckedChange={handleTrayIconChange}
-            disabled={backgroundLoading || backgroundError}
+            onChange={handlePresenceChange}
           />
         </SettingsRow>
       </SettingsGroup>

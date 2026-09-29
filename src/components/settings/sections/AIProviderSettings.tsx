@@ -6,11 +6,9 @@ import {
   EnvironmentVariablesContent,
   EnvironmentVariable,
 } from "@/components/ai-elements/environment-variables";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Save } from "lucide-react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { useEffect, useState } from "react";
@@ -34,6 +32,19 @@ interface ClaudeCliStatus {
 export default function AIProviderSettings({ settings }: SettingsSectionProps) {
   const [demo, setDemo] = useState<DemoInfo | null>(null);
   const [cli, setCli] = useState<ClaudeCliStatus | null>(null);
+
+  // Fields save when they lose focus, the way every other row here applies at
+  // once. The group footer says "Saved" for a moment so the person knows the
+  // blur did something; no button, no toast.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (savedAt === null) return;
+    const id = window.setTimeout(() => setSavedAt(null), 1500);
+    return () => window.clearTimeout(id);
+  }, [savedAt]);
+  const commit = async () => {
+    if (await settings.handleSaveProviderSettings()) setSavedAt(Date.now());
+  };
 
   // A demo build answers with its own key, so say so rather than letting the
   // person wonder why Juno works without one.
@@ -100,17 +111,19 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
       {settings.activeProvider && settings.providerSettings && (
         <SettingsGroup
           title="Provider Configuration"
-          footer={`Configure settings for ${
-            settings.activeProvider === "claude_cli"
-              ? "Claude CLI"
-              : settings.activeProvider
-          }`}
+          footer={
+            savedAt !== null
+              ? "Saved."
+              : settings.activeProvider === "claude_cli"
+                ? "Nothing to enter. Juno talks to Claude Code on this Mac."
+                : "Changes save when you leave a field."
+          }
         >
           <SettingsRow
             below={
               settings.activeProvider === "claude_cli" ? (
-                <div className="rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
-                  <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                <div className="rounded-md border border-border bg-muted/40 p-4">
+                  <p className="text-[13px] font-medium text-foreground">
                     {cli && !cli.available
                       ? "Claude Code is not installed"
                       : cli && !cli.authenticated
@@ -120,12 +133,12 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                   {/* Said as a fact about this machine, not as a hedge. The old
                       copy ended "if not authenticated", which left the person
                       to work out which half of the sentence applied to them. */}
-                  <p className="mt-1 text-sm text-blue-700 dark:text-blue-300">
+                  <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
                     {cli && !cli.available ? (
                       <>
                         Juno runs on your Claude subscription through Claude Code.
                         Install it from{" "}
-                        <code className="rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900">
+                        <code className="rounded bg-muted px-1 py-0.5 text-xs">
                           claude.ai/code
                         </code>
                         , or choose another provider above.
@@ -133,7 +146,7 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                     ) : cli && !cli.authenticated ? (
                       <>
                         Run{" "}
-                        <code className="rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900">
+                        <code className="rounded bg-muted px-1 py-0.5 text-xs">
                           claude login
                         </code>{" "}
                         in your terminal, then come back to this window.
@@ -161,6 +174,7 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                           apiKey: val,
                         }))
                       }
+                      onCommit={commit}
                       required
                     />
                   </EnvironmentVariablesContent>
@@ -183,6 +197,7 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                       maxTokens: e.target.value,
                     }))
                   }
+                  onBlur={commit}
                   placeholder="e.g., 4000"
                   className="w-[120px]"
                 />
@@ -202,6 +217,7 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                       temperature: e.target.value,
                     }))
                   }
+                  onBlur={commit}
                   placeholder="e.g., 0.7"
                   className="w-[120px]"
                 />
@@ -223,18 +239,13 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                     systemPrompt: e.target.value,
                   }))
                 }
-                placeholder="Enter custom system prompt (optional)"
+                onBlur={commit}
+                placeholder="Optional. How Juno should behave."
                 rows={4}
               />
             }
           />
 
-          <SettingsRow>
-            <Button onClick={settings.handleSaveProviderSettings}>
-              <Save className="w-4 h-4 mr-2" />
-              Save Provider Settings
-            </Button>
-          </SettingsRow>
         </SettingsGroup>
       )}
     </div>

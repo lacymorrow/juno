@@ -634,10 +634,13 @@ export function useSettings() {
 		console.log("========================");
 	}, [activeProvider, providers, providerSettings, formData, isLoading]);
 
-	const handleSaveProviderSettings = async () => {
+	// Saves whatever differs from the stored provider settings. Called when a
+	// field loses focus, so there is no Save button; the pane shows "Saved"
+	// inline on `true`. Nothing to save also returns true.
+	const handleSaveProviderSettings = async (): Promise<boolean> => {
 		if (!activeProvider) {
 			toast.error("No provider selected");
-			return;
+			return false;
 		}
 
 		try {
@@ -699,11 +702,12 @@ export function useSettings() {
 				systemPrompt: updatedSettings.system_prompt || "",
 			});
 
-			toast.success("Provider settings saved successfully");
 			console.log("Provider settings saved and reloaded successfully");
+			return true;
 		} catch (error) {
 			console.error("Failed to save provider settings:", error);
 			toast.error("Failed to save provider settings");
+			return false;
 		}
 	};
 
@@ -712,8 +716,7 @@ export function useSettings() {
 			"set_sound_enabled",
 			{ enabled },
 			{
-				showSuccessToast: true,
-				successMessage: `Sound ${enabled ? "enabled" : "disabled"}`,
+				showSuccessToast: false,
 				errorMessage: "Failed to update sound setting"
 			}
 		);
@@ -725,8 +728,7 @@ export function useSettings() {
 			"set_performance_monitoring",
 			{ enabled },
 			{
-				showSuccessToast: true,
-				successMessage: `Performance monitoring ${enabled ? "enabled" : "disabled"}`,
+				showSuccessToast: false,
 				errorMessage: "Failed to update performance monitoring setting"
 			}
 		);
@@ -738,8 +740,7 @@ export function useSettings() {
 			"set_agent_mode",
 			{ mode: newMode },
 			{
-				showSuccessToast: true,
-				successMessage: `Agent mode set to: ${newMode}`,
+				showSuccessToast: false,
 				errorMessage: "Failed to set agent mode"
 			}
 		);

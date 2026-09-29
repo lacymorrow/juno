@@ -81,14 +81,17 @@ Descriptors were checked against the captured previews (`docs/frontend/screensho
 
 ## Slice 2: fewer switches, better defaults (frontend only)
 
-Removals and merges, each a one-line commit:
-- "Glow while listening" becomes part of the appearance (the Pill glows, others do not). Row removed.
-- "Play sounds" stays. "Notifications" pane keeps one switch.
-- Tools pane: "Enable all / Disable all" plus per-category switches become one list of checkboxes (HIG: checkboxes in dense forms).
-- Advanced pane: "Show in Dock" and "Show system tray icon" become one segmented control "Show Juno in: Menu bar / Dock / Both".
-- AI Provider: the Save button goes. Fields save on blur, the API key field shows "Saved" inline (immediate apply is the macOS rule).
-- AI Provider tile: replace the Brain icon and the purple tile with a neutral glyph.
-- Settings search hides rows that are unreachable (permission missing, dependent switch off), per the FluidVoice teardown G1.
+**Status:** built on `feat/settings-slice2`.
+
+- "Glow while listening" row removed. Only the Pill reads the setting, and it defaults on; the Rust setting stays for the harness and the bar config.
+- Toggle toasts removed (sound, agent mode, performance monitoring, follow cursor). The switch flipping is the feedback.
+- Advanced pane: "Show in Dock" and "Show system tray icon" become one control, "Show Juno in: Menu bar / Dock / Both". The state where Juno is nowhere is no longer expressible. The new place is turned on before the old one is turned off.
+- AI Provider: the Save button is gone. The key, max tokens, temperature and system prompt save when the field loses focus (Enter also commits the key). The group footer reads "Saved." for a moment. The Claude CLI box is neutral chrome, not blue-on-blue.
+- AI Provider tile: chip glyph on a light blue tile instead of the Brain on purple.
+- Tools: category and per-tool switches are checkboxes (HIG: a dense list of options is a checkbox list). The Enable all / Disable all row stays.
+- Settings search only returns rows the person can reach: rows flagged advanced, or in advanced sections, match only while the toggle is on.
+
+Considered and cut: changing the theme's `--primary` to system blue (touches every window, not a settings change); the Notifications pane (one switch already).
 
 ## Slice 3: triggers the Wispr way (Rust + frontend)
 
