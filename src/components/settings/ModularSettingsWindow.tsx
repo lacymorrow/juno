@@ -8,7 +8,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Bell,
   Boxes,
-  Brain,
+  Cpu,
   CalendarClock,
   Mic,
   Network,
@@ -83,8 +83,8 @@ export const settingsCategories: MacCategory[] = [
   {
     id: "ai",
     name: "AI Provider",
-    icon: <Brain className="h-3.5 w-3.5" />,
-    tile: "bg-[#AF52DE]",
+    icon: <Cpu className="h-3.5 w-3.5" />,
+    tile: "bg-[#64D2FF]",
     description: "Configure AI models and providers",
     keywords: "model anthropic openai gemini api key provider claude llm",
   },
@@ -181,6 +181,8 @@ export interface SettingsRowEntry {
   rowId: string;
   label: string;
   keywords: string;
+  /** Only reachable while the advanced toggle is on. */
+  advanced?: boolean;
 }
 
 export const settingsRowIndex: SettingsRowEntry[] = [
@@ -188,7 +190,7 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "general", rowId: "auto-launch", label: "Open at login", keywords: "startup login boot autostart launch" },
   { sectionId: "general", rowId: "big-cursor-enabled", label: "Enable big cursor", keywords: "cursor pointer magnify enlarge big" },
   { sectionId: "general", rowId: "bar-appearance", label: "Bar appearance", keywords: "bar appearance look style pill bar studio island orb halo avatar persona floating preview" },
-  { sectionId: "general", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup" },
+  { sectionId: "general", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup", advanced: true },
   // Triggers
   { sectionId: "triggers", rowId: "add-trigger", label: "Add trigger", keywords: "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
   // Models
@@ -197,9 +199,9 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "models", rowId: "model-row-large-v3", label: "Most accurate dictation model", keywords: "whisper large accurate dictation model download" },
   // AI Provider
   { sectionId: "ai", rowId: "ai-provider", label: "Active Provider", keywords: "provider anthropic openai gemini claude" },
-  { sectionId: "ai", rowId: "max-tokens", label: "Max Tokens", keywords: "tokens length limit output" },
-  { sectionId: "ai", rowId: "temperature", label: "Temperature", keywords: "temperature randomness creativity sampling" },
-  { sectionId: "ai", rowId: "system-prompt", label: "System Prompt", keywords: "system prompt instructions persona" },
+  { sectionId: "ai", rowId: "max-tokens", label: "Max Tokens", keywords: "tokens length limit output", advanced: true },
+  { sectionId: "ai", rowId: "temperature", label: "Temperature", keywords: "temperature randomness creativity sampling", advanced: true },
+  { sectionId: "ai", rowId: "system-prompt", label: "System Prompt", keywords: "system prompt instructions persona", advanced: true },
   // Notifications
   { sectionId: "notifications", rowId: "notification-type", label: "Notification method", keywords: "banner alert method delivery" },
   { sectionId: "notifications", rowId: "position", label: "Position", keywords: "position corner placement screen" },
@@ -211,7 +213,7 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   // Advanced
   { sectionId: "advanced", rowId: "background-mode", label: "Work in the background", keywords: "background quiet no interruption cursor focus other apps" },
   { sectionId: "advanced", rowId: "mouse-control", label: "Mouse control", keywords: "mouse pointer cursor permission ask always takeover control" },
-  { sectionId: "advanced", rowId: "dock-icon-visible", label: "Show in Dock", keywords: "dock icon menu bar menubar hide accessory app switcher missing disappeared" },
+  { sectionId: "advanced", rowId: "show-juno-in", label: "Show Juno in", keywords: "dock icon menu bar menubar tray hide accessory app switcher missing disappeared" },
   { sectionId: "advanced", rowId: "debug-mode", label: "Debug Mode", keywords: "debug logs verbose developer" },
   { sectionId: "advanced", rowId: "performance-monitoring", label: "Performance Monitoring", keywords: "performance monitoring metrics profiling" },
   { sectionId: "advanced", rowId: "reset-all-settings", label: "Reset all settings", keywords: "reset factory defaults erase wipe" },
@@ -222,11 +224,17 @@ export const settingsRowIndex: SettingsRowEntry[] = [
  * Empty query yields nothing — row deep-linking only kicks in on an active
  * search, section-level filtering handles the rest.
  */
-export function searchRows(query: string): SettingsRowEntry[] {
+export function searchRows(query: string, showAdvanced = true): SettingsRowEntry[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const terms = q.split(/\s+/);
+  // A hit the person cannot reach is worse than no hit: rows behind the
+  // advanced toggle, or in a section it hides, only match while it is on.
+  const hiddenSections = new Set(
+    settingsCategories.filter((c) => c.advanced).map((c) => c.id),
+  );
   return settingsRowIndex.filter((r) => {
+    if (!showAdvanced && (r.advanced || hiddenSections.has(r.sectionId))) return false;
     const haystack = `${r.label} ${r.keywords}`.toLowerCase();
     return terms.every((t) => haystack.includes(t));
   });
@@ -255,7 +263,7 @@ function SettingsWindowContent() {
   // Rows (inside sections) that match the query, restricted to visible sections.
   const rowMatches = useMemo(
     () =>
-      searchRows(query).filter((r) =>
+      searchRows(query, advanced).filter((r) =>
         categories.some((c) => c.id === r.sectionId),
       ),
     [categories, query],
