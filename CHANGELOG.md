@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-09-29
+
+### Added
+
+- **settings:** persistent Claude CLI session as a beta toggle under Advanced (LAC-4025) (#597) (69f66cfa)
+
 ## [0.8.9] - 2026-09-29
 
 ### Changed
@@ -509,7 +515,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.9...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.10...HEAD
+[0.8.10]: https://github.com/lacymorrow/juno/compare/cua-v0.8.9...v0.8.10
 [0.8.9]: https://github.com/lacymorrow/juno/compare/cua-v0.8.8...v0.8.9
 [0.8.7]: https://github.com/lacymorrow/juno/compare/cua-v0.8.6...v0.8.7
 [0.8.6]: https://github.com/lacymorrow/juno/compare/cua-v0.8.5...v0.8.6
