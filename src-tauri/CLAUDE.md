@@ -38,6 +38,25 @@ bun run tauri dev                                  # Full app development
 bun run tauri:build                                # Build production app (signs + notarizes)
 ```
 
+**In a fresh clone or a new git worktree, build the frontend before any cargo
+command:**
+
+```bash
+bun install && npm run build    # creates dist/, which cargo needs
+```
+
+`tauri::generate_context!()` reads `frontendDist` (`../dist`) while the macro
+expands, so without it the Rust side does not compile. It surfaces as a
+proc-macro panic pointing at `lib.rs`, which looks like a code fault and is
+not:
+
+```
+error: proc macro panicked
+  --> src-tauri/src/lib.rs:65:5
+   = help: message: The `frontendDist` configuration is set to `"../dist"`
+           but this path doesn't exist
+```
+
 ## Architecture
 
 ### Hierarchical Agent System
@@ -386,6 +405,68 @@ async fn test_with_mock() {
 
 ### Compilation Check
 **MANDATORY**: Run `cargo check --manifest-path src-tauri/Cargo.toml` after every Rust change. Project MUST compile with exit code 0.
+
+### macOS: main-thread-only APIs
+
+Some macOS APIs kill the process when called off the main thread. Not an
+error, not a panic — `dispatch_assert_queue(main)` inside the framework, then
+`__builtin_trap()`. SIGTRAP. No unwind, so `catch_unwind` never sees it, and
+the log just stops mid-run with no message.
+
+This is a **third threading axis**, separate from the two rules above it.
+`tokio::task::spawn_blocking` is the correct tool for blocking work and stays
+correct; it simply does not run on the main thread. Nothing in the type
+system, in clippy, or in a function signature will warn you. Juno shipped
+exactly this bug for weeks: dictation's paste path read the keyboard layout
+through Text Input Services from a blocking worker and took the whole app
+down on the first paste of every run (#603).
+
+Treat these as main-thread-only:
+
+| API family | Examples |
+|---|---|
+| Text Input Services | `TISCopyCurrentKeyboardLayoutInputSource`, `TISGetInputSourceProperty` |
+| HIToolbox generally | `TSMGetInputSourceProperty`, input-source and TSM calls |
+| AppKit UI | window, view, menu, `NSApp` anything |
+| `NSWorkspace` mutations | launching, activating, opening |
+
+The pattern, when a worker needs a value only the main thread can read:
+
+```rust
+static CACHED: AtomicU16 = AtomicU16::new(UNRESOLVED);
+
+/// Main thread only. Call once during setup.
+pub fn prime_cached() {
+    if !is_main_thread() { warn!("prime called off-main; ignoring"); return; }
+    CACHED.store(resolve_via_framework(), Ordering::Relaxed);
+}
+
+pub fn cached() -> u16 {
+    if is_main_thread() {
+        let v = resolve_via_framework();     // safe here, keeps it fresh
+        CACHED.store(v, Ordering::Relaxed);
+        return v;
+    }
+    match CACHED.load(Ordering::Relaxed) {
+        UNRESOLVED => SENSIBLE_DEFAULT,      // degrade, never trap
+        v => v,
+    }
+}
+```
+
+Resolve on main, cache atomically, degrade off-main. Prime from
+`apply_macos_setup`, which already runs on the main thread.
+
+**Do not** `dispatch_sync` to the main queue to "fix" this. It deadlocks
+whenever the main thread is waiting on the task you are calling from, which
+is exactly the shape of a Tauri command awaiting `spawn_blocking`.
+
+Check the thread with `NSThread.isMainThread` via `objc`.
+`dispatch::Queue::main().is_current()` does not exist in our bindings.
+
+Regression tests come free: Rust's test harness runs every test on a spawned
+thread, so calling the function from a test is already off-main. Before the
+fix, the test binary dies and reports nothing.
 
 ### Memory Management
 - Clone memory managers safely using Arc-based patterns

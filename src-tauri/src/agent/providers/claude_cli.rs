@@ -146,7 +146,7 @@ pub fn detect_claude_cli() -> Result<PathBuf, AgentError> {
 
     for candidate in candidates.into_iter().flatten() {
         if candidate.exists() {
-            info!("Found Claude CLI at: {}", candidate.display());
+            debug!("Found Claude CLI at: {}", candidate.display());
             return Ok(candidate);
         }
     }
@@ -157,7 +157,7 @@ pub fn detect_claude_cli() -> Result<PathBuf, AgentError> {
         for dir in std::env::split_paths(&path_var) {
             let candidate = dir.join("claude");
             if candidate.is_file() {
-                info!("Found Claude CLI via PATH: {}", candidate.display());
+                debug!("Found Claude CLI via PATH: {}", candidate.display());
                 return Ok(candidate);
             }
         }

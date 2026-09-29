@@ -14,16 +14,38 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 use crate::{agent, cli, commands, state};
 
+/// Whether ONNX Runtime's own logging should be turned down.
+///
+/// ORT narrates every graph-optimization pass, every freed initializer and
+/// every arena reservation at INFO, and `ort` forwards all of it into
+/// tracing. Loading Parakeet costs several thousand lines per launch, which
+/// buries the application's own logs completely.
+///
+/// The one case where that output is wanted is someone debugging ORT, and
+/// they say so by naming the target in `RUST_LOG`. Anything mentioning `ort`
+/// hands the decision back to them.
+fn should_quiet_onnx_runtime(rust_log: &str) -> bool {
+    !rust_log.contains("ort")
+}
+
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
+    let mut filter = EnvFilter::from_default_env().add_directive(
+        "info"
+            .parse()
+            .unwrap_or_else(|_| tracing::level_filters::LevelFilter::INFO.into()),
+    );
+
+    // More specific than the blanket `info` above, so this wins for `ort`
+    // and leaves every other target alone.
+    if should_quiet_onnx_runtime(&std::env::var("RUST_LOG").unwrap_or_default()) {
+        if let Ok(quiet_ort) = "ort=warn".parse() {
+            filter = filter.add_directive(quiet_ort);
+        }
+    }
+
     fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env().add_directive(
-                "info"
-                    .parse()
-                    .unwrap_or_else(|_| tracing::level_filters::LevelFilter::INFO.into()),
-            ),
-        )
+        .with_env_filter(filter)
         .with_target(false) // Hide target module names for cleaner output
         .with_thread_ids(false) // Hide thread IDs for cleaner output
         .with_ansi(true) // Enable colors for better readability
@@ -542,5 +564,33 @@ mod tests {
         let (tx, _rx) = oneshot::channel::<Result<String, JunoError>>();
         let send_result = tx.send(Ok("test".to_string()));
         assert!(send_result.is_ok(), "Channel send should succeed");
+    }
+}
+
+#[cfg(test)]
+mod tracing_filter_tests {
+    use super::should_quiet_onnx_runtime;
+
+    #[test]
+    fn onnx_runtime_is_quiet_by_default() {
+        // The common case: nobody set RUST_LOG, and a launch should not cost
+        // several thousand lines of ORT graph-optimisation narration.
+        assert!(should_quiet_onnx_runtime(""));
+    }
+
+    #[test]
+    fn a_plain_level_still_silences_onnx_runtime() {
+        // `RUST_LOG=debug` means "I want Juno's debug logs", not "bury me in
+        // arena reservations".
+        assert!(should_quiet_onnx_runtime("debug"));
+        assert!(should_quiet_onnx_runtime("juno=debug"));
+    }
+
+    #[test]
+    fn naming_ort_hands_the_decision_back() {
+        // Someone debugging the ONNX session asked for it by name.
+        assert!(!should_quiet_onnx_runtime("ort=info"));
+        assert!(!should_quiet_onnx_runtime("ort=debug"));
+        assert!(!should_quiet_onnx_runtime("juno=debug,ort=trace"));
     }
 }
