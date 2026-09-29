@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -79,7 +79,10 @@ describe("Background settings", () => {
     await mount();
 
     expect(screen.getByLabelText("Work in the background")).not.toBeChecked();
-    expect(screen.getByLabelText("Show in Dock")).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: "Menu bar" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
     expect(screen.getByRole("radio", { name: "Always allow" })).toHaveAttribute(
       "aria-checked",
       "true",
@@ -115,7 +118,9 @@ describe("Background settings", () => {
   it("offers exactly two mouse control choices, asking by default", async () => {
     await mount();
 
-    const options = screen.getAllByRole("radio");
+    const options = within(
+      screen.getByRole("radiogroup", { name: "Mouse control" }),
+    ).getAllByRole("radio");
     expect(options.map((o) => o.textContent)).toEqual([
       "Ask each time",
       "Always allow",
@@ -129,17 +134,26 @@ describe("Background settings", () => {
     );
   });
 
-  it("puts the whole way back into the Show in Dock description", async () => {
+  it("puts the whole way back into the Show Juno in description", async () => {
     await mount();
 
-    const description = screen.getByText(/lives only in the menu bar/);
+    const description = screen.getByText(/keeps Juno out of the Dock/);
     expect(description).toHaveTextContent("click the Juno icon in the menu bar");
     expect(description).toHaveTextContent("Applications folder");
   });
 
+  it("cannot express Juno being nowhere", async () => {
+    await mount();
+    expect(screen.getAllByRole("radio").map((r) => r.textContent)).toEqual(
+      expect.arrayContaining(["Menu bar", "Dock", "Both"]),
+    );
+    expect(screen.queryByLabelText("Show in Dock")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Show system tray icon")).not.toBeInTheDocument();
+  });
+
   it("says where Juno went the moment the Dock icon is turned off", async () => {
     await mount();
-    await click(screen.getByLabelText("Show in Dock"));
+    await click(screen.getByRole("radio", { name: "Menu bar" }));
 
     expect(invokeMock).toHaveBeenCalledWith(
       COMMANDS.INPUT_CONTROL_SET_DOCK_ICON_VISIBLE,
@@ -156,7 +170,7 @@ describe("Background settings", () => {
   it("stays quiet when the Dock icon comes back", async () => {
     mockBackend({ dock_icon_visible: false });
     await mount();
-    await click(screen.getByLabelText("Show in Dock"));
+    await click(screen.getByRole("radio", { name: "Both" }));
 
     expect(invokeMock).toHaveBeenCalledWith(
       COMMANDS.INPUT_CONTROL_SET_DOCK_ICON_VISIBLE,
@@ -172,10 +186,13 @@ describe("Background settings", () => {
     });
     await mount();
 
-    await click(screen.getByLabelText("Show in Dock"));
+    await click(screen.getByRole("radio", { name: "Menu bar" }));
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Show in Dock")).toBeChecked(),
+      expect(screen.getByRole("radio", { name: "Both" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      ),
     );
     expect(toast.error).toHaveBeenCalledWith("Could not change that setting");
   });

@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 
 import { SettingsSectionProps } from "../types";
@@ -383,11 +384,12 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
                                 </Badge>
                               )}
                             </div>
-                            <Switch
+                            <Checkbox
+                              aria-label={tool.name}
                               checked={tool.enabled}
                               disabled={tool.required}
                               onCheckedChange={(enabled) =>
-                                handleToggleTool(tool.name, enabled)
+                                handleToggleTool(tool.name, enabled === true)
                               }
                             />
                           </div>
@@ -396,10 +398,11 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
                     )
                   }
                 >
-                  <Switch
+                  <Checkbox
+                    aria-label={category.name}
                     checked={category.enabled}
                     onCheckedChange={(enabled) =>
-                      handleToggleCategory(categoryName, enabled)
+                      handleToggleCategory(categoryName, enabled === true)
                     }
                   />
                 </SettingsRow>
