@@ -8,8 +8,13 @@
 # browser, and `gh run download` does not quarantine what it saves.
 name: Build branch
 
+# Also on every push to main: that run saves the release build cache on main,
+# where tag builds (release-tauri.yml) and branch builds can restore it. A
+# cache saved on a tag or a branch is invisible to everything else.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 # A second request for the same branch replaces the first.
 concurrency:
@@ -45,7 +50,11 @@ jobs:
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          # Cargo workspace root is the repo root, so the build lands in ./target.
+          # Shared with the other aarch64 release build: build-branch saves it
+          # on main, and tag and branch builds restore it from there.
+          workspaces: ". -> target"
+          shared-key: tauri-release-aarch64
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -98,7 +107,7 @@ jobs:
         id: pkg
         run: |
           set -euo pipefail
-          app="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Juno.app"
+          app="target/aarch64-apple-darwin/release/bundle/macos/Juno.app"
           [ -d "$app" ] || { echo "no Juno.app at $app" >&2; exit 1; }
           codesign --verify --deep --strict "$app"
           tar -czf Juno.app.tar.gz -C "$(dirname "$app")" Juno.app
