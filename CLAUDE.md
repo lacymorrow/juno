@@ -18,21 +18,14 @@ bun run tauri:dev
 # Frontend only (Vite dev server on port 1420)
 bun run dev
 
-# Build
+# Build and check Rust: in CI, not locally (see "Rust: CI Compiles, Not Your Mac")
+scripts/juno-build.sh            # Build this branch in CI, install + open it
+scripts/juno-build.sh promote    # Ship the newest prerelease to users
+gh pr checks --watch             # fmt + clippy + cargo test run on the PR
+
+# Frontend (cheap, fine locally)
 bun run build                    # Frontend build (tsc + vite)
-bun run tauri:build              # Full production app (signs + notarizes, see docs/development/RELEASES.md)
-bun run build:universal          # Universal macOS binary
-
-# Testing
-npm test                         # Vitest (frontend)
-npm run test:watch               # Watch mode
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust tests
-
-# Rust compilation check (MANDATORY after Rust changes, ~15min)
-cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1 | tee cargo-check-results.log
-
-# Linting
-cargo clippy --manifest-path src-tauri/Cargo.toml
+bun run test                     # Vitest
 
 # Debug mode with self-awareness tools
 RUST_LOG=debug bun run tauri dev
@@ -198,11 +191,15 @@ Alternative to direct API keys — uses the locally installed `claude` binary (C
 
 ## Critical Development Rules
 
-### Rust: Mandatory Compilation Check
-After every substantial Rust change, the project MUST compile:
-```bash
-cargo check --manifest-path src-tauri/Cargo.toml
-```
+### Rust: CI Compiles, Not Your Mac
+Do not run `cargo check`, `cargo clippy`, `cargo test` or `tauri build` locally. Zero is a 16 GB M1 shared by every agent, and one Juno build fills it. GitHub's macOS runners do it for free (public repo).
+
+1. `cargo fmt --manifest-path src-tauri/Cargo.toml --all` (formatting only, compiles nothing).
+2. Commit, push, open a draft PR against `main`. `ci.yml` runs fmt, clippy `-D warnings` and tests.
+3. `gh pr checks --watch`, then `gh run view <id> --log-failed` on a red check. Clippy lists every warning in one pass, so fix them all before pushing again.
+4. To run the app: `scripts/juno-build.sh` builds the current branch in CI, installs it in /Applications and opens it. `scripts/juno-build.sh v0.8.12` installs a published release or prerelease.
+
+Local cargo is the exception: only when the task is a build-system change that CI cannot show you, and say so in the PR.
 
 ### Rust: No `.unwrap()` or `.expect()` in Production Code
 ```rust
