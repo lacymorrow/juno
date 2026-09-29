@@ -271,6 +271,80 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Where a dogfooding install keeps the downloaded Parakeet model.
+    fn installed_model_dir() -> Option<PathBuf> {
+        if let Ok(dir) = std::env::var("JUNO_PARAKEET_DIR") {
+            return Some(PathBuf::from(dir));
+        }
+        let dir =
+            dirs_home()?.join("Library/Application Support/com.juno.desktop/models/parakeet-ctc");
+        ParakeetEngine::model_files_present(&dir).then_some(dir)
+    }
+
+    fn dirs_home() -> Option<PathBuf> {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+
+    /// The only guard against a silent transcription regression.
+    ///
+    /// Everything else in this suite checks structure — files present, paths
+    /// correct. This one checks that the model still turns audio into the
+    /// right words, which is what breaks when the execution provider or the
+    /// model changes underneath it, and which nothing else here would notice.
+    ///
+    /// It has already earned that. An attempt to cut Parakeet's ~17s startup
+    /// by moving to the CoreML execution provider passed fmt, clippy and
+    /// every other test, and failed here:
+    ///
+    ///     ONNX Runtime error: ... running CoreMLExecutionProvider_..._3
+    ///     node. Unable to compute the prediction using a neural network
+    ///     model ... broken/unsupported model (error code: -1)
+    ///
+    /// CoreML accepted `model_int8.onnx` at load and only failed at
+    /// inference, so a fallback around the constructor never fired. Without
+    /// this test that ships as "Juno starts, you speak, nothing comes back".
+    ///
+    /// Runs automatically wherever the model is downloaded, which is any
+    /// machine actually running Juno. CI has no model, so it skips rather
+    /// than fails — a skip is honest, a green light on an untested path is
+    /// not.
+    ///
+    /// The fixture is macOS `say` output at 16 kHz mono, committed so the
+    /// test needs no setup:
+    ///   say -o fox.aiff "The quick brown fox jumps over the lazy dog"
+    ///   afconvert -f WAVE -d LEI16@16000 -c 1 fox.aiff fox.wav
+    #[test]
+    fn parakeet_still_turns_audio_into_the_right_words() {
+        let Some(dir) = installed_model_dir() else {
+            eprintln!("skipping: no Parakeet model installed (this is fine in CI)");
+            return;
+        };
+        let wav = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fox-16k-mono.wav");
+
+        let engine = ParakeetEngine::new(&dir).expect("engine loads");
+        assert!(engine.is_initialized());
+
+        let mut reader = hound::WavReader::open(&wav).expect("fixture opens");
+        assert_eq!(reader.spec().sample_rate, 16_000, "fixture must be 16 kHz");
+        let samples: Vec<f32> = reader
+            .samples::<i16>()
+            .filter_map(|s| s.ok())
+            .map(|s| s as f32 / i16::MAX as f32)
+            .collect();
+
+        let mut session = engine.create_session().expect("session");
+        let text = session.transcribe_final(&samples).expect("transcribes");
+        let lower = text.to_lowercase();
+        println!("parakeet said: {text:?}");
+
+        // Not an exact match: decoding varies slightly and always has. These
+        // four content words are what a working model gets right and a broken
+        // execution provider does not.
+        for word in ["quick", "brown", "fox", "lazy"] {
+            assert!(lower.contains(word), "expected {word:?} in {text:?}");
+        }
+    }
+
     /// Real load + transcription against downloaded files. Run once by hand:
     /// `JUNO_PARAKEET_DIR=<dir> JUNO_PARAKEET_WAV=<16 kHz mono wav> cargo test -p tauri-plugin-voice-transcription parakeet_loads -- --ignored --nocapture`
     #[test]
@@ -294,3 +368,4 @@ mod tests {
         assert!(text.to_lowercase().contains("fox"), "got {text:?}");
     }
 }
+

@@ -8,6 +8,10 @@
 # Audio files (project-specific)
 debug_live_audio.wav
 *.wav
+# ...except committed test fixtures. The blanket rule above is for stray
+# recordings; the transcription regression test needs its audio in the repo
+# so it runs with no setup.
+!tauri-plugin-voice-transcription/tests/fixtures/*.wav
 *.aiff
 *.m4a
 *.mp3
