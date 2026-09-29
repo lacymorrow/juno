@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-09-29
+
+### Fixed
+
+- **dictation:** boot the STT engine the person saved, not Whisper first (#609) (df62e81d)
+
 ## [0.8.10] - 2026-09-29
 
 ### Added
@@ -515,7 +521,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.10...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.12...HEAD
+[0.8.12]: https://github.com/lacymorrow/juno/compare/cua-v0.8.11...v0.8.12
 [0.8.10]: https://github.com/lacymorrow/juno/compare/cua-v0.8.9...v0.8.10
 [0.8.9]: https://github.com/lacymorrow/juno/compare/cua-v0.8.8...v0.8.9
 [0.8.7]: https://github.com/lacymorrow/juno/compare/cua-v0.8.6...v0.8.7
