@@ -1,6 +1,6 @@
 # Human-forward Settings (spec)
 
-**Status:** Slice 1 built on `feat/settings-appearance-picker` (PR pending review). Slices 2 and 3 not started.
+**Status:** Slice 1 merged (PR #604, v0.8.6). Slice 2 merged (PR #606). Slice 3 is PR #611.
 **DRI:** Frontend Engineer for slices 1 and 2. Founding Engineer for slice 3 (Rust).
 **Reference:** `docs/design/settings-ux-reference.md` (research, principles, skills).
 
@@ -81,7 +81,7 @@ Descriptors were checked against the captured previews (`docs/frontend/screensho
 
 ## Slice 2: fewer switches, better defaults (frontend only)
 
-**Status:** built on `feat/settings-slice2`.
+**Status:** merged as PR #606.
 
 - "Glow while listening" row removed. Only the Pill reads the setting, and it defaults on; the Rust setting stays for the harness and the bar config.
 - Toggle toasts removed (sound, agent mode, performance monitoring, follow cursor). The switch flipping is the feedback.
@@ -95,19 +95,21 @@ Considered and cut: changing the theme's `--primary` to system blue (touches eve
 
 ## Slice 3: triggers the Wispr way (Rust + frontend)
 
-Backend (`src-tauri/src/triggers`, `events/shortcuts.rs`):
-- "Automatic" behavior on the hold key: a tap under 0.4 s toggles, a hold is push-to-talk. Replaces the 300 ms cancel. (FluidVoice teardown B1.)
-- Double-tap on the hold key toggles hands-free; derived, not a separate row. The row shows a live hint built from the person's own key: "Double-tap 🌐 for hands-free."
-- Side-specific bare modifiers (Right Option) as valid bindings. (B2, B3.)
-- Conflict messages that name the other binding. (B8.)
-- Keyboard detection: no Globe key present, pre-fill ⌃⌥ variants instead of Fn.
+**Status:** PR #611.
 
-Frontend (`TriggersSettings.tsx`, `ShortcutInput.tsx`):
-- Each row reads as one sentence: "Hold 🌐 to dictate. Let go to finish." The key caps render Apple glyphs in ⌃⌥⇧⌘ order.
-- Recorder: keys render as caps while held, saves on release, Enter saves early, Backspace clears, "Shortcut saved" appears inline next to the caps for 1.5 s. No toast.
-- Conflict shown in the row, naming the owner, with "Use it anyway" only for Juno's own bindings.
-- "Reset to default" per row, with "No undo" in its description.
-- Onboarding step 5 becomes the Wispr-style tryout: a real sentence to read, the key rendered as a cap, live words in the demo field, skippable.
+Backend (`dictation_monitor.rs`, `agent_monitor.rs`, `constants/agent.rs`, `triggers/mod.rs`):
+- A tap on a hold key keeps the session running hands-free until the next press of the same key. Dictation: the release converts the session instead of cancelling it, the next press stops it with the usual cue, and that press's release is swallowed. Agent: the release hands the open spoken query to the bar-voice guard, which finalises it on the next press exactly as a toggle does. Watchdogs that exist for a stuck hold stand down while a session is hands-free.
+- The hold threshold is 400 ms (was 300). Under it is a tap.
+- Row labels are sentences: "Hold to dictate", "Press to talk to Juno", "Say a phrase to dictate". Conflict messages quote them.
+
+Frontend (`KeyCaps.tsx`, `ShortcutRecorder.tsx`, `TriggersSettings.tsx`):
+- Bindings render as key caps with Apple glyphs in ⌃⌥⇧⌘ order. Fn is 🌐.
+- The recorder records. It starts listening when it opens, shows the caps pressed while they are held, and saves when the main key is let go. Enter saves a chord already showing, Backspace clears it, Escape leaves the binding as it was. "Shortcut saved" appears inline for a moment. The old editor's manual text field, Save, Cancel and Capture buttons are gone.
+- Conflicts show the backend's sentence in the row, naming the other trigger.
+- "Reset to default" appears on the two rows that have a factory binding.
+- The hold hint says what a tap does.
+
+Considered and cut, each a follow-up if wanted: the onboarding tryout (a separate screen, its own slice), side-specific bare modifiers such as Right Option (needs the event tap work in the FluidVoice teardown, B2 and B3), keyboard detection to pre-fill a chord when no Globe key exists (needs IOKit), and "Use it anyway" on a conflict (the backend refuses duplicates, and letting one row silently take another's key is the trap Raycast warns about).
 
 ## What was considered and cut
 

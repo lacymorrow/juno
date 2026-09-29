@@ -102,12 +102,9 @@ impl AgentInputMonitorState {
             .map(|start| start.elapsed())
             .unwrap_or(Duration::ZERO);
 
-        // If agent was started but threshold wasn't reached, it means we're cancelling
-        if agent_was_started && !threshold_was_reached {
-            self.last_cancellation_time = Some(Instant::now());
-            let gen = increment_agent_generation();
-            warn!("[AgentMonitor] Cancelling agent after {}ms - recording cancellation time for cooldown (generation={})", duration.as_millis(), gen);
-        }
+        // A tap that already opened the microphone hands the session over to
+        // the bar-voice guard (see the release handler), so this is not a
+        // cancellation and starts no cooldown.
 
         // Force reset all state immediately to prevent stuck state
         self.hold_start_time = None;
@@ -264,15 +261,15 @@ pub async fn on_agent_input_released_with_mode(
             );
         }
     } else if agent_started {
+        // A tap: the microphone is already open, so keep it open hands-free.
+        // Marking the bar-voice session active hands the next press to the
+        // stop guard in `fire_trigger_edge`, which finalises the query on
+        // release exactly as a toggle does.
         info!(
-            "[AgentMonitor] Agent input released before threshold ({}ms) - cancelling agent",
+            "[AgentMonitor] Tapped ({}ms) - keeping the spoken query open hands-free until the next press",
             duration.as_millis()
         );
-
-        // If released before threshold, cancel the agent
-        if let Err(e) = app_handle.emit(events::agent::CANCEL, ()) {
-            error!("[AgentMonitor] Failed to emit agent-cancel: {}", e);
-        }
+        set_bar_voice_active(true);
     } else {
         // Tap mode: no start yet on press; release should initiate agent transcription
         if matches!(trigger_mode, AgentTriggerMode::Tap) {
