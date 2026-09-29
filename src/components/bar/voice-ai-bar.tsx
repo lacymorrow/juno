@@ -29,7 +29,7 @@ import {
   Check,
   Type,
 } from "lucide-react";
-import Marquee from "react-fast-marquee";
+import MarqueeImport from "react-fast-marquee";
 import AudioVisualizer from "./audio-visualizer";
 
 import { EVENTS, UI } from "@/lib/constants.generated";
@@ -40,6 +40,13 @@ import type {
   ResponseContent,
 } from "../../types/voice-ai";
 import tauriConfig from "../../../src-tauri/tauri.conf.json";
+
+// react-fast-marquee is CommonJS with `exports.default`. Vite's dev pre-bundle
+// hands that over as `{ default: Component }` on the default import, so the
+// bar rendered an object and React threw "Element type is invalid" the moment
+// this appearance was chosen. Unwrap either shape.
+const Marquee = ((MarqueeImport as unknown as { default?: unknown }).default ??
+  MarqueeImport) as typeof MarqueeImport;
 
 // === STANDARDIZED UI API TYPES ===
 
