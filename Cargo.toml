@@ -55,20 +55,6 @@ codegen-units = 1
 panic = "unwind"
 strip = true
 
-# Branch builds from CI (build-branch.yml, `juno-build`). Never used for
-# anything a user downloads. With every dependency cached, a warm branch build
-# is ~21 minutes of rustc on the juno crate alone at opt-level 3 (LTO and
-# codegen-units barely matter). Dependencies, including the audio and STT
-# stack, stay at opt-level 3 so dictation performs like release; only the juno
-# crate drops to 1. Same panic = "unwind" as release.
-[profile.ci-test]
-inherits = "release"
-lto = false
-codegen-units = 16
-
-[profile.ci-test.package.juno]
-opt-level = 1
-
 # `block` 0.1.6 (unmaintained, pulled in by cocoa/objc) trips the
 # `uninhabited_static` future-incompat lint that will become a hard error
 # (rust-lang/rust#74840). vendor/block is the same crate with a one-line fix.
