@@ -32,6 +32,10 @@ pub mod settings {
     pub const SET_AUTOSTART_ENABLED: &str = "set_autostart_enabled";
     pub const GET_ADVANCED_SETTINGS_ENABLED: &str = "get_advanced_settings_enabled";
     pub const SET_ADVANCED_SETTINGS_ENABLED: &str = "set_advanced_settings_enabled";
+    /// Beta: one long-lived claude process per conversation.
+    /// See docs/plans/cli-persistent-session-spike.md
+    pub const GET_CLI_PERSISTENT_SESSION_ENABLED: &str = "get_cli_persistent_session_enabled";
+    pub const SET_CLI_PERSISTENT_SESSION_ENABLED: &str = "set_cli_persistent_session_enabled";
 }
 
 /// Core system command names

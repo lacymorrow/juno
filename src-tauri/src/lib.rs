@@ -763,6 +763,10 @@ pub fn run() {
             commands::settings::set_autostart_enabled,
             commands::settings::get_advanced_settings_enabled,
             commands::settings::set_advanced_settings_enabled,
+            // Experimental: one long-lived `claude` process per conversation.
+            // Off by default — docs/plans/cli-persistent-session-spike.md
+            agent::providers::claude_cli_session::get_cli_persistent_session_enabled,
+            agent::providers::claude_cli_session::set_cli_persistent_session_enabled,
             commands::bar_position::get_bar_position,
             commands::bar_position::set_bar_position,
             commands::bar_position::set_bar_frame,
@@ -1158,6 +1162,16 @@ pub fn run() {
                                 warn!("Failed to clean up onboarding state on window close: {}", e);
                             }
                         });
+                    }
+                    // The event loop is over; the process is about to end. Any
+                    // persistent Claude CLI processes must die with it —
+                    // `kill_on_drop` covers a drop on a live runtime, not the app
+                    // being torn down around the children (their conversations
+                    // survive via their session ids on disk).
+                    tauri::RunEvent::Exit => {
+                        tauri::async_runtime::block_on(
+                            agent::providers::claude_cli_session::shutdown_all(),
+                        );
                     }
                     _ => {}
                 }
