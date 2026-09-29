@@ -368,4 +368,3 @@ mod tests {
         assert!(text.to_lowercase().contains("fox"), "got {text:?}");
     }
 }
-
