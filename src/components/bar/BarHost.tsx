@@ -92,7 +92,9 @@ export function BarHost() {
   const loaded = barConfig !== null;
 
   useEffect(() => {
-    if (!loaded) return;
+    // Not inside a preview frame: the settings picker keeps three of those
+    // mounted, and parsing Three.js and Rive in each would only slow it down.
+    if (!loaded || window.self !== window.top) return;
     return warmHeavyLooks();
   }, [loaded]);
 

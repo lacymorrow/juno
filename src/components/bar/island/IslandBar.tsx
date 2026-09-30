@@ -229,9 +229,19 @@ export function IslandBar() {
   // ── The card ──
   const [cardOpen, setCardOpen] = useState(false);
   const [spokenOpen, setSpokenOpen] = useState(false);
+  // Read through refs so a close from a timer sees the current state.
+  const barRef = useRef(bar);
+  barRef.current = bar;
+  const inputRef = useRef("");
   const closeCard = useCallback(() => {
     setCardOpen(false);
     setSpokenOpen(false);
+    // Focus put Rust in its input state while the card was up. With nothing
+    // typed, tell it the composer blurred so it shrinks to Default and the
+    // island settles to the capsule rather than the line.
+    if (isInputState(barRef.current.barState) && inputRef.current.trim() === "") {
+      void sendInteraction(UI.INTERACTION_TYPES_BLUR);
+    }
   }, []);
 
   // A reply that arrives while the island is up opens the card. A reply that
@@ -284,6 +294,7 @@ export function IslandBar() {
 
   // ── Composer ──
   const [input, setInput] = useState("");
+  inputRef.current = input;
   const lineInputRef = useRef<HTMLInputElement>(null);
   const followUpRef = useRef<HTMLInputElement>(null);
   const lineOpen = isInputState(bar.barState);
@@ -365,17 +376,23 @@ export function IslandBar() {
   // ── Posture and size ──
   const posture = postureFor({ state: bar.barState, cardOpen, driving: isDriving });
   const [cardContentH, setCardContentH] = useState(ISLAND_SIZES.card.minHeight);
-  const measureRef = useCallback((el: HTMLDivElement | null) => {
-    if (!el || typeof ResizeObserver === "undefined") return;
+  // The card's content, measured through a callback ref: the body mounts
+  // after the posture switches, so a plain ref would be empty when the
+  // observer effect first ran.
+  const [measureEl, setMeasureEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!measureEl || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
       const h = entry.contentRect.height;
       setCardContentH(CARD_HEADER_H + CARD_BODY_PAD * 2 + Math.ceil(h) + CARD_FOOTER_H);
     });
-    observer.observe(el);
-    // The observer lives as long as the element; a new element gets a new one.
-    (el as HTMLDivElement & { __islandObserver?: ResizeObserver }).__islandObserver?.disconnect();
-    (el as HTMLDivElement & { __islandObserver?: ResizeObserver }).__islandObserver = observer;
-  }, []);
+    observer.observe(measureEl);
+    return () => observer.disconnect();
+  }, [measureEl]);
+  // A closed card forgets its height, so the next one opens small and grows.
+  useEffect(() => {
+    if (!cardOpen) setCardContentH(ISLAND_SIZES.card.minHeight);
+  }, [cardOpen]);
   const target = islandSize(posture, cardContentH);
   const suggestionExtra =
     skill.open && posture === "line" ? skill.suggestions.length * 29 + 20 : 0;
@@ -507,7 +524,7 @@ export function IslandBar() {
           className="island-scroll min-h-0 flex-1 cursor-auto select-text overflow-y-auto px-4"
           style={{ paddingTop: CARD_BODY_PAD, paddingBottom: CARD_BODY_PAD }}
         >
-          <div ref={measureRef} className="text-[13px] leading-[1.55] text-white/85">
+          <div ref={setMeasureEl} className="text-[13px] leading-[1.55] text-white/85">
             {turn.approval && (
               <ApprovalRow msg={turn.approval} onDecided={chat.handleApprovalUpdate} />
             )}

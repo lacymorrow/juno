@@ -206,6 +206,25 @@ describe("IslandBar", () => {
     expect(invoke).not.toHaveBeenCalledWith("ui_handle_interaction", expect.anything());
   });
 
+  it("settles to the capsule, not the line, when a card is dismissed under focus", async () => {
+    const { rerender } = render(<IslandBar />);
+    chat.messages = [
+      { role: "user", content: "Q", timestamp: 1 },
+      { role: "assistant", content: "A", messageId: "m1", timestamp: 2 },
+    ];
+    rerender(<IslandBar />);
+    // Clicking the card focused the window, so Rust moved to its input state.
+    await send(UI.BAR_STATES_INPUT);
+    expect(posture()).toBe("card");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(invoke).toHaveBeenCalledWith(
+      "ui_handle_interaction",
+      expect.objectContaining({
+        interaction: expect.objectContaining({ interaction_type: UI.INTERACTION_TYPES_BLUR }),
+      }),
+    );
+  });
+
   it("does not open the card for an answer that was already there when it mounted", () => {
     chat.messages = [
       { role: "user", content: "Q", timestamp: 1 },

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { LINGER_MS } from "./islandModel";
 
 const SIZE = 22;
 const RADIUS = 9;
@@ -22,7 +23,7 @@ interface LingerRingProps {
  * out. Its label says which, for assistive tech.
  */
 export function LingerRing({ progress, counting, paused, onClose, className }: LingerRingProps) {
-  const seconds = Math.ceil(progress * 12);
+  const seconds = Math.ceil((progress * LINGER_MS) / 1000);
   const label = counting
     ? paused
       ? "Close (paused)"
