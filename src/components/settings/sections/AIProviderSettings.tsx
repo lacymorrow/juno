@@ -8,6 +8,7 @@ import {
 } from "@/components/ai-elements/environment-variables";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
@@ -223,6 +224,23 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                 />
               </SettingsRow>
             </>
+          )}
+
+          {/* Applies on the next query: one-shot spawns pick it up directly,
+              and a persistent CLI session is replaced via its spawn signature. */}
+          {settings.activeProvider === "claude_cli" && (
+            <SettingsRow
+              advanced
+              htmlFor="load-account-mcp"
+              label="Load account MCP connectors"
+              description="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
+            >
+              <Switch
+                id="load-account-mcp"
+                checked={settings.providerSettings?.load_account_mcp ?? true}
+                onCheckedChange={settings.handleLoadAccountMcpChange}
+              />
+            </SettingsRow>
           )}
 
           <SettingsRow
