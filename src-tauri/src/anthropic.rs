@@ -398,8 +398,8 @@ pub async fn submit_query(
         // agent would spend seconds of model time arriving at that same card,
         // so serve it here and only fall through when the request needs
         // interpretation.
-        if crate::agent::local_intents::try_handle_media_intent(&app_handle, trimmed_query).await {
-            info!("Query handled locally as a media intent: {}", trimmed_query);
+        if crate::agent::local_intents::try_handle_local_intent(&app_handle, trimmed_query).await {
+            info!("Query handled locally as a local intent: {}", trimmed_query);
             // No agent run will start, so nothing further will ever say this
             // ended, and every surface that switched to a working state when
             // the query was accepted would sit there. The flag is already
