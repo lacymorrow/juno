@@ -1997,17 +1997,44 @@ pub(crate) fn post_mouse_event(
     Ok(())
 }
 
+/// Hard backstop on platform-level waits: 1 hour, in milliseconds.
+/// The Tauri `wait` command enforces a tighter cap upstream (LAC-4013); this
+/// bound covers callers that reach the platform layer directly (e.g. the MCP
+/// `computer` tool's `wait` action), where the duration is agent-controlled
+/// (LAC-4069).
+pub(crate) const MAX_WAIT_DURATION_MS: u64 = 3_600_000;
+
 /// Wait for a specified duration in milliseconds.
 ///
-/// Blocks the calling thread (`std::thread::sleep`). Only call this from
-/// synchronous contexts (e.g. the juno-cua CLI). From async code, use
-/// `tokio::time::sleep` instead — the Tauri `wait` command does exactly that
-/// (LAC-4013): routing through this function pinned a Tokio worker for the
-/// whole duration.
+/// Blocks the calling thread (`std::thread::sleep`). Prefer calling it from
+/// synchronous contexts (e.g. the juno-cua CLI); from async code, use
+/// `tokio::time::sleep` instead, as the Tauri `wait` command does (LAC-4013).
+/// When it is reached from a multi-thread Tokio runtime anyway — the sync
+/// `AccessibilityEngine` trait hides its callers, and the MCP stdio server
+/// calls `Desktop::call_tool` from async handlers — `block_in_place` keeps
+/// the sleep from starving the executor (LAC-4069).
 pub(crate) fn wait(duration_ms: u64) -> Result<(), AutomationError> {
+    if duration_ms > MAX_WAIT_DURATION_MS {
+        return Err(AutomationError::InvalidArgument(format!(
+            "Wait duration {}ms exceeds maximum of {}ms (1 hour)",
+            duration_ms, MAX_WAIT_DURATION_MS
+        )));
+    }
+
     debug!("Waiting for {} ms", duration_ms);
 
-    std::thread::sleep(std::time::Duration::from_millis(duration_ms));
+    let sleep = || std::thread::sleep(std::time::Duration::from_millis(duration_ms));
+    match tokio::runtime::Handle::try_current() {
+        // On a multi-thread Tokio runtime, demote this worker to a blocking
+        // thread for the duration so the sleep cannot starve the executor
+        // (LAC-4069 — this is called through the sync AccessibilityEngine
+        // trait from async MCP handlers).
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(sleep)
+        }
+        // Plain thread, or current-thread runtime where block_in_place panics.
+        _ => sleep(),
+    }
 
     debug!("Wait completed");
     Ok(())
@@ -3115,11 +3142,38 @@ fn left_click_no_warp_inner(
 
 #[cfg(test)]
 mod tests {
-    use super::focus_to_restore;
+    use super::{focus_to_restore, wait, MAX_WAIT_DURATION_MS};
 
     const USER_APP: i32 = 101;
     const AGENT_TARGET: i32 = 202;
     const SOMEWHERE_ELSE: i32 = 303;
+
+    // --- wait() bounds and runtime safety (LAC-4069) ---
+
+    #[test]
+    fn wait_over_cap_rejected_without_sleeping() {
+        // A wait like `seconds=1e12` must fail fast, not park a thread for years
+        assert!(wait(MAX_WAIT_DURATION_MS + 1).is_err());
+        assert!(wait(u64::MAX).is_err());
+    }
+
+    #[test]
+    fn wait_within_cap_succeeds_outside_runtime() {
+        assert!(wait(1).is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn wait_on_multi_thread_runtime_uses_block_in_place() {
+        // Exercises the block_in_place branch; must not panic or deadlock
+        assert!(wait(1).is_ok());
+    }
+
+    #[tokio::test]
+    async fn wait_on_current_thread_runtime_does_not_panic() {
+        // block_in_place panics on current-thread runtimes — wait() must
+        // detect the flavor and fall back to a plain sleep
+        assert!(wait(1).is_ok());
+    }
 
     #[test]
     fn a_failed_redirect_restores_nothing() {
