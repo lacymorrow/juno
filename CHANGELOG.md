@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.26] - 2026-09-30
+
+### Added
+
+- **router:** smart routing beta, plus real orchestrator task timeouts (#624) (2d87cb59)
+- **agent:** speak first and render components while the reply streams (#626) (606838b3)
+- **local-intents:** instant system, timer and app commands (#625) (a11da515)
+
 ## [0.8.25] - 2026-09-30
 
 ### Added
@@ -580,7 +588,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.25...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.26...HEAD
+[0.8.26]: https://github.com/lacymorrow/juno/compare/canary...v0.8.26
 [0.8.25]: https://github.com/lacymorrow/juno/compare/cua-v0.8.24...v0.8.25
 [0.8.24]: https://github.com/lacymorrow/juno/compare/cua-v0.8.23...v0.8.24
 [0.8.23]: https://github.com/lacymorrow/juno/compare/cua-v0.8.22...v0.8.23
