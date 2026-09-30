@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.35] - 2026-09-30
+
+### Added
+
+- **bar:** Avatar rebuilt as a character with speech bubbles (#633) (995f946f)
+
 ## [0.8.34] - 2026-09-30
 
 ### Added
@@ -630,7 +636,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.34...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.35...HEAD
+[0.8.35]: https://github.com/lacymorrow/juno/compare/cua-v0.8.34...v0.8.35
 [0.8.34]: https://github.com/lacymorrow/juno/compare/cua-v0.8.33...v0.8.34
 [0.8.33]: https://github.com/lacymorrow/juno/compare/cua-v0.8.32...v0.8.33
 [0.8.31]: https://github.com/lacymorrow/juno/compare/cua-v0.8.30...v0.8.31
