@@ -3,7 +3,8 @@ import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { KeyboardShortcuts } from "@/types/keyboard";
-import { AUDIO } from "@/lib/constants.generated";
+import { AUDIO, SETTINGS } from "@/lib/constants.generated";
+import { useEventListener } from "@/hooks/useEventListener";
 import { useInvoke } from "@/hooks/useInvoke";
 import type {
 	ProviderInfo,
@@ -303,6 +304,19 @@ export function useSettings() {
 			unlisten?.();
 		};
 	}, []); // No deps needed — handler always gets latest state via event payload
+
+	// Each window (Settings, chat pane) runs its own copy of this hook, so a
+	// change made in one never reached the other. The backend emits the full
+	// settings on every save; follow the agent mode from there.
+	useEventListener<{ agent?: { execution_mode?: string } }>(
+		SETTINGS.EVENTS_SETTINGS_CHANGED,
+		(payload) => {
+			const mode = payload?.agent?.execution_mode;
+			if (!mode) return;
+			invalidateCache("agentMode");
+			setAgentMode(mode);
+		},
+	);
 
 	const loadAllSettings = useCallback(async () => {
 		setIsLoading(true);
@@ -764,6 +778,7 @@ export function useSettings() {
 				errorMessage: "Failed to set agent mode"
 			}
 		);
+		invalidateCache("agentMode");
 		setAgentMode(newMode);
 	}, [invokeCommand]);
 
