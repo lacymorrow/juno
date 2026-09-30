@@ -48,7 +48,7 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
   {
     value: UI.BAR_APPEARANCES_PERSONA,
     name: "Avatar",
-    descriptor: "A round avatar that shifts while Juno listens and speaks.",
+    descriptor: "A character you talk to. It leans in, thinks, and answers in speech bubbles.",
   },
 ];
 
