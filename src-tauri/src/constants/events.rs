@@ -104,7 +104,6 @@ pub mod dictation {
     pub const FINISHED: &str = "app-dictation-finished";
     pub const PARTIAL_RESULT: &str = "app-dictation-partial-result";
     pub const ERROR: &str = "app-dictation-error";
-    pub const STATE_CHANGED: &str = "dictation-state-changed";
 
     // Dictation state events
     pub const ACTIVE: &str = "dictation-active";
@@ -273,6 +272,8 @@ pub mod always_listening {
     pub const EVENT: &str = "always-listening-event";
     pub const STOPPED_BY_COMMAND: &str = "always-listening:stopped-by-command";
     pub const RETURN_TO_WAKE_WORD: &str = "always-listening:return-to-wake-word";
+    /// The wake-word test panel listens for this. Nothing emits it today.
+    pub const VOLUME: &str = "always-listening-volume";
 }
 
 /// Permission events
@@ -332,6 +333,8 @@ pub mod cloud {
     pub const CONNECTOR_STATE: &str = "cloud-connector-state";
     pub const CONNECTION_STATE: &str = "cloud-connection-state";
     pub const COMMAND_RECEIVED: &str = "cloud-command-received";
+    /// The cloud connector listens for this. Nothing emits it today.
+    pub const CONNECTOR_ERROR: &str = "cloud-connector-error";
 }
 
 /// System and application events
@@ -354,6 +357,12 @@ pub mod system {
     pub const WINDOW_MINIMIZE: &str = "window-minimize";
     pub const WINDOW_MAXIMIZE: &str = "window-maximize";
     pub const WINDOW_CLOSE: &str = "window-close";
+
+    /// Emitted by Tauri itself when a window is destroyed.
+    pub const TAURI_DESTROYED: &str = "tauri://destroyed";
+    /// Debug builds listen for this to clean up MCP servers after a frontend
+    /// reload. Nothing emits it today, so that cleanup never runs.
+    pub const FRONTEND_RELOAD: &str = "frontend-reload";
 }
 
 /// Onboarding events
@@ -388,6 +397,15 @@ pub mod bar {
     pub const MAIN_WINDOW_OPENED: &str = "bar-main-window-opened";
     /// The full-size chat window went away. The bar takes the conversation back.
     pub const MAIN_WINDOW_CLOSED: &str = "bar-main-window-closed";
+}
+
+/// Snap-well overlay. Window to window: the bar emits these while it is being
+/// dragged and the overlay window draws the wells. The backend never sends them.
+pub mod snap_wells {
+    /// Payload: the logical frame the overlay should draw the wells in.
+    pub const SHOW: &str = "snap-wells-show";
+    /// No payload.
+    pub const HIDE: &str = "snap-wells-hide";
 }
 
 /// Trigger binding events

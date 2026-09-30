@@ -13,9 +13,26 @@ const RUST_CONSTANTS_DIR = 'src-tauri/src/constants';
 const TS_OUTPUT_FILE = 'src/lib/constants.generated.ts';
 
 /**
+ * Read a Rust constants file with every comment line removed.
+ *
+ * The parsers below find module bodies by matching braces. A brace inside a
+ * doc comment (for example a payload shape written as `{ agent_id, x, y }`)
+ * used to end the module early and silently drop every constant after it.
+ * Stripping whole-line comments first makes that impossible. Only lines that
+ * start with `//` are removed, so a `//` inside a string such as a URL stays.
+ */
+function readRustConstantsFile(name) {
+    const source = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, name), 'utf8');
+    return source
+        .split('\n')
+        .filter((line) => !/^\s*\/\//.test(line))
+        .join('\n');
+}
+
+/**
  * Parse all Rust constant definitions
  */
-function parseRustConstants() {
+export function parseRustConstants() {
     const constants = {
         events: {},
         timeouts: {},
@@ -36,59 +53,59 @@ function parseRustConstants() {
     // Parse each constants module
     try {
         // Parse events module
-        const eventsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'events.rs'), 'utf8');
+        const eventsFile = readRustConstantsFile('events.rs');
         constants.events = parseEventConstants(eventsFile);
 
         // Parse timeouts module
-        const timeoutsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'timeouts.rs'), 'utf8');
+        const timeoutsFile = readRustConstantsFile('timeouts.rs');
         constants.timeouts = parseSimpleConstants(timeoutsFile);
 
         // Parse ports module
-        const portsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'ports.rs'), 'utf8');
+        const portsFile = readRustConstantsFile('ports.rs');
         constants.ports = parseSimpleConstants(portsFile);
 
         // Parse API module
-        const apiFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'api.rs'), 'utf8');
+        const apiFile = readRustConstantsFile('api.rs');
         constants.api = parseModuleConstants(apiFile);
 
         // Parse app module
-        const appFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'app.rs'), 'utf8');
+        const appFile = readRustConstantsFile('app.rs');
         constants.app = parseSimpleConstants(appFile);
 
         // Parse UI module
-        const uiFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'ui.rs'), 'utf8');
+        const uiFile = readRustConstantsFile('ui.rs');
         constants.ui = parseModuleConstants(uiFile);
 
         // Parse audio module
-        const audioFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'audio.rs'), 'utf8');
+        const audioFile = readRustConstantsFile('audio.rs');
         constants.audio = parseModuleConstants(audioFile);
 
         // Parse files module
-        const filesFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'files.rs'), 'utf8');
+        const filesFile = readRustConstantsFile('files.rs');
         constants.files = parseModuleConstants(filesFile);
 
         // Parse permissions module
-        const permissionsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'permissions.rs'), 'utf8');
+        const permissionsFile = readRustConstantsFile('permissions.rs');
         constants.permissions = parseModuleConstants(permissionsFile);
 
         // Parse errors module
-        const errorsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'errors.rs'), 'utf8');
+        const errorsFile = readRustConstantsFile('errors.rs');
         constants.errors = parseModuleConstants(errorsFile);
 
         // Parse commands module
-        const commandsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'commands.rs'), 'utf8');
+        const commandsFile = readRustConstantsFile('commands.rs');
         constants.commands = parseModuleConstants(commandsFile);
 
         // Parse memory module
-        const memoryFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'memory.rs'), 'utf8');
+        const memoryFile = readRustConstantsFile('memory.rs');
         constants.memory = parseModuleConstants(memoryFile);
 
         // Parse agent module (contains computer actions and tool names)
-        const agentFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'agent.rs'), 'utf8');
+        const agentFile = readRustConstantsFile('agent.rs');
         constants.agent = parseModuleConstants(agentFile);
 
         // Parse settings module (contains keyboard shortcuts and other settings)
-        const settingsFile = fs.readFileSync(path.join(RUST_CONSTANTS_DIR, 'settings.rs'), 'utf8');
+        const settingsFile = readRustConstantsFile('settings.rs');
         constants.settings = parseSettingsConstants(settingsFile);
 
     } catch (error) {
@@ -101,22 +118,20 @@ function parseRustConstants() {
 function parseEventConstants(rustCode) {
     const events = {};
 
-    // Parse nested modules like agent::EVENT
-    const moduleRegex = /pub mod (\w+) \{([^}]+)\}/g;
+    // Nested modules like agent::EVENT, found with the same brace matching as
+    // the other module parsers (a `[^}]+` body regex stopped at the first
+    // closing brace it met).
     // `\s*` around `:` and `=` (not literal spaces) so a rustfmt line-wrap of a
-    // long event definition is still parsed — same fix as parseSimpleConstants.
+    // long event definition is still parsed, same fix as parseSimpleConstants.
     const constRegex = /pub const (\w+):\s*&str\s*=\s*"([^"]+)"/g;
 
-    let moduleMatch;
-    while ((moduleMatch = moduleRegex.exec(rustCode)) !== null) {
-        const [, moduleName, moduleContent] = moduleMatch;
-
+    parseModulesWithBraceMatching(rustCode).forEach(({ moduleName, moduleContent }) => {
         let constMatch;
         while ((constMatch = constRegex.exec(moduleContent)) !== null) {
             const [, constName, constValue] = constMatch;
             events[`${moduleName.toUpperCase()}_${constName}`] = constValue;
         }
-    }
+    });
 
     return events;
 }
@@ -349,7 +364,7 @@ function formatValue(value) {
 /**
  * Generate comprehensive TypeScript constants file
  */
-function generateTypeScript(constants) {
+export function generateTypeScript(constants) {
     return `// Generated file - do not edit manually
 // This file is auto-generated from Rust constants
 // Run 'npm run generate-constants' to update

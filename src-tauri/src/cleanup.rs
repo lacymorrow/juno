@@ -12,7 +12,7 @@ pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
     let app_handle_clone = app_handle.clone();
 
     // Handle window close event
-    app_handle.listen("tauri://destroyed", move |_| {
+    app_handle.listen(crate::constants::events::system::TAURI_DESTROYED, move |_| {
         info!("Application window destroyed, initiating cleanup...");
         let handle = app_handle_clone.clone();
 

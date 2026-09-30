@@ -289,21 +289,17 @@ pub mod defaults {
     pub const OPEN_SETTINGS: &str = "Ctrl+Comma";
 }
 
-/// Command names for settings operations (to prevent duplication)
-pub mod commands {
-    pub const GET_ALL_SETTINGS: &str = "get_all_settings";
-    pub const UPDATE_SETTINGS: &str = "update_settings";
-    pub const RESET_SETTINGS: &str = "reset_centralized_settings";
-    pub const EXPORT_SETTINGS: &str = "export_settings";
-    pub const IMPORT_SETTINGS: &str = "import_settings";
-}
+// Settings command names live in `constants::commands::settings`, the one
+// place every command name is defined.
 
 /// Event names for settings changes (for reactivity)
 pub mod events {
     pub const SETTINGS_CHANGED: &str = "settings_changed";
     pub const KEYBOARD_SHORTCUTS_CHANGED: &str = "keyboard_shortcuts_changed";
     pub const AGENT_SETTINGS_CHANGED: &str = "agent_settings_changed";
-    pub const PROVIDER_SETTINGS_CHANGED: &str = "provider_settings_changed";
+    /// Defined once, in `constants::events::system`, and re-exported here so
+    /// the settings manager can keep emitting it by its settings name.
+    pub use crate::constants::events::system::PROVIDER_SETTINGS_CHANGED;
     pub const CLOUD_SETTINGS_CHANGED: &str = "cloud_settings_changed";
     pub const AUDIO_SETTINGS_CHANGED: &str = "audio_settings_changed";
     pub const TOOL_SETTINGS_CHANGED: &str = "tool_settings_changed";
