@@ -268,12 +268,17 @@ pub mod config {
 // Monitor session settings
 pub mod monitor_sessions {
     /// How long a press must last to count as a hold. Under this it is a tap,
-    /// and a tap on a push-to-talk key keeps the session running hands-free
-    /// until the next tap. 400 ms is where a deliberate hold and a quick tap
-    /// separate cleanly on hardware; 300 ms cancelled short holds that people
-    /// meant.
+    /// which on a hold key cancels the session it opened. 400 ms is where a
+    /// deliberate hold and a quick tap separate cleanly on hardware; 300 ms
+    /// cancelled short holds that people meant.
     pub const HOLD_DURATION_MS: u64 = 400;
     pub const IMMEDIATE_START_MS: u64 = 15;
+
+    /// How long the recognizer waits after a short-hold release for a second
+    /// press before it forgets. A press inside the window is a double tap and
+    /// runs the Press code path on its down edge. Kept short so a natural
+    /// second tap counts and a slow one-then-later press does not.
+    pub const DOUBLE_TAP_WINDOW_MS: u64 = 300;
 
     // Max durations
     pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds

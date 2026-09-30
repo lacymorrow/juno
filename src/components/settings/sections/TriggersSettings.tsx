@@ -76,7 +76,7 @@ const TARGET_LABEL: Record<TriggerTarget, string> = {
 
 const METHOD_HINT: Record<TriggerMethod, string> = {
   push_to_talk:
-    "Hold the key while you speak, let go to finish. Tap it instead and it keeps listening until the next tap.",
+    "Hold the key while you speak, let go to finish. Double-tap it to keep listening until you press it again.",
   toggle: "Press once to start, again to stop.",
   voice: "Say the phrase out loud and Juno listens.",
 };
