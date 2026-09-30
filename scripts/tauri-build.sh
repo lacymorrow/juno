@@ -36,9 +36,10 @@
 # Anthropic key, for handing to someone who should be able to open Juno and
 # talk to it without signing up for a provider. The key is read from
 # ~/.tauri/juno-demo.key (never the repo) and compiled in with option_env!.
-# It installs beside a normal Juno under its own bundle id, and it does not
-# self-update, because the public build has no key and an update would end the
-# demo. The key is readable in the binary by anyone holding it: give the demo
+# It is the same app as a normal Juno (same name, same bundle id), so
+# installing the real Juno over it keeps settings, history, models and macOS
+# permissions. It does not self-update, because the public build has no key
+# and an update would end the demo. The key is readable in the binary by anyone holding it: give the demo
 # its own Anthropic workspace with a spend cap, one key per cohort, and hand
 # the build out privately. The demo gets signed and notarized like any other
 # build: it is the one most likely to be handed to someone else, so it is the
@@ -527,7 +528,6 @@ else
 fi
 
 if [[ "$demo" == "1" ]]; then
-  product_app_name="Juno Demo"
   if [[ -z "${JUNO_DEMO_ANTHROPIC_KEY:-}" ]]; then
     if [[ ! -f "$demo_key_path" ]]; then
       cat >&2 <<MSG
@@ -544,7 +544,7 @@ MSG
   export JUNO_DEMO_COHORT="${JUNO_DEMO_COHORT:-}"
   echo "tauri-build: demo build, key ${JUNO_DEMO_ANTHROPIC_KEY:0:7}... (${#JUNO_DEMO_ANTHROPIC_KEY} chars)${JUNO_DEMO_COHORT:+, cohort $JUNO_DEMO_COHORT}" >&2
   echo "tauri-build: ${version} build ${build_number} ${commit} on ${branch}" >&2
-  run_build "Juno-Demo" bunx tauri build --config '{"productName":"Juno Demo","identifier":"com.juno.desktop.demo","bundle":{"createUpdaterArtifacts":false}}' "$@"
+  run_build "Juno-Demo" bunx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' "$@"
   exit $?
 fi
 

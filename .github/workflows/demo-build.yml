@@ -6,9 +6,9 @@ name: Demo build
 #
 # The demo is a golden copy that carries an Anthropic key compiled in, handed
 # out privately to people who should be able to open Juno and talk to it
-# without signing up for a provider. It installs beside a normal Juno under its
-# own bundle id, sets createUpdaterArtifacts:false, and does NOT self-update, so
-# it needs no updater signing key (TAURI_SIGNING_PRIVATE_KEY) at all. See the
+# without signing up for a provider. It is the same app as a normal Juno (same
+# name and bundle id, so installing the real Juno over it keeps everything),
+# sets createUpdaterArtifacts:false, and does NOT self-update, so it needs no updater signing key (TAURI_SIGNING_PRIVATE_KEY) at all. See the
 # "Demo builds:" comment block in scripts/tauri-build.sh.
 #
 # NEW repository secrets a human must add before this can run
