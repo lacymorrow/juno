@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEventListener } from "@/hooks/useEventListener";
-import { EVENTS } from "@/lib/constants.generated";
+import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 
 /** Mirrors `AgentSessionStatus` in src-tauri/src/agents/session.rs (snake_case serde). */
 export type AgentSessionStatus =
@@ -39,7 +39,7 @@ export function useAgentSessions() {
 
 	useEffect(() => {
 		let mounted = true;
-		invoke<AgentSessionInfo[]>("list_agent_sessions")
+		invoke<AgentSessionInfo[]>(COMMANDS.AGENT_SESSIONS_LIST_AGENT_SESSIONS)
 			.then((snapshot) => {
 				if (mounted) setSessions(snapshot);
 			})
@@ -55,7 +55,7 @@ export function useAgentSessions() {
 
 	const focusSession = useCallback(async (sessionId: string | null) => {
 		try {
-			await invoke("focus_agent_session", { sessionId });
+			await invoke(COMMANDS.AGENT_SESSIONS_FOCUS_AGENT_SESSION, { sessionId });
 		} catch (error) {
 			console.error("Failed to focus agent session:", error);
 		}
@@ -63,7 +63,7 @@ export function useAgentSessions() {
 
 	const cancelSession = useCallback(async (sessionId: string) => {
 		try {
-			await invoke("cancel_agent_session", { sessionId });
+			await invoke(COMMANDS.AGENT_SESSIONS_CANCEL_AGENT_SESSION, { sessionId });
 		} catch (error) {
 			console.error("Failed to cancel agent session:", error);
 		}

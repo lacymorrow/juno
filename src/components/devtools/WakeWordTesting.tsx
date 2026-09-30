@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import type { LoadingStates } from "@/types/devtools";
-import { EVENTS } from "@/lib/constants.generated";
+import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -186,7 +186,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
 
       // Listen for volume level updates (if available)
       const unlistenVolume = await listen<{ level: number }>(
-        "always-listening-volume",
+        EVENTS.ALWAYS_LISTENING_VOLUME,
         (event) => {
           setVolumeLevel(event.payload.level);
         }
@@ -213,9 +213,9 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
   const loadStatus = async () => {
     try {
       const [isActive, sensitivity, wakeWords] = await Promise.all([
-        invoke<boolean>("get_always_listening_status"),
-        invoke<number>("get_always_listening_sensitivity"),
-        invoke<string[]>("get_always_listening_wake_words"),
+        invoke<boolean>(COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS),
+        invoke<number>(COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_SENSITIVITY),
+        invoke<string[]>(COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_WAKE_WORDS),
       ]);
 
       setStatus((prev) => ({
@@ -235,7 +235,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
     setLoadingStates((prev) => ({ ...prev, toggleAlwaysListening: true }));
 
     try {
-      await invoke("toggle_always_listening_mode");
+      await invoke(COMMANDS.ALWAYS_LISTENING_TOGGLE_ALWAYS_LISTENING_MODE);
       await loadStatus(); // Refresh status after toggle
       addEvent(`${status.isActive ? "⏹️" : "▶️"} Always listening ${action}ed`);
       toast.success(`Always listening ${action}ed`);
@@ -254,7 +254,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
     }));
 
     try {
-      await invoke("set_always_listening_sensitivity", {
+      await invoke(COMMANDS.ALWAYS_LISTENING_SET_ALWAYS_LISTENING_SENSITIVITY, {
         sensitivity: newSensitivity,
       });
       setStatus((prev) => ({ ...prev, sensitivity: newSensitivity }));
@@ -283,7 +283,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
 
     try {
       const updatedWakeWords = [...status.wakeWords, newWakeWord.trim()];
-      await invoke("set_always_listening_wake_words", {
+      await invoke(COMMANDS.ALWAYS_LISTENING_SET_ALWAYS_LISTENING_WAKE_WORDS, {
         wakeWords: updatedWakeWords,
       });
       setStatus((prev) => ({ ...prev, wakeWords: updatedWakeWords }));
@@ -308,7 +308,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
 
     try {
       const updatedWakeWords = status.wakeWords.filter((w) => w !== word);
-      await invoke("set_always_listening_wake_words", {
+      await invoke(COMMANDS.ALWAYS_LISTENING_SET_ALWAYS_LISTENING_WAKE_WORDS, {
         wakeWords: updatedWakeWords,
       });
       setStatus((prev) => ({ ...prev, wakeWords: updatedWakeWords }));
@@ -350,7 +350,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
     setLoadingStates((prev) => ({ ...prev, debugAlwaysListening: true }));
 
     try {
-      const debugInfo = await invoke("debug_always_listening_status");
+      const debugInfo = await invoke(COMMANDS.ALWAYS_LISTENING_DEBUG_ALWAYS_LISTENING_STATUS);
       console.log("Always Listening Debug Info:", debugInfo);
       addEvent(`🔍 Debug info retrieved (check console)`);
       toast.success("Debug information logged to console");
@@ -366,7 +366,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
     setTranscriptionDebugging(newState);
 
     try {
-      await invoke("set_transcription_debugging", { enabled: newState });
+      await invoke(COMMANDS.ALWAYS_LISTENING_SET_TRANSCRIPTION_DEBUGGING, { enabled: newState });
       addEvent(
         `🔍 Transcription debugging ${newState ? "enabled" : "disabled"}`
       );
@@ -384,7 +384,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
     setAudioLevelMonitoring(newState);
 
     try {
-      await invoke("set_audio_level_monitoring", { enabled: newState });
+      await invoke(COMMANDS.ALWAYS_LISTENING_SET_AUDIO_LEVEL_MONITORING, { enabled: newState });
       addEvent(
         `📊 Audio level monitoring ${newState ? "enabled" : "disabled"}`
       );
@@ -401,7 +401,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
     setLoadingStates((prev) => ({ ...prev, debugAlwaysListening: true }));
 
     try {
-      const testResult = await invoke("test_whisper_model");
+      const testResult = await invoke(COMMANDS.ALWAYS_LISTENING_TEST_WHISPER_MODEL);
       console.log("Whisper Model Test Result:", testResult);
       addEvent(`🧠 Whisper model test completed (check console)`);
       toast.success("Whisper model test completed - check console for details");
@@ -417,7 +417,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
     setLoadingStates((prev) => ({ ...prev, debugAlwaysListening: true }));
 
     try {
-      const result = await invoke("force_transcription_test");
+      const result = await invoke(COMMANDS.ALWAYS_LISTENING_FORCE_TRANSCRIPTION_TEST);
       console.log("Force Transcription Test Result:", result);
       addEvent(`🎤 Force transcription test completed (check console)`);
       toast.success(

@@ -166,7 +166,7 @@ export function NowPlayingCard({
 
   const openApp = useCallback(async () => {
     try {
-      await invoke("open_application", { appName: app });
+      await invoke(COMMANDS.DESKTOP_OPEN_APPLICATION, { appName: app });
       setTimeout(() => void refresh(), 1500);
     } catch (err) {
       setError(String(err));

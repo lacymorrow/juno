@@ -6,6 +6,7 @@ import type { LoadingStates } from "@/types/devtools";
 import { Download, Eye, FileText } from "lucide-react";
 import React, { useState } from "react";
 import { toast } from "sonner";
+import { COMMANDS } from "@/lib/constants.generated";
 
 interface SystemContextDebugProps {
   loadingStates: LoadingStates;
@@ -23,7 +24,7 @@ const SystemContextDebug: React.FC<SystemContextDebugProps> = ({
     setLoadingStates((prev) => ({ ...prev, testSystemContext: true }));
 
     try {
-      const context = await invokeCommand<string>("test_system_context", {});
+      const context = await invokeCommand<string>(COMMANDS.APP_TEST_SYSTEM_CONTEXT, {});
       setSystemContext(context);
       setShowContext(true);
       toast.success("System context gathered successfully");

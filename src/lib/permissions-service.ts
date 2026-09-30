@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PermissionsState } from "@/types/settings";
+import { COMMANDS } from "@/lib/constants.generated";
 export type { PermissionsState, AppPermissionStatus } from "@/types/settings";
 
 // Cache configuration
@@ -117,7 +118,7 @@ export function __resetPermissionsServiceCacheForTests(): void {
 }
 
 function startPermissionsRequest(): Promise<PermissionsState> {
-  const request = invoke<PermissionsState>("check_permissions_status_native")
+  const request = invoke<PermissionsState>(COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS)
     .then((result) => {
       if (pendingRequest === request) {
         cachedPermissions = result;

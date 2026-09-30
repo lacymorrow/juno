@@ -129,6 +129,7 @@ export const EVENTS = {
   ALWAYS_LISTENING_EVENT: 'always-listening-event',
   ALWAYS_LISTENING_STOPPED_BY_COMMAND: 'always-listening:stopped-by-command',
   ALWAYS_LISTENING_RETURN_TO_WAKE_WORD: 'always-listening:return-to-wake-word',
+  ALWAYS_LISTENING_VOLUME: 'always-listening-volume',
   INPUT_CONTROL_REQUEST: 'input-control-request',
   INPUT_CONTROL_STATE: 'input-control-state',
   INPUT_CONTROL_OFFER: 'input-control-offer',
@@ -147,6 +148,7 @@ export const EVENTS = {
   CLOUD_CONNECTOR_STATE: 'cloud-connector-state',
   CLOUD_CONNECTION_STATE: 'cloud-connection-state',
   CLOUD_COMMAND_RECEIVED: 'cloud-command-received',
+  CLOUD_CONNECTOR_ERROR: 'cloud-connector-error',
   SYSTEM_ERROR_OCCURRED: 'error-occurred',
   SYSTEM_STATUS_UPDATE: 'system-status-update',
   SYSTEM_MCP_STATE_UPDATED: 'mcp_state_updated',
@@ -162,6 +164,7 @@ export const EVENTS = {
   SYSTEM_WINDOW_MAXIMIZE: 'window-maximize',
   SYSTEM_WINDOW_CLOSE: 'window-close',
   SYSTEM_TAURI_DESTROYED: 'tauri://destroyed',
+  SYSTEM_FRONTEND_RELOAD: 'frontend-reload',
   ONBOARDING_COMPLETE: 'onboarding-complete',
   ONBOARDING_SKIPPED: 'onboarding-skipped',
   ONBOARDING_STATE_CHANGED: 'onboarding-state-changed',
@@ -1472,6 +1475,12 @@ export const LOCAL_STORAGE_KEYS = {
   VOICE_SETTINGS: 'juno_voice_settings',
   THEME_PREFERENCE: 'juno_theme',
   WINDOW_STATE: 'juno_window_state',
+  // Developer-tools overlay toggles, read by the overlays and written by the
+  // Visualization settings panel. Per-window display prefs, not settings.
+  SHOW_KEY_PRESS_OVERLAY: 'juno-show-key-press-overlay',
+  SHOW_COMMAND_OVERLAY: 'juno-show-command-overlay',
+  SHOW_CLICK_VISUALIZATION: 'juno-show-click-visualization',
+  SHOW_DESKTOP_CURSOR_VISUALIZATION: 'juno-show-desktop-cursor-visualization',
 } as const;
 
 export const REGEX_PATTERNS = {

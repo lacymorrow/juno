@@ -9,6 +9,7 @@ import {
   Square,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { COMMANDS } from "@/lib/constants.generated";
 
 interface AgentExecutionProgress {
   is_executing: boolean;
@@ -49,7 +50,7 @@ export function AgentExecutionProgressIndicator({
         }
 
         const result = await invoke<AgentExecutionProgress>(
-          "get_agent_execution_progress"
+          COMMANDS.CORE_GET_AGENT_EXECUTION_PROGRESS
         );
         
         if (!isCleanedUp) {

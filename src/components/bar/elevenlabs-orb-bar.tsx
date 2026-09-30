@@ -11,7 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, useReducedMotion } from "motion/react";
-import { EVENTS, UI } from "@/lib/constants.generated";
+import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
@@ -67,8 +67,8 @@ import {
  */
 
 /** Backend element id. Rust has no orb id; the orb uses the floating bar's. */
-const COMPONENT_ID = "floating-bar";
-const WINDOW_LABEL = "floating-bar";
+const COMPONENT_ID = UI.ELEMENT_IDS_FLOATING_BAR;
+const WINDOW_LABEL = WINDOW_LABELS.FLOATING_BAR;
 /** Vertical padding inside the sheet, both sides. */
 const SHEET_PAD = 24;
 
@@ -118,7 +118,7 @@ async function sendInteraction(type: string, data?: Record<string, unknown>): Pr
     timestamp: Date.now(),
   };
   try {
-    await invoke("ui_handle_interaction", { elementId: COMPONENT_ID, interaction });
+    await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, { elementId: COMPONENT_ID, interaction });
   } catch (error) {
     console.error("Orb: interaction failed:", error);
   }

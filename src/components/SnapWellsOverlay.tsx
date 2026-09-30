@@ -32,6 +32,7 @@ import {
   wellToOverlayRect,
   type OverlayRect,
 } from "@/lib/snapWellsOverlay";
+import { EVENTS } from "@/lib/constants.generated";
 
 // Corner radius of each hole / ring, in CSS px. Roughly matches the bar pill.
 const HOLE_RADIUS = 14;
@@ -198,11 +199,11 @@ export const SnapWellsOverlay = () => {
     [hide, startHighlightPoll],
   );
 
-  useEventListener<ShowPayload>("snap-wells-show", (payload) => {
+  useEventListener<ShowPayload>(EVENTS.SNAP_WELLS_SHOW, (payload) => {
     void show(payload);
   });
 
-  useEventListener("snap-wells-hide", () => {
+  useEventListener(EVENTS.SNAP_WELLS_HIDE, () => {
     void hide();
   });
 

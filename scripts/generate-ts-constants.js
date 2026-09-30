@@ -544,6 +544,12 @@ export const LOCAL_STORAGE_KEYS = {
   VOICE_SETTINGS: 'juno_voice_settings',
   THEME_PREFERENCE: 'juno_theme',
   WINDOW_STATE: 'juno_window_state',
+  // Developer-tools overlay toggles, read by the overlays and written by the
+  // Visualization settings panel. Per-window display prefs, not settings.
+  SHOW_KEY_PRESS_OVERLAY: 'juno-show-key-press-overlay',
+  SHOW_COMMAND_OVERLAY: 'juno-show-command-overlay',
+  SHOW_CLICK_VISUALIZATION: 'juno-show-click-visualization',
+  SHOW_DESKTOP_CURSOR_VISUALIZATION: 'juno-show-desktop-cursor-visualization',
 } as const;
 
 export const REGEX_PATTERNS = {

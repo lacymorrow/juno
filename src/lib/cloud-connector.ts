@@ -134,7 +134,7 @@ export class ProductionCloudConnector {
 		}));
 
 		// Listen for connection errors (no generated constant for this event)
-		this.unlistenFns.push(await listen('cloud-connector-error', (event) => {
+		this.unlistenFns.push(await listen(EVENTS.CLOUD_CONNECTOR_ERROR, (event) => {
 			console.error('[CloudConnector] Connection error:', event.payload);
 		}));
 	}

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useConversation } from "@/hooks/useConversation";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import type { BackendStatus } from "@/components/ExamplePrompts";
+import { COMMANDS } from "@/lib/constants.generated";
 
 const noop = () => {};
 
@@ -45,7 +46,7 @@ export function useBarConversation() {
   useEffect(() => {
     if (hasCheckedServer.current) return;
     hasCheckedServer.current = true;
-    invoke<{ backend_running: boolean }>("check_server_status")
+    invoke<{ backend_running: boolean }>(COMMANDS.UTILS_CHECK_SERVER_STATUS)
       .then((status) => setServerStatus(status?.backend_running ? "connected" : "error"))
       .catch(() => setServerStatus("error"));
   }, []);
@@ -84,7 +85,7 @@ export function useBarConversation() {
   // stop out to every window and the bar state machine.
   const stop = useCallback(async () => {
     try {
-      await invoke("stop_all_operations");
+      await invoke(COMMANDS.AGENT_STOP_ALL_OPERATIONS);
     } catch (error) {
       console.error("FloatingBar: failed to stop operations:", error);
     }

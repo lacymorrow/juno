@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useCallback } from 'react';
 import { SoundPlayResult, SoundSystem, SoundType } from '../types/sound';
+import { COMMANDS } from '@/lib/constants.generated';
 
 // Sound management to prevent overlapping
 let lastSoundTime = 0;
@@ -19,7 +20,7 @@ export function useSound(): SoundSystem {
 		}
 
 		try {
-			const result = await invoke<SoundPlayResult>('play_sound_by_type', {
+			const result = await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_SOUND_BY_TYPE, {
 				soundType
 			});
 			lastSoundTime = now;
@@ -37,7 +38,7 @@ export function useSound(): SoundSystem {
 	// Play a sound file by path
 	const playSoundFile = useCallback(async (filePath: string): Promise<SoundPlayResult> => {
 		try {
-			return await invoke<SoundPlayResult>('play_sound_file', {
+			return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_SOUND_FILE, {
 				filePath
 			});
 		} catch (error) {
@@ -51,25 +52,25 @@ export function useSound(): SoundSystem {
 
 	// Convenience functions - now just call backend commands
 	const playNotification = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_notification_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_NOTIFICATION_SOUND);
 	}, []);
 
 	const playSuccess = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_success_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_SUCCESS_SOUND);
 	}, []);
 
 	const playError = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_error_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_ERROR_SOUND);
 	}, []);
 
 	const playAlert = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_alert_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_ALERT_SOUND);
 	}, []);
 
 	// Get list of available sounds
 	const getAvailableSounds = useCallback(async (): Promise<SoundType[]> => {
 		try {
-			return await invoke<SoundType[]>('get_available_sounds');
+			return await invoke<SoundType[]>(COMMANDS.SOUND_GET_AVAILABLE_SOUNDS);
 		} catch (error) {
 			console.error('Failed to get available sounds:', error);
 			return [];
@@ -91,19 +92,19 @@ export function useSound(): SoundSystem {
 
 export function useAgentSounds() {
 	const playAgentStart = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_agent_start_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_AGENT_START_SOUND);
 	}, []);
 
 	const playAgentSuccess = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_agent_success_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_AGENT_SUCCESS_SOUND);
 	}, []);
 
 	const playAgentError = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_agent_error_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_AGENT_ERROR_SOUND);
 	}, []);
 
 	const playAgentAttention = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_agent_attention_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_AGENT_ATTENTION_SOUND);
 	}, []);
 
 	return {
@@ -116,23 +117,23 @@ export function useAgentSounds() {
 
 export function useVoiceSounds() {
 	const playVoiceStart = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_voice_start_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_VOICE_START_SOUND);
 	}, []);
 
 	const playVoiceEnd = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_voice_end_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_VOICE_END_SOUND);
 	}, []);
 
 	const playDictationStart = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_dictation_start_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_DICTATION_START_SOUND);
 	}, []);
 
 	const playDictationEnd = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_dictation_end_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_DICTATION_END_SOUND);
 	}, []);
 
 	const playVoiceError = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_voice_error_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_VOICE_ERROR_SOUND);
 	}, []);
 
 	return {
@@ -148,19 +149,19 @@ export function useVoiceSounds() {
 
 export function useSystemSounds() {
 	const playBootSound = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_boot_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_BOOT_SOUND);
 	}, []);
 
 	const playSystemReady = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_system_ready_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_SYSTEM_READY_SOUND);
 	}, []);
 
 	const playConnectionSound = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_connection_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_CONNECTION_SOUND);
 	}, []);
 
 	const playDisconnectionSound = useCallback(async (): Promise<SoundPlayResult> => {
-		return await invoke<SoundPlayResult>('play_disconnection_sound');
+		return await invoke<SoundPlayResult>(COMMANDS.SOUND_PLAY_DISCONNECTION_SOUND);
 	}, []);
 
 	return {

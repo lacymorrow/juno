@@ -2,7 +2,7 @@ import OnboardingFlow from "@/components/onboarding/Onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
-import { COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
+import { COMMANDS, WINDOW_LABELS, EVENTS } from "@/lib/constants.generated";
 import { getPermissionsStatus } from "@/lib/permissions-service";
 
 export default function OnboardingWindow() {
@@ -49,7 +49,7 @@ export default function OnboardingWindow() {
     return () => {
       cleanupTimerRef.current = setTimeout(() => {
         cleanupTimerRef.current = null;
-        invoke("set_onboarding_active", { active: false }).catch((e) =>
+        invoke(COMMANDS.ONBOARDING_SET_ONBOARDING_ACTIVE, { active: false }).catch((e) =>
           console.warn("Failed to clear onboarding active:", e)
         );
       }, 0);
@@ -69,7 +69,7 @@ export default function OnboardingWindow() {
         setPermissionsGranted(permissionsResult.all_granted);
 
         // Get onboarding info including development mode status
-        const onboardingInfo = await invoke<any>("get_onboarding_info");
+        const onboardingInfo = await invoke<any>(COMMANDS.ONBOARDING_GET_ONBOARDING_INFO);
         console.log("OnboardingWindow: Onboarding info:", onboardingInfo);
         setIsDevelopmentMode(onboardingInfo?.is_development_mode || false);
 
@@ -107,22 +107,22 @@ export default function OnboardingWindow() {
     await stopListeningForGlobeKey();
     try {
       // Use backend command to mark onboarding as completed
-      await invoke("complete_onboarding");
+      await invoke(COMMANDS.ONBOARDING_COMPLETE_ONBOARDING);
       console.log("Onboarding completed via backend");
 
       // Notify main window of completion
       const mainWindow = await Window.getByLabel(WINDOW_LABELS.MAIN);
       if (mainWindow) {
-        await mainWindow.emit("onboarding-complete", {});
+        await mainWindow.emit(EVENTS.ONBOARDING_COMPLETE, {});
       }
 
       // Close the onboarding window via backend
-      await invoke("close_onboarding_window");
+      await invoke(COMMANDS.ONBOARDING_CLOSE_ONBOARDING_WINDOW);
     } catch (error) {
       console.error("Error completing onboarding:", error);
       // Try to close anyway
       try {
-        await invoke("close_onboarding_window");
+        await invoke(COMMANDS.ONBOARDING_CLOSE_ONBOARDING_WINDOW);
       } catch (closeError) {
         console.error("Error closing onboarding window:", closeError);
       }
@@ -133,22 +133,22 @@ export default function OnboardingWindow() {
     await stopListeningForGlobeKey();
     try {
       // Use backend command to skip onboarding (still marks as completed)
-      await invoke("skip_onboarding");
+      await invoke(COMMANDS.ONBOARDING_SKIP_ONBOARDING);
       console.log("Onboarding skipped via backend");
 
       // Notify main window that onboarding was skipped
       const mainWindow = await Window.getByLabel(WINDOW_LABELS.MAIN);
       if (mainWindow) {
-        await mainWindow.emit("onboarding-skipped", {});
+        await mainWindow.emit(EVENTS.ONBOARDING_SKIPPED, {});
       }
 
       // Close the onboarding window via backend
-      await invoke("close_onboarding_window");
+      await invoke(COMMANDS.ONBOARDING_CLOSE_ONBOARDING_WINDOW);
     } catch (error) {
       console.error("Error skipping onboarding:", error);
       // Try to close anyway
       try {
-        await invoke("close_onboarding_window");
+        await invoke(COMMANDS.ONBOARDING_CLOSE_ONBOARDING_WINDOW);
       } catch (closeError) {
         console.error("Error closing onboarding window:", closeError);
       }

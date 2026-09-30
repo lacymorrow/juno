@@ -300,7 +300,7 @@ function playApprovalDemo(later: (fn: () => void, ms: number) => void): void {
       { barState: UI.BAR_STATES_LOADING, audioLevel: 0, transcriptionText: "" },
       { lastSubmittedValue: DEMO_SCRIPT_QUESTION },
     );
-    void emit("tool-approval-request", {
+    void emit(EVENTS.TOOLS_APPROVAL_REQUEST, {
       tool_name: "mail",
       tool_id: "preview-approval",
       tool_input: {},

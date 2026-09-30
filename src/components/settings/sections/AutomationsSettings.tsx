@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { useEventListener } from "@/hooks/useEventListener";
 import { SettingsGroup, SettingsRow } from "../ui";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 
 interface ScheduledAutomation {
   id: string;
@@ -62,7 +63,7 @@ export default function AutomationsSettings() {
 
   const loadAutomations = useCallback(async () => {
     try {
-      const list = await invoke<ScheduledAutomation[]>("list_scheduled_tasks");
+      const list = await invoke<ScheduledAutomation[]>(COMMANDS.SCHEDULER_LIST_SCHEDULED_TASKS);
       setAutomations(list);
     } catch (error) {
       console.error("Failed to load scheduled automations:", error);
@@ -75,12 +76,12 @@ export default function AutomationsSettings() {
   }, [loadAutomations]);
 
   // The backend emits this whenever the list changes (including agent-created schedules)
-  useEventListener("scheduled-automations-changed", () => {
+  useEventListener(EVENTS.SCHEDULER_AUTOMATIONS_CHANGED, () => {
     loadAutomations();
   });
 
   useEventListener<{ name: string; success: boolean; error?: string }>(
-    "scheduled-automation-fired",
+    EVENTS.SCHEDULER_AUTOMATION_FIRED,
     (payload) => {
       if (payload.success) {
         toast.info(`Automation "${payload.name}" is running`);
@@ -97,7 +98,7 @@ export default function AutomationsSettings() {
       return;
     }
     try {
-      const times = await invoke<number[]>("preview_cron_schedule", { cron });
+      const times = await invoke<number[]>(COMMANDS.SCHEDULER_PREVIEW_CRON_SCHEDULE, { cron });
       setPreviewTimes(times);
       setCronError(null);
     } catch (error) {
@@ -159,10 +160,10 @@ export default function AutomationsSettings() {
         notify: form.notify,
       };
       if (editingId) {
-        await invoke("update_scheduled_task", { id: editingId, ...payload });
+        await invoke(COMMANDS.SCHEDULER_UPDATE_SCHEDULED_TASK, { id: editingId, ...payload });
         toast.success("Automation updated");
       } else {
-        await invoke("create_scheduled_task", payload);
+        await invoke(COMMANDS.SCHEDULER_CREATE_SCHEDULED_TASK, payload);
         toast.success("Automation created");
       }
       setDialogOpen(false);
@@ -176,7 +177,7 @@ export default function AutomationsSettings() {
 
   const handleToggle = async (automation: ScheduledAutomation, enabled: boolean) => {
     try {
-      await invoke("update_scheduled_task", { id: automation.id, enabled });
+      await invoke(COMMANDS.SCHEDULER_UPDATE_SCHEDULED_TASK, { id: automation.id, enabled });
       loadAutomations();
     } catch (error) {
       toast.error(String(error));
@@ -185,7 +186,7 @@ export default function AutomationsSettings() {
 
   const handleDelete = async (automation: ScheduledAutomation) => {
     try {
-      await invoke("delete_scheduled_task", { id: automation.id });
+      await invoke(COMMANDS.SCHEDULER_DELETE_SCHEDULED_TASK, { id: automation.id });
       toast.success(`Deleted "${automation.name}"`);
       loadAutomations();
     } catch (error) {
@@ -195,7 +196,7 @@ export default function AutomationsSettings() {
 
   const handleRunNow = async (automation: ScheduledAutomation) => {
     try {
-      await invoke("run_scheduled_task_now", { id: automation.id });
+      await invoke(COMMANDS.SCHEDULER_RUN_SCHEDULED_TASK_NOW, { id: automation.id });
       toast.success(`Started "${automation.name}"`);
       loadAutomations();
     } catch (error) {
