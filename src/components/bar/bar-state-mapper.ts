@@ -1,5 +1,4 @@
 import { UI } from "@/lib/constants.generated";
-import type { AgentState as OrbAgentState } from "@/components/ui/elevenlabs-orb";
 import type { PersonaState } from "@/components/ai-elements/persona";
 
 /**
@@ -42,102 +41,6 @@ export function getStatusLabel(barState: string): string {
       return "Dictation Ready";
     default:
       return "Ready";
-  }
-}
-
-/**
- * Maps Juno's 16 bar states to ElevenLabs Orb AgentState.
- * Orb supports: null | "thinking" | "listening" | "talking"
- */
-export function mapToOrbState(barState: string): OrbAgentState {
-  switch (barState) {
-    case UI.BAR_STATES_LISTENING:
-    case UI.BAR_STATES_DICTATING:
-    case UI.BAR_STATES_DICTATION_READY:
-    case UI.BAR_STATES_ALWAYS_LISTENING:
-    case UI.BAR_STATES_INPUT:
-      return "listening";
-
-    case UI.BAR_STATES_LOADING:
-    case UI.BAR_STATES_SUBMITTING:
-    case UI.BAR_STATES_TRANSCRIBING:
-    case UI.BAR_STATES_EXPANDING:
-    case UI.BAR_STATES_SHRINKING:
-    case UI.BAR_STATES_FINISHING:
-      return "thinking";
-
-    case UI.BAR_STATES_SPEAKING:
-    case UI.BAR_STATES_AGENT_RESPONDING:
-      return "talking";
-
-    case UI.BAR_STATES_DEFAULT:
-    case UI.BAR_STATES_SUCCESS:
-    case UI.BAR_STATES_ERROR:
-    case UI.BAR_STATES_STOPPING:
-    default:
-      return null;
-  }
-}
-
-/**
- * Per-state color pair for the ElevenLabs orb (elevenlabs-orb.tsx), which takes
- * a two-tone `colors` gradient as [primary, secondary]. Motion still comes from
- * mapToOrbState() + audio volume; this is the color axis on top of it.
- *
- * The palette is a cohesive family grown from the orb's documented periwinkle
- * default: idle periwinkle, listening blues, thinking warm gold/amber, talking
- * teal-green, success green, error red, stopping dim slate. Each entry is a
- * lighter primary paired with a deeper secondary so the gradient reads on any
- * background. Kept tight, not a rainbow.
- */
-export function mapToElevenLabsOrbColors(barState: string): [string, string] {
-  switch (barState) {
-    // Listening family — blues/cyan
-    case UI.BAR_STATES_LISTENING:
-      return ["#7EB6FF", "#3B82F6"];
-    case UI.BAR_STATES_DICTATING:
-      return ["#8FD0FF", "#38BDF8"];
-    case UI.BAR_STATES_ALWAYS_LISTENING:
-      return ["#93C5FD", "#2563EB"];
-    case UI.BAR_STATES_DICTATION_READY:
-      return ["#BFDBFE", "#60A5FA"];
-    case UI.BAR_STATES_INPUT:
-      return ["#C7DBFF", "#7DA0E8"];
-
-    // Thinking family — warm gold/amber
-    case UI.BAR_STATES_LOADING:
-    case UI.BAR_STATES_FINISHING:
-      return ["#FCD34D", "#F59E0B"];
-    case UI.BAR_STATES_SUBMITTING:
-      return ["#FDE68A", "#F59E0B"];
-    case UI.BAR_STATES_TRANSCRIBING:
-      return ["#FCD34D", "#FBBF24"];
-    case UI.BAR_STATES_EXPANDING:
-    case UI.BAR_STATES_SHRINKING:
-      return ["#FDE68A", "#FBBF24"];
-
-    // Talking family — teal-green
-    case UI.BAR_STATES_SPEAKING:
-      return ["#5EEAD4", "#14B8A6"];
-    case UI.BAR_STATES_AGENT_RESPONDING:
-      return ["#6EE7B7", "#10B981"];
-
-    // Success — green
-    case UI.BAR_STATES_SUCCESS:
-      return ["#86EFAC", "#22C55E"];
-
-    // Error — red
-    case UI.BAR_STATES_ERROR:
-      return ["#FCA5A5", "#EF4444"];
-
-    // Stopping — dim slate
-    case UI.BAR_STATES_STOPPING:
-      return ["#94A3B8", "#475569"];
-
-    // Idle / default — periwinkle (the orb's documented default)
-    case UI.BAR_STATES_DEFAULT:
-    default:
-      return ["#CADCFC", "#A0B9D1"];
   }
 }
 
