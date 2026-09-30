@@ -132,11 +132,6 @@ export class ProductionCloudConnector {
 			console.log('[CloudConnector] Received cloud message:', message);
 			this.messageListeners.forEach(listener => listener(message));
 		}));
-
-		// Listen for connection errors (no generated constant for this event)
-		this.unlistenFns.push(await listen(EVENTS.CLOUD_CONNECTOR_ERROR, (event) => {
-			console.error('[CloudConnector] Connection error:', event.payload);
-		}));
 	}
 
 	/**

@@ -69,10 +69,6 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
     // Setup agent mode integration
     setup_agent_mode_integration(&app_handle);
 
-    // Setup development mode integration (if debug build)
-    #[cfg(debug_assertions)]
-    setup_development_integration(&app_handle);
-
     // Boot sound is handled by app_setup module - removed duplicate call
 
     info!("✅ Application integration setup completed");
@@ -1639,34 +1635,6 @@ async fn handle_agent_stop_all(app_handle: &AppHandle) {
     crate::error_handling::utils::handle_voice_error(app_handle, "Emergency stop requested").await;
 
     info!("[Agent Stop All] Comprehensive agent shutdown completed");
-}
-
-/// Setup development mode integration (debug builds only)
-#[cfg(debug_assertions)]
-fn setup_development_integration(app_handle: &AppHandle) {
-    info!("🛠️ Setting up development mode integration...");
-
-    // Listen for frontend reload events and cleanup resources (development mode)
-    let app_handle_for_frontend_reload = app_handle.clone();
-    app_handle.listen(events::system::FRONTEND_RELOAD, move |_event| {
-        info!("🔄 Frontend reload detected - cleaning up resources...");
-
-        let app_handle_clone = app_handle_for_frontend_reload.clone();
-        safe_spawn_async_task(move || async move {
-            // Cleanup MCP servers to prevent accumulation
-            if let Some(state) = app_handle_clone.try_state::<crate::state::AppState>() {
-                if let Err(e) = state.cleanup_mcp_resources().await {
-                    error!("Failed to cleanup MCP resources: {}", e);
-                } else {
-                    info!("✅ MCP resources cleaned up successfully");
-                }
-            }
-
-            info!("✅ Development cleanup completed");
-        });
-    });
-
-    info!("🛠️ Development mode cleanup handlers installed");
 }
 
 // Boot sound function removed - handled by app_setup module
