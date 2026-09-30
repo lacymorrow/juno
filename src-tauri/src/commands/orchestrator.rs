@@ -759,6 +759,9 @@ pub async fn execute_intelligent_parallel_tasks(
     task_descriptions: Vec<String>,
     priority: Option<String>,
     context: Option<serde_json::Value>,
+    // Optional time each task may run, in seconds. The orchestrator clamps it
+    // to its min..max range; omitted means the orchestrator default.
+    timeout_seconds: Option<u64>,
 ) -> Result<Vec<String>, String> {
     let orchestrator = get_orchestrator().await?;
     let orchestrator_guard = orchestrator.lock().await;
@@ -780,7 +783,7 @@ pub async fn execute_intelligent_parallel_tasks(
             agent_type: AgentType::Desktop, // Will be determined by orchestrator
             priority: task_priority,
             dependencies: vec![],
-            timeout: None,
+            timeout: timeout_seconds.map(std::time::Duration::from_secs),
             metadata: serde_json::json!({
                 "batch_index": i,
                 "context": context,

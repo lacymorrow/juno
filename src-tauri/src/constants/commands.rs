@@ -39,6 +39,9 @@ pub mod settings {
     /// Ask before Juno sends (LAC-4058): per-send approval for connector writes.
     pub const GET_CLI_ASK_BEFORE_SEND_ENABLED: &str = "get_cli_ask_before_send_enabled";
     pub const SET_CLI_ASK_BEFORE_SEND_ENABLED: &str = "set_cli_ask_before_send_enabled";
+    /// Beta: smart routing, a model and a route per request. See agent/router.rs
+    pub const GET_SMART_ROUTING_ENABLED: &str = "get_smart_routing_enabled";
+    pub const SET_SMART_ROUTING_ENABLED: &str = "set_smart_routing_enabled";
 }
 
 /// Core system command names

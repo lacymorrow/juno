@@ -777,6 +777,8 @@ pub fn run() {
             // Ask before Juno sends (LAC-4058): per-send approval for connector writes.
             agent::providers::cli_approval::get_cli_ask_before_send_enabled,
             agent::providers::cli_approval::set_cli_ask_before_send_enabled,
+            agent::router::get_smart_routing_enabled,
+            agent::router::set_smart_routing_enabled,
             commands::bar_position::get_bar_position,
             commands::bar_position::set_bar_position,
             commands::bar_position::set_bar_frame,
