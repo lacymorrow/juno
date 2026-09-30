@@ -5,27 +5,34 @@
 // Core API endpoints
 pub mod endpoints {
     pub const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
+    /// Reached with a HEAD request to tell "offline" from "API down".
+    pub const ANTHROPIC_API_ORIGIN: &str = "https://api.anthropic.com";
     pub const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
     pub const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
     // Cloud services
     pub const CLOUD_SERVER_URL: &str = "wss://juno-cloud-backend.fly.dev/ws";
-    pub const GITHUB_URL: &str = "https://github.com/juno-ai";
+    pub const CLOUD_API_URL: &str = "https://juno-cloud-backend.fly.dev/api";
+    pub const CLOUD_HEALTH_URL: &str = "https://juno-cloud-backend.fly.dev/health";
+    pub const CLOUD_METRICS_URL: &str = "https://juno-cloud-backend.fly.dev/metrics";
 
-    // Local development
+    // The project on GitHub: source, releases and the update feeds
+    pub const GITHUB_URL: &str = "https://github.com/lacymorrow/juno";
+    /// Update manifest for the stable channel. Must match the endpoint in
+    /// tauri.conf.json (a test checks).
+    pub const UPDATE_FEED_STABLE: &str =
+        "https://github.com/lacymorrow/juno/releases/latest/download/latest.json";
+    /// Update manifest for the prerelease channel: a fixed tag every build
+    /// overwrites, because releases/latest cannot see prereleases.
+    pub const UPDATE_FEED_PRERELEASE: &str =
+        "https://github.com/lacymorrow/juno/releases/download/canary/latest.json";
+
+    // Local development. Ports live in constants::ports; join them onto this.
     pub const LOCALHOST_BASE: &str = "http://localhost";
-    pub const LOCALHOST_CHROME_DEBUG: &str = "http://localhost:9222";
-    pub const LOCALHOST_MCP_SERVER: &str = "http://localhost:8080";
-    pub const WEBSOCKET_LOCALHOST: &str = "ws://localhost:8080";
 
     // Third-party services
     pub const ELEVENLABS_TTS_BASE: &str = "https://api.elevenlabs.io/v1/text-to-speech";
     pub const REPLICATE_API_BASE: &str = "https://api.replicate.com";
-    pub const JUNO_CLOUD_WEBSOCKET: &str = "wss://juno-cloud-backend.fly.dev/ws";
-
-    // Development server
-    pub const DEV_SERVER_BASE: &str = "http://localhost:1420";
-    pub const HMR_WEBSOCKET: &str = "ws://localhost:1421";
 }
 
 // Anthropic Computer Use API Type Definitions (Official Specification)

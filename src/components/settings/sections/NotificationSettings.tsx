@@ -11,6 +11,7 @@ import type {
 } from "@/types/notifications";
 
 import { SettingsGroup, SettingsRow } from "../ui";
+import { COMMANDS } from "@/lib/constants.generated";
 
 /**
  * Notifications.
@@ -40,7 +41,7 @@ export function NotificationSettings() {
     try {
       setPermission(
         await invoke<SystemNotificationPermission>(
-          "check_notification_permission",
+          COMMANDS.NOTIFICATIONS_CHECK_NOTIFICATION_PERMISSION,
         ),
       );
     } catch (error) {
@@ -52,7 +53,7 @@ export function NotificationSettings() {
     let mounted = true;
     (async () => {
       try {
-        const settings = await invoke<Settings>("get_notification_settings");
+        const settings = await invoke<Settings>(COMMANDS.NOTIFICATIONS_GET_NOTIFICATION_SETTINGS);
         if (mounted) setEnabled(settings.enabled);
       } catch (error) {
         console.error("Failed to load notification settings:", error);
@@ -70,7 +71,7 @@ export function NotificationSettings() {
     const previous = enabled;
     setEnabled(next);
     try {
-      await invoke("set_notifications_enabled", { enabled: next });
+      await invoke(COMMANDS.NOTIFICATIONS_SET_NOTIFICATIONS_ENABLED, { enabled: next });
     } catch (error) {
       console.error("Failed to change notifications:", error);
       setEnabled(previous);
@@ -84,7 +85,7 @@ export function NotificationSettings() {
     setRequesting(true);
     try {
       const result = await invoke<SystemNotificationPermission>(
-        "request_notification_permission",
+        COMMANDS.NOTIFICATIONS_REQUEST_NOTIFICATION_PERMISSION,
       );
       setPermission(result);
       if (result.denied) {
@@ -161,7 +162,7 @@ export function NotificationSettings() {
             variant="outline"
             disabled={!enabled}
             onClick={() => {
-              void invoke("test_notification").catch((error) => {
+              void invoke(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION).catch((error) => {
                 console.error("Failed to send test notification:", error);
                 toast.error("Could not send a test notification");
               });

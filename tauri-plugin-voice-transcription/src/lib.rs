@@ -165,7 +165,7 @@ fn build_plugin<R: Runtime + 'static>(
                     tracing::warn!("Could not read models directory");
                 }
                 // Notify frontend so it can offer to download the preferred model
-                let _ = app.emit("whisper-model-not-found", serde_json::json!({
+                let _ = app.emit(crate::constants::engine::WHISPER_MODEL_NOT_FOUND, serde_json::json!({
                     "preferred": &config.model_path,
                     "resolved": &resolved_model_path
                 }));
@@ -282,7 +282,7 @@ fn build_plugin<R: Runtime + 'static>(
 
                 tracing::info!("=== Voice Transcription Plugin Initialization Complete (background) ===");
                 let _ = app_handle_bg.emit(
-                    "voice-engine-ready",
+                    crate::constants::engine::READY,
                     serde_json::json!({ "provider": engine_name }),
                 );
             });

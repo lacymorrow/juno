@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { FileText, Folder, Info } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
+import { COMMANDS } from "@/lib/constants.generated";
 
 const FileOperations: React.FC = () => {
   const [pathToList, setPathToList] = useState<string>("");
@@ -23,7 +24,7 @@ const FileOperations: React.FC = () => {
     }
     setFileListResult(null);
     const result = await invokeCommand<string | null>(
-      "list_files",
+      COMMANDS.FILES_LIST_FILES,
       { path_str: pathToList.trim(), debug_mode: true },
       "listFiles"
     );
@@ -58,7 +59,7 @@ const FileOperations: React.FC = () => {
     }
     setFileContentResult(null);
     const result = await invokeCommand<string | null>(
-      "get_file_content",
+      COMMANDS.FILES_GET_FILE_CONTENT,
       { path_str: pathGetContent.trim(), debug_mode: true },
       "getFileContent"
     );
@@ -75,7 +76,7 @@ const FileOperations: React.FC = () => {
       return;
     }
     await invokeCommand(
-      "set_file_content",
+      COMMANDS.FILES_SET_FILE_CONTENT,
       { path_str: pathSetContent.trim(), content: fileContentToSet, debug_mode: true },
       "setFileContent"
     );

@@ -8,7 +8,6 @@ use crate::utils::coordinates;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri::State;
-use tauri_plugin_store::StoreExt;
 use tracing::warn;
 use tracing::{error, info};
 
@@ -488,20 +487,15 @@ pub async fn list_ai_providers() -> Result<Vec<ProviderInfo>, String> {
     Ok(BrainFactory::list_providers())
 }
 
-/// Set the active AI provider
+/// Set the active AI provider.
+///
+/// This used to write `ai_provider` into a separate `settings.json` store that
+/// nothing reads, so the call succeeded and changed nothing. It now goes
+/// through the same path as `set_active_provider`, which writes the real
+/// settings store.
 #[tauri::command]
 pub async fn set_ai_provider(provider_id: String, app_handle: AppHandle) -> Result<(), String> {
-    // Persist via Tauri store instead of unsafe std::env::set_var
-    let store = app_handle
-        .store("settings.json")
-        .map_err(|e| format!("Failed to open settings store: {}", e))?;
-    store.set("ai_provider", serde_json::json!(provider_id.clone()));
-    store
-        .save()
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-
-    tracing::info!("Set AI provider to: {}", provider_id);
-    Ok(())
+    super::providers::set_active_provider(app_handle, provider_id).await
 }
 
 /// Set performance monitoring enabled state

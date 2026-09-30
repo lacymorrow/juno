@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { KeyCaps } from "./KeyCaps";
+import { COMMANDS } from "@/lib/constants.generated";
 
 /**
  * Records a keyboard shortcut by pressing it. Recording starts the moment
@@ -129,7 +130,7 @@ export function ShortcutRecorder({
       try {
         // The backend's own validation runs on save too; asking first keeps
         // the message identical to the one a save would fail with.
-        await invoke<string>("validate_keyboard_shortcut", {
+        await invoke<string>(COMMANDS.SHORTCUTS_VALIDATE_KEYBOARD_SHORTCUT, {
           shortcutValue: shortcut,
           shortcutName,
         });

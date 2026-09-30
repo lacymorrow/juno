@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { UI, EVENTS, TIMEOUTS } from "@/lib/constants.generated";
+import { UI, EVENTS, TIMEOUTS, COMMANDS } from "@/lib/constants.generated";
 import type { FloatingBarConfig } from "@/types/bar-config";
 
 import { FloatingBar } from "@/components/FloatingBar";
@@ -48,7 +48,7 @@ export function BarHost() {
 
     const load = async () => {
       try {
-        const config = await invoke<FloatingBarConfig>("ui_get_bar_config");
+        const config = await invoke<FloatingBarConfig>(COMMANDS.BAR_UI_GET_BAR_CONFIG);
         if (mounted) setBarConfig(config);
       } catch (error) {
         console.error("Failed to load bar config:", error);

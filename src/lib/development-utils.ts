@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { COMMANDS } from "@/lib/constants.generated";
 
 /**
  * Development mode detection utilities
@@ -12,7 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
  */
 export const isDevelopment = async (): Promise<boolean> => {
 	try {
-		const result = await invoke<boolean>('get_debug_mode');
+		const result = await invoke<boolean>(COMMANDS.CORE_GET_DEBUG_MODE);
 		return result;
 	} catch (error) {
 		console.warn('Failed to check async development mode:', error);

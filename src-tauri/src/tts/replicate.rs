@@ -1,3 +1,4 @@
+use crate::constants::api::endpoints::REPLICATE_API_BASE;
 use crate::constants::timeouts;
 use base64::Engine;
 use reqwest::Client;
@@ -46,8 +47,6 @@ pub(crate) struct ReplicateStatusResponse {
     error: Option<String>,  // Capture error messages
 }
 // --- End Replicate API Structures ---
-
-const _REPLICATE_API_BASE: &str = "https://api.replicate.com/v1";
 
 // --- Chatterbox API Structures (model-based endpoint, no version pin) ---
 #[derive(Serialize)]
@@ -98,7 +97,7 @@ pub async fn invoke_replicate_tts(text: String) -> Result<String, String> {
         .connect_timeout(Duration::from_secs(timeouts::HTTP_CONNECT_TIMEOUT_SECONDS))
         .build()
         .map_err(|e| format!("Failed to create Replicate HTTP client: {}", e))?;
-    let start_url = "https://api.replicate.com/v1/predictions";
+    let start_url = format!("{}/v1/predictions", REPLICATE_API_BASE);
 
     let request_payload = ReplicateRequest {
         version: model_version,
@@ -122,7 +121,7 @@ pub async fn invoke_replicate_tts(text: String) -> Result<String, String> {
 
     // 1. Start the prediction
     let initial_response = client
-        .post(start_url)
+        .post(&start_url)
         .header("Authorization", format!("Token {}", api_key))
         .header("Content-Type", "application/json")
         .json(&request_payload)
@@ -391,8 +390,8 @@ pub async fn invoke_chatterbox_tts(
         "chatterbox"
     };
     let start_url = format!(
-        "https://api.replicate.com/v1/models/resemble-ai/{}/predictions",
-        model_name
+        "{}/v1/models/resemble-ai/{}/predictions",
+        REPLICATE_API_BASE, model_name
     );
     info!("Using Chatterbox model endpoint: {}", start_url);
 

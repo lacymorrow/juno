@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { KeyboardShortcuts } from "@/types/keyboard";
-import { AUDIO, SETTINGS } from "@/lib/constants.generated";
+import { AUDIO, SETTINGS, COMMANDS, EVENTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useInvoke } from "@/hooks/useInvoke";
 import type {
@@ -203,7 +203,7 @@ export function useSettings() {
 					servers: MCPServerConfig[];
 					statuses: Record<string, MCPServerStatus>;
 					tools: MCPToolInfo[];
-				}>("mcp_state_updated", (event) => {
+				}>(EVENTS.SYSTEM_MCP_STATE_UPDATED, (event) => {
 					if (!mounted) return;
 					console.log("Received MCP state update:", event.payload);
 					setMcpServers(event.payload.servers);
@@ -244,7 +244,7 @@ export function useSettings() {
 						temperature?: number;
 						system_prompt?: string;
 					}[];
-				}>("provider_settings_changed", async (event) => {
+				}>(EVENTS.SYSTEM_PROVIDER_SETTINGS_CHANGED, async (event) => {
 					if (!mounted) return;
 					console.log("useSettings: Received provider settings update:", event.payload);
 					const fullProviderSettings = event.payload;
@@ -280,7 +280,7 @@ export function useSettings() {
 
 					// Re-fetch providers to update is_available after API key changes
 					try {
-						const freshProviders = await invokeCommand<ProviderInfo[]>("get_providers");
+						const freshProviders = await invokeCommand<ProviderInfo[]>(COMMANDS.PROVIDERS_GET_PROVIDERS);
 						if (mounted) {
 							setProviders(freshProviders);
 						}
@@ -337,19 +337,19 @@ export function useSettings() {
 				sensitivity,
 				wakeWords
 			] = await Promise.all([
-				getCachedOrFetch('ttsProvider', () => invokeCommand<string>("get_tts_provider_command")),
-				getCachedOrFetch('providers', () => invokeCommand<ProviderInfo[]>("get_providers")),
-				getCachedOrFetch('activeProvider', () => invokeCommand<string>("get_active_provider")),
-				getCachedOrFetch('agentMode', () => invokeCommand<string>("get_agent_mode")),
-				getCachedOrFetch('agentTriggerMode', () => invokeCommand<string>("get_agent_trigger_mode")),
-				getCachedOrFetch('dictationClipboardEnabled', () => invokeCommand<boolean>("get_dictation_clipboard_enabled")),
-				getCachedOrFetch('dictationInsertionMode', () => invokeCommand<string>("get_dictation_insertion_mode")),
-				getCachedOrFetch('dictationTriggerMode', () => invokeCommand<string>("get_dictation_trigger_mode")),
-				getCachedOrFetch('soundEnabled', () => invokeCommand<boolean>("get_sound_enabled")),
-				getCachedOrFetch('performanceMonitoringEnabled', () => invokeCommand<boolean>("get_performance_monitoring")),
-				getCachedOrFetch('alwaysListeningActive', () => invokeCommand<boolean>("get_always_listening_status")),
-				getCachedOrFetch('alwaysListeningSensitivity', () => invokeCommand<number>("get_always_listening_sensitivity")),
-				getCachedOrFetch('alwaysListeningWakeWords', () => invokeCommand<string[]>("get_always_listening_wake_words"))
+				getCachedOrFetch('ttsProvider', () => invokeCommand<string>(COMMANDS.TTS_GET_TTS_PROVIDER)),
+				getCachedOrFetch('providers', () => invokeCommand<ProviderInfo[]>(COMMANDS.PROVIDERS_GET_PROVIDERS)),
+				getCachedOrFetch('activeProvider', () => invokeCommand<string>(COMMANDS.PROVIDERS_GET_ACTIVE_PROVIDER)),
+				getCachedOrFetch('agentMode', () => invokeCommand<string>(COMMANDS.AGENT_GET_AGENT_MODE)),
+				getCachedOrFetch('agentTriggerMode', () => invokeCommand<string>(COMMANDS.AGENT_GET_AGENT_TRIGGER_MODE)),
+				getCachedOrFetch('dictationClipboardEnabled', () => invokeCommand<boolean>(COMMANDS.DICTATION_GET_DICTATION_CLIPBOARD_ENABLED)),
+				getCachedOrFetch('dictationInsertionMode', () => invokeCommand<string>(COMMANDS.DICTATION_GET_DICTATION_INSERTION_MODE)),
+				getCachedOrFetch('dictationTriggerMode', () => invokeCommand<string>(COMMANDS.DICTATION_GET_DICTATION_TRIGGER_MODE)),
+				getCachedOrFetch('soundEnabled', () => invokeCommand<boolean>(COMMANDS.SOUND_GET_SOUND_ENABLED)),
+				getCachedOrFetch('performanceMonitoringEnabled', () => invokeCommand<boolean>(COMMANDS.CORE_GET_PERFORMANCE_MONITORING)),
+				getCachedOrFetch('alwaysListeningActive', () => invokeCommand<boolean>(COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS)),
+				getCachedOrFetch('alwaysListeningSensitivity', () => invokeCommand<number>(COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_SENSITIVITY)),
+				getCachedOrFetch('alwaysListeningWakeWords', () => invokeCommand<string[]>(COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_WAKE_WORDS))
 			]);
 
 			// Set all state values
@@ -374,7 +374,7 @@ export function useSettings() {
 					reference_audio_url: string | null;
 					exaggeration: number;
 					use_hd: boolean;
-				}>("get_chatterbox_settings_command");
+				}>(COMMANDS.TTS_GET_CHATTERBOX_SETTINGS);
 				setChatterboxReferenceAudioUrl(chatterboxSettings.reference_audio_url ?? "");
 				setChatterboxExaggeration(chatterboxSettings.exaggeration);
 				setChatterboxUseHd(chatterboxSettings.use_hd);
@@ -388,7 +388,7 @@ export function useSettings() {
 					server_url: string;
 					voice: string;
 					speed: number;
-				}>("get_supertonic_settings_command");
+				}>(COMMANDS.TTS_GET_SUPERTONIC_SETTINGS);
 				setSupertonicServerUrl(stSettings.server_url);
 				setSupertonicVoice(stSettings.voice);
 				setSupertonicSpeed(stSettings.speed);
@@ -397,7 +397,7 @@ export function useSettings() {
 			}
 
 			if (currentActiveProvider) {
-				const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
+				const settings = await invokeCommand<ProviderSettings>(COMMANDS.PROVIDERS_GET_PROVIDER_SETTINGS, {
 					providerId: currentActiveProvider,
 				});
 				setProviderSettings(settings);
@@ -440,7 +440,7 @@ export function useSettings() {
 		setPermissionsLoading(true);
 		try {
 			const permissions = await getCachedOrFetch('permissionsState', () =>
-				invokeCommand<PermissionsState>("check_permissions_status_native")
+				invokeCommand<PermissionsState>(COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS)
 			);
 			setPermissionsState(permissions);
 		} catch (error) {
@@ -455,7 +455,7 @@ export function useSettings() {
 		setShortcutsLoading(true);
 		try {
 			const shortcuts = await getCachedOrFetch('keyboardShortcuts', () =>
-				invokeCommand<KeyboardShortcuts>("get_keyboard_shortcuts")
+				invokeCommand<KeyboardShortcuts>(COMMANDS.SHORTCUTS_GET_KEYBOARD_SHORTCUTS)
 			);
 			setKeyboardShortcuts(shortcuts);
 		} catch (error) {
@@ -485,7 +485,7 @@ export function useSettings() {
 						required: boolean;
 						server_id?: string;
 					}>;
-				}>>("get_tool_configurations");
+				}>>(COMMANDS.TOOLS_GET_TOOL_CONFIGURATIONS);
 
 				console.log(`📊 Loaded ${Object.keys(toolConfigsResponse).length} tool categories from backend`);
 
@@ -531,13 +531,13 @@ export function useSettings() {
 	const loadMcpServers = useCallback(async () => {
 		setMcpLoading(true);
 		try {
-			const servers = await invokeCommand<MCPServerConfig[]>("get_mcp_servers");
+			const servers = await invokeCommand<MCPServerConfig[]>(COMMANDS.MCP_GET_MCP_SERVERS);
 			setMcpServers(servers);
 
-			const statuses = await invokeCommand<Record<string, MCPServerStatus>>("get_mcp_server_statuses");
+			const statuses = await invokeCommand<Record<string, MCPServerStatus>>(COMMANDS.MCP_GET_MCP_SERVER_STATUSES);
 			setMcpServerStatuses(statuses);
 
-			const tools = await invokeCommand<MCPToolInfo[]>("get_mcp_tools");
+			const tools = await invokeCommand<MCPToolInfo[]>(COMMANDS.MCP_GET_MCP_TOOLS);
 			setMcpTools(tools);
 		} catch (error) {
 			console.error("Error loading MCP servers:", error);
@@ -550,7 +550,7 @@ export function useSettings() {
 	// Handler functions
 	const handleTtsProviderChange = useCallback(async (newProvider: string) => {
 		await invokeCommand(
-			"set_tts_provider_command",
+			COMMANDS.TTS_SET_TTS_PROVIDER,
 			{ provider: newProvider },
 			{
 				showSuccessToast: true,
@@ -571,7 +571,7 @@ export function useSettings() {
 		useHd: boolean,
 	) => {
 		await invokeCommand(
-			"set_chatterbox_settings_command",
+			COMMANDS.TTS_SET_CHATTERBOX_SETTINGS,
 			{
 				referenceAudioUrl: referenceAudioUrl || null,
 				exaggeration,
@@ -594,7 +594,7 @@ export function useSettings() {
 		speed: number,
 	) => {
 		await invokeCommand(
-			"set_supertonic_settings_command",
+			COMMANDS.TTS_SET_SUPERTONIC_SETTINGS,
 			{ serverUrl, voice, speed },
 			{
 				showSuccessToast: true,
@@ -610,7 +610,7 @@ export function useSettings() {
 	const handleActiveProviderChange = useCallback(async (providerId: string) => {
 		try {
 			console.log(`Switching active provider to: ${providerId}`);
-			await invokeCommand("set_active_provider", { providerId });
+			await invokeCommand(COMMANDS.PROVIDERS_SET_ACTIVE_PROVIDER, { providerId });
 			setActiveProvider(providerId);
 
 			// Invalidate cache for fresh data
@@ -619,7 +619,7 @@ export function useSettings() {
 
 			// Load settings specifically for the new provider
 			console.log(`Loading settings for provider: ${providerId}`);
-			const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
+			const settings = await invokeCommand<ProviderSettings>(COMMANDS.PROVIDERS_GET_PROVIDER_SETTINGS, {
 				providerId,
 			});
 			setProviderSettings(settings);
@@ -664,7 +664,7 @@ export function useSettings() {
 
 			// Update API key
 			if (formData.apiKey !== providerSettings?.api_key) {
-				await invoke("update_provider_api_key", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_API_KEY, {
 					providerId: activeProvider,
 					apiKey: formData.apiKey,
 				});
@@ -672,7 +672,7 @@ export function useSettings() {
 
 			// Update model
 			if (formData.model !== providerSettings?.model) {
-				await invoke("update_provider_model", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_MODEL, {
 					providerId: activeProvider,
 					model: formData.model,
 				});
@@ -680,7 +680,7 @@ export function useSettings() {
 
 			// Update max tokens
 			if (formData.maxTokens && formData.maxTokens !== providerSettings?.max_tokens?.toString()) {
-				await invoke("update_provider_max_tokens", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_MAX_TOKENS, {
 					providerId: activeProvider,
 					maxTokens: parseInt(formData.maxTokens),
 				});
@@ -688,7 +688,7 @@ export function useSettings() {
 
 			// Update temperature
 			if (formData.temperature && formData.temperature !== providerSettings?.temperature?.toString()) {
-				await invoke("update_provider_temperature", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_TEMPERATURE, {
 					providerId: activeProvider,
 					temperature: parseFloat(formData.temperature),
 				});
@@ -696,7 +696,7 @@ export function useSettings() {
 
 			// Update system prompt
 			if (formData.systemPrompt !== providerSettings?.system_prompt) {
-				await invoke("update_provider_system_prompt", {
+				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_SYSTEM_PROMPT, {
 					providerId: activeProvider,
 					systemPrompt: formData.systemPrompt,
 				});
@@ -704,7 +704,7 @@ export function useSettings() {
 
 			// Only reload the specific provider settings instead of all settings
 			console.log("Reloading specific provider settings...");
-			const updatedSettings = await invokeCommand<ProviderSettings>("get_provider_settings", {
+			const updatedSettings = await invokeCommand<ProviderSettings>(COMMANDS.PROVIDERS_GET_PROVIDER_SETTINGS, {
 				providerId: activeProvider,
 			});
 			setProviderSettings(updatedSettings);
@@ -732,7 +732,7 @@ export function useSettings() {
 	const handleLoadAccountMcpChange = useCallback(async (enabled: boolean) => {
 		if (!activeProvider) return;
 		await invokeCommand(
-			"update_provider_load_account_mcp",
+			COMMANDS.PROVIDERS_UPDATE_PROVIDER_LOAD_ACCOUNT_MCP,
 			{ providerId: activeProvider, loadAccountMcp: enabled },
 			{
 				showSuccessToast: true,
@@ -747,7 +747,7 @@ export function useSettings() {
 
 	const handleSoundEnabledChange = useCallback(async (enabled: boolean) => {
 		await invokeCommand(
-			"set_sound_enabled",
+			COMMANDS.SOUND_SET_SOUND_ENABLED,
 			{ enabled },
 			{
 				showSuccessToast: false,
@@ -759,7 +759,7 @@ export function useSettings() {
 
 	const handlePerformanceMonitoringChange = useCallback(async (enabled: boolean) => {
 		await invokeCommand(
-			"set_performance_monitoring",
+			COMMANDS.CORE_SET_PERFORMANCE_MONITORING,
 			{ enabled },
 			{
 				showSuccessToast: false,
@@ -771,7 +771,7 @@ export function useSettings() {
 
 	const handleAgentModeChange = useCallback(async (newMode: string) => {
 		await invokeCommand(
-			"set_agent_mode",
+			COMMANDS.AGENT_SET_AGENT_MODE,
 			{ mode: newMode },
 			{
 				showSuccessToast: false,
@@ -784,7 +784,7 @@ export function useSettings() {
 
 	const handleAgentTriggerModeChange = async (newMode: string) => {
 		try {
-			await invoke("set_agent_trigger_mode", { mode: newMode });
+			await invoke(COMMANDS.AGENT_SET_AGENT_TRIGGER_MODE, { mode: newMode });
 			setAgentTriggerMode(newMode);
 			toast.success(`Agent trigger mode set to: ${newMode === "tap" ? "Tap to Toggle" : "Hold to Activate"}`);
 		} catch (error) {
@@ -795,7 +795,7 @@ export function useSettings() {
 
 	const handleDictationClipboardChange = async (enabled: boolean) => {
 		try {
-			await invoke("set_dictation_clipboard_enabled", { enabled });
+			await invoke(COMMANDS.DICTATION_SET_DICTATION_CLIPBOARD_ENABLED, { enabled });
 			invalidateCache('dictationClipboardEnabled');
 			setDictationClipboardEnabled(enabled);
 			toast.success(`Copy to clipboard ${enabled ? "enabled" : "disabled"}`);
@@ -807,7 +807,7 @@ export function useSettings() {
 
 	const handleDictationInsertionModeChange = async (mode: string) => {
 		try {
-			await invoke("set_dictation_insertion_mode", { mode });
+			await invoke(COMMANDS.DICTATION_SET_DICTATION_INSERTION_MODE, { mode });
 			invalidateCache('dictationInsertionMode');
 			setDictationInsertionMode(mode);
 			toast.success(mode === "clipboard_free" ? "Clipboard-free insertion enabled" : "Clipboard paste insertion enabled");
@@ -819,7 +819,7 @@ export function useSettings() {
 
 	const handleDictationTriggerModeChange = async (newMode: string) => {
 		try {
-			await invoke("set_dictation_trigger_mode", { mode: newMode });
+			await invoke(COMMANDS.DICTATION_SET_DICTATION_TRIGGER_MODE, { mode: newMode });
 			invalidateCache('dictationTriggerMode');
 			setDictationTriggerMode(newMode);
 			toast.success(`Dictation trigger mode set to: ${newMode === "tap" ? "Tap to Toggle" : "Hold to Activate"}`);
@@ -831,7 +831,7 @@ export function useSettings() {
 
 	const handleAlwaysListeningToggle = async () => {
 		try {
-			const newState = await invoke<boolean>("toggle_always_listening_mode");
+			const newState = await invoke<boolean>(COMMANDS.ALWAYS_LISTENING_TOGGLE_ALWAYS_LISTENING_MODE);
 			setAlwaysListeningActive(newState);
 			toast.success(`Always listening ${newState ? "enabled" : "disabled"}`);
 		} catch (error) {
@@ -842,7 +842,7 @@ export function useSettings() {
 
 	const handleSensitivityChange = async (sensitivity: number) => {
 		try {
-			await invoke("set_always_listening_sensitivity", { sensitivity });
+			await invoke(COMMANDS.ALWAYS_LISTENING_SET_ALWAYS_LISTENING_SENSITIVITY, { sensitivity });
 			setAlwaysListeningSensitivity(sensitivity);
 		} catch (error) {
 			console.error("Failed to set sensitivity:", error);
@@ -856,7 +856,7 @@ export function useSettings() {
 				.split(",")
 				.map((word) => word.trim())
 				.filter((word) => word.length > 0);
-			await invoke("set_always_listening_wake_words", { wakeWords });
+			await invoke(COMMANDS.ALWAYS_LISTENING_SET_ALWAYS_LISTENING_WAKE_WORDS, { wakeWords });
 			setAlwaysListeningWakeWords(wakeWords);
 			toast.success("Wake words updated successfully");
 		} catch (error) {
@@ -868,7 +868,7 @@ export function useSettings() {
 	const loadLivePartialSetting = useCallback(async () => {
 		try {
 			const live = await getCachedOrFetch("livePartialTranscription", () =>
-				invokeCommand<boolean>("get_live_partial_transcription")
+				invokeCommand<boolean>(COMMANDS.STT_MODELS_GET_LIVE_PARTIAL_TRANSCRIPTION)
 			);
 			setLivePartialTranscriptionState(live);
 		} catch (error) {
@@ -880,7 +880,7 @@ export function useSettings() {
 		// Optimistic: reflect the toggle immediately, revert on failure.
 		setLivePartialTranscriptionState(enabled);
 		try {
-			await invokeCommand("set_live_partial_transcription", { enabled });
+			await invokeCommand(COMMANDS.STT_MODELS_SET_LIVE_PARTIAL_TRANSCRIPTION, { enabled });
 			invalidateCache("livePartialTranscription");
 		} catch (error) {
 			console.error("Failed to set live partial transcription:", error);

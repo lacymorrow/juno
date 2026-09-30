@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { COMMANDS } from "@/lib/constants.generated";
 
 /**
  * Advanced-settings visibility.
@@ -25,8 +26,8 @@ import { toast } from "sonner";
  * localStorage.
  */
 
-export const GET_ADVANCED_SETTINGS_ENABLED = "get_advanced_settings_enabled";
-export const SET_ADVANCED_SETTINGS_ENABLED = "set_advanced_settings_enabled";
+export const GET_ADVANCED_SETTINGS_ENABLED = COMMANDS.SETTINGS_GET_ADVANCED_SETTINGS_ENABLED;
+export const SET_ADVANCED_SETTINGS_ENABLED = COMMANDS.SETTINGS_SET_ADVANCED_SETTINGS_ENABLED;
 
 export interface AdvancedSettingsContextValue {
   /** True when every setting should be shown. */

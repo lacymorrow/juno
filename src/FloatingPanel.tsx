@@ -4,7 +4,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useDragWindow } from "@/hooks/useDragWindow";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
-import { UI } from "@/lib/constants.generated";
+import { UI, EVENTS } from "@/lib/constants.generated";
 import "./styles/globals.css";
 
 // Constants for all panel sizes - these should match the TransparentFloatingPanel component
@@ -168,13 +168,13 @@ export default function FloatingPanel() {
 
     const setupListeners = async () => {
       try {
-        const fnEnter = await listen<null>("mouse-entered-window", () => {
+        const fnEnter = await listen<null>(EVENTS.SYSTEM_MOUSE_ENTERED_WINDOW, () => {
           if (mounted) setIsHovered(true);
         });
         if (mounted) unlistenEnter = fnEnter;
         else { fnEnter(); return; }
 
-        const fnLeave = await listen<null>("mouse-left-window", () => {
+        const fnLeave = await listen<null>(EVENTS.SYSTEM_MOUSE_LEFT_WINDOW, () => {
           if (mounted) setIsHovered(false);
         });
         if (mounted) unlistenLeave = fnLeave;

@@ -22,10 +22,10 @@ use crate::settings::CloudSettings;
 use tracing::info;
 
 /// Production cloud endpoints - verified healthy and operational
-pub const PRODUCTION_WS_URL: &str = "wss://juno-cloud-backend.fly.dev/ws";
-pub const PRODUCTION_API_URL: &str = "https://juno-cloud-backend.fly.dev/api";
-pub const PRODUCTION_HEALTH_URL: &str = "https://juno-cloud-backend.fly.dev/health";
-pub const PRODUCTION_METRICS_URL: &str = "https://juno-cloud-backend.fly.dev/metrics";
+pub const PRODUCTION_WS_URL: &str = crate::constants::api::endpoints::CLOUD_SERVER_URL;
+pub const PRODUCTION_API_URL: &str = crate::constants::api::endpoints::CLOUD_API_URL;
+pub const PRODUCTION_HEALTH_URL: &str = crate::constants::api::endpoints::CLOUD_HEALTH_URL;
+pub const PRODUCTION_METRICS_URL: &str = crate::constants::api::endpoints::CLOUD_METRICS_URL;
 
 /// Static denied commands list - only truly destructive commands
 static DENIED_COMMANDS: &[&str] = &[

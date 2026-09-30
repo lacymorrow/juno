@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+import { EVENTS, LOCAL_STORAGE_KEYS } from "@/lib/constants.generated";
 
 type ClickInfo = {
   x: number;
@@ -13,13 +14,13 @@ type ClickInfo = {
 const ClickVisualizer = () => {
   const [clicks, setClicks] = useState<ClickInfo[]>([]);
   const [isEnabled, setIsEnabled] = useState(
-    localStorage.getItem('juno-show-click-visualization') !== 'false' // Default to true
+    localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_CLICK_VISUALIZATION) !== 'false' // Default to true
   );
 
   // Check localStorage periodically for setting changes
   useEffect(() => {
     const checkSettings = () => {
-      const enabled = localStorage.getItem('juno-show-click-visualization') !== 'false';
+      const enabled = localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_CLICK_VISUALIZATION) !== 'false';
       setIsEnabled(enabled);
     };
 
@@ -41,7 +42,7 @@ const ClickVisualizer = () => {
     const setupListener = async () => {
       try {
         const fn = await listen<[number, number, string]>(
-          "click-visualization",
+          EVENTS.UI_CLICK_VISUALIZATION,
           (event) => {
             if (!mounted) return;
 

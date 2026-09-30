@@ -25,6 +25,7 @@ import {
   XCircle,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import { COMMANDS } from "@/lib/constants.generated";
 
 interface CloudStatus {
   enabled: boolean;
@@ -99,7 +100,7 @@ export const CloudTestPanel: React.FC = () => {
 
   const loadCloudStatus = async () => {
     try {
-      const status = await invoke<CloudStatus>("get_cloud_status");
+      const status = await invoke<CloudStatus>(COMMANDS.CLOUD_GET_CLOUD_STATUS);
       if (mountedRef.current) setCloudStatus(status);
     } catch (error) {
       console.error("Failed to load cloud status:", error);
@@ -108,7 +109,7 @@ export const CloudTestPanel: React.FC = () => {
 
   const loadCloudConfig = async () => {
     try {
-      const config = await invoke<CloudConfig>("get_cloud_config");
+      const config = await invoke<CloudConfig>(COMMANDS.CLOUD_GET_CLOUD_CONFIG);
       if (mountedRef.current) {
         setCloudConfig(config);
         setConfigForm(config); // Initialize form with current config
@@ -121,7 +122,7 @@ export const CloudTestPanel: React.FC = () => {
   const loadDiagnostics = async () => {
     try {
       const diag = await invoke<WebSocketDiagnostics>(
-        "get_websocket_diagnostics"
+        COMMANDS.CLOUD_GET_WEBSOCKET_DIAGNOSTICS
       );
       if (mountedRef.current) setDiagnostics(diag);
     } catch (error) {
@@ -142,7 +143,7 @@ export const CloudTestPanel: React.FC = () => {
   const testWebSocketConnection = async () => {
     setIsLoading(true);
     try {
-      const result = await invoke<TestResult>("test_websocket_connection", {
+      const result = await invoke<TestResult>(COMMANDS.CLOUD_TEST_WEBSOCKET_CONNECTION, {
         serverUrl: testUrl,
       });
       setTestResults((prev) => [result, ...prev]);
@@ -164,7 +165,7 @@ export const CloudTestPanel: React.FC = () => {
     setIsLoading(true);
     try {
       const payload = JSON.parse(testPayload);
-      const result = await invoke<TestResult>("send_test_cloud_command", {
+      const result = await invoke<TestResult>(COMMANDS.CLOUD_SEND_TEST_CLOUD_COMMAND, {
         commandType: testCommand,
         payload,
       });
@@ -191,7 +192,7 @@ export const CloudTestPanel: React.FC = () => {
         test_count: number;
         tests: TestResult[];
         timestamp: number;
-      }>("run_websocket_test_suite");
+      }>(COMMANDS.CLOUD_RUN_WEBSOCKET_TEST_SUITE);
 
       setTestResults((prev) => [
         {
@@ -220,7 +221,7 @@ export const CloudTestPanel: React.FC = () => {
   const startCloudConnector = async () => {
     setIsLoading(true);
     try {
-      await invoke("start_production_cloud_connector");
+      await invoke(COMMANDS.CLOUD_START_PRODUCTION_CLOUD_CONNECTOR);
       await refreshAll();
     } catch (error) {
       console.error("Failed to start cloud connector:", error);
@@ -231,7 +232,7 @@ export const CloudTestPanel: React.FC = () => {
   const stopCloudConnector = async () => {
     setIsLoading(true);
     try {
-      await invoke("stop_production_cloud_connector");
+      await invoke(COMMANDS.CLOUD_STOP_PRODUCTION_CLOUD_CONNECTOR);
       await refreshAll();
     } catch (error) {
       console.error("Failed to stop cloud connector:", error);
@@ -261,7 +262,7 @@ export const CloudTestPanel: React.FC = () => {
 
       // Test 1: Basic connection test
       const basicTest = await invoke<{ success?: boolean } & Record<string, unknown>>(
-        "test_websocket_connection"
+        COMMANDS.CLOUD_TEST_WEBSOCKET_CONNECTION
       );
       setTestResults((prev) => [
         {
@@ -274,7 +275,7 @@ export const CloudTestPanel: React.FC = () => {
       ]);
 
       // Test 2: Get diagnostics
-      const diagnostics = await invoke("get_websocket_diagnostics");
+      const diagnostics = await invoke(COMMANDS.CLOUD_GET_WEBSOCKET_DIAGNOSTICS);
       setTestResults((prev) => [
         {
           success: true,
@@ -287,7 +288,7 @@ export const CloudTestPanel: React.FC = () => {
 
       // Test 3: Run test suite
       const testSuite = await invoke<{ overall_success?: boolean } & Record<string, unknown>>(
-        "run_websocket_test_suite"
+        COMMANDS.CLOUD_RUN_WEBSOCKET_TEST_SUITE
       );
       setTestResults((prev) => [
         {
@@ -317,7 +318,7 @@ export const CloudTestPanel: React.FC = () => {
     setIsLoading(true);
     try {
       const payload = JSON.parse(remotePayload);
-      const result = await invoke<TestResult>("execute_remote_command", {
+      const result = await invoke<TestResult>(COMMANDS.CLOUD_EXECUTE_REMOTE_COMMAND, {
         commandType: remoteCommand,
         payload,
       });
@@ -339,7 +340,7 @@ export const CloudTestPanel: React.FC = () => {
   const loadConnectionDiagnostics = async () => {
     try {
       setIsLoading(true);
-      const diagnostics = await invoke("get_cloud_connection_diagnostics");
+      const diagnostics = await invoke(COMMANDS.CLOUD_GET_CLOUD_CONNECTION_DIAGNOSTICS);
       setConnectionDiagnostics(diagnostics);
     } catch (error) {
       console.error("Failed to load connection diagnostics:", error);
@@ -353,7 +354,7 @@ export const CloudTestPanel: React.FC = () => {
 
     setIsLoading(true);
     try {
-      await invoke("update_cloud_config", {
+      await invoke(COMMANDS.CLOUD_UPDATE_CLOUD_CONFIG, {
         enabled: configForm.enabled,
         serverUrl: configForm.server_url,
         deviceName: configForm.device_name,
@@ -660,7 +661,7 @@ export const CloudTestPanel: React.FC = () => {
                   try {
                     setIsLoading(true);
                     const newDeviceId = await invoke<string>(
-                      "generate_device_id"
+                      COMMANDS.CLOUD_GENERATE_DEVICE_ID
                     );
                     await loadCloudConfig();
                     console.log("Generated new device ID:", newDeviceId);

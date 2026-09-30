@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { COMMANDS } from "@/lib/constants.generated";
 
 interface ToolDebugInfo {
   name: string;
@@ -55,7 +56,7 @@ export function ToolDebugPanel() {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke("debug_tool_configuration");
+      const result = await invoke(COMMANDS.DEBUG_DEBUG_TOOL_CONFIGURATION);
       setDebugInfo(result as DebugInfo);
     } catch (err) {
       setError(`Failed to debug tool configuration: ${err}`);
@@ -68,7 +69,7 @@ export function ToolDebugPanel() {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke("get_registered_tools");
+      const result = await invoke(COMMANDS.TOOLS_GET_REGISTERED_TOOLS);
       setRegisteredTools(result as RegisteredToolsResponse);
     } catch (err) {
       setError(`Failed to debug registered tools: ${err}`);
@@ -81,7 +82,7 @@ export function ToolDebugPanel() {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke("debug_registered_tools");
+      const result = await invoke(COMMANDS.DEBUG_DEBUG_REGISTERED_TOOLS);
       setDetailedDebug(result as DebugRegisteredResponse);
     } catch (err) {
       setError(`Failed to get detailed debug info: ${err}`);
@@ -94,7 +95,7 @@ export function ToolDebugPanel() {
     setLoading(true);
     setError(null);
     try {
-      await invoke("debug_reset_tool_config");
+      await invoke(COMMANDS.DEBUG_DEBUG_RESET_TOOL_CONFIG);
       alert("Tool configuration reset successfully!");
       // Refresh the debug info
       await debugToolConfiguration();

@@ -614,7 +614,7 @@ impl UIManager {
 
         if let Err(e) = self
             .app_handle
-            .emit(events::dictation::STATE_CHANGED, &event)
+            .emit(events::dictation_state::CHANGED, &event)
         {
             error!("Failed to emit dictation-state-changed event: {}", e);
         }

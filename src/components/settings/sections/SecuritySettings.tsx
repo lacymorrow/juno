@@ -20,6 +20,7 @@ import {
   type AppPermissionStatus,
 } from "@/lib/permissions-service";
 import { cn } from "@/lib/utils";
+import { COMMANDS } from "@/lib/constants.generated";
 import { SettingsGroup, SettingsRow } from "../ui";
 
 const permissions = [
@@ -211,19 +212,19 @@ export default function SecuritySettings() {
       setIsRequestingPermission(permissionType);
       setPermissionsError(null);
 
-      let commandName = "";
+      let commandName: string;
       switch (permissionType) {
         case "accessibility":
-          commandName = "request_accessibility_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_ACCESSIBILITY_PERMISSION;
           break;
         case "screen_recording":
-          commandName = "request_screen_recording_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_SCREEN_RECORDING_PERMISSION;
           break;
         case "microphone":
-          commandName = "request_microphone_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_MICROPHONE_PERMISSION;
           break;
         case "input_monitoring":
-          commandName = "request_input_monitoring_permission_native";
+          commandName = COMMANDS.PERMISSIONS_REQUEST_INPUT_MONITORING_PERMISSION;
           break;
         default:
           throw new Error(`Unknown permission type: ${permissionType}`);

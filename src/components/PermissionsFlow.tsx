@@ -32,6 +32,7 @@ import {
   CardTitle,
 } from "./ui/card";
 import { Separator } from "./ui/separator";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 
 interface PermissionsFlowProps {
   onComplete?: () => void;
@@ -99,7 +100,7 @@ export function PermissionsFlow({
     try {
       setIsRequestingPermission("accessibility");
       const granted = await invoke<boolean>(
-        "request_accessibility_permission_native"
+        COMMANDS.PERMISSIONS_REQUEST_ACCESSIBILITY_PERMISSION
       );
 
       // Invalidate cache and force refresh after permission request
@@ -128,7 +129,7 @@ export function PermissionsFlow({
     try {
       setIsRequestingPermission("screen_recording");
       const granted = await invoke<boolean>(
-        "request_screen_recording_permission_native"
+        COMMANDS.PERMISSIONS_REQUEST_SCREEN_RECORDING_PERMISSION
       );
 
       // Invalidate cache and force refresh after permission request
@@ -157,7 +158,7 @@ export function PermissionsFlow({
     try {
       setIsRequestingPermission("microphone");
       const granted = await invoke<boolean>(
-        "request_microphone_permission_native"
+        COMMANDS.PERMISSIONS_REQUEST_MICROPHONE_PERMISSION
       );
 
       // Invalidate cache and force refresh after permission request
@@ -186,7 +187,7 @@ export function PermissionsFlow({
     try {
       setIsRequestingPermission("input_monitoring");
       const granted = await invoke<boolean>(
-        "request_input_monitoring_permission_native"
+        COMMANDS.PERMISSIONS_REQUEST_INPUT_MONITORING_PERMISSION
       );
 
       // Invalidate cache and force refresh after permission request
@@ -213,7 +214,7 @@ export function PermissionsFlow({
   // Enhanced system preferences opening
   const openSystemPreferencesEnhanced = async (preferencePane: string) => {
     try {
-      await invoke("open_system_settings_enhanced", {
+      await invoke(COMMANDS.PERMISSIONS_OPEN_SYSTEM_SETTINGS, {
         permission_type: preferencePane,
       });
     } catch (err) {
@@ -225,7 +226,7 @@ export function PermissionsFlow({
   // Open System Preferences (original method)
   const openSystemPreferences = async (preferencePane: string) => {
     try {
-      await invoke("open_system_preferences", { preferencePane });
+      await invoke(COMMANDS.PERMISSIONS_OPEN_SYSTEM_PREFERENCES, { preferencePane });
     } catch (err) {
       setError(err as string);
       console.error("Error opening System Preferences:", err);
@@ -235,7 +236,7 @@ export function PermissionsFlow({
   // Start monitoring permissions changes
   const startMonitoring = async () => {
     try {
-      await invoke("start_permissions_monitoring");
+      await invoke(COMMANDS.PERMISSIONS_START_PERMISSIONS_MONITORING);
     } catch (err) {
       console.error("Error starting permissions monitoring:", err);
     }
@@ -244,7 +245,7 @@ export function PermissionsFlow({
   // Stop monitoring permissions changes
   const stopMonitoring = async () => {
     try {
-      await invoke("stop_permissions_monitoring");
+      await invoke(COMMANDS.PERMISSIONS_STOP_PERMISSIONS_MONITORING);
     } catch (err) {
       console.error("Error stopping permissions monitoring:", err);
     }
@@ -268,7 +269,7 @@ export function PermissionsFlow({
     const setupListeners = async () => {
       // Listen for permissions changes
       const fn = await listen<PermissionsState>(
-        "permissions-changed",
+        EVENTS.PERMISSIONS_CHANGED,
         (event) => {
           if (!mounted || !mountedRef.current) return;
           setPermissions(event.payload);

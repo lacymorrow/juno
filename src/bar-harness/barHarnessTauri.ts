@@ -21,15 +21,21 @@
 
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
+import { COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 /** The label the bar's window carries in the shipping app. */
-export const BAR_WINDOW_LABEL = "floating-bar";
+export const BAR_WINDOW_LABEL = WINDOW_LABELS.FLOATING_BAR;
 
 /**
  * Every label a bar appearance may resolve through `Window.getByLabel`. The
  * shim reports all of them so a bar that sizes a differently named window (the
  * voice and dynamic bars do) still lands its resize in the store.
  */
-const BAR_WINDOW_LABELS = [BAR_WINDOW_LABEL, "app-bar", "voice-bar", "dynamic-bar"];
+const BAR_WINDOW_LABELS: string[] = [
+  BAR_WINDOW_LABEL,
+  WINDOW_LABELS.APP_BAR,
+  WINDOW_LABELS.VOICE_BAR,
+  WINDOW_LABELS.DYNAMIC_BAR,
+];
 
 /** A monitor, in PHYSICAL pixels, matching Tauri's monitor geometry. */
 export interface HarnessMonitor {
@@ -214,7 +220,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     }
 
     // --- the bar's own frame command (resize + reposition in one shot) ---
-    case "set_bar_frame": {
+    case COMMANDS.BAR_SET_BAR_FRAME: {
       const sf = state.monitor.scaleFactor;
       // width/height arrive logical; x/y arrive physical. Normalize to the
       // physical frame the store holds.
@@ -235,7 +241,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     }
 
     // --- reads that must return a usable shape (callers map/some over these) ---
-    case "ui_get_bar_config":
+    case COMMANDS.BAR_UI_GET_BAR_CONFIG:
       return {
         show_voice_indicator: true,
         enable_animations: true,
@@ -245,26 +251,26 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
         bar_appearance: previewAppearance,
         show_glow_border: true,
       };
-    case "get_floating_bar_settings":
+    case COMMANDS.SETTINGS_GET_FLOATING_BAR_SETTINGS:
       return { follow_cursor_display: true, show_glow_border: true };
     // The preview dictates a sentence; showing it as it arrives is the point.
-    case "get_live_partial_transcription":
+    case COMMANDS.STT_MODELS_GET_LIVE_PARTIAL_TRANSCRIPTION:
       return true;
-    case "get_bar_position":
+    case COMMANDS.BAR_GET_BAR_POSITION:
       return null;
-    case "get_triggers":
+    case COMMANDS.TRIGGERS_GET_TRIGGERS:
       return [];
-    case "list_agent_sessions":
+    case COMMANDS.AGENT_SESSIONS_LIST_AGENT_SESSIONS:
       return [];
-    case "get_always_listening_status":
+    case COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS:
       return false;
     // The island's card: approvals and the stop path answer as the backend
     // would once the work is done; the preview never runs anything.
-    case "approve_tool_execution":
-    case "deny_tool_execution":
+    case COMMANDS.TOOLS_APPROVE_TOOL_EXECUTION:
+    case COMMANDS.TOOLS_DENY_TOOL_EXECUTION:
       return true;
-    case "stop_all_operations":
-    case "ui_handle_interaction":
+    case COMMANDS.AGENT_STOP_ALL_OPERATIONS:
+    case COMMANDS.BAR_UI_HANDLE_INTERACTION:
       return null;
 
     // --- settings reads the bar's chat pane pulls on mount ---
@@ -272,29 +278,29 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     // does `wakeWords.join(", ")`; a bare `null` there throws and surfaces as
     // "Failed to load some settings" plus a "Failed to execute ..." toast. Each
     // must resolve to a value of the shape the hook expects.
-    case "get_tts_provider_command":
+    case COMMANDS.TTS_GET_TTS_PROVIDER:
       return "system";
-    case "get_providers":
+    case COMMANDS.PROVIDERS_GET_PROVIDERS:
       return [];
-    case "get_active_provider":
+    case COMMANDS.PROVIDERS_GET_ACTIVE_PROVIDER:
       return ""; // empty skips the follow-up get_provider_settings fetch
-    case "get_agent_mode":
+    case COMMANDS.AGENT_GET_AGENT_MODE:
       return "agent";
-    case "get_agent_trigger_mode":
+    case COMMANDS.AGENT_GET_AGENT_TRIGGER_MODE:
       return "hotkey";
-    case "get_dictation_trigger_mode":
+    case COMMANDS.DICTATION_GET_DICTATION_TRIGGER_MODE:
       return "hotkey";
-    case "get_dictation_clipboard_enabled":
-    case "get_sound_enabled":
-    case "get_performance_monitoring":
+    case COMMANDS.DICTATION_GET_DICTATION_CLIPBOARD_ENABLED:
+    case COMMANDS.SOUND_GET_SOUND_ENABLED:
+    case COMMANDS.CORE_GET_PERFORMANCE_MONITORING:
       return false;
-    case "get_always_listening_sensitivity":
+    case COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_SENSITIVITY:
       return 0.5;
-    case "get_always_listening_wake_words":
+    case COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_WAKE_WORDS:
       return [];
-    case "get_chatterbox_settings_command":
+    case COMMANDS.TTS_GET_CHATTERBOX_SETTINGS:
       return { reference_audio_url: null, exaggeration: 0.5, use_hd: false };
-    case "get_supertonic_settings_command":
+    case COMMANDS.TTS_GET_SUPERTONIC_SETTINGS:
       return { server_url: "", voice: "", speed: 1 };
 
     // Everything else the bar fires (interactions, dispatch, stop, focus,

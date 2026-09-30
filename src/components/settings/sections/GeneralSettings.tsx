@@ -13,7 +13,7 @@ import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { UI } from "@/lib/constants.generated";
+import { UI, COMMANDS } from "@/lib/constants.generated";
 import type { FloatingBarConfig } from "@/types/bar-config";
 import type { BarAppearance } from "@/components/bar/barAppearance";
 import { AppearancePicker } from "../AppearancePicker";
@@ -37,24 +37,24 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     const loadInitialData = async () => {
       try {
         // Load auto-launch status
-        const enabled = await invoke<boolean>("is_autostart_enabled");
+        const enabled = await invoke<boolean>(COMMANDS.AUTOSTART_IS_AUTOSTART_ENABLED);
         setAutoLaunchEnabled(enabled);
 
         // Load onboarding info
-        const info = await invoke("get_onboarding_info");
+        const info = await invoke(COMMANDS.ONBOARDING_GET_ONBOARDING_INFO);
         setOnboardingInfo(info);
 
         // Load current bar appearance and glow-border preference
         const barConfig = await invoke<{
           bar_appearance?: string;
-        }>("ui_get_bar_config");
+        }>(COMMANDS.BAR_UI_GET_BAR_CONFIG);
         if (barConfig?.bar_appearance) {
           setBarAppearance(barConfig.bar_appearance);
         }
 
         // Load "follow cursor across displays"
         const barSettings = await invoke<{ follow_cursor_display?: boolean }>(
-          "get_floating_bar_settings",
+          COMMANDS.SETTINGS_GET_FLOATING_BAR_SETTINGS,
         );
         if (typeof barSettings?.follow_cursor_display === "boolean") {
           setFollowCursorDisplay(barSettings.follow_cursor_display);
@@ -76,18 +76,18 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
 
     try {
       if (enabled) {
-        await invoke<boolean>("enable_autostart");
+        await invoke<boolean>(COMMANDS.AUTOSTART_ENABLE_AUTOSTART);
         setAutoLaunchEnabled(true);
         console.log("Auto-launch enabled - Juno will start when you log in");
       } else {
-        await invoke<boolean>("disable_autostart");
+        await invoke<boolean>(COMMANDS.AUTOSTART_DISABLE_AUTOSTART);
         setAutoLaunchEnabled(false);
         console.log("Auto-launch disabled");
       }
     } catch (error) {
       console.error("Failed to update auto-launch setting:", error);
       // Revert the state if the operation failed
-      const currentStatus = await invoke<boolean>("is_autostart_enabled").catch(
+      const currentStatus = await invoke<boolean>(COMMANDS.AUTOSTART_IS_AUTOSTART_ENABLED).catch(
         () => false
       );
       setAutoLaunchEnabled(currentStatus);
@@ -102,13 +102,13 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     setRestartOnboardingLoading(true);
 
     try {
-      await invoke("restart_onboarding");
+      await invoke(COMMANDS.ONBOARDING_RESTART_ONBOARDING);
       toast.success("Onboarding restarted successfully", {
         description: "The onboarding window has been opened",
       });
 
       // Refresh onboarding info
-      const info = await invoke("get_onboarding_info");
+      const info = await invoke(COMMANDS.ONBOARDING_GET_ONBOARDING_INFO);
       setOnboardingInfo(info);
     } catch (error) {
       console.error("Failed to restart onboarding:", error);
@@ -126,9 +126,9 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     try {
       // Read-modify-write: this command takes the whole settings object.
       const current = await invoke<Record<string, unknown>>(
-        "get_floating_bar_settings",
+        COMMANDS.SETTINGS_GET_FLOATING_BAR_SETTINGS,
       );
-      await invoke("set_floating_bar_settings", {
+      await invoke(COMMANDS.SETTINGS_SET_FLOATING_BAR_SETTINGS, {
         settings: { ...current, follow_cursor_display: enabled },
       });
       setFollowCursorDisplay(enabled);
@@ -150,12 +150,12 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     const previous = barAppearance;
     setBarAppearance(newAppearance);
     try {
-      const currentConfig = await invoke<FloatingBarConfig>("ui_get_bar_config");
+      const currentConfig = await invoke<FloatingBarConfig>(COMMANDS.BAR_UI_GET_BAR_CONFIG);
       const updatedConfig = {
         ...currentConfig,
         bar_appearance: newAppearance,
       };
-      await invoke("ui_set_bar_config", { config: updatedConfig });
+      await invoke(COMMANDS.BAR_UI_SET_BAR_CONFIG, { config: updatedConfig });
     } catch (error) {
       setBarAppearance(previous);
       console.error("Failed to update bar appearance:", error);
@@ -320,7 +320,7 @@ function BuildGroup() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    invoke<BuildInfo>("get_build_info")
+    invoke<BuildInfo>(COMMANDS.APP_GET_BUILD_INFO)
       .then(setInfo)
       .catch((error) => console.error("Failed to read build info:", error));
   }, []);

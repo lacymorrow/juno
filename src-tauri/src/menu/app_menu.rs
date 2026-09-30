@@ -456,7 +456,7 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         constants::app_menu_ids::VISIT_WEBSITE => {
             info!("[Menu] Visit Website menu item clicked");
             // Open website in default browser
-            if let Err(e) = open::that("https://github.com/juno-ai") {
+            if let Err(e) = open::that(constants::api::endpoints::GITHUB_URL) {
                 error!(
                     "{} {}",
                     prefixes::MENU,

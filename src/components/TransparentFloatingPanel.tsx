@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useDragWindow } from "@/hooks/useDragWindow";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { AgentSessionRows } from "@/components/AgentSessionRows";
-import { UI } from "@/lib/constants.generated";
+import { UI, COMMANDS } from "@/lib/constants.generated";
 import { ChevronUp, ChevronDown, X } from "lucide-react";
 
 interface FloatingPanelProps {
@@ -78,8 +78,8 @@ const TransparentFloatingPanel: React.FC<FloatingPanelProps> = ({
   // Handle panel interaction
   const handlePanelInteraction = async (action: string) => {
     try {
-      await invoke("ui_handle_interaction", {
-        elementId: "floating-panel",
+      await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, {
+        elementId: UI.ELEMENT_IDS_FLOATING_PANEL,
         interaction: {
           interaction_type: action,
           data: { mode, status: agentStatus },

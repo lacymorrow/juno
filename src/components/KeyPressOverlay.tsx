@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+import { EVENTS, LOCAL_STORAGE_KEYS } from "@/lib/constants.generated";
 
 type KeyPressInfo = {
   key: string;
@@ -12,13 +13,13 @@ type KeyPressInfo = {
 const KeyPressOverlay = () => {
   const [keyPresses, setKeyPresses] = useState<KeyPressInfo[]>([]);
   const [isEnabled, setIsEnabled] = useState(
-    localStorage.getItem('juno-show-key-press-overlay') === 'true'
+    localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_KEY_PRESS_OVERLAY) === 'true'
   );
 
   // Check localStorage periodically for setting changes
   useEffect(() => {
     const checkSettings = () => {
-      const enabled = localStorage.getItem('juno-show-key-press-overlay') === 'true';
+      const enabled = localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_KEY_PRESS_OVERLAY) === 'true';
       setIsEnabled(enabled);
     };
 
@@ -37,7 +38,7 @@ const KeyPressOverlay = () => {
     let mounted = true;
 
     listen<{ key: string; modifier?: string }>(
-      "key-press-visualization",
+      EVENTS.UI_KEY_PRESS_VISUALIZATION,
       (event) => {
         if (!mounted) return;
         const { key, modifier } = event.payload;

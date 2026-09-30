@@ -97,12 +97,8 @@ impl UpdateChannel {
     /// The manifest this channel reads.
     pub fn endpoint(self) -> &'static str {
         match self {
-            Self::Stable => {
-                "https://github.com/lacymorrow/juno/releases/latest/download/latest.json"
-            }
-            Self::Prerelease => {
-                "https://github.com/lacymorrow/juno/releases/download/canary/latest.json"
-            }
+            Self::Stable => crate::constants::api::endpoints::UPDATE_FEED_STABLE,
+            Self::Prerelease => crate::constants::api::endpoints::UPDATE_FEED_PRERELEASE,
         }
     }
 }
@@ -386,6 +382,21 @@ mod tests {
             assert!(endpoint.ends_with("latest.json"), "{endpoint}");
             assert!(url::Url::parse(endpoint).is_ok(), "{endpoint}");
         }
+    }
+
+    /// tauri.conf.json names the stable feed too (the updater plugin needs an
+    /// endpoint at build time). It must be the same URL the stable channel
+    /// reads, or a build that ignores the runtime choice looks elsewhere.
+    #[test]
+    fn the_stable_feed_matches_tauri_conf() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap_or_default();
+        let endpoints = &conf["plugins"]["updater"]["endpoints"];
+        assert_eq!(
+            endpoints[0].as_str(),
+            Some(UpdateChannel::Stable.endpoint()),
+            "{endpoints}"
+        );
     }
 
     /// The prerelease feed has to be a fixed URL. If it ever resolved through

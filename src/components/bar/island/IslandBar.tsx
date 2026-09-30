@@ -13,7 +13,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useReducedMotion } from "motion/react";
 import { Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { EVENTS, UI } from "@/lib/constants.generated";
+import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useDragWindow } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
@@ -60,8 +60,8 @@ import {
  */
 
 /** Backend element id for interactions. Must match `ui::element_ids::DYNAMIC_BAR`. */
-const COMPONENT_ID = "dynamic-bar";
-const WINDOW_LABEL = "floating-bar";
+const COMPONENT_ID = UI.ELEMENT_IDS_DYNAMIC_BAR;
+const WINDOW_LABEL = WINDOW_LABELS.FLOATING_BAR;
 
 /** Header and footer heights inside the card, for the content measurement. */
 const CARD_HEADER_H = 36;
@@ -115,7 +115,7 @@ async function sendInteraction(type: string, data?: Record<string, unknown>): Pr
     timestamp: Date.now(),
   };
   try {
-    await invoke("ui_handle_interaction", { elementId: COMPONENT_ID, interaction });
+    await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, { elementId: COMPONENT_ID, interaction });
   } catch (error) {
     console.error("Island: interaction failed:", error);
   }

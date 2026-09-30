@@ -12,17 +12,20 @@ pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
     let app_handle_clone = app_handle.clone();
 
     // Handle window close event
-    app_handle.listen("tauri://destroyed", move |_| {
-        info!("Application window destroyed, initiating cleanup...");
-        let handle = app_handle_clone.clone();
+    app_handle.listen(
+        crate::constants::events::system::TAURI_DESTROYED,
+        move |_| {
+            info!("Application window destroyed, initiating cleanup...");
+            let handle = app_handle_clone.clone();
 
-        // Spawn cleanup in a blocking task since we're exiting anyway
-        std::thread::spawn(move || {
-            tauri::async_runtime::block_on(async {
-                cleanup_application(&handle).await;
+            // Spawn cleanup in a blocking task since we're exiting anyway
+            std::thread::spawn(move || {
+                tauri::async_runtime::block_on(async {
+                    cleanup_application(&handle).await;
+                });
             });
-        });
-    });
+        },
+    );
 
     // Setup ctrl+c handler for CLI mode
     let app_handle_ctrl_c = app_handle.clone();

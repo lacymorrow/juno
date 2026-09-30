@@ -143,7 +143,7 @@ function App() {
       await stopTTS((msg, level) =>
         console.log(`[Stop-${level || "info"}] ${msg}`),
       );
-      await invoke("stop_all_operations");
+      await invoke(COMMANDS.AGENT_STOP_ALL_OPERATIONS);
       console.log("✅ All operations stopped successfully");
       conversation.addSystemMessage("🛑 All operations stopped by user");
     } catch (error) {
@@ -205,7 +205,7 @@ function App() {
   // in history) and clears this window's view. Routing through the backend fixes
   // the old behavior where a new chat left the backend conversation intact.
   const handleNewChat = useCallback(() => {
-    invoke("new_conversation").catch((err) =>
+    invoke(COMMANDS.CONVERSATIONS_NEW_CONVERSATION).catch((err) =>
       console.error("Failed to start new conversation:", err),
     );
     conversation.startNewChat();
@@ -307,7 +307,7 @@ function App() {
         appState.setAppVersion(version);
 
         // Load keyboard shortcuts
-        const shortcuts = (await invoke("get_keyboard_shortcuts")) as {
+        const shortcuts = (await invoke(COMMANDS.SHORTCUTS_GET_KEYBOARD_SHORTCUTS)) as {
           agent_mode: string;
           dictation_input: string;
           stop_current_task: string;
@@ -339,7 +339,7 @@ function App() {
     const setupListener = async () => {
       try {
         const { listen } = await import("@tauri-apps/api/event");
-        const fn = await listen("dictation-active", (event) => {
+        const fn = await listen(EVENTS.DICTATION_ACTIVE, (event) => {
           if (!mounted) return;
           const isActive = event.payload as boolean;
           console.log("Dictation active event from backend:", isActive);
@@ -521,7 +521,7 @@ function App() {
                 {appState.currentView === "history" && (
                   <HistoryView
                     onLoad={(id) => {
-                      invoke("load_conversation", { id }).catch((err) =>
+                      invoke(COMMANDS.CONVERSATIONS_LOAD_CONVERSATION, { id }).catch((err) =>
                         console.error("Failed to load conversation:", err),
                       );
                       appState.setCurrentView("chat");

@@ -50,7 +50,7 @@ import {
 } from "lucide-react";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { UI } from "@/lib/constants.generated";
+import { UI, COMMANDS } from "@/lib/constants.generated";
 
 export type { ChatMessage } from "@/types/chat";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
@@ -186,7 +186,7 @@ function ContinuationActions({
 }) {
   const handleStop = useCallback(async () => {
     try {
-      await invoke("respond_to_agent_continuation", {
+      await invoke(COMMANDS.AGENT_RESPOND_TO_AGENT_CONTINUATION, {
         requestId,
         approved: false,
       });
@@ -198,7 +198,7 @@ function ContinuationActions({
 
   const handleContinue = useCallback(async () => {
     try {
-      await invoke("respond_to_agent_continuation", {
+      await invoke(COMMANDS.AGENT_RESPOND_TO_AGENT_CONTINUATION, {
         requestId,
         approved: true,
         additionalSteps: 20,
@@ -397,7 +397,7 @@ export function ChatMessageComponent({
   // Inline tool approval handlers — visual feedback via Confirmation component
   const handleApprove = useCallback(async (toolId: string) => {
     try {
-      const success = await invoke<boolean>("approve_tool_execution", { toolId });
+      const success = await invoke<boolean>(COMMANDS.TOOLS_APPROVE_TOOL_EXECUTION, { toolId });
       if (success) {
         onApprovalUpdate?.(toolId, "approved");
       }
@@ -408,7 +408,7 @@ export function ChatMessageComponent({
 
   const handleDeny = useCallback(async (toolId: string) => {
     try {
-      const success = await invoke<boolean>("deny_tool_execution", { toolId });
+      const success = await invoke<boolean>(COMMANDS.TOOLS_DENY_TOOL_EXECUTION, { toolId });
       if (success) {
         onApprovalUpdate?.(toolId, "denied");
       }

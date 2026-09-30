@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { COMMANDS } from "@/lib/constants.generated";
 
 // Helper type for the logging function
 type LogFn = (message: string, level?: string) => void;
@@ -15,7 +16,7 @@ export const stopTTS = async (logFn?: LogFn): Promise<void> => {
 	logFn = logFn || ((msg, level) => console.log(`[TTS-${level || 'info'}] ${msg}`));
 
 	try {
-		await invoke("stop_tts");
+		await invoke(COMMANDS.TTS_STOP_TTS);
 		logFn("Backend TTS stop command sent", "info");
 	} catch (error) {
 		logFn(`Error stopping backend TTS: ${error}`, "error");

@@ -477,7 +477,7 @@ export const DesktopCursorOverlay = () => {
   }, []);
 
   // ── Multi-agent cursor events ─────────────────────────────────────────────
-  useEventListener<AgentCursorUpdate>("agent-cursor-update", (payload) => {
+  useEventListener<AgentCursorUpdate>(EVENTS.UI_AGENT_CURSOR_UPDATE, (payload) => {
     const slotIdx = getOrAssignSlot(payload.agent_id, slotMap);
     if (slotIdx === null) return; // all slots occupied
 
@@ -505,7 +505,7 @@ export const DesktopCursorOverlay = () => {
     }
   });
 
-  useEventListener<AgentCursorRemove>("agent-cursor-remove", ({ agent_id }) => {
+  useEventListener<AgentCursorRemove>(EVENTS.UI_AGENT_CURSOR_REMOVE, ({ agent_id }) => {
     const slotIdx = slotMap.get(agent_id);
     if (slotIdx === undefined) return;
 
@@ -523,7 +523,7 @@ export const DesktopCursorOverlay = () => {
   // They map to slot 0 with the default purple color.
   const LEGACY_SLOT = 0;
 
-  useEventListener<[number, number]>("ui-cursor-highlight-start", ([x, y]) => {
+  useEventListener<[number, number]>(EVENTS.UI_UI_CURSOR_HIGHLIGHT_START, ([x, y]) => {
     if (!occupiedSlots.current.has(LEGACY_SLOT)) occupiedSlots.current.add(LEGACY_SLOT);
     const slot = slots.current[LEGACY_SLOT];
     revealSlot(slot);
@@ -531,20 +531,20 @@ export const DesktopCursorOverlay = () => {
     applySlotState(slot, "moving");
   });
 
-  useEventListener<[number, number]>("ui-cursor-highlight-move", ([x, y]) => {
+  useEventListener<[number, number]>(EVENTS.UI_UI_CURSOR_HIGHLIGHT_MOVE, ([x, y]) => {
     const slot = slots.current[LEGACY_SLOT];
     moveSlotTo(slot, x, y);
     if (slot.state !== "clicking") applySlotState(slot, "moving");
   });
 
-  useEventListener<[number, number]>("ui-cursor-highlight-stop", ([x, y]) => {
+  useEventListener<[number, number]>(EVENTS.UI_UI_CURSOR_HIGHLIGHT_STOP, ([x, y]) => {
     const slot = slots.current[LEGACY_SLOT];
     moveSlotTo(slot, x, y);
     applySlotState(slot, "idle");
     scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS);
   });
 
-  useEventListener<[number, number, string]>("click-visualization", ([x, y, color]) => {
+  useEventListener<[number, number, string]>(EVENTS.UI_CLICK_VISUALIZATION, ([x, y, color]) => {
     const slot = slots.current[LEGACY_SLOT];
     revealSlot(slot);
     moveSlotTo(slot, x, y);
@@ -557,12 +557,12 @@ export const DesktopCursorOverlay = () => {
     }, CLICK_ANIM_DURATION_MS);
   });
 
-  useEventListener("agent-thinking-start", () => {
+  useEventListener(EVENTS.STREAMING_THINKING_START, () => {
     const slot = slots.current[LEGACY_SLOT];
     if (slot.state === "idle") { revealSlot(slot); applySlotState(slot, "thinking"); }
   });
 
-  useEventListener("agent-thinking-end", () => {
+  useEventListener(EVENTS.STREAMING_THINKING_END, () => {
     const slot = slots.current[LEGACY_SLOT];
     if (slot.state === "thinking") { applySlotState(slot, "idle"); scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS); }
   });
@@ -581,7 +581,7 @@ export const DesktopCursorOverlay = () => {
     action: string;
     coordinate: [number, number];
     timestamp: number;
-  }>("computer-use-preview", ({ action, coordinate }) => {
+  }>(EVENTS.TOOLS_COMPUTER_USE_PREVIEW, ({ action, coordinate }) => {
     const [x, y] = coordinate;
     firePreview(x, y, action);
   });

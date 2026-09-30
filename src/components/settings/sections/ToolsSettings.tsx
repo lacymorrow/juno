@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
+import { COMMANDS } from "@/lib/constants.generated";
 
 export default function ToolsSettings({ settings }: SettingsSectionProps) {
   const [toolApprovalRequired, setToolApprovalRequired] = useState(false);
@@ -25,7 +26,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
   useEffect(() => {
     const loadToolApprovalSetting = async () => {
       try {
-        const required = await invoke<boolean>("get_tool_approval_required");
+        const required = await invoke<boolean>(COMMANDS.TOOLS_GET_TOOL_APPROVAL_REQUIRED);
         setToolApprovalRequired(required);
       } catch (error) {
         console.error("Failed to load tool approval setting:", error);
@@ -39,7 +40,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     const loadSmoothMouseMovementSetting = async () => {
       try {
         const enabled = await invoke<boolean>(
-          "get_smooth_mouse_movement_setting"
+          COMMANDS.MOUSE_GET_SMOOTH_MOUSE_MOVEMENT_SETTING
         );
         setSmoothMouseMovement(enabled);
       } catch (error) {
@@ -51,7 +52,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
   // Load companion mode setting on mount
   useEffect(() => {
-    invoke<boolean>("get_companion_mode")
+    invoke<boolean>(COMMANDS.MOUSE_GET_COMPANION_MODE)
       .then(setCompanionMode)
       .catch((error) =>
         console.error("Failed to load companion mode setting:", error)
@@ -61,7 +62,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
   const handleToggleToolApproval = async (required: boolean) => {
     setToolApprovalLoading(true);
     try {
-      await invoke("set_tool_approval_required", { required });
+      await invoke(COMMANDS.TOOLS_SET_TOOL_APPROVAL_REQUIRED, { required });
       setToolApprovalRequired(required);
       toast.success(
         `Tool approval ${required ? "enabled" : "disabled"}${
@@ -79,7 +80,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
   const handleToggleSmoothMouseMovement = async (enabled: boolean) => {
     setSmoothMouseMovementLoading(true);
     try {
-      await invoke("set_smooth_mouse_movement_setting", { enabled });
+      await invoke(COMMANDS.MOUSE_SET_SMOOTH_MOUSE_MOVEMENT_SETTING, { enabled });
       setSmoothMouseMovement(enabled);
       toast.success(
         `Smooth mouse movement ${enabled ? "enabled" : "disabled"}`
@@ -95,7 +96,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
   const handleToggleCompanionMode = async (enabled: boolean) => {
     setCompanionModeLoading(true);
     try {
-      await invoke("set_companion_mode", { enabled });
+      await invoke(COMMANDS.MOUSE_SET_COMPANION_MODE, { enabled });
       setCompanionMode(enabled);
       toast.success(
         enabled
@@ -130,7 +131,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
     try {
       // Backend now uses enum format consistently, so categoryName is already correct
-      await invoke("set_tool_category_enabled", {
+      await invoke(COMMANDS.TOOLS_SET_TOOL_CATEGORY_ENABLED, {
         category: categoryName,
         enabled,
       });
@@ -170,7 +171,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     settings.setToolConfigurations(updatedConfigs);
 
     try {
-      await invoke("set_tool_enabled", { toolName, enabled });
+      await invoke(COMMANDS.TOOLS_SET_TOOL_ENABLED, { toolName, enabled });
       // Invalidate cache for future loads but don't reload now
       settings.invalidateToolConfigCache();
       toast.success(`${toolName} ${enabled ? "enabled" : "disabled"}`);
@@ -193,7 +194,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
   const handleSetAllTools = async (enabled: boolean) => {
     setBulkPending(true);
     try {
-      await invoke("set_all_tools_enabled", { enabled });
+      await invoke(COMMANDS.TOOLS_SET_ALL_TOOLS_ENABLED, { enabled });
       settings.invalidateToolConfigCache();
       await settings.loadToolConfigurations();
       toast.success(
@@ -212,7 +213,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
   const handleResetToolConfiguration = async () => {
     try {
-      await invoke("reset_tool_configuration");
+      await invoke(COMMANDS.TOOLS_RESET_TOOL_CONFIGURATION);
       // Force refresh by invalidating cache and reloading
       await settings.invalidateToolConfigCache();
       await settings.loadToolConfigurations();

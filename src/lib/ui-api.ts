@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { useState, useEffect } from "react";
-import { UI } from "./constants.generated";
+import { UI, COMMANDS } from "./constants.generated";
 
 // === Core UI Types ===
 
@@ -181,7 +181,7 @@ export class UIElementManager {
 
     async click(data?: any): Promise<boolean> {
         try {
-            await invoke("ui_handle_interaction", {
+            await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, {
                 elementId: this.elementId,
                 interaction: { type: "click", elementId: this.elementId, data }
             });
@@ -194,7 +194,7 @@ export class UIElementManager {
 
     async focus(data?: any): Promise<boolean> {
         try {
-            await invoke("ui_handle_interaction", {
+            await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, {
                 elementId: this.elementId,
                 interaction: { type: "focus", elementId: this.elementId, data }
             });
@@ -207,7 +207,7 @@ export class UIElementManager {
 
     async blur(data?: any): Promise<boolean> {
         try {
-            await invoke("ui_handle_interaction", {
+            await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, {
                 elementId: this.elementId,
                 interaction: { type: "blur", elementId: this.elementId, data }
             });
@@ -220,7 +220,7 @@ export class UIElementManager {
 
     async input(value: string): Promise<boolean> {
         try {
-            await invoke("ui_handle_interaction", {
+            await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, {
                 elementId: this.elementId,
                 interaction: { type: "input", elementId: this.elementId, data: { value } }
             });
@@ -233,7 +233,7 @@ export class UIElementManager {
 
     async submit(query: string): Promise<boolean> {
         try {
-            await invoke("ui_handle_interaction", {
+            await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, {
                 elementId: this.elementId,
                 interaction: { type: "submit", elementId: this.elementId, data: { query } }
             });

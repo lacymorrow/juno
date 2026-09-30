@@ -95,7 +95,7 @@ struct GeminiCandidate {
 // Removed unused structs: GeminiUsageMetadata and GeminiSafetyRating
 // These were never accessed in the code, removing for performance
 
-const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_API_BASE: &str = crate::constants::api::endpoints::GEMINI_API_BASE;
 
 #[derive(Clone)]
 pub struct GeminiBrain {
@@ -422,7 +422,9 @@ impl Default for GeminiBrain {
                     Client::new()
                 }),
             api_key: String::new(),
-            model: "gemini-1.5-flash".to_string(),
+            model: crate::agent::providers::types::Provider::Gemini
+                .default_model()
+                .to_string(),
             max_tokens: 8192,
             system_prompt: None,
             temperature: 0.1,

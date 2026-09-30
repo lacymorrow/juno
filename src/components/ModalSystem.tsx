@@ -6,7 +6,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { KEYBOARD_SHORTCUTS } from "@/lib/constants.generated";
+import { KEYBOARD_SHORTCUTS, COMMANDS } from "@/lib/constants.generated";
 
 // Types for the modal system
 export type ModalType = "help" | "feedback" | "export" | "import" | null;
@@ -103,7 +103,7 @@ export function ModalSystem({
         const githubUrl = `https://github.com/lacymorrow/juno/issues/new?title=${title}&body=${body}`;
 
         // Open GitHub issues page
-        await invoke("open_url", { url: githubUrl });
+        await invoke(COMMANDS.DESKTOP_OPEN_URL, { url: githubUrl });
       } else {
         // For general feedback, create mailto link
         const subject = encodeURIComponent(
@@ -114,7 +114,7 @@ export function ModalSystem({
         );
         const mailtoUrl = `mailto:feedback@juno-ai.com?subject=${subject}&body=${body}`;
 
-        await invoke("open_url", { url: mailtoUrl });
+        await invoke(COMMANDS.DESKTOP_OPEN_URL, { url: mailtoUrl });
       }
 
       onAddSystemMessage("✅ Feedback form opened. Thank you for your input!");
@@ -152,7 +152,7 @@ export function ModalSystem({
       };
 
       // Use backend command to handle file save dialog and writing
-      const result = (await invoke("save_chat_export", {
+      const result = (await invoke(COMMANDS.CONVERSATIONS_SAVE_CHAT_EXPORT, {
         data: JSON.stringify(exportData, null, 2),
       })) as { success: boolean; path?: string; error?: string };
 
@@ -173,7 +173,7 @@ export function ModalSystem({
   const handleImportChat = async () => {
     try {
       // Use backend command to handle file open dialog and reading
-      const result = (await invoke("load_chat_import")) as {
+      const result = (await invoke(COMMANDS.CONVERSATIONS_LOAD_CHAT_IMPORT)) as {
         success: boolean;
         data?: string;
         error?: string;

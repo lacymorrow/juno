@@ -16,7 +16,6 @@
 set -euo pipefail
 
 repo="lacymorrow/juno"
-app_id="com.juno.desktop"
 dest="/Applications/Juno.app"
 cache="$HOME/.cache/juno-builds"
 
@@ -81,7 +80,10 @@ install_app() {
 
   if pgrep -f "$dest/Contents/MacOS/" >/dev/null; then
     say "Quitting Juno..."
-    osascript -e "quit app id \"$app_id\"" >/dev/null 2>&1 || true
+    # Ask the installed app for its own bundle id instead of keeping a copy
+    # here: src-tauri/tauri.conf.json owns it and a copy goes stale.
+    app_id=$(defaults read "$dest/Contents/Info" CFBundleIdentifier 2>/dev/null || true)
+    [[ -n "$app_id" ]] && osascript -e "quit app id \"$app_id\"" >/dev/null 2>&1 || true
     for _ in $(seq 20); do
       pgrep -f "$dest/Contents/MacOS/" >/dev/null || break
       sleep 0.5

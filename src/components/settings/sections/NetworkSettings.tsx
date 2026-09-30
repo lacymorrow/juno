@@ -19,13 +19,14 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
+import { COMMANDS } from "@/lib/constants.generated";
 
 export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const [newServerJson, setNewServerJson] = useState("");
 
   const handleOpenConfigDirectory = async () => {
     try {
-      await invoke("open_config_directory");
+      await invoke(COMMANDS.APP_OPEN_CONFIG_DIRECTORY);
       toast.success("Opened configuration directory");
     } catch (error) {
       console.error("Failed to open config directory:", error);
@@ -158,7 +159,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
           max_retries: config.max_retries || 3,
         };
 
-        await invoke("add_mcp_server", { config: newServer });
+        await invoke(COMMANDS.MCP_ADD_MCP_SERVER, { config: newServer });
         toast.success(`MCP server "${serverName}" added successfully`);
         setNewServerJson("");
         // Backend will emit mcp_state_updated event automatically
@@ -181,7 +182,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const handleToggleServer = async (serverId: string, enabled: boolean) => {
     try {
-      await invoke("toggle_mcp_server", { server_id: serverId, enabled });
+      await invoke(COMMANDS.MCP_TOGGLE_MCP_SERVER, { server_id: serverId, enabled });
       toast.success(`Server ${enabled ? "enabled" : "disabled"}`);
       // Backend will emit mcp_state_updated event automatically
     } catch (error) {
@@ -196,7 +197,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     enabled: boolean
   ) => {
     try {
-      await invoke("toggle_mcp_tool", {
+      await invoke(COMMANDS.MCP_TOGGLE_MCP_TOOL, {
         server_id: serverId,
         tool_name: toolName,
         enabled,

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Keyboard, Clipboard, Type } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
+import { COMMANDS } from "@/lib/constants.generated";
 
 const KeyboardOperations: React.FC = () => {
   const [textToType, setTextToType] = useState<string>("");
@@ -20,7 +21,7 @@ const KeyboardOperations: React.FC = () => {
       toast.error("Please enter text to type.");
       return;
     }
-    await invokeCommand("type_text", { text: textToType }, "typeText");
+    await invokeCommand(COMMANDS.DESKTOP_TYPE_TEXT, { text: textToType }, "typeText");
   };
 
   const handleGlobalTypeText = async () => {
@@ -29,7 +30,7 @@ const KeyboardOperations: React.FC = () => {
       return;
     }
     await invokeCommand(
-      "global_type_text",
+      COMMANDS.DESKTOP_GLOBAL_TYPE_TEXT,
       { text: globalTextToType },
       "globalTypeText"
     );
@@ -40,13 +41,13 @@ const KeyboardOperations: React.FC = () => {
       toast.error("Please enter a key to release.");
       return;
     }
-    await invokeCommand("release_key", { key: keyToRelease }, "releaseKey");
+    await invokeCommand(COMMANDS.DESKTOP_RELEASE_KEY, { key: keyToRelease }, "releaseKey");
   };
 
   const handleGetClipboard = async () => {
     setClipboardResult(null);
     const result = await invokeCommand<string | null>(
-      "get_clipboard",
+      COMMANDS.UTILS_GET_CLIPBOARD,
       {},
       "getClipboard"
     );
@@ -61,7 +62,7 @@ const KeyboardOperations: React.FC = () => {
       return;
     }
     await invokeCommand(
-      "set_clipboard",
+      COMMANDS.UTILS_SET_CLIPBOARD,
       { content: clipboardContent },
       "setClipboard"
     );
@@ -70,7 +71,7 @@ const KeyboardOperations: React.FC = () => {
   const handleGetSelectedText = async () => {
     setSelectedTextResult(null);
     const result = await invokeCommand<string | null>(
-      "get_selected_text",
+      COMMANDS.DESKTOP_GET_SELECTED_TEXT,
       {},
       "getSelectedText"
     );

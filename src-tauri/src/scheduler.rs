@@ -33,7 +33,7 @@ use tracing::{info, warn};
 use crate::constants::events;
 
 /// Store file holding all scheduled automations.
-pub const STORE_FILE: &str = "scheduled_automations.json";
+pub const STORE_FILE: &str = crate::constants::settings::store_files::SCHEDULED_AUTOMATIONS;
 /// Key inside the store under which the automation list is saved.
 pub const STORE_KEY: &str = "automations";
 /// How often the scheduler checks for due automations.

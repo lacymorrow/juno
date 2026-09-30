@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AppWindow, Maximize2, Move, X, Info, Focus } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
+import { COMMANDS } from "@/lib/constants.generated";
 
 /**
  * WindowOperations Component
@@ -35,7 +36,7 @@ const WindowOperations: React.FC = () => {
   const handleGetWindowList = async () => {
     setWindowListResult(null);
     const result = await invokeCommand<string | null>(
-      "get_window_list",
+      COMMANDS.WINDOWS_GET_WINDOW_LIST,
       {},
       "getWindowList"
     );
@@ -62,7 +63,7 @@ const WindowOperations: React.FC = () => {
     setWindowInfoResult(null);
     // Backend expects: get_window_info(window_id: String, ...)
     const result = await invokeCommand<string | null>(
-      "get_window_info",
+      COMMANDS.WINDOWS_GET_WINDOW_INFO,
       { window_id: windowIdInfo.trim() },
       "getWindowInfo"
     );
@@ -88,7 +89,7 @@ const WindowOperations: React.FC = () => {
     }
     // Backend expects: focus_window(window_id: String, ...)
     await invokeCommand(
-      "focus_window",
+      COMMANDS.WINDOWS_FOCUS_WINDOW,
       { window_id: windowIdFocus.trim() },
       "focusWindow"
     );
@@ -113,7 +114,7 @@ const WindowOperations: React.FC = () => {
 
     // Backend expects: resize_window(window_id: String, width: i32, height: i32, ...)
     await invokeCommand(
-      "resize_window",
+      COMMANDS.WINDOWS_RESIZE_WINDOW,
       { window_id: windowIdResize.trim(), width, height },
       "resizeWindow"
     );
@@ -138,7 +139,7 @@ const WindowOperations: React.FC = () => {
 
     // Backend expects: move_window(window_id: String, x: i32, y: i32, ...)
     await invokeCommand(
-      "move_window",
+      COMMANDS.WINDOWS_MOVE_WINDOW,
       { window_id: windowIdMove.trim(), x, y },
       "moveWindow"
     );
@@ -151,7 +152,7 @@ const WindowOperations: React.FC = () => {
     }
     // Backend expects: close_window(window_id: String, ...)
     await invokeCommand(
-      "close_window",
+      COMMANDS.WINDOWS_CLOSE_WINDOW,
       { window_id: windowIdClose.trim() },
       "closeWindow"
     );

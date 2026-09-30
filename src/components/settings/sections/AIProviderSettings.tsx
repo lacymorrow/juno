@@ -72,7 +72,7 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
     let latest = 0;
     const check = () => {
       const request = ++latest;
-      invoke<ClaudeCliStatus>("check_claude_cli_available")
+      invoke<ClaudeCliStatus>(COMMANDS.ONBOARDING_CHECK_CLAUDE_CLI_AVAILABLE)
         .then((status) => {
           if (mounted && request === latest) setCli(status);
         })

@@ -15,6 +15,7 @@ import { invokeCommand } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { COMMANDS } from "@/lib/constants.generated";
 
 type LiveAnswer =
   | "granted"
@@ -87,7 +88,7 @@ const PermissionDiagnostics: React.FC = () => {
     setLoading(true);
     try {
       const next = await invokeCommand<PermissionDiagnosticsReport>(
-        "get_permission_diagnostics",
+        COMMANDS.PERMISSIONS_GET_PERMISSION_DIAGNOSTICS,
         {}
       );
       setReport(next);
@@ -108,7 +109,7 @@ const PermissionDiagnostics: React.FC = () => {
     setResetting(permission.permission_type);
     try {
       const outcome = await invokeCommand<PermissionResetOutcome>(
-        "reset_permission_grant",
+        COMMANDS.PERMISSIONS_RESET_PERMISSION_GRANT,
         { permissionType: permission.permission_type }
       );
       setOutcomes((prev) => ({ ...prev, [permission.permission_type]: outcome }));
@@ -128,7 +129,7 @@ const PermissionDiagnostics: React.FC = () => {
 
   const handleOpenSettings = async (permission: PermissionDiagnostic) => {
     try {
-      await invokeCommand("open_system_settings_enhanced", {
+      await invokeCommand(COMMANDS.PERMISSIONS_OPEN_SYSTEM_SETTINGS, {
         permissionType: permission.permission_type,
       });
     } catch (error) {
@@ -138,7 +139,7 @@ const PermissionDiagnostics: React.FC = () => {
 
   const handleRelaunch = async () => {
     try {
-      await invokeCommand("restart_app_after_permissions", {});
+      await invokeCommand(COMMANDS.PERMISSIONS_RESTART_AFTER_PERMISSIONS, {});
     } catch (error) {
       toast.error(`Could not relaunch Juno: ${String(error)}`);
     }
