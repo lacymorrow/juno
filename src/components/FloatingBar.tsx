@@ -12,7 +12,15 @@
  * local state is hover, whether the input is open, and the conversation.
  */
 
-import { useEffect, useState, useCallback, useRef, FormEvent, MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  FormEvent,
+  MouseEvent as ReactMouseEvent,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import {
@@ -23,8 +31,9 @@ import {
 } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, Ear, EarOff, MessageSquare, Mic, Square, Type, X } from "lucide-react";
+import { useReducedMotion } from "motion/react";
 
-import { useWindowSize, resetWindowAnchor } from "@/hooks/useWindowSize";
+import { useWindowSize, type WindowAnchorX, type WindowSizeConfig } from "@/hooks/useWindowSize";
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
@@ -102,33 +111,42 @@ interface UIInteractionEvent {
 export type BarLayout = "compact" | "hover" | "voice" | "status" | "full";
 
 /**
- * Pill size per layout plus the transparent padding around it (room for the
- * shadow). The window is exactly pill + padding, so the invisible part of
- * the window that catches clicks meant for what's behind it stays small.
+ * Pill size per layout. The window is exactly the pill plus BAR_PAD on every
+ * side, so the invisible part of the window that catches clicks meant for
+ * what's behind it stays small.
  */
-// `height` is the pill's own height; `band` is the fixed vertical slot the
-// pill is centred in. compact keeps a tiny pill but shares the idle band with
-// hover/voice, so growing from compact to hover changes only the width — the
-// window height and vertical anchor never move, and nothing jumps vertically
-// when the (delayed) shrink resizes the window.
-export const BAR_LAYOUTS: Record<
-  BarLayout,
-  { width: number; height: number; band: number; pad: number }
-> = {
-  compact: { width: 56, height: 16, band: 34, pad: 16 },
-  // Wider than the three buttons alone need: the status dot is now always
-  // present at its fixed home (see DOT_HOME_LEFT) even in hover, so the row
-  // starts past it. The optional wake-phrase button is still added on top via
+export const BAR_LAYOUTS: Record<BarLayout, { width: number; height: number }> = {
+  compact: { width: 56, height: 16 },
+  // Wider than the three buttons alone need: the status dot is always present
+  // at its fixed home (see DOT_HOME_LEFT) even in hover, so the row starts
+  // past it. The optional wake-phrase button is added on top via
   // pillExtraWidth.
-  hover: { width: 148, height: 34, band: 34, pad: 16 },
-  // Voice and status share a width and a band on purpose. Listening used to
-  // open a 220px bar and then, the instant the mic closed, a 419px one, for a
-  // status word and a stop button. The extra 200px held nothing, and the jump
-  // happened mid-sentence, every time.
-  voice: { width: 260, height: 34, band: 34, pad: 16 },
-  status: { width: 260, height: 34, band: 34, pad: 16 },
-  full: { width: 419, height: 44, band: 44, pad: 24 },
+  hover: { width: 148, height: 34 },
+  // Voice and status share a width on purpose. Listening used to open a 220px
+  // bar and then, the instant the mic closed, a 419px one, for a status word
+  // and a stop button. The extra 200px held nothing, and the jump happened
+  // mid-sentence, every time.
+  voice: { width: 260, height: 34 },
+  status: { width: 260, height: 34 },
+  full: { width: 419, height: 44 },
 };
+
+/**
+ * The transparent room around the pill (for its shadow), and the fixed
+ * vertical band the pill is centred in. One value each, for EVERY layout.
+ *
+ * The window is anchored on the band's near edge (the top, or the bottom when
+ * the pane opens upward), and the pill is drawn at that same edge. With a pad
+ * or band that differed between layouts (full used to have 24 and 44 against
+ * 16 and 34) the anchor itself moved by 13px whenever the pill went full, and
+ * because the window moves in one backend call while the pill moves in a CSS
+ * transition, that 13px showed as a lurch: up as the pane closed, back down
+ * when the delayed shrink landed. A constant band means no layout change can
+ * move the anchor, so the near window edge never moves and the pill grows
+ * around the band's centre inside it.
+ */
+export const BAR_PAD = 16;
+export const BAR_BAND = 44;
 
 /**
  * The status dot's fixed home, and the left inset every flowing content block
@@ -171,9 +189,49 @@ async function cursorInsideWindow(): Promise<boolean> {
 }
 
 /**
- * Window size for a layout. `anchorY` is the pill's vertical centre, which
- * `useWindowSize` keeps at the same screen position across resizes, so the
- * pill grows around itself and the pane grows downward from it.
+ * Everything the pill's window size and on-screen geometry depend on. The
+ * resize controller moves the window from one of these to the next; the
+ * render draws whichever one has been applied.
+ */
+export interface PillFrame {
+  layout: BarLayout;
+  paneOpen: boolean;
+  rosterVisible: boolean;
+  /** Extra height the typed text needs beyond a single line. */
+  composerGrowth: number;
+  /** Extra width for a control the layout does not always carry. */
+  extraWidth: number;
+  /** The pane and roster open above the pill; the window grows upward. */
+  growUp: boolean;
+}
+
+export function sameFrame(a: PillFrame, b: PillFrame): boolean {
+  return (
+    a.layout === b.layout &&
+    a.paneOpen === b.paneOpen &&
+    a.rosterVisible === b.rosterVisible &&
+    a.composerGrowth === b.composerGrowth &&
+    a.extraWidth === b.extraWidth &&
+    a.growUp === b.growUp
+  );
+}
+
+/** The compact idle frame the bar launches in. */
+export function restingFrame(growUp: boolean): PillFrame {
+  return {
+    layout: "compact",
+    paneOpen: false,
+    rosterVisible: false,
+    composerGrowth: 0,
+    extraWidth: 0,
+    growUp,
+  };
+}
+
+/**
+ * Window size for a frame. `anchorY` is the band's near edge, BAR_PAD in from
+ * the window's near edge in every frame, so no resize ever moves that edge:
+ * the window only ever gains or loses room on the far side.
  */
 export function floatingBarWindowSize({
   layout,
@@ -185,24 +243,69 @@ export function floatingBarWindowSize({
   layout: BarLayout;
   paneOpen: boolean;
   rosterVisible: boolean;
-  /** Extra height the typed text needs beyond a single line. */
   composerGrowth?: number;
-  /** Extra width for a control this layout does not always carry. */
   extraWidth?: number;
 }) {
   const l = BAR_LAYOUTS[layout];
   const d = FLOATING_BAR_DIMENSIONS;
   // The window is sized to its contents, so a pill that grows without telling
   // the window would simply be clipped by it.
-  const band = l.band + Math.max(0, composerGrowth);
   return {
-    width: l.width + Math.max(0, extraWidth) + 2 * l.pad,
+    width: l.width + Math.max(0, extraWidth) + 2 * BAR_PAD,
     height:
-      band +
-      2 * l.pad +
+      BAR_BAND +
+      Math.max(0, composerGrowth) +
+      2 * BAR_PAD +
       (rosterVisible ? d.ROSTER_STRIP_HEIGHT : 0) +
       (paneOpen ? d.PANE_GAP + d.PANE_HEIGHT : 0),
-    anchorY: l.pad + band / 2,
+    anchorY: BAR_PAD,
+  };
+}
+
+/** Where the docked well puts the window's fixed horizontal edge. */
+export function dockAnchorX(dock: WellSlot | null): WindowAnchorX {
+  if (!dock) return "center";
+  return dock.fx === 0 ? "start" : dock.fx === 1 ? "end" : "center";
+}
+
+/** A well in the bottom half of its display opens the pane upward. */
+export function dockGrowsUp(dock: WellSlot | null): boolean {
+  return dock !== null && dock.fy >= 0.5;
+}
+
+/** Whether moving between two frames needs the window resized BEFORE the pill animates. */
+export function growsFrom(from: PillFrame | null, to: PillFrame): boolean {
+  if (!from) return true;
+  const a = floatingBarWindowSize(from);
+  const b = floatingBarWindowSize(to);
+  // A flip of the growth direction re-anchors the window; it goes first too.
+  return b.width > a.width || b.height > a.height || from.growUp !== to.growUp;
+}
+
+/**
+ * The one resize that takes the window from one frame to the next, with the
+ * pinned point named in both. Same direction: the band's near edge stays at
+ * BAR_PAD. A flip (the pane is open and the bar was just docked on the other
+ * half of the display): the pinned point is the band's FAR edge in the old
+ * frame, which is its near edge in the new one, so the pill stays put while
+ * the pane swaps sides.
+ */
+export function resizeConfigFor(
+  from: PillFrame | null,
+  to: PillFrame,
+  anchorX: WindowAnchorX,
+): WindowSizeConfig {
+  const next = floatingBarWindowSize(to);
+  if (!from) return { ...next, growUp: to.growUp, anchorX };
+  const flipped = from.growUp !== to.growUp;
+  return {
+    ...next,
+    growUp: to.growUp,
+    anchorX,
+    from: {
+      anchorY: flipped ? BAR_PAD + BAR_BAND + Math.max(0, from.composerGrowth) : BAR_PAD,
+      growUp: from.growUp,
+    },
   };
 }
 
@@ -250,13 +353,7 @@ async function animateWindowTo(
         ),
       );
       if (t < 1) requestAnimationFrame(step);
-      else {
-        // The glide moved the window frame by frame without the resize cache
-        // seeing any of it. Drop the stale baseline so the next resize anchors
-        // from where the bar actually landed, not where it was before the drag.
-        resetWindowAnchor(win.label);
-        resolve();
-      }
+      else resolve();
     };
     requestAnimationFrame(step);
   });
@@ -647,6 +744,37 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   });
 
   const windowLabel = getCurrentWindow().label;
+
+  // === THE WELL THE BAR IS DOCKED IN, AND THE FRAME IT IS DRAWN AT ===
+  //
+  // The bar always sits in a well (placed at launch, on release after a drag,
+  // on a display hop), and the well decides how the window grows: away from
+  // the docked screen edge, never towards it. A bar in a right-hand well grows
+  // leftward; one in the bottom half opens its pane upward. This used to be
+  // read back from the window's centre, asynchronously, the first time the
+  // pane opened, which put the flip a few frames AFTER the resize that needed
+  // it: the pane opened downward off the bottom of the screen, and the close,
+  // computed against the wrong direction, teleported the bar to the middle of
+  // the display. The slot is known the moment the bar lands.
+  const [dock, setDock] = useState<WellSlot | null>(null);
+  const dockRef = useRef<WellSlot | null>(null);
+  dockRef.current = dock;
+  const growUp = dockGrowsUp(dock);
+  const anchorX = dockAnchorX(dock);
+
+  // The frame the pill is drawn at. It lags the target while the window makes
+  // room (growing) and leads it while the pill animates down (shrinking); see
+  // the resize controller.
+  const [applied, setApplied] = useState<PillFrame>(() => restingFrame(false));
+  const appliedRef = useRef(applied);
+  appliedRef.current = applied;
+  // The frame the window has, or is about to have: the last one handed to the
+  // backend. Seeded by the launch placement, which sets the frame directly.
+  const issuedRef = useRef<PillFrame | null>(null);
+  // No resize goes out until the launch placement has put the window in its
+  // well. Before this gate the two raced: the resize read the placeholder
+  // position, the placement moved the window, and the resize moved it back.
+  const [placed, setPlaced] = useState(false);
 
   /**
    * Listen to BAR_STATE_UPDATE directly and to the component-specific DOM
@@ -1405,8 +1533,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // Once the input is up, put the caret in it. After a turn ends with the
   // pane open, refocus only if this window is still the one the user is in:
   // element focus in a non-key window is inert and must not steal focus.
+  // Keyed on the applied layout too: the composer mounts once the window has
+  // made room for it, a frame after showInput turns true.
   useEffect(() => {
-    if (!showInput) return;
+    if (!showInput || applied.layout !== "full") return;
     if (inputOpen) {
       inputRef.current?.focus();
       return;
@@ -1414,7 +1544,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     if (!document.hasFocus()) return;
     const t = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(t);
-  }, [showInput, inputOpen]);
+  }, [showInput, inputOpen, applied.layout]);
 
   // A voice or working state that starts while the input is open (hotkey,
   // wake word) takes over; the input is not waiting underneath.
@@ -1503,48 +1633,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [inputOpen, paneOpen, isWorking, closeInput, handleBlur, dismissPane]);
 
-  // === DOCK-AWARE GROWTH DIRECTION ===
-  //
-  // When the bar is docked in the bottom half of its display, its chat pane
-  // (and the roster strip) open ABOVE the pill so they never run off the
-  // bottom; the window then grows upward while the pill stays put. In the top
-  // half it keeps the original downward growth. Recomputed whenever the pane or
-  // roster opens and after a snap settles, since the dock can change.
-  const [growUp, setGrowUp] = useState(false);
-
-  const recomputeGrowUp = useCallback(async () => {
-    try {
-      const win = getCurrentWindow();
-      const [pos, size, mons] = await Promise.all([
-        win.outerPosition(),
-        win.outerSize(),
-        availableMonitors(),
-      ]);
-      const centerX = pos.x + size.width / 2;
-      const centerY = pos.y + size.height / 2;
-      const mon =
-        mons.find(
-          (m) =>
-            centerX >= m.position.x &&
-            centerX < m.position.x + m.size.width &&
-            centerY >= m.position.y &&
-            centerY < m.position.y + m.size.height,
-        ) ?? mons[0];
-      if (!mon) return;
-      setGrowUp(centerY >= mon.position.y + mon.size.height / 2);
-    } catch (error) {
-      console.debug("FloatingBar: growUp recompute failed:", error);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (paneOpen || showRosterStrip) void recomputeGrowUp();
-  }, [paneOpen, showRosterStrip, recomputeGrowUp]);
-
-  // The drag-well slot the bar currently occupies (col/row), so it can re-home
-  // to the same slot on another display when the cursor moves there.
-  const currentSlotRef = useRef<WellSlot | null>(null);
-
   // On launch the bar always lands in a well, never at an arbitrary spot.
   // A remembered position is re-snapped to the nearest current well (so it
   // survives a resolution / monitor change); a fresh install with nothing saved
@@ -1572,8 +1660,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         if (cancelled || !mons.length) return;
 
         // The size the bar is about to be, not the size the window happens to
-        // have been created at: a well is computed for a footprint, and the
-        // resize effect is racing this one to apply exactly this size.
+        // have been created at: a well is computed for a footprint. The resize
+        // controller waits for this placement, then starts from this frame.
         const initial = floatingBarWindowSize({
           layout: "compact",
           paneOpen: false,
@@ -1602,9 +1690,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           width: initial.width,
           height: initial.height,
         });
-        // Placed at launch outside the resize path; start the baseline here.
-        resetWindowAnchor(windowLabel);
-        currentSlotRef.current = { fx: target.fx, fy: target.fy };
+        // The window now has exactly the compact frame, so the resize
+        // controller starts from it instead of asking for it again.
+        issuedRef.current = restingFrame(dockGrowsUp(target));
+        setDock({ fx: target.fx, fy: target.fy });
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
         } catch {
@@ -1614,6 +1703,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         console.debug("FloatingBar: default/restore well failed:", error);
       } finally {
         if (!cancelled) {
+          setPlaced(true);
           await invoke("show_bar_when_ready").catch((error) =>
             console.error("FloatingBar: could not show the bar:", error),
           );
@@ -1626,77 +1716,74 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   }, []);
 
   // === WINDOW RESIZING ===
-
+  //
+  // Two frames: the one the window has (`issuedRef`, the last resize handed
+  // to the backend) and the one the pill is drawn at (`applied`). Growing, the
+  // window is resized first and the pill animates into the room once the
+  // backend has applied it, so nothing is ever drawn past the window's edge.
+  // Shrinking, the pill animates down first and the window follows once the
+  // animation has finished. Island does the same.
+  //
+  // Both are pinned to the same edges: the band's near edge (top, or bottom
+  // when the pane opens upward) and the docked column. Growth happens at the
+  // far edges only, so the frame between the backend applying a resize and
+  // React committing the matching geometry shows nothing moving: the room
+  // that changed is transparent, and on the far side.
+  //
+  // An earlier version anchored growth on the docked edge while the pill
+  // stayed centred in the window, which moved the pill by half the size change
+  // in one frame; it was reverted for a centred window, which the monitor
+  // clamp then walked out of an edge well on every hover. Pinning the window
+  // AND the pill to the same edge is what neither attempt did.
   const { resizeWindowIfChanged } = useWindowSize(windowLabel);
-  const lastWindowRef = useRef<{ width: number; height: number } | null>(null);
+  const reducedMotion = useReducedMotion() ?? false;
+  const requestSeqRef = useRef(0);
 
-  // Vertical centering, the exact analogue of the pill's horizontal centering.
-  // With no pane/roster the window is symmetric top-to-bottom, so the pill sits
-  // at the window's vertical middle — which is the anchor the frame is pinned
-  // to — and any pad/band/anchor change (compact<->full) is absorbed by the
-  // centering the same way the centred window absorbs a width change: the pill
-  // grows around its own middle instead of drifting. With a pane the window is
-  // asymmetric (the pane fills one side), so the pill pins to its near edge
-  // instead. Driven off the APPLIED frame, not the target: on a shrink the
-  // window is held for SHRINK_DELAY_MS, so flipping this with the target would
-  // dump the pill into the middle of a still-tall pane window for that beat.
-  const [vcenter, setVcenter] = useState(true);
-
-  useEffect(() => {
-    const next = floatingBarWindowSize({
+  const target = useMemo<PillFrame>(
+    () => ({
       layout,
       paneOpen,
       rosterVisible: showRosterStrip,
       // Gated on the composer being on screen, exactly as the pill is, so the
       // window and the pill inside it never disagree about how tall it is.
-      composerGrowth: showInput ? composerGrowth : 0,
+      composerGrowth: showInput ? Math.max(0, composerGrowth) : 0,
       extraWidth: pillExtraWidth,
-    });
-    const prev = lastWindowRef.current;
-    lastWindowRef.current = { width: next.width, height: next.height };
+      growUp,
+    }),
+    [layout, paneOpen, showRosterStrip, showInput, composerGrowth, pillExtraWidth, growUp],
+  );
 
-    const apply = () => {
-      // Centre-stable, both axes: the window grows and shrinks around the pill
-      // rather than around a screen edge.
-      //
-      // A previous attempt anchored growth to the well the bar is docked in,
-      // to stop the chat pane walking the bar out of that well a little at a
-      // time. It fixed that and broke the case that happens a hundred times a
-      // day. The pill is centred in its window, so pinning the docked edge
-      // moves the pill by half the size change, in one frame, while the pill's
-      // own width is still animating: every hover jumped the pill sideways and
-      // every collapse jumped it back, and the collapse jumped after the shrink
-      // delay, with nothing connecting the two. Reverted rather than patched,
-      // because the walk is a slow annoyance and this was a fast one.
-      const config = growUp ? { ...next, growUp: true } : next;
-      resizeWindowIfChanged(config).catch((error) =>
-        console.error("❌ FloatingBar: Failed to resize window:", error),
-      );
-      // Follow the frame we just applied: centre only when it is symmetric
-      // (no pane / roster on one side). Flips in lockstep with the window, so
-      // the pill's vertical origin never disagrees with the frame mid-move.
-      setVcenter(!paneOpen && !showRosterStrip);
-    };
-
-    // Growing: make room first, then the pill animates into it. Shrinking:
-    // let the pill animate down before the window snaps around it.
-    const shrinking = prev !== null && next.width <= prev.width && next.height <= prev.height;
-    if (!shrinking) {
-      apply();
+  useEffect(() => {
+    if (!placed) return;
+    const issued = issuedRef.current;
+    if (issued && sameFrame(issued, target)) {
+      // The window is already right (a change was undone before its resize
+      // went out); only the drawing can be behind.
+      if (!sameFrame(appliedRef.current, target)) setApplied(target);
       return;
     }
-    const t = setTimeout(apply, SHRINK_DELAY_MS);
+    const config = resizeConfigFor(issued, target, anchorX);
+    const seq = ++requestSeqRef.current;
+    const resize = () => {
+      issuedRef.current = target;
+      return resizeWindowIfChanged(config).catch((error) =>
+        console.error("FloatingBar: failed to resize window:", error),
+      );
+    };
+    if (growsFrom(issued, target)) {
+      // Room first, then the pill grows into it. A newer target in the
+      // meantime owns the drawing; this one's is discarded.
+      void resize().then(() => {
+        if (requestSeqRef.current === seq) setApplied(target);
+      });
+      return;
+    }
+    // Pill first, then the window follows once the animation is over (at
+    // once under Reduce Motion, where there is no animation to wait for).
+    setApplied(target);
+    const t = setTimeout(() => void resize(), reducedMotion ? 0 : SHRINK_DELAY_MS);
     return () => clearTimeout(t);
-  }, [
-    layout,
-    paneOpen,
-    showRosterStrip,
-    growUp,
-    composerGrowth,
-    showInput,
-    pillExtraWidth,
-    resizeWindowIfChanged,
-  ]);
+  }, [target, placed, anchorX, reducedMotion, resizeWindowIfChanged]);
 
   // === DRAG ANYWHERE, SNAP INTO A WELL ===
   //
@@ -1746,21 +1833,20 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       if (!target) return;
       snapAnimatingRef.current = true;
       await animateWindowTo(win, { x: pos.x, y: pos.y }, { x: target.x, y: target.y });
-      currentSlotRef.current = { fx: target.fx, fy: target.fy };
-      // Remember where it landed so the bar reopens here next launch, and
-      // re-derive the growth direction since the dock may have changed.
+      // The well decides the growth direction and the anchored column from
+      // here on; remember where it landed so the bar reopens here next launch.
+      setDock({ fx: target.fx, fy: target.fy });
       try {
         await invoke("set_bar_position", { x: target.x, y: target.y });
       } catch (error) {
         console.debug("FloatingBar: persist well failed:", error);
       }
-      void recomputeGrowUp();
     } catch (error) {
       console.debug("FloatingBar: settle into well failed:", error);
     } finally {
       snapAnimatingRef.current = false;
     }
-  }, [recomputeGrowUp]);
+  }, []);
 
   // The cursor moved to another display (backend poll): re-home the compact pill
   // to the same drag-well slot on that display, so it is always where the user
@@ -1770,7 +1856,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     async ({ x, y }: { x: number; y: number }) => {
       if (paneOpen || isWorking) return;
       if (snapArmedRef.current || snapAnimatingRef.current) return;
-      const slot = currentSlotRef.current;
+      const slot = dockRef.current;
       if (!slot) return;
       const contains = (
         m: { position: { x: number; y: number }; size: { width: number; height: number } },
@@ -1802,20 +1888,17 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         const target = wellForSlot(slot, targetIdx, wells);
         if (!target) return;
         await win.setPosition(new PhysicalPosition(target.x, target.y));
-        // Moved to another display outside any resize; forget the baseline.
-        resetWindowAnchor(win.label);
-        currentSlotRef.current = { fx: target.fx, fy: target.fy };
+        setDock({ fx: target.fx, fy: target.fy });
         try {
           await invoke("set_bar_position", { x: target.x, y: target.y });
         } catch {
           // best effort persist
         }
-        void recomputeGrowUp();
       } catch (error) {
         console.debug("FloatingBar: cursor-follow move failed:", error);
       }
     },
-    [paneOpen, isWorking, recomputeGrowUp],
+    [paneOpen, isWorking],
   );
 
   useEffect(() => {
@@ -1896,29 +1979,24 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   // === RENDER ===
 
-  // The typed text makes the pill taller, and the window was already sized for
-  // it by floatingBarWindowSize. These two were not: they stayed at the layout's
-  // fixed height, so the window grew around a 34px pill and the textarea was
-  // clipped inside it, which looked like the growth not working at all.
-  //
-  // Only while the composer is actually on screen: belt and braces next to the
-  // hook giving up its measured height when the textarea detaches, so a pill
-  // left tall by a race is still impossible.
-  const growth = showInput ? Math.max(0, composerGrowth) : 0;
+  // Everything with a size is drawn from the APPLIED frame, never the target:
+  // on a grow the window has already made room for it, on a shrink the window
+  // is about to follow it. The typed text makes the pill taller; the band grows
+  // with it, so the pane slides rather than jumps.
+  const shownLayout = applied.layout;
+  const growth = applied.composerGrowth;
   const pill = {
-    ...BAR_LAYOUTS[layout],
-    width: BAR_LAYOUTS[layout].width + pillExtraWidth,
-    height: BAR_LAYOUTS[layout].height + growth,
+    width: BAR_LAYOUTS[shownLayout].width + applied.extraWidth,
+    height: BAR_LAYOUTS[shownLayout].height + growth,
   };
-  const pad = BAR_LAYOUTS[layout].pad;
-  const band = BAR_LAYOUTS[layout].band + growth;
+  const band = BAR_BAND + growth;
 
-  // The pane and roster render either below the pill (default, growing down) or
-  // above it (docked in the bottom half, growing up); only the margin side and
-  // the render order flip, so build each once and place them by `growUp`.
-  const chatPaneNode = paneOpen ? (
+  // The pane and roster render either below the pill (docked in the top half,
+  // growing down) or above it (bottom half, growing up); only the margin side
+  // and the render order flip, so build each once and place them by growUp.
+  const chatPaneNode = applied.paneOpen ? (
     <div
-      className={cn("shrink-0", growUp ? "mb-2" : "mt-2")}
+      className={cn("shrink-0", applied.growUp ? "mb-2" : "mt-2")}
       // The same conversation lives in the full-size window, so handing it
       // over should read as a handover. Without this the pane blinked out of
       // existence the instant that window opened, and blinked back when it
@@ -1944,25 +2022,28 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   // Parallel-agent roster (LAC-2830 §3): appears when 2+ agents run. Clicking a
   // dot focuses that agent; background sessions keep working.
-  const rosterNode = showRosterStrip ? (
+  const rosterNode = applied.rosterVisible ? (
     <AgentRosterStrip
       sessions={agentSessions}
       onFocus={focusSession}
-      className={growUp ? "mb-1.5" : "mt-1.5"}
+      className={applied.growUp ? "mb-1.5" : "mt-1.5"}
     />
   ) : null;
 
   return (
     <div
       className={cn(
-        "relative flex h-screen w-screen cursor-grab select-none flex-col items-center overflow-hidden active:cursor-grabbing",
-        // Vertical origin: centre the pill in a symmetric window so pad/band/
-        // anchor changes are absorbed (the pill grows around its middle); pin
-        // to the near edge when a pane fills one side. Mirrors the horizontal
-        // centring that already makes width changes smooth. See `vcenter`.
-        vcenter ? "justify-center" : growUp ? "justify-end" : "justify-start",
+        "relative flex h-screen w-screen cursor-grab select-none flex-col overflow-hidden active:cursor-grabbing",
+        // Pinned to the docked edges: the pane's side decides top or bottom,
+        // the well's column decides left, centre or right. The window is
+        // anchored on the same edges (see the resize controller), so the pill
+        // and its window agree at every frame of a resize. With the pane
+        // closed the window is exactly band + pad each side, so these put the
+        // pill in the same place whichever way they point.
+        applied.growUp ? "justify-end" : "justify-start",
+        anchorX === "start" ? "items-start" : anchorX === "end" ? "items-end" : "items-center",
       )}
-      style={{ padding: pad }}
+      style={{ padding: BAR_PAD }}
       onMouseDownCapture={onRootMouseDown}
       onMouseMove={onRootMouseMove}
       onMouseUp={onRootMouseUp}
@@ -1979,21 +2060,21 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       {/* Docked in the bottom half: the pane and roster open ABOVE the pill so
           the window grows upward and nothing runs off the bottom. The pill
           stays anchored either way. */}
-      {growUp && chatPaneNode}
-      {growUp && rosterNode}
+      {applied.growUp && chatPaneNode}
+      {applied.growUp && rosterNode}
 
-      {/* Fixed-height band the pill is centred in. compact and hover share
-          the same band, so the pill's vertical centre never moves and the
-          window's height/anchor stay put when the pill grows or shrinks — only
-          the width changes, which is centre-stable and animates cleanly. */}
+      {/* The fixed band the pill is centred in. Every layout shares it, so
+          the pill's vertical centre never moves when the pill grows or
+          shrinks; only the typed text can make it taller, and then it grows
+          away from the anchored edge. */}
       <div
-        className="flex shrink-0 items-center justify-center transition-[height] duration-200 ease-out"
+        className="flex shrink-0 items-center justify-center transition-[height] duration-200 ease-out motion-reduce:transition-none"
         style={{ height: band }}
       >
       <div
         data-testid="floating-bar"
         data-state={currentUiState}
-        data-layout={layout}
+        data-layout={shownLayout}
         data-driving={isDriving ? "" : undefined}
         className={cn(
           // `isolate` scopes the flame border's z-index -1 to the pill, so it
@@ -2002,19 +2083,19 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           "border border-white/10 bg-neutral-950/90 text-white backdrop-blur-xl",
           // Juno has the pointer: a hairline in system blue, nothing louder.
           isDriving && "border-[#0A84FF]/70",
-          "transition-[width,height,padding] duration-200 ease-out",
+          "transition-[width,height,padding] duration-200 ease-out motion-reduce:transition-none",
         )}
-        // Horizontal origin: the dot is absolute at its fixed home, and every
+        // The dot is absolute at its fixed home inside the pill, and every
         // flowing block starts at CONTENT_LEAD so it clears the dot. No layout
-        // flips centre<->left any more, so nothing shifts sideways when the
-        // pill grows or shrinks — only the width changes, around the fixed dot.
-        // The right pad breathes the trailing controls; compact carries no
-        // flowing content, so its right pad is 0.
+        // flips centre<->left, so nothing shifts inside the pill; the pill
+        // itself grows away from the screen edge it is docked at, and the dot
+        // rides its left edge. The right pad breathes the trailing controls;
+        // compact carries no flowing content, so its right pad is 0.
         style={{
           width: pill.width,
           height: pill.height,
           paddingLeft: CONTENT_LEAD,
-          paddingRight: layout === "full" ? 16 : layout === "compact" ? 0 : 8,
+          paddingRight: shownLayout === "full" ? 16 : shownLayout === "compact" ? 0 : 8,
           boxShadow: BAR_DEPTH_GLOW,
         }}
       >
@@ -2047,7 +2128,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           />
         </div>
 
-        {layout === "compact" ? null : layout === "hover" ? (
+        {shownLayout === "compact" ? null : shownLayout === "hover" ? (
           <div
             className="flex items-center gap-1"
             style={{ animation: "fbar-reveal 0.18s ease-out both" }}
@@ -2113,7 +2194,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               </button>
             )}
           </div>
-        ) : showInput ? (
+        ) : showInput && shownLayout === "full" ? (
           <form
             onSubmit={handleSubmit}
             className={cn(
@@ -2299,8 +2380,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       </div>
 
       {/* Default (top-half) downward growth: roster then pane below the pill. */}
-      {!growUp && rosterNode}
-      {!growUp && chatPaneNode}
+      {!applied.growUp && rosterNode}
+      {!applied.growUp && chatPaneNode}
     </div>
   );
 }

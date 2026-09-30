@@ -265,8 +265,24 @@ export default function BarStateHarness() {
     });
   }, [monitor.width, monitor.height, scale, frame.width, frame.height]);
 
+  // Through the bar's own drag-and-settle path, not a bare move of the
+  // container: the bar reads its docked well from the release (growth
+  // direction, anchored column), so a well the bar never learned about would
+  // put the bench in a state hardware cannot reach. Arm a drag on the bar's
+  // root, move the simulated window, release; the settle finds this exact well
+  // and lands with no glide.
   const placeAtWell = useCallback((w: Well) => {
+    const root = document.querySelector<HTMLElement>(".jbh-window > div");
+    if (!root) {
+      harness.setFrame({ x: w.x, y: w.y });
+      return;
+    }
+    const mouse = (type: string, x: number, y: number) =>
+      new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    root.dispatchEvent(mouse("mousedown", 4, 4));
+    root.dispatchEvent(mouse("mousemove", 40, 30));
     harness.setFrame({ x: w.x, y: w.y });
+    window.dispatchEvent(mouse("mouseup", 40, 30));
   }, []);
 
   // Logical geometry for the on-screen render.
