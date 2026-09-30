@@ -17,6 +17,8 @@
  * clip), `demo=approval` to hold a tool waiting on Allow or Don't,
  * `demo=spoken` to play a spoken turn (you speak, a tool runs, the answer is
  * spoken sentence by sentence while it streams, Juno speaks, then rest),
+ * `demo=ring` (two tools then a short answer), `demo=allow` (a tool waiting on
+ * Allow) and `demo=break` (two tools then a failure) for the Halo,
  * `start=manual` to hold the script until `window.__junoBenchStart()` is
  * called (so a recording begins on the first beat, not on a blank page), and
  * `bg=<css color>` to paint a background instead of transparent,
@@ -472,6 +474,107 @@ function playSpokenDemo(later: (fn: () => void, ms: number) => void): void {
   later(() => frame(UI.BAR_STATES_DEFAULT), speakAt + speakFor + 300);
 }
 
+/**
+ * The Halo's demos: a ring measures a turn, so its clips need tools that
+ * finish (ticks), a short answer (inside the ring), a tool waiting on Allow,
+ * and a failure after some work (the gap where it broke). Same events Rust
+ * would send; nothing is run.
+ */
+const RING_QUESTION = "How long until my next meeting?";
+
+type Later = (fn: () => void, ms: number) => void;
+
+/**
+ * A frame that keeps being sent every 400ms until the next one replaces it.
+ * A lazy-loaded bar (the Halo) subscribes after a demo's first beats have
+ * fired; the hold mode re-sends for the same reason.
+ */
+function frameKeeper(later: Later, lastSubmittedValue: string) {
+  let current: { barState: string; currentError: string | null } | null = null;
+  const tick = () => {
+    if (current) emitFrame({ ...current, audioLevel: 0, transcriptionText: "" }, { lastSubmittedValue, currentError: current.currentError });
+    later(tick, 400);
+  };
+  later(tick, 400);
+  return (barState: string, currentError: string | null = null) => {
+    current = { barState, currentError };
+    emitFrame({ barState, audioLevel: 0, transcriptionText: "" }, { lastSubmittedValue, currentError });
+  };
+}
+
+function toolCall(later: Later, at: number, content: string, took: number): void {
+  later(() => {
+    void emit(EVENTS.AGENT_EVENT, { type: "tool_call_request", payload: { tool_name: content, content } });
+  }, at);
+  later(() => {
+    void emit(EVENTS.AGENT_EVENT, {
+      type: "tool_call_result",
+      payload: { tool_name: content, content: "Done", success: true },
+    });
+  }, at + took);
+}
+
+/** One turn with two tools, then a short answer the ring can hold whole. */
+function playRingDemo(later: Later): void {
+  const messageId = "preview-ring";
+  const frame = frameKeeper(later, RING_QUESTION);
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: RING_QUESTION, timestamp: Date.now() });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, 0);
+  later(() => frame(UI.BAR_STATES_LOADING), 500);
+  toolCall(later, 900, "Checking your calendar", 1100);
+  toolCall(later, 2300, "Reading the invite", 900);
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: messageId });
+    void emit(EVENTS.STREAMING_TEXT_STREAM, { message_id: messageId, chunk: "42 min", tts_content: "Forty-two minutes." });
+  }, 3500);
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: messageId, complete_text: "42 min" });
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+  }, 3900);
+  later(() => frame(UI.BAR_STATES_DEFAULT), 4200);
+}
+
+/** A tool waiting on Allow or Don't, after one tick. Holds there. */
+function playAllowDemo(later: Later): void {
+  const question = "Open the invite in Safari";
+  const frame = frameKeeper(later, question);
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: question, timestamp: Date.now() });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, 0);
+  later(() => frame(UI.BAR_STATES_LOADING), 400);
+  toolCall(later, 600, "Reading the invite", 700);
+  later(() => {
+    void emit("tool-approval-request", {
+      tool_name: "browser",
+      tool_id: "preview-allow",
+      tool_input: {},
+      description: "open the invite in Safari",
+      timestamp: Date.now(),
+    });
+  }, 1500);
+}
+
+/** Two tools finish, the third fails: the ring breaks where it was. */
+function playBreakDemo(later: Later): void {
+  const frame = frameKeeper(later, RING_QUESTION);
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: RING_QUESTION, timestamp: Date.now() });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, 0);
+  later(() => frame(UI.BAR_STATES_LOADING), 400);
+  toolCall(later, 700, "Checking your calendar", 900);
+  toolCall(later, 1800, "Reading the invite", 800);
+  later(() => {
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_ERROR, "Calendar did not answer");
+  }, 2900);
+}
+
 function useHarnessWindow() {
   const [snap, setSnap] = useState(() => {
     const { frame, driven } = harness.snapshot();
@@ -544,6 +647,7 @@ export default function AppearancePreview() {
     let cancelled = false;
     const timers: number[] = [];
     const later = (fn: () => void, ms: number) => {
+      if (cancelled) return;
       timers.push(window.setTimeout(fn, ms));
     };
     const stop = () => {
@@ -583,6 +687,18 @@ export default function AppearancePreview() {
     }
     if (demo === "steps" || demo === "fail") {
       playStepsDemo(later, demo === "fail");
+      return stop;
+    }
+    if (demo === "ring") {
+      playRingDemo(later);
+      return stop;
+    }
+    if (demo === "allow") {
+      playAllowDemo(later);
+      return stop;
+    }
+    if (demo === "break") {
+      playBreakDemo(later);
       return stop;
     }
 
