@@ -17,6 +17,7 @@ import { UI } from "@/lib/constants.generated";
 import type { FloatingBarConfig } from "@/types/bar-config";
 import type { BarAppearance } from "@/components/bar/barAppearance";
 import { AppearancePicker } from "../AppearancePicker";
+import { UpdatesGroup } from "../UpdatesGroup";
 
 export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
@@ -288,6 +289,8 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
           </Button>
         </SettingsRow>
       </SettingsGroup>
+
+      <UpdatesGroup />
 
       <BuildGroup />
     </div>

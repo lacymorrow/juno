@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import type { AppView } from "@/components/AppHeader";
-import type { ModalType, FeedbackData, UpdateInfo } from "@/components/ModalSystem";
+import type { ModalType, FeedbackData } from "@/components/ModalSystem";
 
 export interface AppState {
     // View management
@@ -14,8 +14,6 @@ export interface AppState {
     // Modal state
     activeModal: ModalType;
     feedbackData: FeedbackData;
-    updateInfo: UpdateInfo | null;
-    isCheckingUpdate: boolean;
 
     // Which assistant message just got copied (its button shows a check)
     copiedMessageId: string | null;
@@ -52,8 +50,6 @@ export function useAppState() {
     // Modal state
     const [activeModal, setActiveModal] = useState<ModalType>(null);
     const [feedbackData, setFeedbackData] = useState<FeedbackData>(initialFeedbackData);
-    const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-    const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
 
     // Copy feedback state (the reset timer lives in useConversation)
     const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -92,8 +88,6 @@ export function useAppState() {
         serverStatus,
         activeModal,
         feedbackData,
-        updateInfo,
-        isCheckingUpdate,
         copiedMessageId,
         isAgentModeActive,
         isDictationActive,
@@ -111,8 +105,6 @@ export function useAppState() {
         setActiveModal,
         setFeedbackData,
         handleFeedbackDataChange,
-        setUpdateInfo,
-        setIsCheckingUpdate,
         setCopiedMessageId,
         setIsAgentModeActive,
         setIsDictationActive,
