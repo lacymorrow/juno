@@ -6,6 +6,7 @@ pub mod local_intents; // Deterministic requests answered without a model round-
 pub mod multi_agent; // Multi-agent orchestration system
 pub mod prompts; // Centralized prompt management system
 pub mod providers;
+pub mod router; // Smart routing beta: a model and a route per request
 pub mod tool_logger;
 pub mod tools;
 pub mod traits; // Tool choice intelligence system

@@ -33,6 +33,10 @@ pub mod store_keys {
     /// permission prompts into Juno's approval sheet instead of
     /// dangerously-skip-permissions; off restores the old behaviour.
     pub const CLI_ASK_BEFORE_SEND_ENABLED: &str = "cli_ask_before_send_enabled";
+    /// Beta, off unless explicitly set. Smart routing: a quick classifier call
+    /// picks the model for each request and whether it needs the computer.
+    /// See agent/router.rs
+    pub const SMART_ROUTING_ENABLED: &str = "smart_routing_enabled";
     pub const VOICE_TRANSCRIPTION: &str = "voice_transcription";
     pub const TRIGGERS: &str = "triggers";
 }
