@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{command, AppHandle, Manager, PhysicalPosition};
 use tauri_plugin_store::StoreExt;
 
-const BAR_POSITION_STORE_FILE: &str = "bar_position.json";
+const BAR_POSITION_STORE_FILE: &str = crate::constants::settings::store_files::BAR_POSITION;
 const BAR_POSITION_KEY: &str = "last_well";
 
 /// The bar's last settled top-left, in physical pixels.

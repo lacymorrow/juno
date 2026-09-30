@@ -29,6 +29,17 @@ mod tests {
         assert_eq!(conf["identifier"].as_str(), Some(BUNDLE_IDENTIFIER));
     }
 
+    /// The voice plugin finds its downloaded speech model under the app's
+    /// Application Support folder, which is named by the bundle id. It is a
+    /// separate crate, so it keeps a copy; the copy must agree.
+    #[test]
+    fn voice_plugin_bundle_identifier_matches() {
+        assert_eq!(
+            tauri_plugin_voice_transcription::constants::HOST_BUNDLE_IDENTIFIER,
+            BUNDLE_IDENTIFIER
+        );
+    }
+
     /// Demo builds share the normal bundle id so installing the real Juno over
     /// a demo keeps everything. The build script must not override it.
     #[test]

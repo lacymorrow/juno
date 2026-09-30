@@ -481,3 +481,125 @@ pub mod updates {
     /// The update flow moved. Payload is `crate::updater::UpdateStatus`.
     pub const STATUS: &str = "update-status";
 }
+
+#[cfg(test)]
+mod tests {
+    use tauri_plugin_voice_transcription::constants as plugin;
+
+    /// The voice plugin is its own crate and cannot import these constants,
+    /// so it keeps a copy. The app listens by these names and the plugin
+    /// emits by its copy: a rename on one side only is a listener that never
+    /// fires. This pins every name both sides use.
+    #[test]
+    fn plugin_event_names_match_the_app() {
+        use super::{always_listening as al, voice_transcription as vt};
+        let pairs = [
+            (plugin::always_listening::STARTED, al::STARTED),
+            (plugin::always_listening::ACTIVATED, al::ACTIVATED),
+            (plugin::always_listening::DEACTIVATED, al::DEACTIVATED),
+            (plugin::always_listening::STOP_REQUESTED, al::STOP_REQUESTED),
+            (plugin::always_listening::TRANSCRIPTION, al::TRANSCRIPTION),
+            (
+                plugin::always_listening::COMMAND_PROCESSED,
+                al::COMMAND_PROCESSED,
+            ),
+            (plugin::always_listening::EVENT, al::EVENT),
+            (plugin::engine::READY, super::voice_trigger::ENGINE_READY),
+            (plugin::voice_transcription::FINAL_RESULT, vt::FINAL_RESULT),
+            (
+                plugin::voice_transcription::DICTATION_STOPPED,
+                vt::DICTATION_STOPPED,
+            ),
+            (plugin::voice_transcription::ERROR, vt::ERROR),
+            (
+                plugin::voice_transcription::DICTATION_STARTED,
+                vt::DICTATION_STARTED,
+            ),
+            (
+                plugin::voice_transcription::PARTIAL_RESULT,
+                vt::PARTIAL_RESULT,
+            ),
+            (plugin::voice_transcription::AUDIO_LEVEL, vt::AUDIO_LEVEL),
+            (
+                plugin::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED,
+                super::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED,
+            ),
+            (
+                plugin::plugin::VOICE_TRANSCRIPTION_DICTATION_STOPPED,
+                super::plugin::VOICE_TRANSCRIPTION_DICTATION_STOPPED,
+            ),
+            (
+                plugin::plugin::ALWAYS_LISTENING_STARTED,
+                super::plugin::ALWAYS_LISTENING_STARTED,
+            ),
+            (
+                plugin::plugin::ALWAYS_LISTENING_STOPPED,
+                super::plugin::ALWAYS_LISTENING_STOPPED,
+            ),
+        ];
+        for (in_plugin, in_app) in pairs {
+            assert_eq!(in_plugin, in_app);
+        }
+    }
+
+    /// Every event name in src-tauri/src goes through a constant, so a rename
+    /// cannot leave a stale copy behind. Fails on an emit or listen call whose
+    /// event name is a string literal, including when rustfmt moved the
+    /// literal to the next line.
+    #[test]
+    fn no_raw_event_names_in_src() {
+        const CALLS: [&str; 6] = [
+            ".emit(",
+            ".emit_to(",
+            ".listen(",
+            ".listen_any(",
+            ".once(",
+            ".once_any(",
+        ];
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        for entry in walkdir::WalkDir::new(&src).into_iter().flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                let code = line.trim_start();
+                if code.starts_with("//") {
+                    continue;
+                }
+                for call in CALLS {
+                    let Some(at) = code.find(call) else {
+                        continue;
+                    };
+                    // The call spelled inside a string (like the list above).
+                    if code[..at].ends_with('"') {
+                        continue;
+                    }
+                    let rest = code[at + call.len()..].trim_start();
+                    // emit_to's first argument is the target window, not the event.
+                    let rest = if call == ".emit_to(" {
+                        rest.split_once(',').map_or("", |(_, r)| r.trim_start())
+                    } else {
+                        rest
+                    };
+                    // A literal on the next line is the event name, except for
+                    // emit_to, where it would be the window label.
+                    let next = lines.get(i + 1).map_or("", |l| l.trim_start());
+                    let wrapped = call != ".emit_to(" && rest.is_empty() && next.starts_with('"');
+                    if rest.starts_with('"') || wrapped {
+                        offenders.push(format!("{}:{}", path.display(), i + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "raw event names, use constants::events: {offenders:#?}"
+        );
+    }
+}

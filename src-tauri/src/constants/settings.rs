@@ -6,6 +6,16 @@
 /// Central settings store file name
 pub const SETTINGS_STORE_FILE: &str = "app_settings.json";
 
+/// Every other Tauri store file Juno writes, in one list so two features can
+/// never pick the same file name by accident. Settings live in
+/// `SETTINGS_STORE_FILE`; nothing else should hold settings.
+pub mod store_files {
+    pub const MEMORY: &str = "memory.json";
+    pub const SCHEDULED_AUTOMATIONS: &str = "scheduled_automations.json";
+    pub const BAR_POSITION: &str = "bar_position.json";
+    pub const ONBOARDING_ANALYTICS: &str = "onboarding_analytics.json";
+}
+
 /// Top-level settings keys in the unified store
 pub mod store_keys {
     pub const KEYBOARD_SHORTCUTS: &str = "keyboard_shortcuts";

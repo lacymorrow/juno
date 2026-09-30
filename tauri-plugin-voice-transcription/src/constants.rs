@@ -25,3 +25,28 @@ pub mod plugin {
     pub const ALWAYS_LISTENING_STARTED: &str = "plugin:always-listening:started";
     pub const ALWAYS_LISTENING_STOPPED: &str = "plugin:always-listening:stopped";
 }
+
+/// Always-listening (wake word) events. The host app listens for these by the
+/// same names; a test in src-tauri asserts the two copies agree.
+pub mod always_listening {
+    pub const STARTED: &str = "always-listening:started";
+    pub const ACTIVATED: &str = "always-listening:activated";
+    pub const DEACTIVATED: &str = "always-listening:deactivated";
+    pub const STOP_REQUESTED: &str = "always-listening:stop-requested";
+    pub const TRANSCRIPTION: &str = "always-listening:transcription";
+    pub const COMMAND_PROCESSED: &str = "always-listening:command-processed";
+    pub const EVENT: &str = "always-listening-event";
+}
+
+/// Speech engine lifecycle events
+pub mod engine {
+    /// The speech engine finished loading in the background.
+    pub const READY: &str = "voice-engine-ready";
+    /// No Whisper model file was found at startup.
+    pub const WHISPER_MODEL_NOT_FOUND: &str = "whisper-model-not-found";
+}
+
+/// The host app's bundle identifier, which names its Application Support
+/// folder. Owned by src-tauri/tauri.conf.json; a test in src-tauri asserts
+/// this copy matches.
+pub const HOST_BUNDLE_IDENTIFIER: &str = "com.juno.desktop";

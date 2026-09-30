@@ -16,6 +16,8 @@ pub mod chrome_debug_urls {
 // Chrome flags
 pub mod chrome_flags {
     pub const REMOTE_DEBUG_PORT_FLAG: &str = "--remote-debugging-port=9222";
+    /// Second instance, so two browsers never fight over one debug port.
+    pub const REMOTE_DEBUG_PORT_FLAG_ALT1: &str = "--remote-debugging-port=9223";
     pub const HEADLESS_FLAG: &str = "--headless";
     // "--no-sandbox" and "--disable-web-security" are deliberately absent:
     // Chrome must always launch with its sandbox and same-origin policy intact
@@ -153,6 +155,31 @@ pub mod javascript_templates {
 #[cfg(test)]
 mod tests {
     use super::url_protocols::*;
+
+    /// The launch flags, the debug URLs and the port numbers all spell the
+    /// same ports. Chrome is launched with the flag and reached at the URL, so
+    /// one drifting from the other is a browser Juno cannot connect to.
+    #[test]
+    fn debug_port_flags_and_urls_agree_with_the_ports() {
+        use super::{chrome_debug_urls, chrome_flags};
+        use crate::constants::ports::{CHROME_DEBUG_PORT_ALT1, CHROME_DEBUG_PORT_PRIMARY};
+        assert_eq!(
+            chrome_flags::REMOTE_DEBUG_PORT_FLAG,
+            format!("--remote-debugging-port={CHROME_DEBUG_PORT_PRIMARY}")
+        );
+        assert_eq!(
+            chrome_flags::REMOTE_DEBUG_PORT_FLAG_ALT1,
+            format!("--remote-debugging-port={CHROME_DEBUG_PORT_ALT1}")
+        );
+        assert_eq!(
+            chrome_debug_urls::PRIMARY,
+            format!("http://localhost:{CHROME_DEBUG_PORT_PRIMARY}")
+        );
+        assert_eq!(
+            chrome_debug_urls::ALTERNATIVE_1,
+            format!("http://localhost:{CHROME_DEBUG_PORT_ALT1}")
+        );
+    }
 
     #[test]
     fn test_web_urls_should_not_use_system_handler() {

@@ -373,8 +373,10 @@ mod tests {
         if let Ok(dir) = std::env::var("JUNO_PARAKEET_DIR") {
             return Some(PathBuf::from(dir));
         }
-        let dir =
-            dirs_home()?.join("Library/Application Support/com.juno.desktop/models/parakeet-ctc");
+        let dir = dirs_home()?
+            .join("Library/Application Support")
+            .join(crate::constants::HOST_BUNDLE_IDENTIFIER)
+            .join("models/parakeet-ctc");
         ParakeetEngine::model_files_present(&dir).then_some(dir)
     }
 

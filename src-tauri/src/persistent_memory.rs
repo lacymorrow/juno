@@ -4,7 +4,7 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 
-const MEMORY_STORE_FILE: &str = "memory.json";
+const MEMORY_STORE_FILE: &str = crate::constants::settings::store_files::MEMORY;
 const MEMORY_STORE_KEY: &str = "persistent_memory_entries";
 const MAX_ENTRIES: usize = 100;
 const MAX_INJECTION_ENTRIES: usize = 20;

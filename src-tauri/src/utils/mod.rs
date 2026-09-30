@@ -2255,7 +2255,11 @@ pub async fn warmup_tls_session() {
         }
     };
 
-    match client.head("https://api.anthropic.com").send().await {
+    match client
+        .head(crate::constants::api::endpoints::ANTHROPIC_API_ORIGIN)
+        .send()
+        .await
+    {
         Ok(_) => {
             tracing::info!(
                 "TLS warmup: api.anthropic.com session cached in {}ms",

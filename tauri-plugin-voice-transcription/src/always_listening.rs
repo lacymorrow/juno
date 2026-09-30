@@ -227,7 +227,7 @@ impl AlwaysListeningController {
 
         // Emit always listening started event
         app_handle
-            .emit("always-listening:started", ())
+            .emit(crate::constants::always_listening::STARTED, ())
             .map_err(|e| Error::Tauri(e.to_string()))?;
 
         let (control_tx, control_rx) = channel::<AlwaysListeningMessage>();
@@ -592,7 +592,7 @@ impl AlwaysListeningController {
                                         // Emit activation event carrying the matched wake
                                         // phrase so the app can route to the right target.
                                         if let Err(e) = app_handle.emit(
-                                            "always-listening:activated",
+                                            crate::constants::always_listening::ACTIVATED,
                                             matched_phrase.clone(),
                                         ) {
                                             error!("[AlwaysListening] Failed to emit activation event: {}", e);
@@ -641,9 +641,10 @@ impl AlwaysListeningController {
                                             info!("[AlwaysListening] Silence timeout - returning to monitoring (volume: {:.6} < {:.6})", volume, end_threshold);
 
                                             // Emit deactivation event
-                                            if let Err(e) =
-                                                app_handle.emit("always-listening:deactivated", ())
-                                            {
+                                            if let Err(e) = app_handle.emit(
+                                                crate::constants::always_listening::DEACTIVATED,
+                                                (),
+                                            ) {
                                                 error!("[AlwaysListening] Failed to emit deactivation event: {}", e);
                                             }
 
@@ -691,9 +692,10 @@ impl AlwaysListeningController {
                                             info!("[AlwaysListening] Command completion timeout - returning to monitoring (volume: {:.6} < {:.6})", volume, end_threshold);
 
                                             // Emit deactivation event
-                                            if let Err(e) =
-                                                app_handle.emit("always-listening:deactivated", ())
-                                            {
+                                            if let Err(e) = app_handle.emit(
+                                                crate::constants::always_listening::DEACTIVATED,
+                                                (),
+                                            ) {
                                                 error!("[AlwaysListening] Failed to emit deactivation event: {}", e);
                                             }
 
@@ -965,7 +967,7 @@ impl AlwaysListeningController {
                         if Self::contains_stop_words(&cleaned_text) {
                             info!("[AlwaysListening] Stop word detected: '{}' - stopping always listening", cleaned_text);
                             if let Err(e) = app_handle.emit(
-                                "always-listening:stop-requested",
+                                crate::constants::always_listening::STOP_REQUESTED,
                                 serde_json::json!({ "reason": "stop_word", "text": cleaned_text }),
                             ) {
                                 error!(
@@ -979,7 +981,7 @@ impl AlwaysListeningController {
                         if Self::is_agent_call_allowed() {
                             Self::record_agent_call();
                             if let Err(e) = app_handle.emit(
-                                "always-listening:transcription",
+                                crate::constants::always_listening::TRANSCRIPTION,
                                 serde_json::json!({ "text": cleaned_text }),
                             ) {
                                 error!(
@@ -987,8 +989,8 @@ impl AlwaysListeningController {
                                     e
                                 );
                             }
-                            if let Err(e) =
-                                app_handle.emit("always-listening:command-processed", ())
+                            if let Err(e) = app_handle
+                                .emit(crate::constants::always_listening::COMMAND_PROCESSED, ())
                             {
                                 error!(
                                     "[AlwaysListening] Failed to emit command-processed event: {}",
@@ -1225,7 +1227,7 @@ impl AlwaysListeningController {
                         if Self::contains_stop_words(&cleaned_text) {
                             info!("[AlwaysListening] Stop word detected in waiting mode: '{}' - stopping", cleaned_text);
                             if let Err(e) = app_handle.emit(
-                                "always-listening:stop-requested",
+                                crate::constants::always_listening::STOP_REQUESTED,
                                 serde_json::json!({ "reason": "stop_word", "text": cleaned_text }),
                             ) {
                                 error!(
@@ -1239,7 +1241,7 @@ impl AlwaysListeningController {
                         if Self::is_agent_call_allowed() {
                             Self::record_agent_call();
                             if let Err(e) = app_handle.emit(
-                                "always-listening:transcription",
+                                crate::constants::always_listening::TRANSCRIPTION,
                                 serde_json::json!({ "text": cleaned_text }),
                             ) {
                                 error!(
@@ -1414,7 +1416,7 @@ impl AlwaysListeningController {
             // Emit an event to confirm debugging is enabled
             app_handle
                 .emit(
-                    "always-listening-event",
+                    crate::constants::always_listening::EVENT,
                     serde_json::json!({
                         "type": "transcription_debug",
                         "payload": { "enabled": true }
@@ -1450,7 +1452,7 @@ impl AlwaysListeningController {
             // Emit an event to confirm monitoring is enabled
             app_handle
                 .emit(
-                    "always-listening-event",
+                    crate::constants::always_listening::EVENT,
                     serde_json::json!({
                         "type": "audio_level",
                         "payload": { "enabled": true }

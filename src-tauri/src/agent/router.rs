@@ -32,7 +32,7 @@ use crate::agent::providers::types::{Availability, Provider, RouterRole};
 use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 use crate::constants::timeouts::{SMART_ROUTER_CONNECT_TIMEOUT_MS, SMART_ROUTER_TIMEOUT_MS};
 
-const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_API_URL: &str = crate::constants::api::endpoints::ANTHROPIC_API_URL;
 const ROUTE_TOOL_NAME: &str = "route_request";
 /// The classifier answers with one short tool call; this is plenty.
 const CLASSIFIER_MAX_TOKENS: u32 = 200;

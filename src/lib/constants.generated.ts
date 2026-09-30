@@ -311,19 +311,19 @@ export const PORTS = {
 
 export const API_ENDPOINTS = {
   ENDPOINTS_ANTHROPIC_API_URL: 'https://api.anthropic.com/v1/messages',
+  ENDPOINTS_ANTHROPIC_API_ORIGIN: 'https://api.anthropic.com',
   ENDPOINTS_OPENAI_API_URL: 'https://api.openai.com/v1/chat/completions',
   ENDPOINTS_GEMINI_API_BASE: 'https://generativelanguage.googleapis.com/v1beta/models',
   ENDPOINTS_CLOUD_SERVER_URL: 'wss://juno-cloud-backend.fly.dev/ws',
-  ENDPOINTS_GITHUB_URL: 'https://github.com/juno-ai',
+  ENDPOINTS_CLOUD_API_URL: 'https://juno-cloud-backend.fly.dev/api',
+  ENDPOINTS_CLOUD_HEALTH_URL: 'https://juno-cloud-backend.fly.dev/health',
+  ENDPOINTS_CLOUD_METRICS_URL: 'https://juno-cloud-backend.fly.dev/metrics',
+  ENDPOINTS_GITHUB_URL: 'https://github.com/lacymorrow/juno',
+  ENDPOINTS_UPDATE_FEED_STABLE: 'https://github.com/lacymorrow/juno/releases/latest/download/latest.json',
+  ENDPOINTS_UPDATE_FEED_PRERELEASE: 'https://github.com/lacymorrow/juno/releases/download/canary/latest.json',
   ENDPOINTS_LOCALHOST_BASE: 'http://localhost',
-  ENDPOINTS_LOCALHOST_CHROME_DEBUG: 'http://localhost:9222',
-  ENDPOINTS_LOCALHOST_MCP_SERVER: 'http://localhost:8080',
-  ENDPOINTS_WEBSOCKET_LOCALHOST: 'ws://localhost:8080',
   ENDPOINTS_ELEVENLABS_TTS_BASE: 'https://api.elevenlabs.io/v1/text-to-speech',
   ENDPOINTS_REPLICATE_API_BASE: 'https://api.replicate.com',
-  ENDPOINTS_JUNO_CLOUD_WEBSOCKET: 'wss://juno-cloud-backend.fly.dev/ws',
-  ENDPOINTS_DEV_SERVER_BASE: 'http://localhost:1420',
-  ENDPOINTS_HMR_WEBSOCKET: 'ws://localhost:1421',
   COMPUTER_USE_API_TYPES_COMPUTER_20250124: 'computer_20250124',
   COMPUTER_USE_API_TYPES_COMPUTER_20251124: 'computer_20251124',
   COMPUTER_USE_API_TYPES_COMPUTER_TOOLSET_20260801: 'computer_toolset_20260801',
@@ -1080,6 +1080,10 @@ export const KEYBOARD_SHORTCUTS = {
 } as const;
 
 export const SETTINGS = {
+  STORE_FILES_MEMORY: 'memory.json',
+  STORE_FILES_SCHEDULED_AUTOMATIONS: 'scheduled_automations.json',
+  STORE_FILES_BAR_POSITION: 'bar_position.json',
+  STORE_FILES_ONBOARDING_ANALYTICS: 'onboarding_analytics.json',
   STORE_KEYS_KEYBOARD_SHORTCUTS: 'keyboard_shortcuts',
   STORE_KEYS_FLOATING_BAR: 'floating_bar',
   STORE_KEYS_AGENT: 'agent',

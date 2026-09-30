@@ -47,7 +47,11 @@ pub async fn invoke_elevenlabs_tts(text: String) -> Result<String, String> {
         env::var("ELEVENLABS_VOICE_ID").unwrap_or_else(|_| "21m00Tcm4TlvDq8ikWAM".to_string());
     info!("Using ElevenLabs Voice ID: {}", voice_id);
 
-    let url = format!("https://api.elevenlabs.io/v1/text-to-speech/{}", voice_id);
+    let url = format!(
+        "{}/{}",
+        crate::constants::api::endpoints::ELEVENLABS_TTS_BASE,
+        voice_id
+    );
 
     // `Client::new()` has no request timeout at all. A TTS call that stalls
     // mid-response then never returns, and the caller is left holding a future

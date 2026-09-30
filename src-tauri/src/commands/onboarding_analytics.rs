@@ -17,7 +17,7 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 use tracing::{debug, warn};
 
-const STORE_NAME: &str = "onboarding_analytics.json";
+const STORE_NAME: &str = crate::constants::settings::store_files::ONBOARDING_ANALYTICS;
 const EVENTS_KEY: &str = "events";
 /// Stores the last-recorded phase string so the modal Onboarding can resume
 /// from the right step on app restart (Phase D edge case #12).

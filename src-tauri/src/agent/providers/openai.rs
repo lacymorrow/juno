@@ -73,7 +73,7 @@ struct OpenAIChoice {
 
 // --- OpenAIBrain Implementation --- //
 
-const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
+const OPENAI_API_URL: &str = crate::constants::api::endpoints::OPENAI_API_URL;
 
 #[derive(Clone)]
 pub struct OpenAIBrain {
