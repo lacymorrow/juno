@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { motion, useReducedMotion } from "motion/react";
 import { Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { EVENTS, UI } from "@/lib/constants.generated";
+import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useDragWindow } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
@@ -64,8 +64,8 @@ import {
  */
 
 /** Backend element id for interactions. Halo shares the floating bar's. */
-const COMPONENT_ID = "floating-bar";
-const WINDOW_LABEL = "floating-bar";
+const COMPONENT_ID = UI.ELEMENT_IDS_FLOATING_BAR;
+const WINDOW_LABEL = WINDOW_LABELS.FLOATING_BAR;
 
 /** The dark shape's hairline plus depth, so it reads on a black wallpaper too. */
 const SHEET_SHADOW =
@@ -120,7 +120,7 @@ async function sendInteraction(type: string, data?: Record<string, unknown>): Pr
     timestamp: Date.now(),
   };
   try {
-    await invoke("ui_handle_interaction", { elementId: COMPONENT_ID, interaction });
+    await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, { elementId: COMPONENT_ID, interaction });
   } catch (error) {
     console.error("Halo: interaction failed:", error);
   }
