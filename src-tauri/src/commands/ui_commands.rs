@@ -132,6 +132,43 @@ impl Default for FloatingBarConfig {
     }
 }
 
+// === AUDIO LEVEL FOLDING ===
+
+/// Bound on `bar-state-update` traffic caused by audio level events (~20 Hz).
+const AUDIO_LEVEL_MIN_EMIT_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Decides what a plugin `voice-transcription:audio-level` event does to the
+/// bar's `audioLevel` (LAC-4080). Pure state machine (no `AppHandle`) so the
+/// folding rules are testable:
+/// - mic closed → every level folds to silence, emitted only while the bar
+///   still shows something non-zero
+/// - silence (0.0) bypasses the throttle: it is the reset edge that parks
+///   every waveform at baseline
+/// - non-zero levels emit at a bounded rate, never per sample
+#[derive(Debug, Default)]
+pub struct AudioLevelFolder {
+    last_emit: Option<Instant>,
+}
+
+impl AudioLevelFolder {
+    /// Returns the level to store and emit, or `None` to drop the event.
+    fn fold(&mut self, raw: f64, mic_open: bool, current: f64, now: Instant) -> Option<f64> {
+        let level = if mic_open { raw.clamp(0.0, 1.0) } else { 0.0 };
+        if level == 0.0 {
+            self.last_emit = None;
+            return (current != 0.0).then_some(0.0);
+        }
+        if self
+            .last_emit
+            .is_some_and(|last| now.duration_since(last) < AUDIO_LEVEL_MIN_EMIT_INTERVAL)
+        {
+            return None;
+        }
+        self.last_emit = Some(now);
+        Some(level)
+    }
+}
+
 // === CORE UI MANAGER ===
 
 #[derive(Debug)]
@@ -153,6 +190,7 @@ pub struct UIManager {
     pub is_dictation_mode: bool,
     pub is_always_listening: bool,
     pub audio_level: f64,
+    audio_level_folder: AudioLevelFolder,
     pub voice_mode: String,
     pub agent_state: Option<String>,
     pub current_transition_id: Option<String>,
@@ -181,6 +219,7 @@ impl UIManager {
             is_dictation_mode: false,
             is_always_listening: false,
             audio_level: 0.0,
+            audio_level_folder: AudioLevelFolder::default(),
             voice_mode: ui::voice_modes::IDLE.to_string(),
             agent_state: None,
             current_transition_id: None,
@@ -510,6 +549,34 @@ impl UIManager {
 
     // === VOICE & DICTATION FUNCTIONALITY ===
 
+    /// True while the microphone is capturing for the bar: hold-to-talk
+    /// listening, dictation, or an active always-listening session.
+    fn is_mic_session_open(&self) -> bool {
+        self.is_dictation_mode
+            || self.is_always_listening
+            || matches!(
+                self.bar_state,
+                BarState::Listening
+                    | BarState::Transcribing
+                    | BarState::Dictating
+                    | BarState::DictationReady
+                    | BarState::AlwaysListening
+            )
+    }
+
+    /// Fold a plugin audio-level event into `audio_level` and push it to the
+    /// bars via `bar-state-update`, at a bounded rate (LAC-4080).
+    pub async fn handle_audio_level(&mut self, raw_level: f64) {
+        let mic_open = self.is_mic_session_open();
+        if let Some(level) =
+            self.audio_level_folder
+                .fold(raw_level, mic_open, self.audio_level, Instant::now())
+        {
+            self.audio_level = level;
+            self.emit_bar_state_update().await;
+        }
+    }
+
     pub async fn handle_dictation_mode_change(&mut self, is_active: bool) -> Result<(), String> {
         debug!("UI Manager: Handling dictation mode change: {}", is_active);
 
@@ -521,6 +588,9 @@ impl UIManager {
             self.set_bar_state(BarState::Dictating).await;
         } else {
             self.voice_mode = ui::voice_modes::IDLE.to_string();
+            // The mic is closed; the waveform returns to baseline even if the
+            // plugin's final 0.0 level event never arrives.
+            self.audio_level = 0.0;
             if !self.is_agent_working {
                 self.set_bar_state(BarState::Default).await;
             }
@@ -559,11 +629,27 @@ impl UIManager {
         );
         self.is_always_listening = is_active;
 
+        // Pay for level monitoring only while the session is open (LAC-4080).
+        // The toggle reaches the plugin's always-listening audio thread; the
+        // dictation recording thread emits levels for its own session
+        // lifetime already. Spawned so the plugin lock is never taken while
+        // the UI manager lock is held.
+        let app_handle = self.app_handle.clone();
+        safe_spawn_async_task(move || async move {
+            if let Err(e) =
+                crate::commands::always_listening::set_audio_level_monitoring(is_active, app_handle)
+                    .await
+            {
+                warn!("Failed to toggle audio level monitoring: {}", e);
+            }
+        });
+
         if is_active {
             self.voice_mode = ui::voice_modes::ALWAYS_LISTENING.to_string();
             self.set_bar_state(BarState::AlwaysListening).await;
         } else {
             self.voice_mode = ui::voice_modes::IDLE.to_string();
+            self.audio_level = 0.0;
             if !self.is_agent_working && !self.is_dictation_mode {
                 self.set_bar_state(BarState::Default).await;
             }
@@ -608,6 +694,7 @@ impl UIManager {
         self.input_value.clear();
         self.last_submitted_value.clear();
         self.current_error = None;
+        self.audio_level = 0.0;
         self.set_bar_state(BarState::Default).await;
         Ok(())
     }
@@ -638,6 +725,8 @@ impl UIManager {
         debug!("UI Manager: Handling dictation started");
         self.transcription_text.clear();
         self.transcription_provisional = false;
+        // Fresh session: never open on the previous session's last level.
+        self.audio_level = 0.0;
         self.voice_mode = ui::voice_modes::DICTATION.to_string();
         self.set_bar_state(BarState::Listening).await;
         Ok(())
@@ -663,6 +752,9 @@ impl UIManager {
             "UI Manager: Handling dictation finished with query: {:?}",
             query
         );
+
+        // Recording has stopped; the state update below carries a flat level.
+        self.audio_level = 0.0;
 
         if let Some(query_text) = query {
             if !query_text.trim().is_empty() {
@@ -1082,6 +1174,28 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
                 if manager.is_agent_working {
                     manager.set_bar_state(BarState::AgentResponding).await;
                 }
+            });
+        },
+    );
+
+    // Plugin audio level → bar `audioLevel` (LAC-4080). The backend owns the
+    // fold so every bar appearance renders one level from `bar-state-update`
+    // instead of each listening to the plugin event itself.
+    let manager_clone = manager.clone();
+    app_handle.listen(
+        crate::constants::events::voice_transcription::AUDIO_LEVEL,
+        move |event| {
+            let Some(level) = serde_json::from_str::<serde_json::Value>(event.payload())
+                .ok()
+                .and_then(|payload| payload.get("level").and_then(|l| l.as_f64()))
+            else {
+                warn!("Ignoring audio-level event with unreadable payload");
+                return;
+            };
+            let manager = manager_clone.clone();
+            safe_spawn_async_task(move || async move {
+                let mut manager = manager.lock().await;
+                manager.handle_audio_level(level).await;
             });
         },
     );
@@ -1526,5 +1640,69 @@ pub async fn handle_dictation_finished(_app_handle: &AppHandle, query: Option<St
         if let Err(e) = manager.handle_dictation_finished(query).await {
             error!("Failed to handle dictation finished: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// LAC-4080: a level event while listening changes the emitted
+    /// `audioLevel`; after the mic closes it is 0.
+    #[test]
+    fn level_event_moves_audio_level_and_zeroes_after_mic_close() {
+        let mut folder = AudioLevelFolder::default();
+        let t0 = Instant::now();
+
+        // Mic open: the level passes through and would be emitted.
+        assert_eq!(folder.fold(0.6, true, 0.0, t0), Some(0.6));
+
+        // A second event inside the throttle window is dropped (bounded
+        // rate, never per sample).
+        assert_eq!(
+            folder.fold(0.9, true, 0.6, t0 + Duration::from_millis(10)),
+            None
+        );
+
+        // Past the window it passes again.
+        assert_eq!(
+            folder.fold(0.4, true, 0.6, t0 + Duration::from_millis(60)),
+            Some(0.4)
+        );
+
+        // Mic closed: any level folds to silence, emitted exactly once...
+        assert_eq!(
+            folder.fold(0.8, false, 0.4, t0 + Duration::from_millis(120)),
+            Some(0.0)
+        );
+        // ...and not re-emitted while the bar already sits at baseline.
+        assert_eq!(
+            folder.fold(0.8, false, 0.0, t0 + Duration::from_millis(180)),
+            None
+        );
+    }
+
+    #[test]
+    fn silence_reset_bypasses_the_throttle() {
+        let mut folder = AudioLevelFolder::default();
+        let t0 = Instant::now();
+        assert_eq!(folder.fold(0.6, true, 0.0, t0), Some(0.6));
+        // The plugin's end-of-recording 0.0 lands mid-window and still parks
+        // the waveform immediately.
+        assert_eq!(
+            folder.fold(0.0, true, 0.6, t0 + Duration::from_millis(5)),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn out_of_range_levels_are_clamped() {
+        let mut folder = AudioLevelFolder::default();
+        let t0 = Instant::now();
+        assert_eq!(folder.fold(3.7, true, 0.0, t0), Some(1.0));
+        assert_eq!(
+            folder.fold(-0.5, true, 1.0, t0 + Duration::from_millis(60)),
+            Some(0.0)
+        );
     }
 }
