@@ -58,12 +58,18 @@ const FIRST_CHECK_DELAY: Duration = Duration::from_secs(20);
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// Which builds this install accepts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateChannel {
     /// Only releases a human has promoted. What a user should be on.
     Stable,
     /// Every build, including the one from the merge ten minutes ago.
+    ///
+    /// The default, because the people running Juno today are the people
+    /// writing it, and a dogfood build that arrives a week late is not
+    /// dogfooding. Move `#[default]` to `Stable` before there are users who
+    /// did not sign up to find the bugs.
+    #[default]
     Prerelease,
 }
 
@@ -98,12 +104,6 @@ impl UpdateChannel {
                 "https://github.com/lacymorrow/juno/releases/download/canary/latest.json"
             }
         }
-    }
-}
-
-impl Default for UpdateChannel {
-    fn default() -> Self {
-        Self::Prerelease
     }
 }
 
