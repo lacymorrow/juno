@@ -245,6 +245,14 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
       return [];
     case "get_always_listening_status":
       return false;
+    // The island's card: approvals and the stop path answer as the backend
+    // would once the work is done; the preview never runs anything.
+    case "approve_tool_execution":
+    case "deny_tool_execution":
+      return true;
+    case "stop_all_operations":
+    case "ui_handle_interaction":
+      return null;
 
     // --- settings reads the bar's chat pane pulls on mount ---
     // `useSettings.loadAllSettings` fans these out in one Promise.all and then
