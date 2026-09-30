@@ -19,6 +19,8 @@ interface AppearancePickerProps {
 // words instead of a blank stage.
 const PREVIEW_TIMEOUT_MS = 4000;
 
+type PreviewStatus = "loading" | "ready" | "failed";
+
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() =>
     typeof window !== "undefined" && typeof window.matchMedia === "function"
@@ -66,38 +68,55 @@ export function AppearancePicker({ value, onChange, disabled = false }: Appearan
     }
   };
 
-  // Loading and failure are per appearance: switching remounts the frame. The
-  // frame reports "ready" once the bar has painted and "failed" if it threw;
-  // silence past the timeout counts as failure too.
-  const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
+  // The current look and its two neighbours stay mounted, the neighbours
+  // hidden, so stepping lands on a frame that has already painted (the orb
+  // and avatar looks take a moment to load their engines). Each frame reports
+  // "ready" once its bar has painted and "failed" if it threw; a current frame
+  // silent past the timeout counts as failed too.
+  const mounted = useMemo(() => {
+    const n = APPEARANCE_CATALOG.length;
+    const around = [(index - 1 + n) % n, index, (index + 1) % n];
+    return Array.from(new Set(around)).map((i) => APPEARANCE_CATALOG[i]);
+  }, [index]) as readonly (typeof APPEARANCE_CATALOG)[number][];
+  const [statusByValue, setStatusByValue] = useState<Record<string, PreviewStatus>>({});
+  const status: PreviewStatus = statusByValue[entry.value] ?? "loading";
   const timeoutRef = useRef<number | null>(null);
   useEffect(() => {
-    setStatus("loading");
     if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+    if (status !== "loading") return;
     timeoutRef.current = window.setTimeout(() => {
-      setStatus((s) => (s === "loading" ? "failed" : s));
+      setStatusByValue((prev) =>
+        (prev[entry.value] ?? "loading") === "loading" ? { ...prev, [entry.value]: "failed" } : prev,
+      );
     }, PREVIEW_TIMEOUT_MS);
     return () => {
       if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
     };
-  }, [entry.value]);
+  }, [entry.value, status]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       const data = event.data as { type?: string; status?: string; appearance?: string } | null;
-      if (!data || data.type !== "juno-bar-preview" || data.appearance !== entry.value) return;
-      if (data.status === "ready") setStatus("ready");
-      else if (data.status === "failed") setStatus("failed");
+      if (!data || data.type !== "juno-bar-preview" || !data.appearance) return;
+      const next = data.status === "ready" ? "ready" : data.status === "failed" ? "failed" : null;
+      if (!next) return;
+      setStatusByValue((prev) => ({ ...prev, [data.appearance as string]: next }));
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [entry.value]);
+  }, []);
 
-  const src = useMemo(
-    () => appearancePreviewUrl(entry.value, { reducedMotion }),
-    [entry.value, reducedMotion],
-  );
+  // A frame that leaves the neighbourhood unmounts; when it comes back it
+  // loads again, so its status starts over too.
+  useEffect(() => {
+    const keep = new Set<string>(mounted.map((m) => m.value));
+    setStatusByValue((prev) => {
+      const next: Record<string, PreviewStatus> = {};
+      for (const [k, v] of Object.entries(prev)) if (keep.has(k)) next[k] = v;
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [mounted]);
 
   return (
     <div
@@ -123,19 +142,27 @@ export function AppearancePicker({ value, onChange, disabled = false }: Appearan
               {status === "failed" ? "Preview unavailable" : entry.name}
             </div>
           )}
-          <iframe
-            key={entry.value}
-            src={src}
-            title={`Preview of the ${entry.name} bar`}
-            tabIndex={-1}
-            aria-hidden="true"
-            className={cn(
-              "absolute inset-0 h-full w-full border-0 bg-transparent",
-              "pointer-events-none select-none",
-              status === "ready" ? "opacity-100" : "opacity-0",
-              !reducedMotion && "transition-opacity duration-150 ease-out",
-            )}
-          />
+          {mounted.map((item) => {
+            const current = item.value === entry.value;
+            const shown = current && status === "ready";
+            return (
+              <iframe
+                key={item.value}
+                src={appearancePreviewUrl(item.value, { reducedMotion })}
+                title={`Preview of the ${item.name} bar`}
+                tabIndex={-1}
+                aria-hidden="true"
+                data-current={current ? "true" : "false"}
+                className={cn(
+                  "absolute inset-0 h-full w-full border-0 bg-transparent",
+                  "pointer-events-none select-none",
+                  shown ? "opacity-100" : "opacity-0",
+                  !current && "invisible",
+                  !reducedMotion && "transition-opacity duration-150 ease-out",
+                )}
+              />
+            );
+          })}
         </div>
 
         <button

@@ -6,24 +6,38 @@ import type { FloatingBarConfig } from "@/types/bar-config";
 
 import { FloatingBar } from "@/components/FloatingBar";
 import { AppBar } from "@/components/bar/app-bar";
-import { DynamicBar } from "@/components/bar/dynamic-bar";
+import { IslandBar } from "@/components/bar/island/IslandBar";
 import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
 // Lazy-load heavy components to avoid pulling Three.js/Rive into shared bundles
-const ElevenLabsOrbBar = lazy(() =>
-  import("@/components/bar/elevenlabs-orb-bar").then((m) => ({
-    default: m.ElevenLabsOrbBar,
-  }))
-);
-const ReactOrbBar = lazy(() =>
-  import("@/components/bar/react-orb-bar").then((m) => ({
-    default: m.ReactOrbBar,
-  }))
-);
-const PersonaBar = lazy(() =>
-  import("@/components/bar/persona-bar").then((m) => ({
-    default: m.PersonaBar,
-  }))
-);
+const loadOrb = () => import("@/components/bar/elevenlabs-orb-bar");
+const loadHalo = () => import("@/components/bar/react-orb-bar");
+const loadAvatar = () => import("@/components/bar/persona-bar");
+const ElevenLabsOrbBar = lazy(() => loadOrb().then((m) => ({ default: m.ElevenLabsOrbBar })));
+const ReactOrbBar = lazy(() => loadHalo().then((m) => ({ default: m.ReactOrbBar })));
+const PersonaBar = lazy(() => loadAvatar().then((m) => ({ default: m.PersonaBar })));
+
+/**
+ * Fetch and parse the heavy looks once the first bar has painted, so switching
+ * to one later lands on warm code instead of a blank window while Three.js or
+ * Rive arrive. Idle time first; a timer if the browser offers no idle callback.
+ */
+function warmHeavyLooks(): () => void {
+  const warm = () => {
+    void loadOrb();
+    void loadHalo();
+    void loadAvatar();
+  };
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  if (typeof w.requestIdleCallback === "function") {
+    const id = w.requestIdleCallback(warm, { timeout: 3000 });
+    return () => w.cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(warm, 1500);
+  return () => window.clearTimeout(id);
+}
 
 export function BarHost() {
   const [barConfig, setBarConfig] = useState<FloatingBarConfig | null>(null);
@@ -77,6 +91,13 @@ export function BarHost() {
   const appearance = barConfig?.bar_appearance ?? UI.BAR_APPEARANCES_FLOATING;
   const loaded = barConfig !== null;
 
+  useEffect(() => {
+    // Not inside a preview frame: the settings picker keeps three of those
+    // mounted, and parsing Three.js and Rive in each would only slow it down.
+    if (!loaded || window.self !== window.top) return;
+    return warmHeavyLooks();
+  }, [loaded]);
+
   const Component = useMemo(() => {
     switch (appearance) {
       case UI.BAR_APPEARANCES_APP:
@@ -84,7 +105,7 @@ export function BarHost() {
       case UI.BAR_APPEARANCES_VOICE_AI:
         return () => <VoiceAIBar barAppearance={appearance} />;
       case UI.BAR_APPEARANCES_DYNAMIC:
-        return () => <DynamicBar barAppearance={appearance} />;
+        return () => <IslandBar />;
       case UI.BAR_APPEARANCES_ORB:
         return () => (
           <Suspense fallback={null}>

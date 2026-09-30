@@ -33,7 +33,7 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
   {
     value: UI.BAR_APPEARANCES_DYNAMIC,
     name: "Island",
-    descriptor: "Grows and shrinks like the Dynamic Island.",
+    descriptor: "One small shape that grows to hold the answer, then settles back.",
   },
   {
     value: UI.BAR_APPEARANCES_ORB,
