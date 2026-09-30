@@ -111,6 +111,10 @@ export default function AdvancedSettings({
   const [persistentSession, setPersistentSession] = useState(false);
   const [persistentSessionLoading, setPersistentSessionLoading] = useState(true);
 
+  // Beta: smart routing. Default off.
+  const [smartRouting, setSmartRouting] = useState(false);
+  const [smartRoutingLoading, setSmartRoutingLoading] = useState(true);
+
   // Ask before Juno sends (LAC-4058). Default on.
   const [askBeforeSend, setAskBeforeSend] = useState(true);
   const [askBeforeSendLoading, setAskBeforeSendLoading] = useState(true);
@@ -192,6 +196,36 @@ export default function AdvancedSettings({
     } catch (error) {
       console.error("Failed to update the persistent session flag:", error);
       setPersistentSession(previous);
+      toast.error("Could not change that setting");
+    }
+  };
+
+  // Load the beta smart-routing flag on mount.
+  useEffect(() => {
+    let mounted = true;
+    invoke<boolean>(COMMANDS.SETTINGS_GET_SMART_ROUTING_ENABLED)
+      .then((enabled) => {
+        if (mounted) setSmartRouting(enabled === true);
+      })
+      .catch((error) => {
+        console.error("Failed to load the smart routing flag:", error);
+      })
+      .finally(() => {
+        if (mounted) setSmartRoutingLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSmartRoutingChange = async (enabled: boolean) => {
+    const previous = smartRouting;
+    setSmartRouting(enabled);
+    try {
+      await invoke(COMMANDS.SETTINGS_SET_SMART_ROUTING_ENABLED, { enabled });
+    } catch (error) {
+      console.error("Failed to update the smart routing flag:", error);
+      setSmartRouting(previous);
       toast.error("Could not change that setting");
     }
   };
@@ -411,6 +445,18 @@ export default function AdvancedSettings({
             checked={persistentSession}
             onCheckedChange={handlePersistentSessionChange}
             disabled={persistentSessionLoading}
+          />
+        </SettingsRow>
+        <SettingsRow
+          htmlFor="smart-routing"
+          label="Smart routing"
+          description="Picks a model for each request and decides whether Juno needs to use your computer. Applies to the Anthropic API provider, from your next message."
+        >
+          <Switch
+            id="smart-routing"
+            checked={smartRouting}
+            onCheckedChange={handleSmartRoutingChange}
+            disabled={smartRoutingLoading}
           />
         </SettingsRow>
       </SettingsGroup>

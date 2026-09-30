@@ -413,6 +413,18 @@ impl BrainFactory {
         system_prompt: String,
         app_handle: Option<&tauri::AppHandle>,
     ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
+        Self::create_brain_with_system_prompt_and_model(system_prompt, app_handle, None)
+    }
+
+    /// Like `create_brain_with_system_prompt`, but runs this one brain on
+    /// `model_override` instead of the configured model when given. Saved
+    /// settings are not touched, so the next query is back on the configured
+    /// model. Used by the smart-routing beta (`agent::router`).
+    pub fn create_brain_with_system_prompt_and_model(
+        system_prompt: String,
+        app_handle: Option<&tauri::AppHandle>,
+        model_override: Option<&str>,
+    ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
         let config = load_provider_config(app_handle);
 
         let provider_id_str =
@@ -434,6 +446,22 @@ impl BrainFactory {
 
         // Override with custom system prompt
         provider_config.system_prompt = Some(system_prompt);
+
+        // Per-request model, only for this brain. Only a model this provider's
+        // catalog knows is accepted, so a stale override can never send a
+        // model ID the provider does not serve.
+        if let Some(model) = model_override {
+            if provider.knows_model(model) {
+                info!("Running this request on {} (per-request model)", model);
+                provider_config.model = Some(model.to_string());
+            } else {
+                warn!(
+                    "Ignoring per-request model '{}': not in the {} catalog",
+                    model,
+                    provider.id()
+                );
+            }
+        }
 
         // Publish model name so the screenshot pipeline can pick the right
         // resolution tier (Opus 4.5+ → up to 2576px, legacy → XGA/WXGA/FWXGA).

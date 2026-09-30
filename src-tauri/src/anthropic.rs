@@ -43,6 +43,8 @@ struct QueuedQuery {
     images: Option<Vec<String>>,
     _queued_at: std::time::Instant,
     app_handle: tauri::AppHandle,
+    /// The smart-routing decision for this query, if the router ran.
+    route: Option<crate::agent::router::RoutePlan>,
 }
 
 impl AgentExecutionQueue {
@@ -58,6 +60,7 @@ impl AgentExecutionQueue {
         &self,
         query: String,
         images: Option<Vec<String>>,
+        route: Option<crate::agent::router::RoutePlan>,
         app_handle: tauri::AppHandle,
         state: tauri::State<'_, AppState>,
     ) -> Result<String, String> {
@@ -68,6 +71,7 @@ impl AgentExecutionQueue {
             images,
             _queued_at: std::time::Instant::now(),
             app_handle,
+            route,
         };
 
         // Cancel current execution if any
@@ -136,6 +140,7 @@ impl AgentExecutionQueue {
         let result = execute_agent_internal(
             query.query.clone(),
             query.images.clone(),
+            query.route.clone(),
             state,
             query.app_handle.clone(),
         )
@@ -423,6 +428,12 @@ pub async fn submit_query(
         }
     }
 
+    // --- Smart routing (beta, off by default) ---
+    // One quick classifier call picks the route and model for this query.
+    // `None` (off, another provider, no key, timeout, any error) leaves the
+    // query on the standard path, exactly as before.
+    let route = crate::agent::router::plan_route(&app_handle, trimmed_query).await;
+
     // CRITICAL FIX: Execute agent directly instead of relying on incomplete event system
     // The event-driven refactor was incomplete and caused tool calls to not execute
     info!("Executing agent directly for query: {}", trimmed_query);
@@ -433,6 +444,7 @@ pub async fn submit_query(
         .queue_query(
             trimmed_query.to_string(),
             images,
+            route,
             app_handle.clone(),
             state.clone(),
         )
@@ -576,6 +588,7 @@ async fn finish_session_terminal_state(
 async fn execute_agent_internal(
     query: String,
     images: Option<Vec<String>>,
+    route: Option<crate::agent::router::RoutePlan>,
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -773,7 +786,8 @@ async fn execute_agent_internal(
     info!("Using agent mode: {:?}", agent_mode);
 
     // TEMPORARY DEBUG FIX: Force single agent mode for computer use tasks
-    // This ensures direct tool access instead of delegation
+    // This ensures direct tool access instead of delegation. Used only when
+    // smart routing did not run; when it did, its route decides instead.
     let lower_query = trimmed_query.to_lowercase();
     let contains_computer_keywords = lower_query.contains("click")
         || lower_query.contains("drag")
@@ -789,6 +803,16 @@ async fn execute_agent_internal(
     let effective_agent_mode = if companion_mode {
         info!("🔍 Companion mode: forcing single-agent path (no delegation)");
         AgentMode::Single
+    } else if let Some(plan) = route.as_ref() {
+        if plan.route.forces_single_agent() {
+            info!(
+                "Smart routing: '{}' route runs single-agent with direct tools",
+                plan.route.label()
+            );
+            AgentMode::Single
+        } else {
+            agent_mode
+        }
     } else if contains_computer_keywords {
         warn!(
             "FORCING SINGLE AGENT MODE for computer use task: {}",
@@ -992,7 +1016,15 @@ async fn execute_agent_internal(
 
                 let system_prompt = inject_persistent_memory(system_prompt, &app_handle);
                 let system_prompt = inject_chat_only_notice(system_prompt, &app_handle);
-                BrainFactory::create_brain_with_system_prompt(system_prompt, Some(&app_handle))
+                // Smart routing may run this one query on another model.
+                let model_override = route
+                    .as_ref()
+                    .and_then(|plan| plan.model_override.as_deref());
+                BrainFactory::create_brain_with_system_prompt_and_model(
+                    system_prompt,
+                    Some(&app_handle),
+                    model_override,
+                )
             };
             let brain = match brain_result {
                 Ok(brain) => brain,

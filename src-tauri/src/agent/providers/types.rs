@@ -206,6 +206,26 @@ pub struct ModelDefinition {
     /// fallback model in the same round trip.
     pub server_side_fallback: bool,
     pub is_recommended: bool,
+    /// The job this model does for the smart-routing beta, if any. At most one
+    /// model per provider holds each role; `router::` reads the table to find
+    /// them, so no call site keeps its own model list.
+    pub router_role: Option<RouterRole>,
+}
+
+/// A job a model does for the smart-routing beta (`agent::router`).
+///
+/// Routing is a policy, not a capability, but it belongs in this table for the
+/// same reason `is_recommended` does: the moment it lives anywhere else it
+/// becomes a second list of model IDs that can drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouterRole {
+    /// Reads each request and decides its route. Must be cheap and fast; it
+    /// never drives the computer.
+    Classifier,
+    /// Answers requests the classifier marks as conversation. Must be a
+    /// current model that can still drive the computer, so a request routed
+    /// here by mistake keeps every tool it would otherwise have had.
+    Chat,
 }
 
 impl ModelDefinition {
@@ -430,6 +450,7 @@ impl Provider {
                         // the follow-up commit, now that Juno sends
                         // `computer_toolset_20260801`.
                         is_recommended: true,
+                        router_role: None,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_5_5,
@@ -444,6 +465,7 @@ impl Provider {
                         adaptive_thinking: true,
                         server_side_fallback: true,
                         is_recommended: false,
+                        router_role: None,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_5,
@@ -455,6 +477,7 @@ impl Provider {
                         adaptive_thinking: true,
                         server_side_fallback: false,
                         is_recommended: false,
+                        router_role: Some(RouterRole::Chat),
                     },
                     // Haiku 4.5 is in the current lineup even though it drives
                     // the computer through the oldest tool version Juno sends.
@@ -469,6 +492,7 @@ impl Provider {
                         adaptive_thinking: false,
                         server_side_fallback: false,
                         is_recommended: false,
+                        router_role: Some(RouterRole::Classifier),
                     },
                     // --- Legacy models (still available) ---
                     // Anthropic's own "Legacy models (still available)" list.
@@ -484,6 +508,7 @@ impl Provider {
                         adaptive_thinking: true,
                         server_side_fallback: true,
                         is_recommended: false,
+                        router_role: None,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_5,
@@ -495,6 +520,7 @@ impl Provider {
                         adaptive_thinking: true,
                         server_side_fallback: true,
                         is_recommended: false,
+                        router_role: None,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_8,
@@ -506,6 +532,7 @@ impl Provider {
                         adaptive_thinking: true,
                         server_side_fallback: false,
                         is_recommended: false,
+                        router_role: None,
                     },
                     // Opus 4.7 is the last model on the high-resolution image
                     // tier ("Claude 4.7 and later models").
@@ -519,6 +546,7 @@ impl Provider {
                         adaptive_thinking: true,
                         server_side_fallback: false,
                         is_recommended: false,
+                        router_role: None,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_6,
@@ -530,6 +558,7 @@ impl Provider {
                         adaptive_thinking: true,
                         server_side_fallback: false,
                         is_recommended: false,
+                        router_role: None,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_4_6,
@@ -541,6 +570,7 @@ impl Provider {
                         adaptive_thinking: true,
                         server_side_fallback: false,
                         is_recommended: false,
+                        router_role: None,
                     },
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_5,
@@ -552,6 +582,7 @@ impl Provider {
                         adaptive_thinking: false,
                         server_side_fallback: false,
                         is_recommended: false,
+                        router_role: None,
                     },
                     // Sonnet 4.5 drives the computer on the older
                     // computer_20250124 tool version. It is not chat only;
@@ -566,6 +597,7 @@ impl Provider {
                         adaptive_thinking: false,
                         server_side_fallback: false,
                         is_recommended: false,
+                        router_role: None,
                     },
                 ]
             }
@@ -584,6 +616,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: true,
+                    router_role: None,
                 },
                 ModelDefinition {
                     id: model_ids::OPENAI_CODEX_5_3,
@@ -595,6 +628,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: false,
+                    router_role: None,
                 },
             ],
             Provider::Rig => &[ModelDefinition {
@@ -607,6 +641,7 @@ impl Provider {
                 adaptive_thinking: false,
                 server_side_fallback: false,
                 is_recommended: true,
+                router_role: None,
             }],
             Provider::Gemini => &[
                 ModelDefinition {
@@ -619,6 +654,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: true,
+                    router_role: None,
                 },
                 ModelDefinition {
                     id: model_ids::GEMINI_3_7_FLASH,
@@ -630,6 +666,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: false,
+                    router_role: None,
                 },
                 ModelDefinition {
                     id: model_ids::GEMINI_3_5_FLASH,
@@ -641,6 +678,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: false,
+                    router_role: None,
                 },
                 ModelDefinition {
                     id: model_ids::GEMINI_3_5_FLASH_LITE,
@@ -652,6 +690,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: false,
+                    router_role: None,
                 },
                 ModelDefinition {
                     id: model_ids::GEMINI_3_FLASH_PREVIEW,
@@ -663,6 +702,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: false,
+                    router_role: None,
                 },
                 // Google labels this one "Legacy Preview".
                 ModelDefinition {
@@ -675,6 +715,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: false,
+                    router_role: None,
                 },
             ],
             // The CLI drives the desktop through Juno's own in-process MCP
@@ -693,6 +734,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: true,
+                    router_role: None,
                 },
                 ModelDefinition {
                     id: "opus",
@@ -704,6 +746,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: false,
+                    router_role: None,
                 },
                 ModelDefinition {
                     id: "haiku",
@@ -715,6 +758,7 @@ impl Provider {
                     adaptive_thinking: false,
                     server_side_fallback: false,
                     is_recommended: false,
+                    router_role: None,
                 },
             ],
         }
@@ -852,6 +896,14 @@ impl Provider {
         self.model_definitions()
             .iter()
             .any(|def| def.supports_computer_use())
+    }
+
+    /// The model that holds `role` for the smart-routing beta, if this
+    /// provider assigns one.
+    pub fn router_model(&self, role: RouterRole) -> Option<&'static ModelDefinition> {
+        self.model_definitions()
+            .iter()
+            .find(|def| def.router_role == Some(role))
     }
 }
 

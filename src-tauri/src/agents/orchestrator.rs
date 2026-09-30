@@ -11,6 +11,29 @@ use super::base_agent::{
 };
 use crate::agent::core::{AgentError, Message, Role};
 
+/// How long one orchestrator task may run.
+///
+/// A task that asks for its own time gets it, clamped to
+/// `ORCHESTRATOR_MIN_TIMEOUT_SECONDS..=ORCHESTRATOR_MAX_TIMEOUT_SECONDS`, so a
+/// task cannot ask for a few milliseconds (which is how tasks used to be cut off
+/// before they could do anything) or for an hour. A task that asks for nothing
+/// gets `ORCHESTRATOR_PARALLEL_EXECUTION_TIMEOUT_SECONDS`.
+pub fn effective_task_timeout(requested: Option<Duration>) -> Duration {
+    use crate::constants::timeouts::{
+        ORCHESTRATOR_MAX_TIMEOUT_SECONDS, ORCHESTRATOR_MIN_TIMEOUT_SECONDS,
+        ORCHESTRATOR_PARALLEL_EXECUTION_TIMEOUT_SECONDS,
+    };
+    let seconds = requested
+        .map(|timeout| {
+            timeout.as_secs().clamp(
+                ORCHESTRATOR_MIN_TIMEOUT_SECONDS,
+                ORCHESTRATOR_MAX_TIMEOUT_SECONDS,
+            )
+        })
+        .unwrap_or(ORCHESTRATOR_PARALLEL_EXECUTION_TIMEOUT_SECONDS);
+    Duration::from_secs(seconds)
+}
+
 /// Enhanced configuration for the orchestrator with performance optimization
 #[derive(Debug, Clone)]
 pub struct OrchestratorConfig {
@@ -694,23 +717,30 @@ impl Orchestrator {
 
         let mut all_results = Vec::new();
 
-        // Execute independent tasks in parallel (industry best practice)
+        // Execute independent tasks in parallel, each under its own timeout
         if !independent_tasks.is_empty() {
+            // Every task already stops at its own timeout, so the batch waits
+            // for its longest task plus a moment for results to come back.
+            // This outer limit is only a backstop.
+            const BATCH_GRACE: Duration = Duration::from_secs(1);
+            let batch_timeout = independent_tasks
+                .iter()
+                .map(|task| effective_task_timeout(task.timeout))
+                .max()
+                .unwrap_or_else(|| effective_task_timeout(None))
+                + BATCH_GRACE;
+
             let parallel_futures: Vec<_> = independent_tasks
                 .into_iter()
                 .map(|task| {
                     let orchestrator = std::sync::Arc::new(self);
-                    async move {
-                        orchestrator
-                            .execute_task_with_timeout(task, Duration::from_millis(800))
-                            .await
-                    }
+                    let timeout = effective_task_timeout(task.timeout);
+                    async move { orchestrator.execute_task_with_timeout(task, timeout).await }
                 })
                 .collect();
 
-            // Use timeout for critical path vs enhancement components
             let parallel_results = match tokio::time::timeout(
-                Duration::from_secs(5), // Max wait for parallel execution
+                batch_timeout,
                 futures::future::join_all(parallel_futures),
             )
             .await
@@ -736,9 +766,10 @@ impl Orchestrator {
             }
         }
 
-        // Execute dependent tasks sequentially (but with optimized timeouts)
+        // Execute dependent tasks sequentially, each under its own timeout
         for task in dependent_tasks {
-            match self.execute_task_with_graduated_timeout(task).await {
+            let timeout = effective_task_timeout(task.timeout);
+            match self.execute_task_with_timeout(task, timeout).await {
                 Ok(result) => all_results.push(result),
                 Err(e) => {
                     log::warn!(
@@ -784,52 +815,6 @@ impl Orchestrator {
         }
     }
 
-    /// Graduated timeout strategy: try fast, then medium, then basic
-    async fn execute_task_with_graduated_timeout(
-        &self,
-        task: Task,
-    ) -> Result<TaskResult, AgentError> {
-        // Try fast execution first (300ms for critical components)
-        if let Ok(result) =
-            tokio::time::timeout(Duration::from_millis(300), self.delegate_task(task.clone())).await
-        {
-            return result;
-        }
-
-        log::info!(
-            "Fast execution failed for task {}, trying medium timeout",
-            task.id
-        );
-
-        // Fall back to medium timeout (800ms for enhancement components)
-        if let Ok(result) =
-            tokio::time::timeout(Duration::from_millis(800), self.delegate_task(task.clone())).await
-        {
-            return result;
-        }
-
-        log::info!(
-            "Medium execution failed for task {}, using basic fallback",
-            task.id
-        );
-
-        // Final fallback: basic response (industry standard for reliability)
-        Ok(TaskResult {
-            task_id: task.id.clone(),
-            agent_type: task.agent_type,
-            success: true,
-            output: serde_json::json!(
-                "I'm working on a more detailed response - here's a quick overview in the meantime"
-            ),
-            error: None,
-            execution_time: Duration::from_millis(800),
-            metadata: serde_json::json!({
-                "fallback_strategy": "basic_response",
-                "reason": "Prioritizing user flow over perfect completeness"
-            }),
-        })
-    }
-
     /// Fallback strategy when parallel execution fails
     async fn execute_fallback_strategy(
         &self,
@@ -846,7 +831,7 @@ impl Orchestrator {
         for (i, task) in priority_tasks.iter().take(3).enumerate() {
             // Limit to top 3 for performance
             match self
-                .execute_task_with_timeout(task.clone(), Duration::from_millis(500))
+                .execute_task_with_timeout(task.clone(), effective_task_timeout(task.timeout))
                 .await
             {
                 Ok(result) => results.push(result),
@@ -1504,5 +1489,56 @@ impl SpecializedAgent for Orchestrator {
     async fn is_available(&self) -> bool {
         let status = self.status.read().await;
         status.is_available
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_task_timeout;
+    use crate::constants::timeouts::{
+        ORCHESTRATOR_MAX_TIMEOUT_SECONDS, ORCHESTRATOR_MIN_TIMEOUT_SECONDS,
+        ORCHESTRATOR_PARALLEL_EXECUTION_TIMEOUT_SECONDS,
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn a_task_that_asks_for_nothing_gets_the_default() {
+        assert_eq!(
+            effective_task_timeout(None),
+            Duration::from_secs(ORCHESTRATOR_PARALLEL_EXECUTION_TIMEOUT_SECONDS)
+        );
+    }
+
+    #[test]
+    fn the_default_is_long_enough_for_agent_work() {
+        let default = ORCHESTRATOR_PARALLEL_EXECUTION_TIMEOUT_SECONDS;
+        assert!(default >= ORCHESTRATOR_MIN_TIMEOUT_SECONDS);
+        assert!(default <= ORCHESTRATOR_MAX_TIMEOUT_SECONDS);
+    }
+
+    #[test]
+    fn a_task_gets_the_time_it_asks_for_within_range() {
+        assert_eq!(
+            effective_task_timeout(Some(Duration::from_secs(240))),
+            Duration::from_secs(240)
+        );
+    }
+
+    #[test]
+    fn a_request_below_the_floor_is_raised() {
+        for requested in [Duration::from_millis(300), Duration::from_secs(5)] {
+            assert_eq!(
+                effective_task_timeout(Some(requested)),
+                Duration::from_secs(ORCHESTRATOR_MIN_TIMEOUT_SECONDS)
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_above_the_ceiling_is_capped() {
+        assert_eq!(
+            effective_task_timeout(Some(Duration::from_secs(60 * 60))),
+            Duration::from_secs(ORCHESTRATOR_MAX_TIMEOUT_SECONDS)
+        );
     }
 }
