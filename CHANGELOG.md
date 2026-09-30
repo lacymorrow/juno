@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.27] - 2026-09-30
+
+### Added
+
+- **bar:** Studio rebuilt as a recording studio, waveform and script (#628) (f03343b6)
+
 ## [0.8.26] - 2026-09-30
 
 ### Added
@@ -588,7 +594,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.26...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.27...HEAD
+[0.8.27]: https://github.com/lacymorrow/juno/compare/cua-v0.8.26...v0.8.27
 [0.8.26]: https://github.com/lacymorrow/juno/compare/canary...v0.8.26
 [0.8.25]: https://github.com/lacymorrow/juno/compare/cua-v0.8.24...v0.8.25
 [0.8.24]: https://github.com/lacymorrow/juno/compare/cua-v0.8.23...v0.8.24
