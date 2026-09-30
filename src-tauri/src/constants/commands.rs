@@ -36,6 +36,9 @@ pub mod settings {
     /// See docs/plans/cli-persistent-session-spike.md
     pub const GET_CLI_PERSISTENT_SESSION_ENABLED: &str = "get_cli_persistent_session_enabled";
     pub const SET_CLI_PERSISTENT_SESSION_ENABLED: &str = "set_cli_persistent_session_enabled";
+    /// Ask before Juno sends (LAC-4058): per-send approval for connector writes.
+    pub const GET_CLI_ASK_BEFORE_SEND_ENABLED: &str = "get_cli_ask_before_send_enabled";
+    pub const SET_CLI_ASK_BEFORE_SEND_ENABLED: &str = "set_cli_ask_before_send_enabled";
 }
 
 /// Core system command names

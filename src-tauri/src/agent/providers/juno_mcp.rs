@@ -42,6 +42,7 @@ use serde_json::{json, Value};
 use tracing::{debug, error, info, warn};
 
 use crate::agent::core::AgentError;
+use crate::agent::providers::cli_approval;
 use crate::agent::tools::anthropic_computer_use::{create_versioned_tools, run_computer_action};
 use crate::agent::tools::tool_versioning::{ApiVersion, ToolVersionConfig};
 
@@ -188,37 +189,59 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
 
 /// The tools this server offers, in MCP's shape.
 ///
-/// Only `computer`. Bash and file editing are the CLI's own, and better there:
-/// it already has them, they need no desktop, and routing them through Juno
-/// would add a hop for nothing. What Juno has that the CLI does not is a
-/// pointer people can see.
+/// `computer`, plus `approve` (LAC-4058). Bash and file editing are the
+/// CLI's own, and better there: it already has them, they need no desktop,
+/// and routing them through Juno would add a hop for nothing. What Juno has
+/// that the CLI does not is a pointer people can see — and a person to ask
+/// before something goes out: `approve` is the CLI's
+/// `--permission-prompt-tool`, routed into Juno's approval sheet.
 fn tool_list() -> Vec<Value> {
     // Only the schema is served here. The CLI picks its own tool types, so the
     // Anthropic tool version on these definitions is never sent anywhere.
-    create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124))
-        .into_iter()
-        .filter(|tool| tool.name == "computer")
-        .map(|tool| {
-            json!({
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.input_schema,
+    let mut tools: Vec<Value> =
+        create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124))
+            .into_iter()
+            .filter(|tool| tool.name == "computer")
+            .map(|tool| {
+                json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.input_schema,
+                })
             })
-        })
-        .collect()
+            .collect();
+    tools.push(json!({
+        "name": cli_approval::APPROVE_TOOL_NAME,
+        "description": "Internal: Juno's permission prompt. The Claude CLI calls this \
+            automatically when a tool needs the person's approval. Never call it directly.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tool_name": { "type": "string" },
+                "input": { "type": "object" },
+                "tool_use_id": { "type": "string" }
+            },
+            "required": ["tool_name", "input"]
+        }
+    }));
+    tools
 }
 
 async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, RpcError> {
     let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-    if name != "computer" {
-        return Err(RpcError::method_not_found(name));
-    }
 
     let arguments = params
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
+
+    if name == cli_approval::APPROVE_TOOL_NAME {
+        return Ok(cli_approval::handle_approve(app, &arguments).await);
+    }
+    if name != "computer" {
+        return Err(RpcError::method_not_found(name));
+    }
 
     match run_computer_action(app, arguments, None, CLI_CURSOR_ID, CLI_CURSOR_COLOR).await {
         Ok(value) => Ok(to_mcp_content(value)),
@@ -282,14 +305,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_computer_tool_is_offered() {
+    fn the_computer_and_approve_tools_are_offered() {
         let tools = tool_list();
-        assert_eq!(tools.len(), 1);
+        assert_eq!(tools.len(), 2);
         assert_eq!(tools[0]["name"], "computer");
         assert!(
             tools[0]["inputSchema"]["properties"]["action"].is_object(),
             "the CLI needs the schema to call it"
         );
+        // The permission prompt tool (LAC-4058) must exist on the server the
+        // CLI is pointed at, or every gated call would hang and die.
+        assert_eq!(tools[1]["name"], "approve");
+        assert!(tools[1]["inputSchema"]["properties"]["tool_name"].is_object());
     }
 
     #[test]

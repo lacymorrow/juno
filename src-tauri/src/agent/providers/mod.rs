@@ -1,6 +1,7 @@
 pub mod anthropic;
 pub mod claude_cli;
 pub mod claude_cli_session;
+pub mod cli_approval;
 pub mod config;
 pub mod default_selection;
 pub mod factory;
