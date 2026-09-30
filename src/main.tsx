@@ -35,47 +35,63 @@ if (import.meta.env.PROD) {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <VoiceProvider>
-      <SettingsProvider>
-        <TooltipProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<App />} />
-              <Route path="/settings" element={<ModularSettingsWindow />} />
-              <Route path="/app-bar" element={<BarHost />} />
-              <Route path="/floating-bar" element={<BarHost />} />
-              <Route path="/voice-bar" element={<BarHost />} />
-              <Route path="/dynamic-bar" element={<BarHost />} />
-              <Route path="/orb-bar" element={<BarHost />} />
-              <Route path="/persona-bar" element={<BarHost />} />
-              <Route path="/floating-panel" element={<FloatingPanel />} />
-              <Route path="/onboarding" element={<OnboardingWindow />} />
-              <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
-              <Route path="/snap-wells-overlay" element={<SnapWellsOverlay />} />
-              <Route path="/listening-overlay" element={<ListeningGlow />} />
-              <Route
-                path="/__bar-preview"
-                element={
-                  <Suspense fallback={null}>
-                    <AppearancePreview />
-                  </Suspense>
-                }
-              />
-              {/* Unlinked diagnostic bench; not reachable through normal UI. */}
-              <Route
-                path="/__bar-harness"
-                element={
-                  <Suspense fallback={null}>
-                    <BarStateHarness />
-                  </Suspense>
-                }
-              />
-            </Routes>
-          </BrowserRouter>
-        </TooltipProvider>
-        {/* Toast notifications. Every knob lives in the Toaster wrapper so all
-            windows show the same flat, collapsed stack. */}
-        <Toaster />
-      </SettingsProvider>
+      <TooltipProvider>
+        <BrowserRouter>
+          <Routes>
+            {/* Only the windows that read settings mount the provider. Its
+                loader fans out a dozen backend calls on mount; on a bar route
+                or a preview frame that was wasted work, and its failure toast
+                stacked up in whichever window happened to host it. */}
+            <Route
+              path="/"
+              element={
+                <SettingsProvider>
+                  <App />
+                </SettingsProvider>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <SettingsProvider>
+                  <ModularSettingsWindow />
+                </SettingsProvider>
+              }
+            />
+            <Route path="/app-bar" element={<BarHost />} />
+            <Route path="/floating-bar" element={<BarHost />} />
+            <Route path="/voice-bar" element={<BarHost />} />
+            <Route path="/dynamic-bar" element={<BarHost />} />
+            <Route path="/orb-bar" element={<BarHost />} />
+            <Route path="/persona-bar" element={<BarHost />} />
+            <Route path="/floating-panel" element={<FloatingPanel />} />
+            <Route path="/onboarding" element={<OnboardingWindow />} />
+            <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
+            <Route path="/snap-wells-overlay" element={<SnapWellsOverlay />} />
+            <Route path="/listening-overlay" element={<ListeningGlow />} />
+            <Route
+              path="/__bar-preview"
+              element={
+                <Suspense fallback={null}>
+                  <AppearancePreview />
+                </Suspense>
+              }
+            />
+            {/* Unlinked diagnostic bench; not reachable through normal UI. */}
+            <Route
+              path="/__bar-harness"
+              element={
+                <Suspense fallback={null}>
+                  <BarStateHarness />
+                </Suspense>
+              }
+            />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+      {/* Toast notifications. Every knob lives in the Toaster wrapper so all
+          windows show the same flat, collapsed stack. */}
+      <Toaster />
     </VoiceProvider>
   </React.StrictMode>,
 );

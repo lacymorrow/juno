@@ -414,7 +414,9 @@ export function useSettings() {
 			console.log("All settings loaded successfully with caching");
 		} catch (error) {
 			console.error("Error loading settings:", error);
-			toast.error("Failed to load some settings");
+			// One id: a repeat load (StrictMode, a remount) replaces the toast
+			// instead of stacking another copy of it.
+			toast.error("Some settings could not be loaded", { id: "settings-load" });
 		} finally {
 			setIsLoading(false);
 		}

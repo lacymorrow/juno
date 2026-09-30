@@ -10,7 +10,9 @@
  * listening, dictating, done) by emitting the same `bar-state-update` events
  * Rust would, then loops. With `?motion=reduced` it holds a single frame.
  *
- * Query: `appearance=<bar_appearance value>`, `motion=reduced` (optional).
+ * Query: `appearance=<bar_appearance value>`, `motion=reduced` (optional),
+ * `state=<bar state>` to hold one frame (the bench and the docs screenshots),
+ * `demo=card` to play one full turn (question, answer with a component) once.
  */
 
 import { Component, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
@@ -46,12 +48,15 @@ interface Frame {
   transcriptionText: string;
 }
 
-function emitFrame({ barState, audioLevel, transcriptionText }: Frame): void {
+function emitFrame(
+  { barState, audioLevel, transcriptionText }: Frame,
+  extra: { lastSubmittedValue?: string; currentError?: string | null } = {},
+): void {
   void emit(EVENTS.BAR_STATE_UPDATE, {
     barState,
     inputValue: "",
-    lastSubmittedValue: "",
-    currentError: null,
+    lastSubmittedValue: extra.lastSubmittedValue ?? "",
+    currentError: extra.currentError ?? null,
     transcriptionText,
     spokenText: "",
     voiceMode: UI.VOICE_MODES_IDLE,
@@ -93,13 +98,83 @@ class PreviewBoundary extends Component<
   }
 }
 
-function readQuery(): { appearance: string; reducedMotion: boolean } {
+function readQuery(): {
+  appearance: string;
+  reducedMotion: boolean;
+  holdState: string | null;
+  demo: string | null;
+} {
   const params = new URLSearchParams(window.location.search);
   const appearance = appearanceEntry(params.get("appearance")).value;
   const reducedMotion =
     params.get("motion") === "reduced" ||
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  return { appearance, reducedMotion };
+  return {
+    appearance,
+    reducedMotion,
+    holdState: params.get("state"),
+    demo: params.get("demo"),
+  };
+}
+
+/** One frame for a held state, with words where the state would show them. */
+function heldFrame(state: string): Frame & { lastSubmittedValue?: string; currentError?: string | null } {
+  switch (state) {
+    case UI.BAR_STATES_LISTENING:
+    case UI.BAR_STATES_DICTATING:
+    case UI.BAR_STATES_TRANSCRIBING:
+      return { barState: state, audioLevel: 0.5, transcriptionText: DEMO_SENTENCE };
+    case UI.BAR_STATES_SUBMITTING:
+    case UI.BAR_STATES_LOADING:
+    case UI.BAR_STATES_AGENT_RESPONDING:
+    case UI.BAR_STATES_FINISHING:
+      return { barState: state, audioLevel: 0, transcriptionText: "", lastSubmittedValue: DEMO_SENTENCE };
+    case UI.BAR_STATES_ERROR:
+      return { barState: state, audioLevel: 0, transcriptionText: "", currentError: "Connection unavailable" };
+    default:
+      return { barState: state, audioLevel: 0, transcriptionText: "" };
+  }
+}
+
+/** The canned answer `demo=card` plays: a sentence, a component, a sentence. */
+const DEMO_ANSWER =
+  "Done. The draft is with Maya and I asked for Friday.\n\n" +
+  '<TaskSummaryCard title="Sent" tasks={[{ "label": "Draft to Maya", "done": true }, { "label": "Ask for Friday", "done": true }]} />\n\n' +
+  "I will let you know when she replies.";
+const DEMO_SPOKEN = "Done. The draft is with Maya and I asked for Friday.";
+
+/** Play one turn through the same events Rust would send, then rest. */
+function playCardDemo(later: (fn: () => void, ms: number) => void): void {
+  const messageId = "preview-demo";
+  const now = Date.now();
+  const frame = (barState: string) =>
+    emitFrame({ barState, audioLevel: 0, transcriptionText: "" }, { lastSubmittedValue: DEMO_SENTENCE });
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: DEMO_SENTENCE, timestamp: now });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, 0);
+  later(() => frame(UI.BAR_STATES_LOADING), 500);
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: messageId });
+  }, 1100);
+  const words = DEMO_ANSWER.split(" ");
+  words.forEach((word, i) => {
+    later(() => {
+      void emit(EVENTS.STREAMING_TEXT_STREAM, {
+        message_id: messageId,
+        chunk: (i === 0 ? "" : " ") + word,
+        tts_content: i === 0 ? DEMO_SPOKEN : undefined,
+      });
+    }, 1200 + i * 45);
+  });
+  const end = 1200 + words.length * 45 + 200;
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: messageId, complete_text: DEMO_ANSWER });
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+  }, end);
+  later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
 }
 
 function useHarnessWindow() {
@@ -139,7 +214,7 @@ function useNaturalSize() {
 }
 
 export default function AppearancePreview() {
-  const { appearance, reducedMotion } = useMemo(readQuery, []);
+  const { appearance, reducedMotion, holdState, demo } = useMemo(readQuery, []);
 
   // The shim must exist before any bar effect calls `listen` or `invoke`, and
   // the host must read the requested appearance on its first config fetch.
@@ -157,6 +232,34 @@ export default function AppearancePreview() {
   useEffect(() => {
     if (!ready) return;
 
+    let cancelled = false;
+    const timers: number[] = [];
+    const later = (fn: () => void, ms: number) => {
+      timers.push(window.setTimeout(fn, ms));
+    };
+    const stop = () => {
+      cancelled = true;
+      timers.forEach((id) => window.clearTimeout(id));
+    };
+
+    if (holdState) {
+      const { lastSubmittedValue, currentError, ...frame } = heldFrame(holdState);
+      // Re-sent every 400ms: a bar subscribes some time after its first paint
+      // (the host fetches its config first), and a held frame must still land.
+      const hold = () => {
+        if (cancelled) return;
+        emitFrame(frame, { lastSubmittedValue, currentError });
+        later(hold, 400);
+      };
+      hold();
+      return stop;
+    }
+
+    if (demo === "card") {
+      playCardDemo(later);
+      return stop;
+    }
+
     if (reducedMotion) {
       emitFrame({
         barState: UI.BAR_STATES_DICTATING,
@@ -165,12 +268,6 @@ export default function AppearancePreview() {
       });
       return;
     }
-
-    let cancelled = false;
-    const timers: number[] = [];
-    const later = (fn: () => void, ms: number) => {
-      timers.push(window.setTimeout(fn, ms));
-    };
 
     const playBeat = (index: number) => {
       if (cancelled) return;
@@ -217,19 +314,28 @@ export default function AppearancePreview() {
     };
 
     playBeat(0);
-    return () => {
-      cancelled = true;
-      timers.forEach((id) => window.clearTimeout(id));
-    };
-  }, [ready, reducedMotion]);
+    return stop;
+  }, [ready, reducedMotion, holdState, demo]);
 
   const { frame, driven } = useHarnessWindow();
   const { ref: naturalRef, size: natural } = useNaturalSize();
 
-  // Tell the framing window once the bar has painted at a real size.
+  // Tell the framing window once the bar has painted at a real size. Two
+  // frames later, not at once: a WebGL canvas has a size before it has drawn
+  // anything, and the picker fades the frame in on this message.
   const painted = driven ? frame.width > 0 : natural.width > 0;
   useEffect(() => {
-    if (ready && painted) post("ready", appearance);
+    if (!ready || !painted) return;
+    let cancelled = false;
+    const outer = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled) post("ready", appearance);
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(outer);
+    };
   }, [ready, painted, appearance]);
 
   // A bar that sizes its own window (the pill, the island, the studio) gets a
