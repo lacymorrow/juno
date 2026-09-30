@@ -541,7 +541,6 @@ pub(crate) fn fire_trigger_edge(
                         });
                         return;
                     }
-                    let app_clone = app.clone();
                     tauri::async_runtime::spawn(async move {
                         crate::agent_monitor::on_agent_input_pressed().await;
                     });
