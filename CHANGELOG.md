@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.28] - 2026-09-30
+
+### Fixed
+
+- **pill:** every jump and flash on self-resize, with a ledger (#629) (3ad51ef0)
+
 ## [0.8.27] - 2026-09-30
 
 ### Added
@@ -594,7 +600,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.27...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.28...HEAD
+[0.8.28]: https://github.com/lacymorrow/juno/compare/cua-v0.8.27...v0.8.28
 [0.8.27]: https://github.com/lacymorrow/juno/compare/cua-v0.8.26...v0.8.27
 [0.8.26]: https://github.com/lacymorrow/juno/compare/canary...v0.8.26
 [0.8.25]: https://github.com/lacymorrow/juno/compare/cua-v0.8.24...v0.8.25
