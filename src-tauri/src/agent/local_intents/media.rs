@@ -1,23 +1,18 @@
-//! Local intents: queries Juno answers itself, without a model round-trip.
+//! Playback control: "pause Spotify", "skip this song", "what's playing?".
 //!
-//! The first (and so far only) family is playback control. "Pause Spotify",
-//! "skip this song", "what's playing?" are fully deterministic: the answer is
-//! one AppleScript call plus the pre-built `<NowPlayingCard>` widget, which is
-//! live-bound to the player and re-used verbatim on every response. Sending
-//! those through the agent costs 5–10 s of model time to arrive at the same
-//! card, so `submit_query` asks this module first and only falls through to
-//! the agent when the request is not a bare transport command.
-//!
-//! The grammar is deliberately narrow. Anything with extra content ("play my
-//! liked songs", "skip two tracks", "play the video") does not match and goes
-//! to the agent, which has the tools to interpret it. Bare verbs with no
-//! player named ("pause", "next") only match when a supported player is
-//! actually playing, so a video in a browser is never mistaken for Spotify.
+//! The answer is one AppleScript call plus the pre-built `<NowPlayingCard>`
+//! widget, which is live-bound to the player. The grammar is deliberately
+//! narrow. Anything with extra content ("play my liked songs", "skip two
+//! tracks", "play the video") does not match and goes to the agent. Bare
+//! verbs with no player named ("pause", "next") only match when a supported
+//! player is actually playing, so a video in a browser is never mistaken for
+//! Spotify.
 
 use once_cell::sync::Lazy;
 use regex::Regex;
 use tauri::AppHandle;
 
+use super::Reply;
 use crate::commands::media::{self, display_name, MediaState};
 
 /// Transport action the user asked for.
@@ -139,7 +134,7 @@ impl MediaPatterns {
 
 /// Compiled once on first use. The patterns are literals, so a failure means a
 /// developer broke one; instead of panicking (no-unwrap rule) we log loudly and
-/// disable local intent matching — every query then falls through to the agent.
+/// disable local intent matching; every query then falls through to the agent.
 static PATTERNS: Lazy<Option<MediaPatterns>> = Lazy::new(|| match MediaPatterns::compile() {
     Ok(patterns) => Some(patterns),
     Err(e) => {
@@ -322,17 +317,10 @@ fn spoken_result(intent: &MediaIntent, app: &str, state: &MediaState) -> String 
     }
 }
 
-/// Try to serve `query` locally. Returns `true` when it was handled and the
-/// caller must not run the agent.
-///
-/// Emits exactly the events a normal run does (stream start → chunk with
-/// spoken text → stream end, plus the floating-bar lifecycle) so every window
-/// renders the reply identically to an agent reply.
-pub async fn try_handle_media_intent(app_handle: &AppHandle, query: &str) -> bool {
-    let Some(intent) = parse_media_intent(query) else {
-        return false;
-    };
-
+/// Serve a parsed playback intent. `None` means it cannot be answered
+/// locally after all (no player to address, or "play Spotify" with Spotify
+/// closed, which needs the agent to open it) and the query goes to the agent.
+pub(super) async fn handle(app_handle: &AppHandle, intent: MediaIntent) -> Option<Reply> {
     let explicit_app = match &intent {
         MediaIntent::Control { app, .. } | MediaIntent::Status { app, .. } => *app,
     };
@@ -340,7 +328,7 @@ pub async fn try_handle_media_intent(app_handle: &AppHandle, query: &str) -> boo
     let app = match explicit_app {
         Some(app) => {
             // "Play Spotify" when it is not running means "open it and play"
-            // — that needs the agent.
+            // (that needs the agent).
             if matches!(
                 intent,
                 MediaIntent::Control {
@@ -350,7 +338,7 @@ pub async fn try_handle_media_intent(app_handle: &AppHandle, query: &str) -> boo
             ) {
                 match media::get_state(app_handle, app).await {
                     Ok(state) if state.running => {}
-                    _ => return false,
+                    _ => return None,
                 }
             }
             app
@@ -362,14 +350,12 @@ pub async fn try_handle_media_intent(app_handle: &AppHandle, query: &str) -> boo
                     states.push(state);
                 }
             }
-            match resolve_implicit_app(&intent, &states) {
-                Some(app) => app,
-                None => return false,
-            }
+            resolve_implicit_app(&intent, &states)?
         }
     };
 
     log::info!("Local media intent {:?} → {}", intent, app);
+    // The control call waits for the player to settle; show work meanwhile.
     crate::commands::ui_commands::handle_agent_started(app_handle).await;
 
     let result = match &intent {
@@ -379,38 +365,18 @@ pub async fn try_handle_media_intent(app_handle: &AppHandle, query: &str) -> boo
         MediaIntent::Status { .. } => media::get_state(app_handle, app).await,
     };
 
-    let (spoken, agent_state) = match result {
-        Ok(state) => (spoken_result(&intent, app, &state), "Finished"),
+    let display = format!("<NowPlayingCard app=\"{}\" />", app);
+    Some(match result {
+        Ok(state) => Reply::card(display, spoken_result(&intent, app, &state)),
         Err(e) => {
             log::warn!("Local media intent failed: {}", e);
-            (format!("I couldn't reach {}.", display_name(app)), "Failed")
+            Reply {
+                display,
+                spoken: format!("I couldn't reach {}.", display_name(app)),
+                failed: true,
+            }
         }
-    };
-
-    let display = format!("<NowPlayingCard app=\"{}\" />", app);
-    let message_id = uuid::Uuid::new_v4().to_string();
-    crate::agent::tool_logger::emit_stream_start(app_handle, message_id.clone());
-    crate::agent::tool_logger::emit_streaming_text_chunk(
-        app_handle,
-        display.clone(),
-        Some(message_id.clone()),
-        Some(spoken.clone()),
-    );
-    crate::agent::tool_logger::emit_stream_end_with_state(
-        app_handle,
-        message_id,
-        display.clone(),
-        agent_state.to_string(),
-    );
-
-    crate::commands::ui_commands::handle_agent_stopped(app_handle).await;
-    crate::commands::ui_commands::handle_backend_response(
-        app_handle,
-        Some(display),
-        agent_state.to_string(),
-    )
-    .await;
-    true
+    })
 }
 
 #[cfg(test)]
