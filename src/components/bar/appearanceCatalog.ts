@@ -23,7 +23,7 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
   {
     value: UI.BAR_APPEARANCES_APP,
     name: "Bar",
-    descriptor: "A wide, warm bar that says what Juno is doing.",
+    descriptor: "A wide strip that tells each turn step by step, left to right.",
   },
   {
     value: UI.BAR_APPEARANCES_VOICE_AI,

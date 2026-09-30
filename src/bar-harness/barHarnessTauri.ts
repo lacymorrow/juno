@@ -93,6 +93,17 @@ export function setPreviewAppearance(appearance: string): void {
   previewAppearance = appearance;
 }
 
+/**
+ * Which theme `getCurrentWindow().theme()` reports. Null leaves the choice to
+ * the browser's own light or dark setting, as `useSystemTheme` falls back to;
+ * the preview route sets it from `?theme=` so both looks can be captured.
+ */
+let previewTheme: "light" | "dark" | null = null;
+
+export function setPreviewTheme(theme: "light" | "dark" | null): void {
+  previewTheme = theme;
+}
+
 function commit(next: HarnessState): void {
   state = next;
   listeners.forEach((l) => l());
@@ -162,6 +173,8 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     // --- window geometry the bar reads ---
     case "plugin:window|scale_factor":
       return state.monitor.scaleFactor;
+    case "plugin:window|theme":
+      return previewTheme;
     case "plugin:window|outer_position":
     case "plugin:window|inner_position":
       return { x: state.frame.x, y: state.frame.y };
