@@ -5,6 +5,23 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info, warn};
 
+/// What a release meant for the agent input monitor. Mirrors dictation's
+/// `HoldRelease` so `fire_trigger_edge` can drive the same double-tap
+/// recognizer decision on both targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentRelease {
+    /// Held past the threshold: the transcription is stopped and handed to
+    /// the agent for processing.
+    Committed,
+    /// A short tap that opened the microphone but did not commit: the agent
+    /// session is cancelled. The gesture recognizer may promote a second
+    /// press inside the double-tap window into a Press start.
+    Cancelled,
+    /// Release without a preceding transcription start: for `AgentTriggerMode::Tap`
+    /// this fired the toggle path; for `Hold` nothing happened.
+    Idle,
+}
+
 /// Generation counter to prevent race conditions between start and cancel.
 /// Incremented when an agent session starts and when it's cancelled, so that
 /// async handlers can detect if their session was invalidated mid-flight.
@@ -102,9 +119,18 @@ impl AgentInputMonitorState {
             .map(|start| start.elapsed())
             .unwrap_or(Duration::ZERO);
 
-        // A tap that already opened the microphone hands the session over to
-        // the bar-voice guard (see the release handler), so this is not a
-        // cancellation and starts no cooldown.
+        // A short tap that opened the microphone but did not commit is a
+        // cancellation: bump the generation so any in-flight start handler
+        // knows its session was invalidated, and arm the cooldown so a bounce
+        // cannot immediately reopen.
+        if agent_was_started && !threshold_was_reached {
+            let gen = increment_agent_generation();
+            self.last_cancellation_time = Some(Instant::now());
+            debug!(
+                "[AgentMonitor] Short-tap cancel invalidated session (generation={})",
+                gen
+            );
+        }
 
         // Force reset all state immediately to prevent stuck state
         self.hold_start_time = None;
@@ -118,6 +144,14 @@ impl AgentInputMonitorState {
             duration.as_millis(), agent_was_started, threshold_was_reached
         );
         (agent_was_started, threshold_was_reached, duration)
+    }
+
+    /// True while the monitor is watching a held key. The gesture recognizer
+    /// reads this to decide whether a fresh press is landing while a hold path
+    /// is already in flight; a press during an active hold must not be
+    /// promoted to a double tap.
+    pub fn is_tracking_hold(&self) -> bool {
+        self.hold_start_time.is_some() || self.agent_started
     }
 
     pub fn check_and_start_agent(&mut self) -> bool {
@@ -229,21 +263,23 @@ pub async fn on_agent_input_pressed() {
 
 // Called when agent input key is released. Uses the target's configured
 // trigger mode from state.
-pub async fn on_agent_input_released(app_handle: &AppHandle) {
+pub async fn on_agent_input_released(app_handle: &AppHandle) -> AgentRelease {
     let trigger_mode = app_handle
         .state::<AppState>()
         .get_agent_trigger_mode()
         .unwrap_or(AgentTriggerMode::Tap);
-    on_agent_input_released_with_mode(app_handle, trigger_mode).await;
+    on_agent_input_released_with_mode(app_handle, trigger_mode).await
 }
 
 /// Release handler with an explicit trigger mode, so a specific trigger
 /// (push-to-talk vs toggle) drives the behavior regardless of the global
-/// setting. This lets the unified triggers matrix bind both methods.
+/// setting. This lets the unified triggers matrix bind both methods. Returns
+/// the outcome so the gesture recognizer can arm its double-tap window when a
+/// short tap cancels.
 pub async fn on_agent_input_released_with_mode(
     app_handle: &AppHandle,
     trigger_mode: AgentTriggerMode,
-) {
+) -> AgentRelease {
     info!("[AgentMonitor] on_agent_input_released() called");
     let mut state = AGENT_INPUT_STATE.lock().await;
     let (agent_started, threshold_reached, duration) = state.end_hold();
@@ -260,16 +296,21 @@ pub async fn on_agent_input_released_with_mode(
                 e
             );
         }
+        AgentRelease::Committed
     } else if agent_started {
-        // A tap: the microphone is already open, so keep it open hands-free.
-        // Marking the bar-voice session active hands the next press to the
-        // stop guard in `fire_trigger_edge`, which finalises the query on
-        // release exactly as a toggle does.
+        // A short tap on a hold key: cancel the spoken query the press
+        // opened. The gesture recognizer in `events/shortcuts.rs` may still
+        // promote a second press inside the double-tap window into a Press
+        // start on its down edge; that is a separate decision and does not
+        // change what this release means.
         info!(
-            "[AgentMonitor] Tapped ({}ms) - keeping the spoken query open hands-free until the next press",
+            "[AgentMonitor] Tapped ({}ms) - cancelling spoken query",
             duration.as_millis()
         );
-        set_bar_voice_active(true);
+        if let Err(e) = app_handle.emit(events::agent::CANCEL, ()) {
+            error!("[AgentMonitor] Failed to emit agent-cancel: {}", e);
+        }
+        AgentRelease::Cancelled
     } else {
         // Tap mode: no start yet on press; release should initiate agent transcription
         if matches!(trigger_mode, AgentTriggerMode::Tap) {
@@ -296,6 +337,7 @@ pub async fn on_agent_input_released_with_mode(
             "[AgentMonitor] Agent input released without starting agent ({}ms) - no action needed",
             duration.as_millis()
         );
+        AgentRelease::Idle
     }
 }
 
@@ -403,5 +445,79 @@ pub async fn should_handle_agent_key(app_handle: &AppHandle, key_state: &str) ->
             // Handle both press and release for hold behavior
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn held_for_ms(state: &mut AgentInputMonitorState, ms: u64) {
+        state.hold_start_time = Some(Instant::now() - Duration::from_millis(ms));
+    }
+
+    #[test]
+    fn a_short_tap_cancels_the_spoken_query() {
+        let mut state = AgentInputMonitorState::new();
+        assert!(state.start_hold());
+        held_for_ms(&mut state, 120);
+        assert!(state.check_and_start_agent());
+        assert!(
+            !state.check_and_reach_threshold(),
+            "120ms is a tap, not a hold"
+        );
+
+        let start_gen = current_agent_generation();
+        let (agent_started, threshold_reached, _) = state.end_hold();
+        assert!(agent_started);
+        assert!(!threshold_reached);
+        assert!(
+            current_agent_generation() > start_gen,
+            "the tap-cancel must bump the generation so a late start handler knows its session is dead"
+        );
+        assert!(
+            state.last_cancellation_time.is_some(),
+            "the cooldown arms so a bounce cannot immediately reopen"
+        );
+    }
+
+    #[test]
+    fn a_hold_past_the_threshold_commits_on_release() {
+        let mut state = AgentInputMonitorState::new();
+        assert!(state.start_hold());
+        held_for_ms(&mut state, monitor_sessions::HOLD_DURATION_MS + 50);
+        assert!(state.check_and_start_agent());
+        assert!(state.check_and_reach_threshold());
+
+        let (_agent_started, threshold_reached, _) = state.end_hold();
+        assert!(threshold_reached);
+        assert!(
+            state.last_cancellation_time.is_none(),
+            "a commit is not a cancel"
+        );
+    }
+
+    #[test]
+    fn cooldown_blocks_an_immediate_reopen_after_a_cancel() {
+        let mut state = AgentInputMonitorState::new();
+        assert!(state.start_hold());
+        held_for_ms(&mut state, 120);
+        assert!(state.check_and_start_agent());
+        let _ = state.end_hold();
+
+        // A press inside the cooldown window is refused; the recognizer's
+        // double-tap promotion bypasses this monitor entirely, so the
+        // cooldown here does not sabotage the double-tap path.
+        assert!(!state.start_hold());
+    }
+
+    #[test]
+    fn is_tracking_hold_reflects_state() {
+        let mut state = AgentInputMonitorState::new();
+        assert!(!state.is_tracking_hold());
+        assert!(state.start_hold());
+        assert!(state.is_tracking_hold());
+        let _ = state.end_hold();
+        assert!(!state.is_tracking_hold());
     }
 }
