@@ -38,7 +38,7 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
   {
     value: UI.BAR_APPEARANCES_ORB,
     name: "Orb",
-    descriptor: "A blue orb that blooms as you speak.",
+    descriptor: "One orb that tells you everything by how it moves, with subtitles beneath.",
   },
   {
     value: UI.BAR_APPEARANCES_REACT_ORB,

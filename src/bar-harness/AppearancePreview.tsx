@@ -15,6 +15,8 @@
  * `demo=card` to play one full turn (question, answer with a component) once,
  * `demo=script` to play a turn with a tool and a spoken answer (the studio's
  * clip), `demo=approval` to hold a tool waiting on Allow or Don't,
+ * `demo=spoken` to play a spoken turn (you speak, a tool runs, the answer is
+ * spoken sentence by sentence while it streams, Juno speaks, then rest),
  * `start=manual` to hold the script until `window.__junoBenchStart()` is
  * called (so a recording begins on the first beat, not on a blank page), and
  * `bg=<css color>` to paint a background instead of transparent,
@@ -371,6 +373,105 @@ function playStepsDemo(later: (fn: () => void, ms: number) => void, fail: boolea
   later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
 }
 
+/** The answer `demo=spoken` speaks, one sentence per streamed part. */
+const SPOKEN_PARTS = [
+  "Done. The draft is with Maya.",
+  "I asked her for Friday and flagged it as a priority.",
+];
+
+/**
+ * Play one spoken turn: your words arrive while the orb hears you, a tool
+ * runs, the answer streams with its spoken sentences, Juno says them with a
+ * moving audio level, then everything rests. Same events Rust would send.
+ */
+function playSpokenDemo(later: (fn: () => void, ms: number) => void): void {
+  const messageId = "preview-spoken";
+  const frame = (barState: string, audioLevel = 0, transcriptionText = "", spokenText = "") =>
+    void emit(EVENTS.BAR_STATE_UPDATE, {
+      barState,
+      inputValue: "",
+      lastSubmittedValue: DEMO_SENTENCE,
+      currentError: null,
+      transcriptionText,
+      spokenText,
+      voiceMode: UI.VOICE_MODES_IDLE,
+      audioLevel,
+      isAgentWorking: false,
+      isDictationMode: false,
+      isAlwaysListening: false,
+      agentState: null,
+    });
+  // Hearing you: a breathing level and words arriving.
+  const words = DEMO_SENTENCE.split(" ");
+  const hearing = 2000;
+  for (let t = 0; t < hearing; t += 80) {
+    later(() => {
+      const level = 0.4 + 0.3 * Math.sin(t / 160) + 0.15 * Math.sin(t / 55);
+      const spoken = Math.min(words.length, Math.floor((t / hearing) * (words.length + 1)));
+      frame(UI.BAR_STATES_LISTENING, level, words.slice(0, spoken).join(" "));
+    }, t);
+  }
+  later(() => frame(UI.BAR_STATES_TRANSCRIBING, 0, DEMO_SENTENCE), hearing);
+  const ask = hearing + 500;
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: DEMO_SENTENCE, timestamp: Date.now() });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, ask);
+  later(() => frame(UI.BAR_STATES_LOADING), ask + 400);
+  // One tool step, so the orb has a reason to quicken.
+  later(() => {
+    void emit(EVENTS.AGENT_EVENT, {
+      type: "tool_call_request",
+      payload: { tool_name: "mail", content: "Sending the draft to Maya" },
+    });
+  }, ask + 700);
+  later(() => {
+    void emit(EVENTS.AGENT_EVENT, {
+      type: "tool_call_result",
+      payload: { tool_name: "mail", success: true, content: "Sent." },
+    });
+  }, ask + 2000);
+  // The answer streams, one spoken sentence per part.
+  const answerAt = ask + 2300;
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: messageId });
+  }, answerAt);
+  let cursor = answerAt + 100;
+  SPOKEN_PARTS.forEach((part, index) => {
+    const partWords = part.split(" ");
+    partWords.forEach((word, i) => {
+      later(() => {
+        void emit(EVENTS.STREAMING_TEXT_STREAM, {
+          message_id: messageId,
+          chunk: (index === 0 && i === 0 ? "" : " ") + word,
+          tts_content: i === 0 ? part : undefined,
+        });
+      }, cursor + i * 60);
+    });
+    cursor += partWords.length * 60 + 300;
+  });
+  const fullAnswer = SPOKEN_PARTS.join(" ");
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: messageId, complete_text: fullAnswer });
+  }, cursor);
+  // Juno says it: the level moves with the speech.
+  const speakAt = cursor + 100;
+  const speakFor = 2600;
+  for (let t = 0; t < speakFor; t += 80) {
+    later(() => {
+      const level = 0.45 + 0.35 * Math.sin(t / 90) * Math.sin(t / 310 + 1);
+      const part = t < speakFor / 2 ? SPOKEN_PARTS[0] : SPOKEN_PARTS[1];
+      frame(UI.BAR_STATES_SPEAKING, Math.max(0, level), "", part);
+    }, speakAt + t);
+  }
+  later(() => {
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+  }, speakAt + speakFor);
+  later(() => frame(UI.BAR_STATES_DEFAULT), speakAt + speakFor + 300);
+}
+
 function useHarnessWindow() {
   const [snap, setSnap] = useState(() => {
     const { frame, driven } = harness.snapshot();
@@ -465,6 +566,11 @@ export default function AppearancePreview() {
 
     if (demo === "card") {
       playCardDemo(later);
+      return stop;
+    }
+
+    if (demo === "spoken") {
+      playSpokenDemo(later);
       return stop;
     }
     if (demo === "script") {
