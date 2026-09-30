@@ -482,6 +482,30 @@ const MAX_IMPORT_SETTINGS_BYTES: usize = 1_000_000;
 /// - reject unknown top-level sections (a typo'd or foreign file should not
 ///   silently import as all-defaults),
 /// - parse into the typed [`AppSettings`] struct (serde enforces shape), and
+/// Known top-level sections of `AppSettings`; imports carrying other top-level
+/// keys are not settings exports and are rejected rather than ignored.
+///
+/// This must list every field `AppSettings` serializes, or an export of the
+/// app's own settings fails to import. `every_serialized_section_is_allowlisted`
+/// holds the two together.
+const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
+    "keyboard_shortcuts",
+    "floating_bar",
+    "agent",
+    "providers",
+    "cloud",
+    "audio",
+    "tools",
+    "prompts",
+    "onboarding",
+    "autostart_enabled",
+    "advanced_settings_enabled",
+    "cli",
+    "voice_transcription",
+    "triggers",
+    "updates",
+];
+
 /// - apply semantic per-field validation on values the UI setters constrain.
 fn parse_and_validate_settings_json(settings_json: &str) -> Result<AppSettings, String> {
     if settings_json.len() > MAX_IMPORT_SETTINGS_BYTES {
@@ -491,25 +515,6 @@ fn parse_and_validate_settings_json(settings_json: &str) -> Result<AppSettings, 
             MAX_IMPORT_SETTINGS_BYTES
         ));
     }
-
-    // Known top-level sections of AppSettings; imports with other top-level
-    // keys are not settings exports and are rejected rather than ignored
-    const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
-        "keyboard_shortcuts",
-        "floating_bar",
-        "agent",
-        "providers",
-        "cloud",
-        "audio",
-        "tools",
-        "prompts",
-        "onboarding",
-        "autostart_enabled",
-        "advanced_settings_enabled",
-        "cli",
-        "voice_transcription",
-        "triggers",
-    ];
 
     let raw: serde_json::Value = serde_json::from_str(settings_json)
         .map_err(|e| format_error(templates::FAILED_TO_PARSE, actions::SETTINGS_JSON, e))?;
@@ -668,6 +673,25 @@ mod tests {
         assert!(parse_and_validate_settings_json("[]").is_err());
         assert!(parse_and_validate_settings_json("\"hi\"").is_err());
         assert!(parse_and_validate_settings_json("not json at all").is_err());
+    }
+
+    /// The allowlist above and `AppSettings` are two lists of the same thing,
+    /// and nothing but this test stops them drifting: a new section that is
+    /// serialized but not allowlisted makes every export fail to re-import,
+    /// which is how `updates` was caught.
+    #[test]
+    fn every_serialized_section_is_allowlisted() {
+        let value: serde_json::Value = serde_json::from_str(&valid_settings_json())
+            .unwrap_or_else(|e| panic!("parse failed: {}", e));
+        let object = value
+            .as_object()
+            .unwrap_or_else(|| panic!("default settings must serialize to an object"));
+        for key in object.keys() {
+            assert!(
+                KNOWN_TOP_LEVEL_KEYS.contains(&key.as_str()),
+                "AppSettings serializes {key:?}, but the import allowlist does not have it"
+            );
+        }
     }
 
     #[test]
