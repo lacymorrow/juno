@@ -360,7 +360,7 @@ async function animateWindowTo(
 }
 
 /** Component name for backend interactions — MUST match backend element ids */
-const COMPONENT_ID = "floating-bar";
+const COMPONENT_ID = UI.ELEMENT_IDS_FLOATING_BAR;
 
 const IDLE_STATES: readonly string[] = [
   UI.BAR_STATES_DEFAULT,
@@ -1016,7 +1016,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     void (async () => {
       const wasWorking = isWorkingRef.current;
       if (wasWorking) await chat.stop();
-      await invoke("new_conversation").catch(() => {});
+      await invoke(COMMANDS.CONVERSATIONS_NEW_CONVERSATION).catch(() => {});
       chat.startNewChat();
       setPaneShown(true);
       // The stop has been asked for but the backend may still be winding down,
@@ -1031,11 +1031,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // dismiss the pane even when the bar is not focused (the backend emits
   // BAR_DISMISS_PANE when nothing is running). The ledger is idempotent.
   useEffect(() => {
-    void invoke("set_bar_pane_open", { open: paneOpen }).catch(() => {});
+    void invoke(COMMANDS.BAR_SET_BAR_PANE_OPEN, { open: paneOpen }).catch(() => {});
   }, [paneOpen]);
   useEffect(
     () => () => {
-      void invoke("set_bar_pane_open", { open: false }).catch(() => {});
+      void invoke(COMMANDS.BAR_SET_BAR_PANE_OPEN, { open: false }).catch(() => {});
     },
     [],
   );
@@ -1078,7 +1078,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   const sendInteraction = useCallback(async (interaction: UIInteractionEvent) => {
     try {
-      await invoke("ui_handle_interaction", { elementId: COMPONENT_ID, interaction });
+      await invoke(COMMANDS.BAR_UI_HANDLE_INTERACTION, { elementId: COMPONENT_ID, interaction });
     } catch (error) {
       console.error("❌ FloatingBar: Interaction failed:", error);
     }
@@ -1163,7 +1163,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     void (async () => {
       try {
         const [listening, triggers] = await Promise.all([
-          invoke<boolean>("get_always_listening_status"),
+          invoke<boolean>(COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS),
           invoke<Array<{ method?: string; enabled?: boolean; phrase?: string | null }>>(
             COMMANDS.TRIGGERS_GET_TRIGGERS,
           ),
@@ -1212,8 +1212,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
    */
   const toggleVoiceListening = useCallback(() => {
     const command = voiceListening
-      ? "stop_always_listening_mode"
-      : "start_always_listening_mode";
+      ? COMMANDS.ALWAYS_LISTENING_STOP_ALWAYS_LISTENING
+      : COMMANDS.ALWAYS_LISTENING_START_ALWAYS_LISTENING;
     void invoke(command).catch((error) =>
       console.error("FloatingBar: could not change the wake phrase engine:", error),
     );
@@ -1222,7 +1222,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   /** The mic button: a spoken query to the agent (same path as the hotkey). */
   const startTalking = useCallback(async () => {
     try {
-      await invoke("agent_voice", { action: "start" });
+      await invoke(COMMANDS.AGENT_AGENT_VOICE, { action: "start" });
     } catch (error) {
       console.error("❌ FloatingBar: failed to start listening:", error);
     }
@@ -1237,7 +1237,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   /** Send what was said. This is what the old "Stop" button actually did. */
   const stopTalking = useCallback(async () => {
     try {
-      await invoke("agent_voice", { action: "stop" });
+      await invoke(COMMANDS.AGENT_AGENT_VOICE, { action: "stop" });
     } catch (error) {
       console.error("❌ FloatingBar: failed to stop listening:", error);
     }
@@ -1271,7 +1271,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         await emit(EVENTS.DICTATION_TRANSCRIPTION_CANCEL);
         return;
       }
-      await invoke("agent_voice", { action: "cancel" });
+      await invoke(COMMANDS.AGENT_AGENT_VOICE, { action: "cancel" });
     } catch (error) {
       console.error("❌ FloatingBar: failed to cancel listening:", error);
     }
@@ -1478,7 +1478,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const [showGlowBorder, setShowGlowBorder] = useState(true);
   useEffect(() => {
     let cancelled = false;
-    void invoke<{ show_glow_border?: boolean }>("ui_get_bar_config")
+    void invoke<{ show_glow_border?: boolean }>(COMMANDS.BAR_UI_GET_BAR_CONFIG)
       .then((config) => {
         if (!cancelled && typeof config?.show_glow_border === "boolean") {
           setShowGlowBorder(config.show_glow_border);
@@ -1652,7 +1652,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     let cancelled = false;
     void (async () => {
       try {
-        const saved = await invoke<{ x: number; y: number } | null>("get_bar_position");
+        const saved = await invoke<{ x: number; y: number } | null>(COMMANDS.BAR_GET_BAR_POSITION);
         const [pos, mons] = await Promise.all([
           getCurrentWindow().outerPosition(),
           availableMonitors(),
@@ -1684,7 +1684,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
         // Move and size in one transaction, so even a bar that is somehow
         // already visible cannot show an intermediate frame.
-        await invoke("set_bar_frame", {
+        await invoke(COMMANDS.BAR_SET_BAR_FRAME, {
           x: target.x,
           y: target.y,
           width: initial.width,
@@ -1695,7 +1695,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         issuedRef.current = restingFrame(dockGrowsUp(target));
         setDock({ fx: target.fx, fy: target.fy });
         try {
-          await invoke("set_bar_position", { x: target.x, y: target.y });
+          await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y });
         } catch {
           // best effort; a failed persist just means we re-default next launch
         }
@@ -1704,7 +1704,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       } finally {
         if (!cancelled) {
           setPlaced(true);
-          await invoke("show_bar_when_ready").catch((error) =>
+          await invoke(COMMANDS.BAR_SHOW_BAR_WHEN_READY).catch((error) =>
             console.error("FloatingBar: could not show the bar:", error),
           );
         }
@@ -1816,7 +1816,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     // below no-ops (drag not armed, or already consumed by another path).
     if (snapOverlayShownRef.current) {
       snapOverlayShownRef.current = false;
-      void emit("snap-wells-hide");
+      void emit(EVENTS.SNAP_WELLS_HIDE);
     }
     if (!snapArmedRef.current || snapAnimatingRef.current) return;
     snapArmedRef.current = false;
@@ -1837,7 +1837,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       // here on; remember where it landed so the bar reopens here next launch.
       setDock({ fx: target.fx, fy: target.fy });
       try {
-        await invoke("set_bar_position", { x: target.x, y: target.y });
+        await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y });
       } catch (error) {
         console.debug("FloatingBar: persist well failed:", error);
       }
@@ -1890,7 +1890,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         await win.setPosition(new PhysicalPosition(target.x, target.y));
         setDock({ fx: target.fx, fy: target.fy });
         try {
-          await invoke("set_bar_position", { x: target.x, y: target.y });
+          await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y });
         } catch {
           // best effort persist
         }
@@ -1943,7 +1943,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     if (!snapOverlayShownRef.current) {
       snapOverlayShownRef.current = true;
       logicalWindowSize(win)
-        .then((logical) => emit("snap-wells-show", logical))
+        .then((logical) => emit(EVENTS.SNAP_WELLS_SHOW, logical))
         .catch((error) =>
           console.debug("FloatingBar: snap-wells-show failed:", error),
         );

@@ -19,6 +19,7 @@ import { ToolDebugPanel } from "./devtools/ToolDebugPanel";
 import VisualizationSettings from "./devtools/VisualizationSettings";
 import WakeWordTesting from "./devtools/WakeWordTesting";
 import WindowOperations from "./devtools/WindowOperations";
+import { COMMANDS } from "@/lib/constants.generated";
 
 // Custom hook for optimized loading state management
 const useOptimizedLoadingStates = () => {
@@ -146,7 +147,7 @@ const DevToolsPanel: React.FC = () => {
     }
     // Use production function instead of dev_open_app
     await invokeCommand(
-      "open_application",
+      COMMANDS.DESKTOP_OPEN_APPLICATION,
       { appName: appToOpen.trim() },
       "openApp"
     );
@@ -158,7 +159,7 @@ const DevToolsPanel: React.FC = () => {
       return;
     }
     // Use production function instead of dev_open_url
-    await invokeCommand("open_url", { url: urlToOpen.trim() }, "openUrl");
+    await invokeCommand(COMMANDS.DESKTOP_OPEN_URL, { url: urlToOpen.trim() }, "openUrl");
   };
 
   const handleWait = async () => {
@@ -170,7 +171,7 @@ const DevToolsPanel: React.FC = () => {
     // Convert milliseconds to seconds for backend
     const duration_sec = durationMs / 1000.0;
     // Use production function instead of dev_wait
-    await invokeCommand("wait", { duration_sec }, "wait");
+    await invokeCommand(COMMANDS.UTILS_WAIT, { duration_sec }, "wait");
   };
 
   return (

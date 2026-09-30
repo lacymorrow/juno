@@ -300,7 +300,7 @@ function playApprovalDemo(later: (fn: () => void, ms: number) => void): void {
       { barState: UI.BAR_STATES_LOADING, audioLevel: 0, transcriptionText: "" },
       { lastSubmittedValue: DEMO_SCRIPT_QUESTION },
     );
-    void emit("tool-approval-request", {
+    void emit(EVENTS.TOOLS_APPROVAL_REQUEST, {
       tool_name: "mail",
       tool_id: "preview-approval",
       tool_input: {},
@@ -558,7 +558,7 @@ function playAllowDemo(later: Later): void {
   later(() => frame(UI.BAR_STATES_LOADING), 400);
   toolCall(later, 600, "Reading the invite", 700);
   later(() => {
-    void emit("tool-approval-request", {
+    void emit(EVENTS.TOOLS_APPROVAL_REQUEST, {
       tool_name: "browser",
       tool_id: "preview-allow",
       tool_input: {},

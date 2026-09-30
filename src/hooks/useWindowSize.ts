@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { Window, currentMonitor } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { COMMANDS } from "@/lib/constants.generated";
 
 /** Which horizontal edge of the window stays put across a resize. */
 export type WindowAnchorX = "start" | "center" | "end";
@@ -165,7 +166,7 @@ async function edgeStableResize(appWindow: Window, next: WindowSizeConfig) {
   // window showed its new width still anchored at the old top-left and the
   // centered pill/dot visibly jumped before snapping back. One transaction
   // removes that seam. (Off macOS the command falls back to separate setters.)
-  await invoke("set_bar_frame", {
+  await invoke(COMMANDS.BAR_SET_BAR_FRAME, {
     x: clamped.x,
     y: clamped.y,
     width: next.width,

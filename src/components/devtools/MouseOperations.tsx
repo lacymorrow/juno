@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MousePointer, Hand } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
+import { COMMANDS } from "@/lib/constants.generated";
 
 const MouseOperations: React.FC = () => {
   const [mouseX, setMouseX] = useState<string>("");
@@ -41,7 +42,7 @@ const MouseOperations: React.FC = () => {
     }
 
     await invokeCommand(
-      "computer",
+      COMMANDS.DESKTOP_COMPUTER,
       { action: "move", coordinate: [x, y] },
       "mouseMove"
     );
@@ -61,7 +62,7 @@ const MouseOperations: React.FC = () => {
     }
 
     await invokeCommand(
-      "computer",
+      COMMANDS.DESKTOP_COMPUTER,
       { action: "right_click", coordinate: [x, y] },
       "rightClick"
     );
@@ -81,7 +82,7 @@ const MouseOperations: React.FC = () => {
     }
 
     await invokeCommand(
-      "computer",
+      COMMANDS.DESKTOP_COMPUTER,
       { action: "middle_click", coordinate: [x, y] },
       "middleClick"
     );
@@ -101,7 +102,7 @@ const MouseOperations: React.FC = () => {
     }
 
     await invokeCommand(
-      "computer",
+      COMMANDS.DESKTOP_COMPUTER,
       { action: "click", coordinate: [x, y] },
       "mouseClick"
     );
@@ -121,7 +122,7 @@ const MouseOperations: React.FC = () => {
     }
 
     await invokeCommand(
-      "computer",
+      COMMANDS.DESKTOP_COMPUTER,
       { action: "double_click", coordinate: [x, y] },
       "mouseDoubleClick"
     );
@@ -139,7 +140,7 @@ const MouseOperations: React.FC = () => {
     }
 
     await invokeCommand(
-      "computer",
+      COMMANDS.DESKTOP_COMPUTER,
       {
         action: "drag",
         startCoordinate: [startX, startY],

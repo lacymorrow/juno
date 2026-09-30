@@ -18,7 +18,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
-import { COMPUTER_ACTIONS } from "@/lib/constants.generated";
+import { COMPUTER_ACTIONS, COMMANDS } from "@/lib/constants.generated";
 
 // Simple result interface for production testing
 interface ProductionTestResult {
@@ -103,7 +103,7 @@ const ClickQATestPanel: React.FC = () => {
       };
 
       const result = await invokeCommand<ComputerResult>(
-        "computer",
+        COMMANDS.DESKTOP_COMPUTER,
         computerInput,
         "computer"
       );
@@ -171,7 +171,7 @@ const ClickQATestPanel: React.FC = () => {
           };
 
           const result = await invokeCommand<ComputerResult>(
-            "computer",
+            COMMANDS.DESKTOP_COMPUTER,
             computerInput,
             "computer"
           );
@@ -239,7 +239,7 @@ const ClickQATestPanel: React.FC = () => {
       };
 
       await invokeCommand<ComputerResult>(
-        "computer",
+        COMMANDS.DESKTOP_COMPUTER,
         computerInput,
         "computer"
       );
@@ -249,7 +249,7 @@ const ClickQATestPanel: React.FC = () => {
 
       // Get actual cursor position using computer tool
       const cursorResult = await invokeCommand<ComputerResult>(
-        "computer",
+        COMMANDS.DESKTOP_COMPUTER,
         { action: COMPUTER_ACTIONS.CURSOR_POSITION },
         "computer"
       );

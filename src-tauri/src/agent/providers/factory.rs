@@ -139,17 +139,18 @@ impl BrainFactory {
     /// Get current agent mode from centralized settings with app handle
     pub async fn get_agent_mode_with_app_handle(app_handle: &tauri::AppHandle) -> AgentMode {
         // Use direct store access to avoid deadlocks during agent execution
+        use crate::constants::settings::{agent_keys, store_keys, SETTINGS_STORE_FILE};
         use tauri_plugin_store::StoreExt;
-
-        const SETTINGS_STORE_FILE: &str = "app_settings.json";
 
         match app_handle.store(SETTINGS_STORE_FILE) {
             Ok(store) => {
                 // Access nested agent settings structure: { "agent": { "execution_mode": "..." } }
-                match store.get("agent") {
+                match store.get(store_keys::AGENT) {
                     Some(agent_value) => {
                         if let Some(agent_obj) = agent_value.as_object() {
-                            if let Some(execution_mode_value) = agent_obj.get("execution_mode") {
+                            if let Some(execution_mode_value) =
+                                agent_obj.get(agent_keys::EXECUTION_MODE)
+                            {
                                 if let Some(mode_str) = execution_mode_value.as_str() {
                                     let mode = AgentMode::from_str(mode_str)
                                         .unwrap_or_else(|| {

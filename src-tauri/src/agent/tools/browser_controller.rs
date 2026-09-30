@@ -345,7 +345,7 @@ impl BrowserController {
                 // Prevent update checks slowing startup
                 "--disable-component-update",
                 // Enable remote debugging for future CDP connections
-                "--remote-debugging-port=9222",
+                crate::constants::browser::chrome_flags::REMOTE_DEBUG_PORT_FLAG,
             ])
             .build()
             .map_err(|e| AgentError::ToolError(format!("Failed to build browser config: {}", e)))?;
@@ -405,7 +405,7 @@ impl BrowserController {
                 "--no-default-browser-check",
                 "--disable-component-update",
                 // Use different port to avoid conflicts
-                "--remote-debugging-port=9223",
+                crate::constants::browser::chrome_flags::REMOTE_DEBUG_PORT_FLAG_ALT1,
             ])
             .build()
             .map_err(|e| AgentError::ToolError(format!("Failed to build browser config: {}", e)))?;
@@ -606,7 +606,7 @@ impl BrowserController {
             "--no-first-run",
             "--no-default-browser-check",
             // Enable remote debugging for future connections
-            "--remote-debugging-port=9222",
+            crate::constants::browser::chrome_flags::REMOTE_DEBUG_PORT_FLAG,
             // Improve stability
             "--disable-features=VizDisplayCompositor",
         ];
@@ -639,7 +639,8 @@ impl BrowserController {
                 );
 
                 // Try with absolute minimum arguments but keep remote debugging
-                let minimal_args = vec!["--remote-debugging-port=9222"];
+                let minimal_args =
+                    vec![crate::constants::browser::chrome_flags::REMOTE_DEBUG_PORT_FLAG];
 
                 log::info!("Retrying browser launch with minimal configuration...");
                 Browser::launch(build_config(minimal_args)?)

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { stopTTS } from "@/lib/ttsService";
 import type { ChatMessage } from "@/types/chat";
-import { EVENTS } from "@/lib/constants.generated";
+import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
 import { hasMixedContent } from "@/components/ui/mixed-content-renderer";
 
@@ -207,7 +207,7 @@ export function useBackendEvents({
 			hasCheckedServer.current = true;
 
 			try {
-				const status: ServerStatus = await invoke("check_server_status");
+				const status: ServerStatus = await invoke(COMMANDS.UTILS_CHECK_SERVER_STATUS);
 				if (status.backend_running) {
 					setServerStatus("connected");
 					// The same greeting either way. Someone who has not granted
@@ -376,7 +376,7 @@ export function useBackendEvents({
 		target_app?: string;
 		timeout_seconds?: number;
 	}>(
-		"tool-approval-request",
+		EVENTS.TOOLS_APPROVAL_REQUEST,
 		(payload) => {
 			console.log("Tool approval request received (inline):", payload);
 			setConversationWithPruning((prev) => insertBeforeOpenAssistant(prev, {

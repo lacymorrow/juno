@@ -1648,7 +1648,7 @@ fn setup_development_integration(app_handle: &AppHandle) {
 
     // Listen for frontend reload events and cleanup resources (development mode)
     let app_handle_for_frontend_reload = app_handle.clone();
-    app_handle.listen("frontend-reload", move |_event| {
+    app_handle.listen(events::system::FRONTEND_RELOAD, move |_event| {
         info!("🔄 Frontend reload detected - cleaning up resources...");
 
         let app_handle_clone = app_handle_for_frontend_reload.clone();

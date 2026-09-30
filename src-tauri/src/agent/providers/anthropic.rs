@@ -304,7 +304,7 @@ enum ApiTool {
 
 // --- AnthropicBrain Implementation --- //
 
-const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_API_URL: &str = crate::constants::api::endpoints::ANTHROPIC_API_URL;
 
 /// Maximum number of recent screenshots to keep in conversation history.
 /// Older screenshots are replaced with text placeholders to reduce token usage.

@@ -73,7 +73,9 @@ async fn check_cloud_api_connectivity() -> bool {
     let client = reqwest::Client::new();
     match tokio::time::timeout(
         Duration::from_secs(3),
-        client.head("https://api.anthropic.com/").send(),
+        client
+            .head(crate::constants::api::endpoints::ANTHROPIC_API_ORIGIN)
+            .send(),
     )
     .await
     {

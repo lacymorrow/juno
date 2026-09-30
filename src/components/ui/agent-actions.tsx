@@ -30,15 +30,14 @@ import {
 // Security: Command validation
 // ============================================================
 
-const ALLOWED_COMMANDS = new Set([
-  "open_url",
-  "open_application",
-  "capture_screenshot_command",
-  "submit_query",
+const ALLOWED_COMMANDS = new Set<string>([
+  COMMANDS.DESKTOP_OPEN_URL,
+  COMMANDS.DESKTOP_OPEN_APPLICATION,
+  COMMANDS.SCREENSHOTS_CAPTURE_SCREENSHOT,
+  COMMANDS.AGENT_SUBMIT_QUERY,
   COMMANDS.AGENT_DISPATCH_QUERY,
-  "get_system_stats",
-  "get_clipboard",
-  "set_clipboard",
+  COMMANDS.UTILS_GET_CLIPBOARD,
+  COMMANDS.UTILS_SET_CLIPBOARD,
   COMMANDS.MEDIA_CONTROL,
   COMMANDS.MEDIA_GET_STATE,
 ]);
@@ -306,13 +305,13 @@ export function OpenButton({
     setStatus("loading");
     try {
       if (app) {
-        await invoke("open_application", { appName: app });
+        await invoke(COMMANDS.DESKTOP_OPEN_APPLICATION, { appName: app });
       } else if (path) {
         // Convert file path to file:// URL for open_url
         const fileUrl = path.startsWith("file://") ? path : `file://${path.replace(/^~/, "")}`;
-        await invoke("open_url", { url: fileUrl });
+        await invoke(COMMANDS.DESKTOP_OPEN_URL, { url: fileUrl });
       } else if (url) {
-        await invoke("open_url", { url });
+        await invoke(COMMANDS.DESKTOP_OPEN_URL, { url });
       }
       setStatus("idle");
     } catch (err) {

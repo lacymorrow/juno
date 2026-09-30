@@ -162,7 +162,7 @@ impl AgentBrain for RigBrain {
 
         // Send request to OpenAI API
         let response = client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post(crate::constants::api::endpoints::OPENAI_API_URL)
             .header("Authorization", format!("Bearer {}", self.openai_api_key))
             .header("Content-Type", "application/json")
             .json(&payload)

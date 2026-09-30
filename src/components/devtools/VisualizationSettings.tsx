@@ -18,19 +18,20 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { LOCAL_STORAGE_KEYS } from "@/lib/constants.generated";
 const VisualizationSettings = () => {
   const [showKeyPressOverlay, setShowKeyPressOverlay] = useState(
-    localStorage.getItem("juno-show-key-press-overlay") === "true"
+    localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_KEY_PRESS_OVERLAY) === "true"
   );
   const [showCommandOverlay, setShowCommandOverlay] = useState(
-    localStorage.getItem("juno-show-command-overlay") === "true"
+    localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_COMMAND_OVERLAY) === "true"
   );
   const [showClickVisualization, setShowClickVisualization] = useState(
-    localStorage.getItem("juno-show-click-visualization") !== "false" // Default to true
+    localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_CLICK_VISUALIZATION) !== "false" // Default to true
   );
   const [showDesktopCursorVisualization, setShowDesktopCursorVisualization] =
     useState(
-      localStorage.getItem("juno-show-desktop-cursor-visualization") !== "false" // Default to true
+      localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_DESKTOP_CURSOR_VISUALIZATION) !== "false" // Default to true
     );
 
   const visualizationSettings = [
@@ -38,7 +39,7 @@ const VisualizationSettings = () => {
       key: "keypress",
       title: "Key Press Overlay",
       description: "Display key presses in real-time during agent operation",
-      storageKey: "juno-show-key-press-overlay",
+      storageKey: LOCAL_STORAGE_KEYS.SHOW_KEY_PRESS_OVERLAY,
       value: showKeyPressOverlay,
       setValue: setShowKeyPressOverlay,
       location: "Top-right corner",
@@ -48,7 +49,7 @@ const VisualizationSettings = () => {
       key: "command",
       title: "Command Execution",
       description: "Display active command status during tool execution",
-      storageKey: "juno-show-command-overlay",
+      storageKey: LOCAL_STORAGE_KEYS.SHOW_COMMAND_OVERLAY,
       value: showCommandOverlay,
       setValue: setShowCommandOverlay,
       location: "Top-left corner",
@@ -58,7 +59,7 @@ const VisualizationSettings = () => {
       key: "click",
       title: "Click Visualization",
       description: "Display visual feedback for mouse clicks and interactions",
-      storageKey: "juno-show-click-visualization",
+      storageKey: LOCAL_STORAGE_KEYS.SHOW_CLICK_VISUALIZATION,
       value: showClickVisualization,
       setValue: setShowClickVisualization,
       location: "At click locations",
@@ -69,7 +70,7 @@ const VisualizationSettings = () => {
       title: "Desktop Cursor Overlay",
       description:
         "Show desktop-level cursor visualization with circles and ripples",
-      storageKey: "juno-show-desktop-cursor-visualization",
+      storageKey: LOCAL_STORAGE_KEYS.SHOW_DESKTOP_CURSOR_VISUALIZATION,
       value: showDesktopCursorVisualization,
       setValue: setShowDesktopCursorVisualization,
       location: "Desktop-wide overlay",

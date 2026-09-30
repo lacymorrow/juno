@@ -819,7 +819,7 @@ export default function OnboardingFlow({
   const recordEvent = useCallback(
     (eventName: string, payload?: Record<string, unknown>) => {
       // Fire-and-forget — analytics must never block UI progress.
-      invoke("record_onboarding_event", { eventName, payload: payload ?? null }).catch((err) => {
+      invoke(COMMANDS.ONBOARDING_RECORD_ONBOARDING_EVENT, { eventName, payload: payload ?? null }).catch((err) => {
         console.debug("[Onboarding] record_onboarding_event failed:", err);
       });
     },
@@ -843,7 +843,7 @@ export default function OnboardingFlow({
     // flow while onboarding is on screen. Idempotent — the backend cancels
     // any prior task before starting a new one. Best-effort; failure here
     // only degrades revocation responsiveness, not core onboarding.
-    invoke("start_permissions_monitoring").catch((err) => {
+    invoke(COMMANDS.PERMISSIONS_START_PERMISSIONS_MONITORING).catch((err) => {
       console.debug("[Onboarding] start_permissions_monitoring failed:", err);
     });
 
@@ -856,7 +856,7 @@ export default function OnboardingFlow({
       // Stop monitoring when onboarding closes so we're not paying for a
       // 1s tick across the rest of the app's lifetime. PermissionsManager /
       // PermissionsFlow re-start it on demand when they mount.
-      invoke("stop_permissions_monitoring").catch((err) => {
+      invoke(COMMANDS.PERMISSIONS_STOP_PERMISSIONS_MONITORING).catch((err) => {
         console.debug("[Onboarding] stop_permissions_monitoring failed:", err);
       });
     };
@@ -1187,7 +1187,7 @@ export default function OnboardingFlow({
 
         // Check if API keys are already available (from store or .env)
         try {
-          const keysAvailable = await invoke<boolean>("check_api_keys_available");
+          const keysAvailable = await invoke<boolean>(COMMANDS.PROVIDERS_CHECK_API_KEYS_AVAILABLE);
           if (mounted) {
             setApiKeysAvailable(keysAvailable);
           }
@@ -1202,7 +1202,7 @@ export default function OnboardingFlow({
         // Check Claude CLI availability and auth status
         try {
           setCliChecking(true);
-          const cliStatus = await invoke<ClaudeCliStatus>("check_claude_cli_available");
+          const cliStatus = await invoke<ClaudeCliStatus>(COMMANDS.ONBOARDING_CHECK_CLAUDE_CLI_AVAILABLE);
           if (mounted) {
             setCliAvailable(cliStatus.available);
             setCliAuthenticated(cliStatus.authenticated);
@@ -1224,7 +1224,7 @@ export default function OnboardingFlow({
         if (!mounted) return;
 
         // Load onboarding info and shortcuts
-        const onboardingInfo = await invoke("get_onboarding_info");
+        const onboardingInfo = await invoke(COMMANDS.ONBOARDING_GET_ONBOARDING_INFO);
         if (!mounted) return;
         if (
           onboardingInfo &&
@@ -1236,14 +1236,14 @@ export default function OnboardingFlow({
 
         // Test if backend shortcuts are working
         const shortcutsWorking = await invoke<boolean>(
-          "test_global_shortcuts_working"
+          COMMANDS.ONBOARDING_TEST_GLOBAL_SHORTCUTS_WORKING
         );
         if (!mounted) return;
         setBackendShortcutsWorking(shortcutsWorking);
 
         // Load keyboard shortcuts as fallback
         try {
-          const shortcuts = await invoke("get_keyboard_shortcuts");
+          const shortcuts = await invoke(COMMANDS.SHORTCUTS_GET_KEYBOARD_SHORTCUTS);
           if (mounted) {
             setKeyboardShortcuts((prev: any) => prev ?? shortcuts);
           }
@@ -1260,7 +1260,7 @@ export default function OnboardingFlow({
       if (!mounted) return;
       await checkPermissionsStatus();
       try {
-        const cliStatus = await invoke<ClaudeCliStatus>("check_claude_cli_available");
+        const cliStatus = await invoke<ClaudeCliStatus>(COMMANDS.ONBOARDING_CHECK_CLAUDE_CLI_AVAILABLE);
         if (!mounted) return;
         setCliAvailable(cliStatus.available);
         setCliAuthenticated(cliStatus.authenticated);
@@ -1531,7 +1531,7 @@ export default function OnboardingFlow({
     resumeAttemptedRef.current = true;
     (async () => {
       try {
-        const lastPhase = await invoke<string | null>("get_last_onboarding_phase");
+        const lastPhase = await invoke<string | null>(COMMANDS.ONBOARDING_GET_LAST_ONBOARDING_PHASE);
         if (!lastPhase || !mountedRef.current) return;
         const idx = onboardingSteps.findIndex((s) => s.id === lastPhase);
         // Don't resume to the welcome step (always start there if no progress)

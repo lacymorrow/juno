@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {  Focus, Info } from "lucide-react";
 import { invokeCommand } from "@/lib/utils";
+import { COMMANDS } from "@/lib/constants.generated";
 
 const ScreenshotOperations: React.FC = () => {
   const [screenshotSrc, setScreenshotSrc] = useState<string>("");
@@ -12,7 +13,7 @@ const ScreenshotOperations: React.FC = () => {
 
   const handleTakeScreenshot = async () => {
     const result = await invokeCommand<any>(
-      "computer",
+      COMMANDS.DESKTOP_COMPUTER,
       { action: "screenshot" },
       "screenshot"
     );
@@ -23,7 +24,7 @@ const ScreenshotOperations: React.FC = () => {
 
   const handleGetFocusedInfo = async () => {
     const result = await invokeCommand<string | null>(
-      "get_focused_element_info",
+      COMMANDS.DESKTOP_GET_FOCUSED_ELEMENT_INFO,
       {},
       "focusInfo"
     );
@@ -37,7 +38,7 @@ const ScreenshotOperations: React.FC = () => {
       return;
     }
     const result = await invokeCommand<string | null>(
-      "capture_element_screenshot_command",
+      COMMANDS.SCREENSHOTS_CAPTURE_ELEMENT_SCREENSHOT,
       { selector: selectorString },
       "elementScreenshot"
     );

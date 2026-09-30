@@ -210,7 +210,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
     setLoading(true);
     setLoadError(null);
     try {
-      const list = await invoke<Trigger[]>("get_triggers");
+      const list = await invoke<Trigger[]>(COMMANDS.TRIGGERS_GET_TRIGGERS);
       persistedRef.current = list;
       setTriggers(list);
     } catch (e) {
@@ -243,7 +243,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         saveTimer.current = null;
       }
       try {
-        const normalized = await invoke<Trigger[]>("set_triggers", {
+        const normalized = await invoke<Trigger[]>(COMMANDS.TRIGGERS_SET_TRIGGERS, {
           triggers: next,
         });
         persistedRef.current = normalized;

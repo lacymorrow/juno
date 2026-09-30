@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { MessageSquare, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { COMMANDS } from "@/lib/constants.generated";
 
 /** Mirrors the Rust `ConversationMeta` (serde snake_case). */
 interface ConversationMeta {
@@ -41,8 +42,8 @@ export function HistoryView({ onLoad }: HistoryViewProps) {
   const refresh = useCallback(async () => {
     try {
       const [list, active] = await Promise.all([
-        invoke<ConversationMeta[]>("list_conversations"),
-        invoke<string>("get_current_conversation_id").catch(() => null),
+        invoke<ConversationMeta[]>(COMMANDS.CONVERSATIONS_LIST_CONVERSATIONS),
+        invoke<string>(COMMANDS.CONVERSATIONS_GET_CURRENT_CONVERSATION_ID).catch(() => null),
       ]);
       setItems(list);
       setCurrentId(active);
@@ -61,7 +62,7 @@ export function HistoryView({ onLoad }: HistoryViewProps) {
     async (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
       try {
-        await invoke("delete_conversation", { id });
+        await invoke(COMMANDS.CONVERSATIONS_DELETE_CONVERSATION, { id });
         await refresh();
       } catch (err) {
         console.error("Failed to delete conversation:", err);

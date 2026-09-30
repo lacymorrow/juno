@@ -8,7 +8,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEventListener } from "@/hooks/useEventListener";
-import { EVENTS } from "@/lib/constants.generated";
+import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 
 export type OnboardingPhase =
   | "greeting"
@@ -31,7 +31,7 @@ export function useOnboardingState() {
   // Fetch current state on mount
   useEffect(() => {
     let mounted = true;
-    invoke<OnboardingStateInfo>("get_onboarding_state")
+    invoke<OnboardingStateInfo>(COMMANDS.ONBOARDING_GET_ONBOARDING_STATE)
       .then((info) => { if (mounted) setState(info); })
       .catch((e) => console.warn("[useOnboardingState] Failed to fetch initial state:", e));
     return () => { mounted = false; };

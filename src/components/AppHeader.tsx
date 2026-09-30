@@ -48,7 +48,7 @@ export function AppHeader({
   }, []);
 
   const handleOpenSettings = () => {
-    invoke("open_settings_window").catch((err) =>
+    invoke(COMMANDS.WINDOWS_OPEN_SETTINGS_WINDOW).catch((err) =>
       console.error("Failed to open settings:", err),
     );
   };

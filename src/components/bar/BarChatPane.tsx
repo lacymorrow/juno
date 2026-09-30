@@ -6,6 +6,7 @@ import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 import type { ShareAnchor } from "@/hooks/useConversation";
 import { cn } from "@/lib/utils";
 import { BAR_DEPTH_GLOW } from "@/components/bar/barAppearance";
+import { COMMANDS } from "@/lib/constants.generated";
 
 interface BarChatPaneProps {
   messages: ChatMessage[];
@@ -29,13 +30,13 @@ const headerButton =
 
 /** The full-size chat window; it shows this same conversation. */
 const openInWindow = () => {
-  invoke("open_main_window").catch((err) =>
+  invoke(COMMANDS.WINDOWS_OPEN_MAIN_WINDOW).catch((err) =>
     console.error("Failed to open the main window:", err),
   );
 };
 
 const openSettings = () => {
-  invoke("open_settings_window").catch((err) =>
+  invoke(COMMANDS.WINDOWS_OPEN_SETTINGS_WINDOW).catch((err) =>
     console.error("Failed to open settings:", err),
   );
 };
