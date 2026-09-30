@@ -5,6 +5,9 @@
 pub const APP_NAME: &str = "Juno";
 pub const BUNDLE_IDENTIFIER: &str = "com.juno.desktop";
 pub const PRODUCT_NAME: &str = "Juno";
+/// What a demo build calls itself on screen. The bundle id and the app name on
+/// disk stay the same as a normal Juno so the real app installs over it.
+pub const DEMO_PRODUCT_NAME: &str = "Juno Demo";
 pub const ENTITLEMENTS_FILE: &str = "juno.entitlements";
 pub const CONFIG_DIR_NAME: &str = ".juno";
 pub const SCREENSHOT_PREFIX: &str = "juno_screenshot_";
