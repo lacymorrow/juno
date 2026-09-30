@@ -456,3 +456,10 @@ pub mod plugin {
     pub const ALWAYS_LISTENING_STARTED: &str = "plugin:always-listening:started";
     pub const ALWAYS_LISTENING_STOPPED: &str = "plugin:always-listening:stopped";
 }
+
+/// Auto-update events. One event carries the whole `UpdateStatus`, so the UI
+/// never has to combine flags to work out what to show.
+pub mod updates {
+    /// The update flow moved. Payload is `crate::updater::UpdateStatus`.
+    pub const STATUS: &str = "update-status";
+}

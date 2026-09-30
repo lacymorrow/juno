@@ -235,3 +235,18 @@ pub mod media {
 pub mod skills {
     pub const LIST_AVAILABLE_SKILLS: &str = "list_available_skills";
 }
+
+/// Auto-update command names. The backend owns the schedule, the channel and
+/// the install; these three are the whole bridge to the UI.
+pub mod updates {
+    /// Read the current `UpdateStatus` without touching the network.
+    pub const GET_STATUS: &str = "get_update_status";
+    /// Look now, and install anything found.
+    pub const CHECK_NOW: &str = "check_for_updates_now";
+    /// Relaunch into a version that is already installed.
+    pub const RESTART_TO_UPDATE: &str = "restart_to_update";
+    /// Read the auto-check flag and the channel.
+    pub const GET_SETTINGS: &str = "get_update_settings";
+    /// Write the auto-check flag and the channel.
+    pub const SET_SETTINGS: &str = "set_update_settings";
+}

@@ -35,6 +35,8 @@ pub mod store_keys {
     pub const CLI_ASK_BEFORE_SEND_ENABLED: &str = "cli_ask_before_send_enabled";
     pub const VOICE_TRANSCRIPTION: &str = "voice_transcription";
     pub const TRIGGERS: &str = "triggers";
+    /// Auto-update behaviour: the auto-check flag and the channel.
+    pub const UPDATES: &str = "updates";
 }
 
 /// Keyboard shortcut setting keys
@@ -211,6 +213,24 @@ pub mod defaults {
 
     pub fn claude_cli_load_account_mcp() -> bool {
         CLAUDE_CLI_LOAD_ACCOUNT_MCP
+    }
+
+    /// Whether Juno looks for a new version on its own (shortly after launch,
+    /// then every few hours). On: staying current should not be a chore.
+    /// Off still leaves the Check button in Settings working.
+    pub const AUTO_UPDATE_CHECK_ENABLED: bool = true;
+    pub fn auto_update_check_enabled() -> bool {
+        AUTO_UPDATE_CHECK_ENABLED
+    }
+
+    /// Which builds this install takes: "stable" (promoted releases only) or
+    /// "prerelease" (every build). Prerelease by default because the people
+    /// running Juno today are the people writing it, and a dogfood build that
+    /// arrives a week late is not dogfooding. Flip it to "stable" before there
+    /// are users who did not sign up to find the bugs.
+    pub const UPDATE_CHANNEL: &str = "prerelease";
+    pub fn update_channel() -> String {
+        UPDATE_CHANNEL.to_string()
     }
 
     pub fn background_mode() -> bool {

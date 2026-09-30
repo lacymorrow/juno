@@ -191,6 +191,7 @@ export const EVENTS = {
   PLUGIN_VOICE_TRANSCRIPTION_DICTATION_STOPPED: 'plugin:voice-transcription:dictation-stopped',
   PLUGIN_ALWAYS_LISTENING_STARTED: 'plugin:always-listening:started',
   PLUGIN_ALWAYS_LISTENING_STOPPED: 'plugin:always-listening:stopped',
+  UPDATES_STATUS: 'update-status',
 } as const;
 
 export const TIMEOUTS = {
@@ -599,6 +600,11 @@ export const COMMANDS = {
   MEDIA_GET_STATE: 'media_get_state',
   MEDIA_CONTROL: 'media_control',
   SKILLS_LIST_AVAILABLE_SKILLS: 'list_available_skills',
+  UPDATES_GET_STATUS: 'get_update_status',
+  UPDATES_CHECK_NOW: 'check_for_updates_now',
+  UPDATES_RESTART_TO_UPDATE: 'restart_to_update',
+  UPDATES_GET_SETTINGS: 'get_update_settings',
+  UPDATES_SET_SETTINGS: 'set_update_settings',
 } as const;
 
 export const MEMORY = {
@@ -818,6 +824,7 @@ export const AGENT = {
   CONFIG_DEFAULT_COMMAND_TIMEOUT_SECONDS: 180,
   MONITOR_SESSIONS_HOLD_DURATION_MS: 400,
   MONITOR_SESSIONS_IMMEDIATE_START_MS: 15,
+  MONITOR_SESSIONS_DOUBLE_TAP_WINDOW_MS: 300,
   MONITOR_SESSIONS_MAX_TRANSCRIPTION_DURATION_MS: 30000,
   MONITOR_SESSIONS_MAX_AGENT_DURATION_MS: 180000,
   MONITOR_SESSIONS_FORCE_CLEANUP_TIMEOUT_MS: 5000,
@@ -910,6 +917,8 @@ export const KEYBOARD_SHORTCUTS = {
   SHOW_TRAY_ICON: 'true',
   CLAUDE_CLI_EFFORT: 'high',
   CLAUDE_CLI_LOAD_ACCOUNT_MCP: 'true',
+  AUTO_UPDATE_CHECK_ENABLED: 'true',
+  UPDATE_CHANNEL: 'prerelease',
   FOLLOW_CURSOR_DISPLAY: 'true',
   SHOW_GLOW_BORDER: 'true',
   AGENT_MODE: isMac ? 'Option+D' : 'Alt+D',
@@ -940,6 +949,7 @@ export const SETTINGS = {
   STORE_KEYS_CLI_ASK_BEFORE_SEND_ENABLED: 'cli_ask_before_send_enabled',
   STORE_KEYS_VOICE_TRANSCRIPTION: 'voice_transcription',
   STORE_KEYS_TRIGGERS: 'triggers',
+  STORE_KEYS_UPDATES: 'updates',
   KEYBOARD_KEYS_AGENT_MODE: 'agent_mode',
   KEYBOARD_KEYS_DICTATION_INPUT: 'dictation_input',
   KEYBOARD_KEYS_STOP_CURRENT_TASK: 'stop_current_task',

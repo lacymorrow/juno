@@ -54,7 +54,7 @@ function App() {
   const { playError } = useSound();
   const agentSessions = useAgentSessions();
 
-  const { checkForUpdates, installUpdate } = useUpdater();
+  const { status: updateStatus, checkNow, restart } = useUpdater();
 
   // Timer tracking for cleanup
   const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -152,32 +152,44 @@ function App() {
     }
   }, [conversation.addSystemMessage]);
 
-  // Update check handler
+  // "Check for Updates" from the menu. The backend owns the whole flow, so
+  // this only starts it; what happens next arrives on the status event and is
+  // announced below. Settings -> Updates is the durable surface.
   const handleUpdateCheck = useCallback(async () => {
-    if (appState.isCheckingUpdate) return;
-
-    appState.setIsCheckingUpdate(true);
+    if (updateStatus?.stage === "checking" || updateStatus?.stage === "downloading") {
+      return;
+    }
     try {
-      const { available, info } = await checkForUpdates();
-      if (available && info) {
-        appState.setUpdateInfo(info);
-        appState.setActiveModal("update");
-      } else {
-        toast.success("✅ You're running the latest version!");
-      }
+      await checkNow();
     } catch (error) {
       console.error("❌ Error checking for updates:", error);
-      toast.error(`❌ Failed to check for updates: ${error}`);
-    } finally {
-      appState.setIsCheckingUpdate(false);
+      toast.error(`Could not check for updates: ${error}`);
     }
-  }, [
-    appState.isCheckingUpdate,
-    appState.setIsCheckingUpdate,
-    appState.setUpdateInfo,
-    appState.setActiveModal,
-    checkForUpdates,
-  ]);
+  }, [checkNow, updateStatus?.stage]);
+
+  // Announce the end of an update once per version. The check itself is
+  // silent: it runs on a timer, and a toast every six hours saying nothing
+  // happened is noise. Only a finished install and a failure are worth a word.
+  const announcedUpdateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!updateStatus) return;
+    if (updateStatus.stage === "readyToRestart") {
+      const version = updateStatus.availableVersion ?? "A new version";
+      if (announcedUpdateRef.current === version) return;
+      announcedUpdateRef.current = version;
+      toast.success(`Juno ${version} is ready`, {
+        description: "It runs the next time Juno starts.",
+        action: {
+          label: "Restart",
+          onClick: () => {
+            void restart().catch((error) => {
+              toast.error(`Could not restart: ${error}`);
+            });
+          },
+        },
+      });
+    }
+  }, [updateStatus, restart]);
 
   // Backend events integration
   useBackendEvents({
@@ -544,8 +556,6 @@ function App() {
         onClose={() => appState.setActiveModal(null)}
         feedbackData={appState.feedbackData}
         onFeedbackDataChange={appState.handleFeedbackDataChange}
-        updateInfo={appState.updateInfo}
-        onInstallUpdate={installUpdate}
         conversation={conversation.conversation}
         isExporting={false}
         isImporting={false}

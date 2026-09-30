@@ -48,6 +48,35 @@ pub struct AppSettings {
     /// lack the key and are migrated from the legacy shortcut fields on load.
     #[serde(default)]
     pub triggers: Vec<crate::triggers::Trigger>,
+    /// Auto-update behaviour. Older stores lack the key and get the defaults,
+    /// which is how an install from before this shipped starts updating.
+    #[serde(default)]
+    pub updates: UpdateSettings,
+}
+
+/// Auto-update configuration.
+///
+/// The policy that reads this lives in `crate::updater`; this is only where
+/// the two answers are kept.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateSettings {
+    /// Look for a new version without being asked.
+    #[serde(default = "defaults::auto_update_check_enabled")]
+    pub auto_check_enabled: bool,
+    /// "stable" or "prerelease". Parsed leniently by
+    /// `crate::updater::UpdateChannel::from_stored`, so an unknown value costs
+    /// the default rather than the feature.
+    #[serde(default = "defaults::update_channel")]
+    pub channel: String,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            auto_check_enabled: defaults::AUTO_UPDATE_CHECK_ENABLED,
+            channel: defaults::update_channel(),
+        }
+    }
 }
 
 /// Keyboard shortcut configuration
@@ -438,6 +467,7 @@ impl Default for AppSettings {
                 defaults::AGENT_MODE,
                 defaults::DICTATION_INPUT,
             ),
+            updates: UpdateSettings::default(),
         }
     }
 }

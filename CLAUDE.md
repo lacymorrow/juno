@@ -287,6 +287,25 @@ store.save().map_err(|e| format!("Failed: {}", e))?;
 ### macOS Permissions
 Always test **built apps** (not dev builds) for permission issues — they have different bundle identifiers. Required files: `src-tauri/juno.entitlements`, `src-tauri/Info.plist`, `src-tauri/tauri.conf.json` bundle config.
 
+## Auto-Update and Release Channels
+
+Juno keeps itself current. The policy lives in one file, `src-tauri/src/updater.rs`, and the UI decides nothing: it renders an `UpdateStatus` and calls three commands.
+
+**The schedule.** `updater::spawn_schedule` runs one check 20s after launch, then every 6 hours. It re-reads the channel and the on/off flag from the store on every tick, so a change in Settings lands at the next check rather than the next launch. Anything found is downloaded and installed in the background. **Nothing ever relaunches on its own** — on macOS the bundle is swapped on disk while the running process carries on, so the new version starts the next time Juno does. Juno is a dictation tool; a self-chosen relaunch would land mid-sentence.
+
+**Two channels, because there are two audiences.** `release-every-merge.yml` cuts a version on every merge and publishes it as a GitHub *prerelease*. GitHub's `/releases/latest` excludes prereleases, so:
+
+| Channel | Feed | Sees |
+|---|---|---|
+| `stable` | `releases/latest/download/latest.json` | Only releases promoted with `juno-build promote` |
+| `prerelease` (default) | `releases/download/canary/latest.json` | Every build, within the hour |
+
+The canary feed is a **fixed tag whose `latest.json` every release build overwrites** (the "Publish the canary feed" step in `release-tauri.yml`), precisely because `/releases/latest` is the thing that cannot see prereleases. That step has a version guard: release builds finish out of order, and an older build overwriting the manifest would hand everyone a downgrade.
+
+The default is `prerelease` while Juno's own team are the only testers. Flip `defaults::UPDATE_CHANNEL` to `"stable"` before there are users who did not sign up to find the bugs.
+
+**The endpoint is chosen at runtime** via `UpdaterExt::updater_builder().endpoints(...)`, not from `tauri.conf.json`. The `pubkey` there still applies to both feeds: the channel decides which manifest is read, never whether the signature is checked. Rotating the signing key still breaks auto-update silently for everyone on an older build, because a failed signature check is indistinguishable from "no update available".
+
 ## Testing
 
 Frontend tests mock Tauri APIs:

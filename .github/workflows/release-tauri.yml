@@ -5,9 +5,13 @@ on:
     tags:
       - "v*"
   # Every merge to main dispatches this with prerelease=true (see
-  # release-every-merge.yml). A prerelease is invisible to the auto-updater
-  # and to juno-www, both of which read /releases/latest. A tag pushed by hand
-  # has no inputs, so it builds a full release as before.
+  # release-every-merge.yml). A prerelease stays invisible to /releases/latest,
+  # which is what juno-www and the app's *stable* channel read. It is NOT
+  # invisible to the app's prerelease channel: the "Publish the canary feed"
+  # step below copies every build's manifest to a fixed `canary` tag, and an
+  # install with "Get prereleases" on reads that instead. See
+  # src-tauri/src/updater.rs. A tag pushed by hand has no inputs, so it builds
+  # a full release as before.
   workflow_dispatch:
     inputs:
       prerelease:
@@ -129,6 +133,55 @@ jobs:
           releaseDraft: false
           prerelease: ${{ inputs.prerelease == true }}
           args: --target aarch64-apple-darwin
+
+      # The prerelease channel's feed. Every build lands here, promoted or not,
+      # so an install with "Get prereleases" on sees a merge within the hour
+      # instead of waiting for someone to run `juno-build promote`.
+      #
+      # It is a fixed tag whose latest.json is overwritten, not a moving
+      # pointer, because /releases/latest is exactly the thing that cannot see
+      # prereleases. The version guard matters: release builds finish out of
+      # order (v0.8.9 finished after v0.8.10), and an older build overwriting
+      # this file would hand everyone a downgrade.
+      - name: Publish the canary feed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p feed
+          if ! gh release download "$TAG" --repo "$REPO" --pattern latest.json --dir feed --clobber; then
+            echo "::warning::$TAG published no latest.json; nothing to feed the canary channel."
+            exit 0
+          fi
+          new=$(jq -r .version feed/latest.json)
+
+          current=""
+          if gh release download canary --repo "$REPO" --pattern latest.json --dir current --clobber 2>/dev/null; then
+            current=$(jq -r .version current/latest.json)
+          fi
+
+          if [ -n "$current" ] && [ "$current" != "$new" ]; then
+            highest=$(printf '%s\n%s\n' "$current" "$new" | sort -V | tail -1)
+            if [ "$highest" != "$new" ]; then
+              echo "canary is on $current; $new is older. Leaving it alone."
+              exit 0
+            fi
+          fi
+
+          # The canary release holds one file and must never become Latest,
+          # so it is itself a prerelease.
+          if ! gh release view canary --repo "$REPO" >/dev/null 2>&1; then
+            gh release create canary \
+              --repo "$REPO" \
+              --prerelease \
+              --title "Canary feed" \
+              --notes "The auto-update manifest for Juno's prerelease channel. Overwritten by every release build; it is not itself a build. See src-tauri/src/updater.rs." \
+              --target main
+          fi
+          gh release upload canary feed/latest.json --repo "$REPO" --clobber
+          echo "Canary channel is on ${new}."
 
       # GitHub marks whichever full release was created last as Latest, and the
       # updater follows Latest. Builds finish out of order (v0.8.9 finished
