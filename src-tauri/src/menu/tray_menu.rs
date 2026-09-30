@@ -138,7 +138,7 @@ impl TrayIconState {
 
     /// Tooltip for the menu bar icon.
     fn tooltip(self) -> String {
-        format!("Juno · {}", self.label())
+        format!("{} · {}", crate::demo::display_name(), self.label())
     }
 }
 
@@ -543,7 +543,7 @@ pub fn create_state_aware_tray_menu(
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
 
-    let quit_item = MenuItemBuilder::new("Quit Juno")
+    let quit_item = MenuItemBuilder::new(format!("Quit {}", crate::demo::display_name()))
         .id(tray_menu_ids::QUIT)
         .accelerator("CmdOrCtrl+Q")
         .build(app)?;
