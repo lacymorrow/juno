@@ -468,6 +468,46 @@ pub(crate) async fn update_provider_system_prompt(
     Ok(())
 }
 
+/// Update whether a provider loads the MCP servers on the person's own
+/// Claude account (claude.ai connectors, user-level servers). Claude CLI
+/// only today; off makes the CLI run with `--strict-mcp-config` (LAC-4056).
+#[tauri::command]
+pub(crate) async fn update_provider_load_account_mcp(
+    app_handle: tauri::AppHandle,
+    provider_id: String,
+    load_account_mcp: bool,
+) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
+
+    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
+        .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
+
+    let provider = config
+        .providers
+        .iter_mut()
+        .find(|provider| provider.id == provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
+    provider.load_account_mcp = load_account_mcp;
+
+    config
+        .save_to_centralized_settings(&settings_manager)
+        .await
+        .map_err(|e| format_error(templates::FAILED_TO_SAVE, "load_account_mcp", e))?;
+
+    info!(
+        "Updated load_account_mcp for provider {}: {}",
+        provider_id, load_account_mcp
+    );
+    Ok(())
+}
+
 /// Get current agent mode
 #[tauri::command]
 pub(crate) async fn get_agent_mode(app_handle: tauri::AppHandle) -> Result<String, String> {

@@ -122,6 +122,11 @@ pub struct TurnRequest<'a> {
     pub mcp_config: Option<&'a Path>,
     /// Extra system-prompt guidance, appended only when `mcp_config` is present.
     pub mcp_guidance: &'a str,
+    /// Whether the CLI may load the MCP servers on the person's own Claude
+    /// account. When false, `spawn_args` passes `--strict-mcp-config` so only
+    /// what `mcp_config` names loads. Spawn-time: part of the session
+    /// signature, so flipping the setting replaces the process (LAC-4056).
+    pub load_account_mcp: bool,
     pub conversation_id: &'a str,
     /// The CLI session this conversation runs in.
     pub session_id: &'a str,
@@ -306,19 +311,30 @@ async fn evict(conversation_id: &str) {
 ///
 /// Separated by unit separators so a model named `a` with the prompt `b` cannot
 /// collide with a model literally named `a<US>b`.
-fn signature_parts(model: &str, system_prompt: Option<&str>, mcp_config: Option<&Path>) -> String {
+fn signature_parts(
+    model: &str,
+    system_prompt: Option<&str>,
+    mcp_config: Option<&Path>,
+    load_account_mcp: bool,
+) -> String {
     format!(
-        "{}\u{1f}{}\u{1f}{}",
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
         model,
         system_prompt.unwrap_or_default(),
         mcp_config
             .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        load_account_mcp
     )
 }
 
 fn signature_of(req: &TurnRequest<'_>) -> String {
-    signature_parts(req.model, req.system_prompt, req.mcp_config)
+    signature_parts(
+        req.model,
+        req.system_prompt,
+        req.mcp_config,
+        req.load_account_mcp,
+    )
 }
 
 /// The session for this conversation, spawning one if needed.
@@ -500,9 +516,15 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
         "stream-json".to_string(),
         "--model".to_string(),
         req.model.to_string(),
-        "--strict-mcp-config".to_string(),
         "--dangerously-skip-permissions".to_string(),
     ];
+
+    // Mirrors the one-shot path's build_args (LAC-4056): with "Load account
+    // MCP connectors" off, --strict-mcp-config keeps the person's claude.ai
+    // connectors and user-level servers out; on, the default, omits the flag.
+    if !req.load_account_mcp {
+        args.push("--strict-mcp-config".to_string());
+    }
 
     // A fresh id is pinned; one that already exists must be resumed. Getting this
     // backwards is a hard error from the CLI, not a fallback: it refuses to start
@@ -947,27 +969,34 @@ mod tests {
         // A model named "a" with the prompt "b" must not collide with a model
         // literally named "a<US>b", or a prompt change would go unnoticed.
         assert_ne!(
-            signature_parts("a", Some("b"), None),
-            signature_parts("a\u{1f}b", None, None)
+            signature_parts("a", Some("b"), None, true),
+            signature_parts("a\u{1f}b", None, None, true)
         );
     }
 
     #[test]
     fn signature_changes_with_every_spawn_time_argument() {
-        let base = signature_parts("sonnet", None, None);
-        assert_ne!(base, signature_parts("opus", None, None));
-        assert_ne!(base, signature_parts("sonnet", Some("be brief"), None));
+        let base = signature_parts("sonnet", None, None, true);
+        assert_ne!(base, signature_parts("opus", None, None, true));
         assert_ne!(
             base,
-            signature_parts("sonnet", None, Some(Path::new("/tmp/a.json")))
+            signature_parts("sonnet", Some("be brief"), None, true)
         );
+        assert_ne!(
+            base,
+            signature_parts("sonnet", None, Some(Path::new("/tmp/a.json")), true)
+        );
+        // Toggling "Load account MCP connectors" changes --strict-mcp-config,
+        // which a live process cannot be talked out of, so the session must
+        // be replaced rather than reused (LAC-4056).
+        assert_ne!(base, signature_parts("sonnet", None, None, false));
     }
 
     #[test]
     fn signature_is_stable_for_identical_arguments() {
         assert_eq!(
-            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json"))),
-            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")))
+            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")), true),
+            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")), true)
         );
     }
 

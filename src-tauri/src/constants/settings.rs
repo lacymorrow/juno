@@ -198,6 +198,17 @@ pub mod defaults {
     /// fail on an unknown argument.
     pub const CLAUDE_CLI_EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
+    /// Whether the Claude CLI provider loads the MCP servers on the person's
+    /// own Claude account — claude.ai connectors like Slack, Gmail and Drive,
+    /// plus user-level servers. On by default: someone who wired Slack into
+    /// their account expects Juno to have it too. Off passes
+    /// `--strict-mcp-config`, so only Juno's own tool server loads (LAC-4056).
+    pub const CLAUDE_CLI_LOAD_ACCOUNT_MCP: bool = true;
+
+    pub fn claude_cli_load_account_mcp() -> bool {
+        CLAUDE_CLI_LOAD_ACCOUNT_MCP
+    }
+
     pub fn background_mode() -> bool {
         BACKGROUND_MODE
     }

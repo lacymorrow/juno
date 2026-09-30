@@ -77,6 +77,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             temperature: Some(0.7),
             system_prompt: None,
             effort: None,
+            load_account_mcp: crate::constants::settings::defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
         },
         CentralizedProviderConfig {
             id: Provider::OpenAI.id().to_string(),
@@ -86,6 +87,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             temperature: Some(0.7),
             system_prompt: None,
             effort: None,
+            load_account_mcp: crate::constants::settings::defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
         },
         CentralizedProviderConfig {
             id: Provider::Rig.id().to_string(),
@@ -95,6 +97,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             temperature: Some(0.7),
             system_prompt: None,
             effort: None,
+            load_account_mcp: crate::constants::settings::defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
         },
         CentralizedProviderConfig {
             id: Provider::Gemini.id().to_string(),
@@ -104,6 +107,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             temperature: Some(0.7),
             system_prompt: None,
             effort: None,
+            load_account_mcp: crate::constants::settings::defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
         },
         CentralizedProviderConfig {
             id: Provider::ClaudeCli.id().to_string(),
@@ -113,6 +117,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             temperature: Some(0.7),
             system_prompt: None,
             effort: None,
+            load_account_mcp: crate::constants::settings::defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
         },
     ]
 }

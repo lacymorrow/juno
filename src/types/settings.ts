@@ -40,6 +40,12 @@ export interface ProviderSettings {
    * here only so the type matches the Rust `ProviderConfig` it comes from.
    */
   effort?: string;
+  /**
+   * Load the MCP servers on the person's own Claude account (claude.ai
+   * connectors, user-level servers). Claude CLI provider only; on by
+   * default. Off runs the CLI with --strict-mcp-config (LAC-4056).
+   */
+  load_account_mcp?: boolean;
 }
 
 export interface ToolConfig {

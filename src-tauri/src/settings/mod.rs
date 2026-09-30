@@ -153,6 +153,16 @@ pub struct ProviderConfig {
     /// predate the key deserialize to.
     #[serde(default)]
     pub effort: Option<String>,
+    /// Load the MCP servers on the person's own Claude account — claude.ai
+    /// connectors (Slack, Gmail, Drive) and user-level servers — for
+    /// providers that can, which today is only the Claude CLI.
+    ///
+    /// On by default: someone who attached Slack to their account expects
+    /// Juno to have it too, and older stores that predate the key
+    /// deserialize to on. Off passes `--strict-mcp-config`, so the CLI loads
+    /// only Juno's own tool server (LAC-4056).
+    #[serde(default = "defaults::claude_cli_load_account_mcp")]
+    pub load_account_mcp: bool,
 }
 
 /// Cloud connectivity settings

@@ -711,6 +711,24 @@ export function useSettings() {
 		}
 	};
 
+	// Applies immediately, like a System Settings switch — not part of the
+	// Save-button formData flow. Claude CLI provider only (LAC-4056).
+	const handleLoadAccountMcpChange = useCallback(async (enabled: boolean) => {
+		if (!activeProvider) return;
+		await invokeCommand(
+			"update_provider_load_account_mcp",
+			{ providerId: activeProvider, loadAccountMcp: enabled },
+			{
+				showSuccessToast: true,
+				successMessage: `Account MCP connectors ${enabled ? "enabled" : "disabled"}`,
+				errorMessage: "Failed to update MCP connector setting"
+			}
+		);
+		setProviderSettings((prev) =>
+			prev ? { ...prev, load_account_mcp: enabled } : prev
+		);
+	}, [activeProvider, invokeCommand]);
+
 	const handleSoundEnabledChange = useCallback(async (enabled: boolean) => {
 		await invokeCommand(
 			"set_sound_enabled",
@@ -910,6 +928,7 @@ export function useSettings() {
 		handleSupertonicSettingsChange,
 		handleActiveProviderChange,
 		handleSaveProviderSettings,
+		handleLoadAccountMcpChange,
 		handleSoundEnabledChange,
 		handlePerformanceMonitoringChange,
 		handleAgentModeChange,
