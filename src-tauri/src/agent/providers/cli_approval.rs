@@ -471,12 +471,59 @@ pub fn parse_spoken_approval(text: &str) -> Option<bool> {
     };
 
     if matches(DENY) {
-        Some(false)
-    } else if matches(AFFIRM) {
+        return Some(false);
+    }
+
+    // A hedge or negation turns an affirm into a non-answer: "not sure",
+    // "i'm not", "maybe" must fall through rather than send. ("don't" and
+    // "do not" are already handled as denials above.)
+    const HEDGES: &[&str] = &["not", "maybe", "unsure"];
+    if words.iter().any(|w| HEDGES.contains(w)) {
+        return None;
+    }
+
+    if matches(AFFIRM) {
         Some(true)
     } else {
         None
     }
+}
+
+/// Resolve a pending per-send approval (LAC-4058) from a short spoken or typed
+/// reply (LAC-4066). Returns `true` when a clear yes/no answered one or more
+/// pending approvals, so the caller stops instead of treating the utterance as
+/// a new query. A no-op (returns `false`) when nothing is pending or the text
+/// is not a clear affirm/deny, so it is safe to call on every voice/query
+/// entry point.
+pub async fn try_answer_pending_approval(app_state: &AppState, text: &str) -> bool {
+    let decision = match parse_spoken_approval(text) {
+        Some(decision) => decision,
+        None => return false,
+    };
+
+    let pending = app_state.get_pending_tool_approvals().await;
+    if pending.is_empty() {
+        return false;
+    }
+
+    // There is at most one CLI approval waiting at a time (handle_approve
+    // blocks on its own request), but answer every pending request the same
+    // way so a spoken yes/no is never applied to only some of them.
+    for request in &pending {
+        if decision {
+            app_state.approve_tool(&request.tool_id).await;
+        } else {
+            app_state.deny_tool(&request.tool_id).await;
+        }
+    }
+
+    info!(
+        "[CliApproval] Voice/typed '{}' answered {} pending approval(s) as {}",
+        text,
+        pending.len(),
+        if decision { "allow" } else { "deny" }
+    );
+    true
 }
 
 #[cfg(test)]
@@ -639,6 +686,10 @@ mod tests {
             "email cameron about the launch",
             "nobody has replied yet",
             "that is okra",
+            "not sure",
+            "i'm not sure",
+            "maybe",
+            "maybe later",
             "yes i think we should rewrite the whole onboarding flow tomorrow",
             "",
         ] {
