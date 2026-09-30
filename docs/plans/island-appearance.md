@@ -142,13 +142,14 @@ Local conditions layered on top:
 
 ## Evidence
 
-- `docs/frontend/screenshots/island/`: one PNG per posture from `/__bar-preview?appearance=dynamic&state=<state>` and `&demo=card` (default, listening, dictating, input, submitting, error, always_listening, card-streaming, card).
+- `docs/frontend/screenshots/island/`: one PNG per posture from `/__bar-preview?appearance=dynamic&state=<state>` and `&demo=card` (default, listening, dictating, input, submitting, error, always_listening, card-streaming, card), plus `card-demo.mp4`, a nine-second clip of one full turn made with `scripts/bench-record.sh dynamic card`. Any appearance can be recorded the same way; the clip is what a release post should carry.
 - Unit tests: `islandModel.test.ts` (posture, size, dot and words for every bar state; the ring rule; the current-turn reducer), `IslandBar.test.tsx` (state to posture, window protocol, card opens on a new answer and not on history, ring counts only when idle, pauses on hover, cancels on a press and restarts on leave, Escape closes or stops, approvals reach the backend, the spoken channel stays behind its button), `AppearancePicker.test.tsx` (neighbours mounted hidden, warm neighbour shows at once).
 - `tsc` clean; `vitest` 34 files, 342 tests green (2026-09-29).
 - Not verified here: the real window on hardware. The bench runs the same components on the fake Tauri layer, so resize timing, drag, focus and the Rust side of every interaction are for the hardware pass (Lacy, DRI). CI compiles the Rust change.
 
 ## Follow-ups (not in this branch)
 
+- The recording caught a real one, now fixed in the same branch: the island was pinned to the window's left edge, so the capsule jumped left when the window grew first. It is centred now and grows around itself.
 - Grow upward when the island is docked in the bottom half of a display, the way Pill's pane does. The island grows downward today and the window is clamped to the monitor, so nothing is lost, but a low island will jump up when the card opens.
 - The agent cards (`agent-cards/index.tsx`) still carry a purple icon tint. Out of scope here; it shows in the card body for task lists.
 - A component that is still streaming renders as empty space until its closing tag arrives. Same in the pane; belongs to the JSX renderer.

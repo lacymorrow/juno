@@ -12,7 +12,10 @@
  *
  * Query: `appearance=<bar_appearance value>`, `motion=reduced` (optional),
  * `state=<bar state>` to hold one frame (the bench and the docs screenshots),
- * `demo=card` to play one full turn (question, answer with a component) once.
+ * `demo=card` to play one full turn (question, answer with a component) once,
+ * `start=manual` to hold the script until `window.__junoBenchStart()` is
+ * called (so a recording begins on the first beat, not on a blank page), and
+ * `bg=<css color>` to paint a background instead of transparent.
  */
 
 import { Component, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
@@ -103,6 +106,8 @@ function readQuery(): {
   reducedMotion: boolean;
   holdState: string | null;
   demo: string | null;
+  manualStart: boolean;
+  background: string | null;
 } {
   const params = new URLSearchParams(window.location.search);
   const appearance = appearanceEntry(params.get("appearance")).value;
@@ -114,7 +119,16 @@ function readQuery(): {
     reducedMotion,
     holdState: params.get("state"),
     demo: params.get("demo"),
+    manualStart: params.get("start") === "manual",
+    background: params.get("bg"),
   };
+}
+
+declare global {
+  interface Window {
+    /** Bench hook: starts a `start=manual` preview's script. */
+    __junoBenchStart?: () => void;
+  }
 }
 
 /** One frame for a held state, with words where the state would show them. */
@@ -214,7 +228,20 @@ function useNaturalSize() {
 }
 
 export default function AppearancePreview() {
-  const { appearance, reducedMotion, holdState, demo } = useMemo(readQuery, []);
+  const { appearance, reducedMotion, holdState, demo, manualStart, background } = useMemo(
+    readQuery,
+    [],
+  );
+
+  // With `start=manual` the script waits for the bench to say go.
+  const [started, setStarted] = useState(!manualStart);
+  useEffect(() => {
+    if (!manualStart) return;
+    window.__junoBenchStart = () => setStarted(true);
+    return () => {
+      delete window.__junoBenchStart;
+    };
+  }, [manualStart]);
 
   // The shim must exist before any bar effect calls `listen` or `invoke`, and
   // the host must read the requested appearance on its first config fetch.
@@ -222,15 +249,15 @@ export default function AppearancePreview() {
   useLayoutEffect(() => {
     setPreviewAppearance(appearance);
     installBarHarnessTauri();
-    document.documentElement.style.background = "transparent";
-    document.body.style.background = "transparent";
+    document.documentElement.style.background = background ?? "transparent";
+    document.body.style.background = background ?? "transparent";
     setReady(true);
   }, [appearance]);
 
   // Drive the script. Listening breathes the audio level; dictating reveals
   // the sentence a word at a time. Everything else is a single emit.
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !started) return;
 
     let cancelled = false;
     const timers: number[] = [];
@@ -315,7 +342,7 @@ export default function AppearancePreview() {
 
     playBeat(0);
     return stop;
-  }, [ready, reducedMotion, holdState, demo]);
+  }, [ready, started, reducedMotion, holdState, demo]);
 
   const { frame, driven } = useHarnessWindow();
   const { ref: naturalRef, size: natural } = useNaturalSize();
@@ -364,6 +391,7 @@ export default function AppearancePreview() {
       className="relative h-screen w-screen overflow-hidden"
       data-appearance={appearance}
       data-preview-ready="true"
+      data-preview-started={started ? "true" : "false"}
       aria-hidden="true"
     >
       <PreviewBoundary appearance={appearance}>
