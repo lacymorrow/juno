@@ -530,7 +530,10 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
     // Mirrors the one-shot path's build_args (LAC-4056): with "Load account
     // MCP connectors" off, --strict-mcp-config keeps the person's claude.ai
     // connectors and user-level servers out; on, the default, omits the flag.
-    if !req.load_account_mcp {
+    // Same extra case as `build_args`: with no MCP server there is nothing
+    // to answer a permission prompt, so connectors must not load into a
+    // spawn that falls back to --dangerously-skip-permissions.
+    if !req.load_account_mcp || (req.ask_before_send && req.mcp_config.is_none()) {
         args.push("--strict-mcp-config".to_string());
     }
 

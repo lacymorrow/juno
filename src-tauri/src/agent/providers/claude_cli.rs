@@ -550,7 +550,15 @@ impl ClaudeCliBrain {
         // load. On, the default, omits the flag so those connectors ride
         // along (LAC-4056). We can't use --bare either way because it blocks
         // OAuth/keychain auth.
-        if !self.load_account_mcp {
+        //
+        // One extra case, created by LAC-4056 and LAC-4058 landing together:
+        // a spawn with no MCP server has nothing that could answer a
+        // permission prompt, so it falls back to
+        // --dangerously-skip-permissions below. Letting account connectors
+        // ride into *that* spawn would mean unattended sends, which is the
+        // one outcome LAC-4058 exists to prevent, so strict mode is forced
+        // there. Turning "Ask before Juno sends" off is still respected.
+        if !self.load_account_mcp || (ask_before_send && mcp_config.is_none()) {
             args.push("--strict-mcp-config".to_string());
         }
 
@@ -2307,6 +2315,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
         let config = PathBuf::from("/tmp/juno-mcp-test.json");
@@ -2334,6 +2343,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
         let config = PathBuf::from("/tmp/juno-mcp-test.json");
@@ -2345,13 +2355,14 @@ mod tests {
     #[test]
     fn no_tool_server_means_no_prompt_tool_to_point_at() {
         // Headless: no app handle, no MCP server, so nothing could answer a
-        // permission prompt. The old posture applies (and no connectors load
-        // under --strict-mcp-config anyway).
+        // permission prompt. The old posture applies, and strict mode is
+        // forced so no account connector rides into an unpromptable spawn.
         let brain = ClaudeCliBrain {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("hello", None, None, true);
@@ -2608,6 +2619,32 @@ echo '{{"type":"result","result":"answered the old way"}}'"#,
             args.contains(&strict),
             "off: --strict-mcp-config keeps account servers out"
         );
+    }
+
+    /// LAC-4056 + LAC-4058 together: connectors must never load into a spawn
+    /// that cannot prompt. Without this, a headless run would get the
+    /// account's Slack and Gmail tools *and* --dangerously-skip-permissions,
+    /// which is an unattended send.
+    #[test]
+    fn connectors_never_load_into_a_spawn_that_cannot_prompt() {
+        let strict = "--strict-mcp-config".to_string();
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        assert!(brain.load_account_mcp, "the default this test is about");
+
+        // No MCP server (headless) + asking is on: strict mode is forced.
+        let args = brain.build_args("email cameron", None, None, true);
+        assert!(args.contains(&strict));
+        assert!(args.iter().any(|a| a == "--dangerously-skip-permissions"));
+
+        // With a server the prompt tool can answer, so connectors may load.
+        let config = PathBuf::from("/tmp/juno-mcp-test.json");
+        let args = brain.build_args("email cameron", None, Some(&config), true);
+        assert!(!args.contains(&strict));
+        assert!(args.iter().any(|a| a == "--permission-prompt-tool"));
+
+        // Asking turned off is the person's call; today's behaviour stands.
+        let args = brain.build_args("email cameron", None, None, false);
+        assert!(!args.contains(&strict));
     }
 
     #[test]
