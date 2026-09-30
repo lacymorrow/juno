@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.19] - 2026-09-30
+
+### Added
+
+- **bar:** Island rebuilt as one window that grows to hold the answer (#618) (0710e153)
+
 ## [0.8.18] - 2026-09-30
 
 ### Added
@@ -544,7 +550,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.18...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.19...HEAD
+[0.8.19]: https://github.com/lacymorrow/juno/compare/cua-v0.8.18...v0.8.19
 [0.8.18]: https://github.com/lacymorrow/juno/compare/cua-v0.8.17...v0.8.18
 [0.8.16]: https://github.com/lacymorrow/juno/compare/cua-v0.8.15...v0.8.16
 [0.8.14]: https://github.com/lacymorrow/juno/compare/cua-v0.8.13...v0.8.14
