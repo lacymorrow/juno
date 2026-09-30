@@ -403,6 +403,13 @@ impl AlwaysListeningController {
         let wake_word_preroll_samples = (sample_rate as u64 * WAKE_WORD_PREROLL_MS / 1000) as usize;
         let mut audio_activity_start: Option<Instant> = None;
         let mut last_volume_drop: Option<Instant> = None;
+        // Waveform level emission is opt-in: this loop runs for as long as
+        // always-listening is enabled, and an idle app should not pay for
+        // event traffic nobody draws. The flag flips with the mic session
+        // via SetAudioLevelMonitoring (LAC-4080).
+        let mut audio_level_monitoring = false;
+        let level_emit_interval = Duration::from_millis(70);
+        let mut last_level_emit = Instant::now() - level_emit_interval;
 
         loop {
             // Check for control messages
@@ -430,6 +437,14 @@ impl AlwaysListeningController {
                         "[AlwaysListening] Audio level monitoring set to: {}",
                         enabled
                     );
+                    audio_level_monitoring = enabled;
+                    if !enabled {
+                        // Park every waveform at baseline when the session ends.
+                        let _ = app_handle.emit(
+                            crate::constants::voice_transcription::AUDIO_LEVEL,
+                            serde_json::json!({ "level": 0.0_f32 }),
+                        );
+                    }
                 }
                 Ok(AlwaysListeningMessage::ForceTranscriptionTest) => {
                     info!("[AlwaysListening] Force transcription test requested");
@@ -464,6 +479,19 @@ impl AlwaysListeningController {
 
                     // Calculate volume level
                     let volume = Self::calculate_rms_volume(&audio_chunk);
+
+                    // Emit audio level for waveform visualization while a mic
+                    // session has monitoring on, throttled like the dictation
+                    // thread. Same scaling as controller.rs: typical speech
+                    // RMS 0.02–0.1 maps to ~0.2–1.0 display range.
+                    if audio_level_monitoring && last_level_emit.elapsed() >= level_emit_interval {
+                        let level = (volume * 10.0_f32).min(1.0_f32);
+                        let _ = app_handle.emit(
+                            crate::constants::voice_transcription::AUDIO_LEVEL,
+                            serde_json::json!({ "level": level }),
+                        );
+                        last_level_emit = Instant::now();
+                    }
 
                     // Log audio chunk reception occasionally for debugging
                     thread_local! {
