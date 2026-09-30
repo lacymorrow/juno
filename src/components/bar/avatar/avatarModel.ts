@@ -266,6 +266,42 @@ export function sceneFor(input: SceneInput): Scene {
   return { head: headFor(input), yours: yourBubbleFor(input), junos: junoBubbleFor(input) };
 }
 
+// === THE ANSWER ===
+
+export interface AnswerParts {
+  /** The spoken sentence to show above the notes, or null when it would only
+   *  repeat them. */
+  spoken: string | null;
+  /** The visible answer (markdown, components). Empty for a spoken-only reply. */
+  notes: string;
+  /** Both parts are shown, so the spoken one can be folded away. */
+  foldable: boolean;
+}
+
+/** Lowercase, one space between words, no trailing punctuation. */
+function plain(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[\s.!?,;:\u2026]+$/u, "")
+    .trim();
+}
+
+/**
+ * How an answer is laid out in Juno's bubble. Juno's voice usually speaks the
+ * first sentence of the visible answer, so the spoken line is shown only when
+ * it says something the notes do not. A spoken-only reply is the body itself.
+ */
+export function answerParts(visible: string, spoken: string): AnswerParts {
+  const notes = visible.trim();
+  const said = spoken.trim();
+  if (!said) return { spoken: null, notes, foldable: false };
+  if (!notes) return { spoken: said, notes: "", foldable: false };
+  const heard = plain(said);
+  if (heard && plain(notes).includes(heard)) return { spoken: null, notes, foldable: false };
+  return { spoken: said, notes, foldable: true };
+}
+
 // === THE WINDOW ===
 
 export interface WindowBox {

@@ -265,6 +265,46 @@ describe("PersonaBar", () => {
     expect(screen.getByTestId("answer")).toHaveTextContent("Here is the list.");
   });
 
+  it("does not read the spoken sentence twice when the notes open with it", () => {
+    const { rerender } = render(<PersonaBar />);
+    chat.messages = [
+      { role: "user", content: "Q", timestamp: 1 },
+      {
+        role: "assistant",
+        content: "Done. The draft is with Maya.\n\nI will let you know when she replies.",
+        messageId: "m1",
+        timestamp: 2,
+        tts_metadata: {
+          has_spoken_content: true,
+          tts_parts: ["Done. The draft is with Maya."],
+          total_spoken_text: "Done. The draft is with Maya.",
+        },
+      },
+    ];
+    rerender(<PersonaBar />);
+    expect(screen.queryByTestId("avatar-spoken")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Spoken aloud" })).toBeNull();
+    expect(screen.getByTestId("answer")).toHaveTextContent("Done. The draft is with Maya.");
+  });
+
+  it("makes a spoken-only reply the body itself, with nothing to fold", () => {
+    const { rerender } = render(<PersonaBar />);
+    chat.messages = [
+      { role: "user", content: "Q", timestamp: 1 },
+      {
+        role: "assistant",
+        content: "",
+        messageId: "m1",
+        timestamp: 2,
+        tts_metadata: { has_spoken_content: true, tts_parts: ["All set."], total_spoken_text: "All set." },
+      },
+    ];
+    rerender(<PersonaBar />);
+    expect(screen.getByTestId("avatar-spoken")).toHaveTextContent("All set.");
+    expect(screen.queryByTestId("avatar-notes")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Spoken aloud" })).toBeNull();
+  });
+
   it("nods when finished and lets the answer go once the linger runs out", async () => {
     const { rerender } = render(<PersonaBar />);
     await send(UI.BAR_STATES_AGENT_RESPONDING, { lastSubmittedValue: "Q" });

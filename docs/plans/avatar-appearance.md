@@ -98,8 +98,9 @@ Local conditions layered on top:
 | a cursor-control request arrives with no bubble up | a plain Juno bubble holds the notice; it hides itself once answered |
 | answer up, Rust in `input` | the composer opens in your bubble above the answer; the answer stays; the linger pauses |
 | answer up, Rust goes to listening or dictating | the answer leaves; you are speaking again |
-| reply has spoken text and visible text | spoken sentence first, a hairline, the notes beneath; the speaker control folds the spoken part away |
-| reply has only spoken text | the sentence is the bubble |
+| reply has spoken text the notes do not contain | spoken sentence first, a hairline, the notes beneath; the speaker control folds the spoken part away |
+| reply has spoken text the notes already contain (Juno's voice usually reads the first sentence of the answer) | the spoken line is not shown and there is nothing to fold; compared lowercase, whitespace collapsed, trailing punctuation dropped, by containment |
+| reply has only spoken text | the sentence is the bubble; nothing to fold |
 | reply is a component | the component renders inside the bubble at its own width, up to 300 |
 | answer taller than 320 | the bubble body scrolls; scrolling pauses the linger |
 | new turn starts while an answer is up | the bubble takes the new answer at its first chunk; the linger resets |

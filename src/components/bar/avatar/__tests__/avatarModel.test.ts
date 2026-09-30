@@ -7,6 +7,7 @@ import {
   PANEL_WIDTH,
   SYSTEM_BLUE,
   SYSTEM_GREEN,
+  answerParts,
   headFor,
   junoBubbleFor,
   lingerShouldRun,
@@ -299,5 +300,36 @@ describe("the linger", () => {
     expect(lingerShouldRun({ ...base, working: true })).toBe(false);
     expect(lingerShouldRun({ ...base, approvalPending: true })).toBe(false);
     expect(lingerShouldRun({ ...base, composerOpen: true })).toBe(false);
+  });
+});
+
+describe("the answer's parts", () => {
+  it("shows the spoken line only when it says something the notes do not", () => {
+    expect(answerParts("Here is the list.\n\n- one", "Here you go.")).toEqual({
+      spoken: "Here you go.",
+      notes: "Here is the list.\n\n- one",
+      foldable: true,
+    });
+  });
+
+  it("drops a spoken line the notes already contain, however it is punctuated or spaced", () => {
+    const visible = "Done. The draft is with Maya and I asked for Friday.\n\n<TaskSummaryCard />";
+    for (const spoken of [
+      "Done. The draft is with Maya and I asked for Friday.",
+      "done. the draft is with maya and I asked for Friday",
+      "Done.  The draft is with Maya\nand I asked for Friday!",
+      "The draft is with Maya and I asked for Friday...",
+    ]) {
+      expect(answerParts(visible, spoken)).toEqual({ spoken: null, notes: visible, foldable: false });
+    }
+  });
+
+  it("makes a spoken-only reply the body, with nothing to fold", () => {
+    expect(answerParts("", "All set.")).toEqual({ spoken: "All set.", notes: "", foldable: false });
+    expect(answerParts("   ", "All set.")).toEqual({ spoken: "All set.", notes: "", foldable: false });
+  });
+
+  it("is just the notes when nothing was spoken", () => {
+    expect(answerParts("Sunny, 72.", "")).toEqual({ spoken: null, notes: "Sunny, 72.", foldable: false });
   });
 });

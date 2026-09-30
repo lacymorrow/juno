@@ -43,6 +43,7 @@ import {
   isInputState,
   isVoiceState,
   isWorkingState,
+  answerParts,
   sceneFor,
   windowFor,
   lingerShouldRun,
@@ -619,7 +620,9 @@ export function PersonaBar(_props: PersonaBarProps) {
         </Bubble>
       );
     } else if (junos.kind === "answer") {
-      const both = visibleText.length > 0 && spokenText.length > 0;
+      const parts = answerParts(visibleText, spokenText);
+      const both = parts.foldable;
+      const spokenShown = parts.spoken !== null && (!both || spokenOpen);
       junoNode = (
         <Bubble tail="head" facingUp={facingUp} shown={shown} className="self-center" data-testid="avatar-answer">
           <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
@@ -650,17 +653,17 @@ export function PersonaBar(_props: PersonaBarProps) {
             className="av-bubble-scroll cursor-auto select-text overflow-y-auto px-3.5 py-2.5"
             style={{ maxHeight: ANSWER_MAX_HEIGHT, paddingRight: both ? 60 : 36 }}
           >
-            {spokenText && (!both || spokenOpen) && (
+            {spokenShown && (
               <p className="text-white/90" data-testid="avatar-spoken">
-                {spokenText}
+                {parts.spoken}
               </p>
             )}
-            {visibleText && (
+            {parts.notes && (
               <div
-                className={cn("text-white/85", spokenText && (!both || spokenOpen) && "mt-2 border-t border-white/[0.08] pt-2")}
+                className={cn("text-white/85", spokenShown && "mt-2 border-t border-white/[0.08] pt-2")}
                 data-testid="avatar-notes"
               >
-                <MixedContentRenderer content={visibleText} isStreaming={streaming} />
+                <MixedContentRenderer content={parts.notes} isStreaming={streaming} />
               </div>
             )}
             {notices}
