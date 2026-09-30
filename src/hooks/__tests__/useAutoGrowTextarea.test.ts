@@ -47,13 +47,14 @@ describe("floatingBarWindowSize with a grown composer", () => {
     expect(three.width).toBe(one.width);
   });
 
-  it("keeps the pill centred on the band as it grows", () => {
+  it("keeps the anchor on the band's near edge as it grows", () => {
     const one = floatingBarWindowSize(base);
     const grown = floatingBarWindowSize({ ...base, composerGrowth: 36 });
-    // anchorY is the pill's centre, which useWindowSize pins to the same spot
-    // on screen. Growing by 36 moves that centre down by half of it, so the
-    // pill opens evenly around itself instead of lurching.
-    expect(grown.anchorY).toBe(one.anchorY + 18);
+    // anchorY is the band's near edge, which useWindowSize pins to the same
+    // spot on screen. It does not move with the text: the window gains all of
+    // its new room on the far side, the pill's first line stays put, and a
+    // pane underneath slides down with the pill's bottom edge.
+    expect(grown.anchorY).toBe(one.anchorY);
   });
 
   it("still accounts for the pane underneath", () => {

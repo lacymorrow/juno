@@ -2,72 +2,94 @@ import { useCallback } from 'react';
 import { Window, currentMonitor } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 
-interface WindowSizeConfig {
-  width: number;
-  height: number;
+/** Which horizontal edge of the window stays put across a resize. */
+export type WindowAnchorX = "start" | "center" | "end";
+
+/** Where the pinned point sits in one frame of the window. */
+export interface WindowAnchor {
   /**
-   * Logical y, inside the window, of the point that must stay put on screen
-   * across the resize (the bar keeps its pill's vertical centre here, so a
-   * pill that grows on hover grows around itself instead of sliding down).
-   * Omitted: the top edge stays put.
+   * Logical offset of the pinned point from the window's near edge: the top,
+   * or the bottom when `growUp`.
    */
-  anchorY?: number;
-  /**
-   * Grow upward instead of downward. When the bar is docked in the bottom half
-   * of its display, its chat pane opens ABOVE the pill: the window's added
-   * height must extend up while the pill's on-screen position is unchanged
-   * (the bottom edge moves down as much as the top moves up only through the
-   * `anchorY` maths — the pill itself stays put). Omitted/false keeps today's
-   * downward growth.
-   */
+  anchorY: number;
+  /** The near edge is the bottom: the window grows and shrinks upward. */
   growUp?: boolean;
 }
 
-// Cache last applied sizes per window to avoid redundant resizes
-const lastSizeByLabel: Map<string, { width: number; height: number }> = new Map();
+export interface WindowSizeConfig {
+  width: number;
+  height: number;
+  /**
+   * Logical offset, from the near edge of the NEW frame, of the point that
+   * must stay put on screen across the resize (the bar pins its pill band's
+   * near edge here). Omitted: the top edge stays put.
+   */
+  anchorY?: number;
+  /**
+   * Grow upward instead of downward: the near edge is the bottom. A bar docked
+   * in the bottom half of its display opens its pane above the pill, so the
+   * added height extends up while the pill stays where it is.
+   */
+  growUp?: boolean;
+  /**
+   * The same point in the frame the window has RIGHT NOW. The live frame plus
+   * this offset is the whole baseline, so nothing is remembered between
+   * resizes and nothing can go stale when the window is moved by something
+   * other than a resize (a glide into a gravity well, a display hop, the
+   * launch restore). Defaults to the new frame's own offsets, which is right
+   * whenever the pinned point is at the same offset before and after.
+   */
+  from?: WindowAnchor;
+  /**
+   * Which horizontal edge stays put. A bar docked in a left-hand well grows
+   * rightward, one in a right-hand well grows leftward, so it never runs off
+   * the screen edge it sits against. Default: the centre.
+   */
+  anchorX?: WindowAnchorX;
+}
 
-/** What the last resize left behind, so the next one can keep the pill fixed. */
+// Last applied size per window, so a resize to the size the window already
+// has is skipped. `growUp` is part of it: a same-size resize that flips the
+// growth direction moves the window and must go through.
+const lastSizeByLabel: Map<
+  string,
+  { width: number; height: number; growUp: boolean }
+> = new Map();
+
+// Resizes are serialised per window. Each one reads the live frame and then
+// writes a new one; two in flight at once would let the second read the frame
+// before the first had landed and move the window from a position it no longer
+// has. The bar's grow-then-animate protocol also relies on the promise
+// resolving only once the frame is really applied.
+const queueByLabel: Map<string, Promise<void>> = new Map();
+
+function enqueue(label: string, op: () => Promise<void>): Promise<void> {
+  const prev = queueByLabel.get(label) ?? Promise.resolve();
+  const next = prev.then(op, op);
+  queueByLabel.set(label, next);
+  return next;
+}
+
+/** What the last resize left behind: the physical height and the anchor. */
 interface AnchorState {
-  /** Physical height applied last time. */
+  /** Physical height of the frame. */
   physH: number;
-  /** Logical anchorY passed last time (pill centre offset from the near edge). */
+  /** Logical offset of the pinned point from the frame's near edge. */
   anchor: number;
-  /** Whether that resize grew upward. */
+  /** Whether that frame's near edge is the bottom. */
   growUp: boolean;
 }
-// Last anchor state per window, so the next resize knows where the pill was.
-const lastAnchorByLabel: Map<string, AnchorState> = new Map();
 
 /**
- * Forget the last-resize baseline for a window.
+ * The new physical top edge for a resize that keeps one point at the same
+ * screen position, whichever direction the window grows.
  *
- * The anchor maths in `anchoredTop` keeps the pill's vertical centre fixed
- * ACROSS A RESIZE by correcting the new top against what the previous resize
- * left behind. That is only sound while the window moves for no reason other
- * than our resizes. It also moves for reasons this cache never sees: gliding
- * into a gravity well on drag release, hopping to another display, and the
- * launch restore all call `setPosition` / `set_bar_frame` directly. After one
- * of those the stored baseline describes where the window used to be, so the
- * next resize applies a correction against a position that no longer exists
- * and the pill drifts. Every such move must call this so the next resize
- * starts fresh (top-anchored from the real, just-set position) instead of
- * chasing a stale baseline.
- */
-export function resetWindowAnchor(label: string): void {
-  lastAnchorByLabel.delete(label);
-  lastSizeByLabel.delete(label);
-}
-
-/**
- * The new physical top edge for a resize that keeps the pill's vertical centre
- * at the same screen position, whichever direction the window grows.
- *
- * `anchor` is the pill centre's distance from the window's *near* edge (top when
- * growing down, bottom when growing up), so the pill centre's distance from the
- * top is `anchor` (down) or `physH - anchor` (up). Keeping `top + that distance`
- * constant across the resize both fixes the pill and moves the top up when a
- * growUp window gains height. Falls back to a top-anchored resize when there is
- * no previous state or no anchor (matching the original downward behaviour).
+ * `anchor` is the pinned point's distance from the frame's *near* edge (top
+ * when growing down, bottom when growing up), so its distance from the top is
+ * `anchor` (down) or `physH - anchor` (up). Keeping `top + that distance`
+ * constant across the resize both pins the point and moves the top up when a
+ * growUp window gains height. Falls back to a top-anchored resize when there
+ * is no previous state or no anchor.
  */
 export function anchoredTop(
   prevTop: number,
@@ -84,17 +106,35 @@ export function anchoredTop(
 }
 
 /**
- * Center-stable resize: adjusts the window X position so the horizontal center
- * stays constant. Without this, macOS resizes from the top-left anchor, causing
- * the centered island to jump horizontally.
- *
- * Vertical: anchored on `anchorY` when given (the previous call's anchor stays
- * at the same screen position), otherwise top-anchored — the window
- * grows/shrinks downward.
+ * The new physical left edge for a resize that keeps one horizontal edge put:
+ * the left edge, the right edge, or (default) the centre.
+ */
+export function anchoredLeft(
+  prevX: number,
+  prevW: number,
+  nextW: number,
+  anchorX: WindowAnchorX = "center",
+): number {
+  const dx = nextW - prevW;
+  if (dx === 0) return prevX;
+  switch (anchorX) {
+    case "start":
+      return prevX;
+    case "end":
+      return prevX - dx;
+    default:
+      return Math.round(prevX - dx / 2);
+  }
+}
+
+/**
+ * Edge-stable resize: the window's position is adjusted so the anchored edges
+ * stay put. Without this, macOS resizes from the top-left, so a centred pill
+ * would jump horizontally and a pane opening upward would run off the bottom.
  *
  * Uses physical pixel coordinates to match outerPosition()/outerSize() units.
  */
-async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
+async function edgeStableResize(appWindow: Window, next: WindowSizeConfig) {
   const scaleFactor = await appWindow.scaleFactor();
   const physNextW = Math.round(next.width * scaleFactor);
   const physNextH = Math.round(next.height * scaleFactor);
@@ -102,44 +142,22 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
   const pos = await appWindow.outerPosition();   // PhysicalPosition
   const size = await appWindow.outerSize();       // PhysicalSize
 
-  const dx = physNextW - size.width;
-  const newX = dx !== 0 ? Math.round(pos.x - dx / 2) : pos.x;
+  const newX = anchoredLeft(pos.x, size.width, physNextW, next.anchorX);
 
-  // When the cache is empty (first resize, or the baseline was dropped after an
-  // external move: a glide into a well, a display hop, the launch restore) fall
-  // back to the window's LIVE measured frame as the baseline rather than to a
-  // top-anchored resize. The live frame is ground truth for where the pill sits
-  // right now, whatever moved the window there, so the pill stays put and a
-  // grow-up pane still opens upward. Top-anchoring here was the residual drift:
-  // the first resize after a snap is the pane opening with growUp, and with no
-  // baseline it grew the wrong way and the close drifted it further.
-  // We reuse next.anchorY as the current frame's anchor: it is the pill-centre
-  // offset (`l.pad + band/2`), identical in the compact and pane-open frames a
-  // post-move resize moves between. The warm-cache path is untouched, so the
-  // composer-growth case (where anchorY changes between resizes) still anchors
-  // against the previous frame's real anchor.
-  const prevAnchor =
-    lastAnchorByLabel.get(appWindow.label) ??
-    (next.anchorY !== undefined
-      ? { physH: size.height, anchor: next.anchorY, growUp: next.growUp ?? false }
-      : undefined);
+  // The live frame is the baseline, whatever moved the window there.
+  const from = next.from ?? { anchorY: next.anchorY, growUp: next.growUp };
+  const prevAnchor: AnchorState | undefined =
+    from.anchorY !== undefined
+      ? { physH: size.height, anchor: from.anchorY, growUp: from.growUp ?? false }
+      : undefined;
   const anchoredY = anchoredTop(
     pos.y,
     prevAnchor,
     { physH: physNextH, anchor: next.anchorY, growUp: next.growUp },
     scaleFactor,
   );
-  if (next.anchorY !== undefined) {
-    lastAnchorByLabel.set(appWindow.label, {
-      physH: physNextH,
-      anchor: next.anchorY,
-      growUp: next.growUp ?? false,
-    });
-  }
 
   const clamped = await clampToMonitor(newX, anchoredY, physNextW, physNextH);
-  const clampedX = clamped.x;
-  const newY = clamped.y;
 
   // Apply the move + resize atomically through the backend (a single macOS
   // NSWindow setFrame:). Issuing setPosition and setSize separately let the
@@ -148,8 +166,8 @@ async function centerStableResize(appWindow: Window, next: WindowSizeConfig) {
   // centered pill/dot visibly jumped before snapping back. One transaction
   // removes that seam. (Off macOS the command falls back to separate setters.)
   await invoke("set_bar_frame", {
-    x: clampedX,
-    y: newY,
+    x: clamped.x,
+    y: clamped.y,
     width: next.width,
     height: next.height,
   });
@@ -186,33 +204,51 @@ async function clampToMonitor(
 }
 
 export function useWindowSize(windowLabel: string) {
-  const resizeWindow = useCallback(async (config: WindowSizeConfig) => {
-    try {
-      const appWindow = await Window.getByLabel(windowLabel);
-      if (appWindow) {
-        await centerStableResize(appWindow, config);
-      }
-    } catch (error) {
-      console.error(`Failed to resize window ${windowLabel}:`, error);
-    }
-  }, [windowLabel]);
+  const resizeWindow = useCallback(
+    (config: WindowSizeConfig) =>
+      enqueue(windowLabel, async () => {
+        try {
+          const appWindow = await Window.getByLabel(windowLabel);
+          if (appWindow) {
+            await edgeStableResize(appWindow, config);
+          }
+        } catch (error) {
+          console.error(`Failed to resize window ${windowLabel}:`, error);
+        }
+      }),
+    [windowLabel],
+  );
 
-  const resizeWindowIfChanged = useCallback(async (config: WindowSizeConfig) => {
-    try {
-      const prev = lastSizeByLabel.get(windowLabel);
-      if (prev && prev.width === config.width && prev.height === config.height) {
-        return; // no-op
-      }
+  const resizeWindowIfChanged = useCallback(
+    (config: WindowSizeConfig) =>
+      enqueue(windowLabel, async () => {
+        try {
+          const growUp = config.growUp ?? false;
+          const prev = lastSizeByLabel.get(windowLabel);
+          if (
+            prev &&
+            prev.width === config.width &&
+            prev.height === config.height &&
+            prev.growUp === growUp
+          ) {
+            return; // no-op
+          }
 
-      const appWindow = await Window.getByLabel(windowLabel);
-      if (appWindow) {
-        await centerStableResize(appWindow, config);
-        lastSizeByLabel.set(windowLabel, { width: config.width, height: config.height });
-      }
-    } catch (error) {
-      console.error(`Failed to resize window ${windowLabel}:`, error);
-    }
-  }, [windowLabel]);
+          const appWindow = await Window.getByLabel(windowLabel);
+          if (appWindow) {
+            await edgeStableResize(appWindow, config);
+            lastSizeByLabel.set(windowLabel, {
+              width: config.width,
+              height: config.height,
+              growUp,
+            });
+          }
+        } catch (error) {
+          console.error(`Failed to resize window ${windowLabel}:`, error);
+        }
+      }),
+    [windowLabel],
+  );
 
   const getWindowSize = useCallback(async (): Promise<WindowSizeConfig | null> => {
     try {

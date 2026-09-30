@@ -1,87 +1,103 @@
 import { describe, expect, it } from "vitest";
-import { anchoredTop } from "../useWindowSize";
+import { anchoredLeft, anchoredTop } from "../useWindowSize";
 
 // `anchoredTop` decides the new physical top edge for a resize that must keep
-// the pill's vertical centre at the same screen position, whether the window
-// grows down (default) or up (docked in the bottom half). The pill centre's
-// distance from the top is `anchor` when growing down and `physH - anchor`
-// when growing up; the invariant under test is `newTop + fNew === prevTop + fOld`.
+// one point at the same screen position, whether the window grows down
+// (default) or up (docked in the bottom half). The point's distance from the
+// top is `anchor` when growing down and `physH - anchor` when growing up; the
+// invariant under test is `newTop + fNew === prevTop + fOld`.
+//
+// The bar passes the point explicitly for BOTH frames (`from` in the config),
+// so the baseline is always the live frame plus a known offset. Nothing is
+// remembered between resizes, so a glide into a well, a display hop or the
+// launch restore cannot leave a stale baseline behind.
 
 const fromTop = (physH: number, anchor: number, growUp: boolean, scale: number) =>
   growUp ? physH - Math.round(anchor * scale) : Math.round(anchor * scale);
 
 describe("anchoredTop", () => {
   it("keeps the top put when growing downward with an unchanged anchor", () => {
-    // compact -> hover: only width changes, anchor 33 stays, top must not move.
-    const prev = { physH: 66, anchor: 33, growUp: false };
-    expect(anchoredTop(200, prev, { physH: 66, anchor: 33, growUp: false }, 1)).toBe(200);
+    // compact -> hover: only width changes, the band's top edge stays 16 in.
+    const prev = { physH: 76, anchor: 16, growUp: false };
+    expect(anchoredTop(200, prev, { physH: 76, anchor: 16, growUp: false }, 1)).toBe(200);
   });
 
-  it("keeps the pill centre fixed when the anchor changes downward", () => {
-    // compact -> full+pane, downward: anchor 33 -> 46, pane grows below.
-    const prev = { physH: 66, anchor: 33, growUp: false };
-    const next = { physH: 460, anchor: 46, growUp: false };
-    const newTop = anchoredTop(200, prev, next, 1);
-    const pillOld = 200 + fromTop(prev.physH, prev.anchor, prev.growUp, 1);
-    const pillNew = newTop + fromTop(next.physH, next.anchor, next.growUp, 1);
-    expect(pillNew).toBe(pillOld);
-    // Top-anchored: the top only shifts by the small anchor delta.
-    expect(newTop).toBe(200 - (46 - 33));
+  it("keeps the top put when the pane opens downward: all the new room is below", () => {
+    // The band's near edge is 16 in before and after, so the top does not move.
+    const prev = { physH: 76, anchor: 16, growUp: false };
+    expect(anchoredTop(200, prev, { physH: 444, anchor: 16, growUp: false }, 1)).toBe(200);
   });
 
-  it("moves the top up so the pill stays put when growing upward", () => {
-    // Docked at the bottom: compact -> full+pane, growUp. The window gains
-    // height entirely above the pill; the pill's screen Y is unchanged.
-    const prev = { physH: 66, anchor: 33, growUp: true };
-    const next = { physH: 460, anchor: 46, growUp: true };
+  it("moves the top up by exactly the added height when growing upward", () => {
+    // Docked at the bottom: the pane opens above, the bottom edge stays put.
+    const prev = { physH: 76, anchor: 16, growUp: true };
+    const next = { physH: 444, anchor: 16, growUp: true };
     const newTop = anchoredTop(700, prev, next, 1);
+    expect(newTop).toBe(700 - (444 - 76));
     const pillOld = 700 + fromTop(prev.physH, prev.anchor, prev.growUp, 1);
     const pillNew = newTop + fromTop(next.physH, next.anchor, next.growUp, 1);
     expect(pillNew).toBe(pillOld);
-    // The top moved strictly upward to make room for the pane above.
-    expect(newTop).toBeLessThan(700);
   });
 
   it("moves the top back down when an upward-grown window shrinks", () => {
-    const prev = { physH: 460, anchor: 46, growUp: true };
-    const next = { physH: 66, anchor: 33, growUp: true };
-    const newTop = anchoredTop(319, prev, next, 1);
-    const pillOld = 319 + fromTop(prev.physH, prev.anchor, prev.growUp, 1);
-    const pillNew = newTop + fromTop(next.physH, next.anchor, next.growUp, 1);
-    expect(pillNew).toBe(pillOld);
-    expect(newTop).toBeGreaterThan(319);
+    const prev = { physH: 444, anchor: 16, growUp: true };
+    const next = { physH: 76, anchor: 16, growUp: true };
+    expect(anchoredTop(332, prev, next, 1)).toBe(332 + (444 - 76));
+  });
+
+  it("swaps the pane's side without moving the pill when the direction flips", () => {
+    // The pane is open below (444 tall, band top at 16) and the bar is dropped
+    // in a bottom well: the pane must go above. The pinned point is the band's
+    // bottom edge, 60 from the top in the old frame and 16 from the bottom in
+    // the new one.
+    const prev = { physH: 444, anchor: 16 + 44, growUp: false };
+    const next = { physH: 444, anchor: 16, growUp: true };
+    const newTop = anchoredTop(200, prev, next, 1);
+    expect(newTop + 444 - 16).toBe(200 + 60);
+  });
+
+  it("does not move a symmetric window when the direction flips", () => {
+    // Pane closed: the window is band + pad each side, so the band's bottom
+    // edge is at the same place measured from either end.
+    const prev = { physH: 76, anchor: 16 + 44, growUp: false };
+    const next = { physH: 76, anchor: 16, growUp: true };
+    expect(anchoredTop(200, prev, next, 1)).toBe(200);
   });
 
   it("honours the display scale factor", () => {
-    const prev = { physH: 132, anchor: 33, growUp: true };
-    const next = { physH: 920, anchor: 46, growUp: true };
+    const prev = { physH: 152, anchor: 16, growUp: true };
+    const next = { physH: 888, anchor: 16, growUp: true };
     const newTop = anchoredTop(1400, prev, next, 2);
     const pillOld = 1400 + fromTop(prev.physH, prev.anchor, prev.growUp, 2);
     const pillNew = newTop + fromTop(next.physH, next.anchor, next.growUp, 2);
     expect(pillNew).toBe(pillOld);
   });
 
-  it("falls back to the top edge when there is no previous state", () => {
-    expect(anchoredTop(150, undefined, { physH: 460, anchor: 46, growUp: true }, 1)).toBe(150);
+  it("falls back to the top edge when there is no anchor at all", () => {
+    expect(anchoredTop(150, undefined, { physH: 444, anchor: 16, growUp: true }, 1)).toBe(150);
+    expect(anchoredTop(150, { physH: 76, anchor: 16, growUp: false }, { physH: 444 }, 1)).toBe(
+      150,
+    );
+  });
+});
+
+describe("anchoredLeft", () => {
+  it("keeps the centre by default", () => {
+    expect(anchoredLeft(1000, 88, 180)).toBe(954);
+    expect(anchoredLeft(954, 180, 88)).toBe(1000);
   });
 
-  // Regression: gravity-well drift. When the window is moved outside the resize
-  // path (a well snap, a display hop, the launch restore), the real top changes
-  // but the stored baseline does not. The next resize then corrects against a
-  // position that no longer exists and the pill drifts. resetWindowAnchor clears
-  // that baseline so the next resize is top-anchored from the real position;
-  // here that is the difference between the drifted top and the correct one.
-  it("would drift if a stale baseline survives an external move, and does not once cleared", () => {
-    // A resize was recorded while the window sat at top=200 (pill band 46 down).
-    const staleBaseline = { physH: 92, anchor: 46, growUp: false };
-    // The bar then snapped to a well at top=900 without the cache being reset.
-    const realTopAfterSnap = 900;
-    // A same-shape resize now runs. With the stale baseline the correction is
-    // zero here (same anchor), but a growUp resize exposes the drift:
-    const next = { physH: 460, anchor: 46, growUp: true };
-    const drifted = anchoredTop(realTopAfterSnap, staleBaseline, next, 1);
-    const corrected = anchoredTop(realTopAfterSnap, undefined, next, 1);
-    expect(corrected).toBe(realTopAfterSnap); // top-anchored from where it really is
-    expect(drifted).not.toBe(corrected); // the stale baseline moved it away from that
+  it("keeps the left edge for a bar docked on the left", () => {
+    expect(anchoredLeft(16, 88, 451, "start")).toBe(16);
+  });
+
+  it("keeps the right edge for a bar docked on the right, so it never runs off the screen", () => {
+    // Right well on a 1440-wide display: the right edge is at 1424 before and after.
+    expect(anchoredLeft(1336, 88, 180, "end")).toBe(1244);
+    expect(anchoredLeft(1244, 180, 88, "end")).toBe(1336);
+  });
+
+  it("does not move for a same-width resize", () => {
+    expect(anchoredLeft(1336, 88, 88, "end")).toBe(1336);
   });
 });
