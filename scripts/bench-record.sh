@@ -20,6 +20,8 @@
 # Needs `bun run dev` on :1420, agent-browser and ffmpeg. A PNG poster of the
 # last second lands next to the MP4 so a PR can show a frame without playing it.
 # BENCH_BG sets the page colour (URL-encoded; default the picker's stage grey).
+# BENCH_QUERY appends extra preview params (e.g. "&pin=frame"); BENCH_VIEWPORT
+# sets the stage size as "<w> <h>" (default 480 400).
 set -euo pipefail
 
 APPEARANCE="${1:-dynamic}"
@@ -36,7 +38,7 @@ case "$MODE" in
   demo=*) QUERY="&demo=${MODE#demo=}";;
   *) echo "bench-record: unknown mode '$MODE' (loop | card | spoken | state=<bar state> | demo=<name>)" >&2; exit 2;;
 esac
-URL="$BASE/__bar-preview?appearance=$APPEARANCE$QUERY"
+URL="$BASE/__bar-preview?appearance=$APPEARANCE$QUERY${BENCH_QUERY:-}"
 
 if [ -z "$OUT" ]; then
   SAFE_MODE="${MODE//=/-}"
@@ -53,7 +55,8 @@ curl -sf "$BASE/" >/dev/null || { echo "bench-record: nothing answers at $BASE (
 # Open first and wait until the bar has painted, then start the recording and
 # only then start the script: the clip begins on the first beat, not on the
 # blank page a cold dev server serves for a second or two.
-agent-browser set viewport 480 400 >/dev/null
+# shellcheck disable=SC2086
+agent-browser set viewport ${BENCH_VIEWPORT:-480 400} >/dev/null
 agent-browser open "$URL&start=manual&bg=${BENCH_BG:-%23E9E9EB}" >/dev/null
 agent-browser wait '[data-preview-ready="true"]' >/dev/null
 agent-browser wait 800 >/dev/null
