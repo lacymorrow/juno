@@ -1,47 +1,89 @@
-import { useEffect, useState, useRef, useCallback, FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Mic, Zap, Volume2, MessageCircle, Keyboard, Send } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { motion, useReducedMotion } from "motion/react";
+import { Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { VoiceStatusIndicator } from "../VoiceStatusIndicator";
-import { useDragWindow } from "@/hooks/useDragWindow";
 import { EVENTS, UI } from "@/lib/constants.generated";
-import { isOneOf } from "@/lib/ui-api";
-
-// === STANDARDIZED UI API TYPES ===
+import { useWindowSize } from "@/hooks/useWindowSize";
+import { useDragWindow } from "@/hooks/useDragWindow";
+import { useEventListener } from "@/hooks/useEventListener";
+import { useBarConversation } from "@/hooks/useBarConversation";
+import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
+import { useSystemTheme } from "@/hooks/useSystemTheme";
+import { SkillGhostText, SkillSuggestionList } from "@/components/SkillAutocomplete";
+import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
+import { InputControlNotices } from "@/components/input-control/InputControlNotices";
+import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
+import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+import { useLinger } from "./island/useLinger";
+import { Bead, NarratorDot, RailBar, Words, paletteFor } from "./narrator/NarratorStrip";
+import {
+  BAR_HEIGHT,
+  BAR_RADIUS,
+  BAR_WIDTH,
+  DRAIN_MS,
+  SHADOW_PAD,
+  SHEET_MIN_HEIGHT,
+  SHRINK_DELAY_MS,
+  SYSTEM_BLUE,
+  answerKey,
+  dotFor,
+  drainShouldRun,
+  firstSentence,
+  isIdleState,
+  isInputState,
+  isVoiceState,
+  isWorkingState,
+  latestTurn,
+  lineFor,
+  pendingStep,
+  posture as postureFor,
+  railFor,
+  sheetHeightFor,
+  sheetWanted,
+  windowSize,
+  type Segment,
+  type Step,
+} from "./narrator/narratorModel";
 
 /**
- * UI State enumeration - Uses generated constants from backend.
- * These values are emitted by the backend UIManager in BAR_STATE_UPDATE events.
+ * Bar: the narrator. One wide strip that tells the turn left to right.
+ *
+ * Spec and the full state table: docs/plans/bar-appearance.md. In short: what
+ * you said sits at the left; each step Juno takes is a bead on the line with
+ * its words; the answer's first sentence ends the line. A rail along the
+ * bottom edge fills as the turn goes and drains once it is done. The full
+ * answer slides down from the strip's bottom edge as a sheet when one line
+ * cannot hold it. The strip never changes width, so nothing on it can jump.
  */
-type UIState =
-  | typeof UI.BAR_STATES_DEFAULT
-  | typeof UI.BAR_STATES_EXPANDING
-  | typeof UI.BAR_STATES_INPUT
-  | typeof UI.BAR_STATES_SHRINKING
-  | typeof UI.BAR_STATES_SUBMITTING
-  | typeof UI.BAR_STATES_LOADING
-  | typeof UI.BAR_STATES_FINISHING
-  | typeof UI.BAR_STATES_SUCCESS
-  | typeof UI.BAR_STATES_LISTENING
-  | typeof UI.BAR_STATES_ERROR
-  | typeof UI.BAR_STATES_TRANSCRIBING
-  | typeof UI.BAR_STATES_SPEAKING
-  | typeof UI.BAR_STATES_DICTATING
-  | typeof UI.BAR_STATES_DICTATION_READY
-  | typeof UI.BAR_STATES_ALWAYS_LISTENING
-  | typeof UI.BAR_STATES_AGENT_RESPONDING;
 
-/**
- * Backend State Data Structure - Matches exactly what the backend emits.
- * This structure is defined in ui_commands.rs's emit_bar_state_update().
- */
+/** Backend element id for interactions. Must match `ui::element_ids::APP_BAR`. */
+const COMPONENT_ID = "app-bar";
+const WINDOW_LABEL = "floating-bar";
+
+/** Padding inside the sheet, above and below its body. */
+const SHEET_PAD_TOP = BAR_RADIUS + 10;
+const SHEET_PAD_BOTTOM = 10;
+/** The spoken-text row and the speaker control, when the sheet has them. */
+const SHEET_FOOTER_H = 30;
+
 interface BarStateData {
-  barState: UIState;
+  barState: string;
   inputValue: string;
   lastSubmittedValue: string;
   currentError: string | null;
   transcriptionText: string;
+  transcriptionProvisional?: boolean;
   spokenText: string;
   voiceMode: string;
   audioLevel: number;
@@ -51,418 +93,652 @@ interface BarStateData {
   agentState: string | null;
 }
 
-/**
- * Standardized UI Interaction Event Structure.
- * This matches UIInteractionEvent in ui_commands.rs.
- */
-interface UIInteractionEvent {
+const INITIAL_BAR: BarStateData = {
+  barState: UI.BAR_STATES_DEFAULT,
+  inputValue: "",
+  lastSubmittedValue: "",
+  currentError: null,
+  transcriptionText: "",
+  spokenText: "",
+  voiceMode: UI.VOICE_MODES_IDLE,
+  audioLevel: 0,
+  isAgentWorking: false,
+  isDictationMode: false,
+  isAlwaysListening: false,
+  agentState: null,
+};
+
+interface Interaction {
   element_id: string;
   interaction_type: string;
-  data: Record<string, any> | null;
+  data: Record<string, unknown> | null;
   timestamp: number;
 }
 
-const COMPONENT_ID = "app-bar";
-
-// === COMPONENT DEFINITION ===
-
-const getMainIcon = (uiState: UIState) => {
-  switch (uiState) {
-    case UI.BAR_STATES_LISTENING:
-      return <Mic size={14} className="text-blue-400" />;
-    case UI.BAR_STATES_TRANSCRIBING:
-      return <Mic size={14} className="animate-pulse text-blue-400" />;
-    case UI.BAR_STATES_SPEAKING:
-      return <Volume2 size={14} className="text-green-400" />;
-    case UI.BAR_STATES_LOADING:
-    case UI.BAR_STATES_SUBMITTING:
-      return <Zap size={14} className="animate-pulse text-yellow-400" />;
-    case UI.BAR_STATES_INPUT:
-    case UI.BAR_STATES_EXPANDING:
-      return <MessageCircle size={14} className="text-white" />;
-    case UI.BAR_STATES_DICTATION_READY:
-      return <Keyboard size={14} className="text-orange-400" />;
-    case UI.BAR_STATES_ALWAYS_LISTENING:
-      return <Mic size={14} className="text-blue-400 animate-pulse" />;
-    default:
-      return <Zap size={14} className="text-white" />;
+async function sendInteraction(type: string, data?: Record<string, unknown>): Promise<void> {
+  const interaction: Interaction = {
+    element_id: COMPONENT_ID,
+    interaction_type: type,
+    data: data ?? null,
+    timestamp: Date.now(),
+  };
+  try {
+    await invoke("ui_handle_interaction", { elementId: COMPONENT_ID, interaction });
+  } catch (error) {
+    console.error("Bar: interaction failed:", error);
   }
-};
+}
 
-const getStatusText = (uiState: UIState, currentError: string | null) => {
-  if (currentError) {
-    return `Error: ${currentError}`;
-  }
+// === ALLOW / DON'T, INLINE ON THE LINE ===
 
-  switch (uiState) {
-    case UI.BAR_STATES_DEFAULT:
-      return "Click to start or use voice commands";
-    case UI.BAR_STATES_EXPANDING:
-      return "Preparing input field...";
-    case UI.BAR_STATES_INPUT:
-      return "Type your request or use voice input";
-    case UI.BAR_STATES_SUBMITTING:
-      return "Sending your request...";
-    case UI.BAR_STATES_LOADING:
-      return "Processing your request...";
-    case UI.BAR_STATES_SPEAKING:
-      return "Speaking response...";
-    case UI.BAR_STATES_LISTENING:
-      return "Listening for your voice...";
-    case UI.BAR_STATES_TRANSCRIBING:
-      return "Converting speech to text...";
-    case UI.BAR_STATES_SUCCESS:
-      return "Task completed successfully!";
-    case UI.BAR_STATES_ERROR:
-      return currentError || "An error occurred";
-    case UI.BAR_STATES_FINISHING:
-      return "Finalizing response...";
-    case UI.BAR_STATES_DICTATION_READY:
-      return "Ready for dictation mode";
-    case UI.BAR_STATES_ALWAYS_LISTENING:
-      return "Always listening for wake words...";
-    default:
-      return "Ready";
-  }
-};
-
-const AudioLevelIndicator = ({
-  uiState,
-  audioLevel,
+function ApprovalButtons({
+  step,
+  theme,
+  onDecided,
 }: {
-  uiState: UIState;
-  audioLevel: number;
-}) => {
-  if (
-    !isOneOf(uiState, [
-      UI.BAR_STATES_LISTENING,
-      UI.BAR_STATES_TRANSCRIBING,
-      UI.BAR_STATES_ALWAYS_LISTENING,
-    ])
-  ) {
-    return null;
-  }
-
-  const normalizedLevel = Math.min(Math.max(audioLevel * 100, 0), 100);
-  const barCount = Math.ceil(normalizedLevel / 20); // 5 bars max
-
+  step: Step;
+  theme: "light" | "dark";
+  onDecided: (toolId: string, state: "approved" | "denied") => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const decide = async (state: "approved" | "denied") => {
+    if (!step.toolId || busy) return;
+    setBusy(true);
+    try {
+      const command = state === "approved" ? "approve_tool_execution" : "deny_tool_execution";
+      const ok = await invoke<boolean>(command, { toolId: step.toolId });
+      if (ok) onDecided(step.toolId, state);
+    } catch (error) {
+      console.error("Bar: approval failed:", error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const quiet = theme === "dark" ? "text-white/70 hover:bg-white/[0.08] hover:text-white" : "text-black/60 hover:bg-black/[0.06] hover:text-black";
   return (
-    <div className="flex items-center gap-0.5">
-      {[...Array(5)].map((_, i) => (
-        <div
-          key={i}
-          className={cn(
-            "w-0.5 h-2 rounded-full transition-all duration-100",
-            i < barCount ? "bg-blue-400" : "bg-white/20"
-          )}
-        />
-      ))}
-    </div>
+    <span className="flex shrink-0 items-center gap-1" data-testid="bar-approval-buttons" role="group" aria-label="Permission">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void decide("approved")}
+        className={cn(
+          "h-6 rounded-full px-2.5 text-[12px] font-medium text-white",
+          "transition-colors hover:bg-[#2B93FF] active:bg-[#0071E3] disabled:opacity-50",
+        )}
+        style={{ backgroundColor: SYSTEM_BLUE }}
+      >
+        Allow
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void decide("denied")}
+        className={cn("h-6 rounded-full px-2.5 text-[12px] transition-colors disabled:opacity-50", quiet)}
+      >
+        Don&rsquo;t
+      </button>
+    </span>
   );
-};
+}
+
+// === THE BAR ===
 
 export function AppBar() {
-  const [barState, setBarState] = useState<BarStateData>({
-    barState: UI.BAR_STATES_DEFAULT,
-    inputValue: "",
-    lastSubmittedValue: "",
-    currentError: null,
-    transcriptionText: "",
-    spokenText: "",
-    voiceMode: UI.VOICE_MODES_IDLE,
-    audioLevel: 0,
-    isAgentWorking: false,
-    isDictationMode: false,
-    isAlwaysListening: false,
-    agentState: null,
-  });
+  const theme = useSystemTheme();
+  const palette = paletteFor(theme);
+  const reducedMotion = useReducedMotion() ?? false;
+  const onDragMouseDown = useDragWindow();
+  const { resizeWindowIfChanged } = useWindowSize(WINDOW_LABEL);
+  const chat = useBarConversation();
 
-  const [localInputValue, setLocalInputValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
+  // ── What Rust says ──
+  const [bar, setBar] = useState<BarStateData>(INITIAL_BAR);
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    let isCleanedUp = false;
-    
-    const setupListener = async () => {
-      try {
-        unlisten = await listen<BarStateData>(
-          EVENTS.BAR_STATE_UPDATE,
-          (event) => {
-            if (isCleanedUp) return; // Prevent updates after cleanup
-            
-            console.log("📨 AppBar: Received state update:", event.payload);
-            const payload = event.payload;
-            if (
-              payload &&
-              typeof payload === "object" &&
-              "barState" in payload
-            ) {
-              setBarState(payload);
-            } else {
-              console.error(
-                "❌ AppBar: Invalid state data received:",
-                payload
-              );
-            }
-          }
-        );
-        console.log("✅ AppBar: Event listener established");
-      } catch (error) {
-        console.error("❌ AppBar: Failed to setup event listener:", error);
-      }
-    };
-    
-    setupListener();
-    
+    let mounted = true;
+    listen<BarStateData>(EVENTS.BAR_STATE_UPDATE, (event) => {
+      if (!mounted) return;
+      const p = event.payload;
+      if (p && typeof p === "object" && "barState" in p) setBar(p);
+    })
+      .then((fn) => {
+        if (mounted) unlisten = fn;
+        else safeCleanupEventListener(fn);
+      })
+      .catch((e) => console.error("Bar: listener setup failed:", e));
     return () => {
-      isCleanedUp = true;
-      if (unlisten) {
-        try {
-          unlisten();
-          console.log("🔄 AppBar: Event listener cleaned up");
-        } catch (error) {
-          console.error("❌ AppBar: Error cleaning up listener:", error);
-        }
-      }
+      mounted = false;
+      safeCleanupEventListener(unlisten);
+    };
+  }, []);
+
+  const [driving, setDriving] = useState<InputControlStatePayload | null>(null);
+  useEventListener<InputControlStatePayload>(EVENTS.INPUT_CONTROL_STATE, setDriving);
+  const isDriving = !!driving?.active;
+
+  // ── The current turn ──
+  const turn = useMemo(() => latestTurn(chat.messages), [chat.messages]);
+  const key = answerKey(turn);
+  const answer = turn.answer;
+  const visibleText = answer?.content.trim() ?? "";
+  const spokenText =
+    answer?.tts_metadata?.total_spoken_text?.trim() ||
+    answer?.tts_metadata?.tts_parts?.map((p) => p.trim()).join(" ") ||
+    "";
+  const answerLine = useMemo(() => firstSentence(visibleText), [visibleText]);
+  const spokenOnly = !visibleText && !!spokenText;
+  const streaming = !!answer?.isStreaming;
+  const speaking = bar.barState === UI.BAR_STATES_SPEAKING;
+  const working = isWorkingState(bar.barState) || chat.isProcessing;
+  const pending = pendingStep(turn);
+
+  // ── The sheet ──
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [spokenOpen, setSpokenOpen] = useState(false);
+  const barRef = useRef(bar);
+  barRef.current = bar;
+  const inputRef = useRef("");
+  const closeSheet = useCallback(() => {
+    setSheetOpen(false);
+    setSpokenOpen(false);
+  }, []);
+
+  // An answer that arrives while the Bar is up opens the sheet when the line
+  // cannot hold it. One that was already there when it mounted (history) does
+  // not. A short answer that grows past one line opens it as it grows.
+  const seenKeyRef = useRef(key);
+  const wantsSheet = sheetWanted({ visibleText, streaming });
+  useEffect(() => {
+    if (key && key !== seenKeyRef.current) {
+      seenKeyRef.current = key;
+      setSpokenOpen(false);
+      if (wantsSheet) setSheetOpen(true);
+    } else if (key && key === seenKeyRef.current && streaming && wantsSheet) {
+      setSheetOpen(true);
+    }
+  }, [key, wantsSheet, streaming]);
+  useEventListener(EVENTS.INPUT_CONTROL_REQUEST, () => setSheetOpen(true));
+  // The person is speaking again: the line is theirs. (Always listening is a
+  // resting state that happens to listen; it keeps the sheet.)
+  useEffect(() => {
+    if (isVoiceState(bar.barState)) closeSheet();
+  }, [bar.barState, closeSheet]);
+
+  // ── Engagement and the drain ──
+  const [hovered, setHovered] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
+  const [engaged, setEngaged] = useState(false);
+  const [drainEpoch, setDrainEpoch] = useState(0);
+  const paused = hovered || focusWithin;
+  const hasAnswer = answerLine.length > 0 || spokenOnly;
+  const draining = drainShouldRun({
+    hasAnswer,
+    streaming,
+    working: working || speaking,
+    approvalPending: !!pending,
+  });
+  const [drained, setDrained] = useState(false);
+  const { progress: drainProgress } = useLinger({
+    running: draining && !engaged && !drained,
+    paused,
+    durationMs: DRAIN_MS,
+    resetKey: `${key}:${visibleText.length}:${spokenText.length}:${drainEpoch}`,
+    onExpire: () => {
+      setDrained(true);
+      closeSheet();
+    },
+  });
+  // A new answer, or new growth of this one, gets a fresh drain.
+  useEffect(() => {
+    setDrained(false);
+  }, [key, visibleText.length, spokenText.length]);
+  // Once the pointer has left and nothing inside has focus, an engaged Bar
+  // starts a fresh drain.
+  useEffect(() => {
+    if (engaged && !hovered && !focusWithin) {
+      setEngaged(false);
+      setDrainEpoch((e) => e + 1);
+    }
+  }, [engaged, hovered, focusWithin]);
+  const engage = useCallback(() => setEngaged(true), []);
+
+  // ── Composer ──
+  const [input, setInput] = useState("");
+  inputRef.current = input;
+  const composerRef = useRef<HTMLInputElement>(null);
+  const composing = isInputState(bar.barState);
+  const skill = useSkillAutocomplete({ value: input, onAccept: setInput, enabled: composing });
+  useEffect(() => {
+    if (bar.inputValue === "" && isIdleState(bar.barState)) setInput("");
+  }, [bar.inputValue, bar.barState]);
+  const changeInput = useCallback((value: string) => {
+    setInput(value);
+    void sendInteraction(UI.INTERACTION_TYPES_INPUT_CHANGE, { value });
+  }, []);
+  const submit = useCallback(
+    (event?: FormEvent) => {
+      event?.preventDefault();
+      event?.stopPropagation();
+      const value = input.trim();
+      if (!value) return;
+      void sendInteraction(UI.INTERACTION_TYPES_SUBMIT, { value });
+      setInput("");
+    },
+    [input],
+  );
+  useEffect(() => {
+    if (!composing) return;
+    const t = window.setTimeout(() => composerRef.current?.focus(), 60);
+    return () => window.clearTimeout(t);
+  }, [composing]);
+
+  // ── OS focus, keys, click ──
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+    getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (!mounted) return;
+        void sendInteraction(focused ? UI.INTERACTION_TYPES_FOCUS : UI.INTERACTION_TYPES_BLUR);
+      })
+      .then((fn) => {
+        if (mounted) unlisten = fn;
+        else fn();
+      })
+      .catch((e) => console.error("Bar: focus listener failed:", e));
+    return () => {
+      mounted = false;
+      unlisten?.();
     };
   }, []);
 
   useEffect(() => {
-    setLocalInputValue(barState.inputValue);
-  }, [barState.inputValue]);
-
-  // === FOCUS MANAGEMENT ===
-  useEffect(() => {
-    if (barState.barState === UI.BAR_STATES_INPUT && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [barState.barState]);
-
-  // FIXME: This is a placeholder. A proper config system should be used.
-  const uiConfig = {
-    opacity: 0.95,
-    showVoiceIndicator: true,
-  };
-
-  // === STANDARDIZED INTERACTION HANDLERS ===
-  const createInteraction = useCallback(
-    (
-      interactionType: string,
-      data?: Record<string, any>
-    ): UIInteractionEvent => ({
-      element_id: COMPONENT_ID,
-      interaction_type: interactionType,
-      data: data || null,
-      timestamp: Date.now(),
-    }),
-    []
-  );
-
-  const sendInteraction = useCallback(
-    async (interaction: UIInteractionEvent) => {
-      try {
-        console.log("🔧 AppBar: Sending interaction:", interaction);
-        await invoke("ui_handle_interaction", {
-          elementId: COMPONENT_ID,
-          interaction,
-        });
-        console.log("✅ AppBar: Interaction sent successfully");
-      } catch (error) {
-        console.error("❌ AppBar: Interaction failed:", error);
-      }
-    },
-    []
-  );
-
-  // === EVENT HANDLERS ===
-  const handleBarClick = useCallback(async () => {
-    const interaction = createInteraction(UI.INTERACTION_TYPES_CLICK);
-    await sendInteraction(interaction);
-  }, [createInteraction, sendInteraction]);
-
-  const handleInputChange = useCallback((value: string) => {
-    setLocalInputValue(value);
-  }, []);
-
-  const handleSubmit = useCallback(
-    async (e: FormEvent) => {
-      e.preventDefault();
-      const trimmedValue = localInputValue.trim();
-      if (trimmedValue) {
-        const interaction = createInteraction(UI.INTERACTION_TYPES_SUBMIT, {
-          value: trimmedValue,
-        });
-        await sendInteraction(interaction);
-      }
-    },
-    [localInputValue, createInteraction, sendInteraction]
-  );
-
-  const handleInputFocus = useCallback(async () => {
-    const interaction = createInteraction(UI.INTERACTION_TYPES_FOCUS);
-    await sendInteraction(interaction);
-  }, [createInteraction, sendInteraction]);
-
-  const handleInputBlur = useCallback(async () => {
-    const interaction = createInteraction(UI.INTERACTION_TYPES_BLUR);
-    await sendInteraction(interaction);
-  }, [createInteraction, sendInteraction]);
-
-  // === STYLING ===
-  const getContainerStyles = () => {
-    let bgColor = "bg-black/90";
-
-    switch (barState.voiceMode) {
-      case UI.VOICE_MODES_DICTATION:
-        bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
-        break;
-      case UI.VOICE_MODES_AGENT:
-        bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
-        break;
-      default:
-        if (barState.isDictationMode) {
-          bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
-        } else if (barState.isAgentWorking) {
-          bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (working) {
+          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
+        } else if (sheetOpen) {
+          closeSheet();
+          setDrained(true);
+        } else if (composing) {
+          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
         }
-        break;
+      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        void sendInteraction(UI.INTERACTION_TYPES_ENTER);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [working, sheetOpen, composing, closeSheet]);
+
+  const idle = isIdleState(bar.barState);
+  const onStripClick = useCallback(() => {
+    if (idle) void sendInteraction(UI.INTERACTION_TYPES_CLICK);
+  }, [idle]);
+
+  // ── The line ──
+  const posture = postureFor({ state: bar.barState, driving: isDriving });
+  const question = turn.question || bar.lastSubmittedValue;
+  const segments = useMemo(
+    () =>
+      lineFor({
+        state: bar.barState,
+        transcriptionText: bar.transcriptionText,
+        transcriptionProvisional: bar.transcriptionProvisional,
+        spokenText: bar.spokenText || spokenText,
+        currentError: bar.currentError,
+        question,
+        turn,
+        drivingLabel: isDriving && driving ? drivingLabel(driving) : null,
+        answerLine,
+        spokenOnly,
+      }),
+    [bar, question, turn, isDriving, driving, answerLine, spokenOnly, spokenText],
+  );
+  const dot = dotFor(bar.barState, theme, isDriving);
+  const rail = railFor({
+    state: bar.barState,
+    audioLevel: bar.audioLevel,
+    segments,
+    answerLength: visibleText.length,
+    streaming,
+    drain: draining && !engaged && !drained ? drainProgress : drained ? 0 : null,
+  });
+
+  // The rail reaches a bead: measured on screen after each render of the line,
+  // so the fill lands on the bead wherever the words put it.
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [beadX, setBeadX] = useState<number | null>(null);
+  const lastBead = (() => {
+    for (let i = segments.length - 1; i >= 0; i -= 1) if (segments[i].bead) return i;
+    return null;
+  })();
+  const beadTarget =
+    rail.kind === "toBead" || rail.kind === "failed" ? rail.index : rail.kind === "streaming" ? lastBead : null;
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    if (!strip || beadTarget === null) {
+      setBeadX(null);
+      return;
     }
-
-    // Override for specific states
-    if (barState.barState === UI.BAR_STATES_ERROR) {
-      bgColor = "bg-gradient-to-r from-red-600/90 to-red-700/90";
-    } else if (barState.barState === UI.BAR_STATES_SUCCESS) {
-      bgColor = "bg-gradient-to-r from-emerald-600/90 to-emerald-700/90";
-    } else if (barState.barState === UI.BAR_STATES_ALWAYS_LISTENING) {
-      bgColor = "bg-gradient-to-r from-blue-500/98 to-cyan-600/98";
+    const el = strip.querySelector<HTMLElement>(`[data-bead-index="${beadTarget}"]`);
+    if (!el) {
+      setBeadX(null);
+      return;
     }
+    const x = el.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+    setBeadX(Math.round(x));
+  }, [beadTarget, segments, posture]);
 
-    const sizeStyles = isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [UI.BAR_STATES_DEFAULT])
-      ? "h-[20px] w-[60px] px-2"
-      : "h-[50px] w-[280px] px-4";
+  // ── The sheet's height ──
+  const [sheetContentH, setSheetContentH] = useState(SHEET_MIN_HEIGHT);
+  const [measureEl, setMeasureEl] = useState<HTMLDivElement | null>(null);
+  const sheetHasFooter = !!visibleText && !!spokenText;
+  useEffect(() => {
+    if (!measureEl || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const h = entry.contentRect.height;
+      setSheetContentH(SHEET_PAD_TOP + Math.ceil(h) + SHEET_PAD_BOTTOM + (sheetHasFooter ? SHEET_FOOTER_H : 0));
+    });
+    observer.observe(measureEl);
+    return () => observer.disconnect();
+  }, [measureEl, sheetHasFooter]);
+  useEffect(() => {
+    if (!sheetOpen) setSheetContentH(SHEET_MIN_HEIGHT);
+  }, [sheetOpen]);
+  const sheetH = sheetOpen ? sheetHeightFor(sheetContentH) : 0;
+  const suggestionExtra = skill.open && composing ? skill.suggestions.length * 29 + 20 : 0;
+  const win = windowSize(sheetH, suggestionExtra);
 
-    const clickable = isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [
-      UI.BAR_STATES_DEFAULT,
-      UI.BAR_STATES_DICTATION_READY,
-    ])
-      ? "cursor-pointer"
-      : "";
+  // ── Window protocol ──
+  // Growing: resize the window, then slide the sheet. Shrinking: slide the
+  // sheet up, then shrink the window once it has gone. The window is anchored
+  // at its top and never changes width, so the strip itself never moves.
+  const [shown, setShown] = useState({ open: false, height: 0 });
+  const [ready, setReady] = useState(false);
+  const prevWinRef = useRef<{ width: number; height: number } | null>(null);
+  const shrinkTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = prevWinRef.current;
+    if (shrinkTimerRef.current) {
+      window.clearTimeout(shrinkTimerRef.current);
+      shrinkTimerRef.current = null;
+    }
+    let cancelled = false;
+    const target = { open: sheetOpen, height: sheetH };
+    if (prev === null) {
+      // First paint: size the window before the strip shows at all, so it is
+      // never seen clipped inside the window the last look left behind.
+      void (async () => {
+        await resizeWindowIfChanged(win);
+        if (cancelled) return;
+        prevWinRef.current = win;
+        setShown(target);
+        setReady(true);
+      })();
+    } else if (win.height > prev.height) {
+      void (async () => {
+        await resizeWindowIfChanged(win);
+        if (cancelled) return;
+        prevWinRef.current = win;
+        setShown(target);
+      })();
+    } else {
+      setShown(target);
+      shrinkTimerRef.current = window.setTimeout(() => {
+        void resizeWindowIfChanged(win);
+        prevWinRef.current = win;
+      }, SHRINK_DELAY_MS);
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win.width, win.height, sheetOpen, sheetH, resizeWindowIfChanged]);
+  useEffect(
+    () => () => {
+      if (shrinkTimerRef.current) window.clearTimeout(shrinkTimerRef.current);
+    },
+    [],
+  );
 
-    return cn(
-      bgColor,
-      sizeStyles,
-      clickable,
-      "rounded-full backdrop-blur-xl border border-white/20 transition-all duration-300 ease-out shadow-lg"
+  // ── Render ──
+  const ink = palette.ink;
+  const hairline = `0 0 0 0.5px ${palette.edge}`;
+  const railLength = BAR_WIDTH;
+  const listening = posture === "listen";
+  const restEmpty = posture === "rest" && segments.length === 0;
+
+  const renderSegment = (segment: Segment, i: number) => {
+    const isLast = i === segments.length - 1;
+    const bead = segment.bead ? (
+      <span data-bead-index={i} className="flex shrink-0 items-center">
+        <Bead segment={segment} theme={theme} title={segment.collapsed ? segment.text : undefined} />
+      </span>
+    ) : null;
+    if (segment.collapsed) {
+      return (
+        <span key={i} className="flex shrink-0 items-center" data-testid="bar-step-collapsed">
+          {bead}
+        </span>
+      );
+    }
+    const isAnswer = segment.kind === "answer" && !!visibleText;
+    return (
+      <span
+        key={i}
+        className={cn(
+          "flex min-w-0 items-center gap-2",
+          // The newest segment is the one being read: it always gets room.
+          // An approval needs enough for its two buttons; a failure, for why.
+          isLast
+            ? segment.kind === "approval" || segment.failed
+              ? "min-w-[62%] flex-1"
+              : "min-w-[38%] flex-1"
+            : segment.kind === "question"
+              ? pending
+                ? "max-w-[28%] shrink"
+                : "max-w-[60%] shrink"
+              : "max-w-[40%] shrink",
+        )}
+      >
+        {bead}
+        <Words
+          segment={segment}
+          theme={theme}
+          tail={listening}
+          className="flex-1"
+          onClick={
+            isAnswer
+              ? () => {
+                  engage();
+                  setSheetOpen((v) => !v);
+                }
+              : undefined
+          }
+          ariaLabel={isAnswer ? (sheetOpen ? "Hide the full answer" : "Show the full answer") : undefined}
+          ariaExpanded={isAnswer ? sheetOpen : undefined}
+        />
+        {segment.kind === "approval" && segment.step && (
+          <ApprovalButtons step={segment.step} theme={theme} onDecided={chat.handleApprovalUpdate} />
+        )}
+      </span>
     );
   };
 
-  const onDragMouseDown = useDragWindow();
+  const composer = (
+    <form onSubmit={submit} className="relative flex min-w-0 flex-1 items-center" data-testid="bar-composer">
+      <input
+        ref={composerRef}
+        type="text"
+        value={input}
+        onChange={(e) => changeInput(e.target.value)}
+        onKeyDown={skill.handleKeyDown}
+        aria-label="Ask Juno"
+        placeholder={turn.question ? "Follow up" : "Ask Juno"}
+        disabled={bar.barState !== UI.BAR_STATES_INPUT}
+        className="w-full bg-transparent text-[13px] tracking-[-0.01em] outline-none placeholder:opacity-40"
+        style={{ color: ink }}
+      />
+      <SkillGhostText
+        value={input}
+        ghostText={skill.ghostText}
+        className="flex items-center text-[13px] tracking-[-0.01em]"
+        ghostClassName="opacity-30"
+      />
+    </form>
+  );
+
+  // In the compose posture the question slot is the text field; the rest of
+  // the line (beads, the answer) stays where it was.
+  const lineChildren = (() => {
+    if (posture === "compose") {
+      const rest = segments.filter((s) => s.kind !== "question");
+      return [<span key="composer" className={cn("flex min-w-0 items-center", rest.length ? "min-w-[180px] flex-1" : "flex-1")}>{composer}</span>, ...rest.map((s) => renderSegment(s, segments.indexOf(s)))];
+    }
+    if (restEmpty) {
+      return (
+        <span key="empty" className="min-w-0 flex-1 text-[13px] leading-none tracking-[-0.01em]" style={{ color: ink, opacity: 0.35 }} data-testid="bar-empty">
+          Ask Juno
+        </span>
+      );
+    }
+    return segments.map(renderSegment);
+  })();
 
   return (
-    <div className="relative cursor-grab active:cursor-grabbing" onMouseDown={onDragMouseDown}>
-      <button
-        type="button"
-        aria-label="Activate assistant"
-        className={getContainerStyles()}
-        style={{ opacity: uiConfig.opacity }}
-        onClick={
-          isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY])
-            ? handleBarClick
-            : undefined
-        }
-        disabled={!isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [UI.BAR_STATES_DEFAULT, UI.BAR_STATES_DICTATION_READY])}
+    <div
+      className="relative h-screen w-screen cursor-grab overflow-hidden bg-transparent select-none active:cursor-grabbing"
+      onMouseDown={onDragMouseDown}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocusCapture={() => setFocusWithin(true)}
+      onBlurCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
+      }}
+      onClickCapture={(e) => {
+        if (sheetOpen && (e.target as HTMLElement).closest("button, input, a")) engage();
+      }}
+      data-testid="bar-root"
+      data-posture={posture}
+      data-theme={theme}
+      data-sheet={shown.open ? "open" : "closed"}
+      style={{ opacity: ready ? 1 : 0, transition: "opacity 120ms ease" }}
+    >
+      {/* The sheet slides from under the strip's bottom edge. Its top is tucked
+          under the strip's corner radius so the two read as one object. */}
+      <div
+        className="absolute overflow-hidden"
+        style={{
+          left: SHADOW_PAD,
+          top: SHADOW_PAD + BAR_HEIGHT - BAR_RADIUS,
+          width: BAR_WIDTH,
+          height: shown.height + BAR_RADIUS,
+          pointerEvents: shown.open ? "auto" : "none",
+        }}
+        data-testid="bar-sheet-clip"
       >
-        {/* Default State */}
-        {(barState.barState === UI.BAR_STATES_DEFAULT ||
-          barState.barState === UI.BAR_STATES_DICTATION_READY ||
-          barState.barState === UI.BAR_STATES_FINISHING) && (
-          <div className="flex items-center gap-2">
-            {getMainIcon(barState.barState || UI.BAR_STATES_DEFAULT)}
-            {uiConfig.showVoiceIndicator &&
-              (barState.voiceMode !== UI.VOICE_MODES_IDLE ||
-                barState.isDictationMode ||
-                barState.isAgentWorking) && (
-                <VoiceStatusIndicator variant="compact" className="ml-1" />
-              )}
-            {barState.isAlwaysListening && (
-              <div
-                className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"
-                             />
-            )}
-          </div>
-        )}
-
-        {/* Input State */}
-        {(barState.barState === UI.BAR_STATES_EXPANDING ||
-          barState.barState === UI.BAR_STATES_INPUT) && (
-          <form
-            onSubmit={handleSubmit}
-            className={cn(
-              "flex items-center justify-between w-full h-full gap-3",
-              "transition-opacity duration-300 ease-in-out",
-              barState.barState === UI.BAR_STATES_INPUT
-                ? "opacity-100"
-                : "opacity-0"
-            )}
-                     >
-            <div className="flex items-center gap-2">
-              {getMainIcon(barState.barState || UI.BAR_STATES_INPUT)}
-              <input
-                ref={inputRef}
-                type="text"
-                value={localInputValue}
-                onChange={(e) => handleInputChange(e.target.value)}
-                onFocus={handleInputFocus}
-                onBlur={handleInputBlur}
-                placeholder="Ask me anything..."
-                className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
-                disabled={barState.barState !== UI.BAR_STATES_INPUT}
-              />
-            </div>
-            <button
-              type="submit"
-              className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
-              disabled={barState.barState !== UI.BAR_STATES_INPUT}
-            >
-              <Send size={14} />
-            </button>
-          </form>
-        )}
-
-        {/* Active States */}
-        {isOneOf((barState.barState || UI.BAR_STATES_DEFAULT), [
-          UI.BAR_STATES_SUBMITTING,
-          UI.BAR_STATES_LOADING,
-          UI.BAR_STATES_SPEAKING,
-          UI.BAR_STATES_DICTATING,
-          UI.BAR_STATES_TRANSCRIBING,
-          UI.BAR_STATES_AGENT_RESPONDING,
-          UI.BAR_STATES_LISTENING,
-        ]) && (
+        <motion.div
+          data-testid="bar-sheet"
+          data-open={shown.open ? "true" : "false"}
+          initial={false}
+          animate={{ y: shown.open ? 0 : -(shown.height + BAR_RADIUS + 8), opacity: shown.open ? 1 : 0 }}
+          transition={reducedMotion ? { duration: 0.15, ease: "easeOut" } : { type: "spring", stiffness: 380, damping: 36, mass: 1 }}
+          className="absolute left-0 top-0 flex w-full flex-col"
+          style={{
+            height: shown.height + BAR_RADIUS,
+            backgroundColor: palette.sheet,
+            borderRadius: `0 0 ${BAR_RADIUS}px ${BAR_RADIUS}px`,
+            boxShadow: `${hairline}, ${palette.shadow}`,
+            color: ink,
+          }}
+        >
           <div
-            className="flex items-center justify-between w-full h-full"
-                     >
-            <div className="flex items-center gap-2">
-              {getMainIcon(barState.barState || UI.BAR_STATES_DEFAULT)}
-              <span
-                className="text-sm font-medium truncate"
-                             >
-                {getStatusText(
-                  barState.barState || UI.BAR_STATES_DEFAULT,
-                  barState.currentError
-                )}
-              </span>
+            data-no-drag
+            onScroll={engage}
+            className={cn("narrator-scroll min-h-0 flex-1 cursor-auto select-text overflow-y-auto px-4", theme === "dark" && "dark")}
+            style={{ paddingTop: SHEET_PAD_TOP, paddingBottom: SHEET_PAD_BOTTOM }}
+          >
+            <div ref={setMeasureEl} className="text-[13px] leading-[1.55]" style={{ color: ink }}>
+              <InputControlNotices className="px-0 pt-0" />
+              {visibleText ? (
+                <MixedContentRenderer content={visibleText} isStreaming={streaming} />
+              ) : spokenText ? (
+                <p className="italic opacity-70" data-testid="bar-spoken-only">
+                  {spokenText}
+                </p>
+              ) : null}
+              {visibleText && spokenText && spokenOpen && (
+                <p className="mt-2 border-t pt-2 text-[12px] italic opacity-60" style={{ borderColor: palette.edge }} data-testid="bar-spoken">
+                  {spokenText}
+                </p>
+              )}
             </div>
-            <AudioLevelIndicator
-              uiState={barState.barState || UI.BAR_STATES_DEFAULT}
-              audioLevel={barState.audioLevel}
-            />
           </div>
-        )}
+          {sheetHasFooter && (
+            <footer className="flex shrink-0 items-center px-3" style={{ height: SHEET_FOOTER_H }}>
+              <button
+                type="button"
+                onClick={() => {
+                  engage();
+                  setSpokenOpen((v) => !v);
+                }}
+                aria-pressed={spokenOpen}
+                aria-label="Spoken aloud"
+                title="Spoken aloud"
+                className={cn(
+                  "flex size-6 shrink-0 items-center justify-center rounded-full transition-colors",
+                  theme === "dark"
+                    ? spokenOpen ? "bg-white/[0.12] text-white/85" : "text-white/40 hover:bg-white/[0.08] hover:text-white/80"
+                    : spokenOpen ? "bg-black/[0.08] text-black/80" : "text-black/40 hover:bg-black/[0.05] hover:text-black/75",
+                )}
+              >
+                <Volume2 className="size-3.5" />
+              </button>
+            </footer>
+          )}
+        </motion.div>
+      </div>
 
-        {/* Other states would go here similar to FloatingBar... */}
-      </button>
+      {/* The strip. Fixed size; only what is on it changes. */}
+      <div
+        ref={stripRef}
+        data-testid="bar-strip"
+        onClick={idle ? onStripClick : undefined}
+        className={cn("absolute z-10 overflow-hidden", idle && "cursor-pointer")}
+        style={{
+          left: SHADOW_PAD,
+          top: SHADOW_PAD,
+          width: BAR_WIDTH,
+          height: BAR_HEIGHT,
+          borderRadius: BAR_RADIUS,
+          backgroundColor: palette.surface,
+          boxShadow: `${hairline}, ${palette.shadow}`,
+          color: ink,
+          transition: "background-color 200ms ease",
+        }}
+      >
+        <div className="flex h-full w-full items-center gap-2 pl-3.5 pr-3.5" data-testid="bar-line">
+          <NarratorDot look={dot} />
+          {lineChildren}
+        </div>
+        <RailBar rail={rail} beadX={beadX} length={railLength} palette={palette} reducedMotion={reducedMotion} />
+      </div>
+
+      {composing && skill.open && (
+        <div
+          className="absolute z-20"
+          style={{ left: SHADOW_PAD + 12, top: SHADOW_PAD + BAR_HEIGHT + 8, width: BAR_WIDTH - 24 }}
+        >
+          <SkillSuggestionList
+            variant="bar"
+            suggestions={skill.suggestions}
+            selectedIndex={skill.selectedIndex}
+            onSelect={skill.accept}
+            onHighlight={skill.setSelectedIndex}
+          />
+        </div>
+      )}
     </div>
   );
 }
