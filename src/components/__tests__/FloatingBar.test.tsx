@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -93,10 +94,6 @@ vi.mock("@tauri-apps/api/webview", () => ({
 
 vi.mock("@/hooks/useWindowSize", () => ({
   useWindowSize: () => ({ resizeWindowIfChanged }),
-  // FloatingBar resets the resize baseline whenever it moves the window outside
-  // the resize path (well snap, display hop, launch restore). The mock must
-  // expose it or those code paths throw at render time.
-  resetWindowAnchor: vi.fn(),
 }));
 
 vi.mock("@/hooks/useAgentSessions", () => ({
@@ -123,13 +120,20 @@ const barState = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+/**
+ * The pill is drawn from the frame the window has been given, so a state
+ * change shows only once the (mocked) resize has resolved: every driver flushes
+ * that promise before handing back.
+ */
+const flush = () => act(async () => {});
+
 const setBarState = (overrides: Record<string, unknown>) =>
-  act(() => {
+  act(async () => {
     listenHandlers.get("bar-state-update")?.({ payload: barState(overrides) });
   });
 
 const fire = (event: string, payload: unknown) =>
-  act(() => {
+  act(async () => {
     eventHandlers.get(event)?.(payload);
   });
 
@@ -147,6 +151,7 @@ const hover = async (inside: boolean) => {
     });
   });
   if (!inside) await settle(LEAVE_VERIFY_MS);
+  await flush();
 };
 
 /** The native tracking area forwarding the cursor position, then a rAF flush. */
@@ -175,10 +180,10 @@ const settle = async (ms: number) => {
 const submitUserMessage = (content: string) =>
   fire("user-message-submitted", { content, timestamp: 1_700_000_000_000 });
 
-const streamAssistant = (id: string, text: string) => {
-  fire("agent-stream-start", { message_id: id });
-  fire("agent-text-stream", { chunk: text, message_id: id });
-  fire("agent-stream-end", { message_id: id, complete_text: text, agent_state: "Finished" });
+const streamAssistant = async (id: string, text: string) => {
+  await fire("agent-stream-start", { message_id: id });
+  await fire("agent-text-stream", { chunk: text, message_id: id });
+  await fire("agent-stream-end", { message_id: id, complete_text: text, agent_state: "Finished" });
 };
 
 async function renderBar() {
@@ -243,23 +248,29 @@ afterEach(() => {
 // ── Tests ────────────────────────────────────────────────────────────
 
 describe("floatingBarWindowSize", () => {
-  it("is exactly the pill plus shadow padding, anchored on the pill's centre", () => {
+  it("is exactly the pill plus one pad each side, anchored on the band's near edge in every layout", () => {
     expect(floatingBarWindowSize({ layout: "compact", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 88, height: 66, anchorY: 33 });
+      .toEqual({ width: 88, height: 76, anchorY: 16 });
     expect(floatingBarWindowSize({ layout: "hover", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 180, height: 66, anchorY: 33 });
+      .toEqual({ width: 180, height: 76, anchorY: 16 });
     expect(floatingBarWindowSize({ layout: "voice", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 292, height: 66, anchorY: 33 });
+      .toEqual({ width: 292, height: 76, anchorY: 16 });
     // Status shares voice's width so the bar does not lurch wider the moment
     // the mic closes, for a word and a stop button.
     expect(floatingBarWindowSize({ layout: "status", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 292, height: 66, anchorY: 33 });
+      .toEqual({ width: 292, height: 76, anchorY: 16 });
+    // Full used to carry its own pad and band (24 and 44 against 16 and 34),
+    // which moved the anchor by 13px every time the pill went full: the lurch
+    // on pane close. Same height, same anchor, whatever the layout.
     expect(floatingBarWindowSize({ layout: "full", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 467, height: 92, anchorY: 46 });
+      .toEqual({ width: 451, height: 76, anchorY: 16 });
+    expect(
+      floatingBarWindowSize({ layout: "full", paneOpen: false, rosterVisible: false, composerGrowth: 36 }),
+    ).toEqual({ width: 451, height: 112, anchorY: 16 });
     expect(floatingBarWindowSize({ layout: "full", paneOpen: true, rosterVisible: false }))
-      .toEqual({ width: 467, height: 460, anchorY: 46 });
+      .toEqual({ width: 451, height: 444, anchorY: 16 });
     expect(floatingBarWindowSize({ layout: "full", paneOpen: true, rosterVisible: true }))
-      .toEqual({ width: 467, height: 494, anchorY: 46 });
+      .toEqual({ width: 451, height: 478, anchorY: 16 });
   });
 });
 
@@ -357,7 +368,13 @@ describe("FloatingBar", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
-    expect(lastResize()).toMatchObject({ width: 88, height: 66, anchorY: 33 });
+    // The launch placement sets the compact frame directly, in the well, and
+    // the resize controller starts from it: nothing else touches the window.
+    expect(invoke).toHaveBeenCalledWith(
+      "set_bar_frame",
+      expect.objectContaining({ width: 88, height: 76 }),
+    );
+    expect(resizeWindowIfChanged).not.toHaveBeenCalled();
   });
 
   it("grows on hover to reveal the mic and type buttons, and shrinks back after the animation", async () => {
@@ -369,23 +386,24 @@ describe("FloatingBar", () => {
     expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Type to Juno" })).toBeInTheDocument();
     // Growing: the window makes room straight away.
-    expect(lastResize()).toMatchObject({ width: 180, height: 66, anchorY: 33 });
+    expect(lastResize()).toMatchObject({ width: 180, height: 76, anchorY: 16 });
 
     await hover(false);
     expect(bar()).toHaveAttribute("data-layout", "compact");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     // Shrinking: the window waits for the pill to animate down first.
-    expect(lastResize()).toMatchObject({ width: 180, height: 66, anchorY: 33 });
+    expect(lastResize()).toMatchObject({ width: 180, height: 76, anchorY: 16 });
     act(() => {
       vi.advanceTimersByTime(SHRINK_DELAY_MS);
     });
-    expect(lastResize()).toMatchObject({ width: 88, height: 66, anchorY: 33 });
+    expect(lastResize()).toMatchObject({ width: 88, height: 76, anchorY: 16 });
   });
 
   it("also treats DOM hover as hover, for when Juno is the active app", async () => {
     await renderBar();
 
     fireEvent.mouseEnter(bar().parentElement!);
+    await flush();
     expect(bar()).toHaveAttribute("data-layout", "hover");
     fireEvent.mouseLeave(bar().parentElement!);
     await settle(LEAVE_VERIFY_MS);
@@ -420,11 +438,11 @@ describe("FloatingBar", () => {
   it("shows listening status with a stop control while the mic is open", async () => {
     await renderBar();
 
-    setBarState({ barState: "listening", audioLevel: 0.6 });
+    await setBarState({ barState: "listening", audioLevel: 0.6 });
 
     expect(bar()).toHaveAttribute("data-layout", "voice");
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("listening");
-    expect(lastResize()).toMatchObject({ width: 292, height: 66, anchorY: 33 });
+    expect(lastResize()).toMatchObject({ width: 292, height: 76, anchorY: 16 });
 
     // "Stop" used to be the only control and it submitted what you had said.
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -434,7 +452,7 @@ describe("FloatingBar", () => {
 
   it("can abandon a sentence without sending it", async () => {
     await renderBar();
-    setBarState({ barState: "listening", audioLevel: 0.6 });
+    await setBarState({ barState: "listening", audioLevel: 0.6 });
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel without sending" }));
     await act(async () => {});
@@ -445,7 +463,7 @@ describe("FloatingBar", () => {
 
   it("can switch from talking to typing without sending", async () => {
     await renderBar();
-    setBarState({ barState: "listening", audioLevel: 0.6 });
+    await setBarState({ barState: "listening", audioLevel: 0.6 });
 
     fireEvent.click(screen.getByRole("button", { name: "Type instead" }));
     await act(async () => {});
@@ -456,11 +474,11 @@ describe("FloatingBar", () => {
   it("renders a live partial as dimmed provisional text, then solid on final", async () => {
     await renderBar();
 
-    setBarState({ barState: "listening", isDictationMode: true, audioLevel: 0.4 });
+    await setBarState({ barState: "listening", isDictationMode: true, audioLevel: 0.4 });
 
     // With live transcription on, the backend sets transcribing with the
     // cumulative provisional text every ~600ms while the mic is still open.
-    setBarState({
+    await setBarState({
       barState: "transcribing",
       isDictationMode: true,
       transcriptionText: "hello there",
@@ -471,7 +489,7 @@ describe("FloatingBar", () => {
     expect(status).toHaveClass("italic");
 
     // A later partial replaces, never appends, and stays provisional.
-    setBarState({
+    await setBarState({
       barState: "transcribing",
       isDictationMode: true,
       transcriptionText: "hello there world",
@@ -481,7 +499,7 @@ describe("FloatingBar", () => {
     expect(status).not.toHaveTextContent("hello there hello there");
 
     // The final result swaps the same span to solid.
-    setBarState({
+    await setBarState({
       barState: "transcribing",
       transcriptionText: "hello there world",
       transcriptionProvisional: false,
@@ -493,13 +511,13 @@ describe("FloatingBar", () => {
   it("shows a processing state, not the listening look, once the mic closes", async () => {
     await renderBar();
 
-    setBarState({ barState: "listening", audioLevel: 0.6 });
+    await setBarState({ barState: "listening", audioLevel: 0.6 });
     expect(bar()).toHaveAttribute("data-layout", "voice");
 
     // The backend sets transcribing the instant the mic stops. The bar keeps
     // the same width it had while listening: the old behaviour jumped from
     // 220px to 419px mid-sentence to show one more word.
-    setBarState({ barState: "transcribing" });
+    await setBarState({ barState: "transcribing" });
     expect(bar()).toHaveAttribute("data-layout", "status");
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("transcribing");
     // A processing state has a Stop control, and no live audio bars.
@@ -541,7 +559,7 @@ describe("FloatingBar", () => {
 
   it("offers a cancel, and nothing to send, while a wake phrase is being taken down", async () => {
     await renderBar();
-    setBarState({ barState: "always_listening", isAlwaysListening: true });
+    await setBarState({ barState: "always_listening", isAlwaysListening: true });
 
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("always listening");
     // The engine decides when the sentence ends, so there is nothing to commit
@@ -567,7 +585,7 @@ describe("FloatingBar", () => {
       "ui_handle_interaction",
       interaction("focus", { isFocused: true }),
     );
-    expect(lastResize()).toMatchObject({ width: 467, height: 92, anchorY: 46 });
+    expect(lastResize()).toMatchObject({ width: 451, height: 76, anchorY: 16 });
   });
 
   it("submits typed input through the standard bar interaction and clears it", async () => {
@@ -644,7 +662,7 @@ describe("FloatingBar", () => {
   it("shows the input while the backend is in its input states even if it was not opened here", async () => {
     await renderBar();
 
-    setBarState({ barState: "expanding" });
+    await setBarState({ barState: "expanding" });
     const input = screen.getByPlaceholderText("Ask Juno");
     expect(input).toBeEnabled();
     fireEvent.change(input, { target: { value: "hel" } });
@@ -776,7 +794,7 @@ describe("FloatingBar", () => {
   it("opens the chat pane with the user's message when the backend announces a query", async () => {
     await renderBar();
 
-    submitUserMessage("Play my liked songs on Spotify");
+    await submitUserMessage("Play my liked songs on Spotify");
 
     const pane = screen.getByTestId("bar-chat-pane");
     expect(pane).toBeInTheDocument();
@@ -784,17 +802,17 @@ describe("FloatingBar", () => {
     expect(screen.getByText("Play my liked songs on Spotify")).toBeInTheDocument();
     expect(screen.getByTestId("bar-chat-pane-status")).toHaveTextContent("working");
     expect(bar()).toHaveAttribute("data-layout", "full");
-    expect(lastResize()).toMatchObject({ width: 467, height: 460, anchorY: 46 });
+    expect(lastResize()).toMatchObject({ width: 451, height: 444, anchorY: 16 });
   });
 
   it("streams the assistant response into the pane and settles when the agent goes idle", async () => {
     await renderBar();
 
-    submitUserMessage("What time is it?");
-    streamAssistant("m1", "It is half past nine.");
+    await submitUserMessage("What time is it?");
+    await streamAssistant("m1", "It is half past nine.");
     // `agent-active` is the run, and only the run: this is the agent reporting
     // that it has finished working.
-    fire("agent-active", false);
+    await fire("agent-active", false);
 
     expect(screen.getByText("It is half past nine.")).toBeInTheDocument();
     expect(screen.getByTestId("bar-chat-pane-status")).toHaveTextContent("esc to close");
@@ -803,12 +821,12 @@ describe("FloatingBar", () => {
   it("keeps showing progress when the microphone closes mid-run", async () => {
     await renderBar();
 
-    submitUserMessage("Open Safari");
+    await submitUserMessage("Open Safari");
     // A spoken query closes the microphone as soon as the person stops
     // speaking, which is before the agent has done anything. While capture and
     // execution shared `agent-active`, this teardown reached the pane as "the
     // agent stopped" and the status settled while the agent worked on.
-    fire("agent-capture-active", false);
+    await fire("agent-capture-active", false);
 
     expect(screen.getByTestId("bar-chat-pane-status")).toHaveTextContent("working");
   });
@@ -816,10 +834,10 @@ describe("FloatingBar", () => {
   it("keeps the pill as an input for follow-ups while the pane is open", async () => {
     await renderBar();
 
-    submitUserMessage("Hello");
-    streamAssistant("m1", "Hi there.");
-    fire("agent-active", false);
-    setBarState({ barState: "default" });
+    await submitUserMessage("Hello");
+    await streamAssistant("m1", "Hi there.");
+    await fire("agent-active", false);
+    await setBarState({ barState: "default" });
 
     expect(screen.getByPlaceholderText("Follow up…")).toBeInTheDocument();
   });
@@ -827,8 +845,8 @@ describe("FloatingBar", () => {
   it("shows status and a Stop control instead of the input while the agent works", async () => {
     await renderBar();
 
-    submitUserMessage("Open Safari");
-    setBarState({ barState: "loading", agentState: "working", isAgentWorking: true });
+    await submitUserMessage("Open Safari");
+    await setBarState({ barState: "loading", agentState: "working", isAgentWorking: true });
 
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("working");
@@ -841,32 +859,32 @@ describe("FloatingBar", () => {
     vi.useFakeTimers();
     await renderBar();
 
-    submitUserMessage("Hello");
+    await submitUserMessage("Hello");
     // Still processing: Escape belongs to the Rust stop-key monitor.
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getByTestId("bar-chat-pane")).toBeInTheDocument();
 
-    streamAssistant("m1", "Hi.");
-    fire("agent-active", false);
+    await streamAssistant("m1", "Hi.");
+    await fire("agent-active", false);
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
     act(() => {
       vi.advanceTimersByTime(SHRINK_DELAY_MS);
     });
-    expect(lastResize()).toMatchObject({ width: 88, height: 66, anchorY: 33 });
+    expect(lastResize()).toMatchObject({ width: 88, height: 76, anchorY: 16 });
   });
 
   it("reopens a dismissed pane when the next query arrives", async () => {
     await renderBar();
 
-    submitUserMessage("First");
-    streamAssistant("m1", "One.");
-    fire("agent-active", false);
+    await submitUserMessage("First");
+    await streamAssistant("m1", "One.");
+    await fire("agent-active", false);
     fireEvent.click(screen.getByRole("button", { name: "Dismiss conversation" }));
     expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
 
-    submitUserMessage("Second");
+    await submitUserMessage("Second");
 
     expect(screen.getByTestId("bar-chat-pane")).toBeInTheDocument();
     expect(screen.getByText("First")).toBeInTheDocument();
@@ -876,9 +894,9 @@ describe("FloatingBar", () => {
   it("clears the conversation but stays open and ready to type on New chat", async () => {
     await renderBar();
 
-    submitUserMessage("Hello");
-    streamAssistant("m1", "Hi.");
-    fire("agent-active", false);
+    await submitUserMessage("Hello");
+    await streamAssistant("m1", "Hi.");
+    await fire("agent-active", false);
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     await act(async () => {});
 
@@ -890,17 +908,17 @@ describe("FloatingBar", () => {
     // to the old one behind an apparently empty pane.
     expect(invoke).toHaveBeenCalledWith("new_conversation");
 
-    submitUserMessage("Again");
+    await submitUserMessage("Again");
     expect(screen.getByText("Again")).toBeInTheDocument();
   });
 
   /** A pane open on an empty conversation: the only route to the example prompts. */
   async function openEmptyPane() {
     await renderBar();
-    submitUserMessage("Hello");
-    streamAssistant("m1", "Hi.");
-    fire("agent-active", false);
-    setBarState({ barState: "default" });
+    await submitUserMessage("Hello");
+    await streamAssistant("m1", "Hi.");
+    await fire("agent-active", false);
+    await setBarState({ barState: "default" });
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     await act(async () => {});
   }
@@ -985,6 +1003,7 @@ describe("FloatingBar", () => {
     await renderBar();
     // With no conversation at all, hovering the pill still offers the chat.
     fireEvent.mouseEnter(bar());
+    await flush();
     expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
   });
 
@@ -992,9 +1011,273 @@ describe("FloatingBar", () => {
     await renderBar();
     await openInput();
 
-    setBarState({ barState: "listening" });
+    await setBarState({ barState: "listening" });
 
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(bar()).toHaveAttribute("data-layout", "voice");
+  });
+});
+
+// ── The resize sequence ──────────────────────────────────────────────
+//
+// Every jump the pill ever showed came from the window and the pill
+// disagreeing for a frame: the window growing before the pill was anchored,
+// the anchor itself moving between layouts, a growth direction decided after
+// the resize that needed it, or a resize reading a frame the launch placement
+// was about to change. These pin the order and the anchors of the resize
+// calls, not just where the bar ends up.
+
+describe("FloatingBar resize sequence", () => {
+  const resizes = () =>
+    resizeWindowIfChanged.mock.calls.map((c) => c[0] as Record<string, unknown>);
+
+  /** Drag the pill and drop it at a physical point; the release settles it into the nearest well. */
+  async function dropAt(x: number, y: number) {
+    await hover(true);
+    const mic = screen.getByRole("button", { name: "Talk to Juno" });
+    fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(mic, { clientX: 30, clientY: 20 });
+    outerPos.x = x;
+    outerPos.y = y;
+    fireEvent.mouseUp(window);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 500));
+    });
+    await hover(false);
+  }
+
+  it("places the window in its well before any resize, and every resize after that is anchored on the docked edges", async () => {
+    await renderBar();
+    // Default well with nothing saved: top-right of the monitor the window
+    // opened on. The launch placement is the only thing that touches the
+    // window; the old resize effect raced it and moved the bar back to the
+    // placeholder frame on first launch.
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "set_bar_frame",
+        expect.objectContaining({ width: 88, height: 76 }),
+      ),
+    );
+    expect(resizeWindowIfChanged).not.toHaveBeenCalled();
+
+    await hover(true);
+    // Right-hand well: the right edge stays put and the pill grows leftward,
+    // so the monitor clamp never has to shove the bar out of its well.
+    expect(lastResize()).toEqual({
+      width: 180,
+      height: 76,
+      anchorY: 16,
+      growUp: false,
+      anchorX: "end",
+      from: { anchorY: 16, growUp: false },
+    });
+    expect(bar().parentElement!.parentElement).toHaveClass("items-end", "justify-start");
+  });
+
+  it("grows the window first and lets the pill follow; shrinks the pill first and lets the window follow", async () => {
+    vi.useFakeTimers();
+    await renderBar();
+    let land: () => void = () => {};
+    resizeWindowIfChanged.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+
+    act(() => {
+      listenHandlers.get("mouse-entered-window")?.({ payload: null });
+    });
+    // The room is asked for at once, but the pill stays compact until the
+    // backend has applied it: nothing is ever drawn past the window's edge.
+    expect(lastResize()).toMatchObject({ width: 180, height: 76 });
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+    expect(screen.queryByRole("button", { name: "Talk to Juno" })).not.toBeInTheDocument();
+    await act(async () => {
+      land();
+    });
+    expect(bar()).toHaveAttribute("data-layout", "hover");
+    expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
+
+    resizeWindowIfChanged.mockClear();
+    await hover(false);
+    // The pill is already compact and animating down; the window waits.
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+    expect(resizeWindowIfChanged).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(SHRINK_DELAY_MS);
+    });
+    expect(lastResize()).toMatchObject({ width: 88, height: 76, anchorX: "end" });
+  });
+
+  it("keeps the anchor on the band's near edge through a whole turn, so no resize ever moves the top edge", async () => {
+    vi.useFakeTimers();
+    await renderBar();
+    await setBarState({ barState: "listening", audioLevel: 0.6 });
+    await setBarState({ barState: "transcribing" });
+    await submitUserMessage("Open Safari");
+    await setBarState({ barState: "loading", agentState: "working", isAgentWorking: true });
+    await streamAssistant("m1", "Done.");
+    await fire("agent-active", false);
+    await setBarState({ barState: "finishing" });
+    await setBarState({ barState: "default" });
+    fireEvent.keyDown(document, { key: "Escape" }); // closes the follow-up input
+    fireEvent.keyDown(document, { key: "Escape" }); // dismisses the pane
+    act(() => {
+      vi.advanceTimersByTime(SHRINK_DELAY_MS);
+    });
+
+    const sizes = resizes().map((r) => [r.width, r.height]);
+    expect(sizes).toEqual([
+      [292, 76], // listening (transcribing shares it: no resize)
+      [451, 444], // the pane opens on the question
+      [88, 76], // back to rest after the answer
+    ]);
+    for (const r of resizes()) {
+      expect(r.anchorY).toBe(16);
+      expect(r.from).toEqual({ anchorY: 16, growUp: false });
+      expect(r.anchorX).toBe("end");
+    }
+  });
+
+  it("opens the pane upward at a bottom well, deciding the direction before the resize goes out", async () => {
+    await renderBar();
+    // The glide into the well runs on real frames; the shrink delay below is
+    // stepped by hand.
+    await dropAt(850, 700);
+    await settle(SHRINK_DELAY_MS);
+    // Landing in the bottom-right well flips the growth direction while the
+    // window is still symmetric (and still at the hover width, since the drag
+    // started from the hover buttons): a same-size resize that leaves the top
+    // put, then the usual shrink once the cursor has left.
+    expect(resizes()).toContainEqual({
+      width: 180,
+      height: 76,
+      anchorY: 16,
+      growUp: true,
+      anchorX: "end",
+      from: { anchorY: 60, growUp: false },
+    });
+    expect(lastResize()).toMatchObject({ width: 88, height: 76, growUp: true });
+    resizeWindowIfChanged.mockClear();
+    vi.useFakeTimers();
+
+    await submitUserMessage("Hello");
+    // One resize, already upward. The old bar opened it downward (off the
+    // bottom of the screen), then learned the direction from the window's
+    // centre and flipped the DOM under a frame computed the other way.
+    expect(resizes()).toEqual([
+      {
+        width: 451,
+        height: 444,
+        anchorY: 16,
+        growUp: true,
+        anchorX: "end",
+        from: { anchorY: 16, growUp: true },
+      },
+    ]);
+    // The pane is drawn above the pill.
+    const root = bar().parentElement!.parentElement!;
+    const order = Array.from(root.querySelectorAll("[data-testid]")).map((el) =>
+      el.getAttribute("data-testid"),
+    );
+    expect(order.indexOf("bar-chat-pane")).toBeLessThan(order.indexOf("floating-bar"));
+    expect(root).toHaveClass("justify-end");
+
+    await streamAssistant("m1", "Hi.");
+    await fire("agent-active", false);
+    await setBarState({ barState: "default" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    act(() => {
+      vi.advanceTimersByTime(SHRINK_DELAY_MS);
+    });
+    // And it closes the same way, so the bar ends exactly where it started
+    // instead of 368px up the screen.
+    expect(lastResize()).toEqual({
+      width: 88,
+      height: 76,
+      anchorY: 16,
+      growUp: true,
+      anchorX: "end",
+      from: { anchorY: 16, growUp: true },
+    });
+  });
+
+  it("swaps the pane's side without moving the pill when dropped on the other half with the pane open", async () => {
+    await renderBar();
+    await submitUserMessage("Hello");
+    expect(lastResize()).toMatchObject({ width: 451, height: 444, growUp: false });
+    resizeWindowIfChanged.mockClear();
+
+    // With the pane open the hover buttons are not there; the pill itself
+    // still drags.
+    fireEvent.mouseDown(bar(), { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(bar(), { clientX: 30, clientY: 20 });
+    outerPos.x = 850;
+    outerPos.y = 700;
+    fireEvent.mouseUp(window);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 500));
+    });
+
+    // The pinned point is the band's far edge in the old frame (60 from the
+    // top) and its near edge in the new one (16 from the bottom): the pill
+    // stays put and the pane moves above it.
+    expect(resizes()).toEqual([
+      {
+        width: 451,
+        height: 444,
+        anchorY: 16,
+        growUp: true,
+        anchorX: "end",
+        from: { anchorY: 60, growUp: false },
+      },
+    ]);
+    expect(bar().parentElement!.parentElement).toHaveClass("justify-end");
+  });
+
+  it("grows the window at the far edge only when the typed text wraps", async () => {
+    // Three lines of text: the textarea measures 54px against an 18px line.
+    vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockReturnValue(54);
+    await renderBar();
+    const input = await openInput();
+    resizeWindowIfChanged.mockClear();
+
+    fireEvent.change(input, { target: { value: "one\ntwo\nthree" } });
+    await flush();
+
+    expect(lastResize()).toEqual({
+      width: 451,
+      height: 112,
+      anchorY: 16,
+      growUp: false,
+      anchorX: "end",
+      from: { anchorY: 16, growUp: false },
+    });
+    // The band grows with the text so the pane, when there is one, slides
+    // with the pill's bottom edge rather than jumping.
+    expect(bar().parentElement).toHaveStyle({ height: "80px" });
+  });
+
+  it("does not animate the pill under Reduce Motion", async () => {
+    await renderBar();
+    expect(bar()).toHaveClass("motion-reduce:transition-none");
+    expect(bar().parentElement).toHaveClass("motion-reduce:transition-none");
+  });
+
+  it("places and shows the bar once under StrictMode, where every effect runs twice", async () => {
+    render(
+      <StrictMode>
+        <FloatingBar />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("show_bar_when_ready"));
+    await act(async () => {});
+
+    const calls = (invoke.mock.calls as unknown[][]).map((c) => c[0]);
+    expect(calls.filter((c) => c === "set_bar_frame")).toHaveLength(1);
+    expect(calls.filter((c) => c === "show_bar_when_ready")).toHaveLength(1);
+    expect(resizeWindowIfChanged).not.toHaveBeenCalled();
   });
 });
