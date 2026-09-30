@@ -43,7 +43,7 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
   {
     value: UI.BAR_APPEARANCES_REACT_ORB,
     name: "Halo",
-    descriptor: "A soft ring that ripples as you speak.",
+    descriptor: "A ring that fills as you speak and measures what Juno does.",
   },
   {
     value: UI.BAR_APPEARANCES_PERSONA,

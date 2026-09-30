@@ -13,6 +13,7 @@
 #               card (one full turn: question, answer with a component, ring)
 #               spoken (one spoken turn: your words, a tool step, the answer said sentence by sentence)
 #               state=<bar state> (hold one frame, for a still in motion)
+#               demo=<name> (any demo the preview route knows)
 #   seconds     how long to record (default 10)
 #   out.mp4     default docs/frontend/screenshots/<appearance>-<mode>.mp4
 #
@@ -32,7 +33,8 @@ case "$MODE" in
   card) QUERY="&demo=card";;
   spoken) QUERY="&demo=spoken";;
   state=*) QUERY="&state=${MODE#state=}";;
-  *) echo "bench-record: unknown mode '$MODE' (loop | card | spoken | state=<bar state>)" >&2; exit 2;;
+  demo=*) QUERY="&demo=${MODE#demo=}";;
+  *) echo "bench-record: unknown mode '$MODE' (loop | card | spoken | state=<bar state> | demo=<name>)" >&2; exit 2;;
 esac
 URL="$BASE/__bar-preview?appearance=$APPEARANCE$QUERY"
 
