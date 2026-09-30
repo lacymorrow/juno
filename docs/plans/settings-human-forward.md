@@ -98,7 +98,7 @@ Considered and cut: changing the theme's `--primary` to system blue (touches eve
 **Status:** PR #611.
 
 Backend (`dictation_monitor.rs`, `agent_monitor.rs`, `constants/agent.rs`, `triggers/mod.rs`):
-- A tap on a hold key keeps the session running hands-free until the next press of the same key. Dictation: the release converts the session instead of cancelling it, the next press stops it with the usual cue, and that press's release is swallowed. Agent: the release hands the open spoken query to the bar-voice guard, which finalises it on the next press exactly as a toggle does. Watchdogs that exist for a stuck hold stand down while a session is hands-free.
+- Hands-free on a hold key comes from a **double tap**, not a single tap. See [`docs/plans/trigger-gestures.md`](trigger-gestures.md) for the rule and phase 1. A short tap on a hold key cancels the session it opened; the gesture recognizer in `events/shortcuts.rs` promotes a second press inside `DOUBLE_TAP_WINDOW_MS` (300 ms) into the Press code path on its down edge and swallows the matching release. The single-tap hands-free from slice 3 was reverted in phase 1.
 - The hold threshold is 400 ms (was 300). Under it is a tap.
 - Row labels are sentences: "Hold to dictate", "Press to talk to Juno", "Say a phrase to dictate". Conflict messages quote them.
 

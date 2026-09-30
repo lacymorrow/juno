@@ -23,13 +23,6 @@ pub struct DictationInputMonitorState {
     pub transcription_start_time: Option<Instant>, // Track when transcription actually started
     pub force_cleanup_scheduled: bool,
     pub last_cancellation_time: Option<Instant>, // Track when last cancellation occurred
-    /// The key was tapped, not held, so the session it started keeps running
-    /// on its own until the key is pressed again. While this is set the hold
-    /// timers stand down: nothing is being held.
-    pub hands_free: bool,
-    /// The press that ended a hands-free session has a release coming; it
-    /// must not be read as the end of a hold.
-    pub swallow_next_release: bool,
 }
 
 /// What letting go of the key meant.
@@ -37,8 +30,11 @@ pub struct DictationInputMonitorState {
 pub enum HoldRelease {
     /// Held past the threshold: the session ends and the words are typed.
     Committed,
-    /// A tap: the session keeps running hands-free until the next tap.
-    HandsFree,
+    /// A short tap that opened the microphone but did not commit: the session
+    /// is cancelled and nothing is typed. The gesture recognizer in
+    /// `events/shortcuts.rs` still gets to promote a second press inside the
+    /// double-tap window into a Press start.
+    Cancelled,
     /// Nothing had started, so nothing happens.
     Nothing,
 }
@@ -54,27 +50,7 @@ impl DictationInputMonitorState {
             transcription_start_time: None,
             force_cleanup_scheduled: false,
             last_cancellation_time: None,
-            hands_free: false,
-            swallow_next_release: false,
         }
-    }
-
-    /// End a hands-free session on the press that asked for it. Returns
-    /// whether there was one to end.
-    pub fn end_hands_free(&mut self) -> bool {
-        if !(self.hands_free && self.transcription_started) {
-            return false;
-        }
-        self.hold_start_time = None;
-        self.transcription_started = false;
-        self.hold_threshold_reached = false;
-        self.passthrough_scheduled = false;
-        self.transcription_start_time = None;
-        self.force_cleanup_scheduled = false;
-        self.hands_free = false;
-        self.swallow_next_release = true;
-        info!("[DictationMonitor] Hands-free dictation ended by the next press");
-        true
     }
 
     pub fn start_hold(&mut self) -> bool {
@@ -116,20 +92,6 @@ impl DictationInputMonitorState {
             .map(|start| start.elapsed())
             .unwrap_or(Duration::ZERO);
 
-        // A tap that already opened the microphone keeps it open. The hold
-        // timers stand down and the session belongs to the next press.
-        if transcription_was_started && !threshold_was_reached {
-            self.hold_start_time = None;
-            self.hold_threshold_reached = false;
-            self.passthrough_scheduled = false;
-            self.hands_free = true;
-            info!(
-                "[DictationMonitor] Tapped ({}ms) - dictation keeps running hands-free until the next tap",
-                duration.as_millis()
-            );
-            return (HoldRelease::HandsFree, duration);
-        }
-
         // Force reset all state immediately to prevent stuck state
         self.hold_start_time = None;
         self.transcription_started = false;
@@ -137,17 +99,23 @@ impl DictationInputMonitorState {
         self.passthrough_scheduled = false;
         self.transcription_start_time = None;
         self.force_cleanup_scheduled = false;
-        self.hands_free = false;
 
-        debug!(
-            "[DictationMonitor] Ended dictation input hold tracking, duration: {:?}ms, transcription_started: {}, threshold_reached: {}",
-            duration.as_millis(), transcription_was_started, threshold_was_reached
-        );
         let outcome = if threshold_was_reached {
             HoldRelease::Committed
+        } else if transcription_was_started {
+            // The microphone opened, but the release came before the hold
+            // threshold. Cancel the session and start a cooldown so a bounce
+            // does not immediately reopen it.
+            self.last_cancellation_time = Some(Instant::now());
+            HoldRelease::Cancelled
         } else {
             HoldRelease::Nothing
         };
+
+        debug!(
+            "[DictationMonitor] Ended dictation input hold tracking, duration: {:?}ms, transcription_started: {}, threshold_reached: {}, outcome: {:?}",
+            duration.as_millis(), transcription_was_started, threshold_was_reached, outcome
+        );
         (outcome, duration)
     }
 
@@ -186,11 +154,6 @@ impl DictationInputMonitorState {
 
     // Check if transcription has been running too long and needs forced cleanup
     pub fn check_transcription_timeout(&mut self) -> bool {
-        // A hands-free session is meant to run as long as the person talks,
-        // the same as a toggled one; the cap is for a stuck hold.
-        if self.hands_free {
-            return false;
-        }
         if let Some(start_time) = self.transcription_start_time {
             let duration = start_time.elapsed();
             if duration.as_millis() >= monitor_sessions::MAX_TRANSCRIPTION_DURATION_MS as u128 {
@@ -209,7 +172,6 @@ impl DictationInputMonitorState {
         // If transcription started but dictation input was released and enough time has passed
         if self.transcription_started
             && self.hold_start_time.is_none()
-            && !self.hands_free
             && !self.force_cleanup_scheduled
         {
             if let Some(start_time) = self.transcription_start_time {
@@ -234,8 +196,14 @@ impl DictationInputMonitorState {
         self.transcription_start_time = None;
         self.force_cleanup_scheduled = false;
         self.last_cancellation_time = None; // Clear cooldown tracking on reset
-        self.hands_free = false;
-        self.swallow_next_release = false;
+    }
+
+    /// True while the monitor is watching a held key. The gesture recognizer
+    /// reads this to decide whether a fresh press is landing while a hold path
+    /// is already in flight; a press that arrives during an active hold must
+    /// not be promoted to a double tap.
+    pub fn is_tracking_hold(&self) -> bool {
+        self.hold_start_time.is_some() || self.transcription_started
     }
 }
 
@@ -383,20 +351,6 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
     info!("[DictationMonitor] on_dictation_input_pressed called");
     let mut state = DICTATION_INPUT_STATE.lock().await;
 
-    // A session left running by a tap ends on the next press, the way a
-    // toggled one does. The cue and the stop go out on this edge so it feels
-    // like letting go of a held key.
-    if state.end_hands_free() {
-        crate::commands::sound::play_cue(
-            app_handle,
-            crate::commands::sound::SoundType::NotificationDecorative01,
-        );
-        if let Err(e) = app_handle.emit(events::dictation::STOP, ()) {
-            error!("[DictationMonitor] Failed to emit dictation-stop: {}", e);
-        }
-        return;
-    }
-
     info!("[DictationMonitor] Acquired lock, calling start_hold");
     let started = state.start_hold();
     if started {
@@ -416,50 +370,53 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
     }
 }
 
-// Called when dictation input key is released
-pub async fn on_dictation_input_released(app_handle: &AppHandle) {
+// Called when dictation input key is released. Returns the outcome so the
+// gesture recognizer can arm its double-tap window on a short-tap cancel.
+pub async fn on_dictation_input_released(app_handle: &AppHandle) -> HoldRelease {
     let mut state = DICTATION_INPUT_STATE.lock().await;
-
-    // The release of the press that ended a hands-free session.
-    if state.swallow_next_release {
-        state.swallow_next_release = false;
-        return;
-    }
 
     let (outcome, duration) = state.end_hold();
 
-    if outcome == HoldRelease::Committed {
-        info!("[DictationMonitor] Dictation input released after threshold reached - completing Dictation Mode normally");
+    match outcome {
+        HoldRelease::Committed => {
+            info!("[DictationMonitor] Dictation input released after threshold reached - completing Dictation Mode normally");
 
-        // Fire the stop cue on the key-up edge, before emitting STOP. The STOP
-        // handler awaits speech-to-text finalization (seconds), and the old
-        // end cue played only after that — which is exactly why stopping felt
-        // unresponsive. Play it now so the user hears the release immediately.
-        crate::commands::sound::play_cue(
-            app_handle,
-            crate::commands::sound::SoundType::NotificationDecorative01,
-        );
-
-        // Emit event to stop dictation normally
-        if let Err(e) = app_handle.emit(events::dictation::STOP, ()) {
-            error!("[DictationMonitor] Failed to emit dictation-stop: {}", e);
-        }
-    } else if outcome == HoldRelease::HandsFree {
-        // The session is now committed the way a long hold would be, so
-        // downstream sees the same event a held key produces at the threshold.
-        if let Err(e) = app_handle.emit(events::dictation::COMMITTED, ()) {
-            error!(
-                "[DictationMonitor] Failed to emit dictation-committed: {}",
-                e
+            // Fire the stop cue on the key-up edge, before emitting STOP. The STOP
+            // handler awaits speech-to-text finalization (seconds), and the old
+            // end cue played only after that — which is exactly why stopping felt
+            // unresponsive. Play it now so the user hears the release immediately.
+            crate::commands::sound::play_cue(
+                app_handle,
+                crate::commands::sound::SoundType::NotificationDecorative01,
             );
+
+            // Emit event to stop dictation normally
+            if let Err(e) = app_handle.emit(events::dictation::STOP, ()) {
+                error!("[DictationMonitor] Failed to emit dictation-stop: {}", e);
+            }
         }
-    } else {
-        debug!(
-            "[DictationMonitor] Dictation input released without starting transcription ({}ms) - no action needed",
-            duration.as_millis()
-        );
-        // No passthrough needed since we're using Option+Space, not intercepting normal spacebar
+        HoldRelease::Cancelled => {
+            info!(
+                "[DictationMonitor] Dictation input released before threshold ({}ms) - cancelling",
+                duration.as_millis()
+            );
+            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_CANCEL, ()) {
+                error!(
+                    "[DictationMonitor] Failed to emit dictation-transcription-cancel: {}",
+                    e
+                );
+            }
+        }
+        HoldRelease::Nothing => {
+            debug!(
+                "[DictationMonitor] Dictation input released without starting transcription ({}ms) - no action needed",
+                duration.as_millis()
+            );
+            // No passthrough needed since we're using Option+Space, not intercepting normal spacebar
+        }
     }
+
+    outcome
 }
 
 // Public function to force reset the dictation input state
@@ -478,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tap_keeps_the_session_running_hands_free() {
+    fn a_short_tap_cancels_the_session_it_opened() {
         let mut state = DictationInputMonitorState::new();
         assert!(state.start_hold());
         held_for_ms(&mut state, 120);
@@ -489,13 +446,12 @@ mod tests {
         );
 
         let (outcome, _) = state.end_hold();
-        assert_eq!(outcome, HoldRelease::HandsFree);
-        assert!(state.transcription_started, "the microphone stays open");
-        assert!(state.hands_free);
+        assert_eq!(outcome, HoldRelease::Cancelled);
+        assert!(!state.transcription_started);
         assert!(state.hold_start_time.is_none(), "nothing is being held");
         assert!(
-            state.last_cancellation_time.is_none(),
-            "a tap is not a cancellation"
+            state.last_cancellation_time.is_some(),
+            "a short tap arms the cooldown so a bounce cannot immediately reopen"
         );
     }
 
@@ -510,57 +466,48 @@ mod tests {
         let (outcome, _) = state.end_hold();
         assert_eq!(outcome, HoldRelease::Committed);
         assert!(!state.transcription_started);
-        assert!(!state.hands_free);
+        assert!(
+            state.last_cancellation_time.is_none(),
+            "commit is not a cancel"
+        );
     }
 
     #[test]
-    fn the_next_press_ends_a_hands_free_session_and_its_release_is_swallowed() {
+    fn a_release_before_transcription_opens_is_nothing() {
         let mut state = DictationInputMonitorState::new();
         assert!(state.start_hold());
-        held_for_ms(&mut state, 100);
-        assert!(state.check_and_start_transcription());
-        assert_eq!(state.end_hold().0, HoldRelease::HandsFree);
-
-        assert!(
-            state.end_hands_free(),
-            "the press that follows a tap ends the session"
-        );
-        assert!(!state.transcription_started);
-        assert!(!state.hands_free);
-        assert!(state.swallow_next_release);
-        assert!(!state.end_hands_free(), "there is nothing left to end");
+        // Release before IMMEDIATE_START_MS elapses: transcription never opened.
+        let (outcome, _) = state.end_hold();
+        assert_eq!(outcome, HoldRelease::Nothing);
+        assert!(state.last_cancellation_time.is_none());
     }
 
     #[test]
-    fn a_hands_free_session_is_not_a_stuck_hold() {
+    fn cooldown_blocks_an_immediate_reopen_after_a_cancel() {
         let mut state = DictationInputMonitorState::new();
         assert!(state.start_hold());
-        held_for_ms(&mut state, 100);
+        held_for_ms(&mut state, 120);
         assert!(state.check_and_start_transcription());
-        assert_eq!(state.end_hold().0, HoldRelease::HandsFree);
+        assert_eq!(state.end_hold().0, HoldRelease::Cancelled);
 
-        // Make both watchdogs think plenty of time has passed.
-        state.transcription_start_time = Some(
-            Instant::now()
-                - Duration::from_millis(monitor_sessions::MAX_TRANSCRIPTION_DURATION_MS + 1000),
-        );
+        // A press inside the cooldown window is refused, so a bouncy key
+        // cannot immediately reopen the session.
         assert!(
-            !state.should_force_cleanup(),
-            "hands-free is on purpose, not stuck"
-        );
-        assert!(
-            !state.check_transcription_timeout(),
-            "hands-free runs as long as the person talks"
+            !state.start_hold(),
+            "cooldown must swallow a press that lands inside COOLDOWN_AFTER_CANCEL_MS"
         );
     }
 
     #[test]
-    fn force_reset_clears_hands_free() {
+    fn is_tracking_hold_reflects_state() {
         let mut state = DictationInputMonitorState::new();
-        state.hands_free = true;
-        state.swallow_next_release = true;
-        state.force_reset();
-        assert!(!state.hands_free);
-        assert!(!state.swallow_next_release);
+        assert!(!state.is_tracking_hold());
+        assert!(state.start_hold());
+        assert!(
+            state.is_tracking_hold(),
+            "a press without a release is a live hold"
+        );
+        let _ = state.end_hold();
+        assert!(!state.is_tracking_hold(), "the release clears the hold");
     }
 }
