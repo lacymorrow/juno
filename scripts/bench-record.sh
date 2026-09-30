@@ -11,6 +11,7 @@
 #   appearance  floating | app | voice_ai | dynamic | orb | react_orb | persona
 #   mode        loop (default: the picker's resting/listening/dictating/done loop)
 #               card (one full turn: question, answer with a component, ring)
+#               spoken (one spoken turn: your words, a tool step, the answer said sentence by sentence)
 #               state=<bar state> (hold one frame, for a still in motion)
 #   seconds     how long to record (default 10)
 #   out.mp4     default docs/frontend/screenshots/<appearance>-<mode>.mp4
@@ -29,8 +30,9 @@ BASE="${BENCH_URL:-http://localhost:1420}"
 case "$MODE" in
   loop) QUERY="";;
   card) QUERY="&demo=card";;
+  spoken) QUERY="&demo=spoken";;
   state=*) QUERY="&state=${MODE#state=}";;
-  *) echo "bench-record: unknown mode '$MODE' (loop | card | state=<bar state>)" >&2; exit 2;;
+  *) echo "bench-record: unknown mode '$MODE' (loop | card | spoken | state=<bar state>)" >&2; exit 2;;
 esac
 URL="$BASE/__bar-preview?appearance=$APPEARANCE$QUERY"
 
