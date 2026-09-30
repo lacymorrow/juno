@@ -15,6 +15,14 @@ on:
         required: false
         default: false
         type: boolean
+      # release-every-merge dispatches on main and names the tag here, so the
+      # run's ref is main and its Rust cache is saved where the next release
+      # build can restore it. A cache saved on a tag ref is visible to nothing
+      # else, which made every release build cold (v0.8.15: 48 min).
+      tag:
+        description: "Tag to build (default: the ref this runs on)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -25,6 +33,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       # The repo pins its toolchain in rust-toolchain.toml. Installing the cross
       # targets on @stable put them on a toolchain cargo never used (rustup
@@ -46,7 +56,11 @@ jobs:
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          # Cargo workspace root is the repo root, so the build lands in ./target.
+          # Merge builds run on the main ref (see the `tag` input), so this is
+          # saved on main and the next release build restores it.
+          workspaces: ". -> target"
+          shared-key: tauri-release-aarch64
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -106,10 +120,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Juno ${{ github.ref_name }}"
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: "Juno ${{ inputs.tag || github.ref_name }}"
           releaseBody: |
-            ## Juno ${{ github.ref_name }}
+            ## Juno ${{ inputs.tag || github.ref_name }}
 
             See [CHANGELOG](https://github.com/lacymorrow/juno/blob/main/CHANGELOG.md) for details.
           releaseDraft: false

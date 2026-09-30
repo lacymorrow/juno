@@ -80,7 +80,8 @@ jobs:
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          # Cargo workspace root is the repo root, so the build lands in ./target.
+          workspaces: ". -> target"
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2

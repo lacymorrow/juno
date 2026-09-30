@@ -130,6 +130,24 @@ const CLI_TIMEOUT: Duration = Duration::from_secs(300);
 /// CLI themselves, so there is no floor version to assume.
 const PARTIAL_MESSAGES_FLAG: &str = "--include-partial-messages";
 
+/// Start building a `claude` invocation, rooted at the user's home directory.
+///
+/// Every `claude` spawn goes through here, because the CLI keys its
+/// per-project auto-memory (and project skills) off the working directory.
+/// Launched from Finder or launchd the app inherits cwd `/`, which Claude
+/// Code maps to the empty `~/.claude/projects/-/` — so an inherited cwd
+/// silently loses the user's memory with no error anywhere (LAC-4057).
+/// Rooting at home loads the same memory an interactive `claude` run from a
+/// home-directory terminal would. If home cannot be resolved the cwd is left
+/// inherited: a memory-less answer still beats no answer.
+pub(crate) fn claude_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(binary);
+    if let Some(home) = dirs::home_dir() {
+        cmd.current_dir(home);
+    }
+    cmd
+}
+
 /// Detect the Claude CLI binary on PATH.
 /// Returns the path if found, or an error describing what to do.
 pub fn detect_claude_cli() -> Result<PathBuf, AgentError> {
@@ -263,7 +281,7 @@ pub async fn cli_status() -> CliStatus {
         return CliStatus::default();
     };
 
-    let output = tokio::process::Command::new(&binary_path)
+    let output = claude_command(&binary_path)
         .args(["auth", "status", "--json"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -320,8 +338,10 @@ pub async fn cli_status() -> CliStatus {
 
 /// Write the `--mcp-config` file pointing the CLI at Juno's own tool server.
 ///
-/// With `--strict-mcp-config` this is the only MCP server the CLI loads, so
-/// the person's own user-level servers stay out of Juno's agent. The file is
+/// When "Load account MCP connectors" is off, `--strict-mcp-config` makes
+/// this the only MCP server the CLI loads, so the person's own user-level
+/// servers stay out of Juno's agent; by default the flag is omitted and
+/// their account connectors load alongside it (LAC-4056). The file is
 /// pid-scoped so two Junos in a dev session cannot clobber each other, and it
 /// carries the bearer token, which is why it goes to a file the CLI reads
 /// rather than onto a command line every `ps` on the machine can see.
@@ -365,7 +385,7 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
         return Ok(());
     }
 
-    let output = tokio::process::Command::new(binary_path)
+    let output = claude_command(binary_path)
         .args(["auth", "status", "--json"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -441,6 +461,12 @@ pub struct ClaudeCliBrain {
     /// at construction from the hidden `providers[].effort` setting, so the
     /// stream loop never has to reach for the store.
     effort: String,
+    /// Whether the CLI may load the MCP servers on the person's own Claude
+    /// account — claude.ai connectors (Slack, Gmail, Drive) and user-level
+    /// servers. When false, `build_args` passes `--strict-mcp-config` so
+    /// only Juno's own tool server loads. Resolved once at construction from
+    /// the `providers[].load_account_mcp` setting (LAC-4056).
+    load_account_mcp: bool,
     /// The session id the CLI reported during the current run.
     ///
     /// Filled by the stream reader and read once the run finishes, so the
@@ -475,6 +501,7 @@ impl ClaudeCliBrain {
             model,
             system_prompt: config.system_prompt.clone(),
             effort,
+            load_account_mcp: config.load_account_mcp,
             observed_session: std::sync::Mutex::new(None),
         })
     }
@@ -509,10 +536,6 @@ impl ClaudeCliBrain {
             // tool call, its arguments, the reasoning — was never sent.
             // Stripped again by `run_streaming` for a CLI too old to take it.
             PARTIAL_MESSAGES_FLAG.to_string(),
-            // --strict-mcp-config limits MCP servers to exactly what we pass
-            // via --mcp-config (or none) — user-level servers never load.
-            // We can't use --bare because it blocks OAuth/keychain auth.
-            "--strict-mcp-config".to_string(),
             // The CLI's own toolset (Bash, Read, Edit, WebFetch) stays on
             // deliberately. It augments Juno's computer tool rather than
             // competing with it — reading a file beats screenshotting a text
@@ -521,11 +544,21 @@ impl ClaudeCliBrain {
             // the desktop despite MCP_TOOL_GUIDANCE.
         ];
 
+        // With "Load account MCP connectors" off, --strict-mcp-config limits
+        // MCP servers to exactly what we pass via --mcp-config (or none) —
+        // the person's claude.ai connectors and user-level servers never
+        // load. On, the default, omits the flag so those connectors ride
+        // along (LAC-4056). We can't use --bare either way because it blocks
+        // OAuth/keychain auth.
+        if !self.load_account_mcp {
+            args.push("--strict-mcp-config".to_string());
+        }
+
         // Permission posture (LAC-4058). With "Ask before Juno sends" on and
         // Juno's MCP server available, permission prompts route to the
         // `approve` tool and Juno's approval sheet; everyday tools stay
-        // pre-approved. Otherwise the old skip-permissions behaviour applies
-        // (in -p mode with stdin null the CLI cannot prompt on its own).
+        // pre-approved. Otherwise --dangerously-skip-permissions applies: in
+        // -p mode with stdin null the CLI cannot prompt on its own.
         args.extend(cli_approval::permission_args(
             ask_before_send,
             mcp_config.is_some(),
@@ -637,6 +670,7 @@ impl ClaudeCliBrain {
                     system_prompt: self.system_prompt.as_deref(),
                     mcp_config: mcp_config.as_deref(),
                     mcp_guidance: MCP_TOOL_GUIDANCE,
+                    load_account_mcp: self.load_account_mcp,
                     conversation_id,
                     session_id: &session_id,
                     session_is_new,
@@ -728,7 +762,7 @@ impl ClaudeCliBrain {
             }
 
             let spawn = |args: &Vec<String>| {
-                tokio::process::Command::new(&self.binary_path)
+                claude_command(&self.binary_path)
                     .args(args)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -1965,6 +1999,7 @@ pub(super) fn extract_text_from_message(message: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::settings::defaults;
 
     /// A `CliStatus` in a given state, without running anything.
     fn status(installed: bool, sign_in: SignIn) -> CliStatus {
@@ -2012,6 +2047,26 @@ mod tests {
             remember_sign_in(state);
             assert_eq!(last_known_sign_in(), state);
         }
+    }
+
+    #[test]
+    fn claude_spawns_from_the_home_directory() {
+        // Claude Code keys its per-project auto-memory off the cwd. A GUI
+        // launch inherits `/`, which maps to the empty `~/.claude/projects/-/`
+        // — the CLI would run with no memory and nothing would say so
+        // (LAC-4057). `as_std()` lets us assert on the configured command
+        // without spawning anything, so this runs on CI with no `claude`
+        // installed.
+        let cmd = claude_command("claude");
+        assert_eq!(cmd.as_std().get_current_dir(), dirs::home_dir().as_deref());
+        // The home lookup failing means "leave the cwd inherited", but a CI
+        // runner always has a home — if it resolved to None here, the
+        // assertion above passed vacuously and this test would be asserting
+        // nothing. Fail loudly instead.
+        assert!(
+            dirs::home_dir().is_some(),
+            "home directory unresolvable in test environment"
+        );
     }
 
     #[test]
@@ -2111,6 +2166,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("test query", None, None, false);
@@ -2123,8 +2179,8 @@ mod tests {
         // No MCP flags when Juno's tool server isn't wired
         assert!(!args.contains(&"--mcp-config".to_string()));
         assert!(!args.contains(&"--append-system-prompt".to_string()));
-        // User-level MCP servers stay disabled either way
-        assert!(args.contains(&"--strict-mcp-config".to_string()));
+        // Account connectors load by default, so no --strict-mcp-config
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
     }
 
     #[test]
@@ -2134,6 +2190,7 @@ mod tests {
             model: "opus".to_string(),
             system_prompt: Some("You are helpful.".to_string()),
             effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("test query", None, None, false);
@@ -2142,8 +2199,7 @@ mod tests {
     }
 
     /// Regression test for LAC-3696: when Juno's tool server is up, the CLI
-    /// must be given our MCP config (the `computer` tool) while
-    /// --strict-mcp-config still blocks user-level servers, and the model must
+    /// must be given our MCP config (the `computer` tool), and the model must
     /// be steered toward it via --append-system-prompt.
     #[test]
     fn resuming_passes_the_session_to_the_cli() {
@@ -2154,6 +2210,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args(
@@ -2176,6 +2233,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("hello", None, None, false);
@@ -2201,6 +2259,8 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            // Connectors off: the strict flag must ride with the config.
+            load_account_mcp: false,
             observed_session: std::sync::Mutex::new(None),
         };
         let config = PathBuf::from("/tmp/juno-mcp-test.json");
@@ -2213,7 +2273,7 @@ mod tests {
         assert_eq!(args[idx + 1], "/tmp/juno-mcp-test.json");
         assert!(
             args.iter().any(|a| a == "--strict-mcp-config"),
-            "the person's own MCP servers must stay out of Juno's agent"
+            "with connectors off, the person's own MCP servers stay out of Juno's agent"
         );
         assert!(
             args.iter().any(|a| a.contains("juno")),
@@ -2230,6 +2290,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
         let args = brain.build_args("hello", None, None, false);
@@ -2328,6 +2389,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         }
     }
@@ -2473,7 +2535,7 @@ mod tests {
         assert_eq!(before - 1, args.len(), "only the one standalone flag goes");
         // Everything the run depends on survives.
         assert!(args.contains(&"stream-json".to_string()));
-        assert!(args.contains(&"--strict-mcp-config".to_string()));
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(args.contains(&"abc-123".to_string()));
         assert_eq!(args.last().map(String::as_str), Some("hello"));
     }
@@ -2522,6 +2584,30 @@ echo '{{"type":"result","result":"answered the old way"}}'"#,
         PARTIAL_MESSAGES_UNSUPPORTED.store(false, Ordering::Relaxed);
         let _ = std::fs::remove_file(&script);
         let _ = std::fs::remove_file(&log);
+    }
+
+    /// LAC-4056: "Load account MCP connectors" decides whether the person's
+    /// claude.ai connectors (Slack, Gmail, Drive) and user-level MCP servers
+    /// reach the CLI. On — the default — omits --strict-mcp-config so they
+    /// load; off passes it so only what --mcp-config names may load.
+    #[test]
+    fn account_connectors_load_by_default_and_the_setting_shuts_them_out() {
+        let strict = "--strict-mcp-config".to_string();
+
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        let args = brain.build_args("read my slack", None, None, false);
+        assert!(
+            !args.contains(&strict),
+            "default on: the flag is omitted and account connectors load"
+        );
+
+        let mut brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        brain.load_account_mcp = false;
+        let args = brain.build_args("read my slack", None, None, false);
+        assert!(
+            args.contains(&strict),
+            "off: --strict-mcp-config keeps account servers out"
+        );
     }
 
     #[test]

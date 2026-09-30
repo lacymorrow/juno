@@ -77,6 +77,22 @@ jobs:
           version=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
 
+      # A tag pushed with GITHUB_TOKEN does not start other workflows, which
+      # GitHub enforces so automation cannot loop. Ask for the build by name
+      # against the tag shipx just made. It lands as a prerelease: users on the
+      # auto-updater only see it once someone promotes it with
+      # `scripts/juno-build.sh promote`.
+      - name: Start the release build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run release-tauri.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            -f tag="${{ steps.release.outputs.tag }}" \
+            -f prerelease=true
+          echo "Requested a signed prerelease build of ${{ steps.release.outputs.tag }}."
+
       # shipx does not fail the run when a publish fails: it reports and moves
       # on, which is right locally where a person reads the output. Unattended,
       # that becomes a green job and a release where the app shipped and
@@ -100,18 +116,3 @@ jobs:
           done
           echo "::error::juno-cua@$want did not reach npm (registry reports '${got:-nothing}'). The app release is unaffected; publish by hand from packages/juno-cua."
           exit 1
-
-      # A tag pushed with GITHUB_TOKEN does not start other workflows, which
-      # GitHub enforces so automation cannot loop. Ask for the build by name
-      # against the tag shipx just made. It lands as a prerelease: users on the
-      # auto-updater only see it once someone promotes it with
-      # `scripts/juno-build.sh promote`.
-      - name: Start the release build
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh workflow run release-tauri.yml \
-            --repo "${{ github.repository }}" \
-            --ref "${{ steps.release.outputs.tag }}" \
-            -f prerelease=true
-          echo "Requested a signed prerelease build of ${{ steps.release.outputs.tag }}."

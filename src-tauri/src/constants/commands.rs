@@ -77,6 +77,7 @@ pub mod providers {
     pub const UPDATE_PROVIDER_MAX_TOKENS: &str = "update_provider_max_tokens";
     pub const UPDATE_PROVIDER_TEMPERATURE: &str = "update_provider_temperature";
     pub const UPDATE_PROVIDER_SYSTEM_PROMPT: &str = "update_provider_system_prompt";
+    pub const UPDATE_PROVIDER_LOAD_ACCOUNT_MCP: &str = "update_provider_load_account_mcp";
 }
 
 /// Always listening command names

@@ -67,6 +67,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 use tracing::{debug, info, warn};
 
+use super::claude_cli::claude_command;
 use crate::agent::core::AgentError;
 use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 
@@ -121,6 +122,11 @@ pub struct TurnRequest<'a> {
     pub mcp_config: Option<&'a Path>,
     /// Extra system-prompt guidance, appended only when `mcp_config` is present.
     pub mcp_guidance: &'a str,
+    /// Whether the CLI may load the MCP servers on the person's own Claude
+    /// account. When false, `spawn_args` passes `--strict-mcp-config` so only
+    /// what `mcp_config` names loads. Spawn-time: part of the session
+    /// signature, so flipping the setting replaces the process (LAC-4056).
+    pub load_account_mcp: bool,
     pub conversation_id: &'a str,
     /// The CLI session this conversation runs in.
     pub session_id: &'a str,
@@ -312,18 +318,21 @@ fn signature_parts(
     model: &str,
     system_prompt: Option<&str>,
     mcp_config: Option<&Path>,
+    load_account_mcp: bool,
     ask_before_send: bool,
 ) -> String {
     format!(
-        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
         model,
         system_prompt.unwrap_or_default(),
         mcp_config
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        // A live process keeps the permission posture it was born with, so
-        // flipping "Ask before Juno sends" must respawn it (LAC-4058).
-        ask_before_send,
+        // Both are spawn-time postures a live process cannot be talked out
+        // of: --strict-mcp-config (LAC-4056) and the permission flags
+        // (LAC-4058). Flipping either must replace the process.
+        load_account_mcp,
+        ask_before_send
     )
 }
 
@@ -332,6 +341,7 @@ fn signature_of(req: &TurnRequest<'_>) -> String {
         req.model,
         req.system_prompt,
         req.mcp_config,
+        req.load_account_mcp,
         req.ask_before_send,
     )
 }
@@ -409,7 +419,7 @@ fn spawn_session(req: &TurnRequest<'_>, signature: String) -> Result<CliSession,
     );
     debug!("[CliSession] args: {}", args.join(" "));
 
-    let mut child = tokio::process::Command::new(req.binary)
+    let mut child = claude_command(req.binary)
         .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -515,8 +525,14 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
         "stream-json".to_string(),
         "--model".to_string(),
         req.model.to_string(),
-        "--strict-mcp-config".to_string(),
     ];
+
+    // Mirrors the one-shot path's build_args (LAC-4056): with "Load account
+    // MCP connectors" off, --strict-mcp-config keeps the person's claude.ai
+    // connectors and user-level servers out; on, the default, omits the flag.
+    if !req.load_account_mcp {
+        args.push("--strict-mcp-config".to_string());
+    }
 
     // Permission posture (LAC-4058): same rule as the one-shot path's
     // `build_args`, through the same seam.
@@ -968,34 +984,49 @@ mod tests {
         // A model named "a" with the prompt "b" must not collide with a model
         // literally named "a<US>b", or a prompt change would go unnoticed.
         assert_ne!(
-            signature_parts("a", Some("b"), None, true),
-            signature_parts("a\u{1f}b", None, None, true)
+            signature_parts("a", Some("b"), None, true, true),
+            signature_parts("a\u{1f}b", None, None, true, true)
         );
     }
 
     #[test]
     fn signature_changes_with_every_spawn_time_argument() {
-        let base = signature_parts("sonnet", None, None, true);
-        assert_ne!(base, signature_parts("opus", None, None, true));
+        let base = signature_parts("sonnet", None, None, true, true);
+        assert_ne!(base, signature_parts("opus", None, None, true, true));
         assert_ne!(
             base,
-            signature_parts("sonnet", Some("be brief"), None, true)
+            signature_parts("sonnet", Some("be brief"), None, true, true)
         );
         assert_ne!(
             base,
-            signature_parts("sonnet", None, Some(Path::new("/tmp/a.json")), true)
+            signature_parts("sonnet", None, Some(Path::new("/tmp/a.json")), true, true)
         );
-        // Flipping "Ask before Juno sends" must respawn the process, or a
-        // live session would keep the permission posture it was born with
-        // (LAC-4058).
-        assert_ne!(base, signature_parts("sonnet", None, None, false));
+        // Toggling "Load account MCP connectors" changes --strict-mcp-config,
+        // which a live process cannot be talked out of, so the session must
+        // be replaced rather than reused (LAC-4056).
+        assert_ne!(base, signature_parts("sonnet", None, None, false, true));
+        // Same for "Ask before Juno sends": a live session would otherwise
+        // keep the permission posture it was born with (LAC-4058).
+        assert_ne!(base, signature_parts("sonnet", None, None, true, false));
     }
 
     #[test]
     fn signature_is_stable_for_identical_arguments() {
         assert_eq!(
-            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")), true),
-            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")), true)
+            signature_parts(
+                "sonnet",
+                Some("p"),
+                Some(Path::new("/tmp/a.json")),
+                true,
+                true
+            ),
+            signature_parts(
+                "sonnet",
+                Some("p"),
+                Some(Path::new("/tmp/a.json")),
+                true,
+                true
+            )
         );
     }
 
