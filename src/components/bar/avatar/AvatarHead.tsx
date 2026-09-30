@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Persona } from "@/components/ai-elements/persona";
 import { HEAD, type Cue, type Gesture, type HeadLook } from "./avatarModel";
+import { VOICE_TRANSITION, clampLevel, voiceScale } from "../voiceLevel";
 
 /**
  * The character's head: the Rive sphere (its own listening, thinking and
@@ -133,12 +134,17 @@ interface AvatarHeadProps {
   /** Bubbles rise above the head: the lean and the look flip to face them. */
   facingUp: boolean;
   reducedMotion: boolean;
+  /** The mic level while Juno listens (0..1). The cue by its ear swells with
+   *  your voice and a soft ring spreads from it; 0 leaves the cue as it is. */
+  level?: number;
   onClick?: () => void;
   className?: string;
 }
 
-export function AvatarHead({ look, facingUp, reducedMotion, onClick, className }: AvatarHeadProps) {
+export function AvatarHead({ look, facingUp, reducedMotion, level = 0, onClick, className }: AvatarHeadProps) {
   useHeadKeyframes();
+  const swell = voiceScale(level, 1.1);
+  const heard = clampLevel(level);
   // The sphere arrives over the network. Until it has, and if it never does,
   // the disc is the head.
   const [sphere, setSphere] = useState<"loading" | "ready" | "failed">("loading");
@@ -196,21 +202,45 @@ export function AvatarHead({ look, facingUp, reducedMotion, onClick, className }
       )}
       <Face gesture={look.gesture} blink={blink} />
       {look.cue && (
+        // The outer span carries the voice swell; the inner one keeps the
+        // cue's own breathing, so the two transforms never fight.
         <span
-          className="av-cue absolute block rounded-full"
-          data-testid="avatar-cue"
-          data-motion={look.cue.motion}
-          aria-hidden="true"
+          className="absolute flex items-center justify-center"
           style={{
             width: 7,
             height: 7,
             right: HEAD * 0.03,
             top: HEAD / 2 - 3.5,
-            backgroundColor: look.cue.color,
-            opacity: look.cue.opacity,
-            animation: reducedMotion ? undefined : CUE_ANIMATION[look.cue.motion],
+            transform: `scale(${swell})`,
+            transition: VOICE_TRANSITION,
           }}
-        />
+          data-testid="avatar-cue-swell"
+          data-swell={swell.toFixed(2)}
+          aria-hidden="true"
+        >
+          {heard > 0 && (
+            <span
+              className="absolute block rounded-full"
+              style={{
+                inset: -3,
+                backgroundColor: look.cue.color,
+                opacity: 0.25 * heard,
+              }}
+            />
+          )}
+          <span
+            className="av-cue relative block rounded-full"
+            data-testid="avatar-cue"
+            data-motion={look.cue.motion}
+            style={{
+              width: 7,
+              height: 7,
+              backgroundColor: look.cue.color,
+              opacity: look.cue.opacity,
+              animation: reducedMotion ? undefined : CUE_ANIMATION[look.cue.motion],
+            }}
+          />
+        </span>
       )}
     </div>
   );

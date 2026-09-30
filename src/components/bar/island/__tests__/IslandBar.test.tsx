@@ -130,6 +130,18 @@ describe("IslandBar", () => {
     expect(screen.getByTestId("island-dot").getAttribute("data-motion")).toBe("breathe");
   });
 
+  it("the dot swells with your voice while listening, and only then", async () => {
+    render(<IslandBar />);
+    await send(UI.BAR_STATES_LISTENING, { audioLevel: 0 });
+    expect(Number(screen.getByTestId("island-dot").getAttribute("data-swell"))).toBe(1);
+    await send(UI.BAR_STATES_LISTENING, { audioLevel: 0.64 });
+    const loud = Number(screen.getByTestId("island-dot").getAttribute("data-swell"));
+    expect(loud).toBeGreaterThan(1.5);
+    // Working: the level is ignored even if Rust still reports one.
+    await send(UI.BAR_STATES_LOADING, { audioLevel: 0.64, lastSubmittedValue: "Go" });
+    expect(Number(screen.getByTestId("island-dot").getAttribute("data-swell"))).toBe(1);
+  });
+
   it("keeps what you asked in view while Juno works, and does not lurch wider", async () => {
     render(<IslandBar />);
     await send(UI.BAR_STATES_LISTENING, { transcriptionText: "Send it" });

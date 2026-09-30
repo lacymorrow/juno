@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { DotLook, IslandSize, Words } from "./islandModel";
+import { VOICE_TRANSITION, voiceScale } from "../voiceLevel";
 
 /**
  * The island's body: one black shape whose width, height and corner radius
@@ -140,8 +141,19 @@ const DOT_ANIMATION: Record<DotLook["motion"], string | undefined> = {
 };
 
 /** One dot, 7px. State is told by its colour and motion, never an icon. */
-export function IslandDot({ look, size = 7 }: { look: DotLook; size?: number }) {
+export function IslandDot({
+  look,
+  size = 7,
+  level = 0,
+}: {
+  look: DotLook;
+  size?: number;
+  /** The mic level while the island listens (0..1). The dot swells with it;
+   *  0 leaves the dot at its own size and motion. */
+  level?: number;
+}) {
   useDotKeyframes();
+  const swell = voiceScale(level);
   const base = {
     width: size,
     height: size,
@@ -153,9 +165,10 @@ export function IslandDot({ look, size = 7 }: { look: DotLook; size?: number }) 
   return (
     <span
       className="relative flex shrink-0 items-center justify-center"
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size, transform: `scale(${swell})`, transition: VOICE_TRANSITION }}
       data-testid="island-dot"
       data-motion={look.motion}
+      data-swell={swell.toFixed(2)}
       aria-hidden="true"
     >
       <span className="relative z-10 block" style={{ ...base, animation }} />

@@ -705,6 +705,7 @@ export function PersonaBar(_props: PersonaBarProps) {
           look={scene.head}
           facingUp={facingUp}
           reducedMotion={reducedMotion}
+          level={isVoiceState(bar.barState) ? bar.audioLevel : 0}
           onClick={idle ? onHeadClick : undefined}
           className={idle ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}
         />
