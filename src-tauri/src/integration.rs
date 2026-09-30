@@ -524,6 +524,48 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
     setup_always_listening_control_listeners(app_handle);
 }
 
+/// Answer a pending per-send approval sheet (LAC-4058) by voice (LAC-4066).
+///
+/// While a connector send is waiting on approval, `handle_approve` has spoken
+/// the ask ("... Allow?") and is polling for a decision. A short spoken yes/no
+/// resolves it through the same state the sheet buttons write, instead of
+/// becoming a fresh agent query. Returns `true` when it handled the utterance,
+/// so the caller stops and does not submit it. Only clear affirm/deny words
+/// with something pending are handled; everything else falls through.
+async fn try_answer_pending_approval_by_voice(
+    app_state: &state::AppState,
+    spoken_text: &str,
+) -> bool {
+    let decision = match crate::agent::providers::cli_approval::parse_spoken_approval(spoken_text) {
+        Some(decision) => decision,
+        None => return false,
+    };
+
+    let pending = app_state.get_pending_tool_approvals().await;
+    if pending.is_empty() {
+        return false;
+    }
+
+    // There is at most one CLI approval waiting at a time (handle_approve
+    // blocks on its own request), but answer every pending request the same
+    // way so a spoken yes/no is never applied to only some of them.
+    for request in &pending {
+        if decision {
+            app_state.approve_tool(&request.tool_id).await;
+        } else {
+            app_state.deny_tool(&request.tool_id).await;
+        }
+    }
+
+    info!(
+        "[AlwaysListening] Voice {} answered {} pending approval(s): '{}'",
+        if decision { "yes" } else { "no" },
+        pending.len(),
+        spoken_text
+    );
+    true
+}
+
 /// Handle always listening transcription results and agent activation
 async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_str: &str) {
     let app_state = app_handle.state::<state::AppState>();
@@ -549,6 +591,13 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
 
                     // Only act if we have meaningful content.
                     if !trimmed_text.is_empty() && trimmed_text.len() > 2 {
+                        // A per-send approval sheet (LAC-4058) speaks its ask on
+                        // voice; a short spoken yes/no answers it here before the
+                        // utterance is treated as a new command (LAC-4066).
+                        if try_answer_pending_approval_by_voice(&app_state, trimmed_text).await {
+                            return;
+                        }
+
                         let target = PENDING_VOICE_TARGET
                             .lock()
                             .ok()

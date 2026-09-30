@@ -387,6 +387,98 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
     }
 }
 
+/// Classify a short spoken reply to a pending approval prompt as yes/no
+/// (LAC-4066). The sheet also speaks "... Allow?" on voice, so a person
+/// answers out loud; this turns that answer into approve/deny.
+///
+/// Deliberately strict. It only matches tiny, unambiguous affirm/deny
+/// utterances, so ordinary talk near an open approval sheet does not silently
+/// send or cancel. Anything longer than a few words, or with no clear
+/// affirm/deny word, returns `None` and falls through to normal voice
+/// handling. Deny wins when both appear, so "no, don't allow" is a no.
+pub fn parse_spoken_approval(text: &str) -> Option<bool> {
+    // Fold punctuation to spaces, keep apostrophes so "don't" stays one word.
+    let normalized: String = text
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '\'' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    let words: Vec<&str> = normalized.split_whitespace().collect();
+
+    // A yes/no answer is a few words at most. Longer than this is a sentence,
+    // i.e. almost certainly not an answer to the sheet, so let it fall through.
+    if words.is_empty() || words.len() > 6 {
+        return None;
+    }
+    let joined = words.join(" ");
+
+    // Multi-word entries are matched as substrings of the whole utterance;
+    // single words must appear as a standalone token so "no" does not fire on
+    // "nobody" and "ok" does not fire on "okra".
+    const DENY: &[&str] = &[
+        "no",
+        "nope",
+        "nah",
+        "don't",
+        "dont",
+        "do not",
+        "deny",
+        "decline",
+        "declined",
+        "cancel",
+        "reject",
+        "negative",
+        "no thanks",
+        "never mind",
+        "nevermind",
+    ];
+    const AFFIRM: &[&str] = &[
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "sure",
+        "ok",
+        "okay",
+        "allow",
+        "allowed",
+        "approve",
+        "approved",
+        "confirm",
+        "confirmed",
+        "affirmative",
+        "go ahead",
+        "send it",
+        "do it",
+        "please do",
+        "sounds good",
+    ];
+
+    let matches = |phrases: &[&str]| -> bool {
+        phrases.iter().any(|phrase| {
+            if phrase.contains(' ') {
+                joined.contains(phrase)
+            } else {
+                words.contains(phrase)
+            }
+        })
+    };
+
+    if matches(DENY) {
+        Some(false)
+    } else if matches(AFFIRM) {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +587,67 @@ mod tests {
         clear_denial("mcp__gmail__send_email");
         assert!(!recently_denied("mcp__gmail__send_email", Instant::now()));
         clear_denials_for_test();
+    }
+
+    #[test]
+    fn a_spoken_yes_approves_and_a_spoken_no_denies() {
+        for yes in [
+            "yes",
+            "Yes.",
+            "yeah",
+            "sure",
+            "ok",
+            "okay",
+            "allow",
+            "approve it",
+            "go ahead",
+            "send it",
+            "do it",
+        ] {
+            assert_eq!(parse_spoken_approval(yes), Some(true), "{yes} should allow");
+        }
+        for no in [
+            "no",
+            "No.",
+            "nope",
+            "nah",
+            "deny",
+            "cancel",
+            "don't",
+            "do not send it",
+            "no thanks",
+            "never mind",
+        ] {
+            assert_eq!(parse_spoken_approval(no), Some(false), "{no} should deny");
+        }
+    }
+
+    #[test]
+    fn deny_wins_when_both_words_appear() {
+        // "no, don't allow" carries both an affirm and a deny word; it is a no.
+        assert_eq!(parse_spoken_approval("no don't allow"), Some(false));
+        assert_eq!(parse_spoken_approval("no, do not send it"), Some(false));
+    }
+
+    #[test]
+    fn ambient_speech_falls_through() {
+        // Not an answer: no clear affirm/deny word, or too long to be one.
+        // These return None so the utterance goes to normal voice handling
+        // instead of silently approving or cancelling the pending send.
+        for ambient in [
+            "what time is it",
+            "email cameron about the launch",
+            "nobody has replied yet",
+            "that is okra",
+            "yes i think we should rewrite the whole onboarding flow tomorrow",
+            "",
+        ] {
+            assert_eq!(
+                parse_spoken_approval(ambient),
+                None,
+                "'{ambient}' should fall through"
+            );
+        }
     }
 
     #[test]
