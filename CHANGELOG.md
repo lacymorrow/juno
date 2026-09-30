@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.20] - 2026-09-30
+
+### Added
+
+- **cli:** ask before Juno sends — per-send approval for connector writes (LAC-4058) (#614) (cce7fcf5)
+
 ## [0.8.19] - 2026-09-30
 
 ### Added
@@ -550,7 +556,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.19...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.20...HEAD
+[0.8.20]: https://github.com/lacymorrow/juno/compare/cua-v0.8.19...v0.8.20
 [0.8.19]: https://github.com/lacymorrow/juno/compare/cua-v0.8.18...v0.8.19
 [0.8.18]: https://github.com/lacymorrow/juno/compare/cua-v0.8.17...v0.8.18
 [0.8.16]: https://github.com/lacymorrow/juno/compare/cua-v0.8.15...v0.8.16
