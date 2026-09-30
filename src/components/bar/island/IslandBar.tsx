@@ -634,7 +634,10 @@ export function IslandBar() {
         if (cardOpen && (e.target as HTMLElement).closest("button, input, a")) engage();
       }}
     >
-      <div className="absolute" style={{ left: SHADOW_PAD, top: SHADOW_PAD }}>
+      {/* Centred, not left-anchored: the window grows first (centre-stable),
+          so an island pinned to the left edge would jump left by half the
+          added width before it springs open. Centred, it grows around itself. */}
+      <div className="absolute left-1/2 -translate-x-1/2" style={{ top: SHADOW_PAD }}>
         <IslandShell
           size={shell}
           layerKey={posture}
