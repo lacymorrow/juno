@@ -391,12 +391,27 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
 /// (LAC-4066). The sheet also speaks "... Allow?" on voice, so a person
 /// answers out loud; this turns that answer into approve/deny.
 ///
-/// Deliberately strict. It only matches tiny, unambiguous affirm/deny
-/// utterances, so ordinary talk near an open approval sheet does not silently
-/// send or cancel. Anything longer than a few words, or with no clear
-/// affirm/deny word, returns `None` and falls through to normal voice
-/// handling. Deny wins when both appear, so "no, don't allow" is a no.
+/// Deliberately strict, and it errs toward not sending: a wrong "yes" sends a
+/// real message. It only matches tiny, unambiguous affirm/deny utterances, so
+/// ordinary talk near an open approval sheet does not silently send or cancel.
+/// Anything longer than a few words, or with no clear affirm/deny word, returns
+/// `None` and falls through to normal voice handling.
+///
+/// - **Deny wins and stays broad** — "no, don't allow" is a no, because a false
+///   "no" only costs a click.
+/// - **Yes must be clean and unhedged** — a trailing/embedded `?`, or any hedge
+///   ("not", "maybe", "probably", "i think", "wait", "hold on", "hmm", ...)
+///   makes an affirm fall through to `None`, so "not sure", "yes?", "hmm yes"
+///   and "probably yes" never approve. The sheet and the 60 s timeout decide.
 pub fn parse_spoken_approval(text: &str) -> Option<bool> {
+    // A question is never a clean answer, and the normalisation below folds '?'
+    // to a space (turning "yes?" into "yes"), so catch it in the raw text
+    // first: any question mark makes this a non-answer that falls through to the
+    // sheet and the 60 s timeout (LAC-4066).
+    if text.contains('?') {
+        return None;
+    }
+
     // Fold punctuation to spaces, keep apostrophes so "don't" stays one word.
     let normalized: String = text
         .to_lowercase()
@@ -474,11 +489,43 @@ pub fn parse_spoken_approval(text: &str) -> Option<bool> {
         return Some(false);
     }
 
-    // A hedge or negation turns an affirm into a non-answer: "not sure",
-    // "i'm not", "maybe" must fall through rather than send. ("don't" and
-    // "do not" are already handled as denials above.)
-    const HEDGES: &[&str] = &["not", "maybe", "unsure"];
-    if words.iter().any(|w| HEDGES.contains(w)) {
+    // A hedge or negation turns an affirm into a non-answer. A wrong "yes"
+    // sends a real message, so yes needs a clean, unhedged affirm: any of these
+    // words or phrases makes the utterance fall through instead of approving
+    // ("not sure", "hmm yes", "probably yes", "yes but wait", "hold on, ok",
+    // "i think so"). The sheet stays up and the 60 s timeout denies (LAC-4066).
+    // "don't"/"do not" are denials, handled above; "dunno" is the hedge
+    // spelling that carries no deny word. Multi-word hedges match as substrings
+    // and single words as standalone tokens, same as DENY/AFFIRM.
+    const HEDGES: &[&str] = &[
+        "not",
+        "maybe",
+        "perhaps",
+        "unsure",
+        "probably",
+        "possibly",
+        "wait",
+        "hmm",
+        "hm",
+        "um",
+        "uh",
+        "er",
+        "dunno",
+        "what",
+        "why",
+        "who",
+        "which",
+        "how",
+        "but",
+        "i guess",
+        "i think",
+        "i suppose",
+        "hold on",
+        "hang on",
+        "one sec",
+        "let me",
+    ];
+    if matches(HEDGES) {
         return None;
     }
 
@@ -699,6 +746,93 @@ mod tests {
                 "'{ambient}' should fall through"
             );
         }
+    }
+
+    #[test]
+    fn a_clean_affirm_approves_and_a_clear_deny_denies() {
+        // Lacy's required sets on PR #641. Must approve: a clean, unhedged
+        // affirm. Must deny: a clear no.
+        for yes in ["yes", "yeah", "ok", "send it", "go ahead"] {
+            assert_eq!(
+                parse_spoken_approval(yes),
+                Some(true),
+                "'{yes}' must approve"
+            );
+        }
+        for no in ["no", "nope", "don't"] {
+            assert_eq!(parse_spoken_approval(no), Some(false), "'{no}' must deny");
+        }
+    }
+
+    #[test]
+    fn hedged_or_questioned_affirms_never_approve() {
+        // A wrong "yes" sends a real message, so anything short of a clean,
+        // unhedged affirm must fall through to `None`: the sheet stays up and
+        // the 60 s timeout denies (LAC-4066). Every case carries an affirm word
+        // or is a bare hedge; none may return `Some(true)`. This is the
+        // required must-not-approve set from PR #641's review.
+        for hedged in [
+            "not sure",
+            "i'm not sure",
+            "maybe",
+            "sure?",
+            "yes?",
+            "send it?",
+            "i guess so",
+            "i guess so, send it",
+            "i think so",
+            "yes but wait",
+            "hmm yes",
+            "probably",
+            "probably yes",
+            "hold on, ok",
+            "wait",
+            "let me think",
+        ] {
+            assert_eq!(
+                parse_spoken_approval(hedged),
+                None,
+                "'{hedged}' must not approve"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn try_answer_resolves_a_pending_approval_by_voice() {
+        // The hotkey / push-to-talk path funnels through
+        // `anthropic::submit_query`, which calls `try_answer_pending_approval`;
+        // the always-listening path calls it too. Both share this resolver, so
+        // exercising it covers every voice entry point (LAC-4066).
+        let state = AppState::new(None);
+        let request = ToolApprovalRequest::new(
+            "tool-1".to_string(),
+            "mcp__slack__slack_send_message".to_string(),
+            json!({ "channel": "#dev", "text": "site is up" }),
+            "slack: send message".to_string(),
+        );
+
+        // A spoken "yes" approves the pending tool.
+        state.add_pending_tool_approval(request.clone()).await;
+        assert!(try_answer_pending_approval(&state, "yes").await);
+        assert_eq!(state.get_tool_approval_status("tool-1").await, Some(true));
+
+        // A spoken "no" denies it.
+        state.clear_pending_tool_approvals().await;
+        state.add_pending_tool_approval(request.clone()).await;
+        assert!(try_answer_pending_approval(&state, "no").await);
+        assert_eq!(state.get_tool_approval_status("tool-1").await, Some(false));
+
+        // A hedge is not an answer: nothing is resolved, the request stays
+        // pending for the sheet and the timeout to decide.
+        state.clear_pending_tool_approvals().await;
+        state.add_pending_tool_approval(request.clone()).await;
+        assert!(!try_answer_pending_approval(&state, "not sure").await);
+        assert_eq!(state.get_tool_approval_status("tool-1").await, None);
+
+        // Nothing pending: even a clear "yes" is a no-op, so it falls through to
+        // be handled as a normal query.
+        state.clear_pending_tool_approvals().await;
+        assert!(!try_answer_pending_approval(&state, "yes").await);
     }
 
     #[test]
