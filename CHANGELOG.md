@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.18] - 2026-09-30
+
+### Added
+
+- **claude-cli:** make --strict-mcp-config a setting, default off (LAC-4056) (#610) (4f19676b)
+
+### Fixed
+
+- **claude-cli:** root every claude spawn at the home directory (#613) (9a8696d6)
+- **security:** cap platform wait() and stop it starving the Tokio executor (LAC-4069) (#617) (12c387f8)
+
 ## [0.8.16] - 2026-09-29
 
 ### Changed
@@ -533,7 +544,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.16...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.18...HEAD
+[0.8.18]: https://github.com/lacymorrow/juno/compare/cua-v0.8.17...v0.8.18
 [0.8.16]: https://github.com/lacymorrow/juno/compare/cua-v0.8.15...v0.8.16
 [0.8.14]: https://github.com/lacymorrow/juno/compare/cua-v0.8.13...v0.8.14
 [0.8.12]: https://github.com/lacymorrow/juno/compare/cua-v0.8.11...v0.8.12
