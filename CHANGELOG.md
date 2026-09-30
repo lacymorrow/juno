@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.33] - 2026-09-30
+
+### Added
+
+- **bar:** Halo rebuilt as a ring that measures the turn (#632) (42ba2e86)
+
 ## [0.8.31] - 2026-09-30
 
 ### Added
@@ -618,7 +624,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.31...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.33...HEAD
+[0.8.33]: https://github.com/lacymorrow/juno/compare/cua-v0.8.32...v0.8.33
 [0.8.31]: https://github.com/lacymorrow/juno/compare/cua-v0.8.30...v0.8.31
 [0.8.30]: https://github.com/lacymorrow/juno/compare/cua-v0.8.29...v0.8.30
 [0.8.29]: https://github.com/lacymorrow/juno/compare/cua-v0.8.28...v0.8.29
