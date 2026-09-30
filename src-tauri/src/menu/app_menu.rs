@@ -20,7 +20,7 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
 
     // Juno Application Menu — About uses native macOS about panel
     let about_metadata = AboutMetadata {
-        name: Some("Juno".to_string()),
+        name: Some(crate::demo::display_name().to_string()),
         version: Some(env!("CARGO_PKG_VERSION").to_string()),
         copyright: Some("Copyright \u{00a9} 2026 Lacy Morrow".to_string()),
         comments: Some("AI-powered desktop automation for macOS".to_string()),
@@ -36,7 +36,7 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
 
-    let mut app_submenu = SubmenuBuilder::new(app, "Juno")
+    let mut app_submenu = SubmenuBuilder::new(app, crate::demo::display_name())
         .about(Some(about_metadata))
         .separator();
 

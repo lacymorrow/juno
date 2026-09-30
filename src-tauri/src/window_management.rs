@@ -202,6 +202,8 @@ impl WindowManager {
 
         // The one runtime override: a window being opened is a window being seen.
         config.visible = true;
+        // A demo build names its windows "Juno Demo".
+        config.title = crate::demo::window_title(&config.title);
 
         let window = WebviewWindowBuilder::from_config(app, &config)
             .map_err(|e| {

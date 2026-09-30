@@ -360,6 +360,7 @@ export const APP_IDENTITY = {
   APP_NAME: 'Juno',
   BUNDLE_IDENTIFIER: 'com.juno.desktop',
   PRODUCT_NAME: 'Juno',
+  DEMO_PRODUCT_NAME: 'Juno Demo',
   ENTITLEMENTS_FILE: 'juno.entitlements',
   CONFIG_DIR_NAME: '.juno',
   SCREENSHOT_PREFIX: 'juno_screenshot_',

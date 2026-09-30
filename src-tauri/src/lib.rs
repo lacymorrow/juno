@@ -878,6 +878,18 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
+            // A demo build names the windows declared in tauri.conf.json
+            // "Juno Demo". Windows opened later are renamed as they are built.
+            if crate::demo::is_demo_build() {
+                for window in app_handle.webview_windows().values() {
+                    if let Ok(title) = window.title() {
+                        if let Err(e) = window.set_title(&crate::demo::window_title(&title)) {
+                            warn!("Failed to rename {} window for the demo: {}", window.label(), e);
+                        }
+                    }
+                }
+            }
+
             // --- Initialize Settings Manager ---
             let settings_manager = match SettingsManager::new(app_handle.clone()) {
                 Ok(manager) => manager,

@@ -30,6 +30,34 @@ pub fn is_demo_build() -> bool {
     api_key().is_some()
 }
 
+/// The name this build shows people: "Juno Demo" for a demo build, "Juno"
+/// otherwise. Only what is on screen changes; the bundle id does not.
+pub fn display_name() -> &'static str {
+    display_name_for(is_demo_build())
+}
+
+fn display_name_for(is_demo: bool) -> &'static str {
+    if is_demo {
+        crate::constants::DEMO_PRODUCT_NAME
+    } else {
+        crate::constants::PRODUCT_NAME
+    }
+}
+
+/// A window title with the product name swapped for [`display_name`], so a
+/// demo's windows read "Juno Demo" and "Welcome to Juno Demo".
+pub fn window_title(title: &str) -> String {
+    window_title_for(title, is_demo_build())
+}
+
+fn window_title_for(title: &str, is_demo: bool) -> String {
+    if is_demo {
+        title.replacen(crate::constants::PRODUCT_NAME, display_name_for(true), 1)
+    } else {
+        title.to_string()
+    }
+}
+
 /// What Settings shows about this build. Serialised to the frontend.
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct DemoInfo {
@@ -93,6 +121,26 @@ mod tests {
     use super::*;
 
     const DEMO: Option<&'static str> = Some("sk-ant-demo");
+
+    #[test]
+    fn a_demo_build_calls_itself_juno_demo() {
+        assert_eq!(display_name_for(true), "Juno Demo");
+        assert_eq!(display_name_for(false), "Juno");
+    }
+
+    #[test]
+    fn a_demo_build_renames_its_windows() {
+        assert_eq!(window_title_for("Juno", true), "Juno Demo");
+        assert_eq!(
+            window_title_for("Welcome to Juno", true),
+            "Welcome to Juno Demo"
+        );
+        assert_eq!(
+            window_title_for("Juno Settings", true),
+            "Juno Demo Settings"
+        );
+        assert_eq!(window_title_for("Juno Settings", false), "Juno Settings");
+    }
 
     #[test]
     fn the_persons_own_key_beats_the_demo_key() {
