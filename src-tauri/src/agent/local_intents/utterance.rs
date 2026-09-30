@@ -10,7 +10,7 @@
 /// Courtesy that may open a command: "hey Juno, could you please ...".
 const LEADING_COURTESY: &[&str] = &[
     "hey", "hi", "hello", "ok", "okay", "juno", "please", "can", "could", "would", "will", "you",
-    "u", "go", "ahead", "and", "just", "kindly", "now", "yo",
+    "u", "ahead", "and", "just", "kindly", "now", "yo",
 ];
 
 /// Courtesy that may close a command: "... for me, thanks".
@@ -79,9 +79,12 @@ pub fn normalize(query: &str) -> Option<String> {
         }
     }
 
-    let start = tokens
-        .iter()
-        .position(|t| !LEADING_COURTESY.contains(&t.as_str()))?;
+    // "go" is courtesy only in "go ahead"; "go to github.com" is a command.
+    let start = (0..tokens.len()).find(|&i| {
+        let t = tokens[i].as_str();
+        let go_ahead = t == "go" && tokens.get(i + 1).is_some_and(|n| n == "ahead");
+        !go_ahead && !LEADING_COURTESY.contains(&t)
+    })?;
     let mut end = tokens.len();
     while end > start && TRAILING_COURTESY.contains(&tokens[end - 1].as_str()) {
         end -= 1;
@@ -168,6 +171,10 @@ mod tests {
         assert_eq!(
             normalize("Go ahead and lock the screen, thanks!").as_deref(),
             Some("lock screen")
+        );
+        assert_eq!(
+            normalize("go to github.com").as_deref(),
+            Some("go to github.com")
         );
         assert_eq!(
             normalize("What\u{2019}s the time now?").as_deref(),
