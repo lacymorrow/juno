@@ -476,18 +476,12 @@ pub async fn export_settings(app_handle: AppHandle) -> Result<String, String> {
 /// file (security audit 2026-02-08, item #31).
 const MAX_IMPORT_SETTINGS_BYTES: usize = 1_000_000;
 
-/// Parse and validate an imported settings JSON payload
-/// (security audit 2026-02-08, item #31):
-/// - reject oversized payloads,
-/// - reject unknown top-level sections (a typo'd or foreign file should not
-///   silently import as all-defaults),
-/// - parse into the typed [`AppSettings`] struct (serde enforces shape), and
-/// Known top-level sections of `AppSettings`; imports carrying other top-level
-/// keys are not settings exports and are rejected rather than ignored.
+/// Known top-level sections of `AppSettings`. An import carrying any other
+/// top-level key is not a settings export and is rejected rather than ignored.
 ///
-/// This must list every field `AppSettings` serializes, or an export of the
-/// app's own settings fails to import. `every_serialized_section_is_allowlisted`
-/// holds the two together.
+/// This must name every field `AppSettings` serializes, or an export of the
+/// app's own settings fails to import its own output.
+/// `every_serialized_section_is_allowlisted` holds the two together.
 const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "keyboard_shortcuts",
     "floating_bar",
@@ -506,6 +500,12 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "updates",
 ];
 
+/// Parse and validate an imported settings JSON payload
+/// (security audit 2026-02-08, item #31):
+/// - reject oversized payloads,
+/// - reject unknown top-level sections (a typo'd or foreign file should not
+///   silently import as all-defaults),
+/// - parse into the typed [`AppSettings`] struct (serde enforces shape), and
 /// - apply semantic per-field validation on values the UI setters constrain.
 fn parse_and_validate_settings_json(settings_json: &str) -> Result<AppSettings, String> {
     if settings_json.len() > MAX_IMPORT_SETTINGS_BYTES {
