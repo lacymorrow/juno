@@ -1,7 +1,20 @@
 import * as React from "react";
 import { MessageResponse as Response } from "@/components/ai-elements/message";
-import { JsxMessageRenderer } from "@/components/ui/jsx-message-renderer";
+import {
+  ComponentFallback,
+  ComponentSkeleton,
+} from "@/components/ui/component-skeleton";
+import {
+  JsxMessageRenderer,
+  availableComponents,
+} from "@/components/ui/jsx-message-renderer";
 import { WhyBlock } from "@/components/ui/why-block";
+import {
+  findOpenTagEnd,
+  stripJsxMarkup,
+  trimPartialTrailingTag,
+  trimUnresolvedTagTail,
+} from "@/lib/jsx-utils";
 import { cn } from "@/lib/utils";
 
 /**
@@ -9,7 +22,15 @@ import { cn } from "@/lib/utils";
  */
 type ContentSegment =
   | { type: "text"; content: string }
-  | { type: "jsx"; content: string }
+  /**
+   * A component block. `partial` means it is still streaming: its opening tag
+   * has arrived, its closing tag has not, and it renders progressively.
+   */
+  | { type: "jsx"; content: string; partial?: boolean; name?: string }
+  /** A component whose opening tag is still arriving: shown as a skeleton. `content` is the markup so far, never displayed. */
+  | { type: "pending"; name: string; content: string }
+  /** A component that ended malformed: its words, as plain text. */
+  | { type: "fallback"; content: string }
   /** Method rationale, rendered collapsed (see `WhyBlock`). */
   | { type: "why"; content: string };
 
@@ -92,16 +113,22 @@ function pushText(segments: ContentSegment[], text: string) {
  * - Find the matching closing tag (or self-closing)
  * - Everything before is text, the JSX block is a jsx segment, then continue
  *
- * This is intentionally simple — it handles the common case of JSX blocks
- * at the top level separated by text. It does NOT handle:
- * - JSX nested inside markdown code blocks (```<Card>...</Card>```)
- * - Malformed JSX (missing closing tags)
- * These edge cases are acceptable because the agent is instructed to produce
- * well-formed JSX at the top level.
+ * While streaming, a component never shows as raw markup:
+ * - its opening tag still arriving (`<WeatherCard temp={5`) -> `pending`,
+ *   a skeleton sized for that component;
+ * - its opening tag done but the block still open -> `jsx` with `partial`,
+ *   rendered progressively with any half-arrived inner tag trimmed off.
+ *
+ * Once streaming ends, an unclosed block of a known component becomes a
+ * `fallback` segment (its words as plain text). An unclosed tag that is not a
+ * known component (`Vec<String>`) is prose and stays text.
  */
 export function splitMixedContent(content: string, isStreaming = false): ContentSegment[] {
   const segments: ContentSegment[] = [];
-  let remaining = content;
+  const openFenceCount = (content.match(/```/g) || []).length;
+  // A tag name still arriving at the very end (`<Weath`) is not text yet.
+  let remaining =
+    isStreaming && openFenceCount % 2 === 0 ? trimUnresolvedTagTail(content) : content;
 
   while (remaining.length > 0) {
     const match = JSX_OPEN_TAG_PATTERN.exec(remaining);
@@ -164,17 +191,36 @@ export function splitMixedContent(content: string, isStreaming = false): Content
     }
 
     // Find the end of this JSX block
-    const jsxEnd = findJsxBlockEnd(remaining, jsxStart, componentName);
+    let jsxEnd = findJsxBlockEnd(remaining, jsxStart, componentName);
+    const openTagEnd = findOpenTagEnd(remaining, jsxStart);
+
+    // A self-closing tag with a `>` inside an attribute value slips past the
+    // regex in findJsxBlockEnd; the quote-aware scan still sees it close.
+    if (jsxEnd === -1 && openTagEnd !== -1 && remaining[openTagEnd - 2] === "/") {
+      jsxEnd = openTagEnd;
+    }
 
     if (jsxEnd === -1) {
+      const rest = remaining.slice(jsxStart);
       if (isStreaming) {
-        // During streaming, treat incomplete JSX as a jsx segment —
-        // JsxRenderer with fixIncompleteJsx will auto-close tags,
-        // rendering the component progressively as chunks arrive
-        segments.push({ type: "jsx", content: remaining.slice(jsxStart) });
+        if (openTagEnd === -1) {
+          // Attributes still arriving: nothing renderable yet.
+          segments.push({ type: "pending", name: componentName, content: rest });
+        } else {
+          // Shell is open: render what has arrived, auto-closed by JsxRenderer.
+          segments.push({
+            type: "jsx",
+            content: trimPartialTrailingTag(rest),
+            partial: true,
+            name: componentName,
+          });
+        }
+      } else if (Object.prototype.hasOwnProperty.call(availableComponents, componentName)) {
+        // A known component that never closed is malformed: keep its words.
+        segments.push({ type: "fallback", content: stripJsxMarkup(rest) });
       } else {
-        // After streaming, incomplete JSX is malformed — show as text
-        pushText(segments, remaining.slice(jsxStart));
+        // Not a component (`Vec<String>`): it was prose all along.
+        pushText(segments, rest);
       }
       break;
     }
@@ -268,6 +314,28 @@ export function hasMixedContent(content: string): boolean {
   );
 }
 
+function renderSegment(seg: ContentSegment, className?: string): React.ReactNode {
+  switch (seg.type) {
+    case "text":
+      return <Response className={className}>{seg.content}</Response>;
+    case "why":
+      return <WhyBlock className={className}>{seg.content}</WhyBlock>;
+    case "pending":
+      return <ComponentSkeleton name={seg.name} className={className} />;
+    case "fallback":
+      return <ComponentFallback text={seg.content} className={className} />;
+    case "jsx":
+      return (
+        <JsxMessageRenderer
+          jsx={seg.content}
+          partial={seg.partial}
+          name={seg.name}
+          className={className}
+        />
+      );
+  }
+}
+
 interface MixedContentRendererProps {
   content: string;
   isStreaming?: boolean;
@@ -294,33 +362,18 @@ export const MixedContentRenderer = React.memo(
 
     // Single segment optimization — no wrapper div needed
     if (segments.length === 1) {
-      const seg = segments[0];
-      if (seg.type === "text") {
-        return <Response className={className}>{seg.content}</Response>;
-      }
-      if (seg.type === "why") {
-        return <WhyBlock className={className}>{seg.content}</WhyBlock>;
-      }
-      return <JsxMessageRenderer jsx={seg.content} className={className} />;
+      return renderSegment(segments[0], className);
     }
 
+    // A skeleton turning into its card keeps the same key and wrapper, so the
+    // card replaces it in place without replaying the entry animation.
     return (
       <div className={cn("space-y-3", className)}>
-        {segments.map((seg, i) =>
-          seg.type === "text" ? (
-            <div key={i} className="jsx-segment-enter">
-              <Response>{seg.content}</Response>
-            </div>
-          ) : seg.type === "why" ? (
-            <div key={i} className="jsx-segment-enter">
-              <WhyBlock>{seg.content}</WhyBlock>
-            </div>
-          ) : (
-            <div key={i} className="jsx-segment-enter">
-              <JsxMessageRenderer jsx={seg.content} />
-            </div>
-          ),
-        )}
+        {segments.map((seg, i) => (
+          <div key={i} className="jsx-segment-enter">
+            {renderSegment(seg)}
+          </div>
+        ))}
         {isStreaming && (
           <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
             |

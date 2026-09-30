@@ -169,14 +169,14 @@ Voice (end): "I've made a reservation for 8 PM at Trattoria Roma."
 | `is_jsx_content()` detection | ✅ Working | `anthropic.rs` — checks for JSX indicators in content |
 | Keyboard shortcut trigger | ✅ Working | `useShortcutEvents.ts` → agent mode / dictation |
 | Voice input (Whisper) | ✅ Working | `tauri-plugin-voice-transcription` |
+| Speak first | ✅ Working | Prompt: first output is a short `<TTS>` line; `TtsTagStream` releases it the moment `</TTS>` arrives (every provider, Claude CLI included); `invoke_tts` queues the final line behind it |
+| JSX while streaming | ✅ Working | `useBackendEvents.ts` sets `isJsx` mid-stream; `splitMixedContent` renders finished components at once, shows a sized skeleton while a tag's attributes stream, and falls back to plain text for malformed markup. `TtsTagStream` holds back half-arrived tag names (`<Weath`) |
+| Component instructions in prompt | ✅ Working | `PromptFragments::jsx_capabilities()` |
 
 ### What's Missing (Gaps to Fill)
 
 | Gap | Description | Priority |
 |-----|-------------|----------|
-| **JSX not wired to streaming** | `is_jsx_content()` only runs on specialist delegation results, not on streamed messages. `useBackendEvents.ts` never sets `isJsx: true`. | P0 |
-| **No component-aware streaming** | Agent streams a mix of text + JSX. The frontend needs to detect JSX boundaries during streaming and render them correctly without flashing/reformatting. | P0 |
-| **Agent prompt: component instructions** | The system prompt has TTS instructions but no guidance on when/how to output JSX components. Agents don't know they can render UI. | P0 |
 | **Component library gaps** | Weather widgets, media players, file browsers, restaurant cards, etc. are not in `availableComponents`. The library is basic (shapes, status cards). | P1 |
 | **Mixed content rendering** | A single message with text + JSX needs to split at JSX boundaries — render markdown above, component in the middle, markdown below. Current renderer is either/or. | P1 |
 | **Native app integration** | "Open the Weather app" requires shell commands or AppleScript. Component can include a button that invokes a Tauri command to open native apps. | P2 |

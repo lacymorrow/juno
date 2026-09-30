@@ -7,6 +7,12 @@
 //! means a provider cannot forget to speak (LAC: the Claude CLI provider never
 //! extracted the tags, so nothing was spoken and raw tags showed in the chat).
 //!
+//! The same pass guards the component channel. A component tag whose name is
+//! still arriving (`<Weath`, `</Car`) is held back until the next character
+//! says what it is, so a half-typed tag name never reaches the chat as raw
+//! text. Once the name resolves the markup goes out and the chat renders it
+//! (or a placeholder while its attributes are still streaming).
+//!
 //! Two entry points:
 //! - [`TtsTagStream`] for streaming providers. Feed chunks as they arrive; tags
 //!   split across chunk boundaries are held back until they resolve.
@@ -15,6 +21,31 @@
 
 const OPEN_TAG: &str = "<TTS>";
 const CLOSE_TAG: &str = "</TTS>";
+
+/// Longest component-tag fragment worth holding back. Real component names
+/// are short; anything longer is prose and goes out rather than stalling the
+/// stream.
+const MAX_COMPONENT_FRAGMENT_BYTES: usize = 64;
+
+/// True when `rest` is the start of a component tag whose name has not
+/// finished arriving: `<`, `</`, `<W`, `<WeatherCa`, `</Card`. It must run to
+/// the end of the buffer; the next character decides whether it is a tag.
+/// Lowercase names (`<br`) are HTML or prose and are not held.
+fn is_unresolved_component_fragment(rest: &str) -> bool {
+    if rest.len() > MAX_COMPONENT_FRAGMENT_BYTES {
+        return false;
+    }
+    let Some(after_lt) = rest.strip_prefix('<') else {
+        return false;
+    };
+    let name = after_lt.strip_prefix('/').unwrap_or(after_lt);
+    let mut chars = name.chars();
+    match chars.next() {
+        // `<` or `</` alone: wait for the next character.
+        None => true,
+        Some(first) => first.is_ascii_uppercase() && chars.all(|c| c.is_ascii_alphanumeric()),
+    }
+}
 
 /// Incremental `<TTS>` parser for streamed text.
 ///
@@ -76,6 +107,10 @@ impl TtsTagStream {
                 }
                 if OPEN_TAG.starts_with(rest) {
                     // Possible partial "<TTS>" at the end; wait for more.
+                    break;
+                }
+                if is_unresolved_component_fragment(rest) {
+                    // Possible component tag whose name is still arriving.
                     break;
                 }
             }
@@ -275,5 +310,152 @@ mod tests {
         assert!(contains_tts_tags("x</TTS>"));
         assert!(!contains_tts_tags("<tts>lower</tts>"));
         assert!(!contains_tts_tags("none"));
+    }
+
+    #[test]
+    fn spoken_block_is_released_by_the_chunk_that_closes_it() {
+        // Speak-first: the acknowledgement must reach the speaker the moment
+        // `</TTS>` lands, with nothing after it and before any tool call.
+        let mut s = TtsTagStream::new();
+        let (d1, t1) = s.push("<TTS>Sure, making that spreadsheet now.</TT");
+        assert_eq!(d1, "");
+        assert!(t1.is_empty());
+        let (d2, t2) = s.push("S>");
+        assert_eq!(d2, "");
+        assert_eq!(t2, vec!["Sure, making that spreadsheet now."]);
+    }
+
+    #[test]
+    fn open_tts_tag_split_mid_name_still_speaks() {
+        let mut s = TtsTagStream::new();
+        let mut spoken = Vec::new();
+        let mut display = String::new();
+        for chunk in ["<", "T", "TS>On it", ".</", "TTS>", "\n\nDone."] {
+            let (d, t) = s.push(chunk);
+            display.push_str(&d);
+            spoken.extend(t);
+        }
+        assert_eq!(spoken, vec!["On it."]);
+        assert_eq!(display, "\n\nDone.");
+    }
+
+    #[test]
+    fn component_name_split_across_chunks_is_held_until_resolved() {
+        let mut s = TtsTagStream::new();
+        let (d1, _) = s.push("Here you go.\n<Weath");
+        assert_eq!(d1, "Here you go.\n");
+        let (d2, _) = s.push("erCard temp={5");
+        assert_eq!(d2, "<WeatherCard temp={5");
+        let (d3, _) = s.push("4} />");
+        assert_eq!(d3, "4} />");
+    }
+
+    #[test]
+    fn closing_component_tag_split_across_chunks_is_held() {
+        let mut s = TtsTagStream::new();
+        let (d1, _) = s.push("<Card>hello</Ca");
+        assert_eq!(d1, "<Card>hello");
+        let (d2, _) = s.push("rd>");
+        assert_eq!(d2, "</Card>");
+    }
+
+    #[test]
+    fn lone_angle_bracket_and_slash_wait_for_the_next_char() {
+        let mut s = TtsTagStream::new();
+        let (d1, _) = s.push("x </");
+        assert_eq!(d1, "x ");
+        let (d2, _) = s.push(" y");
+        assert_eq!(d2, "</ y");
+    }
+
+    #[test]
+    fn lowercase_and_prose_angle_brackets_are_not_held() {
+        let mut s = TtsTagStream::new();
+        let (d, _) = s.push("a <b");
+        assert_eq!(d, "a <b");
+        let (d, _) = s.push(" and 3 <4");
+        assert_eq!(d, " and 3 <4");
+    }
+
+    #[test]
+    fn overlong_fragment_is_released_as_text() {
+        let mut s = TtsTagStream::new();
+        let long = format!("<{}", "A".repeat(80));
+        let (d, _) = s.push(&long);
+        assert_eq!(d, long);
+    }
+
+    #[test]
+    fn held_component_fragment_is_flushed_on_finish() {
+        let mut s = TtsTagStream::new();
+        let (d1, _) = s.push("cut off <Stat");
+        assert_eq!(d1, "cut off ");
+        let (d2, t2) = s.finish();
+        assert_eq!(d2, "<Stat");
+        assert!(t2.is_empty());
+    }
+
+    #[test]
+    fn component_then_tts_in_one_chunk() {
+        let mut s = TtsTagStream::new();
+        let (d, t) = s.push("<Stat value={1} label=\"Rows\" /><TTS>Done.</TTS>");
+        assert_eq!(d, "<Stat value={1} label=\"Rows\" />");
+        assert_eq!(t, vec!["Done."]);
+    }
+
+    #[test]
+    fn tts_then_component_split_between_chunks() {
+        let mut s = TtsTagStream::new();
+        let (d1, t1) = s.push("<TTS>Playing.</TTS>\n<Now");
+        assert_eq!(d1, "\n");
+        assert_eq!(t1, vec!["Playing."]);
+        let (d2, t2) = s.push("PlayingCard app=\"Spotify\" />");
+        assert_eq!(d2, "<NowPlayingCard app=\"Spotify\" />");
+        assert!(t2.is_empty());
+    }
+
+    #[test]
+    fn component_markup_inside_tts_is_not_held_or_shown() {
+        // The prompt forbids nesting; if the model does it anyway the markup
+        // stays on the spoken channel and never reaches the chat.
+        let mut s = TtsTagStream::new();
+        let (d1, t1) = s.push("<TTS>Look <Ca");
+        assert_eq!(d1, "");
+        assert!(t1.is_empty());
+        let (d2, t2) = s.push("rd>here</Card></TTS>after");
+        assert_eq!(d2, "after");
+        assert_eq!(t2, vec!["Look <Card>here</Card>"]);
+    }
+
+    #[test]
+    fn nested_components_stream_through_unchanged() {
+        let input =
+            "<AnimatedCard animation=\"fade-up\"><div><Stat value={72} /></div></AnimatedCard>";
+        let mut s = TtsTagStream::new();
+        let mut display = String::new();
+        for ch in input.chars() {
+            let (d, t) = s.push(&ch.to_string());
+            assert!(t.is_empty());
+            display.push_str(&d);
+        }
+        let (d, _) = s.finish();
+        display.push_str(&d);
+        assert_eq!(display, input);
+    }
+
+    #[test]
+    fn stray_close_tag_outside_a_block_is_display_text() {
+        let (display, spoken) = split_tts_tags("oops </TTS> fine");
+        assert!(spoken.is_empty());
+        assert_eq!(display, "oops </TTS> fine");
+    }
+
+    #[test]
+    fn multibyte_text_before_a_split_component_is_safe() {
+        let mut s = TtsTagStream::new();
+        let (d1, _) = s.push("日本 ☕ <Wea");
+        assert_eq!(d1, "日本 ☕ ");
+        let (d2, _) = s.push("therCard />");
+        assert_eq!(d2, "<WeatherCard />");
     }
 }

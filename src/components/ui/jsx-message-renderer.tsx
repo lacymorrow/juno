@@ -28,6 +28,11 @@ import {
   NowPlayingCard,
 } from "@/components/ui/agent-cards";
 import { WhyBlock } from "@/components/ui/why-block";
+import {
+  ComponentFallback,
+  ComponentSkeleton,
+} from "@/components/ui/component-skeleton";
+import { stripJsxMarkup } from "@/lib/jsx-utils";
 import { cn } from "@/lib/utils";
 import {
   AlertCircle,
@@ -108,6 +113,10 @@ import {
 interface JsxMessageRendererProps {
   jsx: string;
   className?: string;
+  /** The markup is still streaming in. */
+  partial?: boolean;
+  /** Top-level component name, used to size the placeholder. */
+  name?: string;
 }
 
 // Custom showcase components for the agent to use
@@ -478,17 +487,83 @@ const availableComponents = {
   CopyButton,
 } as Record<string, React.ComponentType<any>>;
 
+interface ComponentErrorBoundaryProps {
+  /** Markup being rendered; a change clears a previous failure. */
+  jsx: string;
+  fallback: React.ReactNode;
+  children: React.ReactNode;
+}
+
+interface ComponentErrorBoundaryState {
+  hasError: boolean;
+}
+
+/**
+ * Catches a component that throws while rendering (bad props from the agent,
+ * say) so one broken card never takes the whole conversation down. It resets
+ * when the markup changes instead of being remounted, so a streaming card
+ * keeps its animation state between chunks and gets another chance when more
+ * markup arrives.
+ */
+class ComponentErrorBoundary extends React.Component<
+  ComponentErrorBoundaryProps,
+  ComponentErrorBoundaryState
+> {
+  state: ComponentErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): ComponentErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.warn("Agent component failed to render:", error.message);
+  }
+
+  componentDidUpdate(prev: ComponentErrorBoundaryProps) {
+    if (this.state.hasError && prev.jsx !== this.props.jsx) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
+}
+
+/**
+ * Renders one agent component block.
+ *
+ * `partial` marks markup that is still streaming. If a partial block does not
+ * parse yet, a skeleton holds its place; if a finished block does not parse or
+ * throws, the words inside it are shown as plain text instead.
+ */
 export function JsxMessageRenderer({
   jsx,
   className,
+  partial = false,
+  name,
 }: JsxMessageRendererProps) {
+  const fallback = React.useMemo(
+    () =>
+      partial ? (
+        <ComponentSkeleton name={name} />
+      ) : (
+        <ComponentFallback text={stripJsxMarkup(jsx)} />
+      ),
+    [partial, name, jsx],
+  );
+  const renderError = React.useCallback(() => fallback, [fallback]);
+
   return (
     <div className={cn("jsx-message-content", className)}>
-      <JsxRenderer
-        jsx={jsx}
-        components={availableComponents}
-        fixIncompleteJsx={true}
-      />
+      <ComponentErrorBoundary jsx={jsx} fallback={fallback}>
+        <JsxRenderer
+          jsx={jsx}
+          components={availableComponents}
+          fixIncompleteJsx={true}
+          renderError={renderError}
+        />
+      </ComponentErrorBoundary>
     </div>
   );
 }
