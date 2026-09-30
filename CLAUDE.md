@@ -314,6 +314,10 @@ Test files: `src/components/__tests__/`, `src/test/setup.ts`. Rust tests use inl
 - `docs/audits/security-audit-2026-02-08.md`: tracked security vulnerabilities from the 2026-02-08 audit (32 issues, with 2026-09-11 status annotations)
 - See audit before making changes to: cloud/, agent/tools/, commands/shell.rs, browser_controller.rs
 
+## PR feature media
+
+UI PRs attach evidence (see the `insanely-great` demo test). Capture only the new or changed feature in this PR, never unchanged screens. Commit it into the PR at `docs/changelog/media/<PR number>/` with descriptive names (`trigger-sentences-add.png`, `double-tap.mp4`), embed it in the PR body, and keep recordings small (under 5 MB, mp4/webm, no audio unless the feature is audio). Nothing lives only in `/tmp`. No private data. Fleet rule: `~/repo/paperclip-company/knowledge/agent-common.md` (PR feature media).
+
 ## Additional References
 
 - `LLMs.txt` — Short pointer for AI agents (this file is canonical; the old 1,200-line version is in `docs/legacy/`)
