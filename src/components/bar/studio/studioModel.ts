@@ -470,12 +470,37 @@ export function answerKey(script: Script): string {
   return a.messageId ?? String(a.timestamp ?? "");
 }
 
-/** The two channels of a reply: what was said aloud and what was shown. */
+/** Lowercase, one space between words, no trailing punctuation: enough to
+ *  tell "the same sentence" from "a different one". */
+function normaliseSentence(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[\s.!?,;:]+$/g, "")
+    .trim();
+}
+
+/**
+ * Juno usually speaks the first sentence of what it shows. When the visible
+ * text already carries the spoken sentence, the script must not read it twice:
+ * the notes are the Juno line. Only a spoken sentence the person cannot read
+ * anywhere else earns its own line.
+ */
+export function spokenIsInVisible(spoken: string, visible: string): boolean {
+  const s = normaliseSentence(spoken);
+  const v = normaliseSentence(visible);
+  if (!s || !v) return false;
+  return v.includes(s);
+}
+
+/** The two channels of a reply: what was said aloud and what was shown. A
+ *  spoken sentence the visible text already contains comes back empty. */
 export function replyChannels(answer: ChatMessage | null): { spoken: string; visible: string } {
   const visible = answer?.content.trim() ?? "";
-  const spoken =
+  const rawSpoken =
     answer?.tts_metadata?.total_spoken_text?.trim() ||
     answer?.tts_metadata?.tts_parts?.map((p) => p.trim()).join(" ") ||
     "";
+  const spoken = spokenIsInVisible(rawSpoken, visible) ? "" : rawSpoken;
   return { spoken, visible };
 }

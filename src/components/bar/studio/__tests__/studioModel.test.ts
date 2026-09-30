@@ -15,6 +15,7 @@ import {
   lineFor,
   posture,
   replyChannels,
+  spokenIsInVisible,
   scriptFor,
   scriptHeightFor,
   smoothLevel,
@@ -368,5 +369,25 @@ describe("script", () => {
     const s = scriptFor(messages);
     expect(replyChannels(s.answer)).toEqual({ spoken: "It says hello.", visible: "The title is Hello." });
     expect(replyChannels(null)).toEqual({ spoken: "", visible: "" });
+  });
+
+  it("does not read the spoken sentence twice when the notes already carry it", () => {
+    const reply = (content: string, spoken: string): ChatMessage => ({
+      role: "assistant",
+      content,
+      messageId: "m",
+      tts_metadata: { has_spoken_content: true, tts_parts: [spoken], total_spoken_text: spoken },
+    });
+    // Juno spoke the first sentence of what it shows: the notes are the line.
+    expect(
+      replyChannels(reply("Done. The draft is with Maya.\n\nI will let you know.", "Done. The draft is with Maya.")),
+    ).toEqual({ spoken: "", visible: "Done. The draft is with Maya.\n\nI will let you know." });
+    // Case, spacing and trailing punctuation do not make it a different sentence.
+    expect(replyChannels(reply("done, the draft  is with maya", "Done, the draft is with Maya!")).spoken).toBe("");
+    // A sentence the person cannot read anywhere else keeps its own line.
+    expect(replyChannels(reply("The title is Hello.", "It says hello.")).spoken).toBe("It says hello.");
+    // Spoken only: the spoken text is all there is.
+    expect(replyChannels(reply("", "Done.")).spoken).toBe("Done.");
+    expect(spokenIsInVisible("", "anything")).toBe(false);
   });
 });
