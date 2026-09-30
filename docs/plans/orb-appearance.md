@@ -1,6 +1,6 @@
 # Orb: a presence (spec)
 
-**Status:** Built on `feat/orb-presence`; every posture captured from the preview route; unit tests green; CI on the draft PR.
+**Status:** Built on `feat/orb-presence` (PR #630); every posture captured from the preview route; unit tests green; CI on the draft PR.
 **DRI:** Frontend Engineer. Lacy is DRI for the hardware pass (hold the key, speak, drag, real answers, a real GPU).
 
 ## The ask
@@ -140,7 +140,7 @@ Shader changes from the ElevenLabs original: lobe softness 0.6 to 0.9; lobes fad
 
 - `docs/frontend/screenshots/orb/`: one PNG per posture from `/__bar-preview?appearance=orb&state=<state>` and the demos (`default`, `dictation_ready`, `always_listening`, `input`, `listening`, `dictating`, `transcribing`, `loading`, `agent_responding`, `speaking`, `finishing`, `error`, `stopping`, `approval`, `sheet`), plus `spoken-turn.mp4`, one full spoken turn from `/__bar-preview?appearance=orb&demo=spoken`.
 - Unit tests: `orbModel.test.ts` (the look, the targets, the caption, the sentences, the window, the turn; every state Rust can send), `ElevenLabsOrbBar.test.tsx` (rest and sleep, listening with words, green dictation, hide then shrink, working with a tool, the answer sentence by sentence and the linger, the sheet on hover and by itself for a component, history does not linger, speaking again clears, approval, error, Escape, the composer, click, driving).
-- `tsc` clean; `vitest` full suite green.
+- `tsc` clean; `vitest` 42 files, 482 tests green after the rebase onto #629 (2026-09-30). The clip and the hero still are also at `docs/changelog/media/630/`.
 - Not verified here: the real window on hardware, a real GPU's frame cost, the WebGL sleep under a real compositor, drag, OS focus, the Rust side of every interaction. The bench runs the same components on the fake Tauri layer.
 
 ## Follow-ups (not in this branch)
