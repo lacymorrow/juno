@@ -137,6 +137,18 @@ describe("PersonaBar", () => {
     expect(resizeWindowIfChanged).toHaveBeenCalledWith({ ...REST, growUp: false });
   });
 
+  it("the cue by its ear swells with your voice while it listens", async () => {
+    render(<PersonaBar />);
+    await settle();
+    const swell = () => Number(screen.getByTestId("avatar-cue-swell").getAttribute("data-swell"));
+    await send(UI.BAR_STATES_LISTENING, { audioLevel: 0 });
+    expect(swell()).toBe(1);
+    await send(UI.BAR_STATES_LISTENING, { audioLevel: 0.64 });
+    expect(swell()).toBeGreaterThan(1.5);
+    await send(UI.BAR_STATES_LISTENING, { audioLevel: 0.1 });
+    expect(swell()).toBeLessThan(1.5);
+  });
+
   it("leans in with a blue cue and your words in a bubble on your side as you speak", async () => {
     render(<PersonaBar />);
     await settle();

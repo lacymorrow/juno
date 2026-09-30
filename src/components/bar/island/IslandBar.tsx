@@ -441,6 +441,9 @@ export function IslandBar() {
 
   // ── Words and dot ──
   const dot = dotFor(bar.barState, isDriving);
+  // The dot swells with your voice while the island listens; any other
+  // state keeps it at its own size.
+  const dotLevel = isVoiceState(bar.barState) ? bar.audioLevel : 0;
   const question = turn.question || bar.lastSubmittedValue;
   const words = wordsFor({
     state: bar.barState,
@@ -458,7 +461,7 @@ export function IslandBar() {
   if (posture === "capsule") {
     layer = (
       <div className="flex h-full w-full items-center justify-center" data-testid="island-capsule">
-        <IslandDot look={dot} />
+        <IslandDot look={dot} level={dotLevel} />
       </div>
     );
   } else if (posture === "line") {
@@ -468,7 +471,7 @@ export function IslandBar() {
         className="flex h-full w-full items-center gap-2.5 pl-4 pr-3.5"
         data-testid="island-line"
       >
-        <IslandDot look={dot} />
+        <IslandDot look={dot} level={dotLevel} />
         <div className="relative min-w-0 flex-1">
           <input
             ref={lineInputRef}
@@ -510,7 +513,7 @@ export function IslandBar() {
           className="flex shrink-0 items-center gap-2.5 pl-4 pr-2"
           style={{ height: CARD_HEADER_H }}
         >
-          <IslandDot look={dot} />
+          <IslandDot look={dot} level={dotLevel} />
           {headerWords ? (
             <IslandWords words={headerWords} />
           ) : (
@@ -614,7 +617,7 @@ export function IslandBar() {
     // ear and status
     layer = (
       <div className="flex h-full w-full items-center gap-2 pl-3.5 pr-3.5" data-testid={`island-${posture}`}>
-        <IslandDot look={dot} />
+        <IslandDot look={dot} level={dotLevel} />
         {words && <IslandWords words={words} />}
       </div>
     );
