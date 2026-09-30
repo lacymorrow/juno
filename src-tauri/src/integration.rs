@@ -543,6 +543,21 @@ async fn handle_always_listening_transcription(app_handle: &AppHandle, payload_s
                         trimmed_text
                     );
 
+                    // A per-send approval sheet (LAC-4058) speaks its ask on
+                    // voice; a short spoken yes/no answers it (LAC-4066). Run
+                    // this before the meaningful-content gate below, since the
+                    // likeliest answers, "no" and "ok", are 2 chars and would
+                    // be dropped by it. The helper is a no-op when nothing is
+                    // pending or the text is not a clear yes/no.
+                    if crate::agent::providers::cli_approval::try_answer_pending_approval(
+                        &app_state,
+                        trimmed_text,
+                    )
+                    .await
+                    {
+                        return;
+                    }
+
                     // Only act if we have meaningful content.
                     if !trimmed_text.is_empty() && trimmed_text.len() > 2 {
                         let target = PENDING_VOICE_TARGET

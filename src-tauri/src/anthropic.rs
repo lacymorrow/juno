@@ -371,6 +371,21 @@ pub async fn submit_query(
         return Ok(());
     }
 
+    // --- Answer a pending per-send approval (LAC-4058) by voice (LAC-4066) ---
+    // Every query source funnels through here, including the push-to-talk /
+    // hotkey and cloud-voice transcripts. While a connector send is waiting on
+    // its approval sheet, a short spoken (or typed) yes/no resolves it through
+    // the same approve/deny state the sheet buttons use, instead of starting a
+    // new agent turn. This runs before the query is announced to any surface,
+    // so nothing is left in a working state. A no-op when nothing is pending or
+    // the text is not a clear yes/no.
+    if crate::agent::providers::cli_approval::try_answer_pending_approval(&state, trimmed_query)
+        .await
+    {
+        info!("Query answered a pending tool approval: {}", trimmed_query);
+        return Ok(());
+    }
+
     // Phase D analytics: fire `onboarding_first_query` exactly once per process
     // once the user has reached OnboardingPhase::Complete. The helper is a
     // no-op if onboarding is incomplete or the event is already recorded.
