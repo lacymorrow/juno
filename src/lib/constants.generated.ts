@@ -358,7 +358,7 @@ export const API_ENDPOINTS = {
 
 export const APP_IDENTITY = {
   APP_NAME: 'Juno',
-  BUNDLE_IDENTIFIER: 'com.juno.app',
+  BUNDLE_IDENTIFIER: 'com.juno.desktop',
   PRODUCT_NAME: 'Juno',
   ENTITLEMENTS_FILE: 'juno.entitlements',
   CONFIG_DIR_NAME: '.juno',

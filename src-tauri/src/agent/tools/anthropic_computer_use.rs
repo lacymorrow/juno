@@ -582,7 +582,7 @@ async fn enforce_action_cooldown(action: &str) {
 
 /// Juno's own bundle identifier — used for audit logging when the agent
 /// targets its own window.
-const JUNO_BUNDLE_ID: &str = "com.juno.desktop";
+const JUNO_BUNDLE_ID: &str = crate::constants::BUNDLE_IDENTIFIER;
 
 /// Bundle IDs that receive extra audit logging when targeted.
 /// These are sensitive system apps — currently observe-only (no blocking).
