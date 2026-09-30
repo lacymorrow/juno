@@ -18,6 +18,8 @@ pub mod endpoints {
 
     // The project on GitHub: source, releases and the update feeds
     pub const GITHUB_URL: &str = "https://github.com/lacymorrow/juno";
+    /// Juno's public site, opened by Help > Visit Website.
+    pub const WEBSITE_URL: &str = "https://junebug.ai";
     /// Update manifest for the stable channel. Must match the endpoint in
     /// tauri.conf.json (a test checks).
     pub const UPDATE_FEED_STABLE: &str =
