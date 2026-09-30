@@ -28,7 +28,7 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
   {
     value: UI.BAR_APPEARANCES_VOICE_AI,
     name: "Studio",
-    descriptor: "A light bar with its own waveform and transcript.",
+    descriptor: "A light recording studio: a real waveform, a teleprompter, and the answer as a script.",
   },
   {
     value: UI.BAR_APPEARANCES_DYNAMIC,

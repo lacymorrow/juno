@@ -13,6 +13,8 @@
  * Query: `appearance=<bar_appearance value>`, `motion=reduced` (optional),
  * `state=<bar state>` to hold one frame (the bench and the docs screenshots),
  * `demo=card` to play one full turn (question, answer with a component) once,
+ * `demo=script` to play a turn with a tool and a spoken answer (the studio's
+ * clip), `demo=approval` to hold a tool waiting on Allow or Don't,
  * `start=manual` to hold the script until `window.__junoBenchStart()` is
  * called (so a recording begins on the first beat, not on a blank page), and
  * `bg=<css color>` to paint a background instead of transparent.
@@ -51,9 +53,16 @@ interface Frame {
   transcriptionText: string;
 }
 
+interface FrameExtra {
+  lastSubmittedValue?: string;
+  currentError?: string | null;
+  /** The sentence Rust is speaking aloud, for looks that draw Juno's voice. */
+  spokenText?: string;
+}
+
 function emitFrame(
   { barState, audioLevel, transcriptionText }: Frame,
-  extra: { lastSubmittedValue?: string; currentError?: string | null } = {},
+  extra: FrameExtra = {},
 ): void {
   void emit(EVENTS.BAR_STATE_UPDATE, {
     barState,
@@ -61,7 +70,7 @@ function emitFrame(
     lastSubmittedValue: extra.lastSubmittedValue ?? "",
     currentError: extra.currentError ?? null,
     transcriptionText,
-    spokenText: "",
+    spokenText: extra.spokenText ?? "",
     voiceMode: UI.VOICE_MODES_IDLE,
     audioLevel,
     isAgentWorking: false,
@@ -132,7 +141,7 @@ declare global {
 }
 
 /** One frame for a held state, with words where the state would show them. */
-function heldFrame(state: string): Frame & { lastSubmittedValue?: string; currentError?: string | null } {
+function heldFrame(state: string): Frame & FrameExtra {
   switch (state) {
     case UI.BAR_STATES_LISTENING:
     case UI.BAR_STATES_DICTATING:
@@ -145,6 +154,8 @@ function heldFrame(state: string): Frame & { lastSubmittedValue?: string; curren
       return { barState: state, audioLevel: 0, transcriptionText: "", lastSubmittedValue: DEMO_SENTENCE };
     case UI.BAR_STATES_ERROR:
       return { barState: state, audioLevel: 0, transcriptionText: "", currentError: "Connection unavailable" };
+    case UI.BAR_STATES_SPEAKING:
+      return { barState: state, audioLevel: 0, transcriptionText: "", spokenText: DEMO_SPOKEN };
     default:
       return { barState: state, audioLevel: 0, transcriptionText: "" };
   }
@@ -189,6 +200,96 @@ function playCardDemo(later: (fn: () => void, ms: number) => void): void {
     frame(UI.BAR_STATES_FINISHING);
   }, end);
   later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
+}
+
+/** What `demo=script` and `demo=approval` ask. */
+const DEMO_SCRIPT_QUESTION = "Find the draft to Maya and send it.";
+const DEMO_SCRIPT_ANSWER =
+  "Sent. Maya has the draft and I asked her for Friday.\n\n" +
+  '<TaskSummaryCard title="Sent" tasks={[{ "label": "Draft to Maya", "done": true }, { "label": "Ask for Friday", "done": true }]} />';
+const DEMO_SCRIPT_SPOKEN = "Sent. Maya has the draft.";
+
+/** The tool the script demos run, through the same events Rust would send. */
+function emitTool(content: string, done: boolean): void {
+  void emit(EVENTS.AGENT_EVENT, {
+    type: done ? "tool_call_result" : "tool_call_request",
+    payload: done ? { tool_name: "mail", success: true, content: "Found it" } : { tool_name: "mail", content },
+  });
+}
+
+/**
+ * One turn with a tool between the lines and a spoken answer: submit, a tool
+ * runs and finishes, the answer streams with a component, Juno speaks the
+ * first sentence, then rest.
+ */
+function playScriptDemo(later: (fn: () => void, ms: number) => void): void {
+  const messageId = "preview-script";
+  const now = Date.now();
+  const frame = (barState: string, extra: FrameExtra = {}) =>
+    emitFrame(
+      { barState, audioLevel: 0, transcriptionText: "" },
+      { lastSubmittedValue: DEMO_SCRIPT_QUESTION, ...extra },
+    );
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: DEMO_SCRIPT_QUESTION, timestamp: now });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, 0);
+  later(() => frame(UI.BAR_STATES_LOADING), 500);
+  later(() => emitTool("find the draft to Maya", false), 900);
+  later(() => emitTool("find the draft to Maya", true), 2300);
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: messageId });
+  }, 2600);
+  const words = DEMO_SCRIPT_ANSWER.split(" ");
+  words.forEach((word, i) => {
+    later(() => {
+      void emit(EVENTS.STREAMING_TEXT_STREAM, {
+        message_id: messageId,
+        chunk: (i === 0 ? "" : " ") + word,
+        tts_content: i === 0 ? DEMO_SCRIPT_SPOKEN : undefined,
+      });
+    }, 2700 + i * 45);
+  });
+  const end = 2700 + words.length * 45 + 200;
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: messageId, complete_text: DEMO_SCRIPT_ANSWER });
+    frame(UI.BAR_STATES_SPEAKING, { spokenText: DEMO_SCRIPT_SPOKEN });
+  }, end);
+  later(() => {
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+  }, end + 2600);
+  later(() => frame(UI.BAR_STATES_DEFAULT), end + 2900);
+}
+
+/** A tool waiting on Allow or Don't, held so a still can show it. */
+function playApprovalDemo(later: (fn: () => void, ms: number) => void): void {
+  const now = Date.now();
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: DEMO_SCRIPT_QUESTION, timestamp: now });
+    emitFrame(
+      { barState: UI.BAR_STATES_LOADING, audioLevel: 0, transcriptionText: "" },
+      { lastSubmittedValue: DEMO_SCRIPT_QUESTION },
+    );
+  }, 0);
+  later(() => emitTool("find the draft to Maya", false), 300);
+  later(() => emitTool("find the draft to Maya", true), 600);
+  later(() => {
+    // Sent again: a bar subscribes some time after its first paint, and the
+    // still must show the tape counting behind the request.
+    emitFrame(
+      { barState: UI.BAR_STATES_LOADING, audioLevel: 0, transcriptionText: "" },
+      { lastSubmittedValue: DEMO_SCRIPT_QUESTION },
+    );
+    void emit("tool-approval-request", {
+      tool_name: "mail",
+      tool_id: "preview-approval",
+      tool_input: {},
+      description: "send the draft to Maya",
+      timestamp: Date.now(),
+    });
+  }, 900);
 }
 
 function useHarnessWindow() {
@@ -270,12 +371,12 @@ export default function AppearancePreview() {
     };
 
     if (holdState) {
-      const { lastSubmittedValue, currentError, ...frame } = heldFrame(holdState);
+      const { lastSubmittedValue, currentError, spokenText, ...frame } = heldFrame(holdState);
       // Re-sent every 400ms: a bar subscribes some time after its first paint
       // (the host fetches its config first), and a held frame must still land.
       const hold = () => {
         if (cancelled) return;
-        emitFrame(frame, { lastSubmittedValue, currentError });
+        emitFrame(frame, { lastSubmittedValue, currentError, spokenText });
         later(hold, 400);
       };
       hold();
@@ -284,6 +385,14 @@ export default function AppearancePreview() {
 
     if (demo === "card") {
       playCardDemo(later);
+      return stop;
+    }
+    if (demo === "script") {
+      playScriptDemo(later);
+      return stop;
+    }
+    if (demo === "approval") {
+      playApprovalDemo(later);
       return stop;
     }
 
