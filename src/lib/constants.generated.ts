@@ -319,6 +319,7 @@ export const API_ENDPOINTS = {
   ENDPOINTS_CLOUD_HEALTH_URL: 'https://juno-cloud-backend.fly.dev/health',
   ENDPOINTS_CLOUD_METRICS_URL: 'https://juno-cloud-backend.fly.dev/metrics',
   ENDPOINTS_GITHUB_URL: 'https://github.com/lacymorrow/juno',
+  ENDPOINTS_WEBSITE_URL: 'https://junebug.ai',
   ENDPOINTS_UPDATE_FEED_STABLE: 'https://github.com/lacymorrow/juno/releases/latest/download/latest.json',
   ENDPOINTS_UPDATE_FEED_PRERELEASE: 'https://github.com/lacymorrow/juno/releases/download/canary/latest.json',
   ENDPOINTS_LOCALHOST_BASE: 'http://localhost',
