@@ -20,14 +20,19 @@
  * `demo=ring` (two tools then a short answer), `demo=allow` (a tool waiting on
  * Allow) and `demo=break` (two tools then a failure) for the Halo,
  * `start=manual` to hold the script until `window.__junoBenchStart()` is
- * called (so a recording begins on the first beat, not on a blank page), and
+ * called (so a recording begins on the first beat, not on a blank page),
  * `bg=<css color>` to paint a background instead of transparent,
  * `theme=light|dark` to hold a look that follows the system appearance on one
  * of them, `demo=steps` to play a turn with tool steps and an approval (the
- * Bar's timeline), and `demo=fail` to play a turn whose step fails.
+ * Bar's timeline), `demo=fail` to play a turn whose step fails, `pin=frame`
+ * to place the window by the x/y the bar asked for (so a look whose window
+ * grows around an anchor is seen holding still, as on hardware, instead of
+ * being re-centred on every resize), and `dock=low` to park the fake window
+ * in the bottom half of the display before the bar mounts (looks that grow
+ * upward when docked low can then be seen doing so).
  */
 
-import { Component, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import { BarHost } from "@/components/bar/BarHost";
@@ -125,6 +130,8 @@ function readQuery(): {
   manualStart: boolean;
   background: string | null;
   theme: "light" | "dark" | null;
+  pinFrame: boolean;
+  dockLow: boolean;
 } {
   const params = new URLSearchParams(window.location.search);
   const appearance = appearanceEntry(params.get("appearance")).value;
@@ -139,6 +146,8 @@ function readQuery(): {
     manualStart: params.get("start") === "manual",
     background: params.get("bg"),
     theme: params.get("theme") === "dark" ? "dark" : params.get("theme") === "light" ? "light" : null,
+    pinFrame: params.get("pin") === "frame",
+    dockLow: params.get("dock") === "low",
   };
 }
 
@@ -612,10 +621,8 @@ function useNaturalSize() {
 }
 
 export default function AppearancePreview() {
-  const { appearance, reducedMotion, holdState, demo, manualStart, background, theme } = useMemo(
-    readQuery,
-    [],
-  );
+  const { appearance, reducedMotion, holdState, demo, manualStart, background, theme, pinFrame, dockLow } =
+    useMemo(readQuery, []);
 
   // With `start=manual` the script waits for the bench to say go.
   const [started, setStarted] = useState(!manualStart);
@@ -634,10 +641,14 @@ export default function AppearancePreview() {
     setPreviewAppearance(appearance);
     setPreviewTheme(theme);
     installBarHarnessTauri();
+    if (dockLow) {
+      const { monitor, frame } = harness.snapshot();
+      harness.setFrame({ y: Math.round(monitor.height * 0.8) - frame.height });
+    }
     document.documentElement.style.background = background ?? "transparent";
     document.body.style.background = background ?? "transparent";
     setReady(true);
-  }, [appearance, theme]);
+  }, [appearance, theme, dockLow]);
 
   // Drive the script. Listening breathes the audio level; dictating reveals
   // the sentence a word at a time. Everything else is a single emit.
@@ -792,12 +803,27 @@ export default function AppearancePreview() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
   const box = driven ? { width: frame.width, height: frame.height } : natural;
+  // Pinned to the frame, the window is never shrunk to fit: a scaled box
+  // would move its anchor, which is the very thing `pin=frame` shows.
   const scale =
-    box.width > 0 && box.height > 0
+    !pinFrame && box.width > 0 && box.height > 0
       ? Math.min(1, viewport.w / box.width, viewport.h / box.height)
       : 1;
-  const left = (viewport.w - box.width * scale) / 2;
-  const top = (viewport.h - box.height * scale) / 2;
+  let left = (viewport.w - box.width * scale) / 2;
+  let top = (viewport.h - box.height * scale) / 2;
+  // `pin=frame`: the first driven frame is seated near the top of the stage
+  // (near the bottom with `dock=low`) so a window that grows has room to; after
+  // that the box follows the x/y the bar asked for, so the window moves on the
+  // stage exactly as the OS would move it.
+  const originRef = useRef<{ dx: number; dy: number } | null>(null);
+  if (pinFrame && driven) {
+    if (!originRef.current) {
+      const seatTop = dockLow ? viewport.h * 0.82 - box.height : viewport.h * 0.18;
+      originRef.current = { dx: left - frame.x, dy: seatTop - frame.y };
+    }
+    left = frame.x + originRef.current.dx;
+    top = frame.y + originRef.current.dy;
+  }
 
   if (!ready) return null;
 
