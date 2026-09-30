@@ -29,6 +29,10 @@ pub mod store_keys {
     /// of spawning one per query. Off unless explicitly set.
     /// See docs/plans/cli-persistent-session-spike.md
     pub const CLI_PERSISTENT_SESSION_ENABLED: &str = "cli_persistent_session_enabled";
+    /// Ask before Juno sends (LAC-4058). Default on. Routes the Claude CLI's
+    /// permission prompts into Juno's approval sheet instead of
+    /// dangerously-skip-permissions; off restores the old behaviour.
+    pub const CLI_ASK_BEFORE_SEND_ENABLED: &str = "cli_ask_before_send_enabled";
     pub const VOICE_TRANSCRIPTION: &str = "voice_transcription";
     pub const TRIGGERS: &str = "triggers";
 }

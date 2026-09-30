@@ -107,7 +107,7 @@ async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<St
 }
 
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolDefinition};
-use crate::agent::providers::{claude_cli_session, juno_mcp};
+use crate::agent::providers::{claude_cli_session, cli_approval, juno_mcp};
 use crate::agent::traits::AgentBrain;
 use crate::settings::ProviderConfig as CentralizedProviderConfig;
 
@@ -516,6 +516,7 @@ impl ClaudeCliBrain {
         query: &str,
         resume: Option<&str>,
         mcp_config: Option<&std::path::Path>,
+        ask_before_send: bool,
     ) -> Vec<String> {
         let mut args = vec![
             "-p".to_string(),
@@ -535,11 +536,6 @@ impl ClaudeCliBrain {
             // tool call, its arguments, the reasoning — was never sent.
             // Stripped again by `run_streaming` for a CLI too old to take it.
             PARTIAL_MESSAGES_FLAG.to_string(),
-            // In -p mode with stdin null, the CLI can't prompt for permission.
-            // Allow tool execution since the user explicitly chose this provider.
-            // Note: this also lets Juno's own MCP tool run without prompting
-            // — matching this provider's existing trust model.
-            "--dangerously-skip-permissions".to_string(),
             // The CLI's own toolset (Bash, Read, Edit, WebFetch) stays on
             // deliberately. It augments Juno's computer tool rather than
             // competing with it — reading a file beats screenshotting a text
@@ -554,9 +550,27 @@ impl ClaudeCliBrain {
         // load. On, the default, omits the flag so those connectors ride
         // along (LAC-4056). We can't use --bare either way because it blocks
         // OAuth/keychain auth.
-        if !self.load_account_mcp {
+        //
+        // One extra case, created by LAC-4056 and LAC-4058 landing together:
+        // a spawn with no MCP server has nothing that could answer a
+        // permission prompt, so it falls back to
+        // --dangerously-skip-permissions below. Letting account connectors
+        // ride into *that* spawn would mean unattended sends, which is the
+        // one outcome LAC-4058 exists to prevent, so strict mode is forced
+        // there. Turning "Ask before Juno sends" off is still respected.
+        if !self.load_account_mcp || (ask_before_send && mcp_config.is_none()) {
             args.push("--strict-mcp-config".to_string());
         }
+
+        // Permission posture (LAC-4058). With "Ask before Juno sends" on and
+        // Juno's MCP server available, permission prompts route to the
+        // `approve` tool and Juno's approval sheet; everyday tools stay
+        // pre-approved. Otherwise --dangerously-skip-permissions applies: in
+        // -p mode with stdin null the CLI cannot prompt on its own.
+        args.extend(cli_approval::permission_args(
+            ask_before_send,
+            mcp_config.is_some(),
+        ));
 
         // Continue the session this conversation is already running in. The
         // CLI keeps the full transcript and its own tool results on its side,
@@ -633,6 +647,12 @@ impl ClaudeCliBrain {
             None => None,
         };
 
+        // Per-send approval (LAC-4058): with the setting on, the CLI's
+        // permission prompts route into Juno's approval sheet instead of
+        // being skipped. Read per run, so flipping the setting needs no
+        // restart. Without an app handle there is no sheet to route to.
+        let ask_before_send = app_handle.as_ref().is_some_and(cli_approval::is_enabled);
+
         // Experimental (off by default): run this turn in one long-lived process
         // kept alive for the conversation, instead of spawning a fresh one here.
         // Worth ~1.6-3.1s per follow-up — see docs/plans/cli-persistent-session-spike.md.
@@ -666,6 +686,7 @@ impl ClaudeCliBrain {
                     app_handle: handle,
                     message_id: message_id.clone(),
                     cancel_rx: cancel_rx.clone(),
+                    ask_before_send,
                 };
 
                 match claude_cli_session::run_turn(request).await {
@@ -725,7 +746,12 @@ impl ClaudeCliBrain {
         let mut resume = resume;
 
         let (accumulated_text, final_result, status) = loop {
-            let mut args = self.build_args(query, resume.as_deref(), mcp_config.as_deref());
+            let mut args = self.build_args(
+                query,
+                resume.as_deref(),
+                mcp_config.as_deref(),
+                ask_before_send,
+            );
             if !include_partial_messages {
                 strip_partial_messages(&mut args);
             }
@@ -770,7 +796,8 @@ impl ClaudeCliBrain {
                         forget_session(id);
                     }
                     resume = None;
-                    let mut fresh = self.build_args(query, None, mcp_config.as_deref());
+                    let mut fresh =
+                        self.build_args(query, None, mcp_config.as_deref(), ask_before_send);
                     if !include_partial_messages {
                         strip_partial_messages(&mut fresh);
                     }
@@ -2150,7 +2177,7 @@ mod tests {
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("test query", None, None);
+        let args = brain.build_args("test query", None, None, false);
         assert!(args.contains(&"-p".to_string()));
         assert!(args.contains(&"stream-json".to_string()));
         assert!(args.contains(&"sonnet".to_string()));
@@ -2174,7 +2201,7 @@ mod tests {
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("test query", None, None);
+        let args = brain.build_args("test query", None, None, false);
         assert!(args.contains(&"--system-prompt".to_string()));
         assert!(args.contains(&"You are helpful.".to_string()));
     }
@@ -2194,7 +2221,12 @@ mod tests {
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("and what about the other one?", Some("abc-123"), None);
+        let args = brain.build_args(
+            "and what about the other one?",
+            Some("abc-123"),
+            None,
+            false,
+        );
         let idx = args
             .iter()
             .position(|a| a == "--resume")
@@ -2212,7 +2244,7 @@ mod tests {
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("hello", None, None);
+        let args = brain.build_args("hello", None, None, false);
         assert!(!args.iter().any(|a| a == "--resume"));
     }
 
@@ -2240,7 +2272,7 @@ mod tests {
             observed_session: std::sync::Mutex::new(None),
         };
         let config = PathBuf::from("/tmp/juno-mcp-test.json");
-        let args = brain.build_args("move the mouse", None, Some(&config));
+        let args = brain.build_args("move the mouse", None, Some(&config), false);
 
         let idx = args
             .iter()
@@ -2269,8 +2301,73 @@ mod tests {
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
-        let args = brain.build_args("hello", None, None);
+        let args = brain.build_args("hello", None, None, false);
         assert!(!args.iter().any(|a| a == "--mcp-config"));
+    }
+
+    /// The LAC-4058 pin (juno-dead-control-pattern): with "Ask before Juno
+    /// sends" on and Juno's server wired in, the CLI's permission prompts go
+    /// to `mcp__juno__approve` and `--dangerously-skip-permissions` is gone.
+    #[test]
+    fn asking_before_sends_replaces_skip_permissions() {
+        let brain = ClaudeCliBrain {
+            binary_path: PathBuf::from("/usr/bin/claude"),
+            model: "sonnet".to_string(),
+            system_prompt: None,
+            effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
+            observed_session: std::sync::Mutex::new(None),
+        };
+        let config = PathBuf::from("/tmp/juno-mcp-test.json");
+        let args = brain.build_args("email cameron", None, Some(&config), true);
+
+        let idx = args
+            .iter()
+            .position(|a| a == "--permission-prompt-tool")
+            .expect("--permission-prompt-tool present when the setting is on");
+        assert_eq!(args[idx + 1], "mcp__juno__approve");
+        assert!(
+            !args.iter().any(|a| a == "--dangerously-skip-permissions"),
+            "skip-permissions must be gone or the prompt tool is decoration"
+        );
+        assert!(
+            args.iter().any(|a| a == "--allowedTools"),
+            "everyday tools stay pre-approved so only sends prompt"
+        );
+    }
+
+    #[test]
+    fn setting_off_restores_skip_permissions() {
+        let brain = ClaudeCliBrain {
+            binary_path: PathBuf::from("/usr/bin/claude"),
+            model: "sonnet".to_string(),
+            system_prompt: None,
+            effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
+            observed_session: std::sync::Mutex::new(None),
+        };
+        let config = PathBuf::from("/tmp/juno-mcp-test.json");
+        let args = brain.build_args("email cameron", None, Some(&config), false);
+        assert!(args.iter().any(|a| a == "--dangerously-skip-permissions"));
+        assert!(!args.iter().any(|a| a == "--permission-prompt-tool"));
+    }
+
+    #[test]
+    fn no_tool_server_means_no_prompt_tool_to_point_at() {
+        // Headless: no app handle, no MCP server, so nothing could answer a
+        // permission prompt. The old posture applies, and strict mode is
+        // forced so no account connector rides into an unpromptable spawn.
+        let brain = ClaudeCliBrain {
+            binary_path: PathBuf::from("/usr/bin/claude"),
+            model: "sonnet".to_string(),
+            system_prompt: None,
+            effort: "high".to_string(),
+            load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
+            observed_session: std::sync::Mutex::new(None),
+        };
+        let args = brain.build_args("hello", None, None, true);
+        assert!(args.iter().any(|a| a == "--dangerously-skip-permissions"));
+        assert!(!args.iter().any(|a| a == "--permission-prompt-tool"));
     }
 
     /// Write an executable shell script that stands in for the `claude` binary.
@@ -2395,7 +2492,7 @@ mod tests {
     #[test]
     fn partial_messages_are_requested() {
         let brain = test_brain(PathBuf::from("/usr/bin/claude"));
-        let args = brain.build_args("what is on screen", None, None);
+        let args = brain.build_args("what is on screen", None, None, false);
         assert!(args.contains(&"--include-partial-messages".to_string()));
         // Only valid alongside --print and stream-json, both of which we pass.
         assert!(args.contains(&"-p".to_string()));
@@ -2441,7 +2538,7 @@ mod tests {
     #[test]
     fn stripping_the_flag_leaves_the_rest_of_the_command_intact() {
         let brain = test_brain(PathBuf::from("/usr/bin/claude"));
-        let mut args = brain.build_args("hello", Some("abc-123"), None);
+        let mut args = brain.build_args("hello", Some("abc-123"), None, false);
         let before = args.len();
         strip_partial_messages(&mut args);
 
@@ -2509,7 +2606,7 @@ echo '{{"type":"result","result":"answered the old way"}}'"#,
         let strict = "--strict-mcp-config".to_string();
 
         let brain = test_brain(PathBuf::from("/usr/bin/claude"));
-        let args = brain.build_args("read my slack", None, None);
+        let args = brain.build_args("read my slack", None, None, false);
         assert!(
             !args.contains(&strict),
             "default on: the flag is omitted and account connectors load"
@@ -2517,17 +2614,43 @@ echo '{{"type":"result","result":"answered the old way"}}'"#,
 
         let mut brain = test_brain(PathBuf::from("/usr/bin/claude"));
         brain.load_account_mcp = false;
-        let args = brain.build_args("read my slack", None, None);
+        let args = brain.build_args("read my slack", None, None, false);
         assert!(
             args.contains(&strict),
             "off: --strict-mcp-config keeps account servers out"
         );
     }
 
+    /// LAC-4056 + LAC-4058 together: connectors must never load into a spawn
+    /// that cannot prompt. Without this, a headless run would get the
+    /// account's Slack and Gmail tools *and* --dangerously-skip-permissions,
+    /// which is an unattended send.
+    #[test]
+    fn connectors_never_load_into_a_spawn_that_cannot_prompt() {
+        let strict = "--strict-mcp-config".to_string();
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        assert!(brain.load_account_mcp, "the default this test is about");
+
+        // No MCP server (headless) + asking is on: strict mode is forced.
+        let args = brain.build_args("email cameron", None, None, true);
+        assert!(args.contains(&strict));
+        assert!(args.iter().any(|a| a == "--dangerously-skip-permissions"));
+
+        // With a server the prompt tool can answer, so connectors may load.
+        let config = PathBuf::from("/tmp/juno-mcp-test.json");
+        let args = brain.build_args("email cameron", None, Some(&config), true);
+        assert!(!args.contains(&strict));
+        assert!(args.iter().any(|a| a == "--permission-prompt-tool"));
+
+        // Asking turned off is the person's call; today's behaviour stands.
+        let args = brain.build_args("email cameron", None, None, false);
+        assert!(!args.contains(&strict));
+    }
+
     #[test]
     fn effort_is_passed_and_defaults_sanely() {
         let brain = test_brain(PathBuf::from("/usr/bin/claude"));
-        let args = brain.build_args("hello", None, None);
+        let args = brain.build_args("hello", None, None, false);
         let idx = args
             .iter()
             .position(|a| a == "--effort")

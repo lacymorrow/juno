@@ -139,6 +139,9 @@ pub struct TurnRequest<'a> {
     pub app_handle: &'a tauri::AppHandle,
     pub message_id: Option<String>,
     pub cancel_rx: Option<crate::state::CancelReceiver>,
+    /// Per-send approval (LAC-4058): route the CLI's permission prompts into
+    /// Juno's approval sheet instead of skipping permissions.
+    pub ask_before_send: bool,
 }
 
 /// Is the experimental persistent-session path turned on?
@@ -316,15 +319,20 @@ fn signature_parts(
     system_prompt: Option<&str>,
     mcp_config: Option<&Path>,
     load_account_mcp: bool,
+    ask_before_send: bool,
 ) -> String {
     format!(
-        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
         model,
         system_prompt.unwrap_or_default(),
         mcp_config
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        load_account_mcp
+        // Both are spawn-time postures a live process cannot be talked out
+        // of: --strict-mcp-config (LAC-4056) and the permission flags
+        // (LAC-4058). Flipping either must replace the process.
+        load_account_mcp,
+        ask_before_send
     )
 }
 
@@ -334,6 +342,7 @@ fn signature_of(req: &TurnRequest<'_>) -> String {
         req.system_prompt,
         req.mcp_config,
         req.load_account_mcp,
+        req.ask_before_send,
     )
 }
 
@@ -516,15 +525,24 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
         "stream-json".to_string(),
         "--model".to_string(),
         req.model.to_string(),
-        "--dangerously-skip-permissions".to_string(),
     ];
 
     // Mirrors the one-shot path's build_args (LAC-4056): with "Load account
     // MCP connectors" off, --strict-mcp-config keeps the person's claude.ai
     // connectors and user-level servers out; on, the default, omits the flag.
-    if !req.load_account_mcp {
+    // Same extra case as `build_args`: with no MCP server there is nothing
+    // to answer a permission prompt, so connectors must not load into a
+    // spawn that falls back to --dangerously-skip-permissions.
+    if !req.load_account_mcp || (req.ask_before_send && req.mcp_config.is_none()) {
         args.push("--strict-mcp-config".to_string());
     }
+
+    // Permission posture (LAC-4058): same rule as the one-shot path's
+    // `build_args`, through the same seam.
+    args.extend(super::cli_approval::permission_args(
+        req.ask_before_send,
+        req.mcp_config.is_some(),
+    ));
 
     // A fresh id is pinned; one that already exists must be resumed. Getting this
     // backwards is a hard error from the CLI, not a fallback: it refuses to start
@@ -969,34 +987,49 @@ mod tests {
         // A model named "a" with the prompt "b" must not collide with a model
         // literally named "a<US>b", or a prompt change would go unnoticed.
         assert_ne!(
-            signature_parts("a", Some("b"), None, true),
-            signature_parts("a\u{1f}b", None, None, true)
+            signature_parts("a", Some("b"), None, true, true),
+            signature_parts("a\u{1f}b", None, None, true, true)
         );
     }
 
     #[test]
     fn signature_changes_with_every_spawn_time_argument() {
-        let base = signature_parts("sonnet", None, None, true);
-        assert_ne!(base, signature_parts("opus", None, None, true));
+        let base = signature_parts("sonnet", None, None, true, true);
+        assert_ne!(base, signature_parts("opus", None, None, true, true));
         assert_ne!(
             base,
-            signature_parts("sonnet", Some("be brief"), None, true)
+            signature_parts("sonnet", Some("be brief"), None, true, true)
         );
         assert_ne!(
             base,
-            signature_parts("sonnet", None, Some(Path::new("/tmp/a.json")), true)
+            signature_parts("sonnet", None, Some(Path::new("/tmp/a.json")), true, true)
         );
         // Toggling "Load account MCP connectors" changes --strict-mcp-config,
         // which a live process cannot be talked out of, so the session must
         // be replaced rather than reused (LAC-4056).
-        assert_ne!(base, signature_parts("sonnet", None, None, false));
+        assert_ne!(base, signature_parts("sonnet", None, None, false, true));
+        // Same for "Ask before Juno sends": a live session would otherwise
+        // keep the permission posture it was born with (LAC-4058).
+        assert_ne!(base, signature_parts("sonnet", None, None, true, false));
     }
 
     #[test]
     fn signature_is_stable_for_identical_arguments() {
         assert_eq!(
-            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")), true),
-            signature_parts("sonnet", Some("p"), Some(Path::new("/tmp/a.json")), true)
+            signature_parts(
+                "sonnet",
+                Some("p"),
+                Some(Path::new("/tmp/a.json")),
+                true,
+                true
+            ),
+            signature_parts(
+                "sonnet",
+                Some("p"),
+                Some(Path::new("/tmp/a.json")),
+                true,
+                true
+            )
         );
     }
 
