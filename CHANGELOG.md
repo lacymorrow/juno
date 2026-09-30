@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.25] - 2026-09-30
+
+### Added
+
+- **updates:** Juno keeps itself current, on a channel that can see our builds (#623) (8cef2e2e)
+
 ## [0.8.24] - 2026-09-30
 
 ### Fixed
@@ -574,7 +580,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.24...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.25...HEAD
+[0.8.25]: https://github.com/lacymorrow/juno/compare/cua-v0.8.24...v0.8.25
 [0.8.24]: https://github.com/lacymorrow/juno/compare/cua-v0.8.23...v0.8.24
 [0.8.23]: https://github.com/lacymorrow/juno/compare/cua-v0.8.22...v0.8.23
 [0.8.22]: https://github.com/lacymorrow/juno/compare/cua-v0.8.21...v0.8.22
