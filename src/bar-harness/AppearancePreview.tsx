@@ -17,7 +17,10 @@
  * clip), `demo=approval` to hold a tool waiting on Allow or Don't,
  * `start=manual` to hold the script until `window.__junoBenchStart()` is
  * called (so a recording begins on the first beat, not on a blank page), and
- * `bg=<css color>` to paint a background instead of transparent.
+ * `bg=<css color>` to paint a background instead of transparent,
+ * `theme=light|dark` to hold a look that follows the system appearance on one
+ * of them, `demo=steps` to play a turn with tool steps and an approval (the
+ * Bar's timeline), and `demo=fail` to play a turn whose step fails.
  */
 
 import { Component, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
@@ -25,7 +28,7 @@ import { emit } from "@tauri-apps/api/event";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import { BarHost } from "@/components/bar/BarHost";
 import { appearanceEntry } from "@/components/bar/appearanceCatalog";
-import { harness, installBarHarnessTauri, setPreviewAppearance } from "./barHarnessTauri";
+import { harness, installBarHarnessTauri, setPreviewAppearance, setPreviewTheme } from "./barHarnessTauri";
 
 // The sentence the preview "dictates". Short enough to fit every look, long
 // enough to show words arriving.
@@ -117,6 +120,7 @@ function readQuery(): {
   demo: string | null;
   manualStart: boolean;
   background: string | null;
+  theme: "light" | "dark" | null;
 } {
   const params = new URLSearchParams(window.location.search);
   const appearance = appearanceEntry(params.get("appearance")).value;
@@ -130,6 +134,7 @@ function readQuery(): {
     demo: params.get("demo"),
     manualStart: params.get("start") === "manual",
     background: params.get("bg"),
+    theme: params.get("theme") === "dark" ? "dark" : params.get("theme") === "light" ? "light" : null,
   };
 }
 
@@ -292,6 +297,80 @@ function playApprovalDemo(later: (fn: () => void, ms: number) => void): void {
   }, 900);
 }
 
+/** The question `demo=steps` asks, and what Juno says back. */
+const STEPS_QUESTION = "Do I need a coat in Charlotte this morning?";
+const STEPS_ANSWER =
+  "Yes, bring a coat. It is 41 degrees in Charlotte right now and the wind is from the north.\n\n" +
+  '<WeatherCard location="Charlotte, NC" temperature={41} unit="F" condition="cloudy" high={58} low={39} wind="12 mph N" />\n\n' +
+  "It warms up to 58 by mid afternoon.";
+const STEPS_SPOKEN = "Yes, bring a coat. It is 41 degrees in Charlotte right now.";
+
+/**
+ * Play one turn with steps: the question, a tool that runs and finishes, a
+ * tool that waits on Allow or Don't (answered on its own after a moment when
+ * nobody clicks), then the answer. With `fail`, the second tool fails and Rust
+ * reports an error instead.
+ */
+function playStepsDemo(later: (fn: () => void, ms: number) => void, fail: boolean): void {
+  const messageId = "preview-steps";
+  const now = Date.now();
+  const frame = (barState: string, currentError: string | null = null) =>
+    emitFrame({ barState, audioLevel: 0, transcriptionText: "" }, { lastSubmittedValue: STEPS_QUESTION, currentError });
+  const tool = (type: "tool_call_request" | "tool_call_result", payload: Record<string, unknown>) =>
+    void emit(EVENTS.AGENT_EVENT, { type, payload });
+
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: STEPS_QUESTION, timestamp: now });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, 0);
+  later(() => frame(UI.BAR_STATES_LOADING), 500);
+  later(() => tool("tool_call_request", { tool_name: "browser", content: "Opening weather.com" }), 1100);
+  later(() => tool("tool_call_result", { tool_name: "browser", success: true, content: "Opened" }), 2600);
+  later(() => {
+    void emit(EVENTS.TOOLS_APPROVAL_REQUEST, {
+      tool_name: "computer",
+      tool_id: "preview-approval",
+      tool_input: {},
+      description: "read the forecast on this page",
+      timestamp: Date.now(),
+    });
+  }, 3000);
+  const resolved = 6200;
+  later(() => {
+    tool("tool_call_result", {
+      tool_name: "computer",
+      success: !fail,
+      content: fail ? "The page timed out" : "Read the forecast",
+    });
+    if (fail) frame(UI.BAR_STATES_ERROR, "The page timed out");
+  }, resolved);
+  if (fail) {
+    later(() => frame(UI.BAR_STATES_DEFAULT), resolved + 4000);
+    return;
+  }
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: messageId });
+  }, resolved + 400);
+  const words = STEPS_ANSWER.split(" ");
+  words.forEach((word, i) => {
+    later(() => {
+      void emit(EVENTS.STREAMING_TEXT_STREAM, {
+        message_id: messageId,
+        chunk: (i === 0 ? "" : " ") + word,
+        tts_content: i === 0 ? STEPS_SPOKEN : undefined,
+      });
+    }, resolved + 500 + i * 45);
+  });
+  const end = resolved + 500 + words.length * 45 + 200;
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: messageId, complete_text: STEPS_ANSWER });
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+  }, end);
+  later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
+}
+
 function useHarnessWindow() {
   const [snap, setSnap] = useState(() => {
     const { frame, driven } = harness.snapshot();
@@ -329,7 +408,7 @@ function useNaturalSize() {
 }
 
 export default function AppearancePreview() {
-  const { appearance, reducedMotion, holdState, demo, manualStart, background } = useMemo(
+  const { appearance, reducedMotion, holdState, demo, manualStart, background, theme } = useMemo(
     readQuery,
     [],
   );
@@ -349,11 +428,12 @@ export default function AppearancePreview() {
   const [ready, setReady] = useState(false);
   useLayoutEffect(() => {
     setPreviewAppearance(appearance);
+    setPreviewTheme(theme);
     installBarHarnessTauri();
     document.documentElement.style.background = background ?? "transparent";
     document.body.style.background = background ?? "transparent";
     setReady(true);
-  }, [appearance]);
+  }, [appearance, theme]);
 
   // Drive the script. Listening breathes the audio level; dictating reveals
   // the sentence a word at a time. Everything else is a single emit.
@@ -393,6 +473,10 @@ export default function AppearancePreview() {
     }
     if (demo === "approval") {
       playApprovalDemo(later);
+      return stop;
+    }
+    if (demo === "steps" || demo === "fail") {
+      playStepsDemo(later, demo === "fail");
       return stop;
     }
 
