@@ -67,6 +67,7 @@ pub mod tools;
 pub mod tray_commands;
 pub mod triggers;
 pub mod ui_commands; // Consolidated UI API for all floating elements
+pub mod updates; // Auto-update: status, manual check, restart, channel
 pub mod window; // Debug commands for tool configuration diagnostics
 
 // Re-export commands for easy access in lib.rs

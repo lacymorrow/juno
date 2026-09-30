@@ -9,7 +9,7 @@ interface MenuEventsProps {
 	setIsDevPanelOpen: (value: boolean | ((current: boolean) => boolean)) => void;
 
 	// Modal management
-	setActiveModal: (modal: "help" | "feedback" | "export" | "import" | "update" | null) => void;
+	setActiveModal: (modal: "help" | "feedback" | "export" | "import" | null) => void;
 	setFeedbackData: (data: any) => void;
 
 	// Chat actions

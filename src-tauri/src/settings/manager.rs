@@ -12,7 +12,7 @@ use crate::constants::settings::{defaults, events, store_keys, validation, SETTI
 use crate::settings::{
     AgentSettings, AppSettings, AudioSettings, CLISettings, CloudSettings, FloatingBarSettings,
     KeyboardShortcuts, OnboardingSettings, PromptSettings, ProviderSettings, ToolSettings,
-    VoiceTranscriptionSettings,
+    UpdateSettings, VoiceTranscriptionSettings,
 };
 
 /// Centralized settings manager with reactive updates
@@ -97,6 +97,10 @@ impl SettingsManager {
             cli: self.get_cli_settings_from_store(&store)?,
             voice_transcription: self.get_voice_transcription_settings_from_store(&store)?,
             triggers,
+            updates: store
+                .get(store_keys::UPDATES)
+                .and_then(|value| serde_json::from_value(value).ok())
+                .unwrap_or_default(),
         };
 
         Ok(settings)
@@ -177,6 +181,11 @@ impl SettingsManager {
             store_keys::TRIGGERS,
             serde_json::to_value(&settings.triggers)
                 .map_err(|e| format!("Failed to serialize triggers: {}", e))?,
+        );
+        store.set(
+            store_keys::UPDATES,
+            serde_json::to_value(&settings.updates)
+                .map_err(|e| format!("Failed to serialize update settings: {}", e))?,
         );
 
         store
@@ -283,6 +292,37 @@ impl SettingsManager {
             .get(store_keys::ADVANCED_SETTINGS_ENABLED)
             .and_then(|v| v.as_bool())
             .unwrap_or(defaults::ADVANCED_SETTINGS_ENABLED))
+    }
+
+    /// Auto-update behaviour. A store written before this shipped has no
+    /// `updates` key and gets the defaults, which is what starts an old
+    /// install updating rather than leaving it stranded.
+    pub async fn get_update_settings(&self) -> Result<UpdateSettings, String> {
+        let store = self
+            .app_handle
+            .store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        Ok(store
+            .get(store_keys::UPDATES)
+            .and_then(|value| serde_json::from_value(value).ok())
+            .unwrap_or_default())
+    }
+
+    pub async fn set_update_settings(&self, settings: &UpdateSettings) -> Result<(), String> {
+        let store = self
+            .app_handle
+            .store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        store.set(
+            store_keys::UPDATES,
+            serde_json::to_value(settings)
+                .map_err(|e| format!("Failed to serialize update settings: {}", e))?,
+        );
+        store
+            .save()
+            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+        self.emit_settings_changed().await;
+        Ok(())
     }
 
     pub async fn get_cli_settings(&self) -> Result<CLISettings, String> {

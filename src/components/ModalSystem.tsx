@@ -9,7 +9,7 @@ import {
 import { KEYBOARD_SHORTCUTS } from "@/lib/constants.generated";
 
 // Types for the modal system
-export type ModalType = "help" | "feedback" | "export" | "import" | "update" | null;
+export type ModalType = "help" | "feedback" | "export" | "import" | null;
 
 // Enhanced feedback form data
 export interface FeedbackData {
@@ -21,13 +21,6 @@ export interface FeedbackData {
 }
 
 // Update check result
-export interface UpdateInfo {
-  available: boolean;
-  version?: string;
-  notes?: string;
-  date?: string;
-}
-
 // Chat message type for export
 export type ChatMessage = {
   role:
@@ -65,8 +58,6 @@ interface ModalSystemProps {
   onClose: () => void;
   feedbackData: FeedbackData;
   onFeedbackDataChange: (data: Partial<FeedbackData>) => void;
-  updateInfo: UpdateInfo | null;
-  onInstallUpdate?: () => Promise<void>;
   conversation: ChatMessage[];
   isExporting: boolean;
   isImporting: boolean;
@@ -85,8 +76,6 @@ export function ModalSystem({
   onClose,
   feedbackData,
   onFeedbackDataChange,
-  updateInfo,
-  onInstallUpdate,
   conversation,
   isExporting,
   isImporting,
@@ -233,18 +222,6 @@ export function ModalSystem({
       onAddSystemMessage(`Failed to import chat: ${error}`);
     } finally {
       onClose();
-    }
-  };
-
-  const handleInstallUpdate = async () => {
-    try {
-      onAddSystemMessage(
-        "🚀 Installing update... The application will restart automatically."
-      );
-      await onInstallUpdate?.();
-    } catch (error) {
-      console.error("❌ Failed to install update:", error);
-      onAddSystemMessage(`Failed to install update: ${error}`);
     }
   };
 
@@ -611,76 +588,6 @@ export function ModalSystem({
             </div>
           </div>
         );
-
-      case "update":
-        return updateInfo ? (
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                Update Available
-              </h2>
-              <button
-                onClick={onClose}
-                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-              >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <p className="text-gray-700 dark:text-gray-300">
-                  A new version of Juno AI is available!
-                </p>
-                {updateInfo.version && (
-                  <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded">
-                    <p className="text-sm">
-                      <strong>Version:</strong> {updateInfo.version}
-                    </p>
-                    {updateInfo.date && (
-                      <p className="text-sm">
-                        <strong>Date:</strong> {updateInfo.date}
-                      </p>
-                    )}
-                  </div>
-                )}
-                {updateInfo.notes && (
-                  <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded">
-                    <p className="text-sm font-medium mb-1">Release Notes:</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {updateInfo.notes}
-                    </p>
-                  </div>
-                )}
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={onClose}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 dark:text-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
-                >
-                  Later
-                </button>
-                <button
-                  onClick={handleInstallUpdate}
-                  className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600"
-                >
-                  Install Update
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null;
 
       default:
         return null;

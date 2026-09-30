@@ -55,6 +55,7 @@ pub mod testing; // Test harness and mock implementations for headless integrati
 pub mod tools;
 pub mod triggers; // Unified activation model (methods x targets)
 pub mod tts;
+pub mod updater; // Auto-update: which feed, when to look, what to do with it
 pub mod utils;
 pub mod window_management; // Window operations, state management, and positioning
 
@@ -780,6 +781,13 @@ pub fn run() {
             commands::bar_position::set_bar_position,
             commands::bar_position::set_bar_frame,
             commands::bar_position::show_bar_when_ready,
+            // Auto-update commands (the whole bridge; policy lives in `updater`)
+            commands::updates::get_update_status,
+            commands::updates::check_for_updates_now,
+            commands::updates::restart_to_update,
+            commands::updates::get_update_settings,
+            commands::updates::set_update_settings,
+
             // Notification Commands
             // Scheduled automation commands (user-facing cron schedules)
             commands::skills::list_available_skills,
@@ -982,6 +990,14 @@ pub fn run() {
             tauri::async_runtime::spawn(async {
                 crate::utils::warmup_tls_session().await;
             });
+
+            // --- Keep Juno current on its own ---
+            // One check a short while after launch, then every few hours.
+            // Reads the channel and the on/off flag from the store per tick,
+            // so a change in Settings lands at the next check rather than the
+            // next launch. Never relaunches by itself: an update installs in
+            // the background and runs the next time Juno starts.
+            crate::updater::spawn_schedule(app_handle.clone());
 
             // --- Initialize Rate Limiter Cleanup Task ---
             let rate_limiter_app_handle = app_handle.clone();

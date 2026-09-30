@@ -1,36 +1,97 @@
-import { useCallback, useRef } from "react";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
-import type { UpdateInfo } from "@/components/ModalSystem";
+import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useEventListener } from "@/hooks/useEventListener";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 
+/**
+ * Where the update flow is. Mirrors `UpdateStage` in `src-tauri/src/updater.rs`
+ * — the backend owns every transition between these, and the UI only renders
+ * whichever one it was last handed.
+ */
+export type UpdateStage =
+  | "idle"
+  | "checking"
+  | "upToDate"
+  | "downloading"
+  | "readyToRestart"
+  | "failed";
+
+export type UpdateChannel = "stable" | "prerelease";
+
+/** Mirrors `UpdateStatus` in `src-tauri/src/updater.rs`. */
+export interface UpdateStatus {
+  stage: UpdateStage;
+  currentVersion: string;
+  availableVersion: string | null;
+  notes: string | null;
+  error: string | null;
+  channel: UpdateChannel;
+  downloadedBytes: number;
+  totalBytes: number | null;
+}
+
+export interface UpdateSettings {
+  auto_check_enabled: boolean;
+  channel: string;
+}
+
+/**
+ * The update flow, as the UI sees it.
+ *
+ * There is deliberately no local state machine here. Checking, downloading,
+ * installing and the schedule all live in Rust, which is what lets the same
+ * behaviour hold with no window open. This hook reads the status once, then
+ * follows the `update-status` event.
+ */
 export function useUpdater() {
-  const pendingUpdate = useRef<Update | null>(null);
+  const [status, setStatus] = useState<UpdateStatus | null>(null);
+  const [settings, setSettings] = useState<UpdateSettings | null>(null);
 
-  const checkForUpdates = useCallback(async (): Promise<{
-    available: boolean;
-    info: UpdateInfo | null;
-  }> => {
-    const update = await check();
-    if (!update) return { available: false, info: null };
-
-    pendingUpdate.current = update;
-    return {
-      available: true,
-      info: {
-        available: true,
-        version: update.version,
-        date: update.date ?? undefined,
-        notes: update.body ?? undefined,
-      },
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const [initialStatus, initialSettings] = await Promise.all([
+          invoke<UpdateStatus>(COMMANDS.UPDATES_GET_STATUS),
+          invoke<UpdateSettings>(COMMANDS.UPDATES_GET_SETTINGS),
+        ]);
+        if (!mounted) return;
+        setStatus(initialStatus);
+        setSettings(initialSettings);
+      } catch (error) {
+        console.error("Failed to read update status:", error);
+      }
+    })();
+    return () => {
+      mounted = false;
     };
   }, []);
 
-  const installUpdate = useCallback(async () => {
-    const update = pendingUpdate.current;
-    if (!update) throw new Error("No pending update. Check for updates first.");
-    await update.downloadAndInstall();
-    await relaunch();
+  useEventListener<UpdateStatus>(EVENTS.UPDATES_STATUS, (payload) => {
+    setStatus(payload);
+  });
+
+  const checkNow = useCallback(async () => {
+    // The command returns as soon as the check starts; everything after that
+    // arrives on the event, including the failure.
+    await invoke(COMMANDS.UPDATES_CHECK_NOW);
   }, []);
 
-  return { checkForUpdates, installUpdate };
+  const restart = useCallback(async () => {
+    await invoke(COMMANDS.UPDATES_RESTART_TO_UPDATE);
+  }, []);
+
+  const saveSettings = useCallback(
+    async (next: { autoCheckEnabled: boolean; channel: UpdateChannel }) => {
+      const saved = await invoke<UpdateSettings>(COMMANDS.UPDATES_SET_SETTINGS, {
+        autoCheckEnabled: next.autoCheckEnabled,
+        channel: next.channel,
+      });
+      setSettings(saved);
+      return saved;
+    },
+    [],
+  );
+
+  return { status, settings, checkNow, restart, saveSettings };
 }
