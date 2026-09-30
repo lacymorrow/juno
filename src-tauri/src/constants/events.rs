@@ -272,8 +272,6 @@ pub mod always_listening {
     pub const EVENT: &str = "always-listening-event";
     pub const STOPPED_BY_COMMAND: &str = "always-listening:stopped-by-command";
     pub const RETURN_TO_WAKE_WORD: &str = "always-listening:return-to-wake-word";
-    /// The wake-word test panel listens for this. Nothing emits it today.
-    pub const VOLUME: &str = "always-listening-volume";
 }
 
 /// Permission events
@@ -333,8 +331,6 @@ pub mod cloud {
     pub const CONNECTOR_STATE: &str = "cloud-connector-state";
     pub const CONNECTION_STATE: &str = "cloud-connection-state";
     pub const COMMAND_RECEIVED: &str = "cloud-command-received";
-    /// The cloud connector listens for this. Nothing emits it today.
-    pub const CONNECTOR_ERROR: &str = "cloud-connector-error";
 }
 
 /// System and application events
@@ -360,9 +356,6 @@ pub mod system {
 
     /// Emitted by Tauri itself when a window is destroyed.
     pub const TAURI_DESTROYED: &str = "tauri://destroyed";
-    /// Debug builds listen for this to clean up MCP servers after a frontend
-    /// reload. Nothing emits it today, so that cleanup never runs.
-    pub const FRONTEND_RELOAD: &str = "frontend-reload";
 }
 
 /// Onboarding events

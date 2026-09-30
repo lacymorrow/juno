@@ -184,20 +184,9 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
         }
       );
 
-      // Listen for volume level updates (if available)
-      const unlistenVolume = await listen<{ level: number }>(
-        EVENTS.ALWAYS_LISTENING_VOLUME,
-        (event) => {
-          setVolumeLevel(event.payload.level);
-        }
-      );
-
       return () => {
         if (typeof unlistenAlwaysListening === "function") {
           unlistenAlwaysListening();
-        }
-        if (typeof unlistenVolume === "function") {
-          unlistenVolume();
         }
       };
     } catch (error) {
