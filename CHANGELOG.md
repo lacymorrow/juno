@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.24] - 2026-09-30
+
+### Fixed
+
+- **settings:** sync agent mode between Settings and chat pane (#622) (8997199c)
+
 ## [0.8.23] - 2026-09-30
 
 ### Added
@@ -568,7 +574,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.23...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.24...HEAD
+[0.8.24]: https://github.com/lacymorrow/juno/compare/cua-v0.8.23...v0.8.24
 [0.8.23]: https://github.com/lacymorrow/juno/compare/cua-v0.8.22...v0.8.23
 [0.8.22]: https://github.com/lacymorrow/juno/compare/cua-v0.8.21...v0.8.22
 [0.8.20]: https://github.com/lacymorrow/juno/compare/cua-v0.8.19...v0.8.20
