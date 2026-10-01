@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.53] - 2026-10-01
+
+### Fixed
+
+- **macos:** the floating bar decides whether it is on top, and settings wins (#658) (5546f3a4)
+
 ## [0.8.50] - 2026-10-01
 
 ### Added
@@ -708,7 +714,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.50...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.53...HEAD
+[0.8.53]: https://github.com/lacymorrow/juno/compare/cua-v0.8.52...v0.8.53
 [0.8.50]: https://github.com/lacymorrow/juno/compare/cua-v0.8.49...v0.8.50
 [0.8.48]: https://github.com/lacymorrow/juno/compare/cua-v0.8.47...v0.8.48
 [0.8.46]: https://github.com/lacymorrow/juno/compare/cua-v0.8.45...v0.8.46
