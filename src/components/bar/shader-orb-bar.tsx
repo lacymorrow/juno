@@ -15,6 +15,7 @@ import { COMMANDS, EVENTS, UI, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useEscapeToIdle } from "@/hooks/useEscapeToIdle";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
 import { InputControlNotices } from "@/components/input-control/InputControlNotices";
@@ -127,6 +128,11 @@ async function sendInteraction(type: string, data?: Record<string, unknown>): Pr
   } catch (error) {
     console.error("Orb: interaction failed:", error);
   }
+}
+
+/** Escape, reported to Rust. What stopping means is Rust's decision. */
+function reportEscape(): void {
+  void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
 }
 
 interface Layout {
@@ -295,23 +301,26 @@ export function ShaderOrbBar(_props: ShaderOrbBarProps) {
     };
   }, []);
 
+  // Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
+  useEscapeToIdle({
+    barState: bar.barState,
+    working: working,
+    overlayOpen: sheetOpen || unread || noticeOpen,
+    composerOpen: typing,
+    popupOpen: false,
+    collapse: settle,
+    report: reportEscape,
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (working) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        } else if (sheetOpen || unread || noticeOpen) {
-          settle();
-        } else if (typing) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        }
-      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         void sendInteraction(UI.INTERACTION_TYPES_ENTER);
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [working, sheetOpen, unread, noticeOpen, typing, settle]);
+  }, []);
 
   // One click, one idea: give me the words. With something to read that is
   // the sheet; with nothing to read it is the composer.
