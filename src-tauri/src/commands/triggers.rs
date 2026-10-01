@@ -85,6 +85,43 @@ pub async fn open_keyboard_settings() -> Result<(), String> {
     }
 }
 
+/// The combos a trigger may not take, read from the constants because they are
+/// no longer settings: Escape still stops the current task and Cmd+Comma still
+/// opens settings. One list, so the answer [`get_trigger_issues`] gives and the
+/// result of pressing save cannot disagree about what is off-limits.
+fn reserved_combos() -> Vec<String> {
+    vec![
+        crate::constants::settings::defaults::STOP_CURRENT_TASK.to_string(),
+        crate::constants::settings::defaults::OPEN_SETTINGS.to_string(),
+    ]
+}
+
+/// What is wrong with this trigger list right now, one sentence per bad row.
+///
+/// The same derivation [`set_triggers`] refuses on, asked as a question rather
+/// than learned from a rejection. That difference is the whole point: a screen
+/// that renders the answer to this cannot show a message that has stopped
+/// being true, because it asks about the list it is drawing. Rebind the row,
+/// delete it, fix it from the other row, switch either one off, or leave the
+/// pane: the sentence goes when the condition does, with no timer involved and
+/// nothing cached to invalidate.
+///
+/// `enabled` is settled the way a save settles it before the answer is
+/// computed, so the hint and the refusal agree about which rows count. Ids are
+/// left exactly as they arrived (no [`triggers::ensure_ids`]) because every
+/// issue is addressed to a `trigger_id` the window has to be able to match.
+#[tauri::command]
+pub async fn get_trigger_issues(
+    triggers: Vec<Trigger>,
+    app_state: State<'_, AppState>,
+) -> Result<Vec<triggers::TriggerIssue>, String> {
+    let previous = app_state.get_triggers().unwrap_or_default();
+    let mut candidate = triggers;
+    triggers::enable_newly_bound(&previous, &mut candidate);
+    triggers::disable_unbound(&mut candidate);
+    Ok(triggers::issues(&candidate, &reserved_combos()))
+}
+
 /// Replace the activation triggers: validate, store in memory, persist, and
 /// re-register global shortcuts / voice. Returns the normalized list, or an
 /// error string the UI shows inline on the offending row.
@@ -118,14 +155,10 @@ pub async fn set_triggers(
     triggers::disable_unbound(&mut normalized);
 
     // Escape and Cmd+Comma are still live and still off-limits, so a trigger
-    // cannot steal them. They are read from the constants because they are no
-    // longer settings. Voice activation used to be reserved here too and is
+    // cannot steal them. Voice activation used to be reserved here too and is
     // not any more: it was retired outright, so its old combo is free for a
     // real trigger to claim.
-    let reserved = vec![
-        crate::constants::settings::defaults::STOP_CURRENT_TASK.to_string(),
-        crate::constants::settings::defaults::OPEN_SETTINGS.to_string(),
-    ];
+    let reserved = reserved_combos();
     let ks = app_state.get_keyboard_shortcuts()?;
     triggers::validate(&normalized, &reserved)?;
 
