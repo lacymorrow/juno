@@ -466,9 +466,29 @@ impl TimerEventHandler {
             timer_data.id
         );
 
-        // Signal cancellation to current agent
+        // Cancel the focused session, not the world.
+        //
+        // This used to call the global `app_state.signal_cancel()`, which stops
+        // every session at once: a screen monitor firing while three background
+        // agents were working killed all three. The rest of the app moved to
+        // per-session cancellation (`agents/session.rs`,
+        // `stop_coordinator.rs:210`); this is the same pattern, with the global
+        // signal kept only as the fallback for paths that register no session
+        // (legacy callers, headless runs).
         let app_state = self.app_handle.state::<AppState>();
-        app_state.signal_cancel();
+        let cancelled_focused = match app_state.agent_sessions().cancel_focused().await {
+            Ok(cancelled) => cancelled,
+            Err(e) => {
+                warn!(
+                    "Failed to cancel the focused session for a timer wake: {}",
+                    e
+                );
+                false
+            }
+        };
+        if !cancelled_focused {
+            app_state.signal_cancel();
+        }
 
         // Wait briefly for graceful shutdown
         tokio::time::sleep(Duration::from_millis(500)).await;
