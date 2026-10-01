@@ -29,7 +29,7 @@
     "build:universal": "bash scripts/tauri-build.sh --target universal-apple-darwin",
     "preview": "vite preview",
     "generate-constants": "node scripts/generate-ts-constants.js",
-    "prebuild": "npm run generate-constants",
+    "prebuild": "bun run generate-constants",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "bash scripts/tauri-build.sh",
