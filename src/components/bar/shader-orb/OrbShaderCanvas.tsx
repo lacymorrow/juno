@@ -246,7 +246,9 @@ const frag = /* glsl */ `
 interface OrbShaderCanvasProps {
   /** The bar writes the look and its targets here; this reads them per frame. */
   drive: RefObject<OrbDrive>;
-  /** "demand" lets the loop stop; any change should set it back to "always". */
+  /** The bar's record of whether the loop is awake. Setting it back to
+   *  "always" is what wakes a sleeping loop; the loop itself decides when to
+   *  sleep and says so through `onSettled`. */
   frameloop: Frameloop;
   /** Called once the loop has gone to sleep, so the bar can record it. */
   onSettled: () => void;
@@ -258,8 +260,6 @@ export function OrbShaderCanvas({ drive, frameloop, onSettled, size }: OrbShader
   const hostRef = useRef<HTMLDivElement>(null);
   // The loop reads these through refs so the WebGL context is built once and
   // never torn down for a prop change.
-  const frameloopRef = useRef(frameloop);
-  frameloopRef.current = frameloop;
   const settledRef = useRef(onSettled);
   settledRef.current = onSettled;
   // Set by the loop so a "demand" to "always" flip can restart it in place.
@@ -390,8 +390,10 @@ export function OrbShaderCanvas({ drive, frameloop, onSettled, size }: OrbShader
       // Sleep only once the look allows it, the easing has finished, and the
       // inside has had time to drift to a stop. A cut to a still frame would
       // read as a stall; coming to rest reads as rest.
+      // Deliberately not gated on the `frameloop` prop: the bar only sets it
+      // to "demand" in response to `onSettled`, so reading it here would mean
+      // the loop could never reach the state that stops it.
       const quiet =
-        frameloopRef.current === "demand" &&
         loopMaySleep(look) &&
         impulseAt < 0 &&
         look.pulsePeriod === 0 &&
