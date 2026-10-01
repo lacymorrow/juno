@@ -1,7 +1,7 @@
 {
   "name": "Juno",
   "private": true,
-  "version": "0.8.46",
+  "version": "0.8.47",
   "type": "module",
   "description": "AI that controls your Mac. Describe a task. Watch it happen.",
   "author": "Lacy Morrow <lacy@lacymorrow.com> (https://lacymorrow.com)",
