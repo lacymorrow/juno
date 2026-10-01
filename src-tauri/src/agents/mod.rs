@@ -44,10 +44,10 @@ mod structure_tests {
     /// session bookkeeping, add the file to `ALLOWED` below and say why here.
     #[test]
     fn agents_holds_no_executor() {
-        /// Every file this module is allowed to contain.
+        // Every file this module is allowed to contain.
         const ALLOWED: [&str; 2] = ["mod.rs", "session.rs"];
 
-        /// Spellings that mean "this file dispatches tool calls".
+        // Spellings that mean "this file dispatches tool calls".
         const EXECUTOR_MARKERS: [&str; 4] = [
             "SpecializedAgent",
             "fn handle_task",
@@ -80,8 +80,9 @@ mod structure_tests {
             };
             for (i, line) in text.lines().enumerate() {
                 let code = line.trim_start();
-                // The markers are named in this test and in the module header.
-                if code.starts_with("//") || code.starts_with("///") {
+                // The markers are named in this test and in the module header,
+                // so every comment form is skipped: //, /// and //!.
+                if code.starts_with("//") {
                     continue;
                 }
                 for marker in EXECUTOR_MARKERS {
