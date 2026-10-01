@@ -730,7 +730,6 @@ export const COMMANDS = {
   MOUSE_GET_SMOOTH_MOUSE_MOVEMENT_SETTING: 'get_smooth_mouse_movement_setting',
   MOUSE_SET_SMOOTH_MOUSE_MOVEMENT_SETTING: 'set_smooth_mouse_movement_setting',
   NOTIFICATIONS_CHECK_NOTIFICATION_PERMISSION: 'check_notification_permission',
-  NOTIFICATIONS_REQUEST_NOTIFICATION_PERMISSION: 'request_notification_permission',
   NOTIFICATIONS_GET_NOTIFICATION_SETTINGS: 'get_notification_settings',
   NOTIFICATIONS_SET_NOTIFICATIONS_ENABLED: 'set_notifications_enabled',
   NOTIFICATIONS_TEST_NOTIFICATION: 'test_notification',
