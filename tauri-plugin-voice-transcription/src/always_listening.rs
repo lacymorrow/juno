@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Runtime};
 use tracing::{debug, error, info, warn};
 
 use crate::error::{Error, Result};
-use crate::utils::filter_transcription_text;
+use crate::utils::{downmix_f32_to_mono, downmix_i16_to_mono, filter_transcription_text};
 
 // Audio processing constants (matching main crate's constants)
 const WHISPER_SAMPLE_RATE: u32 = 16000;
@@ -298,12 +298,11 @@ impl AlwaysListeningController {
         let sample_rate = config.sample_rate().0;
         let channels = config.channels() as usize;
 
-        if channels > 2 {
-            error!("[AlwaysListening] Unsupported channel count: {}. Only mono (1) or stereo (2) supported.", channels);
-            return;
-        }
-        if channels == 2 {
-            info!("[AlwaysListening] Stereo input detected - will convert to mono");
+        if channels > 1 {
+            info!(
+                "[AlwaysListening] {} input channels detected - averaging down to mono",
+                channels
+            );
         }
 
         let (audio_data_tx, audio_data_rx) = channel::<Vec<f32>>();
@@ -314,20 +313,7 @@ impl AlwaysListeningController {
                 match device.build_input_stream(
                     &config.config(),
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        let mono_data = if channels_for_cb == 2 {
-                            // Convert stereo to mono by averaging channels
-                            data.chunks(2)
-                                .map(|pair| {
-                                    if pair.len() == 2 {
-                                        (pair[0] + pair[1]) / 2.0
-                                    } else {
-                                        pair[0]
-                                    }
-                                })
-                                .collect()
-                        } else {
-                            data.to_vec()
-                        };
+                        let mono_data = downmix_f32_to_mono(data, channels_for_cb);
                         if let Err(e) = audio_data_tx.send(mono_data) {
                             error!("Failed to send audio data: {:?}", e);
                         }
@@ -349,22 +335,7 @@ impl AlwaysListeningController {
                 match device.build_input_stream(
                     &config.config(),
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        // Convert stereo to mono first if needed
-                        let mono_data: Vec<i16> = if channels_for_cb == 2 {
-                            data.chunks(2)
-                                .map(|pair| {
-                                    if pair.len() == 2 {
-                                        ((pair[0] as i32 + pair[1] as i32) / 2) as i16
-                                    } else {
-                                        pair[0]
-                                    }
-                                })
-                                .collect()
-                        } else {
-                            data.to_vec()
-                        };
-                        let audio_f32: Vec<f32> =
-                            mono_data.iter().map(|&s| s as f32 / 32768.0).collect();
+                        let audio_f32 = downmix_i16_to_mono(data, channels_for_cb);
                         if let Err(e) = audio_data_tx.send(audio_f32) {
                             error!("Failed to send converted audio data: {:?}", e);
                         }
