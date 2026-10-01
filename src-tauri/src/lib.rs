@@ -639,6 +639,9 @@ pub fn run() {
             commands::escape_key_coordinator::get_escape_key_coordinator_status,
             commands::escape_key_coordinator::force_unregister_escape_key,
             commands::escape_key_coordinator::test_escape_key_flow,
+            // Armed monitors: what is watching, and the stop for it
+            commands::monitors::list_armed_monitors,
+            commands::monitors::stop_armed_monitors,
             // Stop Coordinator Commands
             commands::stop_coordinator::coordinated_stop_all_operations,
             commands::stop_coordinator::coordinator_emergency_stop_all_operations,
