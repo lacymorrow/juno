@@ -47,12 +47,14 @@ pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
 pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
 pub mod settings; // Centralized settings management with reactive updates
+pub mod shell_command; // The one place that parses a shell command string
 pub mod shortcuts; // Shortcut string parsing utilities
 pub mod startup; // Application startup, initialization, and bootstrapping
 pub mod state;
 pub mod state_management; // Application state management, initialization, and monitoring
 pub mod testing; // Test harness and mock implementations for headless integration tests
 pub mod tools;
+pub mod trash; // Deleting is recoverable: the shell session deletes to the Trash
 pub mod triggers; // Unified activation model (methods x targets)
 pub mod tts;
 pub mod updater; // Auto-update: which feed, when to look, what to do with it

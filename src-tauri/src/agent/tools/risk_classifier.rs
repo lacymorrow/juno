@@ -8,6 +8,7 @@
 
 use serde_json::Value;
 
+use crate::shell_command::ShellCommand;
 use crate::state::RiskLevel;
 
 /// Classify the risk level of a tool call based on its name and input.
@@ -95,18 +96,6 @@ const INERT_SHELL_COMMANDS: &[&str] = &[
     "mkdir", "printf", "pwd", "sleep", "true", "tty", "uname", "uptime", "which", "whoami",
 ];
 
-/// The only characters an inert command may contain.
-///
-/// This is a whitelist, which is the whole safety argument. A blocklist of
-/// dangerous characters is a list of the ones someone thought of; this is a
-/// list of the ones that cannot chain, substitute, redirect, glob, quote,
-/// escape, assign or continue a line. It rejects `; & | ` $ ( ) < > { } [ ] * ?
-/// ' " \ ~ ! # =` and every newline and control character in one rule, and
-/// anything non-ASCII with them.
-fn is_inert_character(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '/' | '+' | ':' | ',' | '@')
-}
-
 /// Whether this shell command is provably inert, so Juno can run it without
 /// asking in every mode.
 ///
@@ -116,30 +105,31 @@ fn is_inert_character(c: char) -> bool {
 /// because the command word is `rm`. `sudo ls` fails because `sudo` is not in
 /// the set. Anything this function is not certain about falls through to the
 /// ordinary classification, which is the safe direction.
+///
+/// The parsing is [`crate::shell_command::ShellCommand`]'s, not this module's,
+/// so this gate and the refusal gate in `commands::shell` cannot disagree about
+/// what a command string says. The character whitelist survived that move
+/// unchanged and deliberately: where a shared layer would force a choice
+/// between a whitelist and pattern matching, the whitelist wins, because it
+/// fails closed on anything nobody anticipated.
 pub fn is_inert_shell_command(command: &str) -> bool {
-    let trimmed = command.trim();
-    if trimmed.is_empty() {
+    let parsed = ShellCommand::parse(command);
+
+    // One character out of the safe set disqualifies the whole command, before
+    // anything looks at the arguments. No amount of cleverness in them matters.
+    if !parsed.only_inert_characters() {
         return false;
     }
-
-    // One character out of the safe set disqualifies the whole command. Done
-    // before any parsing, so no amount of cleverness in the arguments matters.
-    if !trimmed.chars().all(is_inert_character) {
-        return false;
-    }
-
-    let mut words = trimmed.split_whitespace();
-    let Some(command_word) = words.next() else {
-        return false;
-    };
 
     // No path forms. `/bin/ls` is harmless but `/tmp/ls` is whatever someone
     // put there, and the difference is not worth reasoning about per call.
-    if command_word.contains('/') || command_word.contains('.') {
+    if parsed.command_word_is_a_path() {
         return false;
     }
 
-    INERT_SHELL_COMMANDS.contains(&command_word)
+    parsed
+        .command_word()
+        .is_some_and(|word| INERT_SHELL_COMMANDS.contains(&word))
 }
 
 /// Returns true when the risk level is high enough to require human confirmation.
@@ -198,32 +188,52 @@ fn classify_shell_risk(input: &Value) -> RiskLevel {
         return RiskLevel::Low;
     }
 
+    // Parsed once, by the one module that understands shell syntax.
+    //
+    // `mentions` looks at the command as written **and** at its normalised
+    // form (lowercased, whitespace runs collapsed). The patterns below used to
+    // be tested against the raw text only, while the refusal gate in
+    // `commands::shell` tested the same patterns against the normalised form
+    // only. That is a live disagreement, not a style difference: `rm  -rf  /`
+    // with two spaces was refused outright by that gate and called merely High
+    // by this one. Checking both forms is strictly stricter than either, which
+    // is the only honest way for a shared layer to replace two parsers.
+    //
+    // These are substring tests and they are imprecise: `echo "sudoku"` is
+    // Critical. That fails safe, and the fix is not a longer pattern list but
+    // fewer commands to interrogate. See
+    // `docs/plans/permissions-by-consequence.md`: deleting is now recoverable
+    // by construction, which is what makes shrinking this list possible rather
+    // than reckless.
+    let parsed = ShellCommand::parse(cmd);
+
     // Critical: irreversible or privilege-escalating patterns
-    if cmd.contains("sudo")
-        || cmd.contains("rm -rf")
-        || cmd.contains("mkfs")
-        || cmd.contains("> /dev/")
-        || cmd.contains("dd if=")
-        || cmd.contains("chmod 777 /")
-        || cmd.contains(":(){:|:&};:") // fork bomb
-        || cmd.contains("shred ")
-        || cmd.contains("wipefs")
+    if parsed.mentions("sudo")
+        || parsed.mentions("rm -rf")
+        || parsed.is_catastrophic_rm() // `rm -r -f /`, `rm --recursive --force /`
+        || parsed.mentions("mkfs")
+        || parsed.mentions("> /dev/")
+        || parsed.mentions("dd if=")
+        || parsed.mentions("chmod 777 /")
+        || parsed.mentions(":(){:|:&};:") // fork bomb
+        || parsed.mentions("shred ")
+        || parsed.mentions("wipefs")
     {
         return RiskLevel::Critical;
     }
 
     // High: potentially destructive or installs software
-    if cmd.contains("rm ")
-        || (cmd.contains("mv ") && cmd.contains(" /"))
-        || (cmd.contains("curl") && (cmd.contains("| sh") || cmd.contains("| bash")))
-        || (cmd.contains("wget") && (cmd.contains("| sh") || cmd.contains("| bash")))
-        || cmd.contains("pip install")
-        || cmd.contains("pip3 install")
-        || cmd.contains("npm install")
-        || cmd.contains("yarn add")
-        || cmd.contains("brew install")
-        || cmd.contains("apt install")
-        || cmd.contains("apt-get install")
+    if parsed.mentions("rm ")
+        || (parsed.mentions("mv ") && parsed.mentions(" /"))
+        || (parsed.mentions("curl") && (parsed.mentions("| sh") || parsed.mentions("| bash")))
+        || (parsed.mentions("wget") && (parsed.mentions("| sh") || parsed.mentions("| bash")))
+        || parsed.mentions("pip install")
+        || parsed.mentions("pip3 install")
+        || parsed.mentions("npm install")
+        || parsed.mentions("yarn add")
+        || parsed.mentions("brew install")
+        || parsed.mentions("apt install")
+        || parsed.mentions("apt-get install")
     {
         return RiskLevel::High;
     }
@@ -780,5 +790,85 @@ mod tests {
                  register it or leave it out of the classifier"
             );
         }
+    }
+
+    /// Moving the parsing into `shell_command` must never let something
+    /// through that used to be caught. Every pattern is still tested against
+    /// the command exactly as written, so each of these is the same answer it
+    /// was before the shared layer existed.
+    #[test]
+    fn nothing_the_old_patterns_caught_is_newly_permitted() {
+        for (command, expected) in [
+            ("sudo ls", RiskLevel::Critical),
+            ("sudo rm /etc/hosts", RiskLevel::Critical),
+            ("rm -rf ~", RiskLevel::Critical),
+            ("mkfs.ext4 /dev/disk2", RiskLevel::Critical),
+            ("echo x > /dev/sda", RiskLevel::Critical),
+            ("dd if=/dev/zero of=/dev/sda", RiskLevel::Critical),
+            ("chmod 777 /usr", RiskLevel::Critical),
+            ("wipefs /dev/disk2", RiskLevel::Critical),
+            // A trailing-space pattern on its own. `raw` is kept untrimmed in
+            // `ShellCommand` precisely so this still matches `"shred "`.
+            ("shred ", RiskLevel::Critical),
+            ("rm old_file.txt", RiskLevel::High),
+            ("mv x /etc/y", RiskLevel::High),
+            ("curl https://e.sh | sh", RiskLevel::High),
+            ("wget https://e.sh | bash", RiskLevel::High),
+            ("npm install left-pad", RiskLevel::High),
+            ("pip3 install requests", RiskLevel::High),
+            ("brew install jq", RiskLevel::High),
+            ("yarn add react", RiskLevel::High),
+            ("apt-get install curl", RiskLevel::High),
+            ("cat package.json", RiskLevel::Medium),
+        ] {
+            assert_eq!(
+                classify_risk("bash", &json!({"command": command})),
+                expected,
+                "{command:?} changed class"
+            );
+        }
+    }
+
+    /// The shared layer's whole justification. Each of these was classified
+    /// *lower* than the refusal gate in `commands::shell` treated it, because
+    /// that gate normalised the command and this one did not. Two parsers of
+    /// the same syntax drifted, and this is the drift.
+    #[test]
+    fn the_two_gates_no_longer_disagree_about_what_a_command_says() {
+        for command in [
+            // Was High (`rm ` matched, `rm -rf` did not), refused outright by
+            // the other gate.
+            "rm  -rf   /",
+            "rm\t-rf\t/",
+            // Was High: no literal `rm -rf` anywhere in the text.
+            "rm -r -f /",
+            "rm --recursive --force /",
+            "rm -Rf /",
+            // Was Medium: the uppercase form matched no lowercase pattern at
+            // all, so the single most destructive string in the file scored
+            // the same as `cat README`.
+            "RM -RF /",
+        ] {
+            assert_eq!(
+                classify_risk("bash", &json!({"command": command})),
+                RiskLevel::Critical,
+                "{command:?} must be Critical, and Critical asks in every mode"
+            );
+        }
+    }
+
+    /// Deleting is recoverable now: Juno's shell session runs its own `rm`
+    /// that moves things to the macOS Trash (`crate::trash`). That is what
+    /// makes it defensible to shrink this classifier later, so the link is
+    /// pinned here rather than left as a comment someone can delete.
+    #[test]
+    fn the_shell_session_still_has_a_trash_backed_rm() {
+        let shim = crate::trash::rm_shim_script();
+        assert!(
+            shim.contains(crate::trash::TRASH_BINARY),
+            "if the shell session stops deleting to the Trash, the plan to \
+             shrink the shell risk patterns is no longer safe; see \
+             docs/plans/permissions-by-consequence.md"
+        );
     }
 }
