@@ -392,7 +392,10 @@ pub mod mouse {
 /// System notifications
 pub mod notifications {
     pub const CHECK_NOTIFICATION_PERMISSION: &str = "check_notification_permission";
-    pub const REQUEST_NOTIFICATION_PERMISSION: &str = "request_notification_permission";
+    // `request_notification_permission` is gone. On desktop the plugin's
+    // `request_permission()` is a hard-coded `Ok(PermissionState::Granted)`: it
+    // asks macOS nothing, so the "Ask" button it backed could never have asked
+    // anyone anything. Notifications are changed in System Settings.
     pub const GET_NOTIFICATION_SETTINGS: &str = "get_notification_settings";
     pub const SET_NOTIFICATIONS_ENABLED: &str = "set_notifications_enabled";
     pub const TEST_NOTIFICATION: &str = "test_notification";

@@ -817,7 +817,6 @@ pub fn run() {
             commands::notifications::get_notification_settings,
             commands::notifications::set_notifications_enabled,
             commands::notifications::check_notification_permission,
-            commands::notifications::request_notification_permission,
             commands::notifications::send_notification,
             commands::notifications::test_notification,
             // Core Commands

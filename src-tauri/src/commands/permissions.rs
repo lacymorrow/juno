@@ -506,6 +506,12 @@ pub async fn open_system_preferences(preference_pane: String) -> Result<(), Stri
             "input_monitoring" => {
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
             }
+            // Not a Privacy & Security row: notifications live in their own
+            // pane, and it is the only place a person can let Juno's banners
+            // through. See `commands::notifications::SYSTEM_SETTINGS_PANE`.
+            "notifications" => {
+                "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+            }
             _ => return Err(format!("Unknown preference pane: {}", preference_pane)),
         };
 
