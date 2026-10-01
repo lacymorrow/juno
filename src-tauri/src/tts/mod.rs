@@ -547,6 +547,24 @@ pub async fn set_tts_provider_command(
 
     // Update centralized settings
     audio_settings.tts_provider = provider.clone();
+
+    // The engine changed, so the voice has to be one this engine has. A voice
+    // id belongs to the engine that named it, and carrying one across is how
+    // the Audio pane came to offer macOS voices while Kokoro was speaking.
+    // Resolving here means the new engine is never left holding a dangling id
+    // that would reach it as an error and then silence.
+    let engine = voices::listed_engine(&provider).to_string();
+    let inventory = voices::inventory_for(&engine).await;
+    let stored = audio_settings.voice_for(&engine).map(str::to_string);
+    let resolution = voices::resolve_voice(&engine, &inventory, stored.as_deref());
+    if resolution.substituted {
+        warn!(
+            "[TTS] {} cannot speak as {:?}; using {:?} instead",
+            engine, stored, resolution.voice
+        );
+    }
+    audio_settings.set_voice_for(&engine, resolution.voice.clone());
+
     settings_manager
         .set_audio_settings(&audio_settings)
         .await
@@ -556,10 +574,12 @@ pub async fn set_tts_provider_command(
     state
         .set_tts_provider(provider.clone())
         .map_err(|e| format!("Failed to set tts_provider: {}", e))?;
+    voices::push_voice_to_state(state.inner(), &engine, resolution.voice.as_deref())?;
 
     info!(
-        "TTS provider set to: {} (saved to centralized settings)",
-        provider
+        "TTS provider set to: {} speaking as {} (saved to centralized settings)",
+        provider,
+        resolution.voice.as_deref().unwrap_or("its own default")
     );
     Ok(())
 }
@@ -1001,6 +1021,38 @@ async fn execute_tts_with_fallback(
     Err(final_error)
 }
 
+/// Render one short utterance with a named engine, bypassing the fallback
+/// chain.
+///
+/// This is the audition path. A sample is how somebody checks what an engine
+/// sounds like, so quietly handing the sentence to a different engine would be
+/// a lie: an engine that cannot speak has to say so. `Ok(None)` means the
+/// engine already spoke it, which is the Mac's own voice streaming out of
+/// `say`; `Ok(Some(audio))` is base64 for [`play_sample`].
+pub async fn render_sample(
+    text: String,
+    provider: &str,
+    state: AppState,
+) -> Result<Option<String>, String> {
+    let rendered = invoke_tts_for_provider(text, Some(state), provider).await?;
+    let already_done = matches!(
+        rendered.as_str(),
+        "TTS_COMPLETED"
+            | "TTS_STOPPED_BY_USER"
+            | "TTS_DISABLED_BY_SETTING"
+            | "TTS_CONTENT_FILTERED"
+            | "TTS_ALREADY_PLAYING"
+            | "TTS_SOUND_DISABLED"
+    );
+    Ok(if already_done { None } else { Some(rendered) })
+}
+
+/// Play a rendered sample and wait for it to finish.
+pub async fn play_sample(base64_audio: &str) -> Result<(), String> {
+    let handle = play_base64_audio_with_tracking(base64_audio).await?;
+    handle.wait_for_completion().await
+}
+
 // Invoke TTS for a specific provider name
 pub async fn invoke_tts_for_provider(
     text: String,
@@ -1018,10 +1070,14 @@ pub async fn invoke_tts_for_provider(
     match provider.to_lowercase().as_str() {
         "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
         "kokoro" => {
-            let voice = _state
-                .as_ref()
-                .and_then(|s| s.get_kokoro_voice().ok())
-                .unwrap_or_else(|| "af_bella".to_string());
+            // An embedding that is not on disk is not a slow voice: `any_tts`
+            // loads `voices/<id>.pt` straight off disk and never fetches a
+            // missing one, so an id with no file is an error and then
+            // silence. The stored name is checked against the files here
+            // because this is the speaking path, where no settings window has
+            // been open to have resolved it.
+            let stored = _state.as_ref().and_then(|s| s.get_kokoro_voice().ok());
+            let voice = voices::resolve_kokoro_voice(stored.as_deref());
             kokoro::invoke_kokoro_tts(text, voice).await
         }
         "replicate" => replicate::invoke_replicate_tts(text).await,

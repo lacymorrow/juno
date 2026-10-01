@@ -25,14 +25,17 @@ const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
  */
 const FOLLOW_SYSTEM = "__system__";
 
-/** Engine names as a person would say them, for the one line that names one. */
-const TTS_ENGINE_NAMES: Record<string, string> = {
-  elevenlabs: "ElevenLabs",
-  kokoro: "Kokoro",
-  replicate: "Replicate",
-  chatterbox: "Chatterbox",
-  supertonic: "Supertonic",
-};
+/**
+ * Where macOS keeps the voices worth downloading.
+ *
+ * Said rather than offered: Juno cannot install a voice for somebody, and a
+ * button that opened a pane Juno does not control would be a control that
+ * names a behaviour it is not wired to. The sentence appears only when Rust
+ * says every voice this Mac has is the compact one.
+ */
+const BETTER_VOICES_HINT =
+  "The Enhanced and Premium versions of these voices sound far better. " +
+  "They download in System Settings, under Accessibility, Spoken Content, System Voice.";
 
 /**
  * Audio: which microphone Juno hears you on, which speaker it answers from,
@@ -41,12 +44,16 @@ const TTS_ENGINE_NAMES: Record<string, string> = {
  * The voice is here and the engine is under Providers on purpose. The engine
  * is plumbing; the voice is a preference, and it is the only one of the three
  * you can check by ear, which is why picking it plays it.
+ *
+ * The rows belong to whichever engine is speaking, and Rust decides what they
+ * are. This file holds no list of voices and no list of engine names: both
+ * used to live here, and both were wrong the moment the engine changed.
  */
 export default function VoiceSettings({ settings }: SettingsSectionProps) {
   const {
     audioDevices,
     junoVoices,
-    speakingVoiceId,
+    voiceAudition,
     captureFailure,
     loadAudioDevices,
     loadJunoVoices,
@@ -62,7 +69,6 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     void loadJunoVoices();
   }, [loadAudioDevices, loadJunoVoices]);
 
-  const engineName = TTS_ENGINE_NAMES[settings.ttsProvider];
   const inputs = audioDevices?.inputs ?? [];
   const outputs = audioDevices?.outputs ?? [];
 
@@ -74,6 +80,21 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     : audioDevices?.effective_input
       ? `Juno hears you through ${audioDevices.effective_input}.`
       : "Juno cannot find a microphone.";
+
+  // Which engine the rows came from is worth saying only when it is not the
+  // Mac: on the Mac the voice names are the whole answer.
+  const engineNote =
+    junoVoices && junoVoices.engine !== "system"
+      ? `${junoVoices.engine_label} is giving Juno her voice.`
+      : undefined;
+
+  const voiceFooter = [
+    engineNote,
+    "Pick one and you will hear it. Pick the one you are using to hear it again.",
+    junoVoices?.better_voices_available ? BETTER_VOICES_HINT : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const speakerNote = audioDevices?.missing_output
     ? `${audioDevices.missing_output} is not connected. Juno is using your Mac's output instead.`
@@ -163,23 +184,15 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      <SettingsGroup
-        title="Juno's voice"
-        footer="Pick one and you will hear it. Pick the one you are using to hear it again."
-      >
-        {engineName && (
-          <SettingsRow
-            description={`${engineName} is giving Juno her voice right now. Pick one of these to use a voice from your Mac instead.`}
-          />
-        )}
+      <SettingsGroup title="Juno's voice" footer={voiceFooter}>
         <SettingsRow
           id="juno-voice"
           below={
             <VoicePicker
-              options={junoVoices}
+              list={junoVoices}
               onChange={(id) => void handleJunoVoiceChange(id)}
               onReplay={() => void handlePreviewJunoVoice()}
-              speakingId={speakingVoiceId}
+              audition={voiceAudition}
             />
           }
         />
