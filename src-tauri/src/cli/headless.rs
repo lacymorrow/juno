@@ -556,8 +556,12 @@ impl HeadlessRuntime {
                     defaults
                 };
 
-                settings_manager
-                    .save_all_settings(&to_save)
+                // Through `settings::reset`, not `save_all_settings`: a reset
+                // here owes the same guarantee the Settings window's reset
+                // does, that nothing it selects is unavailable on this
+                // machine. Writing the defaults straight to the store is what
+                // left the UI reset on a provider with no credentials.
+                crate::settings::reset::apply_reset(&settings_manager, &to_save)
                     .await
                     .map_err(|e| {
                         JunoError::ApplicationError(format!("Failed to save settings: {}", e))

@@ -192,8 +192,9 @@ impl SettingsManager {
             .save()
             .map_err(|e| format!("Failed to save settings store: {}", e))?;
 
-        // Emit change events for reactivity
-        self.emit_settings_changed().await;
+        // A whole-settings write changes every section, so it says so about
+        // every section. See `emit_every_section_changed`.
+        self.emit_every_section_changed(settings).await;
 
         Ok(())
     }
@@ -850,5 +851,49 @@ impl SettingsManager {
                 eprintln!("Failed to emit settings changed event: {}", e);
             }
         }
+    }
+
+    /// Emit one section's event, logging rather than failing.
+    ///
+    /// A single setter returns the emit error, because the caller asked for
+    /// that one change and deserves to hear that the announcement failed.
+    /// A whole-settings write is announcing ten things, and giving up on the
+    /// remaining nine because the first one failed would leave more of the UI
+    /// stale, not less.
+    fn emit_section_changed<T: serde::Serialize>(&self, event: &str, payload: &T) {
+        if let Err(e) = self.app_handle.emit(event, payload) {
+            warn!("Failed to emit {} event: {}", event, e);
+        }
+    }
+
+    /// Announce a whole-settings write the way ten individual writes would.
+    ///
+    /// `save_all_settings` used to emit only `settings_changed`. Every pane
+    /// follows its own section event instead, so a write that skipped those
+    /// was invisible: "Reset all settings" changed the file and nothing on
+    /// screen moved. Emitting per section here means a pane is subscribed to
+    /// a reset by virtue of being subscribed to its own settings, so a pane
+    /// added later is covered without anyone remembering to add it to a list.
+    async fn emit_every_section_changed(&self, settings: &AppSettings) {
+        self.emit_section_changed(
+            events::KEYBOARD_SHORTCUTS_CHANGED,
+            &settings.keyboard_shortcuts,
+        );
+        self.emit_section_changed(
+            events::FLOATING_BAR_SETTINGS_CHANGED,
+            &settings.floating_bar,
+        );
+        self.emit_section_changed(events::AGENT_SETTINGS_CHANGED, &settings.agent);
+        self.emit_section_changed(events::PROVIDER_SETTINGS_CHANGED, &settings.providers);
+        self.emit_section_changed(events::CLOUD_SETTINGS_CHANGED, &settings.cloud);
+        self.emit_section_changed(events::AUDIO_SETTINGS_CHANGED, &settings.audio);
+        self.emit_section_changed(events::TOOL_SETTINGS_CHANGED, &settings.tools);
+        self.emit_section_changed(events::PROMPT_SETTINGS_CHANGED, &settings.prompts);
+        self.emit_section_changed(events::CLI_SETTINGS_CHANGED, &settings.cli);
+        self.emit_section_changed(
+            events::VOICE_TRANSCRIPTION_SETTINGS_CHANGED,
+            &settings.voice_transcription,
+        );
+        self.emit_settings_changed().await;
     }
 }
