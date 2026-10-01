@@ -628,8 +628,9 @@ where
 
         // The sentence a person reads. Written in Rust on purpose: the
         // frontend should never have to turn `safari_execute_javascript` into
-        // English, and the old copy ("Run bash — sleep 1") handed it a tool
-        // name, an implementation detail and an em dash.
+        // English, and the old copy read "Run bash", an em dash, then the raw
+        // command, which is a tool name, an implementation detail and a dash
+        // this project does not use.
         let batch_description = permission_policy::describe_batch(
             &permission_policy::describe_action(&riskiest_tool.name, &riskiest_tool.input),
             batch.len(),

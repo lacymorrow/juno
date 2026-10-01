@@ -397,7 +397,7 @@ export function useBackendEvents({
 		}
 	);
 
-	// Listen for tool-approval-resolved — settle the row however the question ended.
+	// Listen for tool-approval-resolved: settle the row however the question ended.
 	//
 	// Before this event the backend denied a timed-out approval and told the
 	// frontend nothing, so `approval_state` stayed "pending": the Allow and

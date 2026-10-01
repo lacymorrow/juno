@@ -151,8 +151,8 @@ impl ApprovalOutcome {
 
 /// One plain sentence for what Juno is about to do.
 ///
-/// The prompt used to read `Run bash — sleep 1`, which names the tool and the
-/// implementation and asks a person to audit it. This writes what a person can
+/// The prompt used to read "Run bash", an em dash, then "sleep 1", which names
+/// the tool and the implementation and asks a person to audit it. This writes what a person can
 /// picture, and it never leaks a raw tool name: the fallback runs a tool name
 /// through [`friendly_tool_name`] rather than printing `safari_extract_dom`.
 pub fn describe_action(tool_name: &str, tool_input: &Value) -> String {
@@ -425,8 +425,9 @@ mod tests {
 
     #[test]
     fn the_sentence_has_no_em_dash() {
-        // The old copy was `Run {} — {}`. The em dash is banned in this
-        // project's writing, and it was on screen.
+        // The old format string joined the tool name and the input with an em
+        // dash. That character is banned in this project's writing, and it was
+        // on screen.
         let sentence = describe_action("bash", &json!({"command": "sleep 1"}));
         assert!(!sentence.contains('\u{2014}'));
         assert_eq!(sentence, "Run this in the terminal: sleep 1");
