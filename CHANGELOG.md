@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.64] - 2026-10-01
+
+### Fixed
+
+- **timer:** make the shipping screen and file monitors honest, bounded and stoppable (#670) (13a021e1)
+
 ## [0.8.63] - 2026-10-01
 
 ### Fixed
@@ -756,7 +762,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.63...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.64...HEAD
+[0.8.64]: https://github.com/lacymorrow/juno/compare/cua-v0.8.63...v0.8.64
 [0.8.63]: https://github.com/lacymorrow/juno/compare/cua-v0.8.62...v0.8.63
 [0.8.62]: https://github.com/lacymorrow/juno/compare/cua-v0.8.61...v0.8.62
 [0.8.61]: https://github.com/lacymorrow/juno/compare/cua-v0.8.60...v0.8.61
