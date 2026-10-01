@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { Eye, RefreshCw, RotateCcw, Shield } from "lucide-react";
+import { Eye, RefreshCw, RotateCcw } from "lucide-react";
 import { useState, useEffect } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,27 +13,12 @@ import { SettingsGroup, SettingsRow } from "../ui";
 import { COMMANDS } from "@/lib/constants.generated";
 
 export default function ToolsSettings({ settings }: SettingsSectionProps) {
-  const [toolApprovalRequired, setToolApprovalRequired] = useState(false);
-  const [toolApprovalLoading, setToolApprovalLoading] = useState(false);
   const [bulkPending, setBulkPending] = useState(false);
   const [smoothMouseMovement, setSmoothMouseMovement] = useState(false);
   const [smoothMouseMovementLoading, setSmoothMouseMovementLoading] =
     useState(false);
   const [companionMode, setCompanionMode] = useState(false);
   const [companionModeLoading, setCompanionModeLoading] = useState(false);
-
-  // Load tool approval setting on mount
-  useEffect(() => {
-    const loadToolApprovalSetting = async () => {
-      try {
-        const required = await invoke<boolean>(COMMANDS.TOOLS_GET_TOOL_APPROVAL_REQUIRED);
-        setToolApprovalRequired(required);
-      } catch (error) {
-        console.error("Failed to load tool approval setting:", error);
-      }
-    };
-    loadToolApprovalSetting();
-  }, []);
 
   // Load smooth mouse movement setting on mount
   useEffect(() => {
@@ -58,24 +43,6 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
         console.error("Failed to load companion mode setting:", error)
       );
   }, []);
-
-  const handleToggleToolApproval = async (required: boolean) => {
-    setToolApprovalLoading(true);
-    try {
-      await invoke(COMMANDS.TOOLS_SET_TOOL_APPROVAL_REQUIRED, { required });
-      setToolApprovalRequired(required);
-      toast.success(
-        `Tool approval ${required ? "enabled" : "disabled"}${
-          required ? " - You will be asked to approve each tool execution" : ""
-        }`
-      );
-    } catch (error) {
-      console.error("Failed to toggle tool approval:", error);
-      toast.error("Failed to toggle tool approval setting");
-    } finally {
-      setToolApprovalLoading(false);
-    }
-  };
 
   const handleToggleSmoothMouseMovement = async (enabled: boolean) => {
     setSmoothMouseMovementLoading(true);
@@ -226,40 +193,13 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <SettingsGroup
-        title="Tool Approval"
-        footer="Control whether the agent requires your approval before executing tools"
-      >
-        <SettingsRow
-          htmlFor="tool-approval-required"
-          label="Require Tool Approval"
-          description="Agent will ask for permission before executing each tool"
-          below={
-            toolApprovalRequired && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                <div className="flex items-start gap-2">
-                  <Shield className="mt-0.5 h-4 w-4 text-amber-600" />
-                  <div className="text-sm text-amber-800">
-                    <div className="font-medium">Approval Required Mode</div>
-                    <div className="mt-1">
-                      The agent will pause before executing any tool and show
-                      you an approval dialog. This provides maximum control but
-                      may slow down agent operations.
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )
-          }
-        >
-          <Switch
-            id="tool-approval-required"
-            checked={toolApprovalRequired}
-            disabled={toolApprovalLoading}
-            onCheckedChange={handleToggleToolApproval}
-          />
-        </SettingsRow>
-      </SettingsGroup>
+      {/* The "Require Tool Approval" switch used to live here. It is gone, not
+          moved: it wrote a boolean nothing persisted, and the agent runner then
+          outvoted it with a risk threshold, so turning it off changed nothing a
+          person could see. The real control is "When Juno needs permission" in
+          Security and Privacy, which is not advanced-gated and says what each
+          choice permits. The amber "Approval Required Mode" warning card went
+          with it. */}
 
       <SettingsGroup
         title="Smooth Mouse Movement"

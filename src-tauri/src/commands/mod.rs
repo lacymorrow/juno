@@ -138,20 +138,21 @@ pub use self::triggers::*;
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{
     // Tool approval commands
+    allow_tool_for_conversation,
     approve_tool_execution,
     clear_pending_tool_approvals,
     deny_tool_execution,
     get_enabled_tools,
     get_pending_tool_approvals,
+    get_permission_mode,
     get_registered_tools,
-    get_tool_approval_required,
     get_tool_config,
     get_tool_configuration_summary,
     get_tool_configurations,
     is_tool_enabled,
     reset_tool_configuration,
     set_all_tools_enabled,
-    set_tool_approval_required,
+    set_permission_mode,
     set_tool_category_enabled,
     set_tool_enabled,
     test_dynamic_tool_categorization,

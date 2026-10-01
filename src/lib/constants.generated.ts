@@ -180,6 +180,7 @@ export const EVENTS = {
   TRIGGERS_KEY_CAPTURED: 'trigger-key-captured',
   TOOLS_USAGE: 'tool-usage',
   TOOLS_APPROVAL_REQUEST: 'tool-approval-request',
+  TOOLS_APPROVAL_RESOLVED: 'tool-approval-resolved',
   TOOLS_COMMAND_EXECUTION_START: 'command-execution-start',
   TOOLS_COMMAND_EXECUTION_END: 'command-execution-end',
   TOOLS_COMPUTER_USE_AUDIT: 'computer-use-audit',
@@ -753,8 +754,9 @@ export const COMMANDS = {
   TOOLS_SET_TOOL_ENABLED: 'set_tool_enabled',
   TOOLS_SET_ALL_TOOLS_ENABLED: 'set_all_tools_enabled',
   TOOLS_SET_TOOL_CATEGORY_ENABLED: 'set_tool_category_enabled',
-  TOOLS_GET_TOOL_APPROVAL_REQUIRED: 'get_tool_approval_required',
-  TOOLS_SET_TOOL_APPROVAL_REQUIRED: 'set_tool_approval_required',
+  TOOLS_GET_PERMISSION_MODE: 'get_permission_mode',
+  TOOLS_SET_PERMISSION_MODE: 'set_permission_mode',
+  TOOLS_ALLOW_TOOL_FOR_CONVERSATION: 'allow_tool_for_conversation',
 } as const;
 
 export const MEMORY = {
@@ -1065,6 +1067,10 @@ export const KEYBOARD_SHORTCUTS = {
   MOUSE_CONTROL_ALWAYS: 'always',
   DOCK_ICON_VISIBLE: 'true',
   SHOW_TRAY_ICON: 'true',
+  PERMISSION_MODE_ASK_FIRST: 'ask_first',
+  PERMISSION_MODE_ASK_WHEN_RISKY: 'ask_when_risky',
+  PERMISSION_MODE_DONT_ASK: 'dont_ask',
+  PERMISSION_MODE: 'ask_when_risky',
   CLAUDE_CLI_EFFORT: 'high',
   CLAUDE_CLI_LOAD_ACCOUNT_MCP: 'true',
   AUTO_UPDATE_CHECK_ENABLED: 'true',
@@ -1095,6 +1101,7 @@ export const SETTINGS = {
   STORE_KEYS_ADVANCED_SETTINGS_ENABLED: 'advanced_settings_enabled',
   STORE_KEYS_BACKGROUND_MODE: 'background_mode',
   STORE_KEYS_MOUSE_CONTROL: 'mouse_control',
+  STORE_KEYS_PERMISSION_MODE: 'permission_mode',
   STORE_KEYS_DOCK_ICON_VISIBLE: 'dock_icon_visible',
   STORE_KEYS_SHOW_TRAY_ICON: 'show_tray_icon',
   STORE_KEYS_SHOW_GLOW_BORDER: 'show_glow_border',

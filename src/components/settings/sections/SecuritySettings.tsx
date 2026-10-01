@@ -21,6 +21,17 @@ import {
 } from "@/lib/permissions-service";
 import { cn } from "@/lib/utils";
 import { COMMANDS } from "@/lib/constants.generated";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { toast } from "sonner";
+import {
+  DEFAULT_PERMISSION_MODE,
+  PERMISSION_FLOOR,
+  PERMISSION_MODES,
+  PERMISSION_NEVER_ASKS,
+  parsePermissionMode,
+  type PermissionMode,
+} from "@/lib/permissions";
 import { SettingsGroup, SettingsRow } from "../ui";
 
 const permissions = [
@@ -166,6 +177,101 @@ function PermissionCard({
   );
 }
 
+/**
+ * How much Juno interrupts to ask.
+ *
+ * One row per mode, each saying what it permits. The old control was a switch
+ * called "Require Tool Approval" sitting in the advanced-only Tools pane, and
+ * turning it off changed nothing because a risk threshold in the agent runner
+ * overruled it. Rust now has one decision function, this is the only thing that
+ * sets it, and it lives in Security and Privacy where someone would look.
+ */
+function PermissionModeGroup() {
+  const [mode, setMode] = useState<PermissionMode>(DEFAULT_PERMISSION_MODE);
+  const [loading, setLoading] = useState(true);
+  const [unavailable, setUnavailable] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const stored = await invoke<string>(COMMANDS.TOOLS_GET_PERMISSION_MODE);
+        if (active) setMode(parsePermissionMode(stored));
+      } catch (error) {
+        console.error("Failed to read the permission mode:", error);
+        if (active) setUnavailable(true);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleChange = async (next: string) => {
+    const chosen = parsePermissionMode(next);
+    const previous = mode;
+    // Optimistic: the dot moving is the feedback, so no toast on success.
+    setMode(chosen);
+    try {
+      await invoke(COMMANDS.TOOLS_SET_PERMISSION_MODE, { mode: chosen });
+    } catch (error) {
+      console.error("Failed to change the permission mode:", error);
+      setMode(previous);
+      toast.error("Could not change that setting");
+    }
+  };
+
+  return (
+    <SettingsGroup
+      title="Asking permission"
+      footer={
+        unavailable
+          ? "This setting could not be loaded. Reopen Settings to try again."
+          : `${PERMISSION_NEVER_ASKS} ${PERMISSION_FLOOR}`
+      }
+    >
+      <SettingsRow
+        id="permission-mode"
+        label="When Juno needs permission"
+        description="Pick how often Juno stops to check with you. Changing this also clears anything you told it not to ask about again."
+        below={
+          <RadioGroup
+            value={mode}
+            onValueChange={handleChange}
+            disabled={loading || unavailable}
+            aria-label="When Juno needs permission"
+            className="gap-0 divide-y divide-border rounded-[8px] border border-border"
+          >
+            {PERMISSION_MODES.map((option) => (
+              <Label
+                key={option.value}
+                htmlFor={`permission-mode-${option.value}`}
+                className="flex cursor-pointer items-start gap-3 px-3 py-2.5"
+              >
+                <RadioGroupItem
+                  id={`permission-mode-${option.value}`}
+                  value={option.value}
+                  className="mt-0.5 data-[state=checked]:border-[#007AFF] [&_svg]:fill-[#007AFF]"
+                />
+                <span className="min-w-0 space-y-0.5">
+                  <span className="block text-[13px] font-medium leading-tight text-foreground">
+                    {option.name}
+                  </span>
+                  <span className="block text-[12px] leading-snug text-muted-foreground">
+                    {option.consequence}
+                  </span>
+                </span>
+              </Label>
+            ))}
+          </RadioGroup>
+        }
+      />
+    </SettingsGroup>
+  );
+}
+
 export default function SecuritySettings() {
   // State for granular permissions (from Onboarding)
   const [permissionsState, setPermissionsState] =
@@ -261,6 +367,8 @@ export default function SecuritySettings() {
 
   return (
     <div className="space-y-6">
+      <PermissionModeGroup />
+
       <SettingsGroup
         title="macOS Permissions"
         footer="Manage system permissions required for AI computer use features"

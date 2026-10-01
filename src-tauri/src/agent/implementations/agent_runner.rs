@@ -12,6 +12,7 @@ use crate::agent::core::{
     Role, // Removed ToolCall, ToolResult
 };
 // use crate::agent::tool_logger; // Added for logging
+use crate::agent::tools::permission_policy::ApprovalOutcome;
 use crate::agent::traits::{AgentBrain, AgentRunnable, MemoryManager, ToolProvider};
 use crate::constants::events;
 use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing app state
@@ -568,14 +569,22 @@ where
 
     /// Check approval for a batch of tools.
     ///
-    /// Approval is required when:
-    /// - The global `tool_approval_required` flag is set, OR
-    /// - Any tool in the batch has a High or Critical risk level (auto-detected).
+    /// There is exactly one decision here and it is
+    /// [`permission_policy::requires_approval`], which takes the person's
+    /// chosen mode, the batch's highest risk, and whether they already said not
+    /// to ask about this tool in this conversation.
+    ///
+    /// It used to be two conditions that both had to agree:
+    /// `!is_tool_approval_required() && !needs_approval(&max_risk)`. Risk alone
+    /// could force a prompt, so turning the setting off changed nothing and
+    /// `sleep 1` asked for permission. Keeping the policy in one function is
+    /// the point: a second condition anywhere is how the control died.
     async fn check_batch_approval(
         &self,
         batch: &[crate::agent::core::ToolCall],
         cancel_rx: &crate::state::CancelReceiver,
     ) -> Result<bool, AgentError> {
+        use crate::agent::tools::permission_policy;
         use crate::agent::tools::risk_classifier;
         use crate::state::RiskLevel;
 
@@ -588,11 +597,6 @@ where
             .collect();
         let max_risk = risk_levels.iter().cloned().max().unwrap_or(RiskLevel::Low);
 
-        // Gate: skip approval unless the global flag is set OR any tool is risky.
-        if !app_state.is_tool_approval_required() && !risk_classifier::needs_approval(&max_risk) {
-            return Ok(true);
-        }
-
         // Find the riskiest single tool using pre-computed classifications.
         let riskiest_idx = risk_levels
             .iter()
@@ -602,39 +606,35 @@ where
             .unwrap_or(0);
         let riskiest_tool = &batch[riskiest_idx];
 
+        // Which conversation a "do not ask again" granted here would cover. A
+        // runner with no session of its own gets the shared key, so the grant
+        // still ends when Juno quits.
+        let conversation_key = self
+            .session_id
+            .as_ref()
+            .map(|id| id.as_str().to_string())
+            .unwrap_or_else(crate::state::default_conversation_key);
+        let granted = app_state
+            .tool_granted_for_conversation(&conversation_key, &riskiest_tool.name)
+            .await;
+
+        // The one decision.
+        if !permission_policy::requires_approval(self.permission_mode().await, &max_risk, granted) {
+            return Ok(true);
+        }
+
         let target_app =
             risk_classifier::extract_target_app(&riskiest_tool.name, &riskiest_tool.input);
 
-        // Build a human-readable description.
-        let batch_description = if batch.len() == 1 {
-            format!(
-                "Run {} — {}",
-                riskiest_tool.name,
-                riskiest_tool
-                    .input
-                    .get("command")
-                    .or_else(|| riskiest_tool.input.get("url"))
-                    .or_else(|| riskiest_tool.input.get("path"))
-                    .or_else(|| riskiest_tool.input.get("javascript"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(no details)")
-                    .chars()
-                    .take(120)
-                    .collect::<String>()
-            )
-        } else {
-            format!(
-                "Execute {} tools: {}{}",
-                batch.len(),
-                batch
-                    .iter()
-                    .take(3)
-                    .map(|t| t.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" → "),
-                if batch.len() > 3 { " ..." } else { "" }
-            )
-        };
+        // The sentence a person reads. Written in Rust on purpose: the
+        // frontend should never have to turn `safari_execute_javascript` into
+        // English, and the old copy read "Run bash", an em dash, then the raw
+        // command, which is a tool name, an implementation detail and a dash
+        // this project does not use.
+        let batch_description = permission_policy::describe_batch(
+            &permission_policy::describe_action(&riskiest_tool.name, &riskiest_tool.input),
+            batch.len(),
+        );
 
         let batch_id = uuid::Uuid::new_v4().to_string();
         let approval_request = crate::state::ToolApprovalRequest::new(
@@ -647,7 +647,8 @@ where
             batch_description.clone(),
         )
         .with_risk(max_risk.clone())
-        .with_timeout(60);
+        .with_timeout(60)
+        .with_conversation(conversation_key.clone());
 
         let approval_request = if let Some(ref app) = target_app {
             approval_request.with_target_app(app.clone())
@@ -671,7 +672,19 @@ where
             "target_app": approval_request.target_app,
             "timeout_seconds": approval_request.timeout_seconds,
             "is_batch": batch.len() > 1,
-            "batch_size": batch.len()
+            "batch_size": batch.len(),
+            // What "Don't ask again" would cover, in words a person can read,
+            // so the button can say "Always allow terminal commands" instead
+            // of naming a tool. Absent when the action is Critical, because
+            // nothing waives the floor and a button that claims otherwise is
+            // the next dead control.
+            "always_allow_label": if matches!(max_risk, RiskLevel::Critical) {
+                serde_json::Value::Null
+            } else {
+                serde_json::Value::String(permission_policy::friendly_tool_name(
+                    &riskiest_tool.name,
+                ))
+            }
         });
 
         if let Err(e) = self
@@ -701,6 +714,7 @@ where
             if *cancel_rx.borrow() {
                 log::info!("Cancellation detected during approval wait");
                 app_state.remove_tool_approval(&batch_id).await;
+                self.emit_approval_resolved(&batch_id, ApprovalOutcome::Cancelled);
                 if marked_needs_input {
                     // Guarded restore: no-ops when the cancel already moved
                     // the session to Cancelling via the registry.
@@ -731,19 +745,31 @@ where
             self.clear_session_needs_input().await;
         }
 
+        // Settle the row, always.
+        //
+        // The old code denied a timed-out batch in the backend and emitted
+        // nothing, so the frontend's `approval_state` stayed `pending` and the
+        // Allow and Don't allow buttons sat there doing nothing for the rest of
+        // the conversation. Every way this wait can end now reports itself;
+        // `ApprovalOutcome` has no pending variant, so a new exit path cannot
+        // forget to.
+        let outcome = if approved {
+            ApprovalOutcome::Allowed
+        } else if remaining <= 0 {
+            ApprovalOutcome::TimedOut
+        } else {
+            ApprovalOutcome::Denied
+        };
+        self.emit_approval_resolved(&batch_id, outcome);
+
         if !approved {
-            let reason = if remaining <= 0 {
-                "timeout"
-            } else {
-                "user denied"
-            };
-            log::warn!("Tool batch execution denied: {}", reason);
+            log::warn!("Tool batch execution denied: {}", outcome.reason());
 
             for tool_call in batch {
                 let mut mem = self.memory.lock().await;
                 mem.add_message(crate::agent::core::Message {
                     role: crate::agent::core::Role::Tool,
-                    content: format!("Tool execution was denied ({})", reason),
+                    content: format!("Juno did not run this: {}", outcome.reason()),
                     tool_calls: None,
                     tool_call_id: Some(tool_call.id.clone()),
                     name: Some(tool_call.name.clone()),
@@ -754,6 +780,48 @@ where
         }
 
         Ok(approved)
+    }
+
+    /// Tell the chat surface an approval question is over.
+    ///
+    /// Fires for every outcome including Allowed, which the frontend already
+    /// knows about: the handler is idempotent, and a reporter that only speaks
+    /// up some of the time is how the timeout bug hid.
+    fn emit_approval_resolved(&self, tool_id: &str, outcome: ApprovalOutcome) {
+        if let Err(e) = self.app_handle.emit(
+            events::tools::APPROVAL_RESOLVED,
+            serde_json::json!({
+                "tool_id": tool_id,
+                "resolution": outcome.resolution(),
+                "reason": outcome.reason(),
+            }),
+        ) {
+            log::error!("Failed to emit tool-approval-resolved: {}", e);
+        }
+    }
+
+    /// The person's chosen permission mode, read fresh so a change in Settings
+    /// applies to the next tool call rather than the next launch.
+    async fn permission_mode(&self) -> crate::agent::tools::permission_policy::PermissionMode {
+        use crate::agent::tools::permission_policy::PermissionMode;
+        let Some(manager) = self
+            .app_handle
+            .try_state::<crate::settings::manager::SettingsManager>()
+        else {
+            return PermissionMode::default();
+        };
+        match manager.get_agent_settings().await {
+            Ok(settings) => PermissionMode::from_setting(&settings.permission_mode),
+            Err(e) => {
+                // Falling back to the default is the safe direction: it asks
+                // more than "do not ask", never less.
+                log::warn!(
+                    "Could not read the permission mode, using the default: {}",
+                    e
+                );
+                PermissionMode::default()
+            }
+        }
     }
 
     /// Flip this runner's session row to `NeedsInput` while a tool-approval

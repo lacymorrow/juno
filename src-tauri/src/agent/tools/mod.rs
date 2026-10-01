@@ -37,6 +37,7 @@ pub mod enhanced_visual_reasoning;
 pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
 pub mod mcp_integration;
 pub mod path_security; // Shared canonicalization + workspace-boundary enforcement for file tools
+pub mod permission_policy; // The one decision: does this action need asking, and what do we call it
 pub mod safari_tools; // Native Safari DOM automation with AppleScript injection
 pub mod self_awareness_tools; // Self-building and introspection capabilities
                               // pub mod self_improvement; // Research-backed autonomous code generation system - TODO: Fix module not found

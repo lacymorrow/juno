@@ -141,6 +141,17 @@ pub struct AgentSettings {
     /// runs and its other surfaces (Dock, floating bar) stay reachable.
     #[serde(default = "defaults::show_tray_icon")]
     pub show_tray_icon: bool,
+    /// How much Juno interrupts to ask permission: "ask_first",
+    /// "ask_when_risky" (the default) or "dont_ask". Read by
+    /// [`crate::agent::tools::permission_policy::requires_approval`], which is
+    /// the only thing that decides whether a tool call stops for an answer.
+    ///
+    /// This replaces the `tool_approval_required` boolean, which was held in
+    /// memory only, never written to disk, and outvoted by a risk threshold, so
+    /// turning it off changed nothing. Older stores lack this key and get the
+    /// default.
+    #[serde(default = "defaults::permission_mode")]
+    pub permission_mode: String,
 }
 
 /// AI provider configurations
@@ -509,6 +520,7 @@ impl Default for AgentSettings {
             mouse_control_prompt_dismissed: false,
             dock_icon_visible: defaults::DOCK_ICON_VISIBLE,
             show_tray_icon: defaults::SHOW_TRAY_ICON,
+            permission_mode: defaults::permission_mode(),
         }
     }
 }

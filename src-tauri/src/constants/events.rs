@@ -413,6 +413,16 @@ pub mod triggers {
 pub mod tools {
     pub const USAGE: &str = "tool-usage";
     pub const APPROVAL_REQUEST: &str = "tool-approval-request";
+    /// An approval question is over, however it ended.
+    ///
+    /// Payload fields: tool_id, resolution ("approved" or "denied"), reason.
+    /// Without this the backend denied a timed-out tool and told the frontend
+    /// nothing, so the row kept its Allow and Don't allow buttons and pressing
+    /// either did nothing. A person pressing Allow is the one case the frontend
+    /// already knows about, and this still fires for it, because the handler is
+    /// idempotent and a control that only reports some of its outcomes is how
+    /// the last one rotted.
+    pub const APPROVAL_RESOLVED: &str = "tool-approval-resolved";
     pub const COMMAND_EXECUTION_START: &str = "command-execution-start";
     pub const COMMAND_EXECUTION_END: &str = "command-execution-end";
     /// Emitted for every computer use action with target app, sensitivity, and timing.

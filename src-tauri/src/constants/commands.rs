@@ -446,6 +446,12 @@ pub mod tools {
     pub const SET_TOOL_ENABLED: &str = "set_tool_enabled";
     pub const SET_ALL_TOOLS_ENABLED: &str = "set_all_tools_enabled";
     pub const SET_TOOL_CATEGORY_ENABLED: &str = "set_tool_category_enabled";
-    pub const GET_TOOL_APPROVAL_REQUIRED: &str = "get_tool_approval_required";
-    pub const SET_TOOL_APPROVAL_REQUIRED: &str = "set_tool_approval_required";
+    /// How much Juno interrupts to ask. Replaces the
+    /// get/set_tool_approval_required pair, which was a boolean that nothing
+    /// persisted and a risk threshold outvoted.
+    pub const GET_PERMISSION_MODE: &str = "get_permission_mode";
+    pub const SET_PERMISSION_MODE: &str = "set_permission_mode";
+    /// Approve a pending request and stop asking about that tool for the rest
+    /// of this conversation.
+    pub const ALLOW_TOOL_FOR_CONVERSATION: &str = "allow_tool_for_conversation";
 }

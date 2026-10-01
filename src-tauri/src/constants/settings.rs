@@ -31,6 +31,7 @@ pub mod store_keys {
     pub const ADVANCED_SETTINGS_ENABLED: &str = "advanced_settings_enabled";
     pub const BACKGROUND_MODE: &str = "background_mode";
     pub const MOUSE_CONTROL: &str = "mouse_control";
+    pub const PERMISSION_MODE: &str = "permission_mode";
     pub const DOCK_ICON_VISIBLE: &str = "dock_icon_visible";
     pub const SHOW_TRAY_ICON: &str = "show_tray_icon";
     pub const SHOW_GLOW_BORDER: &str = "show_glow_border";
@@ -207,6 +208,19 @@ pub mod defaults {
     pub const DOCK_ICON_VISIBLE: bool = true;
     /// Juno shows its menu-bar (tray) icon by default; hiding it is opt-in.
     pub const SHOW_TRAY_ICON: bool = true;
+    /// Ask before anything that changes the Mac.
+    pub const PERMISSION_MODE_ASK_FIRST: &str = "ask_first";
+    /// Ask before risky things. The default.
+    pub const PERMISSION_MODE_ASK_WHEN_RISKY: &str = "ask_when_risky";
+    /// Do not ask, except for the irreversible floor.
+    pub const PERMISSION_MODE_DONT_ASK: &str = "dont_ask";
+    /// The default mode. What each one permits is decided in
+    /// [`crate::agent::tools::permission_policy`], which aliases these three
+    /// and has a test pinning this default to the middle one. The literal is
+    /// spelled out rather than referencing the constant above because the
+    /// TypeScript codegen in `scripts/generate-ts-constants.js` reads these
+    /// values as text.
+    pub const PERMISSION_MODE: &str = "ask_when_risky";
 
     /// How hard the Claude CLI provider thinks per turn — its `--effort` flag.
     /// Hidden advanced setting with no UI: it trades latency for depth, and
@@ -252,6 +266,9 @@ pub mod defaults {
     }
     pub fn mouse_control() -> String {
         MOUSE_CONTROL.to_string()
+    }
+    pub fn permission_mode() -> String {
+        PERMISSION_MODE.to_string()
     }
     pub fn dock_icon_visible() -> bool {
         DOCK_ICON_VISIBLE
