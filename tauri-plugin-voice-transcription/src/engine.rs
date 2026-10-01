@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 /// Which STT backend to use. Serializes to lowercase strings for Tauri Store.
+///
+/// Every variant exists on every architecture, deliberately. Parakeet only
+/// *runs* on Apple Silicon (see [`crate::parakeet_model`]), but a person who
+/// chose it there has `"parakeet"` written to their Tauri Store, and that
+/// value has to keep deserializing on an Intel Mac rather than failing the
+/// whole settings load. Only the implementation is gated; the choice is
+/// always a legal thing to have saved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SttProvider {
@@ -62,7 +69,9 @@ pub trait TranscriptionEngine: Send + Sync {
 ///
 /// `saved` is the provider name the host app has persisted (`None` when the
 /// setting is absent, unreadable, or the host handed us no reader at all).
-/// `parakeet_ready` says whether every Parakeet model file is on disk.
+/// `parakeet_ready` says whether Parakeet can actually be loaded: this build
+/// contains it (Apple Silicon only) *and* every model file is on disk. See
+/// [`crate::parakeet_model::parakeet_ready`], which is what callers pass.
 ///
 /// Anything unrecognised, and any Parakeet request we cannot honour, resolves
 /// to Whisper — the engine this plugin has always booted. Getting this right

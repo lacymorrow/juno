@@ -4,8 +4,8 @@ use crate::constants;
 use crate::controller::VoiceController;
 use crate::engine::SttProvider;
 use crate::engine_manager::EngineManager;
-use crate::engine_parakeet::ParakeetModelStatus;
 use crate::error::Error;
+use crate::parakeet_model::ParakeetModelStatus;
 use crate::utils::{resolve_model_path, resolve_parakeet_model_dir};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -1100,6 +1100,11 @@ pub async fn set_stt_provider<R: tauri::Runtime>(
     Ok(provider_name)
 }
 
+/// What Parakeet's model directory holds, and whether this build could use it.
+///
+/// Answers on every architecture. On an Intel Mac the status comes back with
+/// `supported: false` and an `unsupported_reason` to show in place of the
+/// option, so the UI never has to work out availability for itself.
 #[tauri::command]
 pub fn get_parakeet_model_status<R: tauri::Runtime>(
     app: AppHandle<R>,
