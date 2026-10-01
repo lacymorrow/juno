@@ -137,12 +137,20 @@ impl VoiceStartMethod {
     }
 }
 
-impl From<crate::triggers::TriggerMethod> for VoiceStartMethod {
-    fn from(method: crate::triggers::TriggerMethod) -> Self {
-        match method {
-            crate::triggers::TriggerMethod::PushToTalk => VoiceStartMethod::PushToTalk,
-            crate::triggers::TriggerMethod::Toggle => VoiceStartMethod::Toggle,
-            crate::triggers::TriggerMethod::Voice => VoiceStartMethod::WakePhrase,
+impl From<crate::triggers::Gesture> for VoiceStartMethod {
+    /// The registry records how a session was *opened*, which is coarser than
+    /// the gesture that opened it: holding and double-tapping-and-holding both
+    /// keep the microphone open for as long as the key is down, and tapping and
+    /// double-tapping both leave it open until the key comes back. That is the
+    /// distinction every stop path cares about, and it is why the recognizer
+    /// can read "a tap started this" back out of the registry instead of
+    /// keeping a session flag of its own.
+    fn from(gesture: crate::triggers::Gesture) -> Self {
+        use crate::triggers::Gesture;
+        match gesture {
+            Gesture::Hold | Gesture::DoubleTapHold => VoiceStartMethod::PushToTalk,
+            Gesture::Tap | Gesture::DoubleTap => VoiceStartMethod::Toggle,
+            Gesture::Say => VoiceStartMethod::WakePhrase,
         }
     }
 }
@@ -728,19 +736,40 @@ mod tests {
     }
 
     #[test]
-    fn trigger_methods_and_targets_map_onto_session_identity() {
-        use crate::triggers::{TriggerMethod, TriggerTarget};
+    fn gestures_and_targets_map_onto_session_identity() {
+        use crate::triggers::{Gesture, TriggerTarget};
         assert_eq!(
-            VoiceStartMethod::from(TriggerMethod::PushToTalk),
+            VoiceStartMethod::from(Gesture::Hold),
             VoiceStartMethod::PushToTalk
         );
         assert_eq!(
-            VoiceStartMethod::from(TriggerMethod::Voice),
+            VoiceStartMethod::from(Gesture::Say),
             VoiceStartMethod::WakePhrase
         );
         assert_eq!(
             VoiceTarget::from(TriggerTarget::Dictation),
             VoiceTarget::Dictation
+        );
+    }
+
+    #[test]
+    fn a_held_second_press_records_the_same_way_a_hold_does() {
+        // The recognizer reads "a tap started this" back out of the registry,
+        // so which gestures collapse onto which start method is load-bearing:
+        // a double-tap-and-hold session must not look stoppable by a later
+        // press, and a double tap must.
+        use crate::triggers::Gesture;
+        assert_eq!(
+            VoiceStartMethod::from(Gesture::DoubleTapHold),
+            VoiceStartMethod::PushToTalk
+        );
+        assert_eq!(
+            VoiceStartMethod::from(Gesture::DoubleTap),
+            VoiceStartMethod::Toggle
+        );
+        assert_eq!(
+            VoiceStartMethod::from(Gesture::Tap),
+            VoiceStartMethod::Toggle
         );
     }
 }

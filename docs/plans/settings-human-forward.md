@@ -98,7 +98,7 @@ Considered and cut: changing the theme's `--primary` to system blue (touches eve
 **Status:** PR #611.
 
 Backend (`dictation_monitor.rs`, `agent_monitor.rs`, `constants/agent.rs`, `triggers/mod.rs`):
-- Hands-free on a hold key comes from a **double tap**, not a single tap. See [`docs/plans/trigger-gestures.md`](trigger-gestures.md) for the rule and phase 1. A short tap on a hold key cancels the session it opened; the gesture recognizer in `events/shortcuts.rs` promotes a second press inside `DOUBLE_TAP_WINDOW_MS` (300 ms) into the Press code path on its down edge and swallows the matching release. The single-tap hands-free from slice 3 was reverted in phase 1.
+- A hold key only holds. The single-tap hands-free from slice 3 is gone, and so is the derived double tap that briefly replaced it: a double tap is now a **trigger of its own**, a row with its own key and its own target. See [`docs/plans/trigger-gestures.md`](trigger-gestures.md) for the gesture model, the key-sharing table and the recognizer, and [`docs/features/unified-triggers.md`](../features/unified-triggers.md) for what shipped. A short tap on a hold key still cancels the session it opened.
 - The hold threshold is 400 ms (was 300). Under it is a tap.
 - Row labels are sentences: "Hold to dictate", "Press to talk to Juno", "Say a phrase to dictate". Conflict messages quote them.
 

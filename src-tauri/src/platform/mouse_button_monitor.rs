@@ -7,17 +7,21 @@
 //!
 //! The tauri global-shortcut plugin is keyboard-only, so mouse bindings cannot
 //! go through it; this observer is how [`crate::triggers::Binding::Mouse`]
-//! bindings reach [`crate::events::shortcuts::fire_trigger_edge`].
+//! bindings reach [`crate::events::shortcuts::fire_key_edge`], which hands the
+//! edge to that button's gesture recognizer.
 //!
 //! Global monitors only see events in other apps when the process is trusted
 //! for Accessibility (or Input Monitoring) — the same permission Juno already
 //! needs for computer use.
 
-use crate::triggers::{TriggerMethod, TriggerTarget};
 use tauri::AppHandle;
 
-/// AppKit `buttonNumber` mapped to the trigger it activates.
-pub type MouseBinding = (u16, TriggerMethod, TriggerTarget);
+/// An AppKit `buttonNumber` a trigger is bound to.
+///
+/// Just the button. Which gestures it carries, and what each one does, is read
+/// from the trigger list when the edge arrives, so one button serves however
+/// many rows name it.
+pub type MouseBinding = u16;
 
 /// Compute whether an AppKit mouse event type is a press (down) edge.
 /// Down types: Left=1, Right=3, Other=25. Up types: Left=2, Right=4, Other=26.
@@ -63,7 +67,7 @@ mod imp {
     /// don't observe left-clicks unless a left-click trigger exists.
     fn mask_for(bindings: &[MouseBinding]) -> usize {
         let mut mask = 0usize;
-        for (button, _, _) in bindings {
+        for button in bindings {
             mask |= match button {
                 0 => LEFT_DOWN | LEFT_UP,
                 1 => RIGHT_DOWN | RIGHT_UP,
@@ -92,28 +96,27 @@ mod imp {
         }
         let button = button_number as u16;
 
-        // Copy out the matching triggers, then release the lock before routing.
-        let matches: Vec<(super::TriggerMethod, super::TriggerTarget)> = {
+        // Is this button bound at all? Read and release before routing.
+        let bound = {
             let guard = match BINDINGS.lock() {
                 Ok(g) => g,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            guard
-                .iter()
-                .filter(|(b, _, _)| *b == button)
-                .map(|(_, m, t)| (*m, *t))
-                .collect()
+            guard.contains(&button)
         };
-        for (method, target) in matches {
-            debug!(
-                "[MouseButtonMonitor] Button {} {} -> {:?}/{:?}",
-                button,
-                if pressed { "down" } else { "up" },
-                method,
-                target
-            );
-            crate::events::shortcuts::fire_trigger_edge(app, method, target, pressed);
+        if !bound {
+            return;
         }
+        debug!(
+            "[MouseButtonMonitor] Button {} {}",
+            button,
+            if pressed { "down" } else { "up" }
+        );
+        crate::events::shortcuts::fire_key_edge(
+            app,
+            &crate::triggers::Binding::Mouse { button },
+            pressed,
+        );
     }
 
     /// Install (or re-install) the monitors for the given bindings. Removing any

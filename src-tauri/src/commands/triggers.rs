@@ -19,6 +19,20 @@ pub async fn get_triggers(app_state: State<'_, AppState>) -> Result<Vec<Trigger>
     app_state.get_triggers()
 }
 
+/// The key worth naming for each target, derived from the live trigger list.
+///
+/// Onboarding teaches a key on its last screen, and the only honest source for
+/// which key that is, is the registry. It used to draw a hardcoded Option+D,
+/// so somebody whose trigger was the globe key finished setup having been
+/// taught a shortcut that did nothing. Fixing the defaults without this would
+/// just have moved the lie.
+#[tauri::command]
+pub async fn get_trigger_hints(
+    app_state: State<'_, AppState>,
+) -> Result<triggers::TriggerHints, String> {
+    Ok(triggers::hints(&app_state.get_triggers()?))
+}
+
 /// Listen for a bare modifier key so a screen can ask someone to press theirs.
 ///
 /// While this is on, pressing Fn reports the key rather than starting
@@ -80,24 +94,20 @@ pub async fn set_triggers(
     triggers: Vec<Trigger>,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<Trigger>, String> {
-    // Validate what was actually sent, before deduping. Deduping first meant a
-    // trigger that collided on (method, target) was dropped on the floor and
-    // the command still returned Ok, so the row the person had just added
-    // simply vanished with nothing said about it.
-    let dropped = triggers.len() - triggers::dedupe_by_key(triggers.clone()).len();
-    if dropped > 0 {
-        return Err(
-            "That combination of trigger and action already exists. Edit the existing one instead."
-                .to_string(),
-        );
-    }
-    let mut normalized = triggers::dedupe_by_key(triggers);
+    // A row is its id, so nothing is dropped for looking like another row. Two
+    // Hold rows pointing at dictation are a legitimate pair of keys, and the
+    // old uniqueness rule, `(method, target)`, is exactly why a double tap had
+    // to be bolted onto a hold instead of being a row of its own. What is
+    // normalized here is only the identity itself: a row the window has just
+    // created arrives with a blank id and is given one.
+    let mut normalized = triggers;
+    triggers::ensure_ids(&mut normalized);
 
     // Recording a key is what turns a row on. A row added from the "+" menu is
     // switched off while it is unbound, and nothing used to switch it back on
     // once a key was chosen, so the person ended up looking at a row that named
     // their key, greyed out, doing nothing. Compared against what was stored a
-    // moment ago, because only the first binding counts: rebinding a row
+    // moment ago, by id, because only the first binding counts: rebinding a row
     // somebody deliberately switched off leaves it off.
     let previous = app_state.get_triggers().unwrap_or_default();
     triggers::enable_newly_bound(&previous, &mut normalized);
@@ -145,7 +155,7 @@ pub async fn set_triggers(
 /// Called on save and again at startup. A keyboard trigger is re-registered
 /// every launch by `update_global_shortcuts`; voice had no equivalent, so an
 /// enabled wake phrase worked until the app was quit and then silently never
-/// listened again. Voice is a trigger method like any other and is activated
+/// listened again. Say is a gesture like any other and is activated
 /// on the same schedule as the rest.
 pub async fn apply_voice_triggers(app: &AppHandle, triggers: &[Trigger]) {
     let app_state = app.state::<AppState>();

@@ -1164,7 +1164,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       try {
         const [listening, triggers] = await Promise.all([
           invoke<boolean>(COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS),
-          invoke<Array<{ method?: string; enabled?: boolean; phrase?: string | null }>>(
+          invoke<Array<{ gesture?: string; enabled?: boolean; phrase?: string | null }>>(
             COMMANDS.TRIGGERS_GET_TRIGGERS,
           ),
         ]);
@@ -1172,7 +1172,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         setVoiceListening(Boolean(listening));
         setVoiceConfigured(
           triggers.some(
-            (t) => t.method === "voice" && t.enabled === true && Boolean(t.phrase?.trim()),
+            (t) => t.gesture === "say" && t.enabled === true && Boolean(t.phrase?.trim()),
           ),
         );
       } catch (error) {

@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
 import type { SttDownloadProgress, SttModelsStatus } from "@/hooks/useSttModels";
+import { shortcutCaps, type KeyCap } from "@/components/settings/KeyCaps";
 
 // ── Visual language ──────────────────────────────────────────────────────────
 // This flow is styled like a macOS setup assistant: the system SF stack, quiet
@@ -55,7 +56,7 @@ interface PermissionStatus {
 // step still has anything to show.
 /** Only the parts of a Trigger this screen round-trips; the rest is preserved. */
 interface TriggerShape {
-  method: string;
+  gesture: string;
   target: string;
   binding: unknown;
   [key: string]: unknown;
@@ -420,92 +421,86 @@ const getOnboardingSteps = (
 ];
 
 /**
+ * The stop key, drawn the same way a trigger key is.
+ *
+ * Escape is a fixed constant rather than a trigger, so this is the one set of
+ * caps on the final screen that is not read from the registry.
+ */
+const ESCAPE_CAPS: KeyCap[] = shortcutCaps("Escape");
+
+/** The shortcut string the globe key is recorded as, mirroring Rust. */
+const GLOBE_SHORTCUT = "Fn";
+
+/** One target's key, as the backend derives it from the trigger list. */
+export interface TriggerHint {
+  /** The shortcut string the key caps are drawn from, e.g. `"Fn"`. */
+  shortcut: string;
+  /** The gesture's own word, e.g. `"Hold"`. */
+  gesture: string;
+  /** The whole row as a sentence, e.g. `"Hold to talk to Juno"`. */
+  sentence: string;
+}
+
+/** `null` where nothing keyboard-shaped is bound for that target. */
+export interface TriggerHints {
+  agent: TriggerHint | null;
+  dictation: TriggerHint | null;
+}
+
+/**
+ * What the last onboarding screen teaches.
+ *
+ * Derived from the live trigger registry, never from a shortcut written into
+ * this file. The display below used to fall back to a hardcoded Option+D, so
+ * somebody whose trigger was the globe key finished setup having been taught a
+ * shortcut that did nothing. Nothing is drawn when no keyboard trigger is
+ * bound: saying nothing is honest, naming a key that cannot fire is not.
+ *
+ * Talking to Juno comes first, because that is what this screen is about;
+ * dictation is the fallback when nothing is bound to the agent.
+ */
+export function summonDemo(hints: TriggerHints | null): {
+  caps: KeyCap[];
+  sentence: string;
+} | null {
+  const hint = hints?.agent ?? hints?.dictation ?? null;
+  if (!hint || !hint.shortcut.trim()) return null;
+  const caps = shortcutCaps(hint.shortcut);
+  if (caps.length === 0) return null;
+  return { caps, sentence: hint.sentence };
+}
+
+/**
  * Visual keyboard shortcut display.
- * This component is PURELY visual — it renders key caps and reflects state.
- * Shortcut detection is handled by the parent via backend Tauri events,
- * since global shortcuts (Option+D) are captured at the OS level and never
- * reach the webview as keydown events.
+ * This component is PURELY visual — it renders the caps it is handed and
+ * reflects state. Shortcut detection is handled by the parent via backend
+ * Tauri events, since a trigger key is captured at the OS level (or, for the
+ * globe key, by a native monitor) and never reaches the webview as a keydown.
  */
 function KeyboardShortcutDisplay({
-  shortcutString,
-  defaultShortcut = "Option+D",
+  caps,
   isActivated,
 }: {
-  shortcutString?: string;
-  defaultShortcut?: string;
+  caps: KeyCap[];
   isActivated: boolean;
 }) {
-  const parseShortcut = (shortcut: string) => {
-    const parts = shortcut.split("+").map((part) => part.trim().toLowerCase());
-    const modifiers = parts.slice(0, -1);
-    const key = parts[parts.length - 1];
-    return { modifiers, key };
-  };
-
-  const { modifiers, key } = parseShortcut(shortcutString || defaultShortcut);
-
-  const displayKeys = () => {
-    const modifierKeys = modifiers.map((mod) => {
-      switch (mod) {
-        case "option":
-        case "alt":
-          return "⌥";
-        case "cmd":
-        case "command":
-          return "⌘";
-        case "ctrl":
-        case "control":
-          return "⌃";
-        case "commandorcontrol":
-          return "⌘";
-        case "shift":
-          return "⇧";
-        default:
-          return mod.toUpperCase();
-      }
-    });
-
-    const displayKey = (() => {
-      switch (key) {
-        case "escape":
-          return "esc";
-        case "space":
-          return "space";
-        case "enter":
-        case "return":
-          return "return";
-        case "backspace":
-          return "delete";
-        case "delete":
-          return "fwd del";
-        case "tab":
-          return "tab";
-        default:
-          return key.toUpperCase();
-      }
-    })();
-
-    return [...modifierKeys, displayKey];
-  };
-
-  const keys = displayKeys();
-
   return (
     <div className="my-8 flex items-center justify-center gap-3">
-      {keys.map((keySymbol, index) => (
-        <div key={index} className="flex items-center gap-3">
+      {caps.map((cap, index) => (
+        <div key={`${cap.name}-${index}`} className="flex items-center gap-3">
           {/* macOS-style key cap: flat fill, hairline border, subtle base edge.
               Proportions follow the Keyboard Viewer (shallower than square). */}
           <div
+            aria-label={cap.name}
             className={`flex h-11 min-w-[44px] items-center justify-center rounded-[9px] border px-3 text-[14px] font-medium transition-colors duration-150 ${
               isActivated
                 ? "border-[#007AFF] bg-[#007AFF] text-white dark:border-[#0A84FF] dark:bg-[#0A84FF]"
                 : "border-border bg-muted/40 text-foreground shadow-[inset_0_-1px_0_rgba(0,0,0,0.06)] dark:shadow-[inset_0_-1px_0_rgba(0,0,0,0.4)]"
             }`}
           >
-            {keySymbol}
+            {cap.glyph}
           </div>
-          {index < keys.length - 1 && (
+          {index < caps.length - 1 && (
             <span className="text-sm text-muted-foreground">+</span>
           )}
         </div>
@@ -709,7 +704,9 @@ export default function OnboardingFlow({
   const [completeDemoStage, setCompleteDemoStage] = useState<"shortcut" | "escape">("shortcut");
   const [_backendShortcutsWorking, setBackendShortcutsWorking] =
     useState(false);
-  const [keyboardShortcuts, setKeyboardShortcuts] = useState<any>(null);
+  // The key this screen teaches, read from the trigger registry rather than
+  // assumed. See `summonDemo`.
+  const [triggerHints, setTriggerHints] = useState<TriggerHints | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [actualPermissionsGranted, setActualPermissionsGranted] = useState(
     // Always start with false to ensure we re-check permissions on mount
@@ -938,6 +935,18 @@ export default function OnboardingFlow({
     }
   );
 
+  /** Re-read the key this screen teaches. Called on load and after a rebind. */
+  const refreshTriggerHints = useCallback(async () => {
+    try {
+      const hints = await invoke<TriggerHints>(
+        COMMANDS.TRIGGERS_GET_TRIGGER_HINTS
+      );
+      if (mountedRef.current) setTriggerHints(hints);
+    } catch (error) {
+      console.warn("[Onboarding] could not read the trigger hints:", error);
+    }
+  }, []);
+
   const adoptFnAsTalkKey = useCallback(async () => {
     setFnSaveError(null);
     try {
@@ -946,8 +955,11 @@ export default function OnboardingFlow({
       // shortcut string is "Fn". Which watcher can see it is the backend's
       // problem, not a second kind of binding.
       const fnBinding = { kind: "keyboard" as const, shortcut: "Fn" as const };
+      // The row this screen is about: holding a key to talk to Juno. That is
+      // the agent, which is also where the factory default puts the globe key,
+      // so adopting it here lands on the same row rather than a second one.
       const isTalkTrigger = (trigger: TriggerShape) =>
-        trigger.method === "push_to_talk" && trigger.target === "dictation";
+        trigger.gesture === "hold" && trigger.target === "agent";
       // Also switched on, because a trigger that is off is never registered:
       // pressing the key to adopt it and then finding it does nothing is worse
       // than not offering it at all.
@@ -956,16 +968,16 @@ export default function OnboardingFlow({
           ? { ...trigger, binding: fnBinding, enabled: true }
           : trigger
       );
-      // Nothing to hold means nothing to hold a key for. A store that has no
-      // hold-to-talk trigger (it was deleted, or the dictation trigger is a
-      // tap) used to accept this silently and the screen said the globe key
-      // was in use while nothing was bound to it.
+      // Nothing to hold means nothing to hold a key for. A store with no
+      // hold-to-talk row (it was deleted, or changed to another gesture) used
+      // to accept this silently and the screen said the globe key was in use
+      // while nothing was bound to it.
       if (!next.some(isTalkTrigger)) {
         next = [
           ...next,
           {
-            method: "push_to_talk",
-            target: "dictation",
+            gesture: "hold",
+            target: "agent",
             binding: fnBinding,
             phrase: null,
             require_hey_prefix: false,
@@ -991,6 +1003,8 @@ export default function OnboardingFlow({
       if (!mountedRef.current) return;
       if (adopted) {
         setFnOffered(true);
+        // The caps on screen name a key; a rebind has to move them.
+        await refreshTriggerHints();
       } else {
         setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
       }
@@ -1000,7 +1014,7 @@ export default function OnboardingFlow({
         setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
       }
     }
-  }, []);
+  }, [refreshTriggerHints]);
 
   useEventListener<{ key: string }>(EVENTS.TRIGGERS_KEY_CAPTURED, (payload) => {
     if (payload?.key === "fn") void adoptFnAsTalkKey();
@@ -1223,17 +1237,6 @@ export default function OnboardingFlow({
         }
         if (!mounted) return;
 
-        // Load onboarding info and shortcuts
-        const onboardingInfo = await invoke(COMMANDS.ONBOARDING_GET_ONBOARDING_INFO);
-        if (!mounted) return;
-        if (
-          onboardingInfo &&
-          typeof onboardingInfo === "object" &&
-          "shortcuts" in onboardingInfo
-        ) {
-          setKeyboardShortcuts((onboardingInfo as any).shortcuts);
-        }
-
         // Test if backend shortcuts are working
         const shortcutsWorking = await invoke<boolean>(
           COMMANDS.ONBOARDING_TEST_GLOBAL_SHORTCUTS_WORKING
@@ -1241,15 +1244,10 @@ export default function OnboardingFlow({
         if (!mounted) return;
         setBackendShortcutsWorking(shortcutsWorking);
 
-        // Load keyboard shortcuts as fallback
-        try {
-          const shortcuts = await invoke(COMMANDS.SHORTCUTS_GET_KEYBOARD_SHORTCUTS);
-          if (mounted) {
-            setKeyboardShortcuts((prev: any) => prev ?? shortcuts);
-          }
-        } catch (error) {
-          console.warn("Failed to load keyboard shortcuts:", error);
-        }
+        // The key this flow teaches. One read of the trigger registry, with no
+        // fallback: there is nothing to fall back to, because a shortcut this
+        // screen invented would be a shortcut that does nothing.
+        await refreshTriggerHints();
       } catch (error) {
         console.error("Failed to load onboarding data:", error);
       }
@@ -1812,6 +1810,14 @@ export default function OnboardingFlow({
   const step =
     onboardingSteps[currentStep] ?? onboardingSteps[onboardingSteps.length - 1];
 
+  // The key the last screen teaches, and whether it is already the globe key.
+  // Both derived from the registry, so changing a trigger changes the screen.
+  const demo = summonDemo(triggerHints);
+  const usingGlobeKey =
+    fnOffered ||
+    (triggerHints?.agent?.shortcut ?? "").trim().toLowerCase() ===
+      GLOBE_SHORTCUT.toLowerCase();
+
   // Checklist position.
   const permSubFlowComplete = permIndex >= PERMISSION_FLOW.length;
   // While the checklist is running, its active row owns the primary action, so
@@ -1919,30 +1925,44 @@ export default function OnboardingFlow({
                         exit={{ opacity: 0 }}
                         transition={{ duration: motionDuration, ease: "easeOut" }}
                       >
-                        <KeyboardShortcutDisplay
-                          shortcutString={keyboardShortcuts?.agent_mode}
-                          isActivated={shortcutPressed}
-                        />
-                        <p className="text-[13px] text-muted-foreground">
-                          {shortcutPressed
-                            ? "That summons Juno from anywhere."
-                            : "Try it. This summons Juno from anywhere."}
-                        </p>
+                        {/* The key the registry actually holds. Nothing is
+                            drawn when nothing is bound, because a key cap for
+                            a trigger that cannot fire teaches the wrong key. */}
+                        {demo ? (
+                          <>
+                            <KeyboardShortcutDisplay
+                              caps={demo.caps}
+                              isActivated={shortcutPressed}
+                            />
+                            <p className="text-[13px] text-muted-foreground">
+                              {shortcutPressed
+                                ? "That summons Juno from anywhere."
+                                : `${demo.sentence}. Try it.`}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="my-8 text-[13px] text-muted-foreground">
+                            No key is set up yet. Pick one in Settings, Triggers,
+                            whenever you like.
+                          </p>
+                        )}
                         {/* Offered by invitation rather than by detection: if
                             this keyboard has a globe key, pressing it proves
-                            it, and if it does not, nothing happens and the
-                            shortcut above keeps working. Either way nobody has
-                            to answer a question about their hardware. */}
-                        <p className="mt-3 text-[12px] leading-snug text-muted-foreground">
-                          {fnOffered
-                            ? "Using the globe key to talk. You can change this in Settings."
-                            : "Prefer to hold one key? Press the globe key now to use that instead."}
-                        </p>
+                            it, and if it does not, nothing happens and the key
+                            above keeps working. Either way nobody has to answer
+                            a question about their hardware. Not offered at all
+                            once the globe key is already the one on screen. */}
+                        {!usingGlobeKey && (
+                          <p className="mt-3 text-[12px] leading-snug text-muted-foreground">
+                            Prefer to hold one key? Press the globe key now to
+                            use that instead.
+                          </p>
+                        )}
                         {/* Said once it is actually in use, not before: macOS
                             gives the globe key its own job by default, so
                             without this the emoji picker opens every time you
                             talk to Juno and the key looks broken. */}
-                        {fnOffered && (
+                        {usingGlobeKey && (
                           <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
                             If the emoji picker opens too, set System Settings,
                             Keyboard, "Press globe key to" to "Do Nothing".
@@ -1962,9 +1982,11 @@ export default function OnboardingFlow({
                         exit={{ opacity: 0 }}
                         transition={{ duration: motionDuration, ease: "easeOut" }}
                       >
+                        {/* Escape is a constant, not a trigger: it is the one
+                            key on this screen that is not read from the
+                            registry, because nothing can rebind it. */}
                         <KeyboardShortcutDisplay
-                          shortcutString={keyboardShortcuts?.stop_current_task}
-                          defaultShortcut="Escape"
+                          caps={ESCAPE_CAPS}
                           isActivated={escapePressed}
                         />
                         <p className="text-[13px] text-muted-foreground">
