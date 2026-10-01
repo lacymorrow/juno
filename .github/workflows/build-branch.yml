@@ -46,7 +46,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
@@ -55,7 +55,7 @@ jobs:
           # Same key as release-tauri.yml. Both save it on main (this on push,
           # that on every merge's release build); branch builds restore it.
           workspaces: ". -> target"
-          shared-key: tauri-release-aarch64
+          shared-key: tauri-release-universal
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -103,7 +103,7 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          bunx tauri build --target aarch64-apple-darwin --bundles app \
+          bunx tauri build --target universal-apple-darwin --bundles app \
             --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       # An artifact is a zip, which drops the executable bits and symlinks an
@@ -112,7 +112,7 @@ jobs:
         id: pkg
         run: |
           set -euo pipefail
-          app="target/aarch64-apple-darwin/release/bundle/macos/Juno.app"
+          app="target/universal-apple-darwin/release/bundle/macos/Juno.app"
           [ -d "$app" ] || { echo "no Juno.app at $app" >&2; exit 1; }
           codesign --verify --deep --strict "$app"
           tar -czf Juno.app.tar.gz -C "$(dirname "$app")" Juno.app

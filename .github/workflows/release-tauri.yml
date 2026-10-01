@@ -55,7 +55,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
@@ -64,7 +64,7 @@ jobs:
           # Merge builds run on the main ref (see the `tag` input), so this is
           # saved on main and the next release build restores it.
           workspaces: ". -> target"
-          shared-key: tauri-release-aarch64
+          shared-key: tauri-release-universal
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -111,13 +111,12 @@ jobs:
             echo "No Apple signing secrets configured: building unsigned."
           fi
 
-      # Apple Silicon only. The Parakeet STT engine (parakeet-rs -> ort-sys)
-      # ships prebuilt ONNX Runtime binaries for aarch64 but not x86_64 macOS,
-      # so a universal build fails on the Intel half. Intel Macs lost macOS
-      # feature support with Tahoe; re-add x86_64 only if Parakeet gets
-      # feature-gated to arm64. Intel users on v0.6.0 see no update (the
-      # manifest has no darwin-x86_64 entry), which is the intended behavior.
-      - name: Build Tauri app (Apple Silicon)
+      # Universal: both halves of every release, so Intel Macs can install and
+      # update. Parakeet is the one thing that is not in both. Its ONNX Runtime
+      # (parakeet-rs -> ort-sys) ships an aarch64 build only, so the dependency
+      # is gated to Apple Silicon in the voice plugin's Cargo.toml and an Intel
+      # Mac dictates with Whisper, which is already the default engine.
+      - name: Build Tauri app (universal)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -132,7 +131,7 @@ jobs:
             See [CHANGELOG](https://github.com/lacymorrow/juno/blob/main/CHANGELOG.md) for details.
           releaseDraft: false
           prerelease: ${{ inputs.prerelease == true }}
-          args: --target aarch64-apple-darwin
+          args: --target universal-apple-darwin
 
       # The prerelease channel's feed. Every build lands here, promoted or not,
       # so an install with "Get prereleases" on sees a merge within the hour

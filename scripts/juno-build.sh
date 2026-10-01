@@ -111,9 +111,16 @@ fetch_release() {
   if [[ ! -d "$dir/Juno.app" ]]; then
     mkdir -p "$dir"
     say "Downloading $tag..."
-    gh release download "$tag" --repo "$repo" --pattern 'Juno_aarch64.app.tar.gz' --dir "$dir" --clobber \
+    # Arch-agnostic on purpose. Releases up to v0.8.52 published
+    # Juno_aarch64.app.tar.gz; universal ones publish
+    # Juno_universal.app.tar.gz. Both hold the same Juno.app, and this has to
+    # keep installing the tags that already exist.
+    gh release download "$tag" --repo "$repo" --pattern 'Juno_*.app.tar.gz' --dir "$dir" --clobber \
       || die "$tag has no app download yet; its build may still be running"
-    extract "$dir/Juno_aarch64.app.tar.gz" "$dir"
+    local tarball
+    tarball=$(find "$dir" -maxdepth 1 -name 'Juno_*.app.tar.gz' | head -1)
+    [[ -n "$tarball" ]] || die "$tag published no Juno app tarball"
+    extract "$tarball" "$dir"
   fi
   install_app "$dir/Juno.app" "$tag"
 }

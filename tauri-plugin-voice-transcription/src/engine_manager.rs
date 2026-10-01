@@ -5,8 +5,15 @@ use std::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::engine::{SttProvider, TranscriptionEngine};
-use crate::engine_parakeet::{missing_parakeet_files, ParakeetEngine};
+// Parakeet links on Apple Silicon only, so both the engine and the disk check
+// it needs are gated. The `SttProvider::Parakeet` variant is not: a person who
+// chose Parakeet on an Apple Silicon Mac has "parakeet" in their settings, and
+// that value has to keep deserializing everywhere.
+#[cfg(target_arch = "aarch64")]
+use crate::engine_parakeet::ParakeetEngine;
 use crate::engine_whisper::WhisperEngine;
+#[cfg(target_arch = "aarch64")]
+use crate::parakeet_model::missing_parakeet_files;
 use crate::shared_whisper::SharedWhisperManager;
 
 static ACTIVE_ENGINE: Lazy<RwLock<Option<Arc<dyn TranscriptionEngine>>>> =
@@ -145,23 +152,29 @@ impl EngineManager {
             .unwrap_or("none")
     }
 
+    /// Load Whisper from `whisper_model_path`. The one place a Whisper engine
+    /// is built, so the Intel fallback below reports a missing model file the
+    /// same way an ordinary Whisper request does.
+    fn whisper_engine(whisper_model_path: &str) -> Result<Arc<dyn TranscriptionEngine>, String> {
+        if !Path::new(whisper_model_path).is_file() {
+            return Err(format!(
+                "Whisper model file not found at {}. Download it from Settings > Models.",
+                whisper_model_path
+            ));
+        }
+        let ctx = SharedWhisperManager::initialize(whisper_model_path)
+            .map_err(|e| format!("Whisper could not load {}: {}", whisper_model_path, e))?;
+        Ok(Arc::new(WhisperEngine::new(ctx)))
+    }
+
     fn build_engine(
         provider: SttProvider,
         whisper_model_path: &str,
         parakeet_model_dir: Option<&str>,
     ) -> Result<Arc<dyn TranscriptionEngine>, String> {
         match provider {
-            SttProvider::Whisper => {
-                if !Path::new(whisper_model_path).is_file() {
-                    return Err(format!(
-                        "Whisper model file not found at {}. Download it from Settings > Models.",
-                        whisper_model_path
-                    ));
-                }
-                let ctx = SharedWhisperManager::initialize(whisper_model_path)
-                    .map_err(|e| format!("Whisper could not load {}: {}", whisper_model_path, e))?;
-                Ok(Arc::new(WhisperEngine::new(ctx)))
-            }
+            SttProvider::Whisper => Self::whisper_engine(whisper_model_path),
+            #[cfg(target_arch = "aarch64")]
             SttProvider::Parakeet => {
                 let dir = parakeet_model_dir.ok_or_else(|| {
                     "Parakeet model directory not configured. \
@@ -178,8 +191,23 @@ impl EngineManager {
                         dir
                     ));
                 }
-                let engine = ParakeetEngine::new(Path::new(dir))?;
-                Ok(Arc::new(engine))
+                let engine: Arc<dyn TranscriptionEngine> =
+                    Arc::new(ParakeetEngine::new(Path::new(dir))?);
+                Ok(engine)
+            }
+            // This build has no Parakeet to hand back: its ONNX Runtime has no
+            // x86_64 version, so the dependency is not linked in at all. The
+            // saved setting is honoured as far as it can be, the same way an
+            // unavailable model falls back rather than erroring, and the log
+            // says why so a silent Whisper is not a mystery.
+            #[cfg(not(target_arch = "aarch64"))]
+            SttProvider::Parakeet => {
+                warn!(
+                    "[EngineManager] {} Using Whisper. (Configured Parakeet directory: {})",
+                    crate::parakeet_model::PARAKEET_UNSUPPORTED_REASON,
+                    parakeet_model_dir.unwrap_or("<unset>")
+                );
+                Self::whisper_engine(whisper_model_path)
             }
         }
     }
