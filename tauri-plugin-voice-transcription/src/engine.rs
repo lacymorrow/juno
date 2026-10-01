@@ -58,6 +58,20 @@ pub trait TranscriptionEngine: Send + Sync {
     fn create_session(&self) -> Result<Box<dyn TranscriptionSession>, String>;
 }
 
+/// Whether this build can run Parakeet at all.
+///
+/// Parakeet reaches ONNX Runtime through `parakeet-rs` -> `ort-sys`, whose
+/// prebuilt distribution has no `x86_64-apple-darwin` entry, so the loader is
+/// compiled on Apple Silicon only (see `Cargo.toml`). On Intel the model files
+/// can still be described and even sit on disk; nothing can load them.
+///
+/// This is a separate question from "is the model downloaded". Conflating them
+/// would report an Intel Mac as one download away from an engine it will never
+/// have.
+pub const fn parakeet_is_supported() -> bool {
+    cfg!(target_arch = "aarch64")
+}
+
 /// Which engine to boot at startup.
 ///
 /// `saved` is the provider name the host app has persisted (`None` when the
@@ -69,10 +83,15 @@ pub trait TranscriptionEngine: Send + Sync {
 /// up front is the whole point: booting the wrong engine means loading a
 /// model, allocating its Metal buffers and warming it up, only to free all of
 /// it seconds later when the app applies the saved preference.
+///
+/// "Cannot honour" now includes the architecture. A settings store synced from
+/// an Apple Silicon Mac says `"parakeet"` on an Intel one, and the files may
+/// have come across with it; booting Parakeet there would log an engine that
+/// does not exist and then fall back anyway.
 pub fn startup_provider(saved: Option<&str>, parakeet_ready: bool) -> SttProvider {
     match saved.map(str::trim) {
         Some(name) if name.eq_ignore_ascii_case("parakeet") => {
-            if parakeet_ready {
+            if parakeet_ready && parakeet_is_supported() {
                 SttProvider::Parakeet
             } else {
                 SttProvider::Whisper
@@ -86,12 +105,37 @@ pub fn startup_provider(saved: Option<&str>, parakeet_ready: bool) -> SttProvide
 mod tests {
     use super::*;
 
+    /// What a saved "parakeet" with its files on disk must resolve to on *this*
+    /// machine: the engine on Apple Silicon, Whisper on Intel.
+    ///
+    /// Not a tautology — if `startup_provider` stopped consulting
+    /// `parakeet_is_supported`, the Intel build of this test would get Parakeet
+    /// and fail. Written against the architecture rather than hardcoded so the
+    /// Intel half is genuinely checked, instead of passing only because CI runs
+    /// on arm64.
+    fn expected_when_parakeet_is_saved_and_downloaded() -> SttProvider {
+        if parakeet_is_supported() {
+            SttProvider::Parakeet
+        } else {
+            SttProvider::Whisper
+        }
+    }
+
+    /// The case a synced settings store creates: an Intel Mac that inherited
+    /// both the preference and the 612 MB of model files from an Apple Silicon
+    /// one still boots Whisper.
     #[test]
-    fn saved_parakeet_boots_parakeet_when_the_model_is_on_disk() {
+    fn saved_parakeet_boots_parakeet_only_where_it_is_supported() {
         assert_eq!(
             startup_provider(Some("parakeet"), true),
-            SttProvider::Parakeet
+            expected_when_parakeet_is_saved_and_downloaded()
         );
+    }
+
+    /// Parakeet is Apple Silicon only, and this is the line that says so.
+    #[test]
+    fn parakeet_support_follows_the_architecture() {
+        assert_eq!(parakeet_is_supported(), cfg!(target_arch = "aarch64"));
     }
 
     #[test]
@@ -128,10 +172,11 @@ mod tests {
 
     #[test]
     fn casing_and_whitespace_do_not_lose_the_preference() {
+        let expected = expected_when_parakeet_is_saved_and_downloaded();
         for name in ["Parakeet", "PARAKEET", "  parakeet  "] {
             assert_eq!(
                 startup_provider(Some(name), true),
-                SttProvider::Parakeet,
+                expected,
                 "{name:?} should have been recognised"
             );
         }

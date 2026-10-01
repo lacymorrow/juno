@@ -13,10 +13,15 @@ pub mod controller;
 pub mod devices;
 pub mod engine;
 pub mod engine_manager;
+/// The Parakeet loader. Apple Silicon only — `parakeet-rs` -> `ort-sys` ships no
+/// prebuilt ONNX Runtime for `x86_64-apple-darwin`. The download manifest and
+/// the on-disk check live in `parakeet_model`, which compiles everywhere.
+#[cfg(target_arch = "aarch64")]
 pub mod engine_parakeet;
 pub mod engine_whisper;
 pub mod error;
 pub mod mic_permissions;
+pub mod parakeet_model;
 pub mod shared_whisper;
 pub mod utils;
 pub mod wake_word;
@@ -29,13 +34,16 @@ pub use devices::{
     effective_input_device_name, list_input_devices, preferred_input_device,
     set_preferred_input_device, AudioDeviceInfo,
 };
-pub use engine::{startup_provider, SttProvider, TranscriptionEngine, TranscriptionSession};
-pub use engine_manager::EngineManager;
-pub use engine_parakeet::{
-    missing_parakeet_files, parakeet_file_url, parakeet_total_bytes, ParakeetFile,
-    ParakeetModelStatus, PARAKEET_HF_REPO, PARAKEET_HF_REVISION, PARAKEET_MODEL_FILES,
+pub use engine::{
+    parakeet_is_supported, startup_provider, SttProvider, TranscriptionEngine, TranscriptionSession,
 };
+pub use engine_manager::EngineManager;
 pub use error::{Error, Result};
+pub use parakeet_model::{
+    missing_parakeet_files, parakeet_file_url, parakeet_model_files_present, parakeet_total_bytes,
+    ParakeetFile, ParakeetModelStatus, PARAKEET_HF_REPO, PARAKEET_HF_REVISION,
+    PARAKEET_MODEL_FILES,
+};
 pub use shared_whisper::SharedWhisperManager;
 pub use utils::{downloaded_models_dir, resolve_model_path, resolve_parakeet_model_dir};
 
@@ -216,11 +224,16 @@ fn build_plugin<R: Runtime + 'static>(
             let parakeet_ready =
                 missing_parakeet_files(std::path::Path::new(&parakeet_model_dir)).is_empty();
             let provider = startup_provider(saved_provider.as_deref(), parakeet_ready);
+            // `parakeet built in` is logged separately from `on disk` because on
+            // an Intel Mac with a synced app-data folder the files are present
+            // and the engine still is not. One line that says both is the
+            // difference between a five-minute diagnosis and an hour of one.
             tracing::info!(
-                "[VoicePlugin] STT provider: {} (saved: {}, parakeet on disk: {})",
+                "[VoicePlugin] STT provider: {} (saved: {}, parakeet on disk: {}, parakeet built in: {})",
                 provider,
                 saved_provider.as_deref().unwrap_or("<none>"),
-                parakeet_ready
+                parakeet_ready,
+                parakeet_is_supported()
             );
 
             // Load the STT model in a background task — model files can be >1 GB

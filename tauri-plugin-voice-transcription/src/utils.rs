@@ -100,13 +100,13 @@ pub fn resolve_parakeet_model_dir<R: Runtime>(
     });
 
     if let Some(dir) = &downloaded {
-        if crate::engine_parakeet::ParakeetEngine::model_files_present(dir) {
+        if crate::parakeet_model::parakeet_model_files_present(dir) {
             return dir.to_string_lossy().to_string();
         }
     }
 
     let resolved = resolve_model_path(app, parakeet_model_dir);
-    if crate::engine_parakeet::ParakeetEngine::model_files_present(Path::new(&resolved)) {
+    if crate::parakeet_model::parakeet_model_files_present(Path::new(&resolved)) {
         return resolved;
     }
 

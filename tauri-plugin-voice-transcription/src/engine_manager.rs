@@ -5,8 +5,11 @@ use std::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::engine::{SttProvider, TranscriptionEngine};
-use crate::engine_parakeet::{missing_parakeet_files, ParakeetEngine};
+#[cfg(target_arch = "aarch64")]
+use crate::engine_parakeet::ParakeetEngine;
 use crate::engine_whisper::WhisperEngine;
+#[cfg(target_arch = "aarch64")]
+use crate::parakeet_model::missing_parakeet_files;
 use crate::shared_whisper::SharedWhisperManager;
 
 static ACTIVE_ENGINE: Lazy<RwLock<Option<Arc<dyn TranscriptionEngine>>>> =
@@ -145,23 +148,48 @@ impl EngineManager {
             .unwrap_or("none")
     }
 
+    /// Load Whisper from `whisper_model_path`. Shared by the Whisper arm of
+    /// `build_engine` and, on Intel, by its Parakeet arm.
+    fn build_whisper(whisper_model_path: &str) -> Result<Arc<dyn TranscriptionEngine>, String> {
+        if !Path::new(whisper_model_path).is_file() {
+            return Err(format!(
+                "Whisper model file not found at {}. Download it from Settings > Models.",
+                whisper_model_path
+            ));
+        }
+        let ctx = SharedWhisperManager::initialize(whisper_model_path)
+            .map_err(|e| format!("Whisper could not load {}: {}", whisper_model_path, e))?;
+        Ok(Arc::new(WhisperEngine::new(ctx)))
+    }
+
     fn build_engine(
         provider: SttProvider,
         whisper_model_path: &str,
         parakeet_model_dir: Option<&str>,
     ) -> Result<Arc<dyn TranscriptionEngine>, String> {
         match provider {
-            SttProvider::Whisper => {
-                if !Path::new(whisper_model_path).is_file() {
-                    return Err(format!(
-                        "Whisper model file not found at {}. Download it from Settings > Models.",
-                        whisper_model_path
-                    ));
-                }
-                let ctx = SharedWhisperManager::initialize(whisper_model_path)
-                    .map_err(|e| format!("Whisper could not load {}: {}", whisper_model_path, e))?;
-                Ok(Arc::new(WhisperEngine::new(ctx)))
+            SttProvider::Whisper => Self::build_whisper(whisper_model_path),
+
+            // Parakeet's loader is compiled on Apple Silicon only, so on Intel
+            // a request for it resolves to Whisper instead.
+            //
+            // The `SttProvider::Parakeet` variant itself stays on every
+            // architecture deliberately. A settings store synced from an Apple
+            // Silicon Mac says `"parakeet"`, and that value has to deserialize
+            // on an Intel one rather than fail the whole settings load. The
+            // setting is accepted and cannot be honoured — the same shape as a
+            // model that is not downloaded falling back.
+            #[cfg(not(target_arch = "aarch64"))]
+            SttProvider::Parakeet => {
+                warn!(
+                    "[EngineManager] Parakeet is Apple Silicon only (model dir {}); \
+                     running Whisper on this Mac",
+                    parakeet_model_dir.unwrap_or("unset")
+                );
+                Self::build_whisper(whisper_model_path)
             }
+
+            #[cfg(target_arch = "aarch64")]
             SttProvider::Parakeet => {
                 let dir = parakeet_model_dir.ok_or_else(|| {
                     "Parakeet model directory not configured. \
@@ -182,5 +210,46 @@ impl EngineManager {
                 Ok(Arc::new(engine))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Intel half of the feature gate. Neither model is on disk in CI, so
+    /// this fails either way — what it asserts is *which* engine failed. A
+    /// request for Parakeet that comes back complaining about Whisper is the
+    /// fallback working; one that complains about Parakeet means an Intel build
+    /// is still trying to load an engine it does not contain.
+    ///
+    /// Deliberately does not assert success: loading Whisper for real needs a
+    /// 75 MB model file, and a test that only runs where someone downloaded one
+    /// would not guard the thing that breaks.
+    #[cfg(not(target_arch = "aarch64"))]
+    #[test]
+    fn asking_for_parakeet_on_intel_resolves_to_whisper() {
+        let err = EngineManager::build_engine(
+            SttProvider::Parakeet,
+            "/nonexistent/ggml-tiny.en.bin",
+            Some("/nonexistent/parakeet-ctc"),
+        )
+        .expect_err("no model file exists at either path");
+        assert!(err.contains("Whisper"), "got {err:?}");
+        assert!(!err.contains("Parakeet"), "got {err:?}");
+    }
+
+    /// The mirror image on Apple Silicon: the request is honoured, so the
+    /// failure names Parakeet and lists what is missing.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn asking_for_parakeet_on_apple_silicon_tries_parakeet() {
+        let err = EngineManager::build_engine(
+            SttProvider::Parakeet,
+            "/nonexistent/ggml-tiny.en.bin",
+            Some("/nonexistent/parakeet-ctc"),
+        )
+        .expect_err("no model file exists at either path");
+        assert!(err.contains("Parakeet"), "got {err:?}");
     }
 }

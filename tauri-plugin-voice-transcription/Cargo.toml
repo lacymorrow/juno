@@ -24,7 +24,6 @@ tauri = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 whisper-rs = { version = "0.11.0", features = ["metal"] }
-parakeet-rs = "0.3"
 cpal = "0.15"
 rubato = "0.14.1"
 hound = "3.5"
@@ -36,6 +35,16 @@ crossbeam-channel = "0.5"
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 base64 = "0.22"
 chrono = "0.4"
+
+# Parakeet is Apple Silicon only, and this line is the reason the whole feature
+# gate exists. `parakeet-rs` reaches ONNX Runtime through `ort-sys`, whose
+# prebuilt distribution (`build/download/dist.tsv`) lists `aarch64-apple-darwin`
+# and no `x86_64-apple-darwin`, so an Intel or universal build has nothing to
+# link against. Whisper is the default engine on every Mac, so Intel loses an
+# option, not dictation. See `src/parakeet_model.rs` for the split that keeps
+# the download manifest arch-independent.
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+parakeet-rs = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

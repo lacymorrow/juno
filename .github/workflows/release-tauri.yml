@@ -55,7 +55,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
@@ -64,6 +64,9 @@ jobs:
           # Merge builds run on the main ref (see the `tag` input), so this is
           # saved on main and the next release build restores it.
           workspaces: ". -> target"
+          # Still named for aarch64 so the cache `build-branch.yml` saves on main
+          # stays usable here; this build adds an x86_64 half on top of it rather
+          # than replacing it.
           shared-key: tauri-release-aarch64
 
       - name: Install Bun
@@ -111,13 +114,22 @@ jobs:
             echo "No Apple signing secrets configured: building unsigned."
           fi
 
-      # Apple Silicon only. The Parakeet STT engine (parakeet-rs -> ort-sys)
-      # ships prebuilt ONNX Runtime binaries for aarch64 but not x86_64 macOS,
-      # so a universal build fails on the Intel half. Intel Macs lost macOS
-      # feature support with Tahoe; re-add x86_64 only if Parakeet gets
-      # feature-gated to arm64. Intel users on v0.6.0 see no update (the
-      # manifest has no darwin-x86_64 entry), which is the intended behavior.
-      - name: Build Tauri app (Apple Silicon)
+      # One universal binary, both architectures. This was aarch64-only from
+      # 65b4d20b (2026-09-12) to LAC-4089: the Parakeet STT engine
+      # (parakeet-rs -> ort-sys) has no prebuilt ONNX Runtime for
+      # `x86_64-apple-darwin`, so the Intel half could not link. Parakeet is now
+      # compiled on Apple Silicon only and Intel runs Whisper, which was already
+      # the default engine everywhere.
+      #
+      # Tauri derives the updater manifest from the bundle, so `universal`
+      # publishes both `darwin-aarch64` and `darwin-x86_64` pointing at the same
+      # `Juno_universal.app.tar.gz` — verified against v0.6.0, the last universal
+      # release. Intel installs stranded on v0.6.0 start updating again the first
+      # time this runs. Nothing about the manifest is written by hand.
+      #
+      # The asset names change with the target (`Juno_universal.*`, not
+      # `Juno_aarch64.*`); `scripts/juno-build.sh` accepts either.
+      - name: Build Tauri app (universal macOS)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -132,7 +144,7 @@ jobs:
             See [CHANGELOG](https://github.com/lacymorrow/juno/blob/main/CHANGELOG.md) for details.
           releaseDraft: false
           prerelease: ${{ inputs.prerelease == true }}
-          args: --target aarch64-apple-darwin
+          args: --target universal-apple-darwin
 
       # The prerelease channel's feed. Every build lands here, promoted or not,
       # so an install with "Get prereleases" on sees a merge within the hour
