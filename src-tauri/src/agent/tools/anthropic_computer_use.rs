@@ -1647,7 +1647,11 @@ pub fn resolve_hold_key_duration_ms(input: &Value) -> Result<u64, String> {
 /// Convert error messages to Anthropic Computer Use API compliant format
 /// According to Anthropic's specification, errors should be returned as successful JSON responses
 /// with is_error: true and error: "message" instead of using Rust's Err() pattern
-fn create_anthropic_error_response(error_message: String) -> Value {
+///
+/// `pub(crate)` so `agent::app_observation` can build the same shape when it
+/// declines to act: a result the loop already treats as a failure is exactly
+/// what stops the rest of a batch from clicking where an app used to be.
+pub(crate) fn create_anthropic_error_response(error_message: String) -> Value {
     json!({
         "is_error": true,
         "error": error_message

@@ -10,6 +10,26 @@
 //! Opening runs `open -a <bundle path>` with the path as an argument, never
 //! through a shell. Quitting passes the app name to AppleScript as `argv`, so
 //! the script text itself is a constant.
+//!
+//! # The bundle match is the safeguard, not `argv`
+//!
+//! AppleScript resolves an application name when it compiles the script. A
+//! name macOS cannot place shows the person a modal "Where is ...?" picker
+//! listing every app on the Mac, and the script sits there blocked until
+//! someone dismisses it. Passing the name through `argv` does not reliably
+//! prevent that: `id of application (item 1 of argv)` was observed prompting
+//! on 2026-10-01 with the name supplied as an argument.
+//!
+//! What keeps this module safe is the step before the script: a name is only
+//! ever acted on after [`match_app`] matched it against an `.app` bundle
+//! found on disk, so the app is known to exist and there is nothing for
+//! macOS to ask about. `argv` keeps the person's words out of the script
+//! text, which is a different guarantee (injection, not the picker), and both
+//! are worth having.
+//!
+//! Anything new that addresses an app by name belongs behind the same match.
+//! [`quit_installed`] takes an [`InstalledApp`] rather than a string for that
+//! reason, and a test pins it.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -216,9 +236,12 @@ async fn installed_apps() -> Vec<InstalledApp> {
     apps
 }
 
-/// Quit `item 1 of argv` if it is running. The name arrives as an argument,
-/// so nothing is interpolated into the script. Responses are ignored so an
-/// app showing a "save changes?" sheet cannot stall the reply.
+/// Quit `item 1 of argv` if it is running. Responses are ignored so an app
+/// showing a "save changes?" sheet cannot stall the reply.
+///
+/// Reached only through [`quit_installed`]: this script addresses an app by
+/// name, which is safe only for a name already matched against an installed
+/// bundle. See the module docs.
 const QUIT_SCRIPT: &str = "on run argv\n\
      set appName to item 1 of argv\n\
      if application appName is running then\n\
@@ -229,6 +252,29 @@ const QUIT_SCRIPT: &str = "on run argv\n\
      end if\n\
      return \"not_running\"\n\
      end run";
+
+/// Quit an app that has already been matched against a bundle on disk.
+///
+/// Takes [`InstalledApp`] rather than a name on purpose. An `InstalledApp` is
+/// built from an `.app` bundle the folder scan found, so holding one is proof
+/// the app exists, and the modal app picker has nothing to ask about. A `&str`
+/// here would let a future caller hand this script a guessed name.
+async fn quit_installed(app: &InstalledApp) -> Result<String, String> {
+    osascript(QUIT_SCRIPT, vec![app.name.clone()]).await
+}
+
+/// The installed app a name resolves to, or `None` when nothing on disk
+/// answers to it.
+///
+/// Reuses the cached folder scan, so this costs nothing most of the time and
+/// never asks macOS to place a name. Used by
+/// [`crate::agent::app_observation`] to tell "installed but not running" from
+/// "no such app", and to decide whether a command that names an app literally
+/// is safe to run at all.
+pub(crate) async fn resolve_installed(name: &str) -> Option<InstalledApp> {
+    let apps = installed_apps().await;
+    match_app(&app_key(name), &apps).cloned()
+}
 
 pub(super) async fn handle(_app_handle: &AppHandle, intent: AppIntent) -> Option<Reply> {
     match intent {
@@ -260,7 +306,7 @@ pub(super) async fn handle(_app_handle: &AppHandle, intent: AppIntent) -> Option
         AppIntent::Quit { query } => {
             let apps = installed_apps().await;
             let app = match_app(&query, &apps)?;
-            Some(match osascript(QUIT_SCRIPT, vec![app.name.clone()]).await {
+            Some(match quit_installed(app).await {
                 Ok(out) if out.trim() == "not_running" => {
                     Reply::text(format!("{} isn't running.", app.name))
                 }
@@ -391,6 +437,46 @@ mod tests {
         assert_eq!(hit("juno"), None, "never quit or reopen Juno by voice");
         assert_eq!(hit("flight tracker"), None);
         assert_eq!(hit("safari find flights"), None);
+    }
+
+    /// The real safeguard, pinned.
+    ///
+    /// `QUIT_SCRIPT` addresses an app by name, and AppleScript resolves a name
+    /// when it compiles the script: a name macOS cannot place puts a modal
+    /// "Where is ...?" picker in front of the person. `argv` does not prevent
+    /// that (`id of application (item 1 of argv)` was observed prompting), so
+    /// what makes this call safe is that the name came from a bundle found on
+    /// disk. `quit_installed` takes an `InstalledApp` to keep that true, and
+    /// this test fails if the script is ever reached another way.
+    #[test]
+    fn the_quit_script_is_only_reachable_with_an_installed_app() {
+        // Split so this test's own source is not a match for its needle.
+        let needle = concat!("osascript(", "QUIT_SCRIPT");
+        let src = include_str!("apps.rs");
+        assert_eq!(
+            src.matches(needle).count(),
+            1,
+            "the quit script must have exactly one call site"
+        );
+        let (before, _) = src
+            .split_once(needle)
+            .expect("the quit script has a call site");
+        let enclosing = before
+            .rsplit("\nasync fn ")
+            .next()
+            .expect("rsplit yields at least one piece");
+        assert!(
+            enclosing.starts_with("quit_installed(app: &InstalledApp)"),
+            "the quit script must be called from quit_installed, which can only be \
+             handed an app matched against a bundle on disk"
+        );
+
+        // And an InstalledApp cannot be conjured from a name that is not on
+        // disk: this is the step that makes holding one proof of existence.
+        let installed = installed(&["Spotify"]);
+        assert!(match_app("spotify", &installed).is_some());
+        assert!(match_app(&app_key("Spotfiy"), &installed).is_none());
+        assert!(match_app(&app_key("Definitely Not Installed App"), &installed).is_none());
     }
 
     #[test]
