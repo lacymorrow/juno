@@ -246,10 +246,19 @@ mod tests {
         let cooldown = Duration::from_millis(30);
         let arbiter = InputArbiter::new(cooldown);
 
+        // Start the clock before the first acquire, not after its guard drops.
+        // The cooldown runs from the drop (`last_action_at` is stamped in
+        // `Drop for PhysicalInputGuard`), so starting the clock after it
+        // subtracted the drop-to-`now()` gap from the measurement. The test
+        // then passed only when tokio's timer overshoot outran that gap, and
+        // failed whenever a loaded runner descheduled the thread in between.
+        // Starting first makes the bound unconditional: `start` is never
+        // after the release, so a working cooldown always measures at least
+        // `cooldown`, and a missing one still measures near zero.
+        let start = Instant::now();
         {
             let _g = arbiter.acquire(None).await;
         }
-        let start = Instant::now();
         {
             let _g = arbiter.acquire(None).await;
         }
