@@ -45,7 +45,6 @@ pub mod native_permissions;
 pub mod notifications;
 pub mod onboarding;
 pub mod onboarding_analytics;
-pub mod orchestrator;
 pub mod permission_diagnostics; // What macOS answers right now, and the reset for a stale grant
 pub mod permissions;
 pub mod persistent_memory;
@@ -118,7 +117,6 @@ pub use self::memory::*;
 pub use self::mouse::*;
 pub use self::onboarding::*;
 pub use self::onboarding_analytics::*;
-pub use self::orchestrator::*;
 pub use self::permission_diagnostics::*;
 pub use self::permissions::*;
 pub use self::ui_commands::*; // Re-export consolidated UI API commands

@@ -26,14 +26,11 @@ pub mod network {
 
 /// Queue and processing constants
 pub mod queues {
-    /// Maximum queue size for orchestrator
-    pub const MAX_ORCHESTRATOR_QUEUE_SIZE: usize = 100;
-
     /// Default queue processing interval (milliseconds)
     pub const DEFAULT_QUEUE_PROCESSING_INTERVAL_MS: u64 = 250;
 
-    /// Orchestrator queue processing interval (milliseconds)
-    pub const ORCHESTRATOR_QUEUE_PROCESSING_INTERVAL_MS: u64 = 500;
+    // MAX_ORCHESTRATOR_QUEUE_SIZE and ORCHESTRATOR_QUEUE_PROCESSING_INTERVAL_MS
+    // sized the ungated `agents::Orchestrator`'s task queue, which was removed.
 
     /// Maximum task count for testing
     pub const MAX_TEST_TASK_COUNT: usize = 20;

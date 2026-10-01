@@ -248,7 +248,7 @@ format!("{}...", content.chars().take(50).collect::<String>());
 ```
 
 ### Rust: Escape Key Management
-Register escape key ONLY during agent execution (`submit_query`/`submit_orchestrated_query`). Always unregister on **every** exit path — including early returns, errors, and cancellation. The stop key is *observed* with a passive NSEvent monitor (`platform/stop_key_monitor.rs`) that never consumes the key — never register a bare Escape as an exclusive global hotkey (LAC-3746).
+Register escape key ONLY during agent execution (`submit_query`, the single entry point; `submit_orchestrated_query` and the other thirteen orchestrator commands were removed with the ungated executor behind them). Always unregister on **every** exit path — including early returns, errors, and cancellation. The stop key is *observed* with a passive NSEvent monitor (`platform/stop_key_monitor.rs`) that never consumes the key — never register a bare Escape as an exclusive global hotkey (LAC-3746).
 
 ### Rust: Deadlock Prevention
 Never hold an async mutex while calling a function that acquires another (or the same) mutex. Use check-init-recheck for lazy initialization:

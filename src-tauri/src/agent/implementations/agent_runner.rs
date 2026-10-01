@@ -28,22 +28,59 @@ pub(crate) const BATCH_HALT_SKIPPED_MESSAGE: &str =
 /// The text of a tool result as the model will actually read it.
 ///
 /// This is the other half of the lying problem, and it was upstream of the
-/// prompt. `format_task_output` summarises a multi-field object as "Result
-/// with N fields", and that string is what went into the conversation. So a
-/// bash call that failed arrived as `Result with 2 fields`: its exit code and
-/// its error text never reached the model, which left "it worked" as the only
-/// reading available. `{"windows": [...], "count": 3}` from
-/// `list_visible_windows` arrived the same way.
+/// prompt. The old `format_task_output` summarised a multi-field object as
+/// "Result with N fields", and that string is what went into the
+/// conversation. So a bash call that failed arrived as `Result with 2
+/// fields`: its exit code and its error text never reached the model, which
+/// left "it worked" as the only reading available. `{"windows": [...],
+/// "count": 3}` from `list_visible_windows` arrived the same way, and a
+/// top-level array arrived as `List with N items`.
 ///
-/// A result with more than one field keeps its JSON. One-field objects and
-/// bare strings keep the old unwrapping, which is what makes a file read or a
-/// command's output read as text rather than as a quoted blob.
+/// The invariant is that this function never *describes* a result instead of
+/// reporting it. Anything carrying more than one value keeps its JSON. Bare
+/// scalars and single-field objects are unwrapped, which is what makes a file
+/// read or a command's output read as text rather than as a quoted blob. Only
+/// a genuinely empty result gets a word, because there is nothing to lose.
+///
+/// `format_task_output`, the lossy version this replaces, is gone, along with
+/// the ungated `agents::` executor that was its other caller. Do not
+/// reintroduce a second formatter: `tool_result_content_never_discards` pins
+/// this one, and a second one will drift from it.
 pub(crate) fn tool_result_content(output: &serde_json::Value) -> String {
     match output {
-        serde_json::Value::Object(map) if map.len() > 1 => serde_json::to_string(output)
-            .unwrap_or_else(|_| crate::agents::base_agent::format_task_output(output)),
-        _ => crate::agents::base_agent::format_task_output(output),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "No output".to_string(),
+
+        serde_json::Value::Object(map) => match map.len() {
+            0 => "Empty result".to_string(),
+            // One field is unwrapped, so `{"content": "..."}` reads as the
+            // file rather than as JSON wrapped around it. The key is kept for
+            // a non-string so a bare `3` is still attributable.
+            1 => match map.iter().next() {
+                Some((_, serde_json::Value::String(s))) => s.clone(),
+                Some((key, val)) => format!("{}: {}", key, tool_result_content(val)),
+                None => "Empty result".to_string(),
+            },
+            _ => json_or_debug(output),
+        },
+
+        serde_json::Value::Array(items) => match items.len() {
+            0 => "Empty list".to_string(),
+            1 => tool_result_content(&items[0]),
+            _ => json_or_debug(output),
+        },
     }
+}
+
+/// Serialise a result for the model, falling back to its `Debug` rendering.
+///
+/// `serde_json::to_string` on an already-parsed `Value` only fails on a map
+/// with a non-string key, which `Value` cannot hold. The fallback is here so
+/// that even that impossible path carries the data rather than a count of it.
+fn json_or_debug(output: &serde_json::Value) -> String {
+    serde_json::to_string(output).unwrap_or_else(|_| format!("{:?}", output))
 }
 
 /// True when a tool call should be treated as a failure.
@@ -1109,9 +1146,8 @@ where
                     // For computer tool with screenshot data, preserve the full JSON
                     // so the Anthropic provider can extract the base64 image later
                     if tool_call.name == "computer" && result.output.get("base64_image").is_some() {
-                        serde_json::to_string(&result.output).unwrap_or_else(|_| {
-                            crate::agents::base_agent::format_task_output(&result.output)
-                        })
+                        serde_json::to_string(&result.output)
+                            .unwrap_or_else(|_| tool_result_content(&result.output))
                     } else {
                         tool_result_content(&result.output)
                     }
@@ -2261,5 +2297,72 @@ mod batch_halt_tests {
             tool_result_content(&serde_json::Value::String("hello".into())),
             "hello"
         );
+    }
+
+    /// `tool_result_content` may never describe a result instead of reporting
+    /// it. This is the general form of the two tests above, and it is here
+    /// because fixing the one shape that bit us is not the same as making the
+    /// function incapable of the mistake.
+    ///
+    /// The old `format_task_output` had two lossy arms, and both shipped: an
+    /// object of more than one field became "Result with N fields", and an
+    /// array of more than one item became "List with N items". Four call
+    /// sites were still reading through them when the ungated `agents::`
+    /// executor was deleted. Rather than fix the call sites, the arms are
+    /// gone, so no present or future caller can discard a result.
+    ///
+    /// Every case below carries more than one value, so every case must
+    /// survive as parseable JSON equal to what went in.
+    #[test]
+    fn tool_result_content_never_discards() {
+        let multi_value = [
+            serde_json::json!({ "output": "x", "exit_code": 1 }),
+            serde_json::json!({ "windows": ["Safari", "Mail"], "count": 2 }),
+            serde_json::json!({ "a": 1, "b": 2, "c": 3 }),
+            // A top-level array was the arm nobody noticed: `List with N items`
+            // threw away the whole result.
+            serde_json::json!(["Safari", "Mail"]),
+            serde_json::json!([{ "id": 1 }, { "id": 2 }]),
+            // Nesting must not reintroduce a summary further down.
+            serde_json::json!({ "outer": { "inner": [1, 2], "n": 2 }, "ok": true }),
+        ];
+
+        for value in multi_value {
+            let content = tool_result_content(&value);
+            let parsed: serde_json::Value = serde_json::from_str(&content).unwrap_or_else(|e| {
+                panic!("result was described, not reported: {content:?} ({e})")
+            });
+            assert_eq!(
+                parsed, value,
+                "every value must survive the trip to the model: {content}"
+            );
+        }
+    }
+
+    /// The summaries that caused the lying are not spellable any more.
+    ///
+    /// A regression here would most likely arrive as a well-meaning
+    /// "readability" change, so the banned strings are named rather than
+    /// inferred.
+    #[test]
+    fn the_lossy_summaries_are_gone() {
+        let shapes = [
+            serde_json::json!({ "a": 1, "b": 2 }),
+            serde_json::json!([1, 2, 3]),
+            serde_json::json!({ "n": [1, 2, 3], "m": 2 }),
+        ];
+        for value in shapes {
+            let content = tool_result_content(&value);
+            assert!(
+                !content.starts_with("Result with") && !content.starts_with("List with"),
+                "a count is not a result: {content}"
+            );
+        }
+
+        // An empty result is the one case with nothing to lose, so a word is
+        // honest there and stays.
+        assert_eq!(tool_result_content(&serde_json::json!({})), "Empty result");
+        assert_eq!(tool_result_content(&serde_json::json!([])), "Empty list");
+        assert_eq!(tool_result_content(&serde_json::Value::Null), "No output");
     }
 }
