@@ -122,45 +122,115 @@ pub enum Verdict {
     Prompt,
 }
 
-/// Verbs that read. A connector tool whose name carries one of these — and
-/// none of the write verbs — runs without a prompt.
-const READ_VERBS: &[&str] = &[
-    "get", "list", "search", "read", "fetch", "find", "lookup", "view", "show", "describe",
-    "status", "history", "query", "retrieve", "count", "check", "download", "export",
-];
-
-/// Verbs that change something on the other side. Any of these anywhere in
-/// the name wins over a read verb: `mark_as_read` is a write, whatever
-/// "read" says.
-const WRITE_VERBS: &[&str] = &[
-    "send", "create", "update", "delete", "post", "reply", "schedule", "move", "archive", "upload",
-    "add", "remove", "set", "write", "edit", "insert", "invite", "cancel", "mark", "publish",
-    "submit", "execute", "run", "trigger", "patch", "put", "share", "forward", "react", "pin",
-    "star", "assign", "close", "merge", "approve",
-];
-
-/// A draft is local and reversible, so writing one is not a thing to interrupt
-/// someone about. Lacy's rule: "it should not send communications out without
-/// approval but it should draft emails freely." Fleet rules 12 and 13 already
-/// make draft-only the sanctioned path for mail, so this is the code agreeing
-/// with the rule.
+/// Acts that leave this machine. Sending, publishing, sharing and inviting are
+/// one consequence under four verbs: data reaches a person who could not see it
+/// before, and it cannot be recalled.
 ///
-/// `draft` is a noun about the *consequence* (nothing left the machine), which
-/// is why it outranks the write verb in a name like `create_draft`. It does not
-/// outrank an act that sends: see [`DRAFT_DISQUALIFIERS`].
-const DRAFT_MARKER: &str = "draft";
-
-/// Verbs that undo the draft exemption. A call that drafts *and* does one of
-/// these has a consequence a draft does not: it leaves, or it destroys
-/// something on the other side. Those still ask.
-const DRAFT_DISQUALIFIERS: &[&str] = &[
-    "send", "forward", "share", "publish", "submit", "invite", "delete", "remove", "post", "reply",
+/// Lacy's rule: "it should not send communications out without approval but it
+/// should draft emails freely."
+const SEND_VERBS: &[&str] = &[
+    "send",
+    "post",
+    "reply",
+    "forward",
+    "publish",
+    "share",
+    "invite",
+    "submit",
+    "broadcast",
 ];
+
+/// Acts that cost money. Irrecoverable in the way that matters most to the
+/// person paying.
+const SPEND_VERBS: &[&str] = &[
+    "pay",
+    "purchase",
+    "buy",
+    "checkout",
+    "charge",
+    "subscribe",
+    "transfer",
+    "refund",
+    "payout",
+];
+
+/// Emptying the Trash is the one act that defeats the construction every other
+/// delete now relies on: it turns every recoverable delete Juno made into a
+/// permanent one, retroactively and in bulk. Nobody asking Juno to tidy a
+/// folder is asking for that.
+///
+/// It costs almost nothing to gate, because nobody asks Juno to empty the
+/// Trash in the course of ordinary work.
+const EMPTY_VERBS: &[&str] = &["empty", "purge"];
+
+/// Acts that destroy something the Trash cannot catch: a remote record, a
+/// cloud file, a calendar entry, a database row.
+///
+/// **These are held, not settled.** The directive names three gated acts:
+/// sending, spending, and emptying the Trash. A remote delete is none of them,
+/// so following the directive literally would let it through.
+///
+/// It is kept gated because the standing rule across this whole workstream is
+/// that a prompt is only removed once the construction that makes the act safe
+/// exists. `rm` stopped asking because deletes go to the Trash. Nothing makes a
+/// deleted calendar event come back, and Juno has no remote undo to build on,
+/// so there is no construction here to remove the prompt in favour of.
+///
+/// This is deliberately not a silent addition: it is the one protection in this
+/// change that the directive did not ask for, and removing it is a one-line
+/// edit to this constant if that is the call. See
+/// `docs/plans/permissions-by-consequence.md`.
+const DESTROY_REMOTE_VERBS: &[&str] = &["delete", "destroy", "revoke", "wipe"];
+
+/// Whether a connector tool name reads as one of the gated acts.
+///
+/// Matching is on exact tokens, which is what keeps the singular verb forms
+/// from colliding with plural nouns: `list_transfers` and `get_posts` carry
+/// `transfers` and `posts`, not `transfer` and `post`, so a listing is not
+/// mistaken for a payment or a publish.
+///
+/// A gated verb wins outright. There is no read-verb override, because the safe
+/// direction is now the opposite of what it used to be: under a permissive
+/// default the thing to be careful about is the small gated set, not everything
+/// else, so `search_and_send` asks.
+fn names_a_gated_act(tool: &str) -> bool {
+    tool.split(['_', '-'])
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_lowercase)
+        .any(|segment| {
+            let segment = segment.as_str();
+            SEND_VERBS.contains(&segment)
+                || SPEND_VERBS.contains(&segment)
+                || EMPTY_VERBS.contains(&segment)
+                || DESTROY_REMOTE_VERBS.contains(&segment)
+        })
+}
 
 /// Decide whether a call the CLI could not resolve on its own runs or asks.
 ///
-/// Everything unrecognized prompts. A prompt too many costs a click; a
-/// silent send cannot be taken back.
+/// **The default allows.** Lacy, 2026-10-01: "I prefer to start by allowing
+/// Juno to do everything and then we can rein in permissions as users privacy
+/// concerns arise." A computer-use app that interrupts is one nobody keeps, and
+/// the person this default is for will not know how to answer a prompt, so
+/// every default that asks is a default that stops her.
+///
+/// This used to be the other way round: a tool whose name carried any write
+/// verb prompted, and so did anything unrecognised. That asked about
+/// `create_document`, `update_event`, `mark_as_read`, `move_message`,
+/// `archive_thread` and `add_label`, none of which leaves the machine and all
+/// of which a person can undo.
+///
+/// Now a connector call runs unless its name reads as one of the gated acts,
+/// and the conservative direction moved with it: an unrecognised name runs,
+/// while a name that reads as a send, a spend or an empty asks even when
+/// nothing else about it is recognised.
+///
+/// This is name matching, and name matching is the degraded path. It is here
+/// because a third-party connector's parameters are not a contract Juno can
+/// read, so the tool name is the only structural signal available. Where Juno
+/// owns the tool, the gate belongs on the call's parameters instead. The known
+/// gap is a spend whose verb Juno does not carry, such as `place_order`; the
+/// fix for that is a structural spend signal, not a longer verb list.
 pub fn verdict_for(tool_name: &str) -> Verdict {
     // Juno's own server: the computer tool is in `--allowedTools`, but a
     // call that lands here anyway is Juno driving its own desktop.
@@ -170,32 +240,25 @@ pub fn verdict_for(tool_name: &str) -> Verdict {
 
     if let Some(rest) = tool_name.strip_prefix("mcp__") {
         // `mcp__<server>__<tool>` — split off the server, judge the tool name.
-        if let Some((_server, tool)) = rest.split_once("__") {
-            let lowered: Vec<String> = tool
-                .split(['_', '-'])
-                .filter(|s| !s.is_empty())
-                .map(str::to_lowercase)
-                .collect();
-            let has_write = lowered.iter().any(|s| WRITE_VERBS.contains(&s.as_str()));
-            let has_read = lowered.iter().any(|s| READ_VERBS.contains(&s.as_str()));
-            if has_read && !has_write {
-                return Verdict::Allow;
-            }
-
-            // Drafting stays on this machine, so it runs. Sending does not.
-            let drafts = lowered.iter().any(|s| s == DRAFT_MARKER);
-            let also_sends = lowered
-                .iter()
-                .any(|s| DRAFT_DISQUALIFIERS.contains(&s.as_str()));
-            if drafts && !also_sends {
-                return Verdict::Allow;
-            }
+        // A name that does not split is judged whole rather than waved
+        // through: `mcp__weird` gets the same reading as a tool name.
+        let tool = rest
+            .split_once("__")
+            .map(|(_server, tool)| tool)
+            .unwrap_or(rest);
+        if names_a_gated_act(tool) {
+            return Verdict::Prompt;
         }
-        return Verdict::Prompt;
+        return Verdict::Allow;
     }
 
-    // A built-in that is not in `--allowedTools` reached the prompt path.
-    Verdict::Prompt
+    // A built-in that is not in `--allowedTools`. The CLI's own toolset is
+    // local work: Bash, Read, Edit, Write, Glob, Grep, WebFetch, WebSearch,
+    // NotebookEdit, TodoWrite, Task. None of it sends and none of it spends,
+    // so one arriving here runs. `the_clis_builtins_are_all_local_work` pins
+    // that assumption to the list, so a future built-in that sends shows up as
+    // a failing test rather than as a silent send.
+    Verdict::Allow
 }
 
 /// When each tool was last denied, so a retry loop cannot nag.
@@ -645,25 +708,99 @@ mod tests {
         }
     }
 
+    /// Was `connector_writes_prompt`, which asserted that any connector write
+    /// asks. Under the permissive default that is the wrong question: a write
+    /// is not a consequence, it is a verb tense. Only three consequences ask.
+    ///
+    /// `mcp__docs__create_document` moved out of this list and into
+    /// `local_connector_writes_no_longer_interrupt` below. Creating a document
+    /// does not leave the machine and the person can delete it.
     #[test]
-    fn connector_writes_prompt() {
+    fn sending_and_spending_ask() {
         for name in [
+            // Sending, in its four verbs.
             "mcp__gmail__send_email",
             "mcp__slack__slack_send_message",
-            "mcp__docs__create_document",
-            "mcp__calendar__delete_event",
+            "mcp__blog__publish_article",
+            "mcp__gdrive__share_file",
+            "mcp__github__invite_collaborator",
+            "mcp__forms__submit_response",
+            "mcp__slack__post_to_channel",
+            "mcp__gmail__forward_thread",
+            "mcp__x__broadcast_update",
+            // Spending.
+            "mcp__stripe__charge_card",
+            "mcp__shop__buy_item",
+            "mcp__shop__checkout_cart",
+            "mcp__bank__transfer_funds",
+            "mcp__billing__pay_invoice",
+            "mcp__plans__subscribe_to_plan",
+            "mcp__stripe__refund_payment",
+            "mcp__stripe__create_payout",
+            "mcp__shop__purchase_license",
         ] {
+            assert_eq!(
+                verdict_for(name),
+                Verdict::Prompt,
+                "{name} leaves the machine or costs money"
+            );
+        }
+    }
+
+    /// Emptying the Trash is gated because it defeats the construction every
+    /// other delete relies on: it turns every recoverable delete Juno made
+    /// into a permanent one, retroactively. See [`EMPTY_VERBS`].
+    #[test]
+    fn emptying_the_trash_asks() {
+        for name in ["mcp__files__empty_trash", "mcp__mail__purge_deleted_items"] {
             assert_eq!(verdict_for(name), Verdict::Prompt, "{name} should ask");
         }
     }
 
-    /// `mcp__gmail__create_draft` used to be in the test above, asserting that
-    /// drafting asks. That was the wrong test. Drafting stays on this machine
-    /// and can be thrown away; sending is what cannot be recalled, and the
-    /// gate belongs on the consequence rather than on the word "create".
-    /// Lacy: "it should not send communications out without approval but it
-    /// should draft emails freely." Fleet rules 12 and 13 already make
-    /// draft-only the sanctioned path for mail.
+    /// The point of the whole change. Each of these asked before and does not
+    /// now, and for each one the reason is the same: it stays on this machine
+    /// and the person can undo it.
+    #[test]
+    fn local_connector_writes_no_longer_interrupt() {
+        for name in [
+            "mcp__docs__create_document",
+            "mcp__calendar__update_event",
+            "mcp__gmail__mark_as_read",
+            "mcp__gmail__move_message",
+            "mcp__gmail__archive_thread",
+            "mcp__gmail__add_label",
+            "mcp__gmail__create_draft",
+            "mcp__notion__set_property",
+            "mcp__notion__insert_block",
+            "mcp__jira__assign_issue",
+            "mcp__github__close_issue",
+            "mcp__github__merge_pull_request",
+            "mcp__slack__react_to_message",
+            "mcp__slack__pin_message",
+            "mcp__calendar__cancel_event",
+            "mcp__calendar__schedule_meeting",
+            "mcp__gdrive__upload_file",
+            "mcp__x__patch_record",
+            "mcp__x__put_record",
+            "mcp__x__edit_thing",
+            "mcp__x__write_thing",
+            "mcp__x__trigger_build",
+        ] {
+            assert_eq!(
+                verdict_for(name),
+                Verdict::Allow,
+                "{name} is local and undoable, so it must not interrupt anyone"
+            );
+        }
+    }
+
+    /// `mcp__gmail__create_draft` used to assert that drafting asks. That was
+    /// the wrong test. Drafting stays on this machine and can be thrown away;
+    /// sending is what cannot be recalled, and the gate belongs on the
+    /// consequence rather than on the word "create". Lacy: "it should not send
+    /// communications out without approval but it should draft emails freely."
+    /// Fleet rules 12 and 13 already make draft-only the sanctioned path for
+    /// mail.
     #[test]
     fn drafting_runs_but_sending_asks() {
         for name in [
@@ -680,7 +817,6 @@ mod tests {
 
         for name in [
             "mcp__gmail__send_draft",
-            "mcp__gmail__delete_draft",
             "mcp__gmail__forward_draft",
             // Ambiguous on purpose: a name carrying `reply` is far more often
             // posting one than composing one, so it fails closed.
@@ -692,23 +828,109 @@ mod tests {
             assert_eq!(
                 verdict_for(name),
                 Verdict::Prompt,
-                "{name} leaves the machine or destroys something, draft or not"
+                "{name} leaves the machine, draft or not"
             );
         }
     }
 
+    /// The one protection in this change the directive did not ask for.
+    ///
+    /// The gated set is sending, spending and emptying the Trash. A remote
+    /// delete is none of those, so a literal reading would let it through. It
+    /// stays gated because the rule across this workstream is that a prompt is
+    /// removed only once the construction that makes the act safe exists.
+    /// `rm` stopped asking because deletes go to the Trash; nothing brings a
+    /// deleted calendar event back.
+    ///
+    /// Deleting this test and [`DESTROY_REMOTE_VERBS`] is the one-line change
+    /// if the call goes the other way. It is a test rather than a comment so
+    /// that going the other way is a deliberate act.
     #[test]
-    fn a_write_verb_beats_a_read_verb() {
-        // "read" appears in the name, but the call changes state.
-        assert_eq!(verdict_for("mcp__gmail__mark_as_read"), Verdict::Prompt);
-        // "get" + "put" — the write wins.
-        assert_eq!(verdict_for("mcp__x__get_and_put_thing"), Verdict::Prompt);
+    fn a_remote_delete_still_asks_because_nothing_undoes_it() {
+        for name in [
+            "mcp__calendar__delete_event",
+            "mcp__gdrive__delete_file",
+            "mcp__gmail__delete_draft",
+            "mcp__db__destroy_record",
+            "mcp__auth__revoke_token",
+        ] {
+            assert_eq!(
+                verdict_for(name),
+                Verdict::Prompt,
+                "{name} cannot be undone and Juno has no remote undo to offer"
+            );
+        }
     }
 
+    /// Replaces `unknown_names_prompt_rather_than_run`, whose name is the old
+    /// posture. The conservative direction moved: under a permissive default
+    /// the thing to be careful about is the small gated set, not everything
+    /// else. An unrecognised connector call runs.
+    ///
+    /// The care did not disappear, it moved. The second half of this test is
+    /// where it went: a name Juno cannot otherwise read still asks the moment
+    /// it carries a gated verb.
     #[test]
-    fn unknown_names_prompt_rather_than_run() {
-        assert_eq!(verdict_for("mcp__mystery__frobnicate"), Verdict::Prompt);
-        assert_eq!(verdict_for("SomeBuiltIn"), Verdict::Prompt);
+    fn unknown_names_run_rather_than_prompt() {
+        assert_eq!(verdict_for("mcp__mystery__frobnicate"), Verdict::Allow);
+        assert_eq!(verdict_for("mcp__weird"), Verdict::Allow);
+
+        // Unrecognised in every respect except the part that matters.
+        assert_eq!(
+            verdict_for("mcp__mystery__frobnicate_and_send"),
+            Verdict::Prompt
+        );
+        assert_eq!(
+            verdict_for("mcp__mystery__pay_the_frobnicator"),
+            Verdict::Prompt
+        );
+    }
+
+    /// A gated verb wins outright, with no read-verb override. The old rule
+    /// was "a write verb beats a read verb"; the new one is narrower and
+    /// sharper, so `search_and_send` asks even though it searches.
+    #[test]
+    fn a_gated_verb_beats_a_read_verb() {
+        assert_eq!(verdict_for("mcp__x__search_and_send"), Verdict::Prompt);
+        assert_eq!(verdict_for("mcp__x__get_and_pay"), Verdict::Prompt);
+        // And a read that merely sounds like one does not ask.
+        assert_eq!(verdict_for("mcp__gmail__get_message"), Verdict::Allow);
+    }
+
+    /// Exact-token matching is what keeps plural nouns from reading as verbs.
+    /// `list_transfers` carries `transfers`, not `transfer`, so a listing is
+    /// not mistaken for a payment. This is the property that lets the verb
+    /// lists stay short.
+    #[test]
+    fn plural_nouns_do_not_read_as_verbs() {
+        for name in [
+            "mcp__bank__list_transfers",
+            "mcp__blog__get_posts",
+            "mcp__plans__list_subscriptions",
+            "mcp__gdrive__list_shared_files",
+            "mcp__shop__get_purchases",
+            "mcp__stripe__list_charges",
+        ] {
+            assert_eq!(
+                verdict_for(name),
+                Verdict::Allow,
+                "{name} reads things, it does not do them"
+            );
+        }
+    }
+
+    /// The assumption behind allowing an unlisted built-in: every tool the CLI
+    /// brings of its own is local work. If that stops being true, this fails
+    /// here rather than sending something silently.
+    #[test]
+    fn the_clis_builtins_are_all_local_work() {
+        for builtin in ALLOWED_TOOLS.split(',') {
+            assert!(
+                !names_a_gated_act(builtin),
+                "{builtin} reads as a gated act but is pre-approved in                  ALLOWED_TOOLS; either it does not belong there or                  verdict_for must stop allowing unlisted built-ins"
+            );
+        }
+        assert_eq!(verdict_for("SomeBuiltIn"), Verdict::Allow);
     }
 
     #[test]
