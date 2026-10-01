@@ -2,9 +2,15 @@ import { useCallback } from 'react';
 import { Window, currentMonitor } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS } from "@/lib/constants.generated";
+import {
+  dockAnchorX,
+  dockGrowsUp,
+  getDockSlot,
+  type WindowAnchorX,
+} from "@/lib/barDock";
 
 /** Which horizontal edge of the window stays put across a resize. */
-export type WindowAnchorX = "start" | "center" | "end";
+export type { WindowAnchorX };
 
 /** Where the pinned point sits in one frame of the window. */
 export interface WindowAnchor {
@@ -29,7 +35,8 @@ export interface WindowSizeConfig {
   /**
    * Grow upward instead of downward: the near edge is the bottom. A bar docked
    * in the bottom half of its display opens its pane above the pill, so the
-   * added height extends up while the pill stays where it is.
+   * added height extends up while the pill stays where it is. Omitted: taken
+   * from the well this window is docked in.
    */
   growUp?: boolean;
   /**
@@ -44,7 +51,8 @@ export interface WindowSizeConfig {
   /**
    * Which horizontal edge stays put. A bar docked in a left-hand well grows
    * rightward, one in a right-hand well grows leftward, so it never runs off
-   * the screen edge it sits against. Default: the centre.
+   * the screen edge it sits against. Omitted: taken from the well this window
+   * is docked in, and the centre when it is docked nowhere.
    */
   anchorX?: WindowAnchorX;
 }
@@ -204,6 +212,32 @@ async function clampToMonitor(
   }
 }
 
+/**
+ * Fill in the anchors the docked well decides, for any caller that did not
+ * name them.
+ *
+ * This is the other half of why only the Pill used to behave. Every look
+ * resized through here, but only FloatingBar passed dock-derived anchors, so
+ * an Island parked at a right-edge well grew centre-anchored, ran past the
+ * screen edge, got nudged back inside by `clampToMonitor`, and never returned
+ * to its well. The slot is shared state now, so the default is simply right.
+ *
+ * A caller that names `anchorX` or `growUp` still wins: the Avatar decides its
+ * own growth direction from where its head faces.
+ */
+export function withDockDefaults(
+  windowLabel: string,
+  config: WindowSizeConfig,
+): WindowSizeConfig {
+  const slot = getDockSlot(windowLabel);
+  if (!slot) return config;
+  return {
+    ...config,
+    anchorX: config.anchorX ?? dockAnchorX(slot),
+    growUp: config.growUp ?? dockGrowsUp(slot),
+  };
+}
+
 export function useWindowSize(windowLabel: string) {
   const resizeWindow = useCallback(
     (config: WindowSizeConfig) =>
@@ -211,7 +245,7 @@ export function useWindowSize(windowLabel: string) {
         try {
           const appWindow = await Window.getByLabel(windowLabel);
           if (appWindow) {
-            await edgeStableResize(appWindow, config);
+            await edgeStableResize(appWindow, withDockDefaults(windowLabel, config));
           }
         } catch (error) {
           console.error(`Failed to resize window ${windowLabel}:`, error);
@@ -224,12 +258,16 @@ export function useWindowSize(windowLabel: string) {
     (config: WindowSizeConfig) =>
       enqueue(windowLabel, async () => {
         try {
-          const growUp = config.growUp ?? false;
+          // The dock's anchors are resolved BEFORE the no-op check: a resize to
+          // the size the window already has but with the growth direction
+          // flipped moves the window, so it must go through.
+          const resolved = withDockDefaults(windowLabel, config);
+          const growUp = resolved.growUp ?? false;
           const prev = lastSizeByLabel.get(windowLabel);
           if (
             prev &&
-            prev.width === config.width &&
-            prev.height === config.height &&
+            prev.width === resolved.width &&
+            prev.height === resolved.height &&
             prev.growUp === growUp
           ) {
             return; // no-op
@@ -237,10 +275,10 @@ export function useWindowSize(windowLabel: string) {
 
           const appWindow = await Window.getByLabel(windowLabel);
           if (appWindow) {
-            await edgeStableResize(appWindow, config);
+            await edgeStableResize(appWindow, resolved);
             lastSizeByLabel.set(windowLabel, {
-              width: config.width,
-              height: config.height,
+              width: resolved.width,
+              height: resolved.height,
               growUp,
             });
           }

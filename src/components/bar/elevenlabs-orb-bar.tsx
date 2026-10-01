@@ -13,7 +13,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
-import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
+import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
@@ -137,7 +137,6 @@ interface ElevenLabsOrbBarProps {
 export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
   useOrbKeyframes();
   const reducedMotion = useReducedMotion() ?? false;
-  const dragHandlers = useDragWindowWithThreshold();
   const { resizeWindowIfChanged } = useWindowSize(WINDOW_LABEL);
   const chat = useBarConversation();
 
@@ -242,6 +241,13 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
   useEffect(() => clearHoverTimer, []);
   const sheetAvailable = (hasSheetContent(answer) && (working || lingering)) || noticeOpen;
   const sheetOpen = sheetAvailable && (pinned || autoSheet || hoverOpen || noticeOpen);
+
+  // Drag from anywhere, land in a gravity well. A tap still reaches the orb:
+  // the gesture only becomes a drag past the movement threshold.
+  const { dragProps, swallowClickAfterDrag } = useBarDrag({
+    displayFollowPaused: sheetOpen || working,
+  });
+
   const onPointerEnter = () => {
     setHovered(true);
     clearHoverTimer();
@@ -479,7 +485,8 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
       onBlurCapture={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
       }}
-      {...dragHandlers}
+      {...dragProps}
+      onClickCapture={swallowClickAfterDrag}
     >
       {/* The stage: centred, top-anchored, sized once. The orb's centre is at
           (width/2, STAGE/2) in every posture, so nothing under it can move it. */}

@@ -7,7 +7,7 @@ import { Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
-import { useDragWindow } from "@/hooks/useDragWindow";
+import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
@@ -211,7 +211,6 @@ function ApprovalRow({
 
 export function HaloBar() {
   const reducedMotion = useReducedMotion() ?? false;
-  const onDragMouseDown = useDragWindow();
   const { resizeWindowIfChanged } = useWindowSize(WINDOW_LABEL);
   const chat = useBarConversation();
 
@@ -451,6 +450,12 @@ export function HaloBar() {
 
   // ── The sheet and the window ──
   const sheetOpen = !!caption || composerOpen || !!approval || placement === "below" || askOpen;
+
+  // Drag from anywhere, land in a gravity well.
+  const { dragProps, swallowClickAfterDrag } = useBarDrag({
+    displayFollowPaused: sheetOpen || working,
+  });
+
   const [contentH, setContentH] = useState(0);
   const [measureEl, setMeasureEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -517,7 +522,7 @@ export function HaloBar() {
       className="relative h-screen w-screen cursor-grab overflow-hidden bg-transparent select-none active:cursor-grabbing"
       data-testid="halo"
       data-sheet={sheetOpen ? "open" : "closed"}
-      onMouseDown={onDragMouseDown}
+      {...dragProps}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onFocusCapture={() => setFocusWithin(true)}
@@ -525,6 +530,7 @@ export function HaloBar() {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
       }}
       onClickCapture={(e) => {
+        if (swallowClickAfterDrag(e)) return;
         if (answerShowing && (e.target as HTMLElement).closest("button, input, a")) engage();
       }}
     >

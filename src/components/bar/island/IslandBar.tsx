@@ -15,7 +15,7 @@ import { Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
-import { useDragWindow } from "@/hooks/useDragWindow";
+import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
@@ -185,7 +185,6 @@ function ApprovalRow({
 
 export function IslandBar() {
   const reducedMotion = useReducedMotion() ?? false;
-  const onDragMouseDown = useDragWindow();
   const { resizeWindowIfChanged } = useWindowSize(WINDOW_LABEL);
   const chat = useBarConversation();
 
@@ -229,6 +228,12 @@ export function IslandBar() {
   // ── The card ──
   const [cardOpen, setCardOpen] = useState(false);
   const [spokenOpen, setSpokenOpen] = useState(false);
+
+  // Drag from anywhere, land in a gravity well. The card being open is the
+  // island's "busy": it is not re-homed to another display mid-answer.
+  const { dragProps, swallowClickAfterDrag } = useBarDrag({
+    displayFollowPaused: cardOpen || working,
+  });
   // Read through refs so a close from a timer sees the current state.
   const barRef = useRef(bar);
   barRef.current = bar;
@@ -626,7 +631,7 @@ export function IslandBar() {
   return (
     <div
       className="relative h-screen w-screen cursor-grab overflow-hidden bg-transparent select-none active:cursor-grabbing"
-      onMouseDown={onDragMouseDown}
+      {...dragProps}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onFocusCapture={() => setFocusWithin(true)}
@@ -634,6 +639,7 @@ export function IslandBar() {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
       }}
       onClickCapture={(e) => {
+        if (swallowClickAfterDrag(e)) return;
         if (cardOpen && (e.target as HTMLElement).closest("button, input, a")) engage();
       }}
     >

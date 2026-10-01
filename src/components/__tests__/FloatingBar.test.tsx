@@ -669,101 +669,10 @@ describe("FloatingBar", () => {
     expect(input).toHaveValue("hel");
   });
 
-  it("drags the window from anywhere once the mouse moves, and swallows the click that follows", async () => {
-    await renderBar();
-    await hover(true);
-    const mic = screen.getByRole("button", { name: "Talk to Juno" });
-
-    fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
-    fireEvent.mouseMove(mic, { clientX: 12, clientY: 11 }); // under the threshold
-    expect(startDragging).not.toHaveBeenCalled();
-    fireEvent.mouseMove(mic, { clientX: 30, clientY: 20 });
-    expect(startDragging).toHaveBeenCalledTimes(1);
-
-    fireEvent.mouseUp(mic);
-    fireEvent.click(mic);
-    await act(async () => {});
-    expect(invoke).not.toHaveBeenCalledWith("agent_voice", expect.anything());
-  });
-
-  it("settles into the nearest well after a drag, gliding to it", async () => {
-    await renderBar();
-    await hover(true);
-    const mic = screen.getByRole("button", { name: "Talk to Juno" });
-
-    // Drag hands off to the OS window drag.
-    fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
-    fireEvent.mouseMove(mic, { clientX: 30, clientY: 20 });
-    expect(startDragging).toHaveBeenCalledTimes(1);
-
-    // The OS drops the window near the bottom-right; release settles it.
-    outerPos.x = 850;
-    outerPos.y = 700;
-    fireEvent.mouseUp(window);
-
-    // Let the async settle + the rAF glide run to completion.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 500));
-    });
-
-    expect(windowSetPosition).toHaveBeenCalled();
-    const last = (windowSetPosition.mock.calls.at(-1) as unknown[])[0] as {
-      x: number;
-      y: number;
-    };
-    // Nearest well to (850,700) on a 1000×800 monitor, window 164×66:
-    // right column x = 1000 − 16 − 164 = 820 ; bottom row y = 800 − 16 − 66 = 718.
-    expect(last).toMatchObject({ x: 820, y: 718 });
-  });
-
-  it("does not settle when the press was a click, not a drag", async () => {
-    await renderBar();
-    await hover(true);
-    // On mount the bar deliberately parks itself in a snap well (the saved
-    // position's nearest well, or the default top-right one). That placement is
-    // one atomic set_bar_frame, made while the window is still hidden, so it
-    // never shows as a setPosition. Let it land, then clear the mock so the
-    // assertion below sees only settle calls caused by the click.
-    await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("set_bar_frame", expect.anything()),
-    );
-    windowSetPosition.mockClear();
-    const mic = screen.getByRole("button", { name: "Talk to Juno" });
-
-    fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
-    fireEvent.mouseUp(window);
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-
-    expect(startDragging).not.toHaveBeenCalled();
-    expect(windowSetPosition).not.toHaveBeenCalled();
-  });
-
-  it("treats a press and release without movement as the click it is", async () => {
-    await renderBar();
-    await hover(true);
-    const mic = screen.getByRole("button", { name: "Talk to Juno" });
-
-    fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
-    fireEvent.mouseMove(mic, { clientX: 11, clientY: 10 });
-    fireEvent.mouseUp(mic);
-    fireEvent.click(mic);
-    await act(async () => {});
-
-    expect(startDragging).not.toHaveBeenCalled();
-    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "start" });
-  });
-
-  it("never drags from the text input, so text can be selected", async () => {
-    await renderBar();
-    const input = await openInput();
-
-    fireEvent.mouseDown(input, { button: 0, clientX: 10, clientY: 10 });
-    fireEvent.mouseMove(input, { clientX: 60, clientY: 10 });
-
-    expect(startDragging).not.toHaveBeenCalled();
-  });
+  // The drag gesture and its snap into a well are no longer the Pill's own:
+  // they live in `useBarDrag` (hooks/useDragWindow.ts), shared by every bar
+  // appearance. Their tests moved with them, unchanged, to
+  // hooks/__tests__/useBarDrag.test.tsx.
 
   it("puts the caret back in an open input when the window becomes key", async () => {
     await renderBar();

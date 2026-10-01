@@ -73,7 +73,7 @@ src/
 ### Key Components
 
 - **App.tsx**: Main window with modal system (help, feedback, import/export)
-- **FloatingBar.tsx**: Primary floating interface, the default bar appearance, Wispr-Flow-shaped. Idle: a tiny 56×16 pill in an 88×48 window. Hover (native `mouse-entered-window` from the tracking area in `platform/macos.rs`, plus DOM hover): the pill animates to 132×34 and reveals a mic button (`invoke("agent_voice", {action:"start"})` → the same `agent-transcription-start` pipeline as the hotkey) and a type button (opens the input focused after `getCurrentWindow().setFocus()`). A drag anywhere on the pill, buttons included, moves the window once the mouse travels `DRAG_THRESHOLD_PX`; the click that follows a drag is swallowed. On release the window glides into the nearest **well**, one of the tidy anchor points around every display (corners + edge-midpoints, a 3×3 grid minus centre per monitor, `src/lib/snapWells.ts`); the drag is free, the wells decide where it lands. `useWindowSize` also clamps a resized window onto its current monitor (both axes) so an edge-docked bar's pane can't grow off-screen. Layouts (`pickLayout` / `BAR_LAYOUTS`): compact, hover, voice (220×34, listening/transcribing/dictating/always-listening, with a Stop-listening control), full (419×44: input open, backend input states, working/error/speaking, or the chat pane). The `StatusDot` renders in the compact idle pill and in the status-bearing layouts (voice/full) but **not** in hover; compact and hover both centre their single child, so growing from compact to hover cross-fades the dot out and the buttons in at the same centre instead of teleporting the dot from centre to the left edge. Once a query occurs `bar/BarChatPane.tsx` opens beneath the pill inside the same window: the main window's `ChatContainerV2` under a scoped `.dark` class, fed by `hooks/useBarConversation.ts` (`useConversation` + `useBackendEvents` with `skipServerCheck` and no audio, because the main window owns TTS playback). Follow-ups go through the pill input; Escape closes the input, then the pane, only when idle (a running task's Escape belongs to the Rust stop-key monitor). The window is exactly pill + `BAR_PAD` each side, and every layout shares one `BAR_BAND` (the fixed vertical slot the pill is centred in), so no layout change ever moves the anchor. `useWindowSize` pins the band's near edge (`anchorY`, always `BAR_PAD`, from the top or from the bottom with `growUp`) and the docked column (`anchorX`: the well's left or right edge, else the centre) across resizes, with the caller naming the same point in the current frame (`from`) so nothing is cached between resizes; the DOM is aligned to the same edges. Resizes are two-phase: growing, the window is resized first and the pill is drawn at the new frame once the backend has applied it; shrinking, the pill animates first and the window follows after `SHRINK_DELAY_MS`. The growth direction and column come from the well slot the bar is docked in (`dock`), known at launch placement, snap and display hop, never read back from the window. The audit and ledger are in `docs/plans/pill-resize-audit.md`. The bar window has `acceptFirstMouse` (tauri.conf.json) so the first click on an unfocused bar reaches the page; the window is never told about focus by OS focus changes, only by the input itself, so a mic click that activates the window cannot turn into the backend's expand-to-input transition.
+- **FloatingBar.tsx**: Primary floating interface, the default bar appearance, Wispr-Flow-shaped. Idle: a tiny 56×16 pill in an 88×48 window. Hover (native `mouse-entered-window` from the tracking area in `platform/macos.rs`, plus DOM hover): the pill animates to 132×34 and reveals a mic button (`invoke("agent_voice", {action:"start"})` → the same `agent-transcription-start` pipeline as the hotkey) and a type button (opens the input focused after `getCurrentWindow().setFocus()`). A drag anywhere on the pill, buttons included, moves the window once the mouse travels `DRAG_THRESHOLD_PX`; the click that follows a drag is swallowed. On release the window glides into the nearest **well**, one of the tidy anchor points around every display (corners + edge-midpoints, a 3×3 grid minus centre per monitor, `src/lib/snapWells.ts`); the drag is free, the wells decide where it lands. That gesture is **not the Pill's own**: it is `useBarDrag` (see Window Dragging below), shared by every appearance, so the Pill holds no drag or snap code of its own. `useWindowSize` also clamps a resized window onto its current monitor (both axes) so an edge-docked bar's pane can't grow off-screen. Layouts (`pickLayout` / `BAR_LAYOUTS`): compact, hover, voice (220×34, listening/transcribing/dictating/always-listening, with a Stop-listening control), full (419×44: input open, backend input states, working/error/speaking, or the chat pane). The `StatusDot` renders in the compact idle pill and in the status-bearing layouts (voice/full) but **not** in hover; compact and hover both centre their single child, so growing from compact to hover cross-fades the dot out and the buttons in at the same centre instead of teleporting the dot from centre to the left edge. Once a query occurs `bar/BarChatPane.tsx` opens beneath the pill inside the same window: the main window's `ChatContainerV2` under a scoped `.dark` class, fed by `hooks/useBarConversation.ts` (`useConversation` + `useBackendEvents` with `skipServerCheck` and no audio, because the main window owns TTS playback). Follow-ups go through the pill input; Escape closes the input, then the pane, only when idle (a running task's Escape belongs to the Rust stop-key monitor). The window is exactly pill + `BAR_PAD` each side, and every layout shares one `BAR_BAND` (the fixed vertical slot the pill is centred in), so no layout change ever moves the anchor. `useWindowSize` pins the band's near edge (`anchorY`, always `BAR_PAD`, from the top or from the bottom with `growUp`) and the docked column (`anchorX`: the well's left or right edge, else the centre) across resizes, with the caller naming the same point in the current frame (`from`) so nothing is cached between resizes; the DOM is aligned to the same edges. Resizes are two-phase: growing, the window is resized first and the pill is drawn at the new frame once the backend has applied it; shrinking, the pill animates first and the window follows after `SHRINK_DELAY_MS`. The growth direction and column come from the well slot the bar is docked in (`dock`), known at launch placement, snap and display hop, never read back from the window. The audit and ledger are in `docs/plans/pill-resize-audit.md`. The bar window has `acceptFirstMouse` (tauri.conf.json) so the first click on an unfocused bar reaches the page; the window is never told about focus by OS focus changes, only by the input itself, so a mic click that activates the window cannot turn into the backend's expand-to-input transition.
 - **settings/ModularSettingsWindow.tsx**: the Settings window (`/settings` route), styled after macOS System Settings. A compact left sidebar of coloured icon-tile rows with a search field (filters `settingsCategories` by name + `keywords`), a large content title, the `-apple-system`/SF font, and OS light/dark following via `useSystemTheme` (scopes a `.dark` class on the settings root). Sections live in `settings/sections/*` and are built from the primitives in `settings/ui.tsx`: `SettingsGroup` (a rounded inset card with an optional title above and footer below; `advanced` hides the whole group unless the advanced toggle is on) and `SettingsRow` (one list row: `label`+`description` left, `children` control right, `below` for full-width controls like sliders/textareas; `advanced` gates a single row, `destructive` reddens the label). Rows in a group are auto-separated by hairline dividers. The advanced-settings toggle lives in the sidebar footer; `AdvancedSettingsContext` persists it in the backend. Follow the primitives (not raw `Card`s) when adding settings, and keep neutral chrome on theme tokens so it reads in both themes.
 - **VoiceStatusIndicator.tsx**: Real-time voice mode status display
 - **ui/**: Complete shadcn/ui component library integration
@@ -162,28 +162,39 @@ All floating windows use **programmatic dragging** via `useDragWindow` hooks. Do
 **Two hooks** in `src/hooks/useDragWindow.ts`:
 
 ```typescript
-// For pure drag surfaces (bar containers, background padding):
+// EVERY bar appearance (Pill, Bar, Studio, Island, Orb, Halo, Avatar):
+import { useBarDrag } from "@/hooks/useDragWindow";
+
+const { dragProps, swallowClickAfterDrag } = useBarDrag({ displayFollowPaused: busy });
+return (
+  <div
+    {...dragProps}
+    onClickCapture={(e) => {
+      if (swallowClickAfterDrag(e)) return;
+      /* the look's own click handling */
+    }}
+    className="cursor-grab active:cursor-grabbing"
+  >…</div>
+);
+```
+
+```typescript
+// The floating panels, whose chrome always means "drag":
 import { useDragWindow } from "@/hooks/useDragWindow";
 
 const onDragMouseDown = useDragWindow();
 return <div onMouseDown={onDragMouseDown} className="cursor-grab active:cursor-grabbing">...</div>;
 ```
 
-```typescript
-// For surfaces that are BOTH clickable AND draggable (orb, persona):
-import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
-
-const dragHandlers = useDragWindowWithThreshold();
-return <div onClick={handleClick} {...dragHandlers} className="cursor-grab active:cursor-grabbing">...</div>;
-```
-
 **Rules:**
-- `useDragWindow()` calls `startDragging()` immediately on mousedown. Use on containers where clicks always mean "drag."
-- `useDragWindowWithThreshold()` only drags after 4px of mouse movement. Quick taps pass through to `onClick`. Use when the surface is also an activation target.
-- Interactive elements (button, input, `[role="button"]`, `[data-no-drag]`) are automatically excluded, so clicks on them pass through normally.
+- `useBarDrag()` is the **only** drag a bar appearance uses, and it is what gives that look the gravity wells: drag past `DRAG_THRESHOLD_PX` (4px) hands off to the OS window drag and shows the drop indicator, release glides the window into the nearest well and records the slot in the dock store (`src/lib/barDock.ts`). A look that calls it gets wells with no further wiring; a look that does not, does not snap. The snap itself is gated on the window label, so the hook is safe anywhere.
+- A bar drag starts **anywhere except text entry** (`input, textarea, [contenteditable], [data-no-drag]`). Buttons are draggable-through: the movement threshold means a press and release on one is still that button's click.
+- `useDragWindow()` calls `startDragging()` immediately on mousedown, so it excludes every control (`button, input, textarea, select, a, [role="button"], [contenteditable], [data-no-drag]`). Panels only.
 - Always add `cursor-grab active:cursor-grabbing` for visual affordance.
 - NEVER add `data-tauri-drag-region` to any element. This attribute is banned.
 - The Tauri capability `core:window:allow-start-dragging` must be present (already in `floating.json`).
+
+**The wells are shared, not the Pill's.** `src/lib/snapWells.ts` is the pure geometry (wells per display, nearest, same-slot-on-another-display), `src/lib/barDock.ts` holds the dock slot plus what it decides (`dockAnchorX`, `dockGrowsUp`, `distinctWells`, `predictedWindowOrigin`), `src/hooks/useBarSnapWells.ts` performs the snap and the cursor-display re-home, and `useWindowSize` defaults `anchorX`/`growUp` from the dock slot so every look's resize is anchored on the edges it is docked against. Wells are computed from the window's **measured logical outer size** every time, so there is no per-look data: a wide look's columns simply converge as its width approaches the inset area.
 
 ## Component Patterns
 

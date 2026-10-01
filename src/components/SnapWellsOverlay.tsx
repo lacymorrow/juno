@@ -1,16 +1,25 @@
 /**
- * SnapWellsOverlay — the drop-target affordance for the floating bar.
+ * SnapWellsOverlay: the drop-target affordance for the bar, whichever look
+ * is in it.
  *
  * While the bar is being dragged, dim the whole screen and cut a "hole" at each
  * snap well so the user sees where the bar will land — the way Wispr Flow /
  * superwhisper show drop targets. When the drag ends the overlay disappears.
- * The bar itself snaps to the nearest well on release (`settleIntoWell` in
- * FloatingBar); this is purely the visual affordance for it.
+ * The bar itself snaps to the nearest well on release (`settleBarSnap` in
+ * `hooks/useBarSnapWells`); this is purely the visual affordance for it.
  *
  * Modeled on DesktopCursorOverlay: a full-screen, click-through, always-on-top
- * transparent window spanning the union of every monitor. The bar broadcasts
- * `snap-wells-show` / `snap-wells-hide` events (see FloatingBar); we own only
- * the window show/hide and the dim/hole rendering — no business logic.
+ * transparent window spanning the union of every monitor. The drag gesture
+ * broadcasts `snap-wells-show` / `snap-wells-hide`; we own only the window
+ * show/hide and the dim/hole rendering, and no business logic.
+ *
+ * The brightened ring is predicted with the SAME comparison the settle makes:
+ * the window's top-left against each well's top-left, with that top-left
+ * worked out from the cursor and the grab offset carried in the show payload.
+ * It used to compare the bare cursor against each well's CENTRE, which agrees
+ * with the landing only while the window is small. On a wide strip grabbed
+ * near one end the error is half the window's width, easily a whole column, so
+ * the ring brightened over one well and the bar landed in another.
  *
  * The 2560x1600 @ 0,0 geometry in tauri.conf.json is only a startup fallback
  * (JSON cannot carry comments): this component resizes/positions the window
@@ -26,7 +35,13 @@ import {
   cursorPosition,
 } from "@tauri-apps/api/window";
 import { useEventListener } from "@/hooks/useEventListener";
-import { computeWells, type MonitorRect, type Well } from "@/lib/snapWells";
+import {
+  computeWells,
+  nearestWell,
+  type MonitorRect,
+  type Well,
+} from "@/lib/snapWells";
+import { distinctWells, predictedWindowOrigin } from "@/lib/barDock";
 import {
   unionLogicalBounds,
   wellToOverlayRect,
@@ -43,16 +58,26 @@ const AUTO_HIDE_MS = 8000;
 // How often we re-check the cursor to brighten the nearest well.
 const HIGHLIGHT_POLL_MS = 80;
 
-/** The bar's size in logical pixels; each well scales it for its own display. */
-type ShowPayload = { windowWidth: number; windowHeight: number };
+/**
+ * The bar's size in logical pixels (each well scales it for its own display),
+ * plus where inside the window the drag was grabbed, also in logical pixels.
+ * The grab offset is what lets the highlight predict the window's top-left
+ * from the cursor; a payload without it is treated as grabbed at the window's
+ * top-left, which is the old behaviour and close enough for a small window.
+ */
+type ShowPayload = {
+  windowWidth: number;
+  windowHeight: number;
+  grabOffsetX?: number;
+  grabOffsetY?: number;
+};
 
-// A rendered hole: overlay-local CSS rect plus the well's physical centre (used
-// to pick the nearest well to the cursor) and a stable key.
+// A rendered hole: overlay-local CSS rect, the well it draws (physical px, for
+// the nearest-well highlight) and a stable key.
 interface Hole {
   key: string;
   rect: OverlayRect;
-  centerPhysX: number;
-  centerPhysY: number;
+  well: Well;
 }
 
 export const SnapWellsOverlay = () => {
@@ -64,6 +89,10 @@ export const SnapWellsOverlay = () => {
   const [highlight, setHighlight] = useState<number>(-1);
 
   const holesRef = useRef<Hole[]>([]);
+  // The live monitor set and this drag's grab offset: together they turn a
+  // cursor position into the window's predicted top-left.
+  const monitorsRef = useRef<MonitorRect[]>([]);
+  const grabOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const autoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -90,8 +119,10 @@ export const SnapWellsOverlay = () => {
   }, [stopHighlightPoll]);
 
   // ── Nearest-well highlight ────────────────────────────────────────────────
-  // Poll the cursor and brighten the well whose centre it's closest to, so the
-  // user sees which well they'll snap to. Purely visual; safe to no-op.
+  // Poll the cursor, work out where the dragged window's top-left must be, and
+  // brighten the well that top-left is nearest: the exact comparison the
+  // settle makes, so the preview cannot disagree with the landing. Purely
+  // visual; safe to no-op.
   const startHighlightPoll = useCallback(() => {
     stopHighlightPoll();
     pollTimer.current = setInterval(async () => {
@@ -99,17 +130,16 @@ export const SnapWellsOverlay = () => {
         const c = await cursorPosition();
         const list = holesRef.current;
         if (!list.length) return;
-        let bestIdx = -1;
-        let bestD = Infinity;
-        for (let i = 0; i < list.length; i++) {
-          const dx = c.x - list[i].centerPhysX;
-          const dy = c.y - list[i].centerPhysY;
-          const d = dx * dx + dy * dy;
-          if (d < bestD) {
-            bestD = d;
-            bestIdx = i;
-          }
-        }
+        const origin = predictedWindowOrigin(
+          c,
+          grabOffsetRef.current,
+          monitorsRef.current,
+        );
+        const target = nearestWell(
+          origin,
+          list.map((h) => h.well),
+        );
+        const bestIdx = target ? list.findIndex((h) => h.well === target) : -1;
         // Only re-render when the nearest well actually changes.
         setHighlight((prev) => (prev === bestIdx ? prev : bestIdx));
       } catch {
@@ -120,7 +150,7 @@ export const SnapWellsOverlay = () => {
 
   // ── Show: size+position the overlay over all monitors, then compute holes ──
   const show = useCallback(
-    async ({ windowWidth, windowHeight }: ShowPayload) => {
+    async ({ windowWidth, windowHeight, grabOffsetX, grabOffsetY }: ShowPayload) => {
       try {
         const win = getCurrentWindow();
 
@@ -157,13 +187,18 @@ export const SnapWellsOverlay = () => {
         ]);
 
         // Same wells the bar snaps to: same computeWells, same bar size, and
-        // the same includeCenter (FloatingBar's settleIntoWell enables the
-        // centre well, so this must too, or the indicator would miss a hole).
-        const wells: Well[] = computeWells(monitorRects, {
-          windowWidth,
-          windowHeight,
-          includeCenter: true,
-        });
+        // the same includeCenter (`settleBarSnap` enables the centre well, so
+        // this must too, or the indicator would miss a hole). Collapsed to one
+        // well per real landing spot: a look wider than the inset area has its
+        // columns converge on the same x, and rings stacked on one rectangle
+        // only read as a single brighter ring.
+        const wells: Well[] = distinctWells(
+          computeWells(monitorRects, {
+            windowWidth,
+            windowHeight,
+            includeCenter: true,
+          }),
+        );
 
         const nextHoles: Hole[] = wells.map((w, i) => {
           const rect = wellToOverlayRect(
@@ -175,11 +210,12 @@ export const SnapWellsOverlay = () => {
           return {
             key: `${w.monitorIndex}-${w.fy}-${w.fx}-${i}`,
             rect,
-            centerPhysX: w.x + w.width / 2,
-            centerPhysY: w.y + w.height / 2,
+            well: w,
           };
         });
 
+        monitorsRef.current = monitorRects;
+        grabOffsetRef.current = { x: grabOffsetX ?? 0, y: grabOffsetY ?? 0 };
         holesRef.current = nextHoles;
         setSpan({ w: spanW, h: spanH });
         setHoles(nextHoles);
