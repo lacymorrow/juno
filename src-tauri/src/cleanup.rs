@@ -49,6 +49,19 @@ pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
 pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
     info!("Starting application cleanup...");
 
+    // Cancel every armed timer first. Screen and file monitors poll on an
+    // interval and start a turn of their own when they fire, so leaving one
+    // running through shutdown means capturing the screen on the way out.
+    let cancelled_timers = crate::agent::tools::timer_tools::timer_manager()
+        .cancel_all_timers(Some(app_handle))
+        .await;
+    if !cancelled_timers.is_empty() {
+        info!(
+            "Cancelled {} armed timer(s) during cleanup",
+            cancelled_timers.len()
+        );
+    }
+
     // Get AppState
     if let Some(app_state) = app_handle.try_state::<AppState>() {
         // Cancel any ongoing agent execution
