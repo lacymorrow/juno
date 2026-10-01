@@ -75,12 +75,15 @@ pub enum Presence {
     NotRunning,
     /// Running and frontmost: the app the person is looking at.
     Frontmost,
-    /// Running with at least one window the person could see, behind something.
+    /// Running and not frontmost. Claims nothing about its windows, which is
+    /// what makes it the right answer when the accessibility API did not
+    /// answer: running and not in front is still known.
     Background,
     /// Running, and every window it has is minimized.
     Minimized,
-    /// Running with no windows at all (a menu-bar agent, or a window that
-    /// closed while the process stayed alive).
+    /// Running with an observed window count of zero (a menu-bar agent, or a
+    /// window that closed while the process stayed alive). Only from a real
+    /// count, never from a window read that failed.
     NoWindows,
 }
 
@@ -354,8 +357,10 @@ pub fn parse_record(app: &str, raw: &str, installed: bool) -> Observation {
         "no" => Presence::NotFound,
         "yes" => match (field(1), windows, minimized) {
             ("yes", _, _) => Presence::Frontmost,
-            // No window information: say running, claim nothing about screen.
-            ("no", None, _) => Presence::NoWindows,
+            // The window read failed, so say only what is known: running, and
+            // not in front. "No windows open" would be a claim about windows
+            // nobody counted, which is the defect this module exists to stop.
+            ("no", None, _) => Presence::Background,
             ("no", Some(0), _) => Presence::NoWindows,
             ("no", Some(w), Some(m)) if m >= w => Presence::Minimized,
             ("no", Some(_), _) => Presence::Background,
@@ -749,11 +754,18 @@ mod tests {
 
     #[test]
     fn unreadable_window_state_claims_nothing_about_the_screen() {
-        // Accessibility refused, so windows are unknown. Running is still
-        // known, and the sentence stops there.
+        // Accessibility refused, so the window count is unknown. Running and
+        // not frontmost are still known, and the sentence stops there. It must
+        // not say "no windows open": nobody counted them.
         let o = obs("yes|no|?|?");
-        assert_eq!(o.presence, Presence::NoWindows);
-        assert!(o.sentence().contains("no windows"));
+        assert_eq!(o.presence, Presence::Background);
+        assert!(o.sentence().contains("not frontmost"));
+        assert!(!o.sentence().contains("window"));
+
+        // A real count of zero is a different fact, and may be said.
+        let counted = obs("yes|no|0|0");
+        assert_eq!(counted.presence, Presence::NoWindows);
+        assert!(counted.sentence().contains("no windows"));
 
         let blind = parse_record("Spotify", "?|?|?|?", false);
         assert_eq!(blind.presence, Presence::Unknown);
