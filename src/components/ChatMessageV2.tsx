@@ -486,10 +486,10 @@ function ApprovalPrompt({
             <button
               type="button"
               onClick={() => onAlwaysAllow(toolId, msg.always_allow_label!)}
-              className="text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              className="text-left text-xs text-[#007AFF] underline-offset-2 hover:underline"
             >
               Allow, and stop asking about {msg.always_allow_label}
-              <span className="text-muted-foreground/70"> for this conversation</span>
+              <span className="text-muted-foreground"> for this conversation</span>
             </button>
           )}
         </div>
