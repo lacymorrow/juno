@@ -13,7 +13,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import { COMMANDS, EVENTS, UI, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
-import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
+import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
@@ -141,7 +141,6 @@ interface ShaderOrbBarProps {
 export function ShaderOrbBar(_props: ShaderOrbBarProps) {
   useOrbKeyframes();
   const reducedMotion = useReducedMotion() ?? false;
-  const dragHandlers = useDragWindowWithThreshold();
   const { resizeWindowIfChanged } = useWindowSize(WINDOW_LABEL);
   const chat = useBarConversation();
 
@@ -241,6 +240,12 @@ export function ShaderOrbBar(_props: ShaderOrbBarProps) {
   );
   const sheetAvailable = hasSheet(sheetContent, noticeOpen) && (working || unread || noticeOpen);
   const sheetOpen = sheetAvailable && (pinned || autoSheet || noticeOpen);
+
+  // Drag from anywhere, land in a gravity well. A tap still reaches the
+  // sphere: the gesture only becomes a drag past the movement threshold.
+  const { dragProps, swallowClickAfterDrag } = useBarDrag({
+    displayFollowPaused: sheetOpen || working,
+  });
 
   // ── Composer ──
   const [input, setInput] = useState("");
@@ -478,7 +483,8 @@ export function ShaderOrbBar(_props: ShaderOrbBarProps) {
       onBlurCapture={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
       }}
-      {...dragHandlers}
+      {...dragProps}
+      onClickCapture={swallowClickAfterDrag}
     >
       {/* The stage: centred, top-anchored, sized once. The sphere's centre is
           at (width/2, STAGE/2) in every posture, so nothing under it moves it. */}

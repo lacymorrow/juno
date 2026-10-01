@@ -15,7 +15,7 @@ import { Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
-import { useDragWindow } from "@/hooks/useDragWindow";
+import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
@@ -187,7 +187,6 @@ export function AppBar() {
   const theme = useSystemTheme();
   const palette = paletteFor(theme);
   const reducedMotion = useReducedMotion() ?? false;
-  const onDragMouseDown = useDragWindow();
   const { resizeWindowIfChanged } = useWindowSize(WINDOW_LABEL);
   const chat = useBarConversation();
 
@@ -235,6 +234,13 @@ export function AppBar() {
   // ── The sheet ──
   const [sheetOpen, setSheetOpen] = useState(false);
   const [spokenOpen, setSpokenOpen] = useState(false);
+
+  // Drag from anywhere, land in a gravity well. A wide strip is exactly the
+  // look the old cursor-centre highlight got wrong; the grab offset the drag
+  // hook sends fixes it.
+  const { dragProps, swallowClickAfterDrag } = useBarDrag({
+    displayFollowPaused: sheetOpen || working,
+  });
   const barRef = useRef(bar);
   barRef.current = bar;
   const inputRef = useRef("");
@@ -609,7 +615,7 @@ export function AppBar() {
   return (
     <div
       className="relative h-screen w-screen cursor-grab overflow-hidden bg-transparent select-none active:cursor-grabbing"
-      onMouseDown={onDragMouseDown}
+      {...dragProps}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onFocusCapture={() => setFocusWithin(true)}
@@ -617,6 +623,7 @@ export function AppBar() {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
       }}
       onClickCapture={(e) => {
+        if (swallowClickAfterDrag(e)) return;
         if (sheetOpen && (e.target as HTMLElement).closest("button, input, a")) engage();
       }}
       data-testid="bar-root"

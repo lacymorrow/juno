@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { anchoredLeft, anchoredTop } from "../useWindowSize";
+import { beforeEach, describe, expect, it } from "vitest";
+import { anchoredLeft, anchoredTop, withDockDefaults } from "../useWindowSize";
+import { resetDockSlots, setDockSlot } from "@/lib/barDock";
+import { SLOT } from "@/lib/snapWells";
 
 // `anchoredTop` decides the new physical top edge for a resize that must keep
 // one point at the same screen position, whether the window grows down
@@ -99,5 +101,57 @@ describe("anchoredLeft", () => {
 
   it("does not move for a same-width resize", () => {
     expect(anchoredLeft(1336, 88, 88, "end")).toBe(1336);
+  });
+});
+
+// Every bar look resizes through `useWindowSize`, but only the Pill used to
+// pass dock-derived anchors. Everyone else grew centre-anchored, ran past the
+// screen edge it was docked against, got nudged back inside by
+// `clampToMonitor`, and never returned to its well: an Island parked at a
+// right-edge well drifted inward every time it opened.
+describe("withDockDefaults", () => {
+  const LABEL = "floating-bar";
+  beforeEach(() => resetDockSlots());
+
+  it("leaves a resize alone when the window is docked nowhere yet", () => {
+    const config = { width: 88, height: 66 };
+    expect(withDockDefaults(LABEL, config)).toBe(config);
+  });
+
+  it("anchors on the docked edges for a caller that names neither", () => {
+    setDockSlot(LABEL, SLOT.bottomRight);
+    expect(withDockDefaults(LABEL, { width: 451, height: 444 })).toEqual({
+      width: 451,
+      height: 444,
+      anchorX: "end",
+      growUp: true,
+    });
+  });
+
+  it("grows rightward and downward from a top-left well", () => {
+    setDockSlot(LABEL, SLOT.topLeft);
+    expect(withDockDefaults(LABEL, { width: 451, height: 444 })).toMatchObject({
+      anchorX: "start",
+      growUp: false,
+    });
+  });
+
+  it("never overrules a caller that named its own anchors", () => {
+    setDockSlot(LABEL, SLOT.bottomRight);
+    // The Avatar decides its growth direction from where its head faces.
+    expect(
+      withDockDefaults(LABEL, {
+        width: 116,
+        height: 116,
+        growUp: false,
+        anchorX: "center",
+      }),
+    ).toMatchObject({ anchorX: "center", growUp: false });
+  });
+
+  it("is per window, so a panel's resize is never anchored on the bar's well", () => {
+    setDockSlot(LABEL, SLOT.bottomRight);
+    const config = { width: 300, height: 200 };
+    expect(withDockDefaults("floating-panel", config)).toBe(config);
   });
 });
