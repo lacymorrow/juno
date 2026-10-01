@@ -80,11 +80,11 @@ use commands::{
     accessibility_click, accessibility_scan, always_listening::*, app_url::*, autostart::*,
     computer, core::*, dictation::*, element::*, error_recovery::*, execute_accessibility_tool,
     execute_safari_tool, filesystem::*, get_accessibility_tool_definitions, keyboard::*, media::*,
-    memory::*, mouse::*, orchestrator::*, permission_diagnostics::*, permissions::*,
-    persistent_memory::*, providers::*, safari_clear_cache, safari_click_element,
-    safari_execute_javascript, safari_extract_dom, safari_get_url, safari_is_active,
-    safari_list_clickable_elements, safari_navigate, safari_type_text, shell::*, sound::*,
-    test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
+    memory::*, mouse::*, permission_diagnostics::*, permissions::*, persistent_memory::*,
+    providers::*, safari_clear_cache, safari_click_element, safari_execute_javascript,
+    safari_extract_dom, safari_get_url, safari_is_active, safari_list_clickable_elements,
+    safari_navigate, safari_type_text, shell::*, sound::*, test_accessibility_permissions,
+    text_editor::*, ui_commands::*, window::*,
 };
 
 // Import specific sound commands from sound.rs
@@ -324,22 +324,11 @@ pub fn run() {
             submit_query,
             anthropic::clear_conversation_history, // Add conversation history clearing
             commands::test_system_context,         // Test system context gathering
-            // Orchestrator Commands
-            submit_orchestrated_query,
-            get_orchestrator_status,
-            configure_orchestrator,
-            create_orchestrator_task,
-            get_task_history,
-            get_active_tasks,
-            get_agent_capabilities,
-            cancel_task,
-            // Enhanced Orchestrator Commands (90.2% Performance Improvement)
-            commands::orchestrator::execute_intelligent_parallel_tasks,
-            commands::orchestrator::intelligent_task_splitting,
-            commands::orchestrator::get_orchestrator_performance_metrics,
-            commands::orchestrator::execute_optimized_workflow,
-            commands::orchestrator::configure_enhanced_orchestrator,
-            commands::orchestrator::benchmark_orchestrator_performance,
+            // The fourteen orchestrator commands that used to sit here are gone.
+            // They were the only way to reach a second agent executor that ran
+            // tool calls without consulting the approval gate, and no caller
+            // anywhere invoked them. Multi-agent runs go through submit_query,
+            // which delegates to gated AgentRunners (see agents/mod.rs).
             // Parallel Agent Sessions (LAC-1432) — per-agent cursors, switcher, escape targeting
             commands::agent_sessions::list_agent_sessions,
             commands::agent_sessions::get_focused_agent_session,
