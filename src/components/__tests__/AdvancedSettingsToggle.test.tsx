@@ -107,8 +107,8 @@ function mockBackend(advancedPersisted: boolean) {
 
 const BASIC_SECTIONS = [
   "General",
-  "Voice & Audio",
-  "AI Provider",
+  "Audio",
+  "Providers",
   "Notifications",
   "Security & Privacy",
 ];
@@ -461,8 +461,8 @@ describe("ModularSettingsWindow search", () => {
     render(<ModularSettingsWindow />);
     await waitFor(() => expect(sidebarButton("General")).toBeInTheDocument());
 
-    // "temperature" only lives in a row index entry for the AI Provider section,
-    // so a plain section search would miss it — deep-linking must select AI.
+    // "temperature" only lives in a row index entry for the Providers section,
+    // so a plain section search would miss it: deep-linking must select it.
     fireEvent.change(screen.getByLabelText("Search settings"), {
       target: { value: "temperature" },
     });
@@ -470,7 +470,7 @@ describe("ModularSettingsWindow search", () => {
     await waitFor(() =>
       expect(screen.getByTestId("section-ai")).toBeInTheDocument()
     );
-    expect(sidebarButton("AI Provider")).toBeInTheDocument();
+    expect(sidebarButton("Providers")).toBeInTheDocument();
     expect(sidebarButton("General")).not.toBeInTheDocument();
   });
 

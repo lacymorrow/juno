@@ -1,5 +1,3 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -8,10 +6,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Save } from "lucide-react";
-import { useState } from "react";
+import { useEffect } from "react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
+import { VoicePicker } from "../VoicePicker";
 
 // The insertion-mode row re-explains itself: its subtitle is the selected
 // option's own one-line description.
@@ -20,189 +18,171 @@ const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
   clipboard_free: "Types the transcript directly. Never touches your clipboard.",
 };
 
+/**
+ * "Follow the system" as a Select value. Radix needs a string, and the backend
+ * wants null, so the two are translated at the edge rather than storing a
+ * sentinel that would later look like a device name.
+ */
+const FOLLOW_SYSTEM = "__system__";
+
+/** Engine names as a person would say them, for the one line that names one. */
+const TTS_ENGINE_NAMES: Record<string, string> = {
+  elevenlabs: "ElevenLabs",
+  kokoro: "Kokoro",
+  replicate: "Replicate",
+  chatterbox: "Chatterbox",
+  supertonic: "Supertonic",
+};
+
+/**
+ * Audio: which microphone Juno hears you on, which speaker it answers from,
+ * and which voice it answers in.
+ *
+ * The voice is here and the engine is under Providers on purpose. The engine
+ * is plumbing; the voice is a preference, and it is the only one of the three
+ * you can check by ear, which is why picking it plays it.
+ */
 export default function VoiceSettings({ settings }: SettingsSectionProps) {
   const {
-    chatterboxReferenceAudioUrl,
-    chatterboxExaggeration,
-    chatterboxUseHd,
-    handleChatterboxSettingsChange,
-    supertonicServerUrl,
-    supertonicVoice,
-    supertonicSpeed,
-    handleSupertonicSettingsChange,
+    audioDevices,
+    junoVoices,
+    speakingVoiceId,
+    captureFailure,
+    loadAudioDevices,
+    loadJunoVoices,
+    handleAudioInputDeviceChange,
+    handleAudioOutputDeviceChange,
+    handleJunoVoiceChange,
+    handlePreviewJunoVoice,
+    dismissCaptureFailure,
   } = settings;
 
-  // Local draft state for Chatterbox settings (save on blur/button)
-  const [chatterboxRefUrl, setChatterboxRefUrl] = useState<string>(chatterboxReferenceAudioUrl ?? "");
-  const [chatterboxExag, setChatterboxExag] = useState<number>(chatterboxExaggeration ?? 0.5);
-  const [chatterboxHd, setChatterboxHd] = useState<boolean>(chatterboxUseHd ?? false);
+  useEffect(() => {
+    void loadAudioDevices();
+    void loadJunoVoices();
+  }, [loadAudioDevices, loadJunoVoices]);
 
-  const saveChatterboxSettings = () => {
-    handleChatterboxSettingsChange(chatterboxRefUrl, chatterboxExag, chatterboxHd);
-  };
+  const engineName = TTS_ENGINE_NAMES[settings.ttsProvider];
+  const inputs = audioDevices?.inputs ?? [];
+  const outputs = audioDevices?.outputs ?? [];
 
-  // Local draft state for Supertonic settings
-  const [stServerUrl, setStServerUrl] = useState<string>(supertonicServerUrl ?? "http://localhost:8000");
-  const [stVoice, setStVoice] = useState<string>(supertonicVoice ?? "M1");
-  const [stSpeed, setStSpeed] = useState<number>(supertonicSpeed ?? 1.05);
+  // What the microphone row says underneath itself. In order of what the
+  // person most needs to know: a choice that is not connected, then what is
+  // actually being used.
+  const microphoneNote = audioDevices?.missing_input
+    ? `${audioDevices.missing_input} is not connected. Juno is using ${audioDevices.effective_input ?? "nothing"} instead.`
+    : audioDevices?.effective_input
+      ? `Juno hears you through ${audioDevices.effective_input}.`
+      : "Juno cannot find a microphone.";
 
-  const saveSupertonicSettings = () => {
-    handleSupertonicSettingsChange(stServerUrl, stVoice, stSpeed);
-  };
-
+  const speakerNote = audioDevices?.missing_output
+    ? `${audioDevices.missing_output} is not connected. Juno is using your Mac's output instead.`
+    : undefined;
 
   return (
     <div className="space-y-6">
-      <SettingsGroup title="Text-to-Speech" footer="Configure voice output settings">
-        <SettingsRow htmlFor="tts-provider" label="TTS Provider">
-          <Select
-            value={settings.ttsProvider}
-            onValueChange={settings.handleTtsProviderChange}
+      <SettingsGroup title="Microphone" footer={microphoneNote}>
+        {captureFailure && (
+          <SettingsRow
+            id="capture-failure"
+            label="Juno is not listening"
+            description={captureFailure.message}
           >
-            <SelectTrigger id="tts-provider" className="w-[190px]">
-              <SelectValue placeholder="Select TTS provider" />
+            <button
+              type="button"
+              onClick={dismissCaptureFailure}
+              className="text-[12px] text-muted-foreground hover:text-foreground"
+            >
+              Dismiss
+            </button>
+          </SettingsRow>
+        )}
+
+        <SettingsRow htmlFor="audio-input-device" label="Listen through">
+          <Select
+            value={audioDevices?.chosen_input ?? FOLLOW_SYSTEM}
+            onValueChange={(value) =>
+              void handleAudioInputDeviceChange(value === FOLLOW_SYSTEM ? null : value)
+            }
+          >
+            <SelectTrigger id="audio-input-device" className="w-[250px]">
+              <SelectValue placeholder="Select a microphone" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="off">Off</SelectItem>
-              <SelectItem value="system">System</SelectItem>
-              <SelectItem value="kokoro">Kokoro (Local)</SelectItem>
-              <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
-              <SelectItem value="replicate">Replicate</SelectItem>
-              <SelectItem value="chatterbox">Chatterbox (Cloud)</SelectItem>
-              <SelectItem value="supertonic">Supertonic (Local)</SelectItem>
+              <SelectItem value={FOLLOW_SYSTEM}>Whatever my Mac is using</SelectItem>
+              {inputs.map((device) => (
+                <SelectItem key={device.name} value={device.name}>
+                  {device.name}
+                </SelectItem>
+              ))}
+              {/* A choice that has been unplugged stays selectable, so the
+                  Select shows what was chosen rather than snapping to
+                  something the person never picked. That it is not connected
+                  is said once, underneath, not twice. */}
+              {audioDevices?.missing_input && (
+                <SelectItem value={audioDevices.missing_input}>
+                  {audioDevices.missing_input}
+                </SelectItem>
+              )}
             </SelectContent>
           </Select>
         </SettingsRow>
+      </SettingsGroup>
 
-        {settings.ttsProvider === "chatterbox" && (
-          <>
-            <SettingsRow description="Chatterbox is MIT-licensed and runs on Replicate (~$0.006/sec). Requires a Replicate API key." />
+      <SettingsGroup
+        title="Speaker"
+        footer={
+          speakerNote ??
+          "Juno's own voice plays here. Cloud voices play through your Mac's output."
+        }
+      >
+        <SettingsRow htmlFor="audio-output-device" label="Speak through">
+          <Select
+            value={audioDevices?.chosen_output ?? FOLLOW_SYSTEM}
+            onValueChange={(value) =>
+              void handleAudioOutputDeviceChange(value === FOLLOW_SYSTEM ? null : value)
+            }
+          >
+            <SelectTrigger id="audio-output-device" className="w-[250px]">
+              <SelectValue placeholder="Select a speaker" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FOLLOW_SYSTEM}>Whatever my Mac is using</SelectItem>
+              {outputs.map((device) => (
+                <SelectItem key={device.name} value={device.name}>
+                  {device.name}
+                </SelectItem>
+              ))}
+              {audioDevices?.missing_output && (
+                <SelectItem value={audioDevices.missing_output}>
+                  {audioDevices.missing_output}
+                </SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsGroup>
 
-            <SettingsRow
-              advanced
-              htmlFor="chatterbox-ref-audio"
-              label="Reference Audio URL (optional)"
-              description="5–10s WAV/MP3 URL for voice cloning. Leave blank for default voice."
-              below={
-                <div className="flex gap-2">
-                  <Input
-                    id="chatterbox-ref-audio"
-                    value={chatterboxRefUrl}
-                    onChange={(e) => setChatterboxRefUrl(e.target.value)}
-                    placeholder="https://example.com/voice-sample.wav"
-                    className="flex-1"
-                  />
-                  <Button size="sm" onClick={saveChatterboxSettings} variant="outline">
-                    <Save className="h-3 w-3" />
-                  </Button>
-                </div>
-              }
-            />
-
-            <SettingsRow
-              advanced
-              htmlFor="chatterbox-exaggeration"
-              label={`Emotion Exaggeration: ${chatterboxExag.toFixed(2)}`}
-              description="0 = neutral, 1 = natural, 2 = very expressive"
-              below={
-                <input
-                  type="range"
-                  id="chatterbox-exaggeration"
-                  min="0"
-                  max="2"
-                  step="0.05"
-                  value={chatterboxExag}
-                  onChange={(e) => setChatterboxExag(parseFloat(e.target.value))}
-                  onMouseUp={saveChatterboxSettings}
-                  onTouchEnd={saveChatterboxSettings}
-                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
-                />
-              }
-            />
-
-            <SettingsRow
-              advanced
-              htmlFor="chatterbox-hd"
-              label="Use Chatterbox HD"
-              description="Higher quality, slightly slower (resemble-ai/chatterbox-hd)"
-            >
-              <Switch
-                id="chatterbox-hd"
-                checked={chatterboxHd}
-                onCheckedChange={(checked) => {
-                  setChatterboxHd(checked);
-                  handleChatterboxSettingsChange(chatterboxRefUrl, chatterboxExag, checked);
-                }}
-              />
-            </SettingsRow>
-          </>
+      <SettingsGroup
+        title="Juno's voice"
+        footer="Pick one and you will hear it. Pick the one you are using to hear it again."
+      >
+        {engineName && (
+          <SettingsRow
+            description={`${engineName} is giving Juno her voice right now. Pick one of these to use a voice from your Mac instead.`}
+          />
         )}
-
-        {settings.ttsProvider === "supertonic" && (
-          <>
-            <SettingsRow description="Supertonic is an MIT-licensed on-device TTS engine. 31 languages, 167x real-time on Apple Silicon. Requires: pip install supertonic && supertonic serve" />
-
-            <SettingsRow
-              advanced
-              htmlFor="supertonic-server-url"
-              label="Server URL"
-              description="URL of the local Supertonic server (supertonic serve)."
-              below={
-                <div className="flex gap-2">
-                  <Input
-                    id="supertonic-server-url"
-                    value={stServerUrl}
-                    onChange={(e) => setStServerUrl(e.target.value)}
-                    placeholder="http://localhost:8000"
-                    className="flex-1"
-                  />
-                  <Button size="sm" onClick={saveSupertonicSettings} variant="outline">
-                    <Save className="h-3 w-3" />
-                  </Button>
-                </div>
-              }
+        <SettingsRow
+          id="juno-voice"
+          below={
+            <VoicePicker
+              options={junoVoices}
+              onChange={(id) => void handleJunoVoiceChange(id)}
+              onReplay={() => void handlePreviewJunoVoice()}
+              speakingId={speakingVoiceId}
             />
-
-            <SettingsRow htmlFor="supertonic-voice" label="Voice">
-              <Select
-                value={stVoice}
-                onValueChange={(v) => {
-                  setStVoice(v);
-                  handleSupertonicSettingsChange(stServerUrl, v, stSpeed);
-                }}
-              >
-                <SelectTrigger id="supertonic-voice" className="w-[190px]">
-                  <SelectValue placeholder="Select voice" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="M1">M1 (Male)</SelectItem>
-                  <SelectItem value="F1">F1 (Female)</SelectItem>
-                </SelectContent>
-              </Select>
-            </SettingsRow>
-
-            <SettingsRow
-              advanced
-              htmlFor="supertonic-speed"
-              label={`Speed: ${stSpeed.toFixed(2)}x`}
-              description="0.5 = slow, 1.05 = default, 2.0 = fast"
-              below={
-                <input
-                  type="range"
-                  id="supertonic-speed"
-                  min="0.5"
-                  max="2"
-                  step="0.05"
-                  value={stSpeed}
-                  onChange={(e) => setStSpeed(parseFloat(e.target.value))}
-                  onMouseUp={saveSupertonicSettings}
-                  onTouchEnd={saveSupertonicSettings}
-                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
-                />
-              }
-            />
-          </>
-        )}
+          }
+        />
       </SettingsGroup>
 
       <SettingsGroup

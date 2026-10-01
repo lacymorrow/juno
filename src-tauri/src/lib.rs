@@ -395,6 +395,12 @@ pub fn run() {
             tts::get_tts_provider_command, // Added for TTS provider selection
             tts::set_kokoro_voice_command, // Kokoro voice selection via settings
             tts::get_kokoro_voice_command, // Kokoro voice selection via settings
+            tts::voices::get_juno_voices,  // Juno's voice: the curated rows
+            tts::voices::set_juno_voice,   // Juno's voice: pick one and hear it
+            tts::voices::preview_juno_voice, // Juno's voice: hear it again
+            commands::audio_devices::list_audio_devices, // Microphone and speaker lists
+            commands::audio_devices::set_audio_input_device, // Which microphone Juno listens on
+            commands::audio_devices::set_audio_output_device, // Which speaker Juno talks out of
             tts::get_chatterbox_settings_command, // Chatterbox TTS settings
             tts::set_chatterbox_settings_command, // Chatterbox TTS settings
             tts::get_supertonic_settings_command, // Supertonic TTS settings
