@@ -596,31 +596,19 @@ pub fn ensure_ids(triggers: &mut [Trigger]) {
 
 /// Bring a stored trigger list onto the gesture model, once.
 ///
-/// A list in which no row has an id was written before gestures existed, which
-/// is also the build that shipped the derived double tap: every hold key
-/// silently answered a second press by starting a hands-free session on the
-/// same target. That behaviour is gone, so the reach it gave people is handed
-/// back as what it should always have been, a row of its own: every bound Hold
-/// row gets a Double tap row beside it, same key, same target, which they can
-/// now see, rebind, or delete.
+/// A row for a row. The `method` field is read as `gesture` by serde alias, so
+/// a Hold stays a Hold on the key it was on, with the same target and the same
+/// switch, and the only thing added is the `id` the row now needs to be a row.
+/// Nothing is rebound, nothing is dropped, and nothing new appears.
 ///
-/// Nothing is dropped and nothing is rebound. The `method` field is read as
-/// `gesture` by serde alias, so a Hold stays a Hold on the key it was on.
+/// An earlier draft of this gave every bound Hold row a Double tap row beside
+/// it, to hand back the hands-free that the derived double tap had been giving
+/// people. That was the same mistake one level down: a trigger with a second
+/// gesture bolted on, now written out as two rows that do the same thing.
+/// Triggers are triggers. If someone wants a double tap, they add one, which is
+/// the entire point of making gestures independent.
 pub fn migrate_to_gestures(stored: Vec<Trigger>) -> Vec<Trigger> {
-    let from_the_old_model = !stored.is_empty() && stored.iter().all(|t| t.id.trim().is_empty());
     let mut out = stored;
-    if from_the_old_model {
-        let companions: Vec<Trigger> = out
-            .iter()
-            .filter(|t| t.gesture == Gesture::Hold && t.binding.is_some())
-            .map(|t| Trigger {
-                id: String::new(),
-                gesture: Gesture::DoubleTap,
-                ..t.clone()
-            })
-            .collect();
-        out.extend(companions);
-    }
     ensure_ids(&mut out);
     out
 }
@@ -640,9 +628,6 @@ fn gesture_from_mode(mode: &str) -> Gesture {
 /// Historical always-listening always routed to the agent, so a migrated voice
 /// trigger targets [`TriggerTarget::Agent`]. All configured wake words collapse
 /// into that single trigger's phrase; the user can refine wording in the new UI.
-///
-/// No Double tap companion is added here. A store this old never had the
-/// derived double tap, so there is no behaviour to hand back.
 pub fn migrate_from_legacy(
     agent_combo: &str,
     agent_mode: &str,
@@ -1241,8 +1226,9 @@ mod tests {
     #[test]
     fn a_push_to_talk_trigger_on_fn_becomes_a_hold_on_fn() {
         // The user in the report. Their store says `method: push_to_talk` on
-        // the globe key; it has to come back as Hold on the globe key, with
-        // nothing rebound and nothing dropped.
+        // the globe key, and it has to come back as exactly one row: Hold on
+        // the globe key, same target, same switch. Nothing rebound, nothing
+        // dropped, and nothing new beside it.
         let stored = r#"[{
             "method": "push_to_talk",
             "target": "dictation",
@@ -1256,10 +1242,10 @@ mod tests {
         assert!(read[0].id.is_empty(), "the old shape carries no id");
 
         let migrated = migrate_to_gestures(read);
-        let hold = migrated
-            .iter()
-            .find(|t| t.gesture == Gesture::Hold)
-            .expect("the hold survives");
+        assert_eq!(migrated.len(), 1, "one row in, one row out: {migrated:?}");
+
+        let hold = &migrated[0];
+        assert_eq!(hold.gesture, Gesture::Hold);
         assert_eq!(hold.target, TriggerTarget::Dictation);
         assert_eq!(
             hold.binding,
@@ -1270,21 +1256,57 @@ mod tests {
         );
         assert!(hold.enabled, "and still switched on");
         assert!(!hold.id.is_empty(), "and now has a row identity");
-
-        // The derived double tap shipped, so the reach it gave is handed back
-        // as a row of its own rather than taken away.
-        let double = migrated
-            .iter()
-            .find(|t| t.gesture == Gesture::DoubleTap)
-            .expect("a double-tap row is added beside it");
-        assert_eq!(double.target, TriggerTarget::Dictation);
-        assert_eq!(double.binding, hold.binding, "on the same key");
-        assert_ne!(double.id, hold.id, "two rows, two identities");
-
-        // And the result is a list the validator accepts: Hold + Double tap
-        // share a key by the table.
         assert!(validate(&migrated, &[]).is_ok());
-        assert_eq!(migrated.len(), 2);
+    }
+
+    #[test]
+    fn migration_never_invents_a_row() {
+        // The property, not the example. A trigger is a trigger: nothing about
+        // reading an old store is a reason to hand somebody a gesture they did
+        // not ask for. An earlier draft gave every Hold row a Double tap row
+        // beside it, to keep the hands-free the derived double tap had been
+        // giving people; that was the same mistake one level down, written out
+        // as two rows that do the same thing.
+        let cases: Vec<Vec<Trigger>> = vec![
+            vec![],
+            vec![row(Gesture::Hold, TriggerTarget::Dictation, "Fn")],
+            vec![
+                row(Gesture::Hold, TriggerTarget::Agent, "Fn"),
+                row(Gesture::Hold, TriggerTarget::Dictation, "Option+Space"),
+                row(Gesture::Tap, TriggerTarget::Agent, "Option+D"),
+                trigger(Gesture::DoubleTapHold, TriggerTarget::Dictation, None),
+                voice("juno", TriggerTarget::Agent, true),
+            ],
+        ];
+        for before in cases {
+            // Both ways in: a store from the old model (no ids) and one this
+            // model already wrote.
+            for stripped in [false, true] {
+                let mut input = before.clone();
+                if stripped {
+                    for t in input.iter_mut() {
+                        t.id = String::new();
+                    }
+                }
+                let after = migrate_to_gestures(input);
+                assert_eq!(
+                    after.len(),
+                    before.len(),
+                    "migration produced {} rows from {} (stripped ids: {stripped})",
+                    after.len(),
+                    before.len()
+                );
+                // And row for row, only the id may differ.
+                for (a, b) in after.iter().zip(before.iter()) {
+                    assert_eq!(a.gesture, b.gesture);
+                    assert_eq!(a.target, b.target);
+                    assert_eq!(a.binding, b.binding);
+                    assert_eq!(a.phrase, b.phrase);
+                    assert_eq!(a.enabled, b.enabled);
+                    assert!(!a.id.is_empty());
+                }
+            }
+        }
     }
 
     #[test]
@@ -1300,16 +1322,20 @@ mod tests {
         assert_eq!(read[2].gesture, Gesture::Say);
 
         let migrated = migrate_to_gestures(read);
-        // Three rows in, four out: only the Hold row earns a companion.
-        assert_eq!(migrated.len(), 4);
+        // Three rows in, three rows out.
+        assert_eq!(migrated.len(), 3);
         assert_eq!(
             migrated
                 .iter()
                 .filter(|t| t.gesture == Gesture::DoubleTap)
                 .count(),
-            1
+            0,
+            "nobody is handed a double tap they did not bind"
         );
         // Nothing lost: every original row is still there, on its own key.
+        assert!(migrated
+            .iter()
+            .any(|t| t.gesture == Gesture::Hold && t.target == TriggerTarget::Dictation));
         assert!(migrated
             .iter()
             .any(|t| t.gesture == Gesture::Tap && t.target == TriggerTarget::Agent));
@@ -1320,19 +1346,20 @@ mod tests {
     }
 
     #[test]
-    fn migration_skips_an_unbound_hold() {
-        // Nothing to double-tap on a row with no key.
+    fn migration_keeps_an_unbound_row_unbound() {
         let stored = r#"[{ "method": "push_to_talk", "target": "dictation", "binding": null, "enabled": false }]"#;
         let read: Vec<Trigger> = serde_json::from_str(stored).expect("loads");
         let migrated = migrate_to_gestures(read);
         assert_eq!(migrated.len(), 1);
+        assert_eq!(migrated[0].binding, None);
+        assert!(!migrated[0].enabled, "and still switched off");
     }
 
     #[test]
     fn migration_runs_once() {
-        // A list that already has ids was written by this model. Running the
-        // migration again must not keep stacking double-tap rows onto it,
-        // which is what an unmarked migration does on every launch.
+        // A list that already has ids was written by this model, so a second
+        // pass is a no-op: same rows, same identities. An unmarked migration
+        // would redo its work on every launch.
         let first = migrate_to_gestures(vec![Trigger {
             id: String::new(),
             gesture: Gesture::Hold,
@@ -1344,14 +1371,9 @@ mod tests {
             require_hey_prefix: false,
             enabled: true,
         }]);
-        assert_eq!(first.len(), 2);
+        assert_eq!(first.len(), 1);
         let second = migrate_to_gestures(first.clone());
-        assert_eq!(second.len(), 2, "the second pass adds nothing");
-        assert_eq!(
-            second.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
-            first.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
-            "and keeps the identities it gave out"
-        );
+        assert_eq!(second, first, "the second pass changes nothing");
     }
 
     #[test]

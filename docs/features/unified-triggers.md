@@ -159,14 +159,20 @@ been taught a shortcut that did nothing.
 - **No stored triggers:** the list is synthesized from the legacy shortcut,
   tap/hold, and wake-word settings (`migrate_from_legacy`), so an upgrading
   user keeps their setup.
-- **Stored triggers from before gestures:** `migrate_to_gestures` runs once, on
-  a list in which no row has an id. `push_to_talk` reads as Hold, `toggle` as
-  Tap and `voice` as Say (serde aliases), every row keeps its key, its target
-  and its switch, and every bound Hold row gains a **Double tap** row beside it
-  on the same key and target. That hands back the hands-free reach the derived
-  double tap gave people, as the row it should always have been: visible,
-  rebindable, deletable. The migration is self-marking, because after it every
-  row has an id, so it cannot stack companions on every launch.
+- **Stored triggers from before gestures:** `migrate_to_gestures` gives every
+  row the `id` it now needs to be a row, and nothing else. `push_to_talk` reads
+  as Hold, `toggle` as Tap and `voice` as Say (serde aliases), and each row
+  keeps its key, its target and its switch. **A row for a row.** Nothing is
+  rebound, nothing is dropped, and nothing new appears, which
+  `migration_never_invents_a_row` pins as a property rather than an example.
+  After it every row has an id, so a second pass is a no-op.
+
+  The derived double tap is not preserved in any form. An earlier draft gave
+  every bound Hold row a Double tap row beside it, to hand back the hands-free
+  that behaviour had been giving people; that was the same mistake one level
+  down, two rows doing the same thing. Triggers are triggers. Someone who wants
+  a double tap adds one, which is the entire point of making gestures
+  independent.
 
 ## Adding a gesture or target later
 
