@@ -27,6 +27,67 @@ function isScreenshot(msg: ChatMessage): boolean {
 	return typeof action === "string" && action.toLowerCase().includes("screenshot");
 }
 
+/** One capture the agent made during a turn. */
+export type TurnScreenshot = {
+	/**
+	 * The PNG as Rust captured it, base64. Absent when the call was a screenshot
+	 * by name but no image came back: a denied screen-recording permission, a
+	 * failed capture, or an image pruned from visual context. The disclosure says
+	 * so rather than drawing a broken image.
+	 */
+	base64?: string;
+	/** Which tool took it. Alt text only. */
+	toolName?: string;
+};
+
+/**
+ * Where this turn begins: the nearest user message before the reply.
+ *
+ * Tool rows are inserted ahead of the open assistant bubble, so everything the
+ * turn did sits in `(start, index)`. Returns -1 for the opening messages of a
+ * conversation, which can arrive with no question in front of them.
+ */
+function turnStart(conversation: ChatMessage[], index: number): number {
+	let start = index - 1;
+	while (start >= 0 && conversation[start].role !== "user") start--;
+	return start;
+}
+
+/** A row that stands for one tool call, whichever half of it the UI holds. */
+function isToolRow(msg: ChatMessage): boolean {
+	return msg.role === "tool_call_request" || msg.role === "tool_call_result";
+}
+
+/**
+ * Every capture the assistant message at `index` made getting to its answer.
+ *
+ * This is the list the chat shows and the number the turn summary counts, so
+ * the two can never disagree. It deliberately does not wait for the stream to
+ * close: a computer-use turn holds the bubble open for a minute, and a person
+ * watching it work wants the captures as they land, the same reason the spoken
+ * panel stopped gating on `isStreaming`.
+ *
+ * Both tool roles count. A result normally folds into the request that produced
+ * it, but a result whose request was lost stands alone, and its image is still
+ * something the agent saw.
+ */
+export function turnScreenshots(
+	conversation: ChatMessage[],
+	index: number
+): TurnScreenshot[] {
+	const reply = conversation[index];
+	if (!reply || reply.role !== "assistant") return [];
+
+	const start = turnStart(conversation, index);
+	const shots: TurnScreenshot[] = [];
+	for (let i = start + 1; i < index; i++) {
+		const msg = conversation[i];
+		if (!isToolRow(msg) || !isScreenshot(msg)) continue;
+		shots.push({ base64: msg.screenshot_base64, toolName: msg.tool_name });
+	}
+	return shots;
+}
+
 /**
  * Count what the assistant message at `index` spent getting to its answer.
  *
@@ -42,18 +103,17 @@ export function summarizeTurn(
 	const reply = conversation[index];
 	if (!reply || reply.role !== "assistant" || reply.isStreaming) return null;
 
-	let start = index - 1;
-	while (start >= 0 && conversation[start].role !== "user") start--;
+	const start = turnStart(conversation, index);
 
 	let actions = 0;
-	let screenshots = 0;
 	for (let i = start + 1; i < index; i++) {
-		const msg = conversation[i];
-		if (msg.role !== "tool_call_request") continue;
-		actions++;
-		if (isScreenshot(msg)) screenshots++;
+		if (isToolRow(conversation[i])) actions++;
 	}
 	if (actions === 0) return null;
+
+	// Derived, not recounted: the summary's number is the length of the list the
+	// disclosure draws, so "4 screenshots" and four images are the same fact.
+	const screenshots = turnScreenshots(conversation, index).length;
 
 	const question = start >= 0 ? conversation[start] : undefined;
 	const durationMs =

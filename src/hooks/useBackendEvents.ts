@@ -45,11 +45,16 @@ type AxGroundingAuditEvent = {
 };
 
 // Type definitions for backend events
+// No `screenshot_base64` here, and that is not an omission. Rust's
+// `SubmitQueryResult` (src-tauri/src/anthropic.rs) carries `screenshot_data`,
+// a serde_json::Value that both construction sites set to None, so the field
+// this used to declare never arrived. It made the chat's screenshot renderer
+// look wired up when nothing could ever reach it. Captures travel on the
+// tool-call events below, which is where the UI now reads them.
 type SubmitQueryResult = {
 	text: string;
 	spoken_text?: string;
 	agent_state: string;
-	screenshot_base64?: string;
 };
 
 type BackendResponsePayload = {
@@ -174,7 +179,6 @@ export function useBackendEvents({
 				const assistantMessage: ChatMessage = {
 					role: "assistant",
 					content: response.text,
-					screenshot_base64: response.screenshot_base64,
 					timestamp: Date.now(),
 				};
 

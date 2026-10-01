@@ -29,6 +29,17 @@ const toolCall = (toolName: string, timestamp: number): ChatMessage => ({
   timestamp,
 });
 
+/** A capture that came back, as the tool row carries it. */
+const capture = (base64: string, timestamp: number): ChatMessage => ({
+  role: "tool_call_request",
+  content: "Using tool: computer",
+  tool_name: "computer",
+  tool_args: { action: "screenshot" },
+  screenshot_base64: base64,
+  success: true,
+  timestamp,
+});
+
 const pendingApproval = (timestamp: number): ChatMessage => ({
   role: "tool_call_request",
   content: "Run bash: rm -rf /tmp/scratch",
@@ -181,6 +192,173 @@ describe("tool rows outside development", () => {
       expect(screen.getByText("The page is about otters.")).toBeInTheDocument();
     });
     expect(screen.queryByText("Working...")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The screenshots a turn took, in the transcript an ordinary person reads.
+ *
+ * This is the regression the feature exists for: the images only ever rode on
+ * tool rows, every tool row is filtered out of the transcript outside
+ * development, and the one renderer that sat on the reply bubble read a field
+ * Rust never sent. Three renderers, nothing on screen. These tests fail if the
+ * disclosure ever loses its way back to the reply.
+ */
+describe("screenshots outside development", () => {
+  beforeEach(() => {
+    vi.mocked(isDevelopment).mockResolvedValue(false);
+  });
+
+  it("offers what the agent saw on the reply, with the tool rows still hidden", async () => {
+    renderChat([
+      user("What is on my screen?", 1_700_000_000_000),
+      capture("aGVsbG8=", 1_700_000_001_000),
+      { role: "assistant", content: "Your inbox.", timestamp: 1_700_000_002_000 },
+    ]);
+
+    const trigger = await waitFor(() =>
+      screen.getByRole("button", { name: "Saw the screen" }),
+    );
+    // The tool card it came from is still gone.
+    expect(screen.queryByText("computer")).not.toBeInTheDocument();
+    // Closed means no image in the DOM at all, so nothing is decoded until asked.
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const image = screen.getByRole("img", { name: "Screenshot from computer" });
+    expect(image).toHaveAttribute("src", "data:image/png;base64,aGVsbG8=");
+
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("counts several captures and stacks them in the order they happened", async () => {
+    // The normal shape of a computer-use task. Rendering the first and dropping
+    // the rest was the other way this could have gone wrong.
+    renderChat([
+      user("Reply to the top email", 1_700_000_000_000),
+      capture("b25l", 1_700_000_001_000),
+      capture("dHdv", 1_700_000_002_000),
+      capture("dGhyZWU=", 1_700_000_003_000),
+      { role: "assistant", content: "Sent.", timestamp: 1_700_000_004_000 },
+    ]);
+
+    const trigger = await waitFor(() =>
+      screen.getByRole("button", { name: "Saw the screen 3 times" }),
+    );
+    fireEvent.click(trigger);
+
+    const sources = screen.getAllByRole("img").map((img) => img.getAttribute("src"));
+    expect(sources).toEqual([
+      "data:image/png;base64,b25l",
+      "data:image/png;base64,dHdv",
+      "data:image/png;base64,dGhyZWU=",
+    ]);
+  });
+
+  it("says a capture did not come back instead of offering an empty drawer", async () => {
+    // A denied screen-recording permission looks exactly like this: the call
+    // happened, no image arrived. There is nothing to open, so there is no
+    // disclosure to open, and the label never claims Juno saw anything.
+    renderChat([
+      user("What is on my screen?", 1_700_000_000_000),
+      {
+        role: "tool_call_request",
+        content: "Using tool: capture_screenshot",
+        tool_name: "capture_screenshot",
+        success: false,
+        timestamp: 1_700_000_001_000,
+      },
+      { role: "assistant", content: "I could not see it.", timestamp: 1_700_000_002_000 },
+    ]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("A screen capture did not come back."),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /Saw the screen/ })).not.toBeInTheDocument();
+  });
+
+  it("names the captures that went missing alongside the ones that did not", async () => {
+    renderChat([
+      user("Walk through setup", 1_700_000_000_000),
+      capture("b25l", 1_700_000_001_000),
+      {
+        role: "tool_call_request",
+        content: "Using tool: capture_screenshot",
+        tool_name: "capture_screenshot",
+        success: false,
+        timestamp: 1_700_000_002_000,
+      },
+      { role: "assistant", content: "Done.", timestamp: 1_700_000_003_000 },
+    ]);
+
+    // The label counts what there is to look at, not what was attempted.
+    const trigger = await waitFor(() =>
+      screen.getByRole("button", { name: "Saw the screen" }),
+    );
+    fireEvent.click(trigger);
+
+    expect(screen.getAllByRole("img")).toHaveLength(1);
+    expect(
+      screen.getByText("One more capture did not come back."),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to words when the browser refuses the image", async () => {
+    // A truncated or malformed data URI otherwise leaves the broken-image glyph
+    // sitting in the transcript.
+    renderChat([
+      user("What is on my screen?", 1_700_000_000_000),
+      capture("not-base64", 1_700_000_001_000),
+      { role: "assistant", content: "Your inbox.", timestamp: 1_700_000_002_000 },
+    ]);
+
+    const trigger = await waitFor(() =>
+      screen.getByRole("button", { name: "Saw the screen" }),
+    );
+    fireEvent.click(trigger);
+
+    fireEvent.error(screen.getByRole("img"));
+
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("This capture could not be shown."),
+    ).toBeInTheDocument();
+  });
+
+  it("stays out of a turn that took no captures", async () => {
+    renderChat([
+      user("What is the capital of Spain?", 1_700_000_000_000),
+      { role: "assistant", content: "Madrid.", timestamp: 1_700_000_001_000 },
+    ]);
+
+    await waitFor(() => expect(screen.getByText("Madrid.")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /Saw the screen/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/did not come back/)).not.toBeInTheDocument();
+  });
+
+  it("keeps each turn's captures on its own reply", async () => {
+    renderChat([
+      user("First", 1_700_000_000_000),
+      capture("Zmlyc3Q=", 1_700_000_001_000),
+      { role: "assistant", content: "One.", timestamp: 1_700_000_002_000 },
+      user("Second", 1_700_000_003_000),
+      capture("c2Vjb25k", 1_700_000_004_000),
+      capture("dGhpcmQ=", 1_700_000_005_000),
+      { role: "assistant", content: "Two.", timestamp: 1_700_000_006_000 },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Saw the screen" })).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: "Saw the screen 2 times" }),
+    ).toBeInTheDocument();
   });
 });
 

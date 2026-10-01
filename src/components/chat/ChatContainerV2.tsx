@@ -13,7 +13,11 @@ import {
 } from "@/components/ChatMessageV2";
 import { isDevelopment } from "@/lib";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
-import { formatTurnSummary, summarizeTurn } from "@/lib/turn-summary";
+import {
+  formatTurnSummary,
+  summarizeTurn,
+  turnScreenshots,
+} from "@/lib/turn-summary";
 import type { ShareAnchor } from "@/hooks/useConversation";
 import { ExamplePrompts, type BackendStatus } from "@/components/ExamplePrompts";
 import { InputControlNotices } from "@/components/input-control/InputControlNotices";
@@ -202,6 +206,16 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
               onApprovalUpdate={onApprovalUpdate}
               onContinuationUpdate={onContinuationUpdate}
               showToolDetails={showToolDetails}
+              // The captures this turn made. Gathered here because only the
+              // container can see the turn: the images arrive on tool rows,
+              // which the transcript does not draw, and a reply that cannot
+              // reach them is why a screenshot was never visible outside
+              // development.
+              screenshots={
+                msg.role === "assistant"
+                  ? turnScreenshots(conversation, index)
+                  : undefined
+              }
             />
 
             {/* What the turn cost, for turns that spent anything. A reply that
