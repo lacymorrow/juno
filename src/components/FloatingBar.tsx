@@ -36,6 +36,7 @@ import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useEscapeToIdle } from "@/hooks/useEscapeToIdle";
 import { BarFlameBorder } from "@/components/bar/BarFlameBorder";
 import { BAR_DEPTH_GLOW } from "@/components/bar/barAppearance";
 import { cn } from "@/lib/utils";
@@ -933,42 +934,23 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     })();
   }, [chat.startNewChat, chat.stop]);
 
-  // Arm the global Escape monitor only while the pane is open, so Escape can
-  // dismiss the pane even when the bar is not focused (the backend emits
-  // BAR_DISMISS_PANE when nothing is running). The ledger is idempotent.
+  // External open/close of the pane: the tray "Show/Hide Chat" toggles it, so a
+  // dismissed conversation can be reopened showing the retained history.
   useEffect(() => {
-    void invoke(COMMANDS.BAR_SET_BAR_PANE_OPEN, { open: paneOpen }).catch(() => {});
-  }, [paneOpen]);
-  useEffect(
-    () => () => {
-      void invoke(COMMANDS.BAR_SET_BAR_PANE_OPEN, { open: false }).catch(() => {});
-    },
-    [],
-  );
-
-  // External open/close of the pane: the tray "Show/Hide Chat" toggles it (so a
-  // dismissed conversation can be reopened, showing the retained history), and a
-  // global Escape dismisses it.
-  useEffect(() => {
-    const unlisteners: Array<() => void> = [];
     let active = true;
+    let unlisten: (() => void) | undefined;
     void (async () => {
-      const dismiss = await listen(EVENTS.BAR_DISMISS_PANE, () => dismissPane());
       const toggle = await listen(EVENTS.BAR_TOGGLE_PANE, () =>
         setPaneShown((shown) => !shown),
       );
-      if (active) {
-        unlisteners.push(dismiss, toggle);
-      } else {
-        dismiss();
-        toggle();
-      }
+      if (active) unlisten = toggle;
+      else toggle();
     })();
     return () => {
       active = false;
-      unlisteners.forEach((fn) => fn());
+      unlisten?.();
     };
-  }, [dismissPane]);
+  }, []);
 
   // === INTERACTIONS ===
 
@@ -1519,25 +1501,30 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   }, [isVoice, isWorking, openInput]);
 
   /**
-   * Escape while idle closes the input, then the pane. Escape while work is
-   * in progress is deliberately NOT handled here: the passive stop-key
-   * monitor in Rust (platform/stop_key_monitor.rs) sees it and stops
-   * everything.
+   * Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
+   *
+   * The Pill used to stage this by hand and leave the working case to Rust's
+   * passive stop-key monitor. The hook wires both routes, so a press lands
+   * whether or not the bar is the focused window, and in every state rather
+   * than only while the input or the pane is up.
    */
-  useEffect(() => {
-    if (isWorking || (!inputOpen && !paneOpen)) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (inputOpen) {
-        closeInput();
-        void handleBlur();
-      } else {
-        dismissPane();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [inputOpen, paneOpen, isWorking, closeInput, handleBlur, dismissPane]);
+  const collapseToIdle = useCallback(() => {
+    if (inputOpen) void handleBlur();
+    closeInput();
+    dismissPane();
+  }, [inputOpen, handleBlur, closeInput, dismissPane]);
+  const reportEscape = useCallback(() => {
+    void sendInteraction(createInteraction(UI.INTERACTION_TYPES_ESCAPE));
+  }, [sendInteraction, createInteraction]);
+  useEscapeToIdle({
+    barState: currentUiState,
+    working: isWorking,
+    overlayOpen: paneOpen,
+    composerOpen: inputOpen,
+    popupOpen: false,
+    collapse: collapseToIdle,
+    report: reportEscape,
+  });
 
   // On launch the bar always lands in a well, never at an arbitrary spot.
   // A remembered position is re-snapped to the nearest current well (so it

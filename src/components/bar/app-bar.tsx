@@ -17,6 +17,7 @@ import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useEscapeToIdle } from "@/hooks/useEscapeToIdle";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
 import { useSystemTheme } from "@/hooks/useSystemTheme";
@@ -127,6 +128,11 @@ async function sendInteraction(type: string, data?: Record<string, unknown>): Pr
   } catch (error) {
     console.error("Bar: interaction failed:", error);
   }
+}
+
+/** Escape, reported to Rust. What stopping means is Rust's decision. */
+function reportEscape(): void {
+  void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
 }
 
 // === ALLOW / DON'T, INLINE ON THE LINE ===
@@ -248,6 +254,12 @@ export function AppBar() {
     setSheetOpen(false);
     setSpokenOpen(false);
   }, []);
+  /** Escape: the sheet goes away and the lingering answer line stops holding
+   *  the strip open, so the Bar is back to its resting line in one press. */
+  const collapse = useCallback(() => {
+    closeSheet();
+    setDrained(true);
+  }, [closeSheet]);
 
   // An answer that arrives while the Bar is up opens the sheet when the line
   // cannot hold it. One that was already there when it mounted (history) does
@@ -358,24 +370,28 @@ export function AppBar() {
     };
   }, []);
 
+  // Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
+  useEscapeToIdle({
+    barState: bar.barState,
+    working: working,
+    // The draining rail is a timer, and WCAG 2.2.1 says a timer that
+    // dismisses content must be stoppable: while it counts, Escape stops it.
+    overlayOpen: sheetOpen || spokenOpen || (draining && !drained),
+    composerOpen: composing,
+    popupOpen: skill.open,
+    collapse: collapse,
+    report: reportEscape,
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (working) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        } else if (sheetOpen) {
-          closeSheet();
-          setDrained(true);
-        } else if (composing) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        }
-      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         void sendInteraction(UI.INTERACTION_TYPES_ENTER);
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [working, sheetOpen, composing, closeSheet]);
+  }, []);
 
   const idle = isIdleState(bar.barState);
   const onStripClick = useCallback(() => {
