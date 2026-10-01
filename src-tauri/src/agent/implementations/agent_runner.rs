@@ -371,10 +371,7 @@ where
     ) -> Result<crate::agent::core::ToolResult, AgentError> {
         // A call that failed outright is already an honest answer; there is
         // nothing to add and nothing launched to observe.
-        let mut result = match tool_result {
-            Ok(result) => result,
-            Err(e) => return Err(e),
-        };
+        let mut result = tool_result?;
 
         let report = crate::agent::app_observation::settle(&app, kind, before).await;
         log::info!("Observed after acting on {}: {}", app, report.sentence());
