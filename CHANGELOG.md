@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.43] - 2026-10-01
+
+### Fixed
+
+- **permissions:** one decision, three named modes, and no prompt for sleep (#645) (d555d930)
+- **voice:** listen on a microphone with any channel count (#643) (02bbbd7b)
+
 ## [0.8.42] - 2026-10-01
 
 ### Fixed
@@ -666,7 +673,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.42...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.43...HEAD
+[0.8.43]: https://github.com/lacymorrow/juno/compare/cua-v0.8.42...v0.8.43
 [0.8.42]: https://github.com/lacymorrow/juno/compare/cua-v0.8.41...v0.8.42
 [0.8.40]: https://github.com/lacymorrow/juno/compare/cua-v0.8.39...v0.8.40
 [0.8.39]: https://github.com/lacymorrow/juno/compare/cua-v0.8.38...v0.8.39
