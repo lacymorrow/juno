@@ -50,9 +50,24 @@ use crate::settings::AppSettings;
 pub async fn reset_to_available_defaults(
     settings_manager: &SettingsManager,
 ) -> Result<String, String> {
-    let defaults = AppSettings::default();
+    apply_reset(settings_manager, &AppSettings::default()).await
+}
 
-    settings_manager.save_all_settings(&defaults).await?;
+/// Write `settings` as a reset, then make sure what they select is available.
+///
+/// Takes the settings rather than building them, because the headless
+/// `config reset --section` writes an `AppSettings` that is default in one
+/// section and current in the rest. That is still a reset and owes the person
+/// the same guarantee, so it comes through here instead of calling
+/// `save_all_settings` for itself, which is how the UI reset and the CLI reset
+/// came to disagree about what a reset means.
+///
+/// Returns the provider id that is active afterwards.
+pub async fn apply_reset(
+    settings_manager: &SettingsManager,
+    settings: &AppSettings,
+) -> Result<String, String> {
+    settings_manager.save_all_settings(settings).await?;
 
     // The write above went straight to the store, so the cached provider
     // configuration still holds the settings that were just thrown away,
@@ -63,11 +78,11 @@ pub async fn reset_to_available_defaults(
     match startup_default::apply(settings_manager).await {
         Ok(active) => Ok(active),
         Err(e) => {
-            // The reset itself happened and the defaults are written. Failing
-            // the command now would tell the person their reset did not work
-            // when it did. Say so in the log and hand back what was written.
+            // The reset itself happened and the settings are written. Failing
+            // now would tell the person their reset did not work when it did.
+            // Say so in the log and hand back what was written.
             warn!("[Settings] Reset could not reconcile the provider choice: {e}");
-            Ok(defaults.providers.active_provider)
+            Ok(settings.providers.active_provider.clone())
         }
     }
 }
