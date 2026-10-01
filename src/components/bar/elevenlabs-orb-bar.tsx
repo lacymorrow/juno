@@ -56,14 +56,15 @@ import {
 } from "./orb/orbModel";
 
 /**
- * Orb: a presence. One orb is the only object, and everything is told
- * through what it does: dim and breathing at rest, blue and swelling with
+ * Presence: the ElevenLabs orb as a presence. The orb is the only object,
+ * and everything is told through what it does: dim and breathing at rest,
+ * blue and swelling with
  * your voice, green while your words become text, turning while Juno works
  * (faster as steps complete), rippling with Juno's speech, one red flinch
  * when something fails. Words live in one caption slot beneath it, one line
  * at a time like subtitles; the whole answer unfolds in a sheet under that.
  *
- * Spec and the full state table: docs/plans/orb-appearance.md.
+ * Spec and the full state table: docs/plans/presence-appearance.md.
  */
 
 /** Backend element id. Rust has no orb id; the orb uses the floating bar's. */

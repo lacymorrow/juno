@@ -47,12 +47,18 @@ pub mod bar_appearances {
     pub const VOICE_AI: &str = "voice_ai";
     pub const DYNAMIC: &str = "dynamic";
     /// The ElevenLabs orb appearance (three.js / react-three-fiber orb from
-    /// ui.elevenlabs.io). The value stays "orb" so saved configs keep working;
-    /// the UI label was renamed to "ElevenLabs Orb".
+    /// ui.elevenlabs.io), shown to a person as "Presence". The value stays
+    /// "orb" so saved configs keep working.
     pub const ORB: &str = "orb";
-    /// The React Bits orb appearance (ogl WebGL shader from reactbits.dev,
-    /// recolored per state via hue).
+    /// The ring appearance, shown to a person as "Halo". The value stays
+    /// "react_orb" so saved configs keep working: it named the React Bits orb
+    /// until the ring replaced that look, and the orb now has its own value
+    /// below.
     pub const REACT_ORB: &str = "react_orb";
+    /// The React Bits orb appearance (ogl WebGL shader from reactbits.dev,
+    /// recolored per state via hue), shown to a person as "Orb". Its own value
+    /// because "react_orb" above still belongs to the ring.
+    pub const SHADER_ORB: &str = "shader_orb";
     pub const PERSONA: &str = "persona";
 }
 
