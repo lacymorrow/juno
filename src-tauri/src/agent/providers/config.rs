@@ -20,6 +20,22 @@ static CONFIG_CACHE: std::sync::LazyLock<Arc<Mutex<HashMap<String, (ProviderConf
 
 const CACHE_DURATION: Duration = Duration::from_secs(5); // 5 second cache
 
+/// Drop the cached provider configuration.
+///
+/// Anything that writes provider settings without going through
+/// [`ProviderConfig::save_to_centralized_settings`] has to say so here, or the
+/// next read inside [`CACHE_DURATION`] hands back the configuration that was
+/// just overwritten. A factory reset is the case that matters: it writes the
+/// whole settings file in one go and then immediately asks which provider
+/// should run, which without this reads the pre-reset config, sees the API key
+/// that was just deleted, and concludes nothing needs to change.
+pub fn invalidate_config_cache() {
+    if let Ok(mut cache) = CONFIG_CACHE.lock() {
+        cache.clear();
+        debug!("Cleared provider configuration cache");
+    }
+}
+
 /// Agent execution mode
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub enum AgentMode {
@@ -191,10 +207,7 @@ impl ProviderConfig {
             })?;
 
         // Invalidate cache after saving
-        if let Ok(mut cache) = CONFIG_CACHE.lock() {
-            cache.clear();
-            debug!("Cleared provider configuration cache after save");
-        }
+        invalidate_config_cache();
 
         info!("Saved provider configuration to centralized settings");
         Ok(())

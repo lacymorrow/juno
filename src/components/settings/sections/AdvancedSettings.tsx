@@ -488,9 +488,18 @@ export default function AdvancedSettings({
                   <AlertDialogAction
                     onClick={async () => {
                       try {
-                        await invoke(COMMANDS.SETTINGS_RESET_SETTINGS);
+                        // Rust picks the provider, because only Rust knows
+                        // what is installed and signed in on this machine,
+                        // and names it back so the confirmation can say which
+                        // one Juno is on rather than claiming success and
+                        // leaving the person to find out.
+                        const provider = await invoke<string>(
+                          COMMANDS.SETTINGS_RESET_SETTINGS,
+                        );
                         await settings.loadAllSettings();
-                        toast.success("All settings have been reset to defaults");
+                        toast.success(
+                          `Settings reset. Juno is using ${provider}.`,
+                        );
                       } catch (error) {
                         console.error("Failed to reset settings:", error);
                         toast.error("Failed to reset settings");

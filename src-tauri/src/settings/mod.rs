@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod manager;
+pub mod reset;
 
 /// Main application settings structure
 /// This replaces all individual JSON config files with a single, centralized structure
