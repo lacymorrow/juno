@@ -69,13 +69,29 @@ describe("the sphere, state by state", () => {
     expect(new Set(seen.values()).size).toBeGreaterThanOrEqual(6);
   });
 
-  it("rests small and dim, and lets the loop sleep", () => {
+  it("rests small and quiet, and lets the loop sleep", () => {
     const look = orbLook({ state: UI.BAR_STATES_DEFAULT });
+    const awake = orbLook({ state: UI.BAR_STATES_LISTENING });
     expect(look.motion).toBe("ember");
     expect(look.hue).toBe(HUE_BASE);
     expect(look.scale).toBe(ORB_SCALE.rest);
-    expect(look.bright).toBeLessThan(0.7);
+    expect(look.bright).toBeLessThan(awake.bright);
+    expect(look.sat).toBeLessThan(awake.sat);
     expect(loopMaySleep(look)).toBe(true);
+  });
+
+  it("stays bright enough at rest to be found on a black wallpaper", () => {
+    // The Orb has no chrome, so a dim ring on a dark desktop is a lost ring.
+    // This is the floor that a tuning pass must not quietly drop below.
+    for (const state of [
+      UI.BAR_STATES_DEFAULT,
+      UI.BAR_STATES_SHRINKING,
+      UI.BAR_STATES_DICTATION_READY,
+      UI.BAR_STATES_ALWAYS_LISTENING,
+      UI.BAR_STATES_STOPPING,
+    ]) {
+      expect(orbLook({ state }).bright, state).toBeGreaterThanOrEqual(0.66);
+    }
   });
 
   it("cools to blue and grows when the microphone is open for Juno", () => {

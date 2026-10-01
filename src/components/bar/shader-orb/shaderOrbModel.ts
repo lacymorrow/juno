@@ -163,9 +163,9 @@ const MAX_STEPS_COUNTED = 4;
 const EMBER: OrbLook = {
   motion: "ember",
   hue: HUE_BASE,
-  sat: 0.35,
+  sat: 0.5,
   mono: 0,
-  bright: 0.55,
+  bright: 0.82,
   scale: ORB_SCALE.rest,
   ripple: 0,
   flow: 0.08,
@@ -215,7 +215,7 @@ export function orbLook({
   if (driving) return { ...work, pulsePeriod: 0, spin: 0.45 };
 
   const rest: OrbLook = answerWaiting
-    ? { ...EMBER, hue: HUE_GREEN, sat: 0.5, bright: 0.7, scale: ORB_SCALE.held }
+    ? { ...EMBER, hue: HUE_GREEN, sat: 0.7, bright: 0.95, scale: ORB_SCALE.held }
     : EMBER;
 
   switch (state) {
@@ -224,11 +224,11 @@ export function orbLook({
       return rest;
     case UI.BAR_STATES_DICTATION_READY:
       // Dictation is armed: the ember takes the colour your words will have.
-      return { ...rest, hue: HUE_GREEN, sat: 0.5, bright: 0.6, scale: ORB_SCALE.rest };
+      return { ...rest, hue: HUE_GREEN, sat: 0.6, bright: 0.85, scale: ORB_SCALE.rest };
     case UI.BAR_STATES_ALWAYS_LISTENING:
       // Waiting for the wake word: cool, and dimmer than rest, so a desk with
       // always-listening on does not glow at you all day.
-      return { ...rest, hue: HUE_COOL, sat: 0.45, bright: 0.4, scale: 0.5 };
+      return { ...rest, hue: HUE_COOL, sat: 0.55, bright: 0.66, scale: 0.5 };
     case UI.BAR_STATES_EXPANDING:
     case UI.BAR_STATES_INPUT:
       return {
@@ -319,7 +319,7 @@ export function orbLook({
         pulsePeriod: 0,
       };
     case UI.BAR_STATES_STOPPING:
-      return { ...EMBER, bright: 0.7, sat: 0.4, scale: 0.66, flow: 0.25, spin: 0.12 };
+      return { ...EMBER, bright: 0.72, sat: 0.45, scale: 0.66, flow: 0.25, spin: 0.12 };
     default:
       return rest;
   }

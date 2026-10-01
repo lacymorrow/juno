@@ -113,10 +113,10 @@ The orb column is what the canvas does. The words column is what the panel shows
 
 | Rust bar state | Orb | Words | Leaves when |
 |---|---|---|---|
-| default | base hue, 35% chroma, 55% bright, 52% of the stage, inside at 0.08, CSS breath, loop asleep | none (green ember instead while an answer is unread) | any state change, click |
+| default | base hue, 50% chroma, 82% bright, 52% of the stage, inside at 0.08, CSS breath, loop asleep | none (green ember instead while an answer is unread) | any state change, click |
 | shrinking | same as default | none | Rust: Default after 300ms |
-| dictation_ready | green ember, 50% chroma, 60% bright | none | dictation starts |
-| always_listening | cool ember, 45% chroma, 40% bright, 50%: dimmer than rest, so a listening desk does not glow all day | none | wake word, or off |
+| dictation_ready | green ember, 60% chroma, 85% bright | none | dictation starts |
+| always_listening | cool ember, 55% chroma, 66% bright, 50%: dimmer than rest, so a listening desk does not glow all day | none | wake word, or off |
 | expanding | base hue, 80% chroma, 90% bright, 64%, inside at 0.35 | composer, disabled | Rust: Input after 300ms |
 | input | same | composer, focused | submit, blur, Escape |
 | listening | cool hue (350), full chroma, 76% plus up to 18% with your voice, rim ripple 0.22 plus up to 0.5 | none | mic closes |
@@ -138,7 +138,7 @@ Local conditions, layered on top:
 | a tool waits on Allow or Don't | everything stops: the inside is frozen, no spin, no pulse, no ripple. A canvas that has stopped moving is the clearest way to say the next move is yours. The panel asks "Juno wants to <description>" with Allow and Don't |
 | Juno is driving the cursor | it turns steadily, no pulse |
 | Juno asks for the cursor | the sheet opens with the notice in it |
-| an answer arrives and nobody has read it | at rest the orb takes a green ember, 50% chroma and a little larger, for 12 seconds. That ember is what makes the click worth making |
+| an answer arrives and nobody has read it | at rest the orb takes a green ember, brighter and a little larger, for 12 seconds. That ember is what makes the click worth making |
 | the answer carries a component | the sheet opens by itself: a component cannot be spoken, so an orb that stayed shut would have swallowed it |
 | you click the orb | with something to read, the sheet; with nothing to read, Rust opens the composer. One idea, two shapes: give me the words |
 | you speak again | the sheet closes and the ember lets go at once |
@@ -155,13 +155,16 @@ Eight uniforms, each of them something a person can see.
 | `uTime` | the inside's own clock, advanced here at the look's flow rate | 0.08x | 1.0x |
 | `uRot` | rigid rotation of the whole orb | 0 | 0.1 to 0.57 rad/s |
 | `uHue` | degrees applied to all three base colours | 0 | 350 or 110 |
-| `uSat` | chroma, 0 grey to 1 full | 0.35 | 1 |
+| `uSat` | chroma, 0 grey to 1 full | 0.5 | 1 |
 | `uMono` | collapses the three colours onto one red object | 0 | 0 (error only) |
 | `uScale` | how much of the canvas the orb fills | 0.52 | up to 0.94 |
 | `uRipple` | surface disturbance | 0 | up to 0.72 |
-| `uBright` | how present it is | 0.55 | 1 |
+| `uBright` | how present it is | 0.82 | 1 |
 
-Three decisions inside that table are the design:
+Four decisions inside that table are the design:
+
+- **Rest is quiet, not faint.** The first pass had rest at 0.55 bright and 0.35 chroma, which looked right on a light desktop and all but vanished on a black one. The Orb has no chrome, so there is no separation glow to fall back on the way the pill has one: the ring itself has to carry it. Rest is now 0.82 and 0.5, which reads on both. A test holds a floor under every resting state so a later tuning pass cannot quietly drop back.
+
 
 - **`uTime` is advanced here, not read from the frame clock.** That is what makes `flow: 0` a freeze rather than a slow drift, and a freeze is what an approval needed.
 - **Thinking is motion, not a colour.** Working keeps the orb's own violet and cyan and says the work through turning, a quickening pulse and a racing inside. Only three hues exist: the orb's own, cool for the open microphone, green for your words landing and for done. Each one is a message that must not be missed, which is the opposite of the six pastel buckets this replaced.
@@ -191,9 +194,10 @@ Everything else in the shader is the original's: the same simplex rim, the same 
 
 - `docs/frontend/screenshots/shader-orb/`: one PNG per state from `/__bar-preview?appearance=shader_orb&state=<state>` (default, always-listening, dictation-ready, input, listening, dictating, transcribing, loading, agent-responding, speaking, finishing, error, stopping), plus `approval.png` and `card.png` from the preview demos.
 - `turn-loop.mp4`, ten seconds of the picker's loop (resting, listening, dictating, done) and `full-turn.mp4`, eleven seconds of one turn ending in a component answer that opens the sheet by itself. Both recorded with `scripts/bench-record.sh shader_orb`.
-- Unit tests: `shaderOrbModel.test.ts` (36: every state, the audio, the sleep rule, the words policy, the postures, the window), `OrbShaderCanvas.test.tsx` (6: the real loop with ogl stubbed, so the sleep, the wake, the frozen clock, the hue easing taking the short way round, and a missing WebGL context are all exercised rather than mocked away) and `ShaderOrbBar.test.tsx` (16: rest and sleep, silence while you speak, silence while Juno works, the frozen approval and Allow, red with the error, the green ember and the click, the sheet opening by itself, the clock, speaking again, history, the composer, the click with nothing to read, Escape, driving, the two-phase resize, and one test that walks twelve states asserting the bar renders no text at all).
+- Unit tests: `shaderOrbModel.test.ts` (37: every state, the audio, the sleep rule, the words policy, the postures, the window), `OrbShaderCanvas.test.tsx` (6: the real loop with ogl stubbed, so the sleep, the wake, the frozen clock, the hue easing taking the short way round, and a missing WebGL context are all exercised rather than mocked away) and `ShaderOrbBar.test.tsx` (16: rest and sleep, silence while you speak, silence while Juno works, the frozen approval and Allow, red with the error, the green ember and the click, the sheet opening by itself, the clock, speaking again, history, the composer, the click with nothing to read, Escape, driving, the two-phase resize, and one test that walks twelve states asserting the bar renders no text at all).
 - `appearanceMigration.test.tsx` (14): every stored value lands on the component it landed on before, and the catalog has no duplicate value or name.
-- `tsc` clean, `vitest` 57 files and 737 tests green, `bun run build` clean, `rustfmt --check` clean on `constants/ui.rs`.
+- Checked on a black wallpaper as well as a light one (`?bg=%23000000`), which is what found the rest brightness problem above. `docs/changelog/media/649/orb-rest-on-black.png` is the result.
+- `tsc` clean, `vitest` 57 files and 738 tests green, `bun run build` clean, `rustfmt --check` clean on `constants/ui.rs`.
 - Not verified here: the real window on hardware, a real GPU's frame cost, the WebGL sleep under a real compositor, drag, OS focus, and the Rust side of every interaction. The preview runs the real components on the fake Tauri layer. Rust was not compiled locally; CI does that.
 - Not captured: a still of the green unread ember on its own. The preview has no demo that reaches it with the sheet shut; it is covered by `ShaderOrbBar.test.tsx` and by the model test, and it is visible in `full-turn.mp4` only with the sheet open.
 
