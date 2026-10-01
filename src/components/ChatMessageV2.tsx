@@ -31,6 +31,7 @@ import {
   ConfirmationAction,
 } from "@/components/ai-elements/confirmation";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Button } from "@/components/ui/button";
 import {
   Check,
   Copy,
@@ -87,6 +88,12 @@ interface ChatMessageProps {
   onShareResponse: (response: ResponseExportInput, anchor: ShareAnchor) => void;
   onApprovalUpdate?: (toolId: string, state: "approved" | "denied") => void;
   onContinuationUpdate?: (requestId: string, state: "stopped" | "continued") => void;
+  /**
+   * Whether to draw the tool cards: the tool name, its JSON arguments and its
+   * output. Development only. Production keeps the approval question and drops
+   * the rest, so the default here is the production answer.
+   */
+  showToolDetails?: boolean;
 }
 
 // Compact accordion for TTS spoken content
@@ -290,9 +297,16 @@ function RiskBadge({ level }: { level: RiskLevel }) {
 function ApprovalCountdown({
   timeoutSeconds,
   isPending,
+  variant = "bar",
 }: {
   timeoutSeconds: number;
   isPending: boolean;
+  /**
+   * `bar` is the development card's progress meter. `text` is one calm line,
+   * for the question a person reads in production: the deadline is real, so it
+   * is said, but a reddening bar is alarm for its own sake.
+   */
+  variant?: "bar" | "text";
 }) {
   const [timeLeft, setTimeLeft] = useState(timeoutSeconds);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -318,6 +332,14 @@ function ApprovalCountdown({
   }, [isPending, timeoutSeconds]);
 
   if (!isPending) return null;
+
+  if (variant === "text") {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground/70 tabular-nums">
+        Expires in {timeLeft}s
+      </p>
+    );
+  }
 
   const pct = (timeLeft / timeoutSeconds) * 100;
   const urgentColor =
@@ -349,9 +371,105 @@ function ApprovalCountdown({
   );
 }
 
-export 
+/**
+ * A tool call the person still has to answer.
+ *
+ * `approval_state` is set only by the backend's approval request, so it is what
+ * separates "Juno is asking" from "Juno is working". Production hides the
+ * working rows and keeps the asking ones: a risky action that cannot ask is an
+ * agent that blocks forever on an answer nobody can give.
+ */
+export function awaitsApproval(msg: ChatMessage): boolean {
+  return msg.role === "tool_call_request" && msg.approval_state !== undefined;
+}
+
+/** The debug rows: a tool call, or a result that arrived without its call. */
+export function isToolRow(msg: ChatMessage): boolean {
+  return msg.role === "tool_call_request" || msg.role === "tool_call_result";
+}
+
+/**
+ * A tool approval with the tool plumbing taken out.
+ *
+ * Production never shows tool rows, but the approval is not a tool row, it is a
+ * question. So it loses the tool card, the tool name badge, the risk level and
+ * the raw JSON arguments, and keeps the one sentence the backend already wrote,
+ * which app it touches, and two buttons.
+ *
+ * It sits at the top level of the transcript on purpose. Nested inside the tool
+ * disclosure, which is where it lives in development, the question is one click
+ * away from being missed, and a question a person does not see is an agent that
+ * waits forever.
+ */
+function ApprovalPrompt({
+  msg,
+  onApprove,
+  onDeny,
+}: {
+  msg: ChatMessage;
+  onApprove: (toolId: string) => void;
+  onDeny: (toolId: string) => void;
+}) {
+  const toolId = msg.tool_id;
+  const detail = msg.content?.trim();
+
+  if (msg.approval_state === "approved") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+        <CheckCircle className="h-3 w-3 text-muted-foreground/50" />
+        <span>Allowed{detail ? `: ${detail}` : ""}</span>
+      </span>
+    );
+  }
+
+  if (msg.approval_state === "denied") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+        <XCircle className="h-3 w-3 text-muted-foreground/50" />
+        <span>Not allowed{detail ? `: ${detail}` : ""}</span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="w-full rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+      <p className="text-sm font-medium text-foreground">Juno needs your OK</p>
+      {detail && (
+        <p className="mt-1 text-sm text-muted-foreground break-words">{detail}</p>
+      )}
+
+      {/* Which app it touches, because that is the part a person can picture.
+          No risk level: "Critical" in red tells someone who cannot act on it
+          only that they should be frightened. */}
+      {msg.target_app && (
+        <p className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <AppWindow className="size-3" />
+          {msg.target_app}
+        </p>
+      )}
+
+      {toolId && (
+        <div className="mt-2.5 flex items-center gap-2">
+          <Button size="sm" onClick={() => onApprove(toolId)}>
+            Allow
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => onDeny(toolId)}>
+            Don't allow
+          </Button>
+        </div>
+      )}
+
+      <ApprovalCountdown
+        timeoutSeconds={msg.approval_timeout_seconds ?? 60}
+        isPending={msg.approval_state === "pending"}
+        variant="text"
+      />
+    </div>
+  );
+}
+
 /** Spoken markers never reach the page, but export.rs documents content that still carries them. */
-const TTS_BLOCK = /<TTS>[\s\S]*?<\/TTS>/g;
+export const TTS_BLOCK = /<TTS>[\s\S]*?<\/TTS>/g;
 
 /**
  * Whether this message is worth offering to copy or share.
@@ -385,6 +503,7 @@ export function ChatMessageComponent({
   onShareResponse,
   onApprovalUpdate,
   onContinuationUpdate,
+  showToolDetails = false,
 }: ChatMessageProps) {
   const copied = copiedMessageId === `copy-${index}`;
   const exportInput = (): ResponseExportInput => ({
@@ -417,11 +536,18 @@ export function ChatMessageComponent({
     }
   }, [onApprovalUpdate]);
 
-  // Thinking messages — Reasoning component with auto-open/close and duration tracking
+  // Thinking messages: collapsed, and they stay collapsed.
+  //
+  // `defaultOpen={false}` is the Reasoning component's explicit-closed path: it
+  // suppresses the auto-open that used to throw the panel open on every
+  // thinking block and close it a second later, which moved the whole
+  // transcript twice per turn. The duration effect is independent of the open
+  // state, so the collapsed row still reports "Thought for 3 seconds"; opening
+  // it is the person's call.
   if (msg.role === "thinking") {
     return (
       <div className="flex justify-start w-full">
-        <Reasoning isStreaming={msg.isStreaming}>
+        <Reasoning defaultOpen={false} isStreaming={msg.isStreaming}>
           <ReasoningTrigger />
           <ReasoningContent>{msg.content}</ReasoningContent>
         </Reasoning>
@@ -431,6 +557,18 @@ export function ChatMessageComponent({
 
   // Tool call requests — with inline approval if pending
   if (msg.role === "tool_call_request") {
+    // Outside development a tool call is not shown at all, with one exception:
+    // one Juno is waiting on. ChatContainerV2 filters the rest out of the list
+    // before they reach here, so this branch only has the question to draw.
+    if (!showToolDetails) {
+      if (!awaitsApproval(msg)) return null;
+      return (
+        <div className="flex justify-start w-full">
+          <ApprovalPrompt msg={msg} onApprove={handleApprove} onDeny={handleDeny} />
+        </div>
+      );
+    }
+
     // One row per tool call. `success` is undefined until the result folds in,
     // so the same message carries the call through running -> done/failed
     // instead of spawning a second row underneath it.
@@ -521,6 +659,10 @@ export function ChatMessageComponent({
 
   // Tool call results
   if (msg.role === "tool_call_result") {
+    // A result that arrived without its call. Nothing to ask, so production
+    // shows nothing; the container has already filtered it out.
+    if (!showToolDetails) return null;
+
     const resultState = (msg.success ?? true)
       ? "output-available" as const
       : "output-error" as const;

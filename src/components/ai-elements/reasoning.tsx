@@ -162,7 +162,14 @@ const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
   if (duration === undefined) {
     return <p>Thought for a few seconds</p>;
   }
-  return <p>Thought for {duration} seconds</p>;
+  // The collapsed row is the whole surface now that the panel starts closed,
+  // so "Thought for 1 seconds" is on screen rather than hidden behind a
+  // panel that opened itself.
+  return (
+    <p>
+      Thought for {duration} {duration === 1 ? "second" : "seconds"}
+    </p>
+  );
 };
 
 export const ReasoningTrigger = memo(

@@ -6,7 +6,12 @@ import {
   ConversationScrollButton,
   ConversationScrollOnSend,
 } from "@/components/ai-elements/conversation";
-import { ChatMessageComponent } from "@/components/ChatMessageV2";
+import {
+  ChatMessageComponent,
+  awaitsApproval,
+  isToolRow,
+} from "@/components/ChatMessageV2";
+import { isDevelopment } from "@/lib";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 import { formatTurnSummary, summarizeTurn } from "@/lib/turn-summary";
 import type { ShareAnchor } from "@/hooks/useConversation";
@@ -60,6 +65,36 @@ function formatFullTimestamp(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
+/**
+ * Whether a message is drawn at all.
+ *
+ * Tool calls are development furniture: the transcript a person reads is their
+ * question, what Juno said back, and anything Juno had to ask permission for.
+ * The one tool row that survives production is an approval, because hiding it
+ * would leave the agent waiting on an answer the person was never asked for.
+ */
+function isVisible(msg: ChatMessage, showToolDetails: boolean): boolean {
+  if (showToolDetails) return true;
+  return !isToolRow(msg) || awaitsApproval(msg);
+}
+
+/**
+ * True when the last thing that happened is work the transcript does not show.
+ *
+ * A turn that is nothing but tool calls would otherwise be an empty pane: the
+ * assistant bubble, and the shimmer that comes with it, only opens on the
+ * first chunk of text, and a model that goes straight to tools emits none. One
+ * plain line stands in until the reply lands.
+ */
+function hasHiddenWorkInFlight(
+  conversation: ChatMessage[],
+  showToolDetails: boolean
+): boolean {
+  if (showToolDetails) return false;
+  const last = conversation[conversation.length - 1];
+  return !!last && isToolRow(last) && !awaitsApproval(last);
+}
+
 interface ChatContainerProps {
   conversation: ChatMessage[];
   copiedMessageId: string | null;
@@ -88,6 +123,17 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
   className,
   contentClassName,
 }: ChatContainerProps) {
+  // Tool cards are a development view. The backend owns the answer; this is one
+  // read at mount, long before any tool call can arrive, and the default until
+  // it resolves is the production one.
+  const [showToolDetails, setShowToolDetails] = React.useState(false);
+
+  React.useEffect(() => {
+    isDevelopment()
+      .then(setShowToolDetails)
+      .catch(() => setShowToolDetails(false));
+  }, []);
+
   // How many messages the person has sent. Sending is the one moment the
   // conversation should jump to the bottom whatever the reader was doing.
   const sentCount = React.useMemo(
@@ -106,9 +152,19 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
 
   // Memoize message list to prevent unnecessary re-renders
   const messageList = React.useMemo(
-    () =>
-      conversation.map((msg, index) => {
-        const previousMsg = index > 0 ? conversation[index - 1] : null;
+    () => {
+      // Filtering here rather than returning null from the renderer: each row
+      // is a child of a `gap-6` column, so a row that renders nothing still
+      // leaves its gap, and the timestamp divider above it would separate a
+      // hole from a hole. Original indices ride along, because the copy and
+      // share handlers and the turn summary are both indexed into the whole
+      // conversation, not into what is on screen.
+      const visible = conversation
+        .map((msg, index) => ({ msg, index }))
+        .filter(({ msg }) => isVisible(msg, showToolDetails));
+
+      return visible.map(({ msg, index }, position) => {
+        const previousMsg = position > 0 ? visible[position - 1].msg : null;
         const showTimestamp = shouldShowTimestamp(msg, previousMsg);
         // The question a reply answers: the nearest user message before it.
         const question =
@@ -145,6 +201,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
               onShareResponse={onShareResponse}
               onApprovalUpdate={onApprovalUpdate}
               onContinuationUpdate={onContinuationUpdate}
+              showToolDetails={showToolDetails}
             />
 
             {/* What the turn cost, for turns that spent anything. A reply that
@@ -161,7 +218,8 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
             })()}
           </div>
         );
-      }),
+      });
+    },
     [
       conversation,
       copiedMessageId,
@@ -169,6 +227,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
       onShareResponse,
       onApprovalUpdate,
       onContinuationUpdate,
+      showToolDetails,
     ]
   );
 
@@ -207,6 +266,11 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
         ) : (
           <ConversationContent className={cn("gap-6 px-6 py-4", contentClassName)}>
             {messageList}
+            {hasHiddenWorkInFlight(conversation, showToolDetails) && (
+              <div className="text-[11px] text-muted-foreground/60 cursor-default">
+                Working...
+              </div>
+            )}
           </ConversationContent>
         )}
         <ConversationScrollButton />
