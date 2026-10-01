@@ -65,6 +65,20 @@ const BLOOM_DEPTH = 0.14;
 /** The working pulse: how far the sphere swells and shrinks. */
 const PULSE_DEPTH = 0.03;
 
+/** Where the first frame starts if the bar has not written a drive yet. The
+ *  resting look, so a canvas that mounts before any state arrives is not a
+ *  bright flash that then dims. */
+const FIRST_FRAME: OrbTargets = {
+  hue: 0,
+  sat: 0.35,
+  mono: 0,
+  bright: 0.55,
+  scale: 0.52,
+  ripple: 0,
+  flow: 0.08,
+  spin: 0,
+};
+
 const vert = /* glsl */ `
   precision highp float;
   attribute vec2 position;
@@ -262,7 +276,7 @@ export function OrbShaderCanvas({ drive, frameloop, onSettled, size }: OrbShader
   // never torn down for a prop change.
   const settledRef = useRef(onSettled);
   settledRef.current = onSettled;
-  // Set by the loop so a "demand" to "always" flip can restart it in place.
+  // Set by the loop; calling it restarts a sleeping loop in place.
   const wakeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -293,12 +307,12 @@ export function OrbShaderCanvas({ drive, frameloop, onSettled, size }: OrbShader
         uTime: { value: 0 },
         uRot: { value: 0 },
         iResolution: { value: [0, 0, 1] },
-        uHue: { value: start?.hue ?? 0 },
-        uSat: { value: start?.sat ?? 0.35 },
+        uHue: { value: (start ?? FIRST_FRAME).hue },
+        uSat: { value: (start ?? FIRST_FRAME).sat },
         uMono: { value: 0 },
-        uScale: { value: start?.scale ?? 0.52 },
+        uScale: { value: (start ?? FIRST_FRAME).scale },
         uRipple: { value: 0 },
-        uBright: { value: start?.bright ?? 0.55 },
+        uBright: { value: (start ?? FIRST_FRAME).bright },
       },
     });
     const mesh = new Mesh(gl, { geometry, program });
@@ -313,8 +327,9 @@ export function OrbShaderCanvas({ drive, frameloop, onSettled, size }: OrbShader
     window.addEventListener("resize", resize);
     resize();
 
-    // Everything the loop carries between frames.
-    const now: OrbTargets = { ...(start ?? { hue: 0, sat: 0.35, mono: 0, bright: 0.55, scale: 0.52, ripple: 0, flow: 0.08, spin: 0 }) };
+    // Everything the loop carries between frames. `now` is what is on screen;
+    // it chases `drive.current.targets` every frame.
+    const now: OrbTargets = { ...(start ?? FIRST_FRAME) };
     let flowTime = 0;
     let rot = 0;
     let pulseTime = 0;
