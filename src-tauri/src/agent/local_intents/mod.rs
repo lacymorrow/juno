@@ -33,12 +33,14 @@
 //!   time, date
 //! - [`timer`]: start, check, cancel countdown timers (backend-owned)
 //! - [`apps`]: open or quit an installed app, open a website
+//! - [`stop`]: a bare "stop" or "cancel" while a run is in flight
 //!
 //! [`try_handle_local_intent`] is the single entry point `submit_query` calls.
 //! See `docs/plans/local-intents.md` for what was considered and cut.
 
 pub mod apps;
 pub mod media;
+pub mod stop;
 pub mod system;
 pub mod timer;
 pub mod utterance;
@@ -175,6 +177,15 @@ async fn osascript(script: &str, argv: Vec<String>) -> Result<String, String> {
 /// spoken text, stream end, plus the floating-bar lifecycle) so every window
 /// renders the reply identically to an agent reply.
 pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> bool {
+    // First, because a bare "stop" while a run is in flight is the Escape key
+    // in words and must not queue behind the run it is trying to end. It only
+    // fires on a whole-utterance stop with something running, so every other
+    // reading of the word (including "stop the music", which `media` owns two
+    // lines down) is untouched. See `stop`.
+    if stop::try_halt(app_handle, query).await {
+        return true;
+    }
+
     if let Some(intent) = parse_media_intent(query) {
         if let Some(reply) = media::handle(app_handle, intent).await {
             emit_reply(app_handle, reply).await;
