@@ -34,8 +34,7 @@ const FOLLOW_SYSTEM = "__system__";
  * says every voice this Mac has is the compact one.
  */
 const BETTER_VOICES_HINT =
-  "The Enhanced and Premium versions of these voices sound far better. " +
-  "They download in System Settings, under Accessibility, Spoken Content, System Voice.";
+  "Better versions of these download in System Settings, under Accessibility and Spoken Content.";
 
 /**
  * Audio: which microphone Juno hears you on, which speaker it answers from,
@@ -85,12 +84,14 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
   // Mac: on the Mac the voice names are the whole answer.
   const engineNote =
     junoVoices && junoVoices.engine !== "system"
-      ? `${junoVoices.engine_label} is giving Juno her voice.`
+      ? `${junoVoices.engine_label} is giving Juno her voice. Pick one and you will hear it.`
       : undefined;
 
+  // Two sentences at most. "Tap the one you are using to hear it again" was
+  // the third and it is gone: tapping a row plays it, so tapping the chosen
+  // one playing it again is what somebody would expect anyway.
   const voiceFooter = [
-    engineNote,
-    "Pick one and you will hear it. Pick the one you are using to hear it again.",
+    engineNote ?? "Pick one and you will hear it.",
     junoVoices?.better_voices_available ? BETTER_VOICES_HINT : undefined,
   ]
     .filter(Boolean)
