@@ -276,10 +276,10 @@ pub mod validators {
     // `#[tauri::command]` calls it. The validator that used to live here tested
     // for a non-empty string plus a literal `".."` substring, with no workspace
     // root, no credential blocklist and no size cap, and it was the only check
-    // on the surface `agents::system_agent` drives. A new path check added here
-    // would be the same bug again; add an operation to `path_gate::PathOp`
-    // instead. `path_gate`'s command-surface contract test fails if the name
-    // `valid_file_path` reappears in this file.
+    // on the surface `agents::system_agent` drove before #671 deleted it. A new
+    // path check added here would be the same bug again; add an operation to
+    // `path_gate::PathOp` instead. `path_gate`'s command-surface contract test
+    // fails if the name `valid_file_path` reappears in this file.
 }
 
 /// Helper function to determine if debug mode should be enabled

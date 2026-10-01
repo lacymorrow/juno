@@ -13,8 +13,8 @@
 //! `commands::debug_utils::validators::valid_file_path` used to guard these
 //! commands with a non-empty test plus a literal `".."` substring test. It had
 //! no workspace root, no credential blocklist and no size cap, and it was the
-//! only check on the surface `agents::system_agent` drives, so an autonomous
-//! agent reached the filesystem through the laxest of the three path checks in
+//! only check on the surface `agents::system_agent` drove (that executor was
+//! deleted in #671), so an autonomous agent reached the filesystem through the laxest of the three path checks in
 //! the tree. That function is gone; this module is its replacement.
 //!
 //! ## The three layers, and who owns which question
@@ -546,7 +546,7 @@ mod command_surface_contract {
                 let touches: Vec<&str> = PATH_TOUCHING_CALLS
                     .iter()
                     .copied()
-                    .filter(|call| block.contains(call))
+                    .filter(|call| block.contains(*call))
                     .collect();
                 if !touches.is_empty() && !block.contains(GATE_CALL) {
                     offenders.push(format!(
@@ -603,7 +603,9 @@ mod command_surface_contract {
     #[test]
     fn the_interim_validator_is_gone() {
         // `valid_file_path` was the non-empty-plus-".." check that guarded the
-        // agent's surface. It must not come back, here or anywhere.
+        // agent's surface. It must not come back, here or anywhere. Comments
+        // are stripped first: the note left where it used to live names it on
+        // purpose, so the next person knows not to re-add it.
         let debug_utils = include_str!("commands/debug_utils.rs");
         for (file, source) in COMMAND_SOURCES
             .iter()
@@ -611,7 +613,7 @@ mod command_surface_contract {
             .chain([("commands/debug_utils.rs", debug_utils)])
         {
             assert!(
-                !source.contains("valid_file_path"),
+                !code_only(source).contains("valid_file_path"),
                 "{} still references valid_file_path",
                 file
             );

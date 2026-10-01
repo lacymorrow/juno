@@ -530,6 +530,61 @@ mod tests {
     }
 
     #[test]
+    fn parent_traversal_pops_a_symlinks_real_parent_not_its_lexical_one() {
+        // The ordering that makes a lexical normalizer wrong. `inside/link`
+        // points at `outside/sub`, so `inside/link/../secret.txt` is
+        // `outside/secret.txt` to the kernel and `inside/secret.txt` to a
+        // normalizer that resolves `..` before following symlinks. Only the
+        // first answer refuses, and the first answer is the one the open uses.
+        let inside = temp_root();
+        let outside = temp_root();
+        let sub = outside.path().join("sub");
+        std::fs::create_dir(&sub).unwrap_or_else(|e| panic!("mkdir failed: {}", e));
+        let link = inside.path().join("link");
+        std::os::unix::fs::symlink(&sub, &link).unwrap_or_else(|e| panic!("symlink failed: {}", e));
+
+        let sneaky = link.join("..").join("secret.txt");
+        let resolved = resolve_path_lenient(&sneaky.to_string_lossy())
+            .unwrap_or_else(|e| panic!("resolve failed: {}", e));
+
+        let canonical_outside = canonicalize_lenient(outside.path());
+        assert!(
+            resolved.starts_with(&canonical_outside),
+            "expected the symlink's real parent ({}), got {}",
+            canonical_outside.display(),
+            resolved.display()
+        );
+
+        let result =
+            resolve_within_roots(&sneaky.to_string_lossy(), &[inside.path().to_path_buf()]);
+        assert!(
+            result.is_err(),
+            "the boundary must refuse this, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn resolve_path_lenient_normalizes_a_path_whose_parent_does_not_exist() {
+        // `canonicalize_lenient` cannot do this: it needs the parent to exist.
+        // A write to a new file under a new directory is the common case.
+        let dir = temp_root();
+        let deep = dir.path().join("a").join("b").join("c.txt");
+
+        let resolved = resolve_path_lenient(&deep.to_string_lossy())
+            .unwrap_or_else(|e| panic!("resolve failed: {}", e));
+        assert!(resolved.is_absolute());
+        assert!(!resolved.to_string_lossy().contains("/./"));
+        assert!(resolved.ends_with("a/b/c.txt"));
+        assert!(resolved.starts_with(canonicalize_lenient(dir.path())));
+    }
+
+    #[test]
+    fn resolve_path_lenient_refuses_traversal_above_the_filesystem_root() {
+        assert!(resolve_path_lenient("/../../../etc/hosts").is_err());
+    }
+
+    #[test]
     fn empty_path_rejected() {
         let dir = temp_root();
         let result = resolve_within_roots("", &[dir.path().to_path_buf()]);
