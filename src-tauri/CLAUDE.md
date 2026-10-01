@@ -286,7 +286,7 @@ merging them into one list would weaken both.
 |---|---|---|
 | Does Juno stop and ask the person? | `agent/tools/risk_classifier.rs` → `agent/tools/permission_policy.rs::requires_approval` | Risk level plus the person's mode. A closed set of 20 inert commands behind a character whitelist never asks |
 | Does Juno run it at all? | `commands/shell.rs::refuse_forbidden_command` | Blocklist. Privilege escalation, catastrophic literals, recursive forced `rm` of `/`, redirection into system directories, path traversal in a redirection |
-| Does Juno ask before it sends? (Claude CLI path) | `agent/providers/cli_approval.rs` | Consequence at the tool boundary: read-only connector calls and drafts run, sends and deletes ask |
+| Does Juno ask before it sends? (Claude CLI path) | `agent/providers/cli_approval.rs` | Consequence at the tool boundary. **The default allows**: a connector call runs unless its name reads as sending, spending, emptying the Trash, or a remote delete |
 
 **One construction, so a question can go away.** `src/trash.rs` writes the
 `rm` the shell session runs: deletes go to the macOS Trash, so they are
