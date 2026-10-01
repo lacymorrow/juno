@@ -815,3 +815,75 @@ pub mod mouse_tracking {
         // No-op on non-macOS platforms
     }
 }
+
+/// `NSWindowAbove`: order one window directly above another in the same level.
+#[cfg(target_os = "macos")]
+const NS_WINDOW_ABOVE: i64 = 1;
+
+/// Put `label` directly above Juno's chat window, without raising its level.
+///
+/// Showing and focusing a window is not enough on its own. Activating an
+/// application makes AppKit re-order that application's windows, and a window
+/// built or shown a moment earlier can lose that re-order and come up behind
+/// a sibling. Settings opened while the chat window was up is exactly that
+/// case, and from a non-activating surface like the floating bar it is the
+/// common case rather than the rare one.
+///
+/// This is deliberately a re-order and not a window level. A level is a
+/// system-wide band: anything above `NSNormalWindowLevel` floats over every
+/// other application's ordinary windows too, and there is no level that means
+/// "above Juno's own windows and nothing else". Settings is not an accessory
+/// panel, and the floating bar already recorded what too high a level costs:
+/// at level 5 it sat above a system permission prompt, which arrived behind
+/// Juno unreadable and unclickable. Settings is where the permission rows
+/// live, so it is the last window that should be able to cover that prompt.
+///
+/// Ordering is relative to Juno's own chat window, so the rest of the system
+/// is untouched: click another app and settings goes behind it, as a settings
+/// window should.
+#[cfg(target_os = "macos")]
+pub fn raise_above_chat_window(app_handle: &AppHandle, label: &str) {
+    let Some(window) = app_handle.get_webview_window(label) else {
+        return;
+    };
+    let Ok(window_ptr) = window.ns_window() else {
+        return;
+    };
+
+    // No chat window on screen means there is nothing to get out from under,
+    // and ordering relative to a window that is not there would be a no-op
+    // with a worse failure mode than skipping.
+    let chat_ptr = app_handle
+        .get_webview_window(constants::window_labels::MAIN)
+        .filter(|chat| chat.is_visible().unwrap_or(false))
+        .and_then(|chat| chat.ns_window().ok());
+
+    let window_addr = window_ptr as usize;
+    let chat_addr = chat_ptr.map(|ptr| ptr as usize);
+
+    // NSWindow ordering is main-thread-only, and this is called from an async
+    // command. Queueing it also means it runs after the activation AppKit is
+    // part-way through, which is the re-order being corrected.
+    if let Err(e) = app_handle.run_on_main_thread(move || unsafe {
+        let ns_window = window_addr as cocoa_id;
+        if let Some(chat_addr) = chat_addr {
+            let chat = chat_addr as cocoa_id;
+            #[allow(unexpected_cfgs)]
+            let chat_number: i64 = msg_send![chat, windowNumber];
+            #[allow(unexpected_cfgs)]
+            let _: () = msg_send![ns_window, orderWindow: NS_WINDOW_ABOVE relativeTo: chat_number];
+        }
+        // Key status last: ordering alone leaves the keyboard pointed at
+        // whatever had it, so typing would land in the window underneath.
+        #[allow(unexpected_cfgs)]
+        let _: () = msg_send![ns_window, makeKeyAndOrderFront: nil];
+    }) {
+        warn!(
+            "Could not raise the {} window above the chat window: {}",
+            label, e
+        );
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn raise_above_chat_window(_app_handle: &AppHandle, _label: &str) {}

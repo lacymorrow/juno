@@ -162,6 +162,10 @@ pub mod permissions {
     pub const AWAITING_RELAUNCH: &str = "permissions_awaiting_relaunch";
     /// Restart Juno so a granted permission takes effect
     pub const RESTART_AFTER_PERMISSIONS: &str = "restart_app_after_permissions";
+    /// Where one capability stands now, including whether a restart is owed
+    pub const PERMISSION_MOMENT: &str = "permission_moment";
+    /// Lets macOS raise its Automation dialog, after Juno has explained it
+    pub const ALLOW_AUTOMATION: &str = "allow_automation_permission";
     pub const GET_PERMISSION_DIAGNOSTICS: &str = "get_permission_diagnostics";
     pub const RESET_PERMISSION_GRANT: &str = "reset_permission_grant";
     pub const OPEN_SYSTEM_PREFERENCES: &str = "open_system_preferences";

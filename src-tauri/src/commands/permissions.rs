@@ -337,6 +337,14 @@ pub async fn request_screen_recording_permission_native(app: AppHandle) -> Resul
                     let _ = Command::new("open")
                         .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
                         .status();
+                    // Juno has asked and macOS said no, and for screen capture
+                    // that answer is fixed for the life of the process: the
+                    // WindowServer decides what a client may capture when the
+                    // client connects. So whatever they do in that pane, this
+                    // process will not see it. The ledger was never written
+                    // here, which is why the one permission that always needs
+                    // a restart was the one that never asked for one.
+                    note_relaunch_pending("screen_recording");
                     Ok(false)
                 } else {
                     info!("Requesting screen recording permissions with native prompt (first time this launch)");
@@ -353,6 +361,9 @@ pub async fn request_screen_recording_permission_native(app: AppHandle) -> Resul
                                         info!("Screen recording permissions now granted");
                                     } else {
                                         info!("Screen recording permissions still not granted - user needs to manually enable in System Settings");
+                                        // See the branch above: a refusal here
+                                        // cannot be undone without a restart.
+                                        note_relaunch_pending("screen_recording");
                                     }
                                     Ok(granted)
                                 }
@@ -816,6 +827,35 @@ pub async fn check_restart_needed_after_permissions() -> Result<bool, String> {
         .lock()
         .map(|pending| !pending.is_empty())
         .unwrap_or(false))
+}
+
+/// Where the person stands with one capability, right now.
+///
+/// The ask card used to answer this out of the permissions-state blob, which
+/// has a row for Accessibility and Screen Recording and none for Microphone,
+/// so a microphone ask could never turn into its own receipt, and nothing
+/// anywhere could tell "not granted" apart from "granted, but this process
+/// cannot use it". One uncached answer per capability closes both holes.
+///
+/// The decision itself is `permission_gate::restart_is_the_missing_step`, a
+/// pure function with a test per capability.
+#[tauri::command]
+pub async fn permission_moment(
+    permission: String,
+) -> Result<crate::permission_gate::PermissionMoment, String> {
+    crate::permission_gate::moment_for(&permission)
+}
+
+/// Let macOS raise its Automation dialog, because the person pressed Allow.
+///
+/// This is the only place the system's Automation prompt is triggered on
+/// purpose, and it only runs behind Juno's own card, so the dialog arrives
+/// with the explanation already read rather than out of nowhere mid-task.
+#[tauri::command]
+pub async fn allow_automation_permission(app: AppHandle, target: String) -> Result<bool, String> {
+    let target = crate::platform::automation::AutomationTarget::from_key(&target)
+        .ok_or_else(|| format!("Juno does not drive '{}'", target))?;
+    Ok(crate::permission_gate::allow_automation(&app, target).await)
 }
 
 /// Handle restart logic after permissions are granted
