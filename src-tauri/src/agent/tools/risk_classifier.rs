@@ -11,22 +11,239 @@ use serde_json::Value;
 use crate::shell_command::ShellCommand;
 use crate::state::RiskLevel;
 
+// --- the names this gate guards ---
+//
+// One list per arm of [`classify_risk`], read by the arm itself. A name used
+// to live only inside a match arm, which meant nothing could enumerate what
+// the gate claimed to cover, and that is exactly how the hole opened twice: in
+// the browser arm (#586) and again in the file arm, where the agent's own text
+// editor matched nothing and came through as `RiskLevel::Low`.
+//
+// Every name below is accounted for by the `gate_name_truth` test module at the
+// bottom of this file. A name is allowed here only if something can execute
+// it: a tool definition Juno registers, a name one of the agents in
+// `src/agents/` routes, or a generic name listed in
+// [`GENERIC_NAMES_FROM_OUTSIDE_JUNO`] with the reason written down. Nothing
+// else, because a name nothing can execute reads as cover and is not.
+
+/// Shell execution. The highest-variance category, classified by command text.
+///
+/// Left exactly as it was: the shell arm's aliases are a separate audit and
+/// this change is about the file tools. `bash` is the registered one.
+const SHELL_TOOLS: &[&str] = &[
+    "bash",
+    "execute_bash",
+    "run_bash_command",
+    "shell_execute",
+    "execute_command",
+    "run_command",
+];
+
+/// Tools that write, create, edit or revert a file that they name.
+///
+/// Where each one comes from: `write_file`, `text_editor_insert`,
+/// `text_editor_str_replace` and `text_editor_undo_edit` are in the catalog in
+/// `crate::tools::list_tool_definitions`;
+/// `save_and_close_file` and `open_file_and_type` are registered by
+/// `agent::tools::desktop_tools`; `edit_file` and `create_file` are in
+/// [`GENERIC_NAMES_FROM_OUTSIDE_JUNO`].
+///
+/// `text_editor_undo_edit` is here on purpose, and the usual argument for
+/// leaving a recovery action ungated does not survive reading it:
+/// `commands::text_editor::text_editor_undo_edit` keeps exactly one snapshot,
+/// consumes it, and blind-writes the file. Undo after the person has typed in
+/// that file destroys their work with nothing left to undo from, and undoing a
+/// create deletes the file outright. What buys silence is a construction that
+/// makes a mistake recoverable, the way deleting to the Trash does; a
+/// single-level snapshot that the undo itself spends is not one.
+const FILE_WRITE_TOOLS: &[&str] = &[
+    "write_file",
+    "text_editor_insert",
+    "text_editor_str_replace",
+    "text_editor_undo_edit",
+    "save_and_close_file",
+    "open_file_and_type",
+    "edit_file",
+    "create_file",
+];
+
+/// Tools that delete a file. High in every case: a path is not enough to tell
+/// a scratch file from a year of work.
+const FILE_DELETE_TOOLS: &[&str] = &["delete_file", "remove_file", "unlink_file"];
+
+/// Tools that run caller-supplied code, where the capability is the risk and
+/// the input cannot be read for intent. See the `safari_execute_javascript`
+/// reasoning below.
+const ARBITRARY_SCRIPT_TOOLS: &[&str] = &["safari_execute_javascript", "run_applescript"];
+
+/// Navigation, classified by where it is going.
+const BROWSER_NAV_TOOLS: &[&str] = &[
+    "browser_navigate",
+    "navigate_to_url",
+    "open_url",
+    "safari_navigate",
+];
+
+/// Typing into a page, classified by what is being typed.
+const FORM_FILL_TOOLS: &[&str] = &["browser_type", "safari_type_text"];
+
+/// Tools whose arm reads the verb out of the input rather than the tool name,
+/// so they get an arm each rather than a group. Enumerated here so
+/// `every_verb_in_input_tool_still_has_an_arm` can prove the arms exist.
+const VERB_IN_INPUT_TOOLS: &[&str] = &[
+    "computer",
+    "str_replace_based_edit_tool",
+    "browser_interact",
+];
+
+/// Agent self-scheduling.
+const SCHEDULING_TOOLS: &[&str] = &["create_scheduled_automation", "delete_scheduled_automation"];
+
+/// Generic names that no Juno tool uses, kept on purpose.
+///
+/// These are not the fictional names #586 removed. #586 deleted
+/// `browser_fill`, `fill_form` and `type_in_element` because they made the
+/// form-fill arm *look* like it covered the browser tool that types while the
+/// real one, `browser_interact`, matched nothing. These are the opposite case:
+/// MCP servers register into the same tool provider under whatever names they
+/// choose (`agent::implementations::tool_provider`), those names reach
+/// [`classify_risk`] like any other, and a connector tool called `edit_file`
+/// edits a file. Juno already gates tools from outside the build by reading
+/// their names on the Claude CLI path (`agent::providers::cli_approval`); this
+/// is the same move in the same spirit.
+///
+/// `str_replace_editor` was removed rather than kept here, because it is not a
+/// generic name: it is the name Anthropic's `text_editor_20241022` used, and
+/// having it sit in the file arm is what made the arm read as though the
+/// editor was covered. Juno's editor is `str_replace_based_edit_tool`, under
+/// every API version (`tool_versioning::ToolVersionConfig::get_tool_api_type`
+/// changes the tool's `api_type`, never its name), and it now has its own arm.
+pub const GENERIC_NAMES_FROM_OUTSIDE_JUNO: &[&str] = &[
+    "edit_file",
+    "create_file",
+    "remove_file",
+    "unlink_file",
+    "browser_type",
+    "navigate_to_url",
+    "execute_bash",
+    "run_bash_command",
+    "execute_command",
+    "run_command",
+];
+
+/// Registered tools that are deliberately left at [`RiskLevel::Low`].
+///
+/// This list is the other half of the fix. The hole was never that `Low` is
+/// the fall-through; it was that falling through took no decision from anyone.
+/// Every tool Juno can execute is now either classified above `Low` or written
+/// down here, and `every_enumerable_tool_is_classified_or_knowingly_ungated`
+/// fails the build on a tool that is neither.
+///
+/// Three reasons appear here and no others:
+///
+///   - It reads and reports. Nothing is left behind.
+///   - It is desktop or page input the person is watching happen: a click, a
+///     keystroke, a scroll, a window focus. These are `Low` deliberately and
+///     consistently with the `computer` tool's own classification, because a
+///     prompt per click is a prompt nobody reads, which is less safety than
+///     one prompt that means something.
+///   - It changes something that is not the Mac's state in any lasting sense:
+///     the clipboard, Safari's cache.
+///
+/// Two entries carry a caveat worth knowing. `press_key` has no equivalent of
+/// the destructive-combination check `classify_computer_use_risk` applies to
+/// the `computer` tool's `key` action, because its input names the key in
+/// `key`/`modifier` rather than in `action`/`text`; nothing registers
+/// `press_key` today, which is the only reason that is not a live gap.
+/// `set_clipboard_content` replaces the clipboard, which is a change a person
+/// can notice, and it is `Low` on the same reading as typing.
+pub const DELIBERATELY_UNGATED_TOOLS: &[&str] = &[
+    // Reads and reports
+    "capture_element_screenshot",
+    "capture_screenshot",
+    "cursor_position",
+    "find_files",
+    "get_browser_info",
+    "get_clipboard_content",
+    "get_element_by_description",
+    "get_element_tree",
+    "get_focused_element_info",
+    "get_screen_text",
+    "read_file",
+    "browser_extract_content",
+    "browser_get_current_url",
+    "browser_screenshot",
+    "safari_extract_dom",
+    "safari_get_url",
+    "safari_list_clickable_elements",
+    // Desktop and page input the person is watching happen
+    "click_focused_element",
+    "hold_key",
+    "open_application",
+    "press_key",
+    "release_key",
+    "scroll_at_position",
+    "scroll_window",
+    "type_text",
+    "wait",
+    "safari_click_element",
+    // Changes nothing lasting
+    "safari_clear_cache",
+    "set_clipboard_content",
+];
+
+/// Every tool name [`classify_risk`] has an arm for.
+///
+/// Derived from the same lists the arms read, so it cannot describe a gate
+/// other than the one that runs.
+pub fn guarded_tool_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = SHELL_TOOLS
+        .iter()
+        .chain(FILE_WRITE_TOOLS)
+        .chain(FILE_DELETE_TOOLS)
+        .chain(ARBITRARY_SCRIPT_TOOLS)
+        .chain(BROWSER_NAV_TOOLS)
+        .chain(FORM_FILL_TOOLS)
+        .chain(VERB_IN_INPUT_TOOLS)
+        .chain(SCHEDULING_TOOLS)
+        .copied()
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 /// Classify the risk level of a tool call based on its name and input.
 /// Returns the highest applicable risk level found.
 pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
     match tool_name {
         // Shell execution — highest-variance category
-        "bash" | "execute_bash" | "run_bash_command" | "shell_execute" | "execute_command"
-        | "run_command" => classify_shell_risk(tool_input),
+        name if SHELL_TOOLS.contains(&name) => classify_shell_risk(tool_input),
 
         // Computer use actions (screenshot/cursor are safe; keyboard combos vary)
         "computer" => classify_computer_use_risk(tool_input),
 
         // File mutations
-        "write_file" | "edit_file" | "create_file" | "str_replace_editor" => {
-            classify_file_write_risk(tool_input)
-        }
-        "delete_file" | "remove_file" | "unlink_file" => RiskLevel::High,
+        name if FILE_WRITE_TOOLS.contains(&name) => classify_file_write_risk(tool_input),
+
+        // Anthropic's official text editor, and the one tool the agent reaches
+        // for to change a file. It carries the verb in `command` rather than in
+        // the tool name, the same shape as `browser_interact` below, and
+        // without this arm it matched nothing and was `RiskLevel::Low`: in
+        // "Ask me first" the agent could rewrite a file on disk with no prompt,
+        // in the mode whose whole promise is that it asks first.
+        //
+        // Only `view` is let through, rather than gating a list of writing
+        // commands. Anthropic's editor has gained commands before (`insert`,
+        // `undo_edit` in later tool versions), and a command this build has
+        // never heard of writing a file unprompted is the exact failure this
+        // arm exists to stop, so the unknown case fails towards the gate.
+        "str_replace_based_edit_tool" => match tool_input.get("command").and_then(Value::as_str) {
+            Some("view") => RiskLevel::Low,
+            _ => classify_file_write_risk(tool_input),
+        },
+
+        name if FILE_DELETE_TOOLS.contains(&name) => RiskLevel::High,
 
         // Arbitrary JavaScript injected into the user's real Safari session.
         // The substring blocklist in safari_tools.rs (validate_javascript_safety)
@@ -38,12 +255,15 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
         // Parameterized Safari tools (click by cached numeric id, DOM
         // extraction with a fixed script) stay Low because their injected JS
         // is compiled from typed inputs, not caller-supplied code.
-        "safari_execute_javascript" => RiskLevel::High,
+        //
+        // `run_applescript` sits in the same arm for the same reason, and it
+        // was absent from the classifier entirely. AppleScript is not a
+        // narrower capability than page JavaScript, it is a wider one:
+        // `do shell script` is one line of it.
+        name if ARBITRARY_SCRIPT_TOOLS.contains(&name) => RiskLevel::High,
 
         // Browser navigation to sensitive sites
-        "browser_navigate" | "navigate_to_url" | "open_url" | "safari_navigate" => {
-            classify_browser_nav_risk(tool_input)
-        }
+        name if BROWSER_NAV_TOOLS.contains(&name) => classify_browser_nav_risk(tool_input),
 
         // Form fill — could submit payments/passwords. safari_type_text
         // injects an escaped string literal into a fixed script (not
@@ -56,13 +276,14 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
         // A classifier full of fictional names cannot be read for what it
         // covers, so the fictional ones are gone.
         //
-        // `browser_type` is NOT registered either, and the ungated executor
-        // that used to route it to the same controller call as
-        // `browser_interact` has been removed, so nothing reaches it today.
-        // The arm stays because classifying an unsent name fails safe, and
-        // removing it is a change to the gate rather than to dead code.
-        // `alias_names_are_still_reachable` pins the classification.
-        "browser_type" | "safari_type_text" => classify_form_fill_risk(tool_input),
+        // `browser_type` is NOT registered, and the ungated executor that used
+        // to route it to the same controller call as `browser_interact` was
+        // deleted in #671, so nothing in Juno sends it today. It stays guarded
+        // as an outside name: an MCP connector registers under whatever names
+        // it chooses, and a browser connector's tool called `browser_type`
+        // would type into a page. Classifying a name nothing sends fails safe.
+        // `gate_name_truth` pins it through `GENERIC_NAMES_FROM_OUTSIDE_JUNO`.
+        name if FORM_FILL_TOOLS.contains(&name) => classify_form_fill_risk(tool_input),
 
         // The browser tool that actually types is `browser_interact`, which
         // carries the verb in `action` rather than in the tool name. Without
@@ -147,8 +368,7 @@ pub fn needs_approval(risk_level: &RiskLevel) -> bool {
 /// Extract a human-readable target app hint from tool input, if present.
 pub fn extract_target_app(tool_name: &str, tool_input: &Value) -> Option<String> {
     match tool_name {
-        "bash" | "execute_bash" | "run_bash_command" | "shell_execute" | "execute_command"
-        | "run_command" => {
+        name if SHELL_TOOLS.contains(&name) => {
             let cmd = tool_input
                 .get("command")
                 .or_else(|| tool_input.get("cmd"))
@@ -158,7 +378,10 @@ pub fn extract_target_app(tool_name: &str, tool_input: &Value) -> Option<String>
             // Extract the binary name from the command
             cmd.split_whitespace().next().map(|s| s.to_string())
         }
-        "browser_navigate" | "navigate_to_url" | "open_url" => tool_input
+        // The same list the classifier's navigation arm reads, so the badge on
+        // the prompt cannot name a different set of tools from the gate.
+        // `safari_navigate` was missing here and is covered now.
+        name if BROWSER_NAV_TOOLS.contains(&name) => tool_input
             .get("url")
             .and_then(|v| v.as_str())
             .and_then(|url| {
@@ -956,6 +1179,183 @@ mod tests {
         );
     }
 
+    /// The defect, stated the way a person would say it: in the mode named
+    /// "ask first", the agent must not be able to change a file on disk
+    /// without asking.
+    ///
+    /// Before this test, `str_replace_based_edit_tool` (Anthropic's editor and
+    /// the agent's usual way of changing a file), `text_editor_insert`,
+    /// `text_editor_str_replace`, `text_editor_create`, `text_editor_undo_edit`,
+    /// `save_and_close_file` and `open_file_and_type` all matched no arm, came
+    /// out `RiskLevel::Low`, and `Low` is the one level that goes through in
+    /// every mode including `AskFirst`.
+    #[test]
+    fn no_file_tool_changes_a_file_unprompted_in_ask_first() {
+        use crate::agent::tools::permission_policy::{requires_approval, PermissionMode};
+
+        let cases: Vec<(&str, Value)> = vec![
+            (
+                "str_replace_based_edit_tool",
+                json!({"command": "str_replace", "path": "/Users/me/notes.txt",
+                       "old_str": "a", "new_str": "b"}),
+            ),
+            (
+                "str_replace_based_edit_tool",
+                json!({"command": "create", "path": "/Users/me/notes.txt", "file_text": "x"}),
+            ),
+            (
+                "text_editor_str_replace",
+                json!({"file_path": "/Users/me/notes.txt", "old_str": "a", "new_str": "b"}),
+            ),
+            (
+                "text_editor_insert",
+                json!({"file_path": "/Users/me/notes.txt", "line_number": 1,
+                       "text_to_insert": "x"}),
+            ),
+            // Takes no arguments at all: the command reads the file it last
+            // edited out of app state. Medium is the floor, and the classifier
+            // cannot see which file or whether the undo deletes it.
+            ("text_editor_undo_edit", json!({})),
+            (
+                "write_file",
+                json!({"path": "/Users/me/notes.txt", "content": "x"}),
+            ),
+            // Saves with cmd+S, so it names no file either.
+            ("save_and_close_file", json!({})),
+            (
+                "open_file_and_type",
+                json!({"file_path": "/Users/me/notes.txt", "content": "x"}),
+            ),
+        ];
+
+        for (tool, input) in cases {
+            let risk = classify_risk(tool, &input);
+            assert_eq!(
+                risk,
+                RiskLevel::Medium,
+                "{tool} classifies {risk:?}; a tool that changes a file has to \
+                 be above Low or \"Ask me first\" never sees it"
+            );
+            assert!(
+                requires_approval(PermissionMode::AskFirst, &risk, false),
+                "{tool} changes a file and does not ask in \"Ask me first\""
+            );
+            // And the default mode gains no prompts from this change: it asks
+            // at High, so an ordinary edit still goes through.
+            assert!(
+                !requires_approval(PermissionMode::AskWhenRisky, &risk, false),
+                "{tool} started interrupting the default mode"
+            );
+        }
+    }
+
+    /// Reading through the editor is reading, and must not start asking.
+    #[test]
+    fn viewing_a_file_through_the_editor_stays_low() {
+        let r = classify_risk(
+            "str_replace_based_edit_tool",
+            &json!({"command": "view", "path": "/Users/me/notes.txt"}),
+        );
+        assert_eq!(r, RiskLevel::Low);
+        assert!(!needs_approval(&r));
+    }
+
+    /// The unknown case fails towards the gate, which is the opposite of the
+    /// choice that caused this defect. Anthropic's editor has gained commands
+    /// before (`insert`, `undo_edit` in later tool versions), so a build that
+    /// has not heard of a command must not let it write unasked.
+    #[test]
+    fn an_editor_command_this_build_does_not_know_still_asks() {
+        for input in [
+            json!({"command": "insert", "path": "/Users/me/notes.txt"}),
+            json!({"command": "undo_edit", "path": "/Users/me/notes.txt"}),
+            json!({"path": "/Users/me/notes.txt"}),
+        ] {
+            assert_eq!(
+                classify_risk("str_replace_based_edit_tool", &input),
+                RiskLevel::Medium,
+                "an unrecognised editor command must not fall to Low"
+            );
+        }
+
+        // The system-path and traversal rules still apply through this arm.
+        assert_eq!(
+            classify_risk(
+                "str_replace_based_edit_tool",
+                &json!({"command": "create", "path": "/etc/sudoers"})
+            ),
+            RiskLevel::Critical
+        );
+    }
+
+    /// AppleScript is a superset of the shell (`do shell script`), so it
+    /// cannot be classified lower than arbitrary page JavaScript.
+    #[test]
+    fn applescript_is_arbitrary_code_execution() {
+        let r = classify_risk(
+            "run_applescript",
+            &json!({"script": "do shell script \"rm -rf ~/Documents\""}),
+        );
+        assert_eq!(r, RiskLevel::High);
+        assert!(needs_approval(&r));
+    }
+
+    /// `str_replace_editor` is the name Anthropic's `text_editor_20241022`
+    /// used. Juno's editor tool is named `str_replace_based_edit_tool` under
+    /// every API version, so this name covered nothing while reading as though
+    /// the editor was covered. It is gone; if a build ever sends it, the arm
+    /// comes back and this test goes.
+    #[test]
+    fn the_editor_name_juno_never_sends_is_no_longer_classified() {
+        assert_eq!(
+            classify_risk("str_replace_editor", &json!({"path": "/Users/me/x.txt"})),
+            RiskLevel::Low
+        );
+    }
+
+    /// The three tools whose arm reads a verb out of the input keep their own
+    /// arm rather than a group, so this is what proves the arms still exist.
+    #[test]
+    fn every_verb_in_input_tool_still_has_an_arm() {
+        let mutating: &[(&str, Value)] = &[
+            ("computer", json!({"action": "key", "text": "cmd+q"})),
+            (
+                "str_replace_based_edit_tool",
+                json!({"command": "create", "path": "/Users/me/x.txt"}),
+            ),
+            (
+                "browser_interact",
+                json!({"action": "type", "value": "hunter2", "field": "password"}),
+            ),
+        ];
+
+        for name in VERB_IN_INPUT_TOOLS {
+            let case = mutating
+                .iter()
+                .find(|(tool, _)| tool == name)
+                .unwrap_or_else(|| panic!("{name} has no case in this test; add one"));
+            assert_ne!(
+                classify_risk(case.0, &case.1),
+                RiskLevel::Low,
+                "{name} is listed as having its own arm and does not"
+            );
+        }
+    }
+
+    #[test]
+    fn scheduling_an_unattended_automation_still_asks() {
+        // Pinned because the two scheduling names are literal arms while
+        // `SCHEDULING_TOOLS` enumerates them for the drift test.
+        assert_eq!(
+            classify_risk("create_scheduled_automation", &json!({})),
+            RiskLevel::High
+        );
+        assert_eq!(
+            classify_risk("delete_scheduled_automation", &json!({})),
+            RiskLevel::Medium
+        );
+    }
+
     /// Deleting is recoverable now: Juno's shell session runs its own `rm`
     /// that moves things to the macOS Trash (`crate::trash`). That is what
     /// makes it defensible to shrink this classifier later, so the link is
@@ -969,5 +1369,299 @@ mod tests {
              shrink the shell risk patterns is no longer safe; see \
              docs/plans/permissions-by-consequence.md"
         );
+    }
+}
+
+/// Both directions of the question this file keeps getting wrong.
+///
+/// A name in the classifier that nothing can execute is cover, not a control:
+/// it looks right on inspection and gates nothing. A tool Juno can execute
+/// that the classifier has never heard of is `RiskLevel::Low`, which goes
+/// through unprompted in every mode including "Ask me first". The browser arm
+/// had both at once (#586) and the file arm had both again, which is why this
+/// is a test and not a comment: the first fix corrected names and wrote down
+/// the reasoning, and the reasoning did not stop it happening in the next arm
+/// along.
+///
+/// Scope, stated plainly so the gap is not mistaken for coverage. The catalogs
+/// walked here are the ones that are a plain function returning definitions:
+/// `crate::tools::list_tool_definitions`, the browser and Safari families, and
+/// the Anthropic computer-use family. The desktop, display, window, timer,
+/// schedule, accessibility, self-awareness and basic families build their
+/// lists inline inside `register_*` functions that need an `AppHandle` and an
+/// `AppState`, so there is nothing to walk without refactoring registration
+/// first; the names from those families that this gate guards are pinned by
+/// source text in [`pinned_names`] instead, which proves the name still exists
+/// but cannot notice a *new* tool appearing. MCP tools are registered at
+/// runtime by servers and cannot be enumerated at build time at all. What the
+/// second half needs is written up in the pull request.
+#[cfg(test)]
+mod gate_name_truth {
+    use super::*;
+    use crate::agent::tools::anthropic_computer_use::create_versioned_tools;
+    use crate::agent::tools::browser_tools::get_browser_tool_definitions;
+    use crate::agent::tools::safari_tools::get_safari_tool_definitions;
+    use crate::agent::tools::tool_versioning::{ApiVersion, ToolVersionConfig};
+    use serde_json::json;
+    use std::collections::BTreeSet;
+
+    /// Every tool name Juno can execute that is enumerable at build time.
+    fn enumerable_tool_names() -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+
+        for definition in crate::tools::list_tool_definitions() {
+            names.insert(definition.name);
+        }
+        for definition in get_browser_tool_definitions() {
+            names.insert(definition.name);
+        }
+        for definition in get_safari_tool_definitions() {
+            names.insert(definition.name);
+        }
+        for definition in
+            create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124))
+        {
+            names.insert(definition.name);
+        }
+
+        names
+    }
+
+    /// A guarded name whose registration or routing is not a function this
+    /// test can call, pinned to the file that makes it reachable.
+    ///
+    /// This generalises `alias_names_are_still_reachable`, which did exactly
+    /// this for one name. The file tools `desktop_tools.rs` registers inline
+    /// are this shape, and so is a name that only `constants::agent::tool_names`
+    /// declares: still reachable, still not enumerable.
+    ///
+    /// `browser_type`, `text_editor_create` and `text_editor_str_replace` used
+    /// to be pinned here to `agents/browser_agent.rs` and
+    /// `agents/system_agent.rs`. #671 deleted that executor. `browser_type` is
+    /// now guarded as an outside name, `text_editor_create` left the
+    /// classifier because nothing sends it, and `text_editor_str_replace` is
+    /// enumerable through the catalog, so none of the three needs a pin.
+    struct PinnedName {
+        /// The guarded name.
+        name: &'static str,
+        /// Where a reader goes to check it, for the failure message.
+        site: &'static str,
+        /// Why it is guarded without a definition of its own.
+        reason: &'static str,
+        /// That file's text, read at compile time.
+        source: &'static str,
+    }
+
+    fn pinned_names() -> Vec<PinnedName> {
+        let desktop_tools = include_str!("desktop_tools.rs");
+        let declared = include_str!("../../constants/agent.rs");
+
+        vec![
+            PinnedName {
+                name: "save_and_close_file",
+                site: "src-tauri/src/agent/tools/desktop_tools.rs",
+                reason: "registered inline; presses cmd+S, so it writes the open file \
+                         to disk",
+                source: desktop_tools,
+            },
+            PinnedName {
+                name: "open_file_and_type",
+                site: "src-tauri/src/agent/tools/desktop_tools.rs",
+                reason: "registered inline; opens a named file and types into it",
+                source: desktop_tools,
+            },
+            PinnedName {
+                name: "delete_file",
+                site: "src-tauri/src/constants/agent.rs (tool_names::DELETE_FILE)",
+                reason: "the standardised name for a file delete; declared, and High \
+                         before anything registers it",
+                source: declared,
+            },
+            PinnedName {
+                name: "shell_execute",
+                site: "src-tauri/src/constants/agent.rs (tool_names::SHELL_EXECUTE)",
+                reason: "declared shell alias; the shell arm is left exactly as it was",
+                source: declared,
+            },
+            PinnedName {
+                name: "create_scheduled_automation",
+                site: "src-tauri/src/constants/agent.rs \
+                       (tool_names::CREATE_SCHEDULED_AUTOMATION)",
+                reason: "registered by schedule_tools through the declared constant",
+                source: declared,
+            },
+            PinnedName {
+                name: "delete_scheduled_automation",
+                site: "src-tauri/src/constants/agent.rs \
+                       (tool_names::DELETE_SCHEDULED_AUTOMATION)",
+                reason: "registered by schedule_tools through the declared constant",
+                source: declared,
+            },
+        ]
+    }
+
+    /// Direction one: nothing in this file may guard a name that nothing can
+    /// execute.
+    #[test]
+    fn every_guarded_name_can_actually_be_executed() {
+        let enumerable = enumerable_tool_names();
+        assert!(
+            enumerable.len() > 30,
+            "only {} tool names were enumerated, so this test proves almost \
+             nothing. Check crate::tools::list_tool_definitions and the browser, \
+             Safari and computer-use definition functions.",
+            enumerable.len()
+        );
+
+        let pinned = pinned_names();
+        for entry in &pinned {
+            assert!(
+                entry.source.contains(&format!("\"{}\"", entry.name)),
+                "{:?} is guarded because {} ({}), and that file no longer \
+                 mentions it. Either drop the name from the classifier or point \
+                 this pin at wherever it moved.",
+                entry.name,
+                entry.site,
+                entry.reason
+            );
+        }
+
+        // And the pin works in both directions, which is what makes it worth
+        // having. Direction two below can only walk the enumerable catalogs,
+        // so a name like `save_and_close_file` could be dropped from its arm
+        // and nothing else would notice. Listing it here says it is guarded;
+        // this asserts it still is.
+        let guarded: BTreeSet<&str> = guarded_tool_names().into_iter().collect();
+        for entry in &pinned {
+            assert!(
+                guarded.contains(entry.name),
+                "{:?} is pinned here as a guarded name reachable through {} ({}), \
+                 and no arm in classify_risk covers it any more, so it is \
+                 RiskLevel::Low. Give it an arm again, or delete this pin and say \
+                 in the commit why the tool no longer needs one.",
+                entry.name,
+                entry.site,
+                entry.reason
+            );
+        }
+
+        let pinned_set: BTreeSet<&str> = pinned.iter().map(|entry| entry.name).collect();
+        let from_outside: BTreeSet<&str> =
+            GENERIC_NAMES_FROM_OUTSIDE_JUNO.iter().copied().collect();
+
+        for name in guarded_tool_names() {
+            assert!(
+                enumerable.contains(name)
+                    || pinned_set.contains(name)
+                    || from_outside.contains(name),
+                "the risk classifier guards {name:?} and nothing can execute it: \
+                 no definition function returns it, no agent in src/agents routes \
+                 it, and it is not in GENERIC_NAMES_FROM_OUTSIDE_JUNO. A name \
+                 nothing can call reads as cover and gates nothing, which is how \
+                 #586 happened. Delete it, or say why it stays."
+            );
+        }
+    }
+
+    /// Direction two, and the half that catches this defect: a tool Juno can
+    /// execute must be classified, or written down as knowingly ungated.
+    #[test]
+    fn every_enumerable_tool_is_classified_or_knowingly_ungated() {
+        let guarded: BTreeSet<&str> = guarded_tool_names().into_iter().collect();
+        let ungated: BTreeSet<&str> = DELIBERATELY_UNGATED_TOOLS.iter().copied().collect();
+
+        for name in enumerable_tool_names() {
+            assert!(
+                guarded.contains(name.as_str()) || ungated.contains(name.as_str()),
+                "{name:?} is a tool Juno can execute and the risk gate has never \
+                 heard of it, so it classifies as RiskLevel::Low and runs \
+                 unprompted in every mode, \"Ask me first\" included. Give it an \
+                 arm in classify_risk, or add it to DELIBERATELY_UNGATED_TOOLS \
+                 with the reason it cannot change anything."
+            );
+        }
+    }
+
+    /// The ungated list is a record of decisions, so it may not collect names
+    /// nobody decided anything about, and it may not disagree with the arms.
+    #[test]
+    fn the_ungated_list_holds_no_phantoms_and_contradicts_no_arm() {
+        let enumerable = enumerable_tool_names();
+        let guarded: BTreeSet<&str> = guarded_tool_names().into_iter().collect();
+
+        for name in DELIBERATELY_UNGATED_TOOLS {
+            assert!(
+                enumerable.contains(*name),
+                "DELIBERATELY_UNGATED_TOOLS names {name:?}, which no catalog \
+                 declares. An ungated list full of names nothing registers is as \
+                 unreadable as a classifier full of them."
+            );
+            assert!(
+                !guarded.contains(name),
+                "{name:?} is both classified and listed as deliberately ungated. \
+                 One of the two is a leftover."
+            );
+        }
+    }
+
+    /// The outside-name guard is only for names Juno itself does not have. The
+    /// moment Juno registers one, it stops being a guess about MCP servers and
+    /// becomes a tool with a registration site to pin.
+    #[test]
+    fn the_outside_name_guard_holds_only_names_juno_does_not_register() {
+        let enumerable = enumerable_tool_names();
+        let guarded: BTreeSet<&str> = guarded_tool_names().into_iter().collect();
+
+        for name in GENERIC_NAMES_FROM_OUTSIDE_JUNO {
+            assert!(
+                guarded.contains(name),
+                "{name:?} is justified as a name from outside Juno but no arm \
+                 classifies it, so it is justifying nothing"
+            );
+            assert!(
+                !enumerable.contains(*name),
+                "Juno now registers {name:?}. Move it out of \
+                 GENERIC_NAMES_FROM_OUTSIDE_JUNO and pin it to its registration \
+                 site, so the reason written next to it stays true."
+            );
+        }
+    }
+
+    /// The prompt's sentence has to cover whatever the gate stops, or a person
+    /// gets asked about "Use text editor str replace".
+    #[test]
+    fn everything_the_gate_stops_reads_as_a_sentence() {
+        use crate::agent::tools::permission_policy::describe_action;
+
+        for name in guarded_tool_names() {
+            let sentence = describe_action(name, &json!({"path": "/Users/me/notes.txt"}));
+            assert!(
+                !sentence.contains('_'),
+                "the prompt for {name:?} reads like code: {sentence:?}. Give it an \
+                 arm in permission_policy::describe_action."
+            );
+            assert!(
+                !sentence.contains(name),
+                "the prompt for {name:?} leaks the tool name: {sentence:?}"
+            );
+        }
+
+        // The fallback turns a tool name into English, which is enough for a
+        // Safari reader but not for something about to change a file: "Use
+        // text editor str replace" is the tool name with the underscores taken
+        // out. Anything in the file arm has to say what happens to the file.
+        let editor: &[&str] = &["str_replace_based_edit_tool"];
+        for name in FILE_WRITE_TOOLS
+            .iter()
+            .chain(FILE_DELETE_TOOLS)
+            .chain(editor)
+        {
+            let sentence = describe_action(name, &json!({"path": "/Users/me/notes.txt"}));
+            assert!(
+                !sentence.starts_with("Use "),
+                "{name:?} falls through to the generic sentence: {sentence:?}. A \
+                 prompt about a file has to name what happens to it."
+            );
+        }
     }
 }
