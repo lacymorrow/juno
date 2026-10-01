@@ -269,34 +269,17 @@ pub mod validators {
         }
     }
 
-    /// Validate file path is valid and safe.
-    ///
-    /// Interim enforcement: rejects empty paths and `..` traversal. LAC-4013
-    /// Fix B replaces the command-level call sites with
-    /// `agent::tools::path_security::resolve_within_default_roots` once the
-    /// allowed-roots product decision lands. Until then this is the only path
-    /// check on the `commands/filesystem.rs` and `commands/text_editor.rs`
-    /// surfaces — keep it unconditional.
-    pub fn valid_file_path(path: &str) -> Result<(), String> {
-        use std::path::Path;
-
-        if path.trim().is_empty() {
-            return Err("File path cannot be empty".to_string());
-        }
-
-        // Basic safety checks
-        if path.contains("..") {
-            return Err("File path cannot contain '..' for security reasons".to_string());
-        }
-
-        // Check if it's a valid path format
-        let path_obj = Path::new(path);
-        if path_obj.to_string_lossy().is_empty() {
-            return Err("Invalid file path format".to_string());
-        }
-
-        Ok(())
-    }
+    // There is deliberately no path validator here any more.
+    //
+    // LAC-4013 Fix B landed: `crate::path_gate::authorize` is the one answer to
+    // "may this path be touched, for this purpose", and every file-touching
+    // `#[tauri::command]` calls it. The validator that used to live here tested
+    // for a non-empty string plus a literal `".."` substring, with no workspace
+    // root, no credential blocklist and no size cap, and it was the only check
+    // on the surface `agents::system_agent` drives. A new path check added here
+    // would be the same bug again; add an operation to `path_gate::PathOp`
+    // instead. `path_gate`'s command-surface contract test fails if the name
+    // `valid_file_path` reappears in this file.
 }
 
 /// Helper function to determine if debug mode should be enabled
@@ -340,7 +323,7 @@ mod hold_key_cap_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::validators::{non_empty_text, valid_duration_seconds, valid_file_path};
+    use super::validators::{non_empty_text, valid_duration_seconds};
 
     // Regression tests for LAC-4013: these validators are load-bearing and run
     // unconditionally in release builds. Exercise the boundary values.
@@ -373,19 +356,9 @@ mod tests {
         assert!(valid_duration_seconds(f64::NEG_INFINITY).is_err());
     }
 
-    #[test]
-    fn file_path_rejects_empty_and_traversal() {
-        assert!(valid_file_path("").is_err());
-        assert!(valid_file_path("   ").is_err());
-        assert!(valid_file_path("/tmp/../etc/passwd").is_err());
-        assert!(valid_file_path("../secrets").is_err());
-    }
-
-    #[test]
-    fn file_path_accepts_normal_paths() {
-        assert!(valid_file_path("/Users/someone/Documents/notes.txt").is_ok());
-        assert!(valid_file_path("relative/dir/file.rs").is_ok());
-    }
+    // Path validation moved to `crate::path_gate`, which owns its own tests.
+    // The old cases here asserted the weakness: they accepted
+    // "/Users/someone/Documents/notes.txt" with no boundary and no blocklist.
 
     #[test]
     fn non_empty_text_boundaries() {

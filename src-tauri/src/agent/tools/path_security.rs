@@ -15,12 +15,88 @@ use std::fs::File;
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
 
-/// Canonicalize a path, tolerating files that do not exist yet.
+/// Resolve `path_str` to an absolute path with no `.` or `..` segments and
+/// every symlink in the existing portion followed, tolerating components that
+/// do not exist yet.
+///
+/// ## Why not a `".."` substring test
+///
+/// A substring test is not path normalization. It misses an absolute path to a
+/// sensitive location entirely (`/Users/x/.ssh/id_rsa` contains no `..`), and
+/// it misses a symlink inside an allowed directory that points outside it.
+///
+/// ## Why not plain `canonicalize`
+///
+/// [`std::fs::canonicalize`] fails for a path that does not exist yet, which
+/// is every write to a new file. [`canonicalize_lenient`] handles one missing
+/// final component but still fails when the parent directory is also missing,
+/// which is exactly what `set_file_content` and `text_editor_create` do when
+/// they `create_dir_all` the parent. This walks the components instead.
+///
+/// ## Why the walk, and in this order
+///
+/// Components are applied one at a time from the root. After each existing
+/// component the accumulator is canonicalized, so a symlink is followed
+/// *before* the next component is applied, and `..` pops the symlink's real
+/// parent rather than its lexical one. Resolving `..` lexically first gives a
+/// different and weaker answer: `/root/link/../etc/passwd` normalizes
+/// lexically to `/root/etc/passwd` (inside the boundary) while the kernel
+/// opens whatever `link`'s real parent holds. Matching the kernel's order is
+/// the whole point.
+///
+/// Once a component does not exist, canonicalization stops succeeding and the
+/// remaining components accumulate literally. They carry no `.` or `..`
+/// because those are handled by this loop, so the result is still normalized.
+pub fn resolve_path_lenient(path_str: &str) -> Result<PathBuf, String> {
+    let trimmed = path_str.trim();
+    if trimmed.is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
+    if trimmed == "~" || trimmed.starts_with("~/") {
+        return Err(
+            "Home-relative paths ('~') are not expanded here; pass an absolute path".to_string(),
+        );
+    }
+
+    let raw = PathBuf::from(trimmed);
+    let absolute = if raw.is_absolute() {
+        raw
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?
+            .join(raw)
+    };
+
+    let mut resolved = PathBuf::from(std::path::MAIN_SEPARATOR_STR);
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
+            Component::ParentDir => {
+                if !resolved.pop() {
+                    return Err("Path traverses above the filesystem root".to_string());
+                }
+            }
+            Component::Normal(name) => {
+                resolved.push(name);
+                if let Ok(real) = resolved.canonicalize() {
+                    resolved = real;
+                }
+            }
+        }
+    }
+
+    Ok(resolved)
+}
+
+/// Canonicalize a path, tolerating a file whose final component does not
+/// exist yet.
 ///
 /// For an existing path this is `std::fs::canonicalize`. For a path whose
-/// final component does not exist yet (e.g. a file about to be created), the
-/// parent directory is canonicalized and the file name re-appended, so `..`
-/// segments and symlinks in the directory portion are still resolved.
+/// final component is missing the parent directory is canonicalized and the
+/// file name re-appended. It still fails to normalize when the *parent* is
+/// also missing; [`resolve_path_lenient`] is the general form and is what the
+/// boundary check uses. This remains for canonicalizing workspace roots,
+/// which always exist.
 pub fn canonicalize_lenient(full_path: &Path) -> PathBuf {
     match full_path.canonicalize() {
         Ok(p) => p,
@@ -121,20 +197,17 @@ pub fn sensitive_path_reason(path: &Path) -> Option<String> {
 /// Sensitive credential/key files are denied even inside the boundary
 /// (security audit 2026-02-08, item #32).
 pub fn resolve_within_roots(path_str: &str, roots: &[PathBuf]) -> Result<PathBuf, String> {
-    if path_str.is_empty() {
-        return Err("Empty path not allowed".to_string());
+    // The blocklist runs on the path as written, before any resolution: a
+    // symlink *named* `id_rsa` is credential-shaped regardless of what it
+    // points at, and resolution would replace the name with the target's.
+    if let Some(reason) = sensitive_path_reason(Path::new(path_str.trim())) {
+        return Err(format!(
+            "Access denied: sensitive file is blocked ({})",
+            reason
+        ));
     }
 
-    let path = PathBuf::from(path_str);
-    let full_path = if path.is_absolute() {
-        path
-    } else {
-        let current_dir = std::env::current_dir()
-            .map_err(|e| format!("Failed to get current directory: {}", e))?;
-        current_dir.join(&path)
-    };
-
-    let canonical_path = canonicalize_lenient(&full_path);
+    let canonical_path = resolve_path_lenient(path_str)?;
 
     if let Some(reason) = sensitive_path_reason(&canonical_path) {
         return Err(format!(
