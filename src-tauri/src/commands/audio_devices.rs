@@ -149,13 +149,10 @@ pub async fn set_audio_input_device(
         {
             warn!("[AudioDevices] Could not stop the old listener: {e}");
         }
-        if let Err(e) =
-            crate::commands::always_listening::start_always_listening_mode(app, state).await
-        {
-            // The start path already told the UI it is not listening. Surface
-            // the reason rather than reporting a success nobody got.
-            return Err(e);
-        }
+        // A failure here is the person's answer: the start path has already
+        // told the UI it is not listening, and reporting a success nobody got
+        // is the defect this whole PR is about.
+        crate::commands::always_listening::start_always_listening_mode(app, state).await?;
     }
 
     Ok(())
