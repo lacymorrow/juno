@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.55] - 2026-10-01
+
+### Fixed
+
+- **settings:** a trigger conflict is a field state, not a remembered refusal (#662) (b3bd40ab)
+
 ## [0.8.54] - 2026-10-01
 
 ### Added
@@ -720,7 +726,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.54...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.55...HEAD
+[0.8.55]: https://github.com/lacymorrow/juno/compare/cua-v0.8.54...v0.8.55
 [0.8.54]: https://github.com/lacymorrow/juno/compare/cua-v0.8.53...v0.8.54
 [0.8.53]: https://github.com/lacymorrow/juno/compare/cua-v0.8.52...v0.8.53
 [0.8.50]: https://github.com/lacymorrow/juno/compare/cua-v0.8.49...v0.8.50
