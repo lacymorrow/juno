@@ -56,10 +56,12 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
         // A classifier full of fictional names cannot be read for what it
         // covers, so the fictional ones are gone.
         //
-        // `browser_type` is NOT registered either, but it is kept deliberately:
-        // `agents/browser_agent.rs` routes it to the same controller call as
-        // `browser_interact`, so a call arriving under that alias still types.
-        // `alias_names_are_still_reachable` pins that reasoning.
+        // `browser_type` is NOT registered either, and the ungated executor
+        // that used to route it to the same controller call as
+        // `browser_interact` has been removed, so nothing reaches it today.
+        // The arm stays because classifying an unsent name fails safe, and
+        // removing it is a change to the gate rather than to dead code.
+        // `alias_names_are_still_reachable` pins the classification.
         "browser_type" | "safari_type_text" => classify_form_fill_risk(tool_input),
 
         // The browser tool that actually types is `browser_interact`, which
@@ -810,21 +812,20 @@ mod tests {
         );
     }
 
-    /// `browser_type` is not a registered tool, so a later cleanup will be
-    /// tempted to delete it as dead the way the fictional names were. It is
-    /// not dead: `agents/browser_agent.rs` routes it to the same controller
-    /// call as `browser_interact`, so a call under that alias types for real
-    /// and must stay gated. If that routing goes away, this test is the place
-    /// that says the classifier arm can go too.
+    /// `browser_type` is not a registered tool, and the routing that made it
+    /// reachable is gone: this test used to `include_str!`
+    /// `agents/browser_agent.rs` and assert that it routed `browser_type` to
+    /// the same controller call as `browser_interact`. That whole ungated
+    /// executor was removed, so no caller can reach the alias today.
+    ///
+    /// The arm is kept anyway, and the keeping is deliberate rather than
+    /// inertia. Classifying a name nobody sends costs one match arm and
+    /// fails safe; dropping it would be a behaviour change to the gate, which
+    /// belongs to whoever owns this file, not to the change that deleted the
+    /// executor. What this test still pins is the classification itself, so
+    /// the arm cannot be weakened to `Low` while it stands.
     #[test]
     fn alias_names_are_still_reachable() {
-        let agent_src = include_str!("../../agents/browser_agent.rs");
-        assert!(
-            agent_src.contains("\"browser_type\""),
-            "browser_agent no longer routes browser_type; drop it from the \
-             form-fill arm in risk_classifier.rs and delete this test"
-        );
-
         let r = classify_risk(
             "browser_type",
             &json!({"selector": "input#pw", "value": "hunter2", "field": "password"}),

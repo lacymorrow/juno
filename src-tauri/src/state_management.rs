@@ -23,7 +23,6 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         audio_result,
         mcp_result,
         onboarding_result,
-        orchestrator_result,
         cloud_result,
         ui_manager_result,
         monitoring_result,
@@ -33,7 +32,6 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
         initialize_audio_state(app_handle.clone()),
         initialize_mcp_state(app_handle.clone()),
         initialize_onboarding_state(app_handle.clone()),
-        initialize_orchestrator_state(app_handle.clone()),
         initialize_cloud_state(app_handle.clone()),
         initialize_ui_manager_state(app_handle.clone()),
         initialize_monitoring_state(app_handle.clone()),
@@ -56,9 +54,6 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     }
     if let Err(e) = onboarding_result {
         errors.push(format!("Onboarding: {}", e));
-    }
-    if let Err(e) = orchestrator_result {
-        errors.push(format!("Orchestrator: {}", e));
     }
     if let Err(e) = cloud_result {
         errors.push(format!("Cloud: {}", e));
@@ -336,20 +331,12 @@ async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String
     Ok(())
 }
 
-/// Initialize multi-agent orchestrator state
-async fn initialize_orchestrator_state(app_handle: AppHandle) -> Result<(), String> {
-    debug!("[State] Initializing orchestrator state...");
-
-    if let Err(e) =
-        crate::commands::orchestrator::init_orchestrator_with_app_handle(app_handle.clone()).await
-    {
-        error!("Failed to initialize orchestrator system: {}", e);
-        return Err(format!("Orchestrator initialization failed: {}", e));
-    }
-
-    info!("Multi-agent orchestrator system initialized successfully");
-    Ok(())
-}
+// `initialize_orchestrator_state` used to run here, constructing the
+// `agents::Orchestrator` singleton and its three specialist agents on every
+// launch. That executor ran tool calls without consulting the approval gate
+// and nothing invoked it, so it was removed rather than gated. Juno's real
+// multi-agent path is built per run in `anthropic.rs` out of gated
+// `AgentRunner`s, and needs no startup state.
 
 /// Initialize cloud connectivity state
 async fn initialize_cloud_state(app_handle: AppHandle) -> Result<(), String> {

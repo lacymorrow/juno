@@ -99,9 +99,24 @@ This guide documents the systematic approach to implementing cutting-edge resear
 
 ### 2. Enhanced Multi-Agent Orchestration (January 2025)
 
-**Status**: ✅ **COMPLETED** - Production Ready  
+> **REMOVED. Read this section as history, not as a description of Juno.**
+>
+> Everything below describes `src-tauri/src/agents/` (plural): an
+> `Orchestrator`, an `AgentFactory`, and the `SystemAgent` / `BrowserAgent` /
+> `DesktopAgent` specialists, reached through fourteen Tauri commands. That
+> tree was deleted. It executed tool calls without consulting
+> `risk_classifier` or `permission_policy`, and no caller anywhere ever
+> invoked any of the fourteen commands, so none of the numbers below was ever
+> measured against a running system. "Production Ready" and the 90.2% figure
+> were claims about code nothing reached.
+>
+> Juno's real multi-agent path is `src-tauri/src/agent/` (singular), built
+> per run in `anthropic.rs` out of gated `AgentRunner`s. See the
+> "Hierarchical Agent System" section of `src-tauri/CLAUDE.md`.
+
+**Status**: ❌ **REMOVED** - was never reachable  
 **Research Foundation**: Anthropic Multi-Agent Research (90.2% performance improvement)  
-**Performance Impact**: Advanced parallel execution with intelligent batching achieved  
+**Performance Impact**: Claimed, never measured in a reachable code path  
 
 #### Implementation Details
 

@@ -76,6 +76,26 @@ Orchestrator (src/anthropic.rs)
 - **Memory**: Arc-based cloning for thread safety
 - **Tools**: Lazy initialization for expensive resources
 
+**There is exactly one agent execution path, and `src/agent` (singular) is
+it.** The orchestrator and every specialist it delegates to are
+`DefaultAgentRunner`s built in `anthropic.rs`, so every tool call in a
+multi-agent run passes through `AgentRunner::check_batch_approval` →
+`risk_classifier` → `permission_policy`.
+
+`src/agents` (plural) used to hold a second executor: an `Orchestrator`, a
+`SpecializedAgent` trait, an `AgentFactory`, and `SystemAgent` /
+`BrowserAgent` / `DesktopAgent`, each dispatching tool calls through its own
+`handle_task`. None of it consulted the gate, so `SystemAgent` wrote files
+with nothing asked. It was removed, not gated, because nothing reached it:
+the fourteen Tauri commands that exposed it had no caller anywhere. What is
+left in `src/agents` is the session registry, which the gated runner genuinely
+shares, and a test (`agents_holds_no_executor`) that fails if a dispatcher
+reappears there.
+
+**A new agent belongs in `src/agent`, behind `AgentRunner`.** A second
+executor is how the gate gets bypassed by construction rather than by
+mistake.
+
 ### Core Components
 
 ```
@@ -500,7 +520,7 @@ fix, the test binary dies and reports nothing.
 
 ### Escape Key Management
 - Register escape key ONLY during agent execution
-- Register at start of `submit_query`/`submit_orchestrated_query`
+- Register at start of `submit_query`, which is the only agent entry point
 - Always unregister on **every** exit path — completion, error, cancellation, AND early returns
 
 ### Deadlock Prevention
