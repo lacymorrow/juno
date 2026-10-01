@@ -3,6 +3,7 @@ pub mod kokoro;
 pub mod replicate;
 pub mod supertonic;
 pub mod system;
+pub mod voices;
 
 use crate::state::AppState;
 use regex::Regex;
@@ -1061,10 +1062,21 @@ pub async fn invoke_tts_for_provider(
         // one provider that can start talking immediately, and making it wait
         // on a full render was what put several seconds between the reply
         // appearing and Juno saying it.
-        #[cfg(target_os = "macos")]
-        "system" => system::speak_directly(text).await,
-        #[cfg(not(target_os = "macos"))]
-        "system" => system::invoke_system_tts(text).await,
+        //
+        // It is also the only provider that can be pointed at a chosen
+        // speaker: `say` takes an output device, `afplay` plays to the system
+        // one and takes no device at all.
+        "system" => {
+            let voice = _state
+                .as_ref()
+                .and_then(|s| s.get_system_voice().ok())
+                .flatten();
+            let device = _state
+                .as_ref()
+                .and_then(|s| s.get_output_device().ok())
+                .flatten();
+            system::speak_directly(text, voice, device).await
+        }
         "off" => {
             warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
             Ok("TTS_DISABLED_BY_SETTING".to_string())

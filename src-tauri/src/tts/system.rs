@@ -18,6 +18,29 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
         .replacen("{}", &error.to_string(), 1)
 }
 
+/// The `say` arguments for one utterance.
+///
+/// Pure so the two things a person chose in Audio settings (the voice and the
+/// speaker) can be proved to reach the command. A chooser that does not change
+/// what runs is the defect this codebase keeps producing.
+///
+/// `-v` is the voice by name and `-a` the output device by name; both are
+/// omitted when nothing was chosen, which leaves `say` on the Mac's own
+/// settings.
+pub fn say_arguments(text: &str, voice: Option<&str>, device: Option<&str>) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(voice) = voice.map(str::trim).filter(|v| !v.is_empty()) {
+        args.push("-v".to_string());
+        args.push(voice.to_string());
+    }
+    if let Some(device) = device.map(str::trim).filter(|d| !d.is_empty()) {
+        args.push("-a".to_string());
+        args.push(device.to_string());
+    }
+    args.push(text.to_string());
+    args
+}
+
 /// Speak straight out of `say`, without synthesising a file first.
 ///
 /// `invoke_system_tts` renders the whole clip to an .m4a and hands back base64
@@ -35,15 +58,24 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 /// The child's pid joins the same registry afplay's does, so Escape stops this
 /// exactly the way it stops everything else Juno is playing.
 #[cfg(target_os = "macos")]
-pub async fn speak_directly(text: String) -> Result<String, String> {
+pub async fn speak_directly(
+    text: String,
+    voice: Option<String>,
+    device: Option<String>,
+) -> Result<String, String> {
     if crate::tts::is_tts_stop_requested() {
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
-    info!("Speaking via system TTS: {} chars", text.chars().count());
+    info!(
+        "Speaking via system TTS: {} chars, voice {}, out of {}",
+        text.chars().count(),
+        voice.as_deref().unwrap_or("the Mac's own"),
+        device.as_deref().unwrap_or("the system output")
+    );
 
     let mut child = tokio::process::Command::new("say")
-        .arg(&text)
+        .args(say_arguments(&text, voice.as_deref(), device.as_deref()))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -191,4 +223,68 @@ pub async fn invoke_system_tts(text: String) -> Result<String, String> {
         text
     );
     Err("System TTS is currently only implemented for macOS.".to_string())
+}
+
+/// Same signature as the macOS version so callers need no `cfg`.
+#[cfg(not(target_os = "macos"))]
+pub async fn speak_directly(
+    text: String,
+    _voice: Option<String>,
+    _device: Option<String>,
+) -> Result<String, String> {
+    invoke_system_tts(text).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::say_arguments;
+
+    /// Nothing chosen means nothing imposed: `say` keeps the Mac's own voice
+    /// and output device.
+    #[test]
+    fn no_choices_pass_only_the_text() {
+        assert_eq!(say_arguments("hello", None, None), vec!["hello"]);
+    }
+
+    /// The point of the voice picker: the chosen voice reaches the command.
+    #[test]
+    fn a_chosen_voice_reaches_say() {
+        assert_eq!(
+            say_arguments("hello", Some("Daniel"), None),
+            vec!["-v", "Daniel", "hello"]
+        );
+    }
+
+    /// The point of the speaker picker: the chosen device reaches the command.
+    #[test]
+    fn a_chosen_speaker_reaches_say() {
+        assert_eq!(
+            say_arguments("hello", None, Some("MacBook Air Speakers")),
+            vec!["-a", "MacBook Air Speakers", "hello"]
+        );
+    }
+
+    #[test]
+    fn both_choices_reach_say_with_the_text_last() {
+        assert_eq!(
+            say_arguments("hello", Some("Karen"), Some("AirPods Pro")),
+            vec!["-v", "Karen", "-a", "AirPods Pro", "hello"]
+        );
+    }
+
+    /// A stored empty string is not a device named "", and passing `-a ""`
+    /// would make `say` fail rather than fall back.
+    #[test]
+    fn blank_choices_are_dropped() {
+        assert_eq!(say_arguments("hi", Some("  "), Some("")), vec!["hi"]);
+    }
+
+    /// A voice name with a space is one argument, not two.
+    #[test]
+    fn a_name_with_a_space_stays_one_argument() {
+        assert_eq!(
+            say_arguments("hi", Some("Grandma (Enhanced)"), None),
+            vec!["-v", "Grandma (Enhanced)", "hi"]
+        );
+    }
 }

@@ -118,6 +118,19 @@ pub mod stt_models {
     pub const SET_LIVE_PARTIAL_TRANSCRIPTION: &str = "set_live_partial_transcription";
 }
 
+/// Microphone and speaker choices, and Juno's voice.
+pub mod audio {
+    pub const LIST_AUDIO_DEVICES: &str = "list_audio_devices";
+    pub const SET_AUDIO_INPUT_DEVICE: &str = "set_audio_input_device";
+    pub const SET_AUDIO_OUTPUT_DEVICE: &str = "set_audio_output_device";
+    /// The curated voice rows, and which one is in force.
+    pub const GET_JUNO_VOICES: &str = "get_juno_voices";
+    /// Choose a voice. Speaking the sample is part of choosing.
+    pub const SET_JUNO_VOICE: &str = "set_juno_voice";
+    /// Say the sample again in the voice already chosen.
+    pub const PREVIEW_JUNO_VOICE: &str = "preview_juno_voice";
+}
+
 /// TTS command names
 pub mod tts {
     pub const INVOKE_TTS: &str = "invoke_tts";

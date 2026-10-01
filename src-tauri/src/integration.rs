@@ -66,6 +66,9 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
     // Setup always listening integration
     setup_always_listening_integration(&app_handle);
 
+    // Put the listening switch back when the microphone never opened
+    setup_capture_failure_listener(&app_handle);
+
     // Setup agent mode integration
     setup_agent_mode_integration(&app_handle);
 
@@ -444,6 +447,62 @@ fn voice_target_for_phrase(
                 .map(|t| t.target)
         })
         .unwrap_or(crate::triggers::TriggerTarget::Agent)
+}
+
+/// Stop claiming Juno is listening when the microphone never opened.
+///
+/// The capture threads used to log an error and end, which left
+/// `always_listening_active` true in the store, in `AppState`, and in the
+/// settings window: a switch on over a thread that no longer existed. The
+/// plugin now reports the failure, and this is what acts on it. The UI needs
+/// no change for the switch to go off: it reads the same state this corrects.
+fn setup_capture_failure_listener(app_handle: &AppHandle) {
+    let app_handle_for_failure = app_handle.clone();
+    app_handle.listen(constants::events::voice_capture::FAILED, move |event| {
+        warn!(
+            "[VoiceCapture] Capture failed, switching listening off: {}",
+            event.payload()
+        );
+        let app_handle_clone = app_handle_for_failure.clone();
+        safe_spawn_async_task(move || async move {
+            let app_state = app_handle_clone.state::<state::AppState>();
+
+            // A dictation whose microphone never opened leaves the controller
+            // believing it is recording, and the next attempt is refused with
+            // "already dictating". Ending it here is what keeps one failure
+            // from costing every dictation after it. The thread has already
+            // exited, so this neither blocks nor transcribes anything.
+            if let Some(controller) = app_handle_clone.try_state::<Arc<Mutex<VoiceController>>>() {
+                match controller.lock() {
+                    Ok(mut voice) => {
+                        if let Err(e) = voice.cancel_dictation() {
+                            warn!("[VoiceCapture] Could not end the dictation session: {e}");
+                        }
+                    }
+                    Err(e) => error!("[VoiceCapture] Voice controller lock is poisoned: {e}"),
+                }
+            }
+            if let Err(e) = app_state.set_dictation_active(false) {
+                error!("[VoiceCapture] Could not clear the dictation flag: {e}");
+            }
+
+            if let Err(e) = app_state.set_always_listening_active(false) {
+                error!("[VoiceCapture] Could not clear the listening flag: {e}");
+            }
+            if let Err(e) = crate::commands::save_audio_settings_to_centralized_settings(
+                &app_handle_clone,
+                &app_state,
+            )
+            .await
+            {
+                error!("[VoiceCapture] Could not persist the listening flag: {e}");
+            }
+            // The bar's dot and the triggers pane both read this, so one
+            // honest event is enough to stop every surface saying "listening".
+            crate::commands::triggers::emit_listening_outcome(&app_handle_clone, false);
+            commands::ui_commands::handle_always_listening_change(&app_handle_clone, false).await;
+        });
+    });
 }
 
 /// Setup always listening integration with wake word detection and agent activation

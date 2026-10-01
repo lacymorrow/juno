@@ -19,6 +19,7 @@ pub mod safari_tools;
 pub mod agent_continuation;
 pub mod agent_sessions; // Parallel agent-session registry commands (LAC-1432)
 pub mod always_listening;
+pub mod audio_devices; // Microphone and speaker choices for the Audio pane
 pub mod auto_grant; // Post-Accessibility auto-grant of remaining permission toggles
 pub mod bar_position; // Floating-bar last-well persistence
 pub mod cloud;
@@ -252,6 +253,16 @@ pub async fn load_audio_settings_from_centralized_settings(
         }
     }
 
+    // The voice plugin is a separate crate with no view of the settings store,
+    // so the microphone choice is handed to it here. This is the only place it
+    // is told, which is why a device picked in Audio settings also calls
+    // `set_preferred_input_device` directly.
+    tauri_plugin_voice_transcription::set_preferred_input_device(
+        audio_settings.input_device.clone(),
+    );
+    let _ = state.set_output_device(audio_settings.output_device.clone());
+    let _ = state.set_system_voice(audio_settings.system_voice.clone());
+
     let _ = state.set_always_listening_active(audio_settings.always_listening_active);
     let _ = state.set_always_listening_sensitivity(audio_settings.always_listening_sensitivity);
     let _ = state.set_dictation_clipboard_enabled(audio_settings.dictation_copy_to_clipboard());
@@ -285,6 +296,14 @@ pub async fn save_audio_settings_to_centralized_settings(
 
     if let Ok(always_listening_active) = state.get_always_listening_active() {
         audio_settings.always_listening_active = always_listening_active;
+    }
+
+    if let Ok(output_device) = state.get_output_device() {
+        audio_settings.output_device = output_device;
+    }
+
+    if let Ok(system_voice) = state.get_system_voice() {
+        audio_settings.system_voice = system_voice;
     }
 
     if let Ok(always_listening_sensitivity) = state.get_always_listening_sensitivity() {

@@ -129,6 +129,21 @@ pub mod voice_transcription {
     pub const AUDIO_LEVEL: &str = "voice-transcription:audio-level";
 }
 
+/// Microphone capture failures, and the fallbacks that avoided one.
+///
+/// Emitted by the voice-transcription plugin, which keeps its own copy of
+/// these names; the test at the bottom of this file asserts they agree.
+pub mod voice_capture {
+    /// The microphone never opened. Payload fields: code, message, device
+    /// (may be null), listening (always false). Juno switches always-listening
+    /// off on this and shows the message, rather than leaving a switch on over
+    /// a thread that is gone.
+    pub const FAILED: &str = "voice-capture:failed";
+    /// The chosen microphone was not connected, so another one stood in.
+    /// Payload fields: requested, used.
+    pub const DEVICE_SUBSTITUTED: &str = "voice-capture:device-substituted";
+}
+
 /// Timer events
 pub mod timer {
     pub const EXPIRED: &str = "timer-expired";
@@ -523,6 +538,11 @@ mod tests {
                 vt::PARTIAL_RESULT,
             ),
             (plugin::voice_transcription::AUDIO_LEVEL, vt::AUDIO_LEVEL),
+            (plugin::voice_capture::FAILED, super::voice_capture::FAILED),
+            (
+                plugin::voice_capture::DEVICE_SUBSTITUTED,
+                super::voice_capture::DEVICE_SUBSTITUTED,
+            ),
             (
                 plugin::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED,
                 super::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED,

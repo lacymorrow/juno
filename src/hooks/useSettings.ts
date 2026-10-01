@@ -18,6 +18,51 @@ import type {
 
 // Types are now imported from shared types
 
+/** One microphone or speaker, as `list_audio_devices` reports it. */
+export interface AudioDeviceEntry {
+	name: string;
+	is_default: boolean;
+}
+
+/** Everything the Audio pane needs to draw both device pickers. */
+export interface AudioDeviceChoices {
+	inputs: AudioDeviceEntry[];
+	outputs: AudioDeviceEntry[];
+	chosen_input: string | null;
+	chosen_output: string | null;
+	/** What the next dictation will actually open. */
+	effective_input: string | null;
+	/** The chosen microphone, when it is not connected. */
+	missing_input: string | null;
+	/** The chosen speaker, when it is not connected. */
+	missing_output: string | null;
+}
+
+/** One row of the "Juno's voice" picker. */
+export interface JunoVoiceOption {
+	id: string;
+	/** "silent", "system" or "voice". */
+	kind: string;
+	name: string;
+	descriptor: string;
+	selected: boolean;
+	/** False for silence, which has nothing to audition. */
+	speaks: boolean;
+}
+
+/**
+ * Why the microphone never opened, in the words Rust chose.
+ *
+ * `listening` is always false: this event exists so that no surface goes on
+ * claiming Juno is listening after the capture thread has gone.
+ */
+export interface CaptureFailure {
+	code: string;
+	message: string;
+	device: string | null;
+	listening: boolean;
+}
+
 // Global cache to prevent duplicate API calls during startup
 interface CachedValue<T> {
 	value: T;
@@ -136,6 +181,19 @@ export function useSettings() {
 
 	// Performance Monitoring Settings
 	const [performanceMonitoringEnabled, setPerformanceMonitoringEnabled] = useState<boolean>(true);
+
+	// Microphone and speaker choices. Rust enumerates, chooses and persists;
+	// this only holds what it said.
+	const [audioDevices, setAudioDevices] = useState<AudioDeviceChoices | null>(null);
+
+	// Juno's voice: the curated rows, and which one is in force.
+	const [junoVoices, setJunoVoices] = useState<JunoVoiceOption[]>([]);
+	const [speakingVoiceId, setSpeakingVoiceId] = useState<string | null>(null);
+
+	// The last capture failure, in the words Rust chose. Null when the
+	// microphone is fine. Shown in the Audio pane, which is where the
+	// microphone is chosen.
+	const [captureFailure, setCaptureFailure] = useState<CaptureFailure | null>(null);
 
 	// Always Listening Settings
 	const [alwaysListeningActive, setAlwaysListeningActive] = useState<boolean>(false);
@@ -547,6 +605,119 @@ export function useSettings() {
 		}
 	}, [invokeCommand]);
 
+	// Re-read the device lists. Cheap and read-only (listing never opens a
+	// device), and deliberately uncached: a microphone can be unplugged while
+	// the settings window is open.
+	const loadAudioDevices = useCallback(async () => {
+		try {
+			setAudioDevices(
+				await invoke<AudioDeviceChoices>(COMMANDS.AUDIO_LIST_AUDIO_DEVICES),
+			);
+		} catch (error) {
+			console.error("Failed to list audio devices:", error);
+		}
+	}, []);
+
+	const loadJunoVoices = useCallback(async () => {
+		try {
+			setJunoVoices(await invoke<JunoVoiceOption[]>(COMMANDS.AUDIO_GET_JUNO_VOICES));
+		} catch (error) {
+			console.error("Failed to load Juno's voices:", error);
+		}
+	}, []);
+
+	const handleAudioInputDeviceChange = useCallback(
+		async (name: string | null) => {
+			// Optimistic, because the pickers are the one place a wrong answer
+			// is obvious: the list reloads from Rust straight after.
+			setAudioDevices((prev) => (prev ? { ...prev, chosen_input: name } : prev));
+			setCaptureFailure(null);
+			try {
+				await invoke(COMMANDS.AUDIO_SET_AUDIO_INPUT_DEVICE, { name });
+			} catch (error) {
+				console.error("Failed to set the microphone:", error);
+				toast.error(String(error));
+			}
+			await loadAudioDevices();
+		},
+		[loadAudioDevices],
+	);
+
+	const handleAudioOutputDeviceChange = useCallback(
+		async (name: string | null) => {
+			setAudioDevices((prev) => (prev ? { ...prev, chosen_output: name } : prev));
+			try {
+				await invoke(COMMANDS.AUDIO_SET_AUDIO_OUTPUT_DEVICE, { name });
+			} catch (error) {
+				console.error("Failed to set the speaker:", error);
+				toast.error(String(error));
+			}
+			await loadAudioDevices();
+		},
+		[loadAudioDevices],
+	);
+
+	/**
+	 * Pick Juno's voice. Selecting is the audition: Rust saves the choice and
+	 * then speaks the sample in it, so the row stays marked as speaking until
+	 * the sample finishes.
+	 */
+	const handleJunoVoiceChange = useCallback(
+		async (id: string) => {
+			const option = junoVoices.find((voice) => voice.id === id);
+			setJunoVoices((prev) => prev.map((voice) => ({ ...voice, selected: voice.id === id })));
+			if (option?.speaks) setSpeakingVoiceId(id);
+			try {
+				await invoke(COMMANDS.AUDIO_SET_JUNO_VOICE, { id });
+				if (id === "silent") setTtsProvider("off");
+				else setTtsProvider("system");
+				invalidateCache("ttsProvider");
+			} catch (error) {
+				console.error("Failed to set Juno's voice:", error);
+				toast.error(String(error));
+			} finally {
+				setSpeakingVoiceId(null);
+				await loadJunoVoices();
+			}
+		},
+		[junoVoices, loadJunoVoices],
+	);
+
+	/** Hear the voice already chosen again. */
+	const handlePreviewJunoVoice = useCallback(async () => {
+		const current = junoVoices.find((voice) => voice.selected && voice.speaks);
+		if (!current) return;
+		setSpeakingVoiceId(current.id);
+		try {
+			await invoke(COMMANDS.AUDIO_PREVIEW_JUNO_VOICE);
+		} catch (error) {
+			console.error("Failed to play the voice sample:", error);
+			toast.error(String(error));
+		} finally {
+			setSpeakingVoiceId(null);
+		}
+	}, [junoVoices]);
+
+	// The microphone never opened. Rust has already switched listening off in
+	// the store and in its own state; this is what stops the window saying
+	// otherwise, and puts the reason where the microphone is chosen.
+	useEventListener<CaptureFailure>(EVENTS.VOICE_CAPTURE_FAILED, (payload) => {
+		if (!payload) return;
+		setCaptureFailure(payload);
+		setAlwaysListeningActive(false);
+		invalidateCache("alwaysListeningActive");
+		void loadAudioDevices();
+	});
+
+	// A chosen microphone was gone and another one stood in. Not a failure:
+	// dictation is working, on a different device than the one on the label.
+	useEventListener<{ requested?: string; used?: string }>(
+		EVENTS.VOICE_CAPTURE_DEVICE_SUBSTITUTED,
+		() => {
+			void loadAudioDevices();
+		},
+	);
+
 	// Handler functions
 	const handleTtsProviderChange = useCallback(async (newProvider: string) => {
 		await invokeCommand(
@@ -913,6 +1084,10 @@ export function useSettings() {
 		dictationTriggerMode,
 		soundEnabled,
 		performanceMonitoringEnabled,
+		audioDevices,
+		junoVoices,
+		speakingVoiceId,
+		captureFailure,
 		alwaysListeningActive,
 		alwaysListeningSensitivity,
 		alwaysListeningWakeWords,
@@ -940,6 +1115,13 @@ export function useSettings() {
 
 		// Actions
 		loadAllSettings,
+		loadAudioDevices,
+		loadJunoVoices,
+		handleAudioInputDeviceChange,
+		handleAudioOutputDeviceChange,
+		handleJunoVoiceChange,
+		handlePreviewJunoVoice,
+		dismissCaptureFailure: () => setCaptureFailure(null),
 		handleTtsProviderChange,
 		handleChatterboxSettingsChange,
 		handleSupertonicSettingsChange,

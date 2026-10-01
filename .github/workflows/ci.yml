@@ -91,3 +91,12 @@ jobs:
       # (tests/browser_cdp_live.rs) — those are run by hand during QA.
       - name: Test
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      # The voice plugin is its own crate, and `--manifest-path src-tauri` does
+      # not reach it: it is compiled as a dependency, so its `#[cfg(test)]`
+      # code is never built and its tests never ran anywhere. The capture
+      # failures and the microphone fallback are pinned by tests in there, and
+      # a test that does not run is the same dead control it was written to
+      # prevent.
+      - name: Test the voice plugin
+        run: cargo test --manifest-path tauri-plugin-voice-transcription/Cargo.toml

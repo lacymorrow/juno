@@ -1,6 +1,6 @@
 use crate::constants;
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::DeviceTrait;
 use cpal::SampleFormat;
 use hound;
 use rubato::{
@@ -14,8 +14,10 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
 
+use crate::capture_failure::{self, CaptureStartFailure};
+use crate::devices;
 use crate::error::{Error, Result};
-use crate::utils::{downmix_f32_to_mono, downmix_i16_to_mono};
+use crate::utils::downmix_i16_to_mono;
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 const SINC_LENGTH: usize = 256;
@@ -391,9 +393,24 @@ impl VoiceController {
             *buffer_guard = None;
         }
 
-        let host = cpal::default_host();
-        let device = host.default_input_device()
-            .ok_or_else(|| Error::AudioDevice("No default input device found. This may indicate microphone permission was not granted — check System Settings > Privacy & Security > Microphone.".to_string()))?;
+        // The microphone the person picked, or the system's, or the system's
+        // standing in for one that was unplugged. A failure here is a sentence
+        // the UI can show, which is why it comes from `CaptureStartFailure`
+        // rather than being written out again.
+        let resolved = devices::resolve_input_device(devices::preferred_input_device().as_deref())
+            .map_err(|failure| Error::AudioDevice(failure.message()))?;
+        if let Some(requested) = &resolved.substituted_for {
+            tracing::warn!(
+                "[VoiceController] {requested} is not connected; dictating through {}",
+                resolved.name
+            );
+            let _ = app_handle.emit(
+                constants::voice_capture::DEVICE_SUBSTITUTED,
+                serde_json::json!({ "requested": requested, "used": &resolved.name }),
+            );
+        }
+        let device_name = resolved.name;
+        let device = resolved.device;
 
         let mut supported_configs_iter = device.supported_input_configs().map_err(|e| {
             Error::AudioDevice(format!(
@@ -477,6 +494,7 @@ impl VoiceController {
                 audio_data_tx,
                 audio_data_rx,
                 device,
+                device_name,
                 config,
                 sample_format,
                 live_partial_for_thread,
@@ -490,6 +508,19 @@ impl VoiceController {
         Ok(())
     }
 
+    /// Stop claiming to be recording, and say why.
+    ///
+    /// [`capture_failure::report`] puts the sentence where the person can read
+    /// it; `DICTATION_STOPPED` is the event the bar and the app already use to
+    /// unwind a session, so a capture that never started unwinds exactly like
+    /// one that ended rather than leaving the UI mid-dictation forever.
+    fn give_up_on_capture<R: Runtime>(app_handle: &AppHandle<R>, failure: CaptureStartFailure) {
+        capture_failure::report(app_handle, &failure);
+        if let Err(e) = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ()) {
+            tracing::error!("[AudioThread] Could not report the stop: {e}");
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn audio_thread_worker<R: Runtime + 'static>(
         engine: Arc<dyn TranscriptionEngine>,
@@ -501,6 +532,7 @@ impl VoiceController {
         audio_data_tx: std::sync::mpsc::Sender<Vec<f32>>,
         audio_data_rx: std::sync::mpsc::Receiver<Vec<f32>>,
         device: cpal::Device,
+        device_name: String,
         config: cpal::StreamConfig,
         sample_format: SampleFormat,
         live_partial: bool,
@@ -514,80 +546,40 @@ impl VoiceController {
         let mut session = match engine.create_session() {
             Ok(s) => s,
             Err(e) => {
-                tracing::error!("Failed to create transcription session: {}", e);
+                Self::give_up_on_capture(
+                    &app_handle,
+                    CaptureStartFailure::EngineUnavailable {
+                        detail: e.to_string(),
+                    },
+                );
                 return;
             }
         };
 
-        let stream = match sample_format {
-            SampleFormat::F32 => {
-                let tx_clone = audio_data_tx.clone();
-                match device.build_input_stream(
-                    &config,
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        let audio_data = downmix_f32_to_mono(data, channels as usize);
-
-                        if let Err(e) = tx_clone.send(audio_data) {
-                            tracing::error!("Failed to send audio data: {:?}", e);
-                        }
-                    },
-                    move |err| {
-                        tracing::error!("An error occurred on the input stream: {}", err);
-                    },
-                    None,
-                ) {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        tracing::error!("Failed to build f32 input stream: {:?}", e);
-                        crate::mic_permissions::invalidate_permission_cache();
-                        return;
-                    }
-                }
-            }
-            SampleFormat::I16 => {
-                let tx_clone = audio_data_tx.clone();
-                match device.build_input_stream(
-                    &config,
-                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        let audio_f32 = downmix_i16_to_mono(data, channels as usize);
-                        if let Err(e) = tx_clone.send(audio_f32) {
-                            tracing::error!("Failed to send converted audio data: {:?}", e);
-                        }
-                    },
-                    move |err| {
-                        tracing::error!("An error occurred on the input stream: {}", err);
-                    },
-                    None,
-                ) {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        tracing::error!("Failed to build i16 input stream: {:?}", e);
-                        crate::mic_permissions::invalidate_permission_cache();
-                        return;
-                    }
-                }
-            }
-            _ => {
-                tracing::error!("Unsupported sample format {:?}", sample_format);
+        // The one exit between here and a running microphone, and it tells the
+        // person why. Before this, each of these failures logged an error and
+        // returned, leaving the bar drawn as if it were recording.
+        let _stream = match devices::start_mono_stream(
+            &device,
+            &device_name,
+            &config,
+            sample_format,
+            audio_data_tx.clone(),
+        ) {
+            Ok(stream) => stream,
+            Err(failure) => {
+                // On macOS a refused stream is usually microphone access, and
+                // the cached answer is now stale.
+                crate::mic_permissions::invalidate_permission_cache();
+                Self::give_up_on_capture(&app_handle, failure);
                 return;
             }
         };
 
-        if let Err(e) = stream.play() {
-            tracing::error!("Failed to start audio stream: {:?}", e);
-            crate::mic_permissions::invalidate_permission_cache();
-            return;
-        }
-
-        info!("[AudioThread] Audio stream started.");
-        info!("[AudioThread] Recording at {} Hz with {} channel(s), will resample to {} Hz for Whisper.", 
+        // The downmix itself is logged once, by `start_mono_stream`.
+        info!("[AudioThread] Audio stream started on {device_name}.");
+        info!("[AudioThread] Recording at {} Hz with {} channel(s), will resample to {} Hz for Whisper.",
               actual_rate, channels, WHISPER_SAMPLE_RATE);
-        if channels > 1 {
-            info!(
-                "[AudioThread] {} input channels detected - averaging down to mono for processing.",
-                channels
-            );
-        }
 
         // Resampler setup
         let mut chunk_resampler: Option<SincFixedIn<f32>> = None;

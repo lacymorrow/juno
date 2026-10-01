@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS } from "@/lib/constants.generated";
 import AssistantModelPicker from "./AssistantModelPicker";
+import TtsEngineGroup from "./TtsEngineGroup";
 
 /** What a demo build carries, from the backend. */
 interface DemoInfo {
@@ -266,6 +267,10 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
 
         </SettingsGroup>
       )}
+
+      {/* Both halves of "which service does the work" in one pane. The voice
+          a person actually picks is under Audio. */}
+      <TtsEngineGroup settings={settings} />
     </div>
   );
 }

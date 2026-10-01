@@ -1,6 +1,5 @@
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::SampleFormat;
+use cpal::traits::DeviceTrait;
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
@@ -12,8 +11,10 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::{debug, error, info, warn};
 
+use crate::capture_failure::{self, CaptureStartFailure};
+use crate::devices;
 use crate::error::{Error, Result};
-use crate::utils::{downmix_f32_to_mono, downmix_i16_to_mono, filter_transcription_text};
+use crate::utils::filter_transcription_text;
 
 // Audio processing constants (matching main crate's constants)
 const WHISPER_SAMPLE_RATE: u32 = 16000;
@@ -128,6 +129,58 @@ pub enum AlwaysListeningState {
     Activated,          // Intent detected, actively transcribing
     Processing,         // Processing detected speech
     WaitingForWakeWord, // Waiting for wake word after command completion
+}
+
+/// A running microphone, and what it took to get one.
+struct OpenCapture {
+    /// Kept alive by the caller. Dropping it stops capture.
+    stream: cpal::Stream,
+    /// Also kept alive by the caller, and never used again. cpal's stream owns
+    /// the audio unit, so this is belt and braces rather than a requirement,
+    /// and it costs one move.
+    device: cpal::Device,
+    sample_rate: u32,
+    device_name: String,
+    /// The microphone the person asked for, when it was not there and another
+    /// one stood in.
+    substituted_for: Option<String>,
+}
+
+/// Open the microphone always-listening should use.
+///
+/// Every failure is a [`CaptureStartFailure`], so the caller has a sentence to
+/// show the person. This is the whole point of the module: before it, each of
+/// these cases logged an error and returned out of the worker thread, and the
+/// settings window went on saying Juno was listening.
+fn open_capture_stream(
+    audio_data_tx: Sender<Vec<f32>>,
+) -> std::result::Result<OpenCapture, CaptureStartFailure> {
+    let resolved = devices::resolve_input_device(devices::preferred_input_device().as_deref())?;
+
+    let supported = resolved.device.default_input_config().map_err(|e| {
+        CaptureStartFailure::DeviceConfigUnavailable {
+            device: resolved.name.clone(),
+            detail: format!("{e:?}"),
+        }
+    })?;
+    let sample_rate = supported.sample_rate().0;
+    let sample_format = supported.sample_format();
+
+    let stream = devices::start_mono_stream(
+        &resolved.device,
+        &resolved.name,
+        &supported.config(),
+        sample_format,
+        audio_data_tx,
+    )?;
+
+    Ok(OpenCapture {
+        stream,
+        device: resolved.device,
+        sample_rate,
+        device_name: resolved.name,
+        substituted_for: resolved.substituted_for,
+    })
 }
 
 pub struct AlwaysListeningController {
@@ -272,98 +325,46 @@ impl AlwaysListeningController {
         let mut session = match engine.create_session() {
             Ok(s) => s,
             Err(e) => {
-                error!("Failed to create transcription session: {}", e);
+                capture_failure::report(
+                    &app_handle,
+                    &CaptureStartFailure::EngineUnavailable {
+                        detail: e.to_string(),
+                    },
+                );
                 return;
             }
         };
-
-        // Set up audio capture
-        let host = cpal::default_host();
-        let device = match host.default_input_device() {
-            Some(dev) => dev,
-            None => {
-                error!("No default input device found for always listening");
-                return;
-            }
-        };
-
-        let config = match device.default_input_config() {
-            Ok(config) => config,
-            Err(e) => {
-                error!("Failed to get default input config: {:?}", e);
-                return;
-            }
-        };
-        let sample_format = config.sample_format();
-        let sample_rate = config.sample_rate().0;
-        let channels = config.channels() as usize;
-
-        if channels > 1 {
-            info!(
-                "[AlwaysListening] {} input channels detected - averaging down to mono",
-                channels
-            );
-        }
 
         let (audio_data_tx, audio_data_rx) = channel::<Vec<f32>>();
 
-        let stream = match sample_format {
-            SampleFormat::F32 => {
-                let channels_for_cb = channels;
-                match device.build_input_stream(
-                    &config.config(),
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        let mono_data = downmix_f32_to_mono(data, channels_for_cb);
-                        if let Err(e) = audio_data_tx.send(mono_data) {
-                            error!("Failed to send audio data: {:?}", e);
-                        }
-                    },
-                    move |err| {
-                        error!("Audio stream error: {}", err);
-                    },
-                    None,
-                ) {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        error!("Failed to build f32 input stream: {:?}", e);
-                        return;
-                    }
-                }
-            }
-            SampleFormat::I16 => {
-                let channels_for_cb = channels;
-                match device.build_input_stream(
-                    &config.config(),
-                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        let audio_f32 = downmix_i16_to_mono(data, channels_for_cb);
-                        if let Err(e) = audio_data_tx.send(audio_f32) {
-                            error!("Failed to send converted audio data: {:?}", e);
-                        }
-                    },
-                    move |err| {
-                        error!("Audio stream error: {}", err);
-                    },
-                    None,
-                ) {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        error!("Failed to build i16 input stream: {:?}", e);
-                        return;
-                    }
-                }
-            }
-            _ => {
-                error!("Unsupported sample format {:?}", sample_format);
+        // Every way the microphone can refuse to open is a named failure the
+        // person is told about, not a log line and a dead thread. Keep it that
+        // way: the one `return` below is the only exit, and it reports first.
+        let opened = match open_capture_stream(audio_data_tx) {
+            Ok(opened) => opened,
+            Err(failure) => {
+                capture_failure::report(&app_handle, &failure);
                 return;
             }
         };
+        let OpenCapture {
+            // Held for as long as the loop runs. Dropping the stream stops the
+            // microphone, so it must outlive the loop below.
+            stream: _stream,
+            device: _device,
+            sample_rate,
+            device_name,
+            substituted_for,
+        } = opened;
 
-        if let Err(e) = stream.play() {
-            error!("Failed to start audio stream: {:?}", e);
-            return;
+        if let Some(requested) = &substituted_for {
+            let _ = app_handle.emit(
+                crate::constants::voice_capture::DEVICE_SUBSTITUTED,
+                serde_json::json!({ "requested": requested, "used": &device_name }),
+            );
         }
 
-        info!("[AlwaysListening] Audio monitoring started");
+        info!("[AlwaysListening] Audio monitoring started on {device_name}");
 
         // Resampling will be done on-demand with custom resamplers
 

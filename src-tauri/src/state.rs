@@ -213,6 +213,12 @@ impl ToolApprovalRequest {
 #[derive(Clone, Debug)]
 pub struct AudioSettings {
     pub tts_provider: String,
+    /// The speaker Juno's own voice plays through, by name. `None` follows the
+    /// system. See `settings::AudioSettings::output_device`.
+    pub output_device: Option<String>,
+    /// Which macOS voice speaks as Juno, by `say -v` name. `None` means the
+    /// voice the Mac is already set to use.
+    pub system_voice: Option<String>,
     pub kokoro_voice: String,
     pub chatterbox_reference_audio_url: Option<String>,
     pub chatterbox_exaggeration: f32,
@@ -253,6 +259,8 @@ impl Default for AudioSettings {
                     "elevenlabs".to_string()
                 }
             },
+            output_device: None,
+            system_voice: None,
             kokoro_voice: "af_bella".to_string(),
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: 0.5,
@@ -579,6 +587,36 @@ impl AppState {
             .lock()
             .map(|mut settings| settings.tts_provider = provider)
             .map_err(|e| format_error(templates::FAILED_TO_SET, "TTS provider", e))
+    }
+
+    /// The speaker Juno's voice plays through, or `None` for the system's.
+    pub fn get_output_device(&self) -> Result<Option<String>, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.output_device.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "output device", e))
+    }
+
+    pub fn set_output_device(&self, device: Option<String>) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.output_device = device)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "output device", e))
+    }
+
+    /// Which macOS voice speaks as Juno, or `None` for the Mac's own choice.
+    pub fn get_system_voice(&self) -> Result<Option<String>, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.system_voice.clone())
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "Juno's voice", e))
+    }
+
+    pub fn set_system_voice(&self, voice: Option<String>) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.system_voice = voice)
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "Juno's voice", e))
     }
 
     pub fn get_kokoro_voice(&self) -> Result<String, String> {
