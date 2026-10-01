@@ -405,10 +405,20 @@ function ApprovalPrompt({
   msg,
   onApprove,
   onDeny,
+  onAlwaysAllow,
+  grantedLabel,
 }: {
   msg: ChatMessage;
   onApprove: (toolId: string) => void;
   onDeny: (toolId: string) => void;
+  /** Answer yes, and stop being asked about this kind of action. */
+  onAlwaysAllow: (toolId: string, label: string) => void;
+  /**
+   * Set once this row was answered with the standing yes, so the settled line
+   * can say what that yes covers. A grant a person cannot see they gave is the
+   * thing this feature was careful not to build.
+   */
+  grantedLabel: string | null;
 }) {
   const toolId = msg.tool_id;
   const detail = msg.content?.trim();
@@ -417,7 +427,11 @@ function ApprovalPrompt({
     return (
       <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
         <CheckCircle className="h-3 w-3 text-muted-foreground/50" />
-        <span>Allowed{detail ? `: ${detail}` : ""}</span>
+        <span>
+          {grantedLabel
+            ? `Allowed. Juno will not ask about ${grantedLabel} again in this conversation.`
+            : `Allowed${detail ? `: ${detail}` : ""}`}
+        </span>
       </span>
     );
   }
@@ -449,13 +463,35 @@ function ApprovalPrompt({
       )}
 
       {toolId && (
-        <div className="mt-2.5 flex items-center gap-2">
-          <Button size="sm" onClick={() => onApprove(toolId)}>
-            Allow
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => onDeny(toolId)}>
-            Don't allow
-          </Button>
+        <div className="mt-2.5 flex flex-col items-start gap-2">
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => onApprove(toolId)}>
+              Allow
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => onDeny(toolId)}>
+              Don't allow
+            </Button>
+          </div>
+
+          {/* The third answer, not a setting.
+              It is phrased as an answer and it begins with the same word as the
+              first one, because that is what it is: yes, and keep saying yes to
+              this kind of thing. A checkbox beside Allow would have turned a
+              question into a preferences panel, and the whole complaint was
+              that permissions felt like a configuration screen.
+              It is quiet on purpose: Allow stays the one primary action.
+              Rust leaves `always_allow_label` out for anything irreversible, so
+              this answer is absent exactly where it could not be honoured. */}
+          {msg.always_allow_label && (
+            <button
+              type="button"
+              onClick={() => onAlwaysAllow(toolId, msg.always_allow_label!)}
+              className="text-left text-xs text-[#007AFF] underline-offset-2 hover:underline"
+            >
+              Allow, and stop asking about {msg.always_allow_label}
+              <span className="text-muted-foreground"> for this conversation</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -513,6 +549,9 @@ export function ChatMessageComponent({
     timestamp: msg.timestamp,
   });
 
+  /** Which standing yes this row was answered with, if it was. Display only. */
+  const [grantedLabel, setGrantedLabel] = useState<string | null>(null);
+
   // Inline tool approval handlers — visual feedback via Confirmation component
   const handleApprove = useCallback(async (toolId: string) => {
     try {
@@ -533,6 +572,33 @@ export function ChatMessageComponent({
       }
     } catch (error) {
       console.error("Error denying tool:", error);
+    }
+  }, [onApprovalUpdate]);
+
+  /**
+   * Allow this, and stop asking about the same kind of action for the rest of
+   * this conversation.
+   *
+   * Scope is one tool, one conversation, memory only. Rust forgets every grant
+   * when Juno quits and when the permission mode changes, which is why there is
+   * no list of grants to review: nothing outlives the session that would need
+   * one. Irreversible actions are never granted, and Rust leaves
+   * `always_allow_label` out for them so this answer is not even offered.
+   */
+  const handleAlwaysAllow = useCallback(async (toolId: string, label: string) => {
+    try {
+      const success = await invoke<boolean>(COMMANDS.TOOLS_ALLOW_TOOL_FOR_CONVERSATION, { toolId });
+      if (success) {
+        // Purely visual, and purely local: Rust holds the grant, this only
+        // remembers which of the three answers was pressed so the settled line
+        // can name what the person just agreed to. `approval_state` cannot
+        // carry it, and widening the backend's event to say "approved, and
+        // standing" would be a protocol change for one sentence of copy.
+        setGrantedLabel(label);
+        onApprovalUpdate?.(toolId, "approved");
+      }
+    } catch (error) {
+      console.error("Error allowing the tool for this conversation:", error);
     }
   }, [onApprovalUpdate]);
 
@@ -564,7 +630,13 @@ export function ChatMessageComponent({
       if (!awaitsApproval(msg)) return null;
       return (
         <div className="flex justify-start w-full">
-          <ApprovalPrompt msg={msg} onApprove={handleApprove} onDeny={handleDeny} />
+          <ApprovalPrompt
+            msg={msg}
+            onApprove={handleApprove}
+            onDeny={handleDeny}
+            onAlwaysAllow={handleAlwaysAllow}
+            grantedLabel={grantedLabel}
+          />
         </div>
       );
     }
@@ -639,6 +711,10 @@ export function ChatMessageComponent({
                       <ConfirmationAction variant="outline" onClick={() => handleDeny(msg.tool_id!)}>
                         Deny
                       </ConfirmationAction>
+                      {/* No standing-yes answer here on purpose. This is the
+                          development card, which #644 deliberately left as it
+                          was, and the third answer belongs with the question a
+                          person actually reads, not in a debug disclosure. */}
                     </ConfirmationActions>
 
                     <ApprovalCountdown

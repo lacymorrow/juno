@@ -52,6 +52,16 @@ export type ChatMessage = {
   risk_level?: "low" | "medium" | "high" | "critical";
   target_app?: string;
   approval_timeout_seconds?: number;
+  /**
+   * What a "Don't ask again" on this prompt would cover, in words a person can
+   * read ("terminal commands", "the browser"), written by Rust.
+   *
+   * Absent means the button is not offered. Rust leaves it out for anything
+   * irreversible, because no mode and no standing grant waives that floor, so a
+   * button claiming otherwise would be another control that does not do what it
+   * says.
+   */
+  always_allow_label?: string | null;
   continuation_request_id?: string;
   continuation_state?: "pending" | "stopped" | "continued";
   tts_metadata?: {
