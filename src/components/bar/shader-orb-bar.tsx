@@ -11,17 +11,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, useReducedMotion } from "motion/react";
-import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS, UI, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
 import { InputControlNotices } from "@/components/input-control/InputControlNotices";
-import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
+import { type InputControlStatePayload } from "@/lib/inputControl";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import { useLinger } from "./island/useLinger";
-import { OrbCanvas, type Frameloop, type OrbDrive } from "./orb/OrbCanvas";
+import { answerKey, latestTurn } from "./orb/orbModel";
 import {
   CaptionApproval,
   CaptionComposer,
@@ -30,41 +30,45 @@ import {
   CaptionSlot,
   useOrbKeyframes,
 } from "./orb/OrbCaption";
+import { OrbShaderCanvas, type Frameloop, type OrbDrive } from "./shader-orb/OrbShaderCanvas";
 import {
-  CAPTION_GAP,
-  HOVER_CLOSE_MS,
-  HOVER_OPEN_MS,
-  LINGER_MS,
+  HELD_MS,
+  PANEL_GAP,
   SHEET_MIN_HEIGHT,
   SHRINK_DELAY_MS,
   STAGE,
-  answerKey,
-  captionFor,
-  hasComponent,
-  hasSheetContent,
+  hasSheet,
+  isImpulse,
   isInputState,
   isRestState,
   isVoiceState,
   isWorkingState,
-  latestTurn,
+  mustOpenSheet,
   orbLook,
   orbTargets,
   posture as postureFor,
   sheetHeightFor,
   windowSize,
+  wordsFor,
   type Posture,
-} from "./orb/orbModel";
+} from "./shader-orb/shaderOrbModel";
 
 /**
- * Presence: the ElevenLabs orb as a presence. The orb is the only object,
- * and everything is told through what it does: dim and breathing at rest,
- * blue and swelling with
- * your voice, green while your words become text, turning while Juno works
- * (faster as steps complete), rippling with Juno's speech, one red flinch
- * when something fails. Words live in one caption slot beneath it, one line
- * at a time like subtitles; the whole answer unfolds in a sheet under that.
+ * Orb: one canvas that tells you what Juno is doing.
  *
- * Spec and the full state table: docs/plans/presence-appearance.md.
+ * The sphere is the whole interface. It rests small and dim, cools to blue
+ * and swells with your voice, turns while Juno works and quickens with every
+ * finished step, ripples while Juno speaks, blooms green when it lands and
+ * goes red and flinches when it fails. An approval stops it dead.
+ *
+ * Words are not a running commentary. The panel under the sphere opens only
+ * when Juno needs an answer from you, when something failed, when you asked
+ * to type, or when you click to read: there is no status line and no
+ * transcript, because the sphere already said it. Reading is one click, and
+ * the sheet carries the question as well as the answer, so a misheard query
+ * is recoverable without a second look.
+ *
+ * Spec and the full state table: docs/plans/orb-appearance.md.
  */
 
 /** Backend element id. Rust has no orb id; the orb uses the floating bar's. */
@@ -130,11 +134,11 @@ interface Layout {
   sheetHeight: number;
 }
 
-interface ElevenLabsOrbBarProps {
+interface ShaderOrbBarProps {
   barAppearance?: string;
 }
 
-export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
+export function ShaderOrbBar(_props: ShaderOrbBarProps) {
   useOrbKeyframes();
   const reducedMotion = useReducedMotion() ?? false;
   const dragHandlers = useDragWindowWithThreshold();
@@ -152,7 +156,7 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
       const p = event.payload;
       if (p && typeof p === "object" && "barState" in p) {
         setBar(p);
-        // Anything Rust says may move the orb; it sleeps again once settled.
+        // Anything Rust says may move the sphere; it sleeps again once settled.
         setLoop("always");
       }
     })
@@ -181,84 +185,67 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
   const key = answerKey(turn);
   const answer = turn.answer;
   const visibleText = answer?.content.trim() ?? "";
-  const spokenParts = answer?.tts_metadata?.tts_parts ?? [];
   const streaming = !!answer?.isStreaming;
   const working = isWorkingState(bar.barState) || chat.isProcessing;
   const approvalPending = !!turn.approval;
+  const question = turn.question || bar.lastSubmittedValue;
 
-  // ── Lingering: a finished answer stays under the orb for a while ──
-  const [lingering, setLingering] = useState(false);
+  // ── An answer nobody has read yet ──
+  // The sphere holds a green ember for it, which is what makes the click
+  // worth making. Reading it, or speaking again, clears it.
+  const [unread, setUnread] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [autoSheet, setAutoSheet] = useState(false);
-  const [hoverOpen, setHoverOpen] = useState(false);
   const settle = useCallback(() => {
-    setLingering(false);
+    setUnread(false);
     setPinned(false);
     setAutoSheet(false);
-    setHoverOpen(false);
     setNoticeOpen(false);
   }, []);
-  // A reply that arrives while the orb is up lingers. One that was already
-  // there when it mounted (history) does not.
+  // An answer that arrives while the orb is up is unread. One that was
+  // already there when it mounted (history) is not.
   const seenKeyRef = useRef(key);
   useEffect(() => {
     if (key && key !== seenKeyRef.current) {
       seenKeyRef.current = key;
-      setLingering(true);
+      setUnread(true);
       setPinned(false);
       setAutoSheet(false);
     }
   }, [key]);
-  // An answer with a component opens the sheet by itself; the caption alone
-  // could not show it.
+  // A component cannot be spoken, so an answer carrying one opens the sheet
+  // by itself rather than waiting for a click that may never come.
   useEffect(() => {
-    if (lingering && hasComponent(answer)) setAutoSheet(true);
-  }, [lingering, answer]);
-  // The person is speaking again: the orb must be free.
+    if (unread && mustOpenSheet(answer)) setAutoSheet(true);
+  }, [unread, answer]);
+  // The person is speaking again: the sphere must be free.
   useEffect(() => {
     if (isVoiceState(bar.barState)) settle();
   }, [bar.barState, settle]);
 
   const [hovered, setHovered] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
-  const paused = hovered || focusWithin;
-  const counting = lingering && !streaming && !working && !approvalPending && !noticeOpen;
+  const counting = unread && !streaming && !working && !approvalPending && !noticeOpen;
   useLinger({
     running: counting,
-    paused,
-    durationMs: LINGER_MS,
-    resetKey: `${key}:${visibleText.length}:${spokenParts.length}`,
+    paused: hovered || focusWithin,
+    durationMs: HELD_MS,
+    resetKey: `${key}:${visibleText.length}`,
     onExpire: settle,
   });
 
-  // ── The sheet: hover or click, when there is more than the caption ──
-  const hoverTimer = useRef<number | null>(null);
-  const clearHoverTimer = () => {
-    if (hoverTimer.current) {
-      window.clearTimeout(hoverTimer.current);
-      hoverTimer.current = null;
-    }
-  };
-  useEffect(() => clearHoverTimer, []);
-  const sheetAvailable = (hasSheetContent(answer) && (working || lingering)) || noticeOpen;
-  const sheetOpen = sheetAvailable && (pinned || autoSheet || hoverOpen || noticeOpen);
-  const onPointerEnter = () => {
-    setHovered(true);
-    clearHoverTimer();
-    hoverTimer.current = window.setTimeout(() => setHoverOpen(true), HOVER_OPEN_MS);
-  };
-  const onPointerLeave = () => {
-    setHovered(false);
-    clearHoverTimer();
-    hoverTimer.current = window.setTimeout(() => setHoverOpen(false), HOVER_CLOSE_MS);
-  };
+  // ── The sheet: by a click, or by itself for a component ──
+  const sheetContent = useMemo(
+    () => ({ question, answer, streaming }),
+    [question, answer, streaming],
+  );
+  const sheetAvailable = hasSheet(sheetContent, noticeOpen) && (working || unread || noticeOpen);
+  const sheetOpen = sheetAvailable && (pinned || autoSheet || noticeOpen);
 
   // ── Composer ──
   const [input, setInput] = useState("");
-  const inputRef = useRef("");
-  inputRef.current = input;
   const composerRef = useRef<HTMLInputElement>(null);
-  const lineOpen = isInputState(bar.barState);
+  const typing = isInputState(bar.barState);
   useEffect(() => {
     if (bar.inputValue === "" && isRestState(bar.barState)) setInput("");
   }, [bar.inputValue, bar.barState]);
@@ -278,10 +265,10 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
     [input],
   );
   useEffect(() => {
-    if (!lineOpen) return;
+    if (!typing) return;
     const t = window.setTimeout(() => composerRef.current?.focus(), 60);
     return () => window.clearTimeout(t);
-  }, [lineOpen]);
+  }, [typing]);
 
   // ── OS focus, keys, click ──
   useEffect(() => {
@@ -308,9 +295,9 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
       if (e.key === "Escape") {
         if (working) {
           void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        } else if (lingering || noticeOpen) {
+        } else if (sheetOpen || unread || noticeOpen) {
           settle();
-        } else if (lineOpen) {
+        } else if (typing) {
           void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
         }
       } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -319,18 +306,23 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [working, lingering, noticeOpen, lineOpen, settle]);
+  }, [working, sheetOpen, unread, noticeOpen, typing, settle]);
 
-  const idle = isRestState(bar.barState) && !lingering && !noticeOpen;
+  // One click, one idea: give me the words. With something to read that is
+  // the sheet; with nothing to read it is the composer.
   const onOrbClick = useCallback(() => {
-    if (idle) {
-      void sendInteraction(UI.INTERACTION_TYPES_CLICK);
-    } else if (sheetAvailable) {
+    if (sheetAvailable) {
+      // `unread` stays set: it is what keeps the sheet available and the
+      // linger clock running. The ember lets go because the look asks for
+      // `unread && !sheetOpen`, not because the answer stopped existing.
+      setAutoSheet(false);
       setPinned((v) => !v);
+      return;
     }
-  }, [idle, sheetAvailable]);
+    if (isRestState(bar.barState)) void sendInteraction(UI.INTERACTION_TYPES_CLICK);
+  }, [sheetAvailable, bar.barState]);
 
-  // ── What the orb does ──
+  // ── What the sphere does ──
   const look = useMemo(
     () =>
       orbLook({
@@ -338,34 +330,32 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
         stepsDone: turn.stepsDone,
         approvalPending,
         driving: isDriving,
+        answerWaiting: unread && !sheetOpen,
       }),
-    [bar.barState, turn.stepsDone, approvalPending, isDriving],
+    [bar.barState, turn.stepsDone, approvalPending, isDriving, unread, sheetOpen],
   );
   const impulseRef = useRef(0);
   const lastMotionRef = useRef(look.motion);
   if (look.motion !== lastMotionRef.current) {
     lastMotionRef.current = look.motion;
-    if (look.motion === "flinch" || look.motion === "bloom") impulseRef.current += 1;
+    if (isImpulse(look.motion)) impulseRef.current += 1;
   }
   const driveRef = useRef<OrbDrive>({ look, targets: orbTargets(look, 0), impulse: 0 });
-  driveRef.current = { look, targets: orbTargets(look, bar.audioLevel), impulse: impulseRef.current };
+  driveRef.current = {
+    look,
+    targets: orbTargets(look, bar.audioLevel),
+    impulse: impulseRef.current,
+  };
   useEffect(() => setLoop("always"), [look]);
   const onSettled = useCallback(() => setLoop("demand"), []);
 
-  // ── The caption ──
-  const question = turn.question || bar.lastSubmittedValue;
-  const caption = captionFor({
+  // ── The words, if any are needed ──
+  const words = wordsFor({
     state: bar.barState,
-    transcriptionText: bar.transcriptionText,
-    transcriptionProvisional: bar.transcriptionProvisional,
-    spokenText: bar.spokenText,
     currentError: bar.currentError,
-    question,
-    answer: answer ? { spokenParts, visibleText, streaming } : null,
-    runningTool: turn.runningTool,
-    approval: approvalPending ? turn.approval?.content || turn.approval?.tool_name || "do this" : null,
-    drivingLabel: isDriving && driving ? drivingLabel(driving) : null,
-    lingering,
+    approval: approvalPending
+      ? turn.approval?.content || turn.approval?.tool_name || "do this"
+      : null,
   });
 
   // ── The window ──
@@ -383,11 +373,14 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
     if (!sheetOpen) setSheetContentH(SHEET_MIN_HEIGHT);
   }, [sheetOpen]);
 
-  const wanted: Layout = { posture: postureFor(caption, sheetOpen), sheetHeight: sheetHeightFor(sheetContentH) };
+  const wanted: Layout = {
+    posture: postureFor(words, sheetOpen),
+    sheetHeight: sheetHeightFor(sheetContentH),
+  };
   const win = windowSize(wanted.posture, wanted.sheetHeight);
 
   // Growing: resize the window, then show. Shrinking: hide, then resize once
-  // the caption has faded. The orb never moves: its centre is at the same
+  // the panel has faded. The sphere never moves: its centre is at the same
   // place in every window, and the resize is centre-stable and top-anchored.
   const [shown, setShown] = useState<Layout>({ posture: "orb", sheetHeight: SHEET_MIN_HEIGHT });
   const prevWinRef = useRef(windowSize("orb"));
@@ -427,45 +420,51 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
     [],
   );
 
-  // ── Under the orb ──
-  let below: ReactNode = null;
-  if (shown.posture !== "orb" && caption) {
-    if (caption.kind === "composer") {
-      below = (
-        <CaptionSlot key="composer" reducedMotion={reducedMotion} testId="orb-slot">
-          <CaptionComposer
-            value={input}
-            disabled={bar.barState !== UI.BAR_STATES_INPUT}
-            inputRef={composerRef}
-            onChange={changeInput}
-            onSubmit={submit}
-          />
-        </CaptionSlot>
-      );
-    } else if (caption.kind === "approval" && turn.approval) {
-      below = (
-        <CaptionSlot key="approval" reducedMotion={reducedMotion} testId="orb-slot">
-          <CaptionApproval caption={caption} msg={turn.approval} onDecided={chat.handleApprovalUpdate} />
-        </CaptionSlot>
-      );
-    } else if (caption.kind === "words" && shown.posture !== "sheet") {
-      // The sheet is the whole answer; the line would only repeat its start.
-      below = (
-        <CaptionSlot key="words" reducedMotion={reducedMotion} testId="orb-slot">
-          <CaptionLine caption={caption} />
-        </CaptionSlot>
-      );
-    }
-  }
-  const sheet =
-    shown.posture === "sheet" ? (
+  // ── Under the sphere ──
+  let panel: ReactNode = null;
+  if (shown.posture === "approval" && words?.kind === "approval" && turn.approval) {
+    panel = (
+      <CaptionSlot key="approval" reducedMotion={reducedMotion} testId="orb-slot">
+        <CaptionApproval
+          caption={{ kind: "approval", text: words.text }}
+          msg={turn.approval}
+          onDecided={chat.handleApprovalUpdate}
+        />
+      </CaptionSlot>
+    );
+  } else if (shown.posture === "words" && words?.kind === "composer") {
+    panel = (
+      <CaptionSlot key="composer" reducedMotion={reducedMotion} testId="orb-slot">
+        <CaptionComposer
+          value={input}
+          disabled={bar.barState !== UI.BAR_STATES_INPUT}
+          inputRef={composerRef}
+          onChange={changeInput}
+          onSubmit={submit}
+        />
+      </CaptionSlot>
+    );
+  } else if (shown.posture === "words" && words?.kind === "error") {
+    panel = (
+      <CaptionSlot key="error" reducedMotion={reducedMotion} testId="orb-slot">
+        <CaptionLine caption={{ kind: "words", text: words.text, tone: "error" }} />
+      </CaptionSlot>
+    );
+  } else if (shown.posture === "sheet") {
+    panel = (
       <CaptionSlot key="sheet" reducedMotion={reducedMotion} testId="orb-sheet-slot">
         <CaptionSheet height={shown.sheetHeight} measureRef={setMeasureEl} reducedMotion={reducedMotion}>
           <InputControlNotices />
+          {question ? (
+            <p data-testid="orb-sheet-question" className="mb-2 text-white/45">
+              {question}
+            </p>
+          ) : null}
           {visibleText ? <MixedContentRenderer content={visibleText} isStreaming={streaming} /> : null}
         </CaptionSheet>
       </CaptionSlot>
-    ) : null;
+    );
+  }
 
   return (
     <div
@@ -473,42 +472,42 @@ export function ElevenLabsOrbBar(_props: ElevenLabsOrbBarProps) {
       data-posture={shown.posture}
       data-loop={loop}
       className="relative h-screen w-screen cursor-grab overflow-hidden bg-transparent select-none active:cursor-grabbing"
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
       onFocusCapture={() => setFocusWithin(true)}
       onBlurCapture={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
       }}
       {...dragHandlers}
     >
-      {/* The stage: centred, top-anchored, sized once. The orb's centre is at
-          (width/2, STAGE/2) in every posture, so nothing under it can move it. */}
+      {/* The stage: centred, top-anchored, sized once. The sphere's centre is
+          at (width/2, STAGE/2) in every posture, so nothing under it moves it. */}
       <div
         className="absolute left-1/2 top-0 -translate-x-1/2"
         style={{ width: STAGE, height: STAGE }}
         onClick={onOrbClick}
         data-testid="orb"
         data-motion={look.motion}
-        data-tint={look.tint[0]}
+        data-hue={look.hue}
+        data-mono={look.mono}
       >
+        {/* The resting breath is CSS, so the WebGL loop can sleep through it
+            and the sphere still reads as alive on an idle desk. */}
         <div
           className="h-full w-full"
           style={{
-            animation: "orb-breathe 4s ease-in-out infinite",
-            animationPlayState: look.motion === "breathe" ? "running" : "paused",
+            animation: "orb-breathe 4.4s ease-in-out infinite",
+            animationPlayState: look.motion === "ember" ? "running" : "paused",
           }}
         >
-          <OrbCanvas drive={driveRef} frameloop={loop} onSettled={onSettled} />
+          <OrbShaderCanvas drive={driveRef} frameloop={loop} onSettled={onSettled} size={STAGE} />
         </div>
       </div>
       <div
-        className="absolute left-1/2 flex -translate-x-1/2 flex-col items-center gap-2"
-        style={{ top: STAGE + CAPTION_GAP, width: win.width }}
+        className="absolute left-1/2 flex -translate-x-1/2 flex-col items-center"
+        style={{ top: STAGE + PANEL_GAP, width: win.width }}
       >
-        <AnimatePresence initial={false}>
-          {below}
-          {sheet}
-        </AnimatePresence>
+        <AnimatePresence initial={false}>{panel}</AnimatePresence>
       </div>
     </div>
   );

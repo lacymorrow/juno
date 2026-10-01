@@ -2,11 +2,11 @@ import { UI } from "@/lib/constants.generated";
 import type { ChatMessage } from "@/types/chat";
 
 /**
- * The Orb's model: pure functions from what Rust says (the bar state, the
+ * Presence's model: pure functions from what Rust says (the bar state, the
  * audio level) and what the orb knows locally (the current turn, a hover, an
  * approval) to what the orb does and what the one caption under it says.
  * Nothing here touches the DOM, Three.js or Tauri, so every row of the state
- * table in docs/plans/orb-appearance.md is a unit test.
+ * table in docs/plans/presence-appearance.md is a unit test.
  */
 
 // === GEOMETRY ===

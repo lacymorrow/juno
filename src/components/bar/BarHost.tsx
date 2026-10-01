@@ -11,20 +11,23 @@ import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
 // Lazy-load heavy components to avoid pulling Three.js/Rive into shared bundles
 const loadOrb = () => import("@/components/bar/elevenlabs-orb-bar");
 const loadHalo = () => import("@/components/bar/react-orb-bar");
+const loadShaderOrb = () => import("@/components/bar/shader-orb-bar");
 const loadAvatar = () => import("@/components/bar/persona-bar");
 const ElevenLabsOrbBar = lazy(() => loadOrb().then((m) => ({ default: m.ElevenLabsOrbBar })));
 const ReactOrbBar = lazy(() => loadHalo().then((m) => ({ default: m.ReactOrbBar })));
+const ShaderOrbBar = lazy(() => loadShaderOrb().then((m) => ({ default: m.ShaderOrbBar })));
 const PersonaBar = lazy(() => loadAvatar().then((m) => ({ default: m.PersonaBar })));
 
 /**
  * Fetch and parse the heavy looks once the first bar has painted, so switching
- * to one later lands on warm code instead of a blank window while Three.js or
- * Rive arrive. Idle time first; a timer if the browser offers no idle callback.
+ * to one later lands on warm code instead of a blank window while Three.js,
+ * ogl or Rive arrive. Idle time first; a timer if the browser offers no idle callback.
  */
 function warmHeavyLooks(): () => void {
   const warm = () => {
     void loadOrb();
     void loadHalo();
+    void loadShaderOrb();
     void loadAvatar();
   };
   const w = window as Window & {
@@ -93,7 +96,8 @@ export function BarHost() {
 
   useEffect(() => {
     // Not inside a preview frame: the settings picker keeps three of those
-    // mounted, and parsing Three.js and Rive in each would only slow it down.
+    // mounted, and parsing Three.js, ogl and Rive in each would only slow it
+    // down.
     if (!loaded || window.self !== window.top) return;
     return warmHeavyLooks();
   }, [loaded]);
@@ -116,6 +120,12 @@ export function BarHost() {
         return () => (
           <Suspense fallback={null}>
             <ReactOrbBar barAppearance={appearance} />
+          </Suspense>
+        );
+      case UI.BAR_APPEARANCES_SHADER_ORB:
+        return () => (
+          <Suspense fallback={null}>
+            <ShaderOrbBar barAppearance={appearance} />
           </Suspense>
         );
       case UI.BAR_APPEARANCES_PERSONA:

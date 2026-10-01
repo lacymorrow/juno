@@ -117,7 +117,7 @@ Local conditions layered on top:
 
 ## Removed (and considered, then cut)
 
-- `react-orb.tsx` (the ogl WebGL shader) and everything that fed it: `mapToReactOrbConfig` is no longer imported by Halo. The `ogl` dependency is now unused and can leave `package.json` in a follow-up (lockfile change, kept out of this branch).
+- `react-orb.tsx` (the ogl WebGL shader) and everything that fed it: `mapToReactOrbConfig` is no longer imported by Halo. The `ogl` dependency is now unused and can leave `package.json` in a follow-up (lockfile change, kept out of this branch). **Superseded 2026-10-01 (#649): `ogl` is in use again by the Orb appearance. Do not remove it.**
 - The status label and its "..." vocabulary.
 - The square window. The window is now the disc plus margin, or the disc plus sheet.
 - Tool descriptions beside the ring. Below, so the ring stays put.
