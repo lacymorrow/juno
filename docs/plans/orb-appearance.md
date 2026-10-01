@@ -1,152 +1,205 @@
-# Orb: a presence (spec)
+# Orb: one canvas that tells you what Juno is doing (spec)
 
-**Status:** Built on `feat/orb-presence` (PR #630); every posture captured from the preview route; unit tests green; CI on the draft PR.
-**DRI:** Frontend Engineer. Lacy is DRI for the hardware pass (hold the key, speak, drag, real answers, a real GPU).
+**Status:** Built on `feat/orb-appearance`. Every posture captured from the preview route; two clips recorded; unit tests green; CI on the PR.
+**DRI:** Frontend Engineer. Lacy is DRI for the hardware pass (hold the key, speak, drag, a real answer, a real GPU).
 
 ## The ask
 
-Lacy, 2026-09-30: every appearance gets a from-scratch pass, and each one can feel like an entirely different app. The Orb is the only object, and everything is told through its behaviour: rest, listening, dictating, thinking, speaking, error. Responses are spoken first; the visible text appears as captions beneath the orb one line at a time like subtitles, the full answer available on hover or click as a sheet that unfolds under it. Approvals: the orb holds still and the caption becomes the question with Allow and Don't. Drive the Three.js material with state rather than adding chrome around it. Performance matters: the loop pauses when idle, the canvas is sized once, the chunk stays lazy. The window is no bigger than the orb plus captions plus shadow, and the orb must not jump when captions appear.
+Lacy, 2026-10-01: "we lost the coolest appearance type, the orb (react-orb)", and then: "the react orb is canvas, we wanted a full appearance created using it with every state thought-out. it's one of the most beautiful looks, and we use it on the website. it should be well thought out."
 
-## Jobs Standard critique of Orb as of main `58f94df2`
+So this is not a file restore. The shader is the starting material; the deliverable is a whole appearance built on it, where every state Rust can send has a deliberate expression in the canvas itself.
+
+## What happened to it
+
+PR #632, "Halo rebuilt as a ring that measures the turn", took the `react_orb`
+value for the ring and deleted `src/components/ui/react-orb.tsx` with it. The
+look had nowhere left to live: the value that named it belongs to the Halo, and
+the name "Orb" was on the ElevenLabs orb that PR #630 had rebuilt.
+
+This branch gives the shader its own value, `shader_orb`, and takes the name
+"Orb" back for it. The ElevenLabs orb keeps its value and its look and takes
+PR #630's own word for itself, "Presence"; its spec moved to
+`docs/plans/presence-appearance.md`. Halo is untouched. Eight appearances now,
+not seven, and nobody's stored setting moves them to a different look:
+`src/components/bar/__tests__/appearanceMigration.test.tsx` is that promise
+written down.
+
+The first commit on this branch restores the deleted file byte for byte, so the
+rewrite that follows it is readable as a diff rather than as a new file.
+
+## Jobs Standard critique of the starting material (the bar as of `42ba2e86^`)
 
 ```
-For: someone who chose Orb because they want Juno to be a presence on the desk, not a bar.
+For: someone who chose Orb because they want one beautiful object on the desk
+     instead of a bar, and want to know what Juno is doing without reading.
 Verdict: REDO
 Remove:
-- The 200x200 always-on window with a 10px "Ready" / "Processing..." label under the orb.
-- The six-family palette (periwinkle, gold, teal, slate, green, red) in bar-state-mapper.
-- The frame loop that runs at 60fps while nothing moves.
-- The agentState indirection (null / thinking / listening / talking): four buckets for sixteen states.
-- Any "Listening" or "Thinking" caption. The colour and the motion are the words.
+- The 10px "Ready" / "Processing..." / "Transcribing..." label under the orb.
+  A status word is an admission that the canvas failed to say it.
+- The six-bucket hue map in bar-state-mapper (listening 140, thinking 40,
+  talking 90, error 180, stopping 20, idle 0): pastel buckets, no meaning.
+- `forceHoverState` pinned true, so the voice warp ran in every state at once.
+- The rAF loop, which ran at 60fps forever, including on an idle desk.
 Fails:
-- 1: the first ten seconds are a pastel blob that never changes -> small, dim, breathing; blue and swelling the instant you speak, your words under it.
-- 4: no way to see an answer, an approval or an error -> one caption slot and one sheet.
-- 4: the WebGL loop burns at idle -> loop on demand, CSS breath at rest.
-- 6: the orb would jump if anything above it changed -> the orb's centre is at the same place in every window.
-- 7: a pinwheel of hard sectors on stage -> soft lobes, a rim of light, one wash at the centre.
-Ship as: one orb, one caption slot, one sheet; every Rust state a row; no roster, no history, no settings.
-Evidence needed: a PNG of every posture, one clip of a full turn, tsc, vitest, CI.
+- 1: ten seconds is a 200x200 window holding a violet blob and the word
+  "Ready" -> small and dim at rest, cool and swelling the instant you speak.
+- 4: the WebGL context was torn down and rebuilt on every hue or intensity
+  change, and intensity followed the audio level -> several context rebuilds
+  per second while you talk. Build it once, drive it from a ref.
+- 4: no approval, no error text, no way to read an answer. An agent asking
+  for permission had nowhere to ask -> one panel, four contents.
+- 4: rotation only advanced while the pointer was inside the orb, so the
+  look was driven by the mouse rather than by the work.
+- 7: not a keynote slide. It is a screensaver with a caption.
+Ship as: one canvas, every Rust state expressed in it, and a panel that opens
+  only for an approval, an error, the composer, or a click to read.
+Evidence needed: a PNG per state, a clip of a turn, vitest, tsc, CI.
 ```
+
+Everything in that critique is addressed below except one thing I kept: the
+orb is still a decoration-grade WebGL shader, and if the context cannot be
+created the canvas stays empty. That is caught and the rest of the appearance
+keeps working.
 
 ## Research (what was worth taking)
 
-- **Apple, Siri on macOS 26 and 27.** The Siri orb is the whole interface: it sits in a corner, its lobes swell with your voice, and the transcript and the answer appear as text beneath it, not inside a window with chrome. Nothing about Siri says "listening" in words. https://support.apple.com/guide/mac-help/use-siri-mchl6b029310/mac
-- **Subtitles.** One line, white on a dark pill, cut hard between lines rather than crossfaded, newest words visible. The BBC's subtitle guidelines put the reading rate at roughly 160 to 180 words per minute and one sentence per line; a spoken answer at that pace fits a line at a time. https://www.bbc.co.uk/accessibility/forproducts/guides/subtitles/
-- **ElevenLabs Conversational AI orb (the shader this keeps).** Seven polar lobes, two noisy rings, a four-stop colour ramp. What it drives well from state: the two ramp colours, the ring swell (`uInputVolume`), the flow turbulence (`uOutputVolume`), the flow's rotation (`uAnimation`) and the opacity. What it did badly at high contrast: the lobes meet at the centre as hard sectors. https://ui.elevenlabs.io/docs/components/orb
-- **react-three-fiber on demand rendering.** `frameloop="demand"` stops the loop; `invalidate()` or switching back to `"always"` resumes it. Switching the prop at runtime reconfigures the root, so the loop can sleep whenever the bar says the orb is at rest. https://r3f.docs.pmnd.rs/advanced/scaling-performance#on-demand-rendering
-- **WCAG 2.2.1 Timing Adjustable.** A finished answer lingers ten seconds, pauses while the pointer is over it or anything inside has focus, and Escape ends it at once. https://www.w3.org/WAI/WCAG21/Understanding/timing-adjustable.html
+- **The React Bits orb** (https://reactbits.dev/backgrounds/orb). The shader this keeps: three base colours (violet, cyan, a deep blue core) rotated together by one `hue`, a simplex-noise rim, two radial lights, and one bright point orbiting inside. Lit at the rim, dark at the centre, so it reads as a luminous O rather than a ball. Rotating the triad together is what keeps it one object instead of a repaint.
+- **Presence (`docs/plans/presence-appearance.md`, PR #630).** The same brief answered for a different shader. What was worth taking wholesale: a pure model beside the renderer, a drive ref so the canvas never re-renders, a frame loop that sleeps, a stage sized once, and the rule that the orb's centre sits at the same point in every window. What was deliberately not taken: subtitles.
+- **Island (`docs/plans/island-appearance.md`, PR #618).** Grow the window first and show second; hide first and shrink second. Same two-phase resize here.
+- **Siri on macOS 26 and 27.** The orb is the whole interface and no part of it says "listening". https://support.apple.com/guide/mac-help/use-siri-mchl6b029310/mac
+- **WCAG 2.2.1 Timing Adjustable.** The unread answer's clock pauses while the pointer is over the orb or anything inside has focus, and Escape ends it at once. https://www.w3.org/WAI/WCAG21/Understanding/timing-adjustable.html
 
 ## The person and the moment
 
-Someone at their desk who chose Orb. They press their key, say a thing, let go. They expect one object to react at once, say the answer, show it if it must, and get out of the way.
+Someone who wants one beautiful object on the desk and nothing else. They hold their key, say a thing, let it go, and expect to know what is happening without reading a word. They read only when they choose to.
 
 ## Ten seconds
 
-A small grey orb, dim, breathing slowly. They hold the key: it takes system blue and swells with their voice; their words appear beneath it, one line, newest words visible. They let go: it goes green for a beat while the words become text, then deep blue and turning while Juno works; the line under it is what they asked, dimmed; if a tool runs, its description replaces the line, and the orb turns a little faster each time a step completes. The first spoken sentence lands in the line as Juno says it; the orb ripples with the speech. The line advances sentence by sentence. If the answer carries a component, a dark sheet unfolds under the orb with the whole answer in it. The orb blooms green, once, and settles. The line stays ten seconds, then fades; the window shrinks back to the orb. Nothing was clicked.
+A small grey ring of light, dim, breathing slowly, its inside at a near stop. They hold the key: it cools toward blue, grows, and its rim ripples with their voice. They let go: it goes green for a beat while their words become text, then takes its own violet and cyan back and starts turning, with a pulse that gets quicker every time a tool finishes. Juno speaks, and the rim ripples to the speech. It blooms green once and settles. On the desk it is now a small green ember: there is an answer. One click and a dark sheet unfolds under it with what Juno heard and what it said. Click again and the sheet folds away. Nothing was read that they did not ask to read.
+
+## What it does not do, and why
+
+The Orb and Presence run the same shader brief on different shaders, so the one
+thing that separates them has to be real. It is this: **Presence narrates and
+the Orb does not.**
+
+- No status word, in any state.
+- No transcript. The orb ripples with your voice, so you know it hears you.
+- No answer as subtitles. The answer is spoken; reading it is a click.
+
+That costs something, and the cost is named: if Juno mishears you, nothing on
+screen says so until the answer arrives. The recovery is that the sheet carries
+the question as well as the answer, so one click shows what Juno heard. A
+person who wants to watch their words land should choose Presence.
 
 ## Geometry
 
-The canvas is a 120px stage, sized once and never resized; the orb scales its own mesh. The orb's centre is at `(width / 2, 60)` in every posture, so a centre-stable, top-anchored resize never moves it. Whatever is under the orb decides the window:
+The canvas is a 160px stage, sized once; the orb scales itself inside it with a uniform rather than by resizing the canvas. Its centre is at `(width / 2, 80)` in every posture. Whatever is under it decides the window:
 
 | Posture | Under the orb | Window |
 |---|---|---|
-| orb | nothing | 120 x 120 |
-| caption | one line (30 tall, up to 320 wide) or the composer | 360 x 170 |
-| approval | the question and Allow / Don't (66 tall) | 360 x 206 |
-| sheet | the whole answer (56..320 tall, in steps of 8) | 360 x 196..460 |
+| orb | nothing | 160 x 160 |
+| words | one line (30 tall): the error, or the composer | 360 x 212 |
+| approval | the question and Allow / Don't (66 tall) | 360 x 248 |
+| sheet | the turn (56..320 tall, in steps of 8) | 360 x 238..502 |
 
-The window has two widths. Caption and composer share a height, and the sheet replaces the line rather than stacking under it, so nothing lurches when the person hovers or a tool asks.
+The panel is Presence's, imported rather than copied: the same pill, the same
+approval card, the same sheet, the same width. Only the canvas and the policy
+are the Orb's own, which is also why the two looks line up where they overlap.
 
 ## Every state
 
-The orb column is what the orb does; the caption column is the one line under it. Sentence case, never a status word.
+The orb column is what the canvas does. The words column is what the panel shows, which is almost always nothing.
 
-| Rust bar state | Orb | Caption | Leaves when |
+| Rust bar state | Orb | Words | Leaves when |
 |---|---|---|---|
-| default | grey, 50% of the stage, 70% opacity, CSS breath 4s, loop asleep | none (a lingering answer keeps its last line for 10s) | any state change, click (Rust: Expanding) |
+| default | base hue, 35% chroma, 55% bright, 52% of the stage, inside at 0.08, CSS breath, loop asleep | none (green ember instead while an answer is unread) | any state change, click |
 | shrinking | same as default | none | Rust: Default after 300ms |
-| dictation_ready | green, rest size, breath | none | dictation starts |
-| always_listening | blue at 55%, rest size, breath | none | wake word (Rust: Listening) or off |
-| expanding | grey, 62%, full opacity, breath | composer, disabled | Rust: Input after 300ms |
-| input | grey, 62%, full opacity, breath | composer, focused; "return" appears once there is text | submit, blur with empty text (Rust: Shrinking), Escape |
-| listening | system blue, 78% plus up to 20% with the voice, rings swell | your words as they arrive, provisional ones italic; nothing until the first word | mic closes (Rust: Transcribing) |
-| dictating | system green, swells the same way | your words | dictation ends |
-| transcribing | green, 70%, turning | your words, dimmed | Rust: Submitting or Default |
-| submitting | deep blue, 70%, turning, 1.2s pulse | what you asked, dimmed | agent starts |
-| loading | deep blue, turning faster with each finished step | what you asked, dimmed; a running tool's description replaces it | first stream chunk (Rust: AgentResponding) |
-| agent_responding | deep blue, turning | the latest spoken sentence; else the latest finished visible sentence; else the question | stream ends |
-| speaking | blue, 78%, ripples with the speech level | the sentence being spoken | TTS ends |
-| finishing | green bloom, once | the answer's last line | 300ms (Rust: Default) |
-| success | green bloom, once | the answer's last line, or nothing | 300ms |
-| error | red, one flinch (recoils 12% and returns in 480ms), then holds red | the error, in red | 3s (Rust: Default) or Escape |
-| stopping | grey at 80%, turning slowly | none | Rust: Default |
+| dictation_ready | green ember, 50% chroma, 60% bright | none | dictation starts |
+| always_listening | cool ember, 45% chroma, 40% bright, 50%: dimmer than rest, so a listening desk does not glow all day | none | wake word, or off |
+| expanding | base hue, 80% chroma, 90% bright, 64%, inside at 0.35 | composer, disabled | Rust: Input after 300ms |
+| input | same | composer, focused | submit, blur, Escape |
+| listening | cool hue (350), full chroma, 76% plus up to 18% with your voice, rim ripple 0.22 plus up to 0.5 | none | mic closes |
+| dictating | green hue (110), otherwise as listening: those words are yours | none | dictation ends |
+| transcribing | green, turning, pulse: still your words, but Juno has them | none | Rust: Submitting or Default |
+| submitting | base hue, turning at 0.45 rad/s, pulse every 1.4s | none | agent starts |
+| loading | the same, quicker with every finished step (inside +0.3, spin +0.12, pulse period / 1.2 per step, counted to four) | none | first stream chunk |
+| agent_responding | the same | none | stream ends |
+| speaking | base hue, 76%, rim ripples with Juno's speech level | none | TTS ends |
+| finishing | green bloom to 84%, once | none | 300ms (Rust: Default) |
+| success | green bloom, once | none | 300ms |
+| error | one red object (the three colours collapse), one inward flinch of 12% over 560ms, then holds | the error itself, in red | 3s (Rust: Default) or Escape |
+| stopping | base hue dimming, 40% chroma, 70% bright, 66%, slow turn | none | Rust: Default |
 
-Local conditions layered on top:
+Local conditions, layered on top:
 
 | Condition | Effect |
 |---|---|
-| a tool waits on Allow or Don't | the orb holds still (breath paused, no spin, no pulse); the caption is "Juno wants to <description>" with Allow and Don't; the linger clock does not run |
-| Juno is driving the cursor (input-control state) | deep blue, steady turn; the caption is "Juno is using the mouse in <app>" |
-| Juno asks for the cursor (input-control request) | the sheet opens with the notice in it |
-| the answer carries a component | the sheet opens by itself and shows the whole answer; the line is not shown twice |
-| the answer is text only | the line shows it sentence by sentence; hover 150ms or click unfolds the sheet; the sheet folds 400ms after the pointer leaves unless clicked open |
-| the answer is spoken only | the line is the whole answer; there is no sheet |
-| a finished answer | its last line and any open sheet linger 10s, paused while the pointer is over the orb or anything inside has focus; Escape settles at once |
-| the person speaks again | everything under the orb clears at once; the orb is free |
-| Rust in `input` while an answer lingers | the composer takes the slot; the answer's line returns when the composer closes |
-| audio level while listening or dictating | scale adds up to 20% of the stage; `uInputVolume` follows the level so the rings rise |
-| audio level while speaking | `uOutputVolume` follows the level so the flow churns; scale adds up to 8% |
-| Reduce Motion on | the caption fades without rising; the sheet's height eases in 150ms; the CSS breath is off; the shader still eases colour and scale (it is state, not decoration) |
+| a tool waits on Allow or Don't | everything stops: the inside is frozen, no spin, no pulse, no ripple. A canvas that has stopped moving is the clearest way to say the next move is yours. The panel asks "Juno wants to <description>" with Allow and Don't |
+| Juno is driving the cursor | it turns steadily, no pulse |
+| Juno asks for the cursor | the sheet opens with the notice in it |
+| an answer arrives and nobody has read it | at rest the orb takes a green ember, 50% chroma and a little larger, for 12 seconds. That ember is what makes the click worth making |
+| the answer carries a component | the sheet opens by itself: a component cannot be spoken, so an orb that stayed shut would have swallowed it |
+| you click the orb | with something to read, the sheet; with nothing to read, Rust opens the composer. One idea, two shapes: give me the words |
+| you speak again | the sheet closes and the ember lets go at once |
+| audio level while listening or dictating | scale adds up to 0.18, rim ripple up to 0.5, the inside up to 0.3 |
+| audio level while Juno speaks | ripple up to 0.45, scale only up to 0.06: speech disturbs the surface rather than inflating it |
+| Reduce Motion on | the CSS breath is off and the panel fades without rising. Colour and scale still ease, because they are state, not decoration |
 
-## The orb
+## The canvas
 
-What state drives, every frame, from a ref the bar writes into (no React re-render of the canvas):
+Eight uniforms, each of them something a person can see.
 
-- **tint**: the two ramp colours. Rest grey `#6E6E73 / #AEAEB2`; system blue `#0A84FF / #8EC5FF` for listening and speaking; deep blue `#0066D6 / #5FA8FF` for working; system green `#30D158 / #A6EFB8`; system red `#FF453A / #FFB3AE`. Eased at 8% per frame.
-- **scale**: the mesh scale, 0.5 at rest, 0.62 awake, 0.7 working, 0.78 for voice, plus the swell. Eased at 16% per frame.
-- **swell** (`uInputVolume`): the audio level while listening or dictating; the rings rise and the lobes pull in.
-- **turbulence** (`uOutputVolume`): 0.12 at rest, 0.45 working, 0.35 plus 0.65 times the level while speaking.
-- **spin**: how fast the flow turns (`uAnimation`): 0 at rest so the loop can sleep, 0.35 for voice, 0.8 plus 0.25 per finished step while working (capped at four steps), 0.6 speaking.
-- **pulse**: a 3% swell and back, period 1.2s while working, shorter as steps complete. The cadence of the pulse is the progress.
-- **impulse**: one flinch (recoil) for an error, one bloom for done. Plays once per entry into the state.
-- **opacity**: 0.7 at rest, 0.55 waiting for the wake word, 0.8 stopping, 1 otherwise.
+| uniform | what it is | at rest | at full voice |
+|---|---|---|---|
+| `uTime` | the inside's own clock, advanced here at the look's flow rate | 0.08x | 1.0x |
+| `uRot` | rigid rotation of the whole orb | 0 | 0.1 to 0.57 rad/s |
+| `uHue` | degrees applied to all three base colours | 0 | 350 or 110 |
+| `uSat` | chroma, 0 grey to 1 full | 0.35 | 1 |
+| `uMono` | collapses the three colours onto one red object | 0 | 0 (error only) |
+| `uScale` | how much of the canvas the orb fills | 0.52 | up to 0.94 |
+| `uRipple` | surface disturbance | 0 | up to 0.72 |
+| `uBright` | how present it is | 0.55 | 1 |
 
-Shader changes from the ElevenLabs original: lobe softness 0.6 to 0.9; lobes fade to 30% toward the rim so the edge reads as light rather than the end of a slice; one soft wash at the centre so seven sectors never meet at a point. The rings, the ramp and the flow are as they were.
+Three decisions inside that table are the design:
+
+- **`uTime` is advanced here, not read from the frame clock.** That is what makes `flow: 0` a freeze rather than a slow drift, and a freeze is what an approval needed.
+- **Thinking is motion, not a colour.** Working keeps the orb's own violet and cyan and says the work through turning, a quickening pulse and a racing inside. Only three hues exist: the orb's own, cool for the open microphone, green for your words landing and for done. Each one is a message that must not be missed, which is the opposite of the six pastel buckets this replaced.
+- **`uMono` exists for exactly one state.** A failure must not read as a mood, so the triad collapses into one red object. A test asserts no other state ever sets it.
+
+Everything else in the shader is the original's: the same simplex rim, the same two lights, the same orbiting point, the same `extractAlpha`. The ripple is literally the original's hover warp, read from state instead of from the pointer.
 
 ## Performance
 
-- **The loop sleeps.** `frameloop` is `"always"` while anything moves and `"demand"` once the orb's look allows sleep (breathe or still) and its colours, scale, swell, turbulence and opacity have settled (`settled()` in the model). Any `bar-state-update` and any change of look wakes it. The resting breath is a CSS transform animation on the canvas wrapper; it is paused, not removed, in active states, so it never snaps. Verified on the bench: `data-loop="demand"` four seconds after mount with no events.
-- **The canvas is sized once.** 120 x 120 CSS px, `dpr` 1 to 2, never remounted: the same `OrbCanvas` element stays mounted through every posture, and nothing keys it. Size is the mesh scale.
-- **The chunk stays lazy.** `BarHost` still lazy-imports `elevenlabs-orb-bar`; the model, the caption pieces and the tests import nothing from Three.js. `OrbCanvas.tsx` is the only file that does, and it is imported only by the bar.
-
-## Motion
-
-- Caption in: the window grows first (`resizeWindowIfChanged`, one `set_bar_frame`), then the slot fades and rises 4px in 180ms. Caption out: the slot fades in 120ms, then the window shrinks 350ms later. Text changes inside the slot cut, like subtitles.
-- Sheet height follows its content through a ResizeObserver, clamped 56..320 in steps of 8, under one spring (stiffness 380, damping 34).
-- The orb never animates its position. Its stage is absolutely placed at the top centre of the window.
+- **The loop sleeps.** It stops once the look allows it (resting or frozen), the eased values have settled, no impulse or pulse is running, and 2.5 seconds have passed. The grace period matters: cutting straight to a still frame reads as a stall, coming to rest reads as rest. Any `bar-state-update` wakes it.
+- **The resting breath is CSS**, a transform animation on the wrapper, so the orb still reads as alive on an idle desk with the WebGL loop asleep. It is paused, not removed, in active states, so it never snaps.
+- **The context is built once.** The bar writes a ref, the loop reads it. No prop change rebuilds anything, which is the bug that made the old bar rebuild its context several times a second while you spoke.
+- **The chunk is small.** `shader-orb-bar` builds to 61 kB, against 906 kB for Presence, because `ogl` is a few hundred lines and Three.js is not. `ogl@^1.0.11` never left package.json, so nothing was installed for this.
 
 ## Removed (and considered, then cut)
 
-- The status label under the orb, and `getStatusLabel` for this look.
-- `mapToOrbState` and `mapToElevenLabsOrbColors` (dead once the orb reads state itself). `getStatusLabel` stays for Halo and Avatar.
-- `src/components/ui/elevenlabs-orb.tsx`, moved to `src/components/bar/orb/OrbCanvas.tsx` and rewritten to be driven from a ref.
-- The `agentState` prop and the "auto" volume mode (synthetic wobble when there is no audio). The orb follows real levels or holds.
-- Skill autocomplete in the composer. The orb is a presence first; the main window has it.
-- Chat history and a follow-up field. The orb shows the current turn; a follow-up is a new press of the key, or a click on the resting orb.
-- A "Listening" or "Listening for hey Juno" caption. Considered for the wake-word state; cut because the dim blue breath says it and the words would be chrome.
-- A tick ring around the orb for tool calls. Considered; cut because a ring is chrome and the pulse cadence already carries the progress.
+- The status label, and `getStatusLabel` for this look. It stays for Halo and Avatar.
+- The whole of `mapToReactOrbConfig` as the Orb's source of truth. It is still in `bar-state-mapper.ts` and now has no caller; deleting it is a separate change, since that file is shared.
+- Subtitles, a transcript line, and a running tool's name under the orb. Considered, and cut: that is Presence, and two looks that behave the same are one look with a settings toggle.
+- Hover to open the sheet. Presence has it; here a click is the only way in, so passing the pointer over the orb never changes the window.
+- A tick ring, a progress arc, or anything drawn around the canvas. The pulse cadence is the progress, and a ring is Halo.
+- A second accent colour for "thinking". Cut on purpose: see above.
+- Changing the shader's violet and cyan to system blue. The no-purple rule is about chrome (gradients and glows on text, borders and cards), not about rendered artwork, and this artwork is the thing being restored. `uHue` is there if a future tuning is wanted.
 
 ## Evidence
 
-- `docs/frontend/screenshots/orb/`: one PNG per posture from `/__bar-preview?appearance=orb&state=<state>` and the demos (`default`, `dictation_ready`, `always_listening`, `input`, `listening`, `dictating`, `transcribing`, `loading`, `agent_responding`, `speaking`, `finishing`, `error`, `stopping`, `approval`, `sheet`), plus `spoken-turn.mp4`, one full spoken turn from `/__bar-preview?appearance=orb&demo=spoken`.
-- Unit tests: `orbModel.test.ts` (the look, the targets, the caption, the sentences, the window, the turn; every state Rust can send), `ElevenLabsOrbBar.test.tsx` (rest and sleep, listening with words, green dictation, hide then shrink, working with a tool, the answer sentence by sentence and the linger, the sheet on hover and by itself for a component, history does not linger, speaking again clears, approval, error, Escape, the composer, click, driving).
-- `tsc` clean; `vitest` 42 files, 482 tests green after the rebase onto #629 (2026-09-30). The clip and the hero still are also at `docs/changelog/media/630/`.
-- Not verified here: the real window on hardware, a real GPU's frame cost, the WebGL sleep under a real compositor, drag, OS focus, the Rust side of every interaction. The bench runs the same components on the fake Tauri layer.
+- `docs/frontend/screenshots/shader-orb/`: one PNG per state from `/__bar-preview?appearance=shader_orb&state=<state>` (default, always-listening, dictation-ready, input, listening, dictating, transcribing, loading, agent-responding, speaking, finishing, error, stopping), plus `approval.png` and `card.png` from the preview demos.
+- `turn-loop.mp4`, ten seconds of the picker's loop (resting, listening, dictating, done) and `full-turn.mp4`, eleven seconds of one turn ending in a component answer that opens the sheet by itself. Both recorded with `scripts/bench-record.sh shader_orb`.
+- Unit tests: `shaderOrbModel.test.ts` (36: every state, the audio, the sleep rule, the words policy, the postures, the window) and `ShaderOrbBar.test.tsx` (16: rest and sleep, silence while you speak, silence while Juno works, the frozen approval and Allow, red with the error, the green ember and the click, the sheet opening by itself, the clock, speaking again, history, the composer, the click with nothing to read, Escape, driving, the two-phase resize, and one test that walks twelve states asserting the bar renders no text at all).
+- `appearanceMigration.test.tsx` (14): every stored value lands on the component it landed on before, and the catalog has no duplicate value or name.
+- `tsc` clean, `vitest` 56 files and 731 tests green, `bun run build` clean, `rustfmt --check` clean on `constants/ui.rs`.
+- Not verified here: the real window on hardware, a real GPU's frame cost, the WebGL sleep under a real compositor, drag, OS focus, and the Rust side of every interaction. The preview runs the real components on the fake Tauri layer. Rust was not compiled locally; CI does that.
+- Not captured: a still of the green unread ember on its own. The preview has no demo that reaches it with the sheet shut; it is covered by `ShaderOrbBar.test.tsx` and by the model test, and it is visible in `full-turn.mp4` only with the sheet open.
 
 ## Follow-ups (not in this branch)
 
-- Grow upward when the orb is docked in the bottom half of a display. The window grows downward today and is clamped to the monitor.
-- The preview's `state=speaking` frame carries no `spokenText`, so the held speaking still has no caption; the spoken demo covers it. Adding it to `heldFrame` touches every look's still, so it waits for the six appearance PRs to land.
-- The task card in the sheet still carries a purple icon tint (`agent-cards/index.tsx`). Same follow-up as Island.
-- `scripts/bench-record.sh` has no `spoken` mode; the clip here was recorded with the same steps from a scratch script. Add the mode once the appearance PRs land.
-- The preview's `VoiceContext` logs "Cannot read properties of undefined (reading 'transformCallback')" on some loads, before the harness installs the mock. Not the orb's; noted.
+- `mapToReactOrbConfig` and `ReactOrbConfig` in `bar-state-mapper.ts` now have no caller. Delete them with the next change to that file.
+- A still that holds the unread green ember needs a `demo=held` in the preview route. Worth adding when the next appearance PR touches that file.
+- Eight appearances is a lot for one picker. If one should go, that is a product decision and not this branch's to make.
+- The preview's `state=speaking` frame carries no live audio level, so the held speaking still shows the resting ripple. The same gap Presence noted.
+- `docs/frontend/screenshots/orb/` still holds Presence's stills, because that is where its spec points. Rename the directory to `presence/` when something else touches it; this branch left it alone rather than rewriting a shipped spec's evidence paths.

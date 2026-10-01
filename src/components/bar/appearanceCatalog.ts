@@ -36,9 +36,14 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
     descriptor: "One small shape that grows to hold the answer, then settles back.",
   },
   {
-    value: UI.BAR_APPEARANCES_ORB,
+    value: UI.BAR_APPEARANCES_SHADER_ORB,
     name: "Orb",
-    descriptor: "One orb that tells you everything by how it moves, with subtitles beneath.",
+    descriptor: "One orb of light. Colour and motion say the whole turn; words only when Juno needs you.",
+  },
+  {
+    value: UI.BAR_APPEARANCES_ORB,
+    name: "Presence",
+    descriptor: "A presence that tells you everything by how it moves, with subtitles beneath.",
   },
   {
     value: UI.BAR_APPEARANCES_REACT_ORB,
