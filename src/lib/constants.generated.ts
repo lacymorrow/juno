@@ -1,6 +1,9 @@
 // Generated file - do not edit manually
 // This file is auto-generated from Rust constants
-// Run 'npm run generate-constants' to update
+// Run 'bun run generate-constants' to update
+
+// Platform detection, used by any constant Rust defines per platform.
+const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
 
 export const EVENTS = {
   AGENT_EVENT: 'agent-event',
@@ -333,6 +336,9 @@ export const API_ENDPOINTS = {
   BETA_FLAGS_COMPUTER_USE_2025_11_24: 'computer-use-2025-11-24',
   BETA_FLAGS_PROMPT_CACHING: 'prompt-caching-2024-07-31',
   BETA_FLAGS_SERVER_SIDE_FALLBACK: 'server-side-fallback-2026-07-01',
+  TOOL_VERSION_GROUPS_COMPUTER_USE_2025_01_24_TOOLS: ['computer_20250124', 'text_editor_20250728', 'bash_20250124'],
+  TOOL_VERSION_GROUPS_COMPUTER_USE_2025_11_24_TOOLS: ['computer_20251124', 'text_editor_20250728', 'bash_20250124'],
+  TOOL_VERSION_GROUPS_COMPUTER_TOOLSET_20260801_TOOLS: ['computer_toolset_20260801', 'text_editor_20250728', 'bash_20250124'],
   HTTP_HEADERS_CONTENT_TYPE: 'Content-Type',
   HTTP_HEADERS_X_API_KEY: 'x-api-key',
   HTTP_HEADERS_APPLICATION_JSON: 'application/json',
@@ -460,6 +466,16 @@ export const UI = {
   INTERACTION_TYPES_SET_LEVEL: 'set_level',
   TEXT_DISPLAY_MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH: 30,
   TEXT_DISPLAY_MAX_UI_PREVIEW_TEXT_LENGTH: 50,
+  STANDARD_RESOLUTIONS_XGA: [1024, 768],
+  STANDARD_RESOLUTIONS_WXGA: [1280, 800],
+  STANDARD_RESOLUTIONS_FWXGA: [1366, 768],
+  STANDARD_RESOLUTIONS_HD_WXGA: [1680, 1050],
+  STANDARD_RESOLUTIONS_HD_1080: [1920, 1080],
+  STANDARD_RESOLUTIONS_HIGH_RES_16_10: [2400, 1500],
+  STANDARD_RESOLUTIONS_UW_1080: [2560, 1080],
+  STANDARD_RESOLUTIONS_LEGACY_RESOLUTIONS: [[1024, 768], [1280, 800], [1366, 768]],
+  STANDARD_RESOLUTIONS_HIGH_RES_RESOLUTIONS: [[1680, 1050], [1920, 1080], [2400, 1500], [2560, 1080]],
+  STANDARD_RESOLUTIONS_ALL_RESOLUTIONS: [[1024, 768], [1280, 800], [1366, 768], [1680, 1050], [1920, 1080], [2400, 1500], [2560, 1080]],
   MOBILE_BREAKPOINT: 768,
   PERCENTAGE_MULTIPLIER: 100,
   SCROLL_WHEEL_EVENT_LINE_SCROLL: 120,
@@ -798,6 +814,7 @@ export const MEMORY = {
   PATTERNS_WEBP_DATA_URL_PREFIX: 'data:image/webp;base64,',
   PATTERNS_GENERIC_IMAGE_DATA_PREFIX: 'data:image/',
   PATTERNS_BASE64_IDENTIFIER: 'base64,',
+  COMMON_WORDS: ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'],
 } as const;
 
 export const AGENT = {
@@ -1049,43 +1066,48 @@ export const AGENT = {
   CONFIDENCE_SCORES_NO_CONFIDENCE: 0,
 } as const;
 
-// Platform detection for keyboard shortcuts
-const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
-
 // Keyboard shortcuts with platform-specific defaults
 export const KEYBOARD_SHORTCUTS = {
+  AGENT_MODE: isMac ? 'Option+D' : 'Alt+D',
+  DICTATION_INPUT: isMac ? 'Option+Space' : 'Alt+Space',
+  STOP_CURRENT_TASK: 'Escape',
+  OPEN_SETTINGS: isMac ? 'Cmd+Comma' : 'Ctrl+Comma',
+} as const;
+
+// Everything else settings::defaults holds, with Rust's types kept: a Rust
+// bool arrives as a boolean, not the string 'true'.
+export const SETTING_DEFAULTS = {
   TTS_PROVIDER: 'system',
-  SOUND_ENABLED: 'true',
-  DICTATION_CLIPBOARD_ENABLED: 'true',
+  SOUND_ENABLED: true,
+  DICTATION_CLIPBOARD_ENABLED: true,
   DICTATION_INSERTION_MODE: 'paste',
-  ALWAYS_LISTENING_ACTIVE: 'false',
-  PERFORMANCE_MONITORING_ENABLED: 'true',
+  ALWAYS_LISTENING_ACTIVE: false,
+  ALWAYS_LISTENING_SENSITIVITY: 0.5,
+  PERFORMANCE_MONITORING_ENABLED: true,
   AGENT_EXECUTION_MODE: 'multi',
   AGENT_TRIGGER_MODE: 'tap',
-  CLOUD_ENABLED: 'false',
-  AUTO_CONNECT: 'false',
-  AUTOSTART_ENABLED: 'false',
-  ADVANCED_SETTINGS_ENABLED: 'false',
-  ONBOARDING_COMPLETED: 'false',
-  BACKGROUND_MODE: 'true',
+  CLOUD_ENABLED: false,
+  AUTO_CONNECT: false,
+  CLOUD_COMMAND_TIMEOUT_SECONDS: 30,
+  AUTOSTART_ENABLED: false,
+  ADVANCED_SETTINGS_ENABLED: false,
+  ONBOARDING_COMPLETED: false,
+  BACKGROUND_MODE: true,
   MOUSE_CONTROL: 'ask',
   MOUSE_CONTROL_ALWAYS: 'always',
-  DOCK_ICON_VISIBLE: 'true',
-  SHOW_TRAY_ICON: 'true',
+  DOCK_ICON_VISIBLE: true,
+  SHOW_TRAY_ICON: true,
   PERMISSION_MODE_ASK_FIRST: 'ask_first',
   PERMISSION_MODE_ASK_WHEN_RISKY: 'ask_when_risky',
   PERMISSION_MODE_DONT_ASK: 'dont_ask',
   PERMISSION_MODE: 'ask_when_risky',
   CLAUDE_CLI_EFFORT: 'high',
-  CLAUDE_CLI_LOAD_ACCOUNT_MCP: 'true',
-  AUTO_UPDATE_CHECK_ENABLED: 'true',
+  CLAUDE_CLI_EFFORT_LEVELS: ['low', 'medium', 'high', 'xhigh', 'max'],
+  CLAUDE_CLI_LOAD_ACCOUNT_MCP: true,
+  AUTO_UPDATE_CHECK_ENABLED: true,
   UPDATE_CHANNEL: 'prerelease',
-  FOLLOW_CURSOR_DISPLAY: 'true',
-  SHOW_GLOW_BORDER: 'true',
-  AGENT_MODE: isMac ? 'Option+D' : 'Alt+D',
-  DICTATION_INPUT: isMac ? 'Option+Space' : 'Alt+Space',
-  STOP_CURRENT_TASK: 'Escape',
-  OPEN_SETTINGS: isMac ? 'Cmd+Comma' : 'Ctrl+Comma',
+  FOLLOW_CURSOR_DISPLAY: true,
+  SHOW_GLOW_BORDER: true,
 } as const;
 
 export const SETTINGS = {
@@ -1186,6 +1208,7 @@ export const SETTINGS = {
   EVENTS_PROMPT_SETTINGS_CHANGED: 'prompt_settings_changed',
   EVENTS_CLI_SETTINGS_CHANGED: 'cli_settings_changed',
   EVENTS_VOICE_TRANSCRIPTION_SETTINGS_CHANGED: 'voice_transcription_settings_changed',
+  EVENTS_PROVIDER_SETTINGS_CHANGED: 'provider_settings_changed',
   SETTINGS_STORE_FILE: 'app_settings.json',
 } as const;
 
@@ -1367,6 +1390,8 @@ export const FILE_EXTENSIONS = {
   EXTENSIONS_OUT: 'out',
   EXTENSIONS_ERR: 'err',
   EXTENSIONS_TMP: 'tmp',
+  EXTENSIONS_PRODUCTION_EXTENSIONS: ['txt', 'md', 'rs', 'js', 'ts', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'css', 'html', 'xml', 'json', 'yaml', 'yml', 'toml', 'cfg', 'ini', 'sh', 'bat', 'ps1', 'sql', 'go', 'rb', 'php', 'swift', 'kt', 'scala'],
+  EXTENSIONS_DEVELOPMENT_EXTENSIONS: ['txt', 'md', 'rs', 'js', 'ts', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'css', 'html', 'xml', 'json', 'yaml', 'yml', 'toml', 'cfg', 'ini', 'sh', 'bat', 'ps1', 'sql', 'go', 'rb', 'php', 'swift', 'kt', 'scala', 'log', 'out', 'err', 'tmp'],
   PREFIXES_LOG_PREFIX: 'juno_',
   PREFIXES_SCREENSHOT_PREFIX: 'screenshot_',
   PREFIXES_TEMP_PREFIX: 'temp_',
@@ -1566,4 +1591,5 @@ export type ChromeDebugPort = typeof CHROME_DEBUG[keyof typeof CHROME_DEBUG];
 export type CommandName = typeof COMMANDS[keyof typeof COMMANDS];
 export type ComputerAction = typeof COMPUTER_ACTIONS[keyof typeof COMPUTER_ACTIONS];
 export type ToolName = typeof TOOL_NAMES[keyof typeof TOOL_NAMES];
+export type SettingDefault = typeof SETTING_DEFAULTS[keyof typeof SETTING_DEFAULTS];
 export type DefaultConfig = typeof DEFAULT_CONFIG;
