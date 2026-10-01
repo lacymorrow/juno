@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.50] - 2026-10-01
+
+### Added
+
+- **bar:** every appearance drops into a gravity well, not just the Pill (#654) (447e4825)
+
+### Fixed
+
+- **permissions:** the connector gate allows by default (#655) (77e38171)
+
 ## [0.8.48] - 2026-10-01
 
 ### Fixed
@@ -698,7 +708,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.48...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.50...HEAD
+[0.8.50]: https://github.com/lacymorrow/juno/compare/cua-v0.8.49...v0.8.50
 [0.8.48]: https://github.com/lacymorrow/juno/compare/cua-v0.8.47...v0.8.48
 [0.8.46]: https://github.com/lacymorrow/juno/compare/cua-v0.8.45...v0.8.46
 [0.8.45]: https://github.com/lacymorrow/juno/compare/cua-v0.8.44...v0.8.45
