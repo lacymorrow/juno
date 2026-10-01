@@ -267,28 +267,38 @@ fn validate_file_path(path: &str, config: &SecurityConfig) -> Result<PathBuf, St
 
 ### Command Security
 
-```rust
-// Command whitelist validation
-const ALLOWED_COMMANDS: &[&str] = &[
-    "cargo", "npm", "bun", "git", "ls", "cat", "grep"
-];
+This section used to show a `const ALLOWED_COMMANDS` whitelist that has never
+existed anywhere in Juno, and called the shell gate "command whitelist
+validation". It is a **blocklist**. Two sections of invented code describing a
+control that works the opposite way is how Juno came to look like it had two
+competing shell allowlists. What it actually has:
 
-fn validate_command(cmd: &str) -> Result<(), String> {
-    let command = cmd.split_whitespace().next()
-        .ok_or("Empty command")?;
-        
-    if !ALLOWED_COMMANDS.contains(&command) {
-        return Err(format!("Command not allowed: {}", command));
-    }
-    
-    // Check for dangerous patterns
-    if cmd.contains("rm -rf") || cmd.contains("sudo") {
-        return Err("Dangerous command pattern detected".to_string());
-    }
-    
-    Ok(())
-}
-```
+**One parser.** `src/shell_command.rs` is the only place that understands a
+shell command string: normalisation, tokenisation, the inert-character
+whitelist, the command word, and the recursive-forced-`rm` tokeniser. Every
+gate reads it and none of them parses for itself. Two parsers of the same
+syntax drift, silently, and they did.
+
+**Two gates, asking different questions.** They are not duplicates, and
+merging them into one list would weaken both.
+
+| Question | Where | Shape |
+|---|---|---|
+| Does Juno stop and ask the person? | `agent/tools/risk_classifier.rs` → `agent/tools/permission_policy.rs::requires_approval` | Risk level plus the person's mode. A closed set of 20 inert commands behind a character whitelist never asks |
+| Does Juno run it at all? | `commands/shell.rs::refuse_forbidden_command` | Blocklist. Privilege escalation, catastrophic literals, recursive forced `rm` of `/`, redirection into system directories, path traversal in a redirection |
+| Does Juno ask before it sends? (Claude CLI path) | `agent/providers/cli_approval.rs` | Consequence at the tool boundary: read-only connector calls and drafts run, sends and deletes ask |
+
+**One construction, so a question can go away.** `src/trash.rs` writes the
+`rm` the shell session runs: deletes go to the macOS Trash, so they are
+reversible and need no dialog. It is a shim on the session's `PATH`, not a
+rewrite of the command text, because bash has already expanded globs, quoting
+and variables by the time the shim sees a path. When the Trash cannot take
+something, the shim refuses and does not delete.
+
+**The direction of travel.** Gate by consequence, not by command: inferring
+intent from shell syntax is undecidable, so substring classification shrinks
+rather than grows, and new gates go where intent is structurally known. Read
+`docs/plans/permissions-by-consequence.md` before changing any of the three.
 
 ## Platform Integration
 
@@ -509,7 +519,8 @@ let client = Client::builder()
 
 ### Security Requirements
 - All file operations must use security validation
-- All command execution must pass whitelist validation
+- Shell commands pass `commands::shell::refuse_forbidden_command`, which is a
+  blocklist, not a whitelist. Parse through `shell_command`, never by hand
 - Implement different security levels for development vs production
 - Add comprehensive audit logging for security events
 - See `docs/audits/security-audit-2026-02-08.md` for 32 tracked vulnerabilities (2026-02-08, with 2026-09-11 status annotations)

@@ -133,10 +133,28 @@ const READ_VERBS: &[&str] = &[
 /// the name wins over a read verb: `mark_as_read` is a write, whatever
 /// "read" says.
 const WRITE_VERBS: &[&str] = &[
-    "send", "create", "update", "delete", "post", "reply", "draft", "schedule", "move", "archive",
-    "upload", "add", "remove", "set", "write", "edit", "insert", "invite", "cancel", "mark",
-    "publish", "submit", "execute", "run", "trigger", "patch", "put", "share", "forward", "react",
-    "pin", "star", "assign", "close", "merge", "approve",
+    "send", "create", "update", "delete", "post", "reply", "schedule", "move", "archive", "upload",
+    "add", "remove", "set", "write", "edit", "insert", "invite", "cancel", "mark", "publish",
+    "submit", "execute", "run", "trigger", "patch", "put", "share", "forward", "react", "pin",
+    "star", "assign", "close", "merge", "approve",
+];
+
+/// A draft is local and reversible, so writing one is not a thing to interrupt
+/// someone about. Lacy's rule: "it should not send communications out without
+/// approval but it should draft emails freely." Fleet rules 12 and 13 already
+/// make draft-only the sanctioned path for mail, so this is the code agreeing
+/// with the rule.
+///
+/// `draft` is a noun about the *consequence* (nothing left the machine), which
+/// is why it outranks the write verb in a name like `create_draft`. It does not
+/// outrank an act that sends: see [`DRAFT_DISQUALIFIERS`].
+const DRAFT_MARKER: &str = "draft";
+
+/// Verbs that undo the draft exemption. A call that drafts *and* does one of
+/// these has a consequence a draft does not: it leaves, or it destroys
+/// something on the other side. Those still ask.
+const DRAFT_DISQUALIFIERS: &[&str] = &[
+    "send", "forward", "share", "publish", "submit", "invite", "delete", "remove", "post", "reply",
 ];
 
 /// Decide whether a call the CLI could not resolve on its own runs or asks.
@@ -161,6 +179,15 @@ pub fn verdict_for(tool_name: &str) -> Verdict {
             let has_write = lowered.iter().any(|s| WRITE_VERBS.contains(&s.as_str()));
             let has_read = lowered.iter().any(|s| READ_VERBS.contains(&s.as_str()));
             if has_read && !has_write {
+                return Verdict::Allow;
+            }
+
+            // Drafting stays on this machine, so it runs. Sending does not.
+            let drafts = lowered.iter().any(|s| s == DRAFT_MARKER);
+            let also_sends = lowered
+                .iter()
+                .any(|s| DRAFT_DISQUALIFIERS.contains(&s.as_str()));
+            if drafts && !also_sends {
                 return Verdict::Allow;
             }
         }
@@ -625,9 +652,48 @@ mod tests {
             "mcp__slack__slack_send_message",
             "mcp__docs__create_document",
             "mcp__calendar__delete_event",
-            "mcp__gmail__create_draft",
         ] {
             assert_eq!(verdict_for(name), Verdict::Prompt, "{name} should ask");
+        }
+    }
+
+    /// `mcp__gmail__create_draft` used to be in the test above, asserting that
+    /// drafting asks. That was the wrong test. Drafting stays on this machine
+    /// and can be thrown away; sending is what cannot be recalled, and the
+    /// gate belongs on the consequence rather than on the word "create".
+    /// Lacy: "it should not send communications out without approval but it
+    /// should draft emails freely." Fleet rules 12 and 13 already make
+    /// draft-only the sanctioned path for mail.
+    #[test]
+    fn drafting_runs_but_sending_asks() {
+        for name in [
+            "mcp__gmail__create_draft",
+            "mcp__gmail__update_draft",
+            "mcp__slack__create_draft_message",
+        ] {
+            assert_eq!(
+                verdict_for(name),
+                Verdict::Allow,
+                "{name} only writes a draft, so it should not interrupt anyone"
+            );
+        }
+
+        for name in [
+            "mcp__gmail__send_draft",
+            "mcp__gmail__delete_draft",
+            "mcp__gmail__forward_draft",
+            // Ambiguous on purpose: a name carrying `reply` is far more often
+            // posting one than composing one, so it fails closed.
+            "mcp__gmail__draft_reply",
+            "mcp__blog__publish_draft",
+            "mcp__forms__submit_draft",
+            "mcp__gmail__send_email",
+        ] {
+            assert_eq!(
+                verdict_for(name),
+                Verdict::Prompt,
+                "{name} leaves the machine or destroys something, draft or not"
+            );
         }
     }
 

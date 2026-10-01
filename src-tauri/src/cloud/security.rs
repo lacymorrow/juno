@@ -179,14 +179,15 @@ impl CloudSecurity {
         }
 
         for content in content_to_check {
-            // Normalize with the same tokenizer the shell validator uses
-            // (lowercase, collapse whitespace) so spacing/case tricks cannot
-            // dodge the blocklist (security audit 2026-02-08, item #25)
-            let normalized = crate::commands::shell::normalize_command(content);
+            // Parsed by `shell_command`, the one place that understands a
+            // shell command string, so spacing and case tricks cannot dodge
+            // the blocklist and this check cannot drift from the shell gates
+            // (security audit 2026-02-08, item #25)
+            let parsed = crate::shell_command::ShellCommand::parse(content);
 
             // Check against blocked command patterns
             for blocked_cmd in &self.blocked_commands {
-                if normalized.contains(&blocked_cmd.to_lowercase()) {
+                if parsed.mentions(&blocked_cmd.to_lowercase()) {
                     log::error!(
                         "🚫 Command contains blocked destructive pattern: '{}'",
                         blocked_cmd
@@ -200,7 +201,7 @@ impl CloudSecurity {
 
             // Catch `rm` flag permutations (`rm -r -f /`, `rm --recursive
             // --force /`) that substring matching misses
-            if crate::commands::shell::is_catastrophic_rm(&normalized) {
+            if parsed.is_catastrophic_rm() {
                 log::error!(
                     "🚫 Command contains blocked destructive pattern: recursive forced rm of /"
                 );
