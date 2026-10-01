@@ -395,7 +395,7 @@ impl VoiceController {
         let device = host.default_input_device()
             .ok_or_else(|| Error::AudioDevice("No default input device found. This may indicate microphone permission was not granted — check System Settings > Privacy & Security > Microphone.".to_string()))?;
 
-        let supported_configs_iter = device.supported_input_configs().map_err(|e| {
+        let mut supported_configs_iter = device.supported_input_configs().map_err(|e| {
             Error::AudioDevice(format!(
                 "Failed to get input device configs (microphone permission may be denied): {:?}",
                 e
