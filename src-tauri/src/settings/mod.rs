@@ -312,8 +312,52 @@ impl AudioSettings {
         self.dictation_clipboard_enabled = enabled;
     }
 
+    /// The voice chosen for one engine.
+    ///
+    /// A voice id belongs to the engine that named it: "Samantha" means
+    /// nothing to Kokoro and "af_heart" means nothing to `say`. Keying the
+    /// storage by engine is what stops a choice made for one engine being
+    /// handed to another, which is how the Audio pane came to offer macOS
+    /// voices while Kokoro was doing the talking.
+    ///
+    /// `None` means no choice: either the engine has no voice of its own to
+    /// store (ElevenLabs keeps it in your account, Replicate in its model), or
+    /// nothing has been chosen for it yet. For the Mac that means `say` runs
+    /// with no `-v` and uses whichever voice this Mac is set to.
+    pub fn voice_for(&self, engine: &str) -> Option<&str> {
+        let stored = match engine.to_ascii_lowercase().as_str() {
+            "system" => self.system_voice.as_deref(),
+            "kokoro" => Some(self.kokoro_voice.as_str()),
+            "supertonic" => Some(self.supertonic_voice.as_str()),
+            _ => None,
+        };
+        stored.map(str::trim).filter(|voice| !voice.is_empty())
+    }
+
+    /// Store a voice against the engine it belongs to.
+    ///
+    /// The two engines whose field is a plain `String` fall back to their own
+    /// default rather than to an empty string, because an empty voice name
+    /// reaches those engines as an error and then silence.
+    pub fn set_voice_for(&mut self, engine: &str, voice: Option<String>) {
+        match engine.to_ascii_lowercase().as_str() {
+            "system" => self.system_voice = voice,
+            "kokoro" => self.kokoro_voice = voice.unwrap_or_else(Self::default_kokoro_voice),
+            "supertonic" => {
+                self.supertonic_voice = voice.unwrap_or_else(Self::default_supertonic_voice)
+            }
+            _ => {}
+        }
+    }
+
+    /// Kokoro's own default, and the only embedding its downloader is
+    /// guaranteed to have fetched: `any_tts` pulls `voices/af_heart.pt` to
+    /// find the voices directory and loads every other one straight off disk
+    /// without fetching it. The previous default here was `af_bella`, whose
+    /// file is never downloaded, so Kokoro failed on every utterance and the
+    /// fallback chain quietly handed the sentence to the Mac.
     fn default_kokoro_voice() -> String {
-        "af_bella".to_string()
+        crate::tts::voices::KOKORO_DEFAULT_VOICE.to_string()
     }
 
     fn default_chatterbox_exaggeration() -> f32 {

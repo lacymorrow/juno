@@ -261,7 +261,9 @@ impl Default for AudioSettings {
             },
             output_device: None,
             system_voice: None,
-            kokoro_voice: "af_bella".to_string(),
+            // af_bella's embedding is never downloaded, so it was an error on
+            // every Kokoro utterance. See `voices::KOKORO_DEFAULT_VOICE`.
+            kokoro_voice: crate::tts::voices::KOKORO_DEFAULT_VOICE.to_string(),
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: 0.5,
             chatterbox_use_hd: false,

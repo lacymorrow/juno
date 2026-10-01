@@ -1,6 +1,6 @@
 # Human-forward Settings (spec)
 
-**Status:** Slice 1 merged (PR #604, v0.8.6). Slice 2 merged (PR #606). Slice 3 is PR #611. Slice 4 is PR #652.
+**Status:** Slice 1 merged (PR #604, v0.8.6). Slice 2 merged (PR #606). Slice 3 is PR #611. Slice 4 is PR #652; slice 4a corrects it.
 **DRI:** Frontend Engineer for slices 1 and 2. Founding Engineer for slice 3 (Rust).
 **Reference:** `docs/design/settings-ux-reference.md` (research, principles, skills).
 
@@ -127,7 +127,21 @@ Considered and cut, each a follow-up if wanted: the onboarding tryout (a separat
 - Devices are chosen, persisted and resolved in Rust (`tauri_plugin_voice_transcription::devices`). A chosen microphone that is not connected falls back to the system default and the pane says which one went away; changing the microphone restarts a running listener.
 - Capture failures are a `CaptureStartFailure` enum whose `code()` and `message()` match exhaustively, reported on `voice-capture:failed` with `listening: false`. Juno switches always-listening off and shows the sentence. A new exit path does not compile until it has words.
 
-Considered and cut: curated voices for the cloud engines (one mechanism that works end to end beats five half-wired ones; the Mac's own voice needs no account, works offline and starts instantly); routing cloud audio to a chosen speaker (`afplay` plays to the default output and takes no device argument, so that needs file playback moved onto cpal); a microphone level meter (it would open the microphone to draw a settings pane).
+Considered and cut: routing cloud audio to a chosen speaker (`afplay` plays to the default output and takes no device argument, so that needs file playback moved onto cpal); a microphone level meter (it would open the microphone to draw a settings pane).
+
+### Slice 4a: the voice list belongs to the engine
+
+**What was wrong.** Slice 4 split one decision across two panes and then let the two halves disagree. "Curated voices for the cloud engines" was cut, but the Mac's curated list was shown whatever engine was selected, so choosing Kokoro left the pane offering Samantha and Daniel, which Kokoro has never heard of. Worse, `set_juno_voice` wrote `tts_provider = "system"` on every pick, so choosing a voice silently undid the engine choice. That is the dead control pattern with a side effect.
+
+**The correction.** The voice list is a function of the active engine, computed in Rust (`tts/voices.rs`):
+
+- Each engine is enumerated from what it actually has. The Mac from `say -v '?'`; Kokoro from the `.pt` embeddings on disk, because `any_tts` loads them off disk and never fetches a missing one; Supertonic from its documented pair. ElevenLabs, Replicate and Chatterbox cannot be enumerated from here and say so in one sentence instead of offering rows they could not honour.
+- A voice is stored against the engine that named it (`AudioSettings::voice_for` / `set_voice_for`). Switching engines resolves to a voice the new engine has rather than carrying a dangling id across, and so does startup, so the default is in force without anybody opening the pane.
+- Picking a voice never changes the engine. It only turns sound back on when Juno was silent.
+- Each catalog row offers the best installed version of itself, so a downloaded Premium or Enhanced voice is in force with no code change and no second choice. The default chain is Premium, then Enhanced, then compact, then `say` with no `-v` at all. A missing voice is never silence: `speak_directly` retries once without `-v`.
+- The audition is reported, not awaited. `set_juno_voice` writes, resolves and returns the list immediately; the sample reports `preparing`, `speaking`, `done` or `failed` on `juno-voice:audition`. The first version spoke before returning and the pane drew an optimistic selection in the meantime, which is what snapped back seconds later.
+
+Considered and cut: a button that opens System Settings to download the better voices (Juno cannot install one, so the pane says where they are and does not pretend to fetch them); using a Siri voice, which `say` and `AVSpeechSynthesizer` will not give a third-party app.
 
 ## What was considered and cut
 
