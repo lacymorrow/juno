@@ -335,10 +335,6 @@ pub fn run() {
             commands::agent_sessions::focus_agent_session,
             commands::agent_sessions::cancel_focused_agent_session,
             commands::agent_sessions::cancel_agent_session,
-            // Workflow Orchestration Commands
-            execute_mcp_task,
-            get_workflow_templates,
-            execute_workflow_template,
             // Memory Management Commands
             get_memory_status,
             clear_conversation_memory,
