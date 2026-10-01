@@ -157,6 +157,12 @@ fn emit_agent_cursor_update(
     // was looking at: the pointer moved on its own with nothing to say why.
     show_cursor_overlay(app_handle);
 
+    // Someone is driving another application, so the floating bar is where the
+    // work shows and the only place it can be stopped. It stays on top for the
+    // duration, even over Juno's own chat window. Cheap to repeat: an unchanged
+    // fact costs nothing.
+    crate::bar_stacking::note_agent_driving(app_handle, true);
+
     if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_UPDATE, &cursor) {
         tracing::debug!("agent cursor update emit failed: {}", e);
     }
@@ -213,6 +219,11 @@ pub(crate) fn emit_agent_cursor_remove(app_handle: &tauri::AppHandle, agent_id: 
         .map(|state| state.agent_cursors_is_empty())
         .unwrap_or(true);
     if nobody_left {
+        // Nobody is driving any more, so the bar goes back to whatever the rest
+        // of the situation asks for: on top if the person is working elsewhere,
+        // behind a Juno window they are reading.
+        crate::bar_stacking::note_agent_driving(app_handle, false);
+
         use tauri::Manager;
         if let Some(window) =
             app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL)
