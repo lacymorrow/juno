@@ -824,6 +824,55 @@ mod tests {
             .is_some_and(|s| s.contains("launched and then exited")));
     }
 
+    /// The acceptance test for the whole change: a failed launch, a minimized
+    /// window and a success must be three different things in the JSON the
+    /// model is handed, not three readings of one string.
+    #[test]
+    fn success_failure_and_minimized_are_three_different_results() {
+        let result = |raw: &str| {
+            LaunchReport {
+                before: Presence::NotRunning,
+                after: obs(raw),
+                seen_running: true,
+                waited_ms: 900,
+            }
+            .to_json()
+        };
+
+        let success = result("yes|yes|1|0");
+        let failed = result("no|?|?|?");
+        let minimized = result("yes|no|1|1");
+        let behind = result("yes|no|2|0");
+
+        assert_eq!(success["state"], "running_frontmost");
+        assert_eq!(failed["state"], "not_running");
+        assert_eq!(minimized["state"], "running_minimized");
+        assert_eq!(behind["state"], "running_not_frontmost");
+
+        let says = |v: &Value| v["observed"].as_str().unwrap_or_default().to_string();
+        let sentences = [
+            says(&success),
+            says(&failed),
+            says(&minimized),
+            says(&behind),
+        ];
+        for (i, a) in sentences.iter().enumerate() {
+            assert!(!a.is_empty(), "every state needs a sentence");
+            for b in sentences.iter().skip(i + 1) {
+                assert_ne!(a, b, "two states must not read the same");
+            }
+        }
+        // And only the success may be read as "it is on their screen".
+        assert!(says(&success).contains("frontmost"));
+        for other in [&failed, &minimized, &behind] {
+            assert!(
+                !says(other).contains("is now frontmost"),
+                "{} must not read as a success",
+                says(other)
+            );
+        }
+    }
+
     #[test]
     fn launch_and_focus_commands_are_recognised() {
         let target = |c: &str| parse_app_command(c);
