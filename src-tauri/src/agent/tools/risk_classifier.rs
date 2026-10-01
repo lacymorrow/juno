@@ -91,7 +91,7 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
 /// absent on purpose too: reading an arbitrary file is not inert when the thing
 /// doing the reading then puts the contents in a model's context.
 const INERT_SHELL_COMMANDS: &[&str] = &[
-    "arch", "basename", "cd", "date", "dirname", "echo", "false", "groups", "hostname", "id",
+    "arch", "basename", "cd", "date", "dirname", "echo", "false", "groups", "hostname", "id", "ls",
     "mkdir", "printf", "pwd", "sleep", "true", "tty", "uname", "uptime", "which", "whoami",
 ];
 
