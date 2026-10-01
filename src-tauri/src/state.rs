@@ -249,16 +249,15 @@ pub struct AudioSettings {
 impl Default for AudioSettings {
     fn default() -> Self {
         Self {
-            tts_provider: {
-                #[cfg(debug_assertions)]
-                {
-                    "system".to_string()
-                }
-                #[cfg(not(debug_assertions))]
-                {
-                    "elevenlabs".to_string()
-                }
-            },
+            // One value in every build profile. This used to be "system" under
+            // `debug_assertions` and "elevenlabs" otherwise, so no developer
+            // ever ran the default a shipped build actually used: every
+            // release defaulted to a cloud engine that cannot speak without
+            // an API key the person may never have entered. A default that
+            // needs credentials is not a default. The constant is shared with
+            // the persisted default so the in-memory and on-disk notions of
+            // "no choice yet" cannot drift apart.
+            tts_provider: crate::constants::settings::defaults::TTS_PROVIDER.to_string(),
             output_device: None,
             system_voice: None,
             // af_bella's embedding is never downloaded, so it was an error on
@@ -2751,5 +2750,29 @@ mod tests {
 
         // Get initial cloud config
         let _ = state.get_cloud_config().await;
+    }
+
+    /// The voice engine a fresh install starts on needs no credentials, and
+    /// the in-memory default agrees with the persisted one.
+    ///
+    /// This field once read "system" under `debug_assertions` and
+    /// "elevenlabs" otherwise. Nobody develops in release, so nobody ever ran
+    /// the default a shipped build actually used: every release started on a
+    /// cloud engine that cannot speak until an API key is entered, and fell
+    /// back silently when it was not. A default that needs credentials is not
+    /// a default. Both notions of "nobody has chosen yet" now read one
+    /// constant, so they cannot drift apart again.
+    #[test]
+    fn the_default_voice_engine_needs_no_credentials() {
+        assert_eq!(
+            AudioSettings::default().tts_provider,
+            defaults::TTS_PROVIDER,
+            "the in-memory default must be the shared constant"
+        );
+        assert_eq!(
+            crate::settings::AudioSettings::default().tts_provider,
+            defaults::TTS_PROVIDER,
+            "the persisted default and the in-memory default must not drift"
+        );
     }
 }
