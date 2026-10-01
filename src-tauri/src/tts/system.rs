@@ -9,7 +9,7 @@ use std::process::Command;
 #[cfg(target_os = "macos")]
 use tempfile::NamedTempFile;
 #[cfg(target_os = "macos")]
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -55,8 +55,8 @@ pub fn say_arguments(text: &str, voice: Option<&str>, device: Option<&str>) -> V
 /// hearing her in four. The file route stays for the providers that genuinely
 /// return audio data.
 ///
-/// The child's pid joins the same registry afplay's does, so Escape stops this
-/// exactly the way it stops everything else Juno is playing.
+/// A voice `say` will not use is retried without one rather than left as
+/// silence; see the comment on the retry.
 #[cfg(target_os = "macos")]
 pub async fn speak_directly(
     text: String,
@@ -74,8 +74,49 @@ pub async fn speak_directly(
         device.as_deref().unwrap_or("the system output")
     );
 
+    let status = run_say(say_arguments(&text, voice.as_deref(), device.as_deref())).await?;
+
+    // A stop arrives as SIGTERM to that pid, so a non-success exit right after
+    // one is the user pressing Escape rather than a failure worth reporting.
+    if crate::tts::is_tts_stop_requested() {
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+    if status.success() {
+        return Ok("TTS_COMPLETED".to_string());
+    }
+
+    // A voice that has been uninstalled, or renamed by a macOS update, makes
+    // `say` exit without a sound. The Mac's own voice saying it is better than
+    // silence, so the one thing dropped on the retry is `-v`, and the log says
+    // which voice went missing. The voice stored for the Mac is resolved
+    // against the installed list whenever the Audio pane is opened; this is
+    // what covers the time before that.
+    if let Some(missing) = voice.as_deref() {
+        warn!("[TTS] 'say' would not use {missing} ({status}); retrying with the Mac's own voice");
+        let retry = run_say(say_arguments(&text, None, device.as_deref())).await?;
+        if crate::tts::is_tts_stop_requested() {
+            return Ok("TTS_STOPPED_BY_USER".to_string());
+        }
+        if retry.success() {
+            return Ok("TTS_COMPLETED".to_string());
+        }
+        return Err(format!(
+            "'say' exited with {} using {}, and with {} using the Mac's own voice",
+            status, missing, retry
+        ));
+    }
+
+    Err(format!("'say' exited with {}", status))
+}
+
+/// Run one `say` and wait for it.
+///
+/// The child's pid joins the same registry afplay's does, so Escape stops this
+/// exactly the way it stops everything else Juno is playing.
+#[cfg(target_os = "macos")]
+async fn run_say(args: Vec<String>) -> Result<std::process::ExitStatus, String> {
     let mut child = tokio::process::Command::new("say")
-        .args(say_arguments(&text, voice.as_deref(), device.as_deref()))
+        .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -94,17 +135,7 @@ pub async fn speak_directly(
         crate::tts::unregister_audio_pid(pid);
     }
 
-    // A stop arrives as SIGTERM to that pid, so a non-success exit right after
-    // one is the user pressing Escape rather than a failure worth reporting.
-    if crate::tts::is_tts_stop_requested() {
-        return Ok("TTS_STOPPED_BY_USER".to_string());
-    }
-
-    match status {
-        Ok(status) if status.success() => Ok("TTS_COMPLETED".to_string()),
-        Ok(status) => Err(format!("'say' exited with {}", status)),
-        Err(e) => Err(format!("Failed to wait for 'say': {}", e)),
-    }
+    status.map_err(|e| format!("Failed to wait for 'say': {}", e))
 }
 
 #[cfg(target_os = "macos")]

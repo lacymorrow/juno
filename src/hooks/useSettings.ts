@@ -51,6 +51,43 @@ export interface JunoVoiceOption {
 }
 
 /**
+ * Everything the Audio pane draws for Juno's voice, as Rust decided it.
+ *
+ * The rows belong to the engine that is speaking: Rust enumerates what that
+ * engine actually offers, resolves the stored choice against it, and says
+ * which row is in force. Nothing here is computed in TypeScript, because a
+ * list computed twice is a list that disagrees with itself.
+ */
+export interface JunoVoiceList {
+	/** The stored engine. "off" means Juno is silent. */
+	provider: string;
+	/** The engine these rows belong to. */
+	engine: string;
+	/** That engine's name as a person would say it. */
+	engine_label: string;
+	options: JunoVoiceOption[];
+	/** One sentence when there is something to say instead of rows. */
+	note: string | null;
+	/** True when every voice this Mac has is the compact one. */
+	better_voices_available: boolean;
+}
+
+/**
+ * How the sample is getting on.
+ *
+ * Reported rather than awaited: choosing a voice answers immediately with the
+ * list Rust decided on, and the sound that follows says what it is doing.
+ * "preparing" arrives before anything slow starts, which is what stops a
+ * local engine loading its model from looking like a dead pane.
+ */
+export interface VoiceAudition {
+	voice: string;
+	engine: string;
+	state: "preparing" | "speaking" | "done" | "failed";
+	message: string | null;
+}
+
+/**
  * Why the microphone never opened, in the words Rust chose.
  *
  * `listening` is always false: this event exists so that no surface goes on
@@ -186,9 +223,10 @@ export function useSettings() {
 	// this only holds what it said.
 	const [audioDevices, setAudioDevices] = useState<AudioDeviceChoices | null>(null);
 
-	// Juno's voice: the curated rows, and which one is in force.
-	const [junoVoices, setJunoVoices] = useState<JunoVoiceOption[]>([]);
-	const [speakingVoiceId, setSpeakingVoiceId] = useState<string | null>(null);
+	// Juno's voice: the rows the active engine has, and which one is in force.
+	// Null until Rust has answered, which is a different state from "no voices".
+	const [junoVoices, setJunoVoices] = useState<JunoVoiceList | null>(null);
+	const [voiceAudition, setVoiceAudition] = useState<VoiceAudition | null>(null);
 
 	// The last capture failure, in the words Rust chose. Null when the
 	// microphone is fine. Shown in the Audio pane, which is where the
@@ -620,7 +658,12 @@ export function useSettings() {
 
 	const loadJunoVoices = useCallback(async () => {
 		try {
-			setJunoVoices(await invoke<JunoVoiceOption[]>(COMMANDS.AUDIO_GET_JUNO_VOICES));
+			const list = await invoke<JunoVoiceList>(COMMANDS.AUDIO_GET_JUNO_VOICES);
+			setJunoVoices(list);
+			// The list carries the engine it belongs to, so the engine picker
+			// and the voice rows cannot disagree about which engine is in
+			// force. They used to, and that was most of "it doesn't stick".
+			setTtsProvider(list.provider);
 		} catch (error) {
 			console.error("Failed to load Juno's voices:", error);
 		}
@@ -658,45 +701,45 @@ export function useSettings() {
 	);
 
 	/**
-	 * Pick Juno's voice. Selecting is the audition: Rust saves the choice and
-	 * then speaks the sample in it, so the row stays marked as speaking until
-	 * the sample finishes.
+	 * Pick Juno's voice. Selecting is still the audition, but the two halves
+	 * are no longer one await.
+	 *
+	 * There is no optimistic selection here on purpose. The first version
+	 * marked the tapped row as chosen, then awaited a command that did not
+	 * return until the sample had finished speaking, and only then replaced
+	 * the list with Rust's answer. Any id Rust resolved differently snapped
+	 * back several seconds later, which is what "it jumps back to the old
+	 * selection" was. Now the command writes, resolves and returns the list
+	 * straight away, and the sound reports itself on an event.
 	 */
-	const handleJunoVoiceChange = useCallback(
-		async (id: string) => {
-			const option = junoVoices.find((voice) => voice.id === id);
-			setJunoVoices((prev) => prev.map((voice) => ({ ...voice, selected: voice.id === id })));
-			if (option?.speaks) setSpeakingVoiceId(id);
-			try {
-				await invoke(COMMANDS.AUDIO_SET_JUNO_VOICE, { id });
-				if (id === "silent") setTtsProvider("off");
-				else setTtsProvider("system");
-				invalidateCache("ttsProvider");
-			} catch (error) {
-				console.error("Failed to set Juno's voice:", error);
-				toast.error(String(error));
-			} finally {
-				setSpeakingVoiceId(null);
-				await loadJunoVoices();
-			}
-		},
-		[junoVoices, loadJunoVoices],
-	);
+	const handleJunoVoiceChange = useCallback(async (id: string) => {
+		try {
+			const list = await invoke<JunoVoiceList>(COMMANDS.AUDIO_SET_JUNO_VOICE, { id });
+			setJunoVoices(list);
+			setTtsProvider(list.provider);
+			invalidateCache("ttsProvider");
+		} catch (error) {
+			console.error("Failed to set Juno's voice:", error);
+			toast.error(String(error));
+		}
+	}, []);
 
 	/** Hear the voice already chosen again. */
 	const handlePreviewJunoVoice = useCallback(async () => {
-		const current = junoVoices.find((voice) => voice.selected && voice.speaks);
-		if (!current) return;
-		setSpeakingVoiceId(current.id);
 		try {
 			await invoke(COMMANDS.AUDIO_PREVIEW_JUNO_VOICE);
 		} catch (error) {
 			console.error("Failed to play the voice sample:", error);
 			toast.error(String(error));
-		} finally {
-			setSpeakingVoiceId(null);
 		}
-	}, [junoVoices]);
+	}, []);
+
+	// What the sample is doing. Rust owns this, so every window that draws
+	// the picker shows the same thing at the same time.
+	useEventListener<VoiceAudition>(EVENTS.JUNO_VOICE_AUDITION, (payload) => {
+		if (!payload) return;
+		setVoiceAudition(payload.state === EVENTS.JUNO_VOICE_DONE ? null : payload);
+	});
 
 	// The microphone never opened. Rust has already switched listening off in
 	// the store and in its own state; this is what stops the window saying
@@ -734,7 +777,11 @@ export function useSettings() {
 		);
 		invalidateCache('ttsProvider');
 		setTtsProvider(newProvider);
-	}, [invokeCommand]);
+		// The engine changed, so the voices did. Rust has already resolved the
+		// new engine's voice; this is what stops the Audio pane going on
+		// showing the old engine's rows.
+		await loadJunoVoices();
+	}, [invokeCommand, loadJunoVoices]);
 
 	const handleChatterboxSettingsChange = useCallback(async (
 		referenceAudioUrl: string,
@@ -1086,7 +1133,7 @@ export function useSettings() {
 		performanceMonitoringEnabled,
 		audioDevices,
 		junoVoices,
-		speakingVoiceId,
+		voiceAudition,
 		captureFailure,
 		alwaysListeningActive,
 		alwaysListeningSensitivity,

@@ -1,15 +1,17 @@
-import { Check, Volume2 } from "lucide-react";
+import { AlertCircle, Check, Volume2 } from "lucide-react";
+import { EVENTS } from "@/lib/constants.generated";
 import { cn } from "@/lib/utils";
-import type { JunoVoiceOption } from "@/hooks/useSettings";
+import type { JunoVoiceList, VoiceAudition } from "@/hooks/useSettings";
 
 interface VoicePickerProps {
-  options: JunoVoiceOption[];
+  /** What Rust says this engine offers. Null until it has answered. */
+  list: JunoVoiceList | null;
   /** Pick a voice. Picking is what plays it. */
   onChange: (id: string) => void;
   /** Hear the voice already chosen again. */
   onReplay: () => void;
-  /** The row that is speaking right now, if any. */
-  speakingId: string | null;
+  /** What the sample is doing, as Rust reported it. */
+  audition: VoiceAudition | null;
 }
 
 /**
@@ -21,25 +23,40 @@ interface VoicePickerProps {
  * it and speaks a sample in that voice, and tapping the chosen row again plays
  * it once more. There is no confirm and no toast. Hearing it is the feedback.
  *
- * Rust owns the list, the order, which row is in force and the speaking. This
- * draws what it was given.
+ * Rust owns the list, the order, which row is in force, which engine the rows
+ * belong to and what the sound is doing. This draws what it was given, and it
+ * computes nothing: a voice list computed here would be a second opinion about
+ * what the engine can say.
  */
-export function VoicePicker({ options, onChange, onReplay, speakingId }: VoicePickerProps) {
-  if (options.length === 0) {
+export function VoicePicker({ list, onChange, onReplay, audition }: VoicePickerProps) {
+  if (!list) {
     return (
       <p className="px-0.5 text-[12px] leading-snug text-muted-foreground" aria-live="polite">
-        Juno could not read this Mac's voices.
+        Reading this Mac's voices.
       </p>
     );
   }
 
+  const failure = audition?.state === EVENTS.JUNO_VOICE_FAILED ? audition.message : null;
+
   return (
     // No card of its own: it is already inside one, and the hairlines are the
     // same ones the rows above it use.
-    <div role="radiogroup" aria-label="Juno's voice" className="-mx-4 -my-2.5">
-      <div className="divide-y divide-border">
-        {options.map((option) => {
-          const speaking = speakingId === option.id;
+    <div className="-mx-4 -my-2.5">
+      {list.note && (
+        <p
+          className="border-b border-border px-4 py-2.5 text-[12px] leading-snug text-muted-foreground"
+          aria-live="polite"
+        >
+          {list.note}
+        </p>
+      )}
+
+      <div role="radiogroup" aria-label="Juno's voice" className="divide-y divide-border">
+        {list.options.map((option) => {
+          const state = audition?.voice === option.id ? audition.state : null;
+          const speaking = state === EVENTS.JUNO_VOICE_SPEAKING;
+          const preparing = state === EVENTS.JUNO_VOICE_PREPARING;
           return (
             <button
               key={option.id}
@@ -70,17 +87,24 @@ export function VoicePicker({ options, onChange, onReplay, speakingId }: VoicePi
               {option.speaks && (
                 <span
                   className={cn(
-                    "shrink-0 text-[11px]",
+                    "shrink-0 text-[11px] transition-opacity duration-150",
                     speaking ? "text-[#007AFF]" : "text-muted-foreground/60",
                   )}
                 >
-                  {speaking ? (
+                  {speaking || preparing ? (
                     <span className="flex items-center gap-1">
                       <Volume2 className="size-3.5" strokeWidth={2} aria-hidden="true" />
-                      Speaking
+                      {/* An engine that loads a model takes seconds. Saying
+                          "Speaking" through that would be a lie, and saying
+                          nothing is what reads as broken. */}
+                      {speaking ? "Speaking" : "Loading"}
                     </span>
                   ) : (
-                    <Volume2 className="size-3.5" strokeWidth={2} aria-label="Plays when you pick it" />
+                    <Volume2
+                      className="size-3.5"
+                      strokeWidth={2}
+                      aria-label="Plays when you pick it"
+                    />
                   )}
                 </span>
               )}
@@ -88,6 +112,16 @@ export function VoicePicker({ options, onChange, onReplay, speakingId }: VoicePi
           );
         })}
       </div>
+
+      {failure && (
+        <p
+          className="flex items-start gap-1.5 border-t border-border px-4 py-2.5 text-[12px] leading-snug text-muted-foreground"
+          aria-live="polite"
+        >
+          <AlertCircle className="mt-px size-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
+          <span>{failure}</span>
+        </p>
+      )}
     </div>
   );
 }

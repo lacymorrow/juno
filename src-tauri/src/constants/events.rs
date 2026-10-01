@@ -144,6 +144,29 @@ pub mod voice_capture {
     pub const DEVICE_SUBSTITUTED: &str = "voice-capture:device-substituted";
 }
 
+/// Hearing Juno's voice before you choose it.
+///
+/// The sample is reported rather than awaited. Choosing a voice answers
+/// immediately with the list Rust decided on; the sound that follows says what
+/// it is doing on this event, so no surface has to guess and no surface has to
+/// draw an optimistic selection it might have to take back.
+pub mod juno_voice {
+    /// How the sample is getting on. Payload fields: voice (the row this is
+    /// about), engine, state (one of the four below) and message, which is
+    /// set only on `failed` and is always a sentence.
+    pub const AUDITION: &str = "juno-voice:audition";
+    /// Emitted before anything slow starts. The Mac's own voice is speaking
+    /// within a tenth of a second, but a local engine loads a model on its
+    /// first sample, and several silent seconds with nothing on screen is the
+    /// thing that reads as broken.
+    pub const PREPARING: &str = "preparing";
+    /// Sound is coming out now.
+    pub const SPEAKING: &str = "speaking";
+    pub const DONE: &str = "done";
+    /// The engine could not speak it, and `message` says why.
+    pub const FAILED: &str = "failed";
+}
+
 /// Timer events
 pub mod timer {
     pub const EXPIRED: &str = "timer-expired";
