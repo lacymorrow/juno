@@ -567,12 +567,14 @@ where
             // (browser navigation, network requests) are interrupted immediately
             // when the user presses Escape — not just between tools.
             let mut cancel_for_tool = cancel_rx.clone();
-            let tool_result = match refusal {
-                Some(output) => Ok(crate::agent::core::ToolResult {
+            let tool_result = if let Some(output) = refusal {
+                // Declined before it ran, so there is nothing to race.
+                Ok(crate::agent::core::ToolResult {
                     call_id: tool_call.id.clone(),
                     output,
-                }),
-                None => tokio::select! {
+                })
+            } else {
+                tokio::select! {
                     result = self.tool_provider.execute_tool(tool_call.clone()) => result,
                     _ = cancel_for_tool.wait_for(|&v| v) => {
                         log::info!(
@@ -581,7 +583,7 @@ where
                         );
                         return Ok(false);
                     }
-                },
+                }
             };
 
             // The observation rides back with the result, so the model's own
