@@ -1182,8 +1182,10 @@ export default function OnboardingFlow({
         if (!mounted) return;
 
         // Should setup offer the recommended dictation model? The backend
-        // answers no on Intel, when it is already on disk, or when the person
-        // declined before.
+        // answers no when it is already on disk, or when the person declined
+        // before. Which model that is depends on the Mac: Parakeet on Apple
+        // Silicon, a Whisper model on Intel, which is why the family name is
+        // read off the row rather than assumed.
         try {
           const stt = await invoke<SttModelsStatus>(COMMANDS.STT_MODELS_GET_STATUS);
           const recommended = stt.models.find((m) => m.recommended);

@@ -179,10 +179,10 @@ name_artifacts() {
   # the manifest silently never ran and every DMG kept its default name. Both
   # are checked because the layout depends on where the workspace is declared.
   #
-  # A --target argument moves it again, to target/<triple>/release, which is
-  # what `bun run build:universal` does. That was the same silent miss, and it
-  # now also decides whether the build gets notarized, so the triple is
-  # checked first when one was given.
+  # A --target argument moves it again, to target/<triple>/release, which
+  # every build does now that the default target is universal. That was the
+  # same silent miss, and it now also decides whether the build gets
+  # notarized, so the triple is checked first.
   local candidates=()
   if [[ -n "$build_target" ]]; then
     candidates+=("target/${build_target}/release/bundle/dmg" "src-tauri/target/${build_target}/release/bundle/dmg")
@@ -448,6 +448,21 @@ for arg in "$@"; do
   args+=("$arg")
 done
 set -- ${args[@]+"${args[@]}"}
+
+# Universal is the only kind of build Juno ships: every release, demo and
+# branch build carries both halves so an Intel Mac can install and update it.
+# Parakeet is the one thing that is not in both (its ONNX Runtime has no x86_64
+# build, so it is gated to Apple Silicon in the voice plugin), and Intel
+# dictates with Whisper. See docs/development/INTEL_UNIVERSAL_PLAN.md.
+#
+# An explicit --target still wins, which is what debugging one half needs.
+# There used to be a separate `bun run build:universal` for this; a second
+# script named after the only kind of build there is was one more thing to
+# forget, so the default moved here.
+if [[ -z "$build_target" ]]; then
+  build_target="universal-apple-darwin"
+  set -- "$@" --target "$build_target"
+fi
 
 # The key must never reach a normal build. Checked after every build, because
 # a stale target dir or a stray export is exactly how that would happen.

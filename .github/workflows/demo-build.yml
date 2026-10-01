@@ -68,14 +68,15 @@ jobs:
           [ -n "$channel" ] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
-      # Apple Silicon only, to match the current release build. The Parakeet STT
-      # engine ships prebuilt ONNX Runtime binaries for aarch64 but not x86_64
-      # macOS, so a universal or Intel build fails on the Intel half.
+      # Universal, to match the release build: the demo is handed to other
+      # people and some of them are on Intel Macs. Parakeet is arm64-only and
+      # gated accordingly in the voice plugin; the demo dictates with Whisper
+      # on Intel.
       - name: Install Rust (pinned toolchain)
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
@@ -162,7 +163,7 @@ jobs:
             echo "missing required secret: JUNO_DEMO_ANTHROPIC_KEY" >&2
             exit 1
           fi
-          bun run tauri:build --demo --target aarch64-apple-darwin
+          bun run tauri:build --demo --target universal-apple-darwin
 
       # The wrapper renames the DMG to Juno-Demo-<version>-b<build>-<commit>.dmg
       # and drops a manifest beside it. Find both so later steps can use them.

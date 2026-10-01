@@ -1,139 +1,121 @@
 # Intel (x86_64) support via a universal build
 
+Status: implemented. Every build Juno produces is now
+`--target universal-apple-darwin`. This doc is the record of why, what moved,
+and the two things only a real release can confirm.
+
 ## The one-line problem
 
 `parakeet-rs` (the Parakeet speech-to-text engine, via `ort-sys`) ships a
-prebuilt ONNX Runtime only for `aarch64` macOS. It is an unconditional
-dependency, so `--target universal-apple-darwin` fails to link the x86_64
-half, which is why the release is pinned to `aarch64-apple-darwin` today. The
-fix is not a build flag; it is making Parakeet arm64-only and letting Intel
-fall back to Whisper.
+prebuilt ONNX Runtime only for `aarch64` macOS. It used to be an unconditional
+dependency, so `--target universal-apple-darwin` built the arm64 half and
+failed to link the x86_64 one, and the release was pinned to
+`aarch64-apple-darwin` (commit `65b4d20b`) rather than let every release fail.
 
-## Why this is safe to do
+The fix was not a build flag. Parakeet is now arm64-only and Intel falls back
+to Whisper.
 
-The default STT provider is already `Whisper` (`SttProvider::default`). Whisper
-(`whisper-rs`, Metal feature) builds on both arches. So on Intel we lose only
-the *option* of Parakeet, and the default experience is unchanged. Nobody who
-never touched the setting notices.
+## Why that is safe
+
+The default STT provider is already Whisper (`SttProvider::default`), and
+`whisper-rs` with the Metal feature builds on both architectures. On Intel we
+lose only the *option* of Parakeet. Nobody who never touched the setting
+notices.
 
 ## The design decision
 
-Keep the `SttProvider::Parakeet` enum variant present on every architecture.
-Do NOT `cfg` the variant itself. A user who selected Parakeet on an Apple
-Silicon machine has `"parakeet"` written to their Tauri Store; that value must
-still deserialize on an Intel machine (or after a config sync) rather than
-panic or fail the whole settings load. So the variant stays; only its
-*implementation* is gated.
+The `SttProvider::Parakeet` enum variant exists on every architecture.
+Deliberately. A person who chose Parakeet on an Apple Silicon machine has
+`"parakeet"` written to their Tauri Store, and that value has to keep
+deserializing on an Intel machine rather than fail the whole settings load. So
+the variant stays and only the implementation is gated.
 
-On x86_64, selecting Parakeet resolves to Whisper with a logged warning. The
-setting is accepted, it just cannot be honoured, the same way an unavailable
-model falls back rather than erroring.
+On x86_64, booting or switching to Parakeet resolves to Whisper with a logged
+warning, the same way an unavailable model falls back rather than erroring.
 
-## Files and the exact change in each
+## Where things live now
 
-Reference counts are from `grep -rn parakeet` at time of writing (76 lines, 7
-files). Each below is the change, not just the location.
-
-1. **`tauri-plugin-voice-transcription/Cargo.toml`**
-   Move `parakeet-rs = "0.3"` out of `[dependencies]` and into:
-   ```toml
-   [target.'cfg(target_arch = "aarch64")'.dependencies]
-   parakeet-rs = "0.3"
-   ```
-   This is the change that actually unblocks the x86_64 link. Everything else
-   is making the code compile without the crate present.
-
-2. **`tauri-plugin-voice-transcription/src/lib.rs`**
-   Gate the module and its command:
-   ```rust
-   #[cfg(target_arch = "aarch64")]
-   pub mod engine_parakeet;
-   ```
-   The `get_parakeet_model_status` command in the handler list stays (see
-   commands.rs) so the frontend can always call it.
-   In the async init block (~line 130-160) the `parakeet_model_dir` resolution
-   is harmless to keep, but the `EngineManager::initialize(provider, ...,
-   Some(&parakeet))` call must pass the provider through unchanged; the manager
-   decides the fallback (item 4).
-
-3. **`tauri-plugin-voice-transcription/src/engine_parakeet.rs`**
-   No internal change. The module is compiled only on aarch64. Its public
-   types (`ParakeetEngine`, `ParakeetModelStatus`) are referenced from
-   `engine_manager.rs` and `commands.rs`, which must therefore also gate those
-   references (items 4, 5).
-
-4. **`tauri-plugin-voice-transcription/src/engine_manager.rs`**
-   The `build_engine` match has `SttProvider::Parakeet => { ParakeetEngine... }`.
-   Split it by arch:
-   ```rust
-   #[cfg(target_arch = "aarch64")]
-   SttProvider::Parakeet => { /* existing ParakeetEngine construction */ }
-   #[cfg(not(target_arch = "aarch64"))]
-   SttProvider::Parakeet => {
-       tracing::warn!("Parakeet is Apple Silicon only; using Whisper on this Mac");
-       let ctx = SharedWhisperManager::initialize(whisper_model_path)?;
-       Ok(Arc::new(WhisperEngine::new(ctx)))
-   }
-   ```
-   Drop the top-of-file `use crate::engine_parakeet::ParakeetEngine;` behind
-   `#[cfg(target_arch = "aarch64")]`.
-
-5. **`tauri-plugin-voice-transcription/src/commands.rs`**
-   - `use crate::engine_parakeet::ParakeetModelStatus;` → gate, and provide an
-     x86_64 stand-in so the return type of `get_parakeet_model_status` exists on
-     both arches. Simplest: define `ParakeetModelStatus` (a small serde struct
-     with an `available: bool` / `reason`) in a place compiled on both arches,
-     or return a shared status enum. On x86_64 the command returns
-     `{ available: false, reason: "not supported on Intel Macs" }`.
-   - The `"parakeet" => SttProvider::Parakeet` parse arm stays (the variant
-     exists everywhere). The manager handles the fallback, so no cfg needed
-     here.
-
-6. **`tauri-plugin-voice-transcription/src/config.rs`**
-   No change. `parakeet_model_dir` and the `SttProvider` field stay; default is
-   already Whisper.
-
-7. **`src-tauri/src/state_management.rs`**
-   No change (the only reference is a comment).
-
-8. **Frontend (settings UI)**
-   Whatever pane lets the user choose Parakeet should reflect availability
-   rather than offer a dead choice. Read `get_parakeet_model_status`: when it
-   returns unavailable, hide or disable the Parakeet option with the reason.
-   This is the one place a person sees the difference on Intel, so it gets the
-   empty/disabled state designed, not a silently broken radio button.
+- **`tauri-plugin-voice-transcription/Cargo.toml`** has `parakeet-rs` under
+  `[target.'cfg(target_arch = "aarch64")'.dependencies]`. This is the change
+  that unblocks the link; `ort` and `ort-sys` are the only crates it pulls in,
+  so the x86_64 dependency graph loses them entirely.
+- **`src/parakeet_model.rs`** (new, compiled everywhere) holds everything that
+  never touches the loader: the pinned HuggingFace manifest, the on-disk check,
+  `ParakeetModelStatus`, and the arch gate itself as `PARAKEET_SUPPORTED`
+  (`cfg!(target_arch = "aarch64")`) with `PARAKEET_UNSUPPORTED_REASON` for the
+  UI to show.
+- **`src/engine_parakeet.rs`** is now only the loader and the session, and is
+  compiled on aarch64 alone.
+- **`src/engine_manager.rs`** splits the `SttProvider::Parakeet` match arm by
+  arch. Both arms, and the plain Whisper arm, build their Whisper engine
+  through one `whisper_engine` helper, so the Intel fallback reports a missing
+  model file exactly like an ordinary Whisper request.
+- **`src/lib.rs`** asks `parakeet_model::parakeet_ready(dir)` at startup, which
+  is `PARAKEET_SUPPORTED && every file on disk`. Asking only about the files
+  would boot an engine this binary does not contain.
+- **`src-tauri/src/commands/stt_models.rs`** already filtered Parakeet out of
+  the catalog at runtime (`arm64_only` plus `catalog_for_arch`), so the Models
+  pane on Intel simply has no Parakeet row. A test now pins that filter to
+  `PARAKEET_SUPPORTED` so the catalog flag cannot drift from what the build
+  links. The onboarding offer is no longer gated on `is_arm64`: it offers
+  whatever the Balanced row is for this Mac, which is large-v3-turbo on Intel.
 
 ## CI
 
-`.github/workflows/release-tauri.yml` currently pins `args: --target
-aarch64-apple-darwin` and installs only that rust target (line ~34). After the
-gating:
-- add `x86_64-apple-darwin` to the `targets:` line,
-- change `args:` to `--target universal-apple-darwin`,
-- delete the "Apple Silicon only" comment block (lines ~86-91) since it no
-  longer holds,
-- confirm the updater manifest gets a `darwin-x86_64` entry so Intel installs
-  can auto-update (they currently get none by design).
+Every workflow that builds the app installs both Rust targets and builds
+`--target universal-apple-darwin`:
 
-## How to verify (the part that cannot be reasoned, only run)
+- `.github/workflows/release-tauri.yml`
+- `.github/workflows/demo-build.yml` (the junebug.ai demo)
+- `.github/workflows/build-branch.yml` (what `juno-build` installs)
 
-1. `rustup target add x86_64-apple-darwin` (already done on zero).
-2. Build both halves locally: `bun run build:universal` (already wired in
-   package.json as `--target universal-apple-darwin`). The x86_64 half is the
-   one that has never compiled; watch for `ort-sys` / `parakeet` link errors,
-   which mean a reference was missed.
-3. `lipo -info` the built binary shows `x86_64 arm64`.
-4. Run it on **graphite** (an Intel Mac, `100.78.6.88`): dictation should work
-   on Whisper, and the Parakeet option should be absent or disabled. This is
-   the real test; the arm64 host cannot prove the Intel path.
+`release-cua.yml` was already building both halves and `lipo`ing them; it is
+unchanged.
+
+`scripts/tauri-build.sh` defaults to the universal target when no `--target` is
+given, so `bun run tauri:build` is universal and the separate
+`bun run build:universal` script is gone.
+
+The Rust cache `shared-key` moved from `tauri-release-aarch64` to
+`tauri-release-universal`. The first build after this lands is cold.
+
+## The updater
+
+`tauri-action` expands a universal `.app.tar.gz` into `darwin-aarch64`,
+`darwin-x86_64`, `darwin-aarch64-app` and `darwin-x86_64-app` keys in
+`latest.json`, all pointing at the same artifact
+(`src/upload-version-json.ts`; verified present in the compiled `dist/index.js`
+on the `v0` tag this repo pins).
+
+That matters in both directions. `tauri-plugin-updater` 2.x looks up only
+`{os}-{arch}-{installer}` then `{os}-{arch}`; it has no `darwin-universal`
+fallback. A manifest with only a `darwin-universal` key would break updates for
+*every* install, arm64 included. The expansion is what keeps that from
+happening, and it is the single most important thing to eyeball on the first
+real release.
+
+The release asset name changes with the target, from `Juno_aarch64.app.tar.gz`
+to `Juno_universal.app.tar.gz`. `scripts/juno-build.sh` now matches
+`Juno_*.app.tar.gz` so it still installs the tags that already exist.
+
+## What a real release still has to confirm
+
+1. `latest.json` on the first universal release carries both `darwin-aarch64`
+   and `darwin-x86_64`.
+2. An existing arm64 install updates to it (the key it reads must not have
+   moved).
+3. `lipo -info` on the shipped binary shows `x86_64 arm64`.
+4. Juno runs on graphite (Intel, `100.78.6.88`): dictation works on Whisper and
+   the Models pane has no Parakeet row.
 
 ## Risk
 
-The unknown is transitive: other native crates (`whisper-rs` Metal,
-`chromiumoxide`, anything linking a prebuilt lib) must also produce x86_64
-objects. whisper's Metal feature compiles on Intel Macs (Metal exists there),
-but this is exactly the kind of thing that only the build reveals. Budget for a
-compile-fix loop on the x86_64 half, not a clean first pass.
+The x86_64 half has never compiled. `parakeet-rs` was the known blocker, but
+any other crate that links a prebuilt library could be a second one. The
+likeliest candidate is `whisper-rs` with the `metal` feature: Metal exists on
+Intel Macs and whisper.cpp builds its Metal backend there, but that is the kind
+of thing only the build reveals. Budget for a compile-fix loop on the x86_64
+half, not a clean first pass.
 
 ## Not in scope
 

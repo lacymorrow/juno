@@ -24,7 +24,7 @@ use tauri_plugin_voice_transcription::{
     downloaded_models_dir, parakeet_file_url, parakeet_total_bytes, resolve_model_path,
     resolve_parakeet_model_dir, AlwaysListeningController, EngineManager, SharedWhisperManager,
     SttProvider, TranscriptionEngine, VoiceController, VoiceTranscriptionConfig,
-    PARAKEET_MODEL_FILES,
+    PARAKEET_MODEL_FILES, PARAKEET_SUPPORTED,
 };
 
 use crate::constants::events::stt_models as events;
@@ -76,7 +76,10 @@ pub struct ModelDef {
     pub filename: &'static str,
     pub size_mb: u32,
     pub bundled: bool,
-    /// Parakeet only builds on Apple Silicon (parakeet-rs / ort).
+    /// Parakeet only builds on Apple Silicon (parakeet-rs / ort). Mirrors
+    /// `PARAKEET_SUPPORTED` in the voice plugin, which is derived from the
+    /// same `cfg` that decides whether the dependency links at all; a test
+    /// below holds the two together.
     pub arm64_only: bool,
     pub speed: u8,
     pub accuracy: u8,
@@ -273,9 +276,9 @@ pub struct SttModelsStatus {
     pub active_id: String,
     /// The one download in flight, if any.
     pub download: Option<DownloadProgress>,
-    /// Onboarding should offer the recommended download: Apple Silicon,
-    /// Parakeet not on disk, and the person has not declined or chosen a
-    /// model by hand.
+    /// Onboarding should offer the Balanced (recommended) download for this
+    /// Mac: it is not on disk, and the person has not declined or chosen a
+    /// model by hand. Parakeet on Apple Silicon, large-v3-turbo on Intel.
     pub offer_recommended: bool,
 }
 
@@ -377,7 +380,10 @@ fn active_model_id(app: &AppHandle, settings: &VoiceTranscriptionSettings) -> St
         _ => {}
     }
 
-    if settings.stt_provider.eq_ignore_ascii_case("parakeet") {
+    // The model files can be present on a Mac that cannot run them (an Intel
+    // Mac restored from an Apple Silicon backup). Reporting Parakeet active
+    // there would name a row the catalog does not even list.
+    if PARAKEET_SUPPORTED && settings.stt_provider.eq_ignore_ascii_case("parakeet") {
         if let Some(def) = find_def(PARAKEET_ID) {
             if is_downloaded(app, def) {
                 return PARAKEET_ID.to_string();
@@ -454,10 +460,14 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
         })
         .collect();
 
-    let offer_recommended = is_arm64(&arch)
-        && !settings.parakeet_download_declined
+    // Offer whatever this Mac's Balanced row is, not Parakeet specifically.
+    // The gate used to be `is_arm64`, from when Intel had no build at all; an
+    // Intel Mac that is offered nothing dictates on the bundled tiny.en
+    // forever. `recommended_id` is Parakeet on Apple Silicon (unchanged) and
+    // large-v3-turbo on Intel, which the offer UI already renders.
+    let offer_recommended = !settings.parakeet_download_declined
         && !settings.stt_provider.eq_ignore_ascii_case("parakeet")
-        && !find_def(PARAKEET_ID).is_some_and(|d| is_downloaded(app, d));
+        && !find_def(recommended_id(&arch)).is_some_and(|d| is_downloaded(app, d));
 
     Ok(SttModelsStatus {
         arch,
@@ -1133,6 +1143,31 @@ mod tests {
         assert_eq!(tier_for("aarch64", "large-v3"), Some(ACCURATE));
         assert_eq!(tier_for("aarch64", "large-v3-turbo"), None);
         assert_eq!(recommended_id("aarch64"), PARAKEET_ID);
+    }
+
+    /// The catalog's `arm64_only` flag and the plugin's build gate are the
+    /// same fact written twice. Let them drift and Settings > Models shows a
+    /// Parakeet row on a build that does not contain Parakeet: a Download
+    /// button, a Use button and an engine switch that cannot work. That is the
+    /// dead-control defect, so it is pinned here rather than left to review.
+    #[test]
+    fn the_catalog_offers_parakeet_exactly_where_the_build_can_run_it() {
+        // The real arch, not `current_arch()`: that one honours
+        // JUNO_DICTATION_ARCH in debug builds, which is every test run.
+        let offered = catalog_for_arch(std::env::consts::ARCH)
+            .iter()
+            .any(|m| m.id == PARAKEET_ID);
+        assert_eq!(
+            offered, PARAKEET_SUPPORTED,
+            "Models must offer Parakeet if and only if this build links it"
+        );
+        // And the flag the filter reads, pinned directly: on an Apple Silicon
+        // runner the check above cannot tell `arm64_only: true` from `false`.
+        assert!(
+            find_def(PARAKEET_ID).is_some_and(|d| d.arm64_only),
+            "Parakeet stays arm64_only while parakeet-rs is gated to aarch64 \
+             in tauri-plugin-voice-transcription/Cargo.toml"
+        );
     }
 
     #[test]
