@@ -589,6 +589,8 @@ export const COMMANDS = {
   PERMISSIONS_OPEN_SYSTEM_SETTINGS: 'open_system_settings_enhanced',
   PERMISSIONS_AWAITING_RELAUNCH: 'permissions_awaiting_relaunch',
   PERMISSIONS_RESTART_AFTER_PERMISSIONS: 'restart_app_after_permissions',
+  PERMISSIONS_PERMISSION_MOMENT: 'permission_moment',
+  PERMISSIONS_ALLOW_AUTOMATION: 'allow_automation_permission',
   PERMISSIONS_GET_PERMISSION_DIAGNOSTICS: 'get_permission_diagnostics',
   PERMISSIONS_RESET_PERMISSION_GRANT: 'reset_permission_grant',
   PERMISSIONS_OPEN_SYSTEM_PREFERENCES: 'open_system_preferences',

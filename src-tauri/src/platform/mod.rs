@@ -8,6 +8,8 @@ pub mod cursor_follow; // Keep the bar on the display the cursor is on
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+/// Automation (TCC AppleEvents) consent per target app, asked before macOS asks.
+pub mod automation;
 pub mod file_panels;
 /// Input Monitoring (TCC ListenEvent) check + request over IOKit; stubs elsewhere.
 pub mod input_monitoring;

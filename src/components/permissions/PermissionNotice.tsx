@@ -20,6 +20,18 @@ import { cn } from "@/lib/utils";
  * Juno to do something, with the reason attached, and with "Not now" as an
  * answer that costs them nothing.
  *
+ * One card, three states, one button each:
+ *
+ * 1. the ask, whose button is whatever the backend said it is ("Open Settings"
+ *    for a switch in System Settings, "Allow" for Automation, where macOS does
+ *    the asking and there is no pane to open until it has),
+ * 2. the restart, for the permissions macOS will not hand a running process,
+ *    which the backend decides per capability so nobody is told to restart for
+ *    a permission that does not need it, and
+ * 3. the receipt, once Juno can act.
+ *
+ * Every one of those decisions is made in Rust. This file renders them.
+ *
  * It never takes focus and renders nothing when there is nothing to ask.
  */
 
@@ -39,30 +51,35 @@ interface PermissionNeeded {
   action: string;
   title: string;
   detail: string;
+  /** What the one button does. Decided in Rust, not inferred here. */
+  primary_action?: "open_settings" | "allow_automation";
+  /** The words on that button. */
+  primary_label?: string;
 }
 
-interface PermissionStatusShape {
+/** The backend's answer about one capability, right now. */
+interface PermissionMoment {
+  permission: string;
   granted: boolean;
-}
-
-interface PermissionsStateShape {
-  accessibility: PermissionStatusShape;
-  screen_recording: PermissionStatusShape;
-}
-
-/** Reads one permission out of the state blob by the key the backend sent. */
-function isGranted(state: PermissionsStateShape, permission: string): boolean {
-  if (permission === "accessibility") return Boolean(state.accessibility?.granted);
-  if (permission === "screen_recording") return Boolean(state.screen_recording?.granted);
-  return false;
+  restart_unblocks: boolean;
+  restart_detail: string;
 }
 
 /** "screen_recording" reads as "Screen Recording" in the confirmation line. */
 function humanName(permission: string): string {
   return permission
+    .replace(/^automation_/, "")
     .split("_")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+/** The receipt line. Automation is a yes about an app, not a switch being on. */
+function receipt(permission: string): string {
+  const name = humanName(permission);
+  return permission.startsWith("automation_")
+    ? `Juno can control ${name} now. Ask again and Juno will pick up where it left off.`
+    : `${name} is on. Ask again and Juno will pick up where it left off.`;
 }
 
 export function PermissionNotice({ className }: { className?: string }) {
@@ -70,6 +87,11 @@ export function PermissionNotice({ className }: { className?: string }) {
   const [granted, setGranted] = useState(false);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The restart sentence, once the backend says a restart is the missing step. */
+  const [restart, setRestart] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
+  /** True once the person has done their part, which is when a restart is news. */
+  const [answered, setAnswered] = useState(false);
 
   // Polling only runs while a card is up and only for a bounded stretch.
   const pollStartedAt = useRef<number>(0);
@@ -84,6 +106,8 @@ export function PermissionNotice({ className }: { className?: string }) {
     });
     setGranted(false);
     setError(null);
+    setRestart(null);
+    setAnswered(false);
     pollStartedAt.current = Date.now();
   });
 
@@ -99,10 +123,18 @@ export function PermissionNotice({ className }: { className?: string }) {
       }
       void (async () => {
         try {
-          const state = await invoke<PermissionsStateShape>(
-            COMMANDS.PERMISSIONS_CHECK_PERMISSIONS_STATUS
-          );
-          if (isGranted(state, needed.permission)) setGranted(true);
+          const moment = await invoke<PermissionMoment>(COMMANDS.PERMISSIONS_PERMISSION_MOMENT, {
+            permission: needed.permission,
+          });
+          if (moment.granted) {
+            setGranted(true);
+            return;
+          }
+          // Only after the person has acted. Before that, a restart is not the
+          // missing step, it is a step they have not reached.
+          if (answered && moment.restart_unblocks && moment.restart_detail) {
+            setRestart(moment.restart_detail);
+          }
         } catch {
           // A failed poll is not worth saying anything about; the next one may
           // well succeed, and the person can still use the buttons.
@@ -111,7 +143,7 @@ export function PermissionNotice({ className }: { className?: string }) {
     }, POLL_MS);
 
     return () => window.clearInterval(timer);
-  }, [needed, granted]);
+  }, [needed, granted, answered]);
 
   // Once it is on, say so briefly and get out of the way.
   useEffect(() => {
@@ -120,29 +152,57 @@ export function PermissionNotice({ className }: { className?: string }) {
     return () => window.clearTimeout(timer);
   }, [granted]);
 
-  const openSettings = useCallback(async () => {
+  /** The card's one button, before a restart is on offer. */
+  const primary = useCallback(async () => {
     if (!needed) return;
     setOpening(true);
     setError(null);
     try {
-      await invoke(COMMANDS.PERMISSIONS_OPEN_SYSTEM_SETTINGS, {
-        permissionType: needed.permission,
-      });
+      if (needed.primary_action === "allow_automation") {
+        const allowed = await invoke<boolean>(COMMANDS.PERMISSIONS_ALLOW_AUTOMATION, {
+          target: needed.permission.replace(/^automation_/, ""),
+        });
+        if (allowed) setGranted(true);
+        else setError("macOS did not allow it. You can change this later in System Settings.");
+      } else {
+        await invoke(COMMANDS.PERMISSIONS_OPEN_SYSTEM_SETTINGS, {
+          permissionType: needed.permission,
+        });
+      }
+      // Their part is done. A restart offer is now the next step rather than a
+      // demand made before they had a chance.
+      setAnswered(true);
     } catch {
       setError(
-        "System Settings did not open. You can find this under Privacy and Security."
+        needed.primary_action === "allow_automation"
+          ? "macOS did not answer. Try again, or change this later in System Settings."
+          : "System Settings did not open. You can find this under Privacy and Security."
       );
     } finally {
       setOpening(false);
     }
   }, [needed]);
 
+  const restartJuno = useCallback(async () => {
+    setRestarting(true);
+    setError(null);
+    try {
+      await invoke(COMMANDS.PERMISSIONS_RESTART_AFTER_PERMISSIONS);
+    } catch {
+      setRestarting(false);
+      setError("Juno could not restart itself. Quit and open it again.");
+    }
+  }, []);
+
   const dismiss = useCallback(() => {
     setNeeded(null);
     setError(null);
+    setRestart(null);
   }, []);
 
   if (!needed) return null;
+
+  const offeringRestart = Boolean(restart) && !granted;
 
   return (
     <div
@@ -161,26 +221,47 @@ export function PermissionNotice({ className }: { className?: string }) {
             rather than blinking out of existence. */}
         <ConfirmationRequest>
           <div className={BODY}>
-            <p className={TITLE}>{needed.title}</p>
-            <p className={DETAIL}>{needed.detail}</p>
+            <p className={TITLE}>
+              {offeringRestart
+                ? `Juno has to start again to pick up ${humanName(needed.permission)}`
+                : needed.title}
+            </p>
+            <p className={DETAIL}>{offeringRestart ? restart : needed.detail}</p>
             <ConfirmationActions className="flex-wrap">
-              <ConfirmationAction onClick={() => void openSettings()} disabled={opening}>
-                Open Settings
-              </ConfirmationAction>
+              {offeringRestart ? (
+                <ConfirmationAction
+                  onClick={() => void restartJuno()}
+                  disabled={restarting}
+                  data-testid="permission-restart"
+                >
+                  {restarting ? "Restarting Juno" : "Restart Juno"}
+                </ConfirmationAction>
+              ) : (
+                <ConfirmationAction
+                  onClick={() => void primary()}
+                  disabled={opening}
+                  data-testid="permission-primary"
+                >
+                  {needed.primary_label ?? "Open Settings"}
+                </ConfirmationAction>
+              )}
               <ConfirmationAction variant="ghost" onClick={dismiss}>
                 Not now
               </ConfirmationAction>
             </ConfirmationActions>
             {error && (
-              <p className={cn(DETAIL, "text-destructive")} role="alert">
+              <p
+                className={cn(DETAIL, "text-destructive")}
+                role="alert"
+                data-testid="permission-error"
+              >
                 {error}
               </p>
             )}
           </div>
         </ConfirmationRequest>
         <ConfirmationAccepted className="col-start-2">
-          {humanName(needed.permission)} is on. Ask again and Juno will pick up
-          where it left off.
+          {receipt(needed.permission)}
         </ConfirmationAccepted>
       </Confirmation>
     </div>
