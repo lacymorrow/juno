@@ -1220,7 +1220,13 @@ fn session_live_for(app: &AppHandle, target: TriggerTarget) -> bool {
     let app_state = app.state::<state::AppState>();
     match target {
         TriggerTarget::Agent => crate::agent_monitor::bar_voice_active(),
-        TriggerTarget::Dictation => app_state.is_dictation_active(),
+        // The same rule the tap path itself uses, so the double-tap window
+        // and the tap agree about whether this press opened something. See
+        // [`state::dictation_tap_means_stop`].
+        TriggerTarget::Dictation => state::dictation_tap_means_stop(
+            app_state.current_voice_session(),
+            app_state.is_dictation_active(),
+        ),
     }
 }
 
@@ -1242,17 +1248,26 @@ fn cancel_session(app: &AppHandle, target: TriggerTarget) {
 fn handle_dictation_tap_mode(app: &AppHandle) {
     info!("[Dictation Tap Mode] Entered handle_dictation_tap_mode");
 
-    // Check if dictation is currently active using AppState (no locking required)
-    // This avoids the VoiceController mutex which can be held during audio processing
+    // Asked of the session registry, not of the liveness flag alone. The flag
+    // is a mirror that drifts in both directions, and each direction had its
+    // own stuck state; the registry is the record that owns the microphone.
+    // The rule, and the two bugs it closes, are in
+    // [`state::dictation_tap_means_stop`]. Neither reads the VoiceController
+    // mutex, which can be held through a final decode.
     let app_state = app.state::<state::AppState>();
-    let is_dictation_active = app_state.is_dictation_active();
-
-    info!(
-        "[Dictation Tap Mode] is_dictation_active (from AppState): {}",
-        is_dictation_active
+    let stopping = state::dictation_tap_means_stop(
+        app_state.current_voice_session(),
+        app_state.is_dictation_active(),
     );
 
-    if is_dictation_active {
+    info!(
+        "[Dictation Tap Mode] session: {:?}, dictation flag: {}, so this tap {}",
+        app_state.current_voice_session().map(|s| s.describe()),
+        app_state.is_dictation_active(),
+        if stopping { "stops" } else { "starts" }
+    );
+
+    if stopping {
         info!("[Dictation Input Shortcut] Tap mode - stopping active dictation");
 
         // Immediate stop cue on the tap edge — before the async stop that waits

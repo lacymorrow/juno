@@ -229,16 +229,30 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
             match crate::commands::dictation::insert_dictation_text(&app_handle, trimmed_text).await
             {
                 Ok(()) => {
+                    // "Sent", not "inserted". See the note in
+                    // `insert_dictation_text`: the keystrokes an insertion is
+                    // made of are posted, and a posted event has no outcome
+                    // to read.
                     info!(
-                        "[Dictation Mode] Successfully inserted text: '{}'",
+                        "[Dictation Mode] Sent text to the focused app: '{}'",
                         trimmed_text
                     );
                 }
                 Err(e) => {
+                    // `insert_dictation_text` has already said this where the
+                    // person can see it and left the words on the clipboard.
                     error!("[Dictation Mode] Failed to insert transcribed text: {}", e);
                 }
             }
+        } else {
+            // Nothing was said, or nothing the engine would commit to. Said
+            // out loud so a report of "the text did not appear" can be told
+            // apart from one of "there was no text": the two look identical
+            // from the outside and used to look identical in the log too.
+            info!("[Dictation Mode] The transcript was empty; nothing to insert");
         }
+    } else {
+        info!("[Dictation Mode] The final result carried no text; nothing to insert");
     }
 
     // Reset Dictation Mode state after processing
@@ -352,7 +366,10 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, _pa
     {
         let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
         if let Err(e) = coordinator
-            .unregister_escape_user(&app_handle, "dictation_events")
+            .unregister_escape_user(
+                &app_handle,
+                crate::commands::dictation::DICTATION_ESCAPE_USER,
+            )
             .await
         {
             warn!(
@@ -396,18 +413,50 @@ async fn handle_voice_transcription_error(app_handle: AppHandle) {
     // Left open it would claim the *next* session's result, and every stop
     // aimed at the next session would be refused as stale.
     let app_state = app_handle.state::<crate::state::AppState>();
-    match app_state.claim_voice_discard(SessionClaim::Current) {
-        Ok(session) => warn!(
-            "[Event] Transcription failed; discarding voice session {}",
-            session.describe()
-        ),
-        Err(rejection) => info!(
-            "[Event] Transcription failed with nothing to discard: {}",
-            rejection.reason()
-        ),
+    let open_target = app_state.current_voice_session().map(|s| s.target);
+
+    match open_target {
+        Some(VoiceTarget::Agent) => {
+            // The agent path owns its own unwind; retiring the identity is all
+            // that is ours to do here.
+            match app_state.claim_voice_discard(SessionClaim::Current) {
+                Ok(session) => warn!(
+                    "[Event] Transcription failed; discarding voice session {}",
+                    session.describe()
+                ),
+                Err(rejection) => info!(
+                    "[Event] Transcription failed with nothing to discard: {}",
+                    rejection.reason()
+                ),
+            }
+        }
+        Some(VoiceTarget::Dictation) => {
+            // Retiring the session was never enough. The dictation flag stayed
+            // up, and tap mode reads that flag to decide whether a press starts
+            // or stops — so after one failed transcription every later tap took
+            // the stop branch, found nothing to claim, and returned. One failure
+            // left dictation stuck in dictation mode until the app restarted.
+            crate::commands::dictation::end_dictation_session(&app_handle, "transcription failed")
+                .await;
+        }
+        None => {
+            // No session, but the flag can still be up if an earlier path put
+            // it up and then failed. Unwind only when it is actually lying.
+            if app_state.is_dictation_active() {
+                warn!("[Event] Transcription failed with no session but the dictation flag up; unwinding it");
+                crate::commands::dictation::end_dictation_session(
+                    &app_handle,
+                    "transcription failed with a stale dictation flag",
+                )
+                .await;
+            } else {
+                info!("[Event] Transcription failed with nothing to discard");
+            }
+        }
     }
 
     // Play voice error sound automatically when transcription fails
+    let app_state = app_handle.state::<crate::state::AppState>();
     if let Err(e) =
         crate::commands::sound::play_voice_error_sound(app_handle.clone(), app_state).await
     {
@@ -502,7 +551,10 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle, method: Voi
                     let coordinator =
                         crate::commands::escape_key_coordinator::get_escape_key_coordinator();
                     if let Err(e) = coordinator
-                        .register_escape_user(&app_handle, "dictation_events")
+                        .register_escape_user(
+                            &app_handle,
+                            crate::commands::dictation::DICTATION_ESCAPE_USER,
+                        )
                         .await
                     {
                         warn!(
@@ -537,32 +589,15 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle, method: Voi
                     return;
                 }
 
-                // Nothing owns the microphone now, so nothing may be left
-                // recording on it.
-                crate::integration::close_unowned_audio_stream(&app_handle).await;
-
-                // Reset the dictation active flag
-                if let Err(e) = app_state.set_dictation_active(false) {
-                    warn!("Failed to reset dictation active state: {}", e);
-                }
-
-                // Emit state change event for UI
-                if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
-                    error!(
-                        "[Dictation Mode] Failed to emit dictation-active event after error: {}",
-                        e
-                    );
-                }
-
-                // Update floating bar manager to reset dictation mode
-                let app_handle_for_bar = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::commands::ui_commands::handle_dictation_mode_change(
-                        &app_handle_for_bar,
-                        false,
-                    )
-                    .await;
-                });
+                // The one end-of-session unwind, same as cancel and same as
+                // every failure path. The id-claim above is what makes it safe
+                // to run: it proves this failed start still owned the session,
+                // so none of this is describing somebody else's.
+                crate::commands::dictation::end_dictation_session(
+                    &app_handle,
+                    "dictation failed to start",
+                )
+                .await;
             }
         }
     } else {
@@ -612,71 +647,19 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
         }
     }
 
-    // Claim it before touching the audio. A cancel that owns nothing still
-    // runs the cleanup below, because that cleanup is idempotent and is the
-    // only thing that unsticks a monitor left mid-hold.
-    match app_state.claim_voice_discard(SessionClaim::Current) {
-        Ok(session) => {
-            info!(
-                "[Dictation Cancel] Discarding voice session {}",
-                session.describe()
-            );
-            // Cancel means cancel, the same way it does on the agent path.
-            // This used to call stop_dictation, which finalises the audio and
-            // emits a final result, so asking to cancel dictation typed what
-            // you had just said.
-            if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-                let _ = tauri_plugin_voice_transcription::commands::cancel_dictation(
-                    app_handle.clone(),
-                    controller_state,
-                )
-                .await;
-            }
-        }
-        Err(rejection) => {
-            info!(
-                "[Dictation Cancel] No audio to discard ({}); running cleanup only",
-                rejection.reason()
-            );
-            // Nothing of ours is recording, which is not the same as nothing at
-            // all. An engine still recording with an empty registry holds audio
-            // no stop or cancel can ever reach, so close it here.
-            crate::integration::close_unowned_audio_stream(&app_handle).await;
-        }
-    }
-
-    // Reset state
-    if let Err(e) = app_state.set_dictation_active(false) {
-        warn!("Failed to reset dictation active state: {}", e);
-    }
-
-    // Force reset dictation monitor state to prevent any stuck state scenarios
-    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-    // Update floating bar manager (was missing - this is critical for UI sync)
-    crate::commands::ui_commands::handle_dictation_mode_change(&app_handle, false).await;
-
-    // Emit dictation-active false event for UI components (was missing)
-    if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
-        error!(
-            "[Dictation Cancel] Failed to emit dictation-active event: {}",
-            e
-        );
-    }
-
-    // Unregister escape key handler (was missing)
-    {
-        let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-        if let Err(e) = coordinator
-            .unregister_escape_user(&app_handle, "dictation_events")
-            .await
-        {
-            warn!(
-                "[Dictation Cancel] Failed to unregister escape key after cancellation: {} - continuing anyway",
-                e
-            );
-        }
-    }
+    // Cancel is one of the exit paths, not a cleanup routine of its own.
+    // What it used to be was the full end-of-session checklist written out by
+    // hand here — retire the session, cancel the audio, clear the flag, reset
+    // the monitor, take the bar out of dictation mode, release the stop key —
+    // which is the same checklist the failure paths each did a different
+    // subset of. It is one function now, so cancel and every failure path end
+    // a session identically, by construction rather than by remembering.
+    //
+    // Ungated on owning a session, as it was before: a cancel that owns
+    // nothing still unwinds, because a microphone open with nothing to own it
+    // is exactly the state this has to be able to close, and the unwind is
+    // idempotent.
+    crate::commands::dictation::end_dictation_session(&app_handle, "cancelled").await;
 
     // Resume always listening mode if it was active before dictation
     let should_resume_always_listening = app_state
@@ -741,6 +724,20 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
         }
         Err(rejection) => {
             info!("[Dictation Stop] Nothing to stop: {}", rejection.reason());
+            // A stop that owns nothing is usually a doubled event, and a no-op
+            // is the right answer. But if the app is still *claiming* to
+            // dictate with no session behind the claim, this is the stuck
+            // state: tap mode reads that same flag to decide start from stop,
+            // so every later tap lands here and returns, and dictation can
+            // never be started or stopped again. Reconcile rather than return.
+            if app_state.is_dictation_active() {
+                warn!("[Dictation Stop] The dictation flag outlived its session; ending what the app still claims");
+                crate::commands::dictation::end_dictation_session(
+                    &app_handle,
+                    "a stop arrived with no session behind the dictation flag",
+                )
+                .await;
+            }
             return;
         }
     }

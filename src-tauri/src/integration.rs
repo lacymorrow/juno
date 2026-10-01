@@ -472,19 +472,20 @@ fn setup_capture_failure_listener(app_handle: &AppHandle) {
             // "already dictating". Ending it here is what keeps one failure
             // from costing every dictation after it. The thread has already
             // exited, so this neither blocks nor transcribes anything.
-            if let Some(controller) = app_handle_clone.try_state::<Arc<Mutex<VoiceController>>>() {
-                match controller.lock() {
-                    Ok(mut voice) => {
-                        if let Err(e) = voice.cancel_dictation() {
-                            warn!("[VoiceCapture] Could not end the dictation session: {e}");
-                        }
-                    }
-                    Err(e) => error!("[VoiceCapture] Voice controller lock is poisoned: {e}"),
-                }
-            }
-            if let Err(e) = app_state.set_dictation_active(false) {
-                error!("[VoiceCapture] Could not clear the dictation flag: {e}");
-            }
+            //
+            // This used to cancel the controller and clear the dictation flag
+            // and stop there, which was half the list. The session itself
+            // stayed registered, and `begin` refuses while a session stands —
+            // so one microphone that would not open killed every later
+            // dictation for the life of the process, behind a bar still drawn
+            // in dictation mode, with Escape declining to help because nothing
+            // looked live. `end_dictation_session` is the whole list, in one
+            // place, for every exit path.
+            crate::commands::dictation::end_dictation_session(
+                &app_handle_clone,
+                "the microphone never opened",
+            )
+            .await;
 
             if let Err(e) = app_state.set_always_listening_active(false) {
                 error!("[VoiceCapture] Could not clear the listening flag: {e}");
