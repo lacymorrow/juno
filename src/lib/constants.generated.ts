@@ -633,6 +633,7 @@ export const COMMANDS = {
   TRIGGERS_GET_TRIGGERS: 'get_triggers',
   TRIGGERS_SET_TRIGGERS: 'set_triggers',
   TRIGGERS_GET_TRIGGER_HINTS: 'get_trigger_hints',
+  TRIGGERS_GET_TRIGGER_ISSUES: 'get_trigger_issues',
   TRIGGERS_SET_TRIGGER_CAPTURE: 'set_trigger_capture',
   TRIGGERS_OPEN_KEYBOARD_SETTINGS: 'open_keyboard_settings',
   INPUT_CONTROL_RESPOND_TO_REQUEST: 'respond_to_input_control',

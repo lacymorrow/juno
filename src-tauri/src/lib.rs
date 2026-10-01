@@ -628,6 +628,7 @@ pub fn run() {
             set_triggers,
             set_trigger_capture,
             commands::triggers::get_trigger_hints,
+            commands::triggers::get_trigger_issues,
             commands::triggers::open_keyboard_settings,
             validate_keyboard_shortcut,
             commands::conversations::list_conversations,
