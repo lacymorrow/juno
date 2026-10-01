@@ -122,9 +122,24 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      # Read the pin rather than using @stable. rustup honours
+      # `rust-toolchain.toml` and auto-installs that toolchain with only the
+      # *host* target, so `dtolnay/rust-toolchain@stable` would add
+      # x86_64-apple-darwin to a toolchain cargo never invokes and the build
+      # fails with `can't find crate for core`. The `rust` job above gets away
+      # with @stable because it only ever needs the host target. Same reasoning,
+      # same two steps, as release-tauri.yml and build-branch.yml.
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          [ -n "$channel" ] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust (pinned toolchain)
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           targets: x86_64-apple-darwin
 
       - name: Cache cargo registry and target
