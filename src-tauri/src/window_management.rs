@@ -357,7 +357,18 @@ fn apply_settings_vibrancy(app: &AppHandle) {
     });
 }
 
-/// Open the native settings window
+/// Open the native settings window.
+///
+/// Settings is declared at the ordinary window level, the same as the chat
+/// window, and it stays there. Showing and focusing it is not enough on its
+/// own: activating an application makes AppKit re-order that application's
+/// windows, so settings opened while the chat window was up could come back
+/// underneath it. Opening it from the floating bar, which never activates
+/// Juno, made that the usual outcome rather than the occasional one.
+///
+/// So it is ordered above the chat window explicitly. See
+/// `platform::macos::raise_above_chat_window` for why a re-order and not a
+/// higher window level.
 #[tauri::command]
 pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
     WindowManager::create_or_show_window(&app, window_labels::SETTINGS).await?;
@@ -367,6 +378,8 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
     // necessary on every open now that closing settings destroys it.
     #[cfg(target_os = "macos")]
     apply_settings_vibrancy(&app);
+
+    crate::platform::macos::raise_above_chat_window(&app, window_labels::SETTINGS);
 
     Ok(())
 }

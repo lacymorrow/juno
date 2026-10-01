@@ -507,6 +507,11 @@ pub fn run() {
             check_restart_needed_after_permissions,
             permissions_awaiting_relaunch,
             handle_restart_after_permissions,
+            // Where one capability stands right now, and whether a restart is
+            // the missing step rather than something the person did wrong
+            permission_moment,
+            // Juno's own Automation moment, in place of the OS asking cold
+            allow_automation_permission,
             // Permission diagnostics: the live answer, and the reset for a stale grant
             get_permission_diagnostics,
             reset_permission_grant,
