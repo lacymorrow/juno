@@ -106,8 +106,39 @@ impl ShellSession {
         })
     }
 
+    /// Write the shims this session puts in front of `PATH`, and return the
+    /// directory holding them.
+    ///
+    /// Today that is one shim, `rm`, which deletes to the macOS Trash so a
+    /// delete can be undone. See [`crate::trash`] for why this is a shim on
+    /// `PATH` rather than a rewrite of the command text.
+    ///
+    /// Idempotent and called before every spawn, so a restarted session always
+    /// has it and a session whose directory was cleaned up rebuilds it.
+    fn ensure_shim_bin(&self) -> Result<std::path::PathBuf, String> {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let shim_dir = self.session_dir.join(crate::trash::SHIM_DIR_NAME);
+        fs::create_dir_all(&shim_dir)
+            .map_err(|e| format!("Failed to create session shim directory: {}", e))?;
+
+        let rm_shim = shim_dir.join("rm");
+        fs::write(&rm_shim, crate::trash::rm_shim_script())
+            .map_err(|e| format!("Failed to write the rm shim: {}", e))?;
+        fs::set_permissions(&rm_shim, fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("Failed to make the rm shim executable: {}", e))?;
+
+        Ok(shim_dir)
+    }
+
     /// Start or restart the bash process
     fn ensure_process(&mut self) -> Result<(), String> {
+        // Before the lock: writing files needs no lock, and doing it here
+        // keeps the borrow of `self` out of the guard's scope entirely.
+        let shim_dir = self.ensure_shim_bin()?;
+        let shim_dir = shim_dir.to_string_lossy().into_owned();
+
         let mut process_guard = self
             .process
             .lock()
@@ -133,19 +164,32 @@ impl ShellSession {
                 let _ = child.wait();
             }
 
-            // Spawn new persistent bash process
+            // Spawn new persistent bash process.
+            //
+            // The shim directory goes on the FRONT of PATH, which is what makes
+            // `rm` in this session resolve to Juno's Trash-backed rm. Set as an
+            // environment variable rather than an `export` line so there is no
+            // shell quoting to get wrong. Child processes inherit it, so an
+            // `rm` inside a make or npm script is recoverable too. That is the
+            // intent, not a side effect.
             let mut bash_process = Command::new("bash")
                 .current_dir(&self.session_dir)
                 .env("HISTFILE", self.session_dir.join(".bash_history"))
                 .env("PS1", "") // No prompt to avoid parsing issues
                 .env("TERM", "dumb") // Prevent fancy terminal features
+                .env("PATH", path_with_shims_first(&shim_dir))
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
                 .map_err(|e| format!("Failed to spawn bash process: {}", e))?;
 
-            // Initialize the shell environment
+            // Initialize the shell environment.
+            //
+            // The shim directory goes on the FRONT of PATH, which is what makes
+            // `rm` in this session resolve to Juno's Trash-backed rm. Child
+            // processes inherit it, so an `rm` inside a make or npm script is
+            // recoverable too. That is the intent, not a side effect.
             if let Some(stdin) = bash_process.stdin.as_mut() {
                 let init_commands = "set +H\nPS1=''\nexport PS1=''\n";
                 stdin
@@ -235,9 +279,11 @@ impl ShellSession {
         self.execute_command_direct(command, cmd_id, timeout)
     }
 
-    /// Validate command for basic security - prevent catastrophic and unsafe redirections/paths
+    /// Refuse the acts Juno will not run at all. See
+    /// [`refuse_forbidden_command`] for which, and why that is a different
+    /// question from whether Juno asks the person.
     fn validate_command(&self, command: &str) -> Result<(), String> {
-        validate_command_security(command)
+        refuse_forbidden_command(command)
     }
 
     /// Execute command directly via stdin/stdout with proper timeout handling
@@ -470,24 +516,63 @@ impl ShellSession {
     }
 }
 
-/// Validate a shell command for basic security.
+/// Put the session's shim directory at the front of `PATH`.
+///
+/// Reads the inherited `PATH` rather than guessing one, so the session keeps
+/// every tool the person has installed and only gains a `rm` that is
+/// recoverable.
+fn path_with_shims_first(shim_dir: &str) -> String {
+    match std::env::var("PATH") {
+        Ok(existing) if !existing.is_empty() => format!("{}:{}", shim_dir, existing),
+        // No inherited PATH is not a case worth inventing a default for, but a
+        // session with only the shim on PATH would be useless, so fall back to
+        // the standard set rather than to nothing.
+        _ => format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", shim_dir),
+    }
+}
+
+/// The acts Juno refuses to run, as opposed to the acts Juno asks about.
+///
+/// This is the second of Juno's two shell gates and it answers a different
+/// question from the first. The approval gate
+/// ([`crate::agent::tools::risk_classifier`] feeding
+/// [`crate::agent::tools::permission_policy::requires_approval`]) answers "does
+/// Juno stop and ask the person". This one answers "does Juno run it at all",
+/// at a point in the agent loop where there is no person attached. It is the
+/// crash barrier under the approval gate, not a duplicate of it.
+///
+/// **It is a blocklist, not an allowlist.** `src-tauri/CLAUDE.md` described it
+/// as "command whitelist validation" for a long time, illustrated with an
+/// `ALLOWED_COMMANDS` constant that has never existed in Juno, and that
+/// description is why it kept being reported as a second allowlist.
+///
+/// It refuses privilege escalation, eight catastrophic literals, recursive
+/// forced `rm` of the filesystem root in any flag permutation, redirection
+/// into system directories, path traversal in a redirection, and anything over
+/// 10,000 characters. Everything else runs.
 ///
 /// Applied identically in debug and release builds; the previous
-/// `cfg!(debug_assertions)` bypass that skipped all non-catastrophic checks
-/// in development was removed (security audit 2026-02-08, item #2).
+/// `cfg!(debug_assertions)` bypass that skipped all non-catastrophic checks in
+/// development was removed (security audit 2026-02-08, item #2).
 ///
-/// The command is normalized (lowercased, whitespace runs collapsed) before
-/// pattern matching so spacing tricks like `rm  -rf   /` cannot dodge the
-/// blocklist, and `rm` flag permutations (`rm -r -f /`, `rm -fr /`,
-/// `rm --recursive --force /`) are caught by a small tokenizer.
-pub(crate) fn validate_command_security(command: &str) -> Result<(), String> {
+/// Parsing is not done here. [`crate::shell_command::ShellCommand`] is the one
+/// place that understands shell syntax, so this gate and the approval gate
+/// cannot disagree about what a command string says.
+///
+/// This gate is temporary in its current shape, not permanent. The policy in
+/// `docs/plans/permissions-by-consequence.md` is that nothing is forbidden
+/// outright: `sudo` and the catastrophic set should become acts that require
+/// permission in every mode, including the permissive one. That change adds the
+/// approval route **first** and removes the refusal second. Done in the other
+/// order, "nothing is forbidden" becomes "nothing is checked".
+pub(crate) fn refuse_forbidden_command(command: &str) -> Result<(), String> {
     // Reject commands that are too long (potential buffer overflow)
     if command.len() > 10000 {
         return Err("Command is too long".to_string());
     }
 
-    // Normalize: lowercase + collapse whitespace runs to single spaces
-    let normalized = normalize_command(command);
+    let parsed = crate::shell_command::ShellCommand::parse(command);
+    let normalized = parsed.normalized();
 
     // Check for truly catastrophic patterns
     let catastrophic_patterns = [
@@ -511,7 +596,7 @@ pub(crate) fn validate_command_security(command: &str) -> Result<(), String> {
     }
 
     // Catch rm flag permutations targeting the filesystem root
-    if is_catastrophic_rm(&normalized) {
+    if parsed.is_catastrophic_rm() {
         return Err(
             "Command contains catastrophic pattern that could destroy the system: recursive forced rm of /"
                 .to_string(),
@@ -549,56 +634,6 @@ pub(crate) fn validate_command_security(command: &str) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-/// Normalize a shell command for pattern matching: lowercase and collapse
-/// whitespace runs to single spaces so spacing tricks (`rm  -rf   /`) cannot
-/// dodge substring blocklists. Shared with the cloud denied-command check
-/// (security audit 2026-02-08, item #25).
-pub(crate) fn normalize_command(command: &str) -> String {
-    command
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Detect `rm` invocations that combine recursive + force flags (in any
-/// order or split across tokens) with the filesystem root as a target.
-/// Expects input already normalized via [`normalize_command`]. Shared with
-/// the cloud denied-command check (security audit 2026-02-08, item #25).
-pub(crate) fn is_catastrophic_rm(normalized: &str) -> bool {
-    let tokens: Vec<&str> = normalized.split(' ').collect();
-    for (i, token) in tokens.iter().enumerate() {
-        if *token != "rm" {
-            continue;
-        }
-        let mut recursive = false;
-        let mut force = false;
-        for tok in &tokens[i + 1..] {
-            // Stop at command separators; a later command is a new context
-            if matches!(*tok, ";" | "&&" | "||" | "|") {
-                break;
-            }
-            if *tok == "--recursive" {
-                recursive = true;
-            } else if *tok == "--force" {
-                force = true;
-            } else if tok.starts_with('-') && !tok.starts_with("--") {
-                // Combined short flags: -rf, -fr, -r, -f (input is lowercased,
-                // so -R is covered as -r)
-                if tok.contains('r') {
-                    recursive = true;
-                }
-                if tok.contains('f') {
-                    force = true;
-                }
-            } else if (*tok == "/" || *tok == "/*") && recursive && force {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 impl Drop for ShellSession {
@@ -921,84 +956,143 @@ mod tests {
 
     #[test]
     fn sudo_blocked_in_debug_builds_too() {
-        assert!(validate_command_security("sudo rm /etc/hosts").is_err());
+        assert!(refuse_forbidden_command("sudo rm /etc/hosts").is_err());
     }
 
     #[test]
     fn doas_blocked_in_debug_builds_too() {
-        assert!(validate_command_security("doas cat /etc/shadow").is_err());
+        assert!(refuse_forbidden_command("doas cat /etc/shadow").is_err());
     }
 
     #[test]
     fn system_redirection_blocked_in_debug_builds_too() {
-        assert!(validate_command_security("echo pwned > /etc/hosts").is_err());
-        assert!(validate_command_security("echo pwned >/etc/hosts").is_err());
-        assert!(validate_command_security("echo x > /System/foo").is_err());
+        assert!(refuse_forbidden_command("echo pwned > /etc/hosts").is_err());
+        assert!(refuse_forbidden_command("echo pwned >/etc/hosts").is_err());
+        assert!(refuse_forbidden_command("echo x > /System/foo").is_err());
     }
 
     #[test]
     fn traversal_redirection_blocked() {
-        assert!(validate_command_security("echo x > ../outside.txt").is_err());
+        assert!(refuse_forbidden_command("echo x > ../outside.txt").is_err());
     }
 
     // --- rm variant canonicalization ---
 
     #[test]
     fn rm_rf_root_blocked() {
-        assert!(validate_command_security("rm -rf /").is_err());
-        assert!(validate_command_security("rm -rf /*").is_err());
+        assert!(refuse_forbidden_command("rm -rf /").is_err());
+        assert!(refuse_forbidden_command("rm -rf /*").is_err());
     }
 
     #[test]
     fn rm_flag_order_variants_blocked() {
-        assert!(validate_command_security("rm -fr /").is_err());
-        assert!(validate_command_security("rm -r -f /").is_err());
-        assert!(validate_command_security("rm -f -r /").is_err());
-        assert!(validate_command_security("rm --recursive --force /").is_err());
-        assert!(validate_command_security("rm -Rf /").is_err());
+        assert!(refuse_forbidden_command("rm -fr /").is_err());
+        assert!(refuse_forbidden_command("rm -r -f /").is_err());
+        assert!(refuse_forbidden_command("rm -f -r /").is_err());
+        assert!(refuse_forbidden_command("rm --recursive --force /").is_err());
+        assert!(refuse_forbidden_command("rm -Rf /").is_err());
     }
 
     #[test]
     fn rm_whitespace_variants_blocked() {
-        assert!(validate_command_security("rm  -rf   /").is_err());
-        assert!(validate_command_security("rm\t-rf\t/").is_err());
-        assert!(validate_command_security("  rm   -r   -f   / ").is_err());
+        assert!(refuse_forbidden_command("rm  -rf   /").is_err());
+        assert!(refuse_forbidden_command("rm\t-rf\t/").is_err());
+        assert!(refuse_forbidden_command("  rm   -r   -f   / ").is_err());
     }
 
     #[test]
     fn fork_bomb_blocked() {
-        assert!(validate_command_security(":(){ :|:& };:").is_err());
-        assert!(validate_command_security(":(){:|:&};:").is_err());
+        assert!(refuse_forbidden_command(":(){ :|:& };:").is_err());
+        assert!(refuse_forbidden_command(":(){:|:&};:").is_err());
     }
 
     #[test]
     fn disk_wipe_blocked() {
-        assert!(validate_command_security("dd if=/dev/zero of=/dev/sda").is_err());
-        assert!(validate_command_security("mkfs.ext4 /dev/sda").is_err());
-        assert!(validate_command_security("echo x > /dev/sda").is_err());
+        assert!(refuse_forbidden_command("dd if=/dev/zero of=/dev/sda").is_err());
+        assert!(refuse_forbidden_command("mkfs.ext4 /dev/sda").is_err());
+        assert!(refuse_forbidden_command("echo x > /dev/sda").is_err());
     }
 
     #[test]
     fn overlong_command_blocked() {
         let long_cmd = "a".repeat(10_001);
-        assert!(validate_command_security(&long_cmd).is_err());
+        assert!(refuse_forbidden_command(&long_cmd).is_err());
     }
 
     // --- Benign commands still pass ---
 
     #[test]
     fn benign_commands_allowed() {
-        assert!(validate_command_security("ls -la").is_ok());
-        assert!(validate_command_security("git status").is_ok());
-        assert!(validate_command_security("echo hello world").is_ok());
-        assert!(validate_command_security("cargo check").is_ok());
+        assert!(refuse_forbidden_command("ls -la").is_ok());
+        assert!(refuse_forbidden_command("git status").is_ok());
+        assert!(refuse_forbidden_command("echo hello world").is_ok());
+        assert!(refuse_forbidden_command("cargo check").is_ok());
     }
 
     #[test]
     fn scoped_rm_allowed() {
-        // rm of a specific relative file is not catastrophic (the runner's
-        // risk classifier still flags it High and gates it behind approval)
-        assert!(validate_command_security("rm old_file.txt").is_ok());
-        assert!(validate_command_security("rm -rf ./build").is_ok());
+        // rm of a specific relative file is not catastrophic, and in this
+        // session it is now also recoverable: `rm` resolves to the shim that
+        // deletes to the Trash. See `the_session_runs_a_trash_backed_rm`.
+        assert!(refuse_forbidden_command("rm old_file.txt").is_ok());
+        assert!(refuse_forbidden_command("rm -rf ./build").is_ok());
+    }
+
+    // --- Deleting is recoverable by construction ---
+
+    #[test]
+    fn the_shims_go_in_front_of_path_not_behind_it() {
+        let path = path_with_shims_first("/juno/session/bin");
+        assert!(
+            path.starts_with("/juno/session/bin:"),
+            "behind the real rm the shim does nothing at all: {path}"
+        );
+        // The rest of PATH survives, or the session loses every tool the
+        // person has installed.
+        assert!(path.len() > "/juno/session/bin:".len());
+    }
+
+    /// The shim exists, is executable, and is the one Juno generated.
+    ///
+    /// This is the test that stops the Trash routing becoming a safeguard
+    /// disconnected from what it names: a shim written but never put on PATH,
+    /// or a PATH entry pointing at a directory with no shim in it, would both
+    /// look fine in review.
+    #[test]
+    fn the_session_runs_a_trash_backed_rm() {
+        let session = ShellSession::new().expect("session");
+        let shim_dir = session.ensure_shim_bin().expect("shim dir");
+
+        // The directory the session will put on PATH is the directory the
+        // shim was written into.
+        assert_eq!(
+            shim_dir,
+            session.session_dir.join(crate::trash::SHIM_DIR_NAME)
+        );
+
+        let rm = shim_dir.join("rm");
+        let script = std::fs::read_to_string(&rm).expect("the shim is readable");
+        assert!(
+            script.contains(crate::trash::TRASH_BINARY),
+            "the session's rm must delete through the Trash"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&rm)
+                .expect("metadata")
+                .permissions()
+                .mode();
+            assert_eq!(
+                mode & 0o111,
+                0o111,
+                "a shim bash cannot execute is not a shim"
+            );
+        }
+
+        // Idempotent: a restart rewrites it rather than finding it missing.
+        session.ensure_shim_bin().expect("second call");
+        assert!(rm.exists());
     }
 }

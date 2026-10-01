@@ -51,37 +51,23 @@ static DENIED_COMMANDS: &[&str] = &[
     "> /etc/shadow",
 ];
 
-/// Static allowed commands list - comprehensive command allowlist
-static ALLOWED_COMMANDS: &[&str] = &[
-    "text_query",
-    "voice_query",
-    "status_request",
-    "screenshot",
-    "system_command",
-    "config_update",
-    "file_operations",
-    "web_browsing",
-    "system_automation",
-    "voice_transcription",
-    "text_processing",
-    "get_system_info",
-    "get_capabilities",
-    "heartbeat",
-    "read_file",
-    "write_file",
-    "execute_script",
-    "browser_automation",
-    "desktop_automation",
-    "anthropic_computer_use",
-];
+// There was an `ALLOWED_COMMANDS` allowlist here, and a matching
+// `CloudConfig::allowed_commands` field, until 2026-10-01. Both are gone.
+//
+// It was never read. `is_command_allowed` consults only the denied list and
+// then returns `true`, so the allowlist decided nothing. It did not even hold
+// shell commands: its entries were cloud message type names (`text_query`,
+// `heartbeat`, `screenshot`), sitting under a name that reads like the shell
+// gates' own. A dead control named like a live one is the recurring defect in
+// this codebase, and this one is what made Juno look like it had two competing
+// shell allowlists when it had one inert list of message types.
+//
+// Cloud command admission is a blocklist. If it should become an allowlist,
+// that is a deliberate change with its own tests, not a constant nobody calls.
 
 /// Lazy-initialized Vec<String> for denied commands
 static DENIED_COMMANDS_VEC: LazyLock<Vec<String>> =
     LazyLock::new(|| DENIED_COMMANDS.iter().map(|&s| s.to_string()).collect());
-
-/// Lazy-initialized Vec<String> for allowed commands
-static ALLOWED_COMMANDS_VEC: LazyLock<Vec<String>> =
-    LazyLock::new(|| ALLOWED_COMMANDS.iter().map(|&s| s.to_string()).collect());
 
 /// Cloud configuration settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,8 +82,10 @@ pub struct CloudConfig {
     pub heartbeat_interval: u64, // seconds
     pub command_timeout: u64,    // seconds
     pub security_level: SecurityLevel,
-    pub allowed_commands: Vec<String>, // All commands allowed by default
-    pub denied_commands: Vec<String>,  // Only truly destructive commands
+    /// Cloud command admission is a blocklist: everything runs except these.
+    /// There is no companion allowlist, deliberately. See the note above
+    /// `DENIED_COMMANDS_VEC`.
+    pub denied_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,8 +116,7 @@ impl Default for CloudConfig {
             // New configs default to the most restrictive level; the stored level
             // is preserved on load and never downgraded (2026-09 security audit).
             security_level: SecurityLevel::High,
-            allowed_commands: ALLOWED_COMMANDS_VEC.clone(), // Use lazy-initialized static
-            denied_commands: DENIED_COMMANDS_VEC.clone(),   // Use lazy-initialized static
+            denied_commands: DENIED_COMMANDS_VEC.clone(),
         }
     }
 }
@@ -325,19 +312,22 @@ impl CloudConfig {
         Self::matched_denied_pattern(command).is_none()
     }
 
-    /// Return the denied pattern the command matches, if any, after
-    /// normalization. Shares the shell validator's normalization and `rm`
-    /// flag-permutation tokenizer (security audit 2026-02-08, item #25).
+    /// Return the denied pattern the command matches, if any.
+    ///
+    /// Parsing comes from [`crate::shell_command::ShellCommand`], the one place
+    /// that understands a shell command string, so this check cannot drift from
+    /// the shell gates about what a command says (security audit 2026-02-08,
+    /// item #25).
     fn matched_denied_pattern(command: &str) -> Option<String> {
-        let normalized = crate::commands::shell::normalize_command(command);
+        let parsed = crate::shell_command::ShellCommand::parse(command);
 
         for &denied_cmd in DENIED_COMMANDS.iter() {
-            if normalized.contains(denied_cmd) {
+            if parsed.mentions(denied_cmd) {
                 return Some(denied_cmd.to_string());
             }
         }
 
-        if crate::commands::shell::is_catastrophic_rm(&normalized) {
+        if parsed.is_catastrophic_rm() {
             return Some("recursive forced rm of /".to_string());
         }
 
@@ -408,8 +398,7 @@ impl CloudConfig {
                 "high" => SecurityLevel::High,
                 _ => SecurityLevel::High, // Unknown values fail closed to the strictest level
             },
-            // Set default values for fields not in CloudSettings (use static references)
-            allowed_commands: ALLOWED_COMMANDS_VEC.clone(),
+            // Set default values for fields not in CloudSettings
             denied_commands: DENIED_COMMANDS_VEC.clone(),
         }
     }
