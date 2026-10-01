@@ -2403,7 +2403,9 @@ mod advertised_parameter_tests {
     fn the_bound_constants_say_what_they_mean() {
         assert_eq!(DEFAULT_MONITOR_DURATION_SECONDS, 1_800);
         assert_eq!(MAX_MONITOR_DURATION_SECONDS, 7_200);
-        assert!(DEFAULT_MONITOR_DURATION_SECONDS <= MAX_MONITOR_DURATION_SECONDS);
+        // A const block, so a default above the cap fails the build rather
+        // than this test.
+        const { assert!(DEFAULT_MONITOR_DURATION_SECONDS <= MAX_MONITOR_DURATION_SECONDS) };
     }
 }
 
