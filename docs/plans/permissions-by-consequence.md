@@ -1,10 +1,58 @@
 # Permissions by consequence
 
-Juno should ask about what an action does to the world, not about what the
-command looks like.
+Juno allows. It asks before it sends a communication and before it spends
+money, and otherwise it gets on with the work.
 
 That is the policy. Everything below is the argument for it, an audit of what
 Juno actually does today, and the order the change has to happen in.
+
+## The directive, which reverses the posture
+
+Lacy, 2026-10-01:
+
+> "Adoption must be widespread, I prefer to start by allowing Juno to do
+> everything and then we can rein in permissions as users privacy concerns
+> arise."
+
+So the default **allows**. Not "a cautious default with a permissive option
+available": the permissive posture *is* the default. A computer-use app that
+interrupts is one nobody keeps, and the target user will not know how to answer
+a prompt, so every default that asks is a default that stops her.
+
+Two exceptions, set the same day and standing:
+
+- **Sending a communication.** "It should not send communications out without
+  approval but it should draft emails freely."
+- **Spending money.**
+
+Both for one reason: they leave the machine and cannot be recalled. Everything
+local goes through without a question.
+
+An earlier draft of this document implied the opposite posture, with a graded
+mode table and a list of acts that always ask. That is reversed. The graded
+modes still have a place, but they are what we **rein in with, later, in
+response to an actual privacy report**, not what we ship first. Do not build an
+elaborate mode system before the default is right.
+
+## Safety comes from construction, not from questions
+
+This is the organising principle, not one tactic among several.
+
+`rm` to the Trash is the model. Deleting stopped being a question not because
+the question got better copy but because the act became reversible. The shim
+made it undoable, and then the prompt had nothing to protect.
+
+So, before removing any prompt: **name the construction that makes the act
+safe, and build that.** If no construction exists, the prompt stays. Never
+remove a prompt and leave the hazard. The failure mode this rule exists to
+prevent is the one that would actually hurt someone: a permissive default
+layered on top of a removed safeguard, which is not "permissive", it is
+unchecked.
+
+The same rule in the other direction: `sudo`, disk formatting and `rm -rf /`
+have **no** construction that makes them reversible. Nothing undoes them. So
+they are not covered by the permissive default by default, and the ordering in
+"What changes, in order" is strict about how they become askable.
 
 ## Who the default is for
 
@@ -52,56 +100,117 @@ before the batch**, names the count in her terms, and offers always-allow. It
 does not ask again in that task after a yes. Nothing has moved when she
 declines.
 
-## Nothing is forbidden
+Under a permissive default this is the **only** prompt outside the two
+exceptions, which makes it the one place the permissive posture is still
+willing to interrupt, and it is the reason structured file tools are the
+critical path rather than a tidy-up. A sweeping irreversible change is exactly
+what Juno cannot currently see, because nothing it registers takes a list of
+paths. Until that exists this threshold is a number with nothing to measure.
 
-There is no tier of acts Juno refuses to do for its owner. `rm -rf`, `sudo`,
-disk formatting and the rest are acts that **require permission in every mode,
-including the permissive one**. Never silent, never automatic, always possible.
-Juno refusing outright to do something its owner asked for is not a decision
-this product gets to make for her.
+## What the default permits, and the two things it does not
 
-That is a change in kind, not in degree, and it has a trap in it. See "What
-must not happen".
+**Permitted, silently, in the default.** Delete (to the Trash), move, rename,
+create, write and edit files. Draft an email, message, post or comment. Open,
+close and focus apps. Read anything local. Browse, search and read pages. Fill
+a form. Run a shell command, inert or not. Install software. Change a system
+setting. Take a screenshot, move the mouse, type. None of this asks.
 
-## Modes set the threshold
+That list is deliberately not hedged. Installing software and changing a system
+setting are both on it, and both sat in the "always ask" column of an earlier
+draft. They are local, a person can undo them, and asking about `npm install`
+is exactly the prompt flood #645 was fixing. Lacy would not expect to be asked
+every time something touches a setting, and "always allow" is his own answer to
+the cases where he would.
 
-Five modes, spanning further than #645's three, because Lacy asked for both
-ends and the ends are real preferences.
+**Gated, in every mode including the permissive one:**
 
-| Mode | Asks about |
-|---|---|
-| Safe | Anything that changes anything, outbound or local, at any size |
-| Careful | Outbound, irreversible, or at or above the bulk threshold |
-| **Default** | Outbound and irreversible. Reversible local acts go through |
-| Trusting | Irreversible only. Outbound goes through below the bulk threshold |
-| Permissive | Only the acts in "nothing is forbidden" |
+1. **Sending a communication.** Email, message, post, comment, reply. The
+   question names the recipient and the first line, so it reads "Send this to
+   Carol?" rather than "Allow a connector write?".
+2. **Spending money.** Buy, book, pay, subscribe, transfer, or submit a form
+   that transacts.
 
-The default is a **rule**, not a point on a volume dial: ask about what leaves
-the machine and what cannot be undone. That is why #645's middle mode needs
-renaming rather than retuning. Its name, "ask about risky things", describes a
-threshold; the thing it should describe is a consequence.
+**Sharing and granting access count as sending**, not as a third exception.
+Making a file public or inviting someone to it puts data in front of a person
+who could not see it before, which is the same consequence under a different
+verb. Treating that as part of the definition keeps the exception set at two.
 
-#645's three map onto Safe, Default and Permissive. Careful and Trusting are
-new, and they exist because the bulk threshold gives them something to mean
-that is not just a louder or quieter version of the default.
+### One act I argue to add, and one I argue to leave out
 
-## Always allow is load-bearing
+**Add: emptying the Trash.** It is the single act that defeats the construction
+this whole policy rests on. Every delete Juno made reversible becomes
+irreversible, retroactively and in bulk, and nobody asking Juno to tidy a
+folder is asking for that. It costs nothing: nobody asks Juno to empty the
+Trash in the course of ordinary work, so the prompt will almost never fire. A
+gate that defends a construction and fires approximately never is the cheapest
+safety in this document.
 
-It is what makes "ask once before a bulk rename" tolerable rather than
-maddening, and it is Lacy's own answer to being asked about system settings
-repeatedly. It is no longer a convenience, so its scope matters.
+**Leave out: installing software, and running a script fetched from the
+network** (`curl | sh`, `brew install`, `npm install`). The argument for gating
+it is real: it executes third-party code with her privileges, she cannot undo
+it, and it is the main route by which a prompt-injected model does lasting
+damage. I am not arguing for it, because it is ordinary work on a developer's
+machine, the prompt would fire constantly, and a prompt that fires constantly
+trains people to dismiss prompts. That costs more safety than it buys.
+Recorded here so it is a decision rather than an oversight. If it is ever
+revisited, the thing to build first is an install log Juno can roll back, not a
+dialog.
 
-**A grant must be keyed to the consequence class and the target scope, never
-to the tool name.** #645 keys it to `(conversation, tool_name)`. With `bash` as
-the tool name that is a blanket yes: say "don't ask again" once on an install,
-and every other High-risk bash command in that conversation goes through
-unasked. Critical still asks, so today the blast is bounded. Make grants
-permanent on that key and it stops being bounded.
+## Nothing is forbidden, and the ordering that makes that safe
 
-The scope that is actually wanted:
+There is no tier of acts Juno refuses to do for its owner. `rm -rf`, `sudo` and
+disk formatting become acts that **require permission in every mode, including
+the permissive one**. Never silent, never automatic, always possible. Juno
+refusing outright to do something its owner asked for is not a decision this
+product gets to make for her.
 
-- **Act**, by consequence class: "moving files in bulk", not "the bash tool".
-- **Target**, where there is one: this folder, this recipient, this app.
+The trap is the interaction with a permissive default, and it is the one
+outcome that would actually cause harm: **a permissive default on top of a
+removed crash barrier is not permissive, it is unchecked.** So the ordering is
+strict and not negotiable.
+
+1. Build the approval route: a consequence class for escalation and
+   irreversible disk acts, a sentence a person can answer, and a floor no mode
+   waives.
+2. Only then remove the refusal in `commands::shell::refuse_forbidden_command`.
+
+Until step 1 exists, that gate keeps refusing, and the permissive default
+changes nothing about it. These acts have no construction that makes them
+reversible, which is exactly why the prompt cannot be removed and left empty.
+
+## Modes, deferred on purpose
+
+Five modes were agreed and recorded: Safe, Careful, Default, Trusting,
+Permissive. They are not the next slice.
+
+What matters now is that the default is right. A permissive mode must exist and
+the default must be it or very near it. A Safe mode is **what we rein in with,
+later, in response to an actual privacy report**, not what we ship first.
+Building a graded mode system before the default is correct is building the
+answer to a question nobody has asked yet.
+
+#645's three modes survive as the ends plus the middle. The middle one needs
+renaming rather than retuning: "ask about risky things" describes a threshold,
+and the thing it should describe is a consequence.
+
+## Always allow, now narrow but still load-bearing
+
+A permissive default takes most of the pressure off this. If Juno stops asking
+about shell work, a blanket `(conversation, "bash")` grant has almost nothing
+left to leak, so #645's scope is mostly moot.
+
+It is not entirely moot, and where it still matters it matters more:
+**the two exceptions are exactly where a grant keyed to a tool name instead of
+a consequence and a target would be a real hole.** "Always allow" on emailing
+Carol must not authorise emailing anyone else, and "always allow" on a $4
+subscription must not authorise a $4,000 one.
+
+So the grant key for the gated set is `(conversation, consequence class,
+target)`:
+
+- **Consequence class**, not tool name: "sending a message", not `bash` and not
+  `mcp__gmail__send_email`.
+- **Target**: the recipient for a send, the payee or domain for a spend.
 - **Lifetime**: the task by default, permanent only on an explicit choice.
 
 A grant that can outlive the session needs a visible place to revoke it, and
@@ -145,6 +254,27 @@ fails closed on anything it does not recognise.
 Juno has one gate built the right way and two built the wrong way. The
 consolidation is not "merge the lists". It is "make the in-process path work
 the way the CLI path already does".
+
+### Spending has no gate at all, today
+
+Worth stating plainly, because the permissive default does not create this hole
+and must not be blamed for it: **Juno cannot currently tell that it is about to
+spend money.**
+
+`browser_interact` takes `click`, `type`, `select` and `scroll`. There is no
+`submit`. Clicking a "Pay" button is `click`, which classifies Low and runs
+silently now and under any mode. The only thing that incidentally catches a
+purchase is `classify_form_fill_risk`, which goes Critical when a card number
+or CVV passes through a `type` action. If the card is already saved in the
+browser, nothing fires.
+
+`classify_browser_nav_risk` flags checkout, payment and bank URLs High, but
+that is navigation, not spending, and navigating to a checkout page is
+something the permissive default should let through.
+
+So the spending exception is not a prompt to preserve. It is a gate to build,
+and it has to be built on something structural rather than on a URL substring.
+That is step 5.
 
 ### The second allowlist, and it is dead
 
@@ -193,7 +323,7 @@ function, not after it.
 
 ## What changes, in order
 
-### Step 1, shipped here: one place that understands a shell command
+### Step 1, shipped in #648: one place that understands a shell command
 
 `src-tauri/src/shell_command.rs`. Normalisation, tokenisation, the inert
 character whitelist, the command word, and the recursive-forced-`rm` tokeniser
@@ -211,7 +341,7 @@ and gained Gate 2's `rm` flag-permutation tokeniser.
 This step does not make the classifier better. It makes it **one thing**, so
 the step that shrinks it only has to be done once.
 
-### Step 2, shipped here: deleting goes to the Trash
+### Step 2, shipped in #648: deleting goes to the Trash
 
 Juno has no trash path today and no delete tool, so the only way Juno deletes
 anything is `rm` in the bash session. The construction goes where the deleting
@@ -243,7 +373,7 @@ Failure modes, designed rather than inherited:
   also goes to the Trash. That is the intent. The cost is Trash volume, which
   is recoverable; permanent deletion is not.
 
-### Step 3, shipped here: drafts are free
+### Step 3, shipped in #648: drafts are free
 
 `cli_approval.rs` listed `draft` among the verbs that prompt, so Juno asked
 before writing a draft it had just been told to write. Drafting is local and
@@ -252,48 +382,122 @@ asking, unless the same call also sends, forwards, shares, publishes, submits,
 invites or deletes. Fleet rules 12 and 13 already make draft-only the
 sanctioned path for mail, so this aligns the code with the rule.
 
-### Step 4, next: real file tools
+### Step 4, next slice: the permissive default
 
-Move, rename, delete and write, each taking an explicit list of paths, each
-routed through the Trash where it deletes. This is the prerequisite for
-everything below it. Without it there is no count to gate on.
+The default stops asking about local work. Two pieces, and the second is the
+one that carries the risk.
 
-### Step 5, next: the severity function
+**4a. `cli_approval` allows by default.** This is where most of the asking
+happens today, and it is the cheapest change with the biggest effect, because
+it already gates by consequence at the tool boundary. The verb lists invert:
+instead of "a write verb prompts", the rule becomes "a send or a spend prompts,
+and everything else runs". That retires the prompts on `mark`, `archive`,
+`move`, `pin`, `star`, `react`, `assign`, `close`, `update`, `create`, `add`
+and `set`, each of which is local or reversible on the other side.
 
-One function, structured input, three outputs that mean something:
-reversibility, reach, blast radius. The shell becomes one input shape among
-several rather than the only one, and the substring tests shrink to the
-degraded fallback they should always have been.
+The verb matching stays, and stays failing closed on the *gated* set: a name
+Juno cannot read as either a send or a spend runs, but a name that reads as
+either one prompts. That is the correct direction now, because the default is
+permissive: the thing to be conservative about is the two exceptions, not
+everything else.
 
-### Step 6, next: `sudo` becomes askable, carefully
+**4b. `requires_approval` becomes a consequence rule.** Today it compares a
+risk level against a mode. It needs a consequence class instead, because
+"ask on High" no longer means anything: High is `rm <file>` and `npm install`,
+both of which now go through.
 
-Under "nothing is forbidden", Gate 2's `sudo` refusal becomes an approval. The
-trap: Gate 2 is not an approval gate, it is a crash barrier on a code path with
-no human attached. Making `sudo` askable means **adding the approval route
-first** and removing the refusal second. Done in the other order, "nothing is
-forbidden" quietly becomes "nothing is checked". The refusal is the thing
-holding the line until the question exists.
+The trap, and it is the whole reason this is one slice and not a one-line
+change: **deleting the High branch without adding the send and spend classes
+first would permit a payment click and a connector send in the same move.**
+Spending has no gate today (see the audit above), so there is nothing to
+preserve and everything to build. The order inside this step is: add the
+classes, prove them with tests, then change the default.
 
-### Step 7, next: the sentence never names a command
+What stays asking after 4b, and why:
 
-`describe_action` still prints `Run this in the terminal: <command>`. Under this
-policy a shell command that reaches a prompt is an install, a network-piped
-script, or an escalation, and each can be said in her terms: "Install
-left-pad?", "Run a script downloaded from example.com?", "Do this as an
-administrator?". No path, no tool name, no risk level, no shell syntax.
+| Act | Why it still asks |
+|---|---|
+| Send a communication | Leaves the machine, cannot be recalled |
+| Spend money | Same, plus it costs her money |
+| Empty the Trash | Defeats the construction every other delete relies on |
 
-### Step 8, next: the five modes and the grant surface
+What `refuse_forbidden_command` still refuses after 4b: unchanged. `sudo`,
+`doas`, the catastrophic literals, recursive forced `rm` of `/`, redirection
+into system directories. Those become askable in step 7, not here.
 
-The mode span above, the grant keyed to consequence class and target, and the
-place to revoke a permanent grant. The revoke surface ships with the grant.
+### Step 5, next: structured file tools, the critical path
+
+This is the prerequisite, as established above, and under a permissive default
+it matters more rather than less: **the one place we would still want to ask, a
+sweeping irreversible change, is exactly the place Juno currently cannot
+detect.** There is no count to read because there is no tool that takes a list
+of paths.
+
+Scope, in order, each its own PR:
+
+1. **Hoist the Trash primitive into Rust.** `/usr/bin/trash` is currently
+   invoked only from the generated shim script. Lift it to a function the shim
+   and the tools both use, so there is one definition of "delete safely" and
+   one place where "the Trash cannot take this" is decided.
+2. **Four tools**, each taking an explicit `paths: [String]`: `move_paths`,
+   `rename_path`, `delete_paths` (through the primitive), `write_file`. Each
+   routed through the existing `agent/tools/path_security.rs` for
+   canonicalisation and workspace bounds. `read_file` already exists.
+3. **Replace the dead classifier arms.** `write_file`, `edit_file`,
+   `create_file`, `str_replace_editor`, `delete_file`, `remove_file` and
+   `unlink_file` are arms for tools Juno does not register; they go, and arms
+   for the real names replace them. Pinned with a test that reads the tool
+   registry, the way `the_registered_browser_typing_tool_is_classified` does,
+   so the arms cannot drift from the registry again.
+4. **Blast radius.** `paths.len()` against `BULK_CHANGE_THRESHOLD`. Ask once,
+   before the batch, naming the count. This is the first prompt this document
+   *adds*, and it is only legitimate because step 2 gives it a real number
+   rather than a guess from a command string.
+
+Note the ordering inside this step: the tools come before the counting, and the
+classifier cleanup comes before the counting too, because counting on arms that
+point at nothing would be a safeguard disconnected from what it names.
+
+### Step 6, next: the sentence never names a command
+
+`describe_action` still prints `Run this in the terminal: <command>`. Under a
+permissive default a shell command barely ever reaches a prompt, so the
+remaining sentences are the two exceptions, and both can be said in her terms:
+"Send this to Carol?", "Pay $24 to example.com?". No path, no tool name, no
+risk level, no shell syntax. If a sentence has to name a command, the gate is
+in the wrong place.
+
+### Step 7, next: `sudo` becomes askable
+
+The approval route first, the refusal second. See "Nothing is forbidden, and
+the ordering that makes that safe". This is deliberately last among the gate
+changes, because it is the step where getting the order wrong converts a
+permissive default into an unchecked one.
+
+### Step 8, later: modes and the grant surface
+
+The five-mode span, the grant keyed to consequence and target, and the place to
+revoke a permanent grant. Deferred until the default is right and someone has
+actually asked to be asked more.
 
 ## What must not happen
 
-Moving a category from "ask" to "safe" is only legitimate once the construction
-exists and is tested. Removing the delete question without routing deletes to
-the Trash would be strictly worse than today. Removing Gate 2's refusals
-because "nothing is forbidden" before the approval route exists would be worse
-still, and it is the single most likely way to get this wrong.
+A permissive default is not a licence to remove safeguards. It is a statement
+about **questions**, not about protections, and the two are not the same thing.
+
+Three specific ways to get this wrong, in order of how likely they are:
+
+1. **Removing Gate 2's refusals because "nothing is forbidden", before the
+   approval route exists.** That is not permissive, it is unchecked, and it is
+   the one outcome that would cause real harm. The route first, the refusal
+   second, always.
+2. **Deleting the "ask on High" branch without first building the send and
+   spend classes.** High is where connector sends and payment clicks would fall
+   through, and spending has no gate of its own today, so this is a one-line
+   change that silently permits buying things.
+3. **Removing a prompt for an act with no construction behind it.** Deleting
+   stopped asking because `rm` goes to the Trash. Nothing else gets to stop
+   asking on the strength of an intention to build the construction later.
 
 #645's 60 bypass assertions stay green through every step. If one ever becomes
 the wrong test, the change that alters it says why in the test itself.
