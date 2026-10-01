@@ -14,7 +14,7 @@ import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
-import { useDragWindow } from "@/hooks/useDragWindow";
+import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
@@ -227,7 +227,6 @@ function ApprovalDirection({
 
 export function VoiceAIBar(_props: VoiceAIBarProps = {}) {
   const reducedMotion = useReducedMotion() ?? false;
-  const onDragMouseDown = useDragWindow();
   const { resizeWindowIfChanged } = useWindowSize(WINDOW_LABEL);
   const chat = useBarConversation();
 
@@ -265,6 +264,12 @@ export function VoiceAIBar(_props: VoiceAIBarProps = {}) {
 
   // ── The script ──
   const [scriptOpen, setScriptOpen] = useState(false);
+
+  // Drag from anywhere, land in a gravity well.
+  const { dragProps, swallowClickAfterDrag } = useBarDrag({
+    displayFollowPaused: scriptOpen || working,
+  });
+
   // Read through refs so a close from a timer sees the current state.
   const barRef = useRef(bar);
   barRef.current = bar;
@@ -687,7 +692,7 @@ export function VoiceAIBar(_props: VoiceAIBarProps = {}) {
   return (
     <div
       className="relative h-screen w-screen cursor-grab overflow-hidden bg-transparent select-none active:cursor-grabbing"
-      onMouseDown={onDragMouseDown}
+      {...dragProps}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onFocusCapture={() => setFocusWithin(true)}
@@ -695,6 +700,7 @@ export function VoiceAIBar(_props: VoiceAIBarProps = {}) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
       }}
       onClickCapture={(e) => {
+        if (swallowClickAfterDrag(e)) return;
         if (scriptOpen && (e.target as HTMLElement).closest("button, input, a")) engage();
       }}
     >

@@ -19,7 +19,6 @@ import {
   useCallback,
   useRef,
   FormEvent,
-  MouseEvent as ReactMouseEvent,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
@@ -27,7 +26,6 @@ import {
   availableMonitors,
   cursorPosition,
   getCurrentWindow,
-  PhysicalPosition,
 } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, Ear, EarOff, MessageSquare, Mic, Square, Type, X } from "lucide-react";
@@ -47,12 +45,12 @@ import {
   computeWells,
   nearestWell,
   wellForSlot,
-  easeOutCubic,
   SLOT,
-  type MonitorRect,
   type Well,
-  type WellSlot,
 } from "@/lib/snapWells";
+import { dockAnchorX, dockGrowsUp, monitorIndexAt, setDockSlot } from "@/lib/barDock";
+import { toMonitorRects, useDockSlot } from "@/hooks/useBarSnapWells";
+import { useBarDrag } from "@/hooks/useDragWindow";
 import { AgentRosterStrip } from "./AgentRosterStrip";
 import { BarChatPane } from "./bar/BarChatPane";
 import type { BarAppearance } from "@/components/bar/barAppearance";
@@ -168,8 +166,6 @@ export const FLOATING_BAR_DIMENSIONS = {
   PANE_HEIGHT: 360,
 };
 
-/** Drag starts once the mouse has moved this far from where it went down. */
-export const DRAG_THRESHOLD_PX = 4;
 /** A shrinking window waits for the pill's size animation before it snaps. */
 export const SHRINK_DELAY_MS = 220;
 /**
@@ -262,17 +258,6 @@ export function floatingBarWindowSize({
   };
 }
 
-/** Where the docked well puts the window's fixed horizontal edge. */
-export function dockAnchorX(dock: WellSlot | null): WindowAnchorX {
-  if (!dock) return "center";
-  return dock.fx === 0 ? "start" : dock.fx === 1 ? "end" : "center";
-}
-
-/** A well in the bottom half of its display opens the pane upward. */
-export function dockGrowsUp(dock: WellSlot | null): boolean {
-  return dock !== null && dock.fy >= 0.5;
-}
-
 /** Whether moving between two frames needs the window resized BEFORE the pill animates. */
 export function growsFrom(from: PillFrame | null, to: PillFrame): boolean {
   if (!from) return true;
@@ -319,45 +304,6 @@ export const BAR_PILL_BUTTON_PX = 32;
 /** One line of the bar's composer, and the most it may grow to. */
 export const BAR_COMPOSER_LINE_PX = 18;
 export const BAR_COMPOSER_MAX_PX = 96;
-
-/** Settle animation: min/max duration, and the travel below which it's skipped. */
-export const SNAP_MIN_MS = 160;
-export const SNAP_MAX_MS = 340;
-export const SNAP_MIN_TRAVEL_PX = 2;
-
-/**
- * Animate a window's top-left from `from` to `to` (physical px) with an
- * ease-out, so a released bar glides into its well instead of teleporting.
- */
-async function animateWindowTo(
-  win: ReturnType<typeof getCurrentWindow>,
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-): Promise<void> {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (Math.abs(dx) + Math.abs(dy) < SNAP_MIN_TRAVEL_PX) return;
-  const duration = Math.min(
-    SNAP_MAX_MS,
-    Math.max(SNAP_MIN_MS, Math.hypot(dx, dy) * 0.35),
-  );
-  const start = performance.now();
-  await new Promise<void>((resolve) => {
-    const step = () => {
-      const t = Math.min(1, (performance.now() - start) / duration);
-      const e = easeOutCubic(t);
-      void win.setPosition(
-        new PhysicalPosition(
-          Math.round(from.x + dx * e),
-          Math.round(from.y + dy * e),
-        ),
-      );
-      if (t < 1) requestAnimationFrame(step);
-      else resolve();
-    };
-    requestAnimationFrame(step);
-  });
-}
 
 /** Component name for backend interactions — MUST match backend element ids */
 const COMPONENT_ID = UI.ELEMENT_IDS_FLOATING_BAR;
@@ -662,49 +608,6 @@ function statusLabel(state: UIState, data: BarStateData): string | null {
   }
 }
 
-/** Tauri monitors as the plain rects the well math takes. */
-const toMonitorRects = (
-  mons: Array<{
-    position: { x: number; y: number };
-    size: { width: number; height: number };
-    scaleFactor: number;
-  }>,
-): MonitorRect[] =>
-  mons.map((m) => ({
-    position: { x: m.position.x, y: m.position.y },
-    size: { width: m.size.width, height: m.size.height },
-    scaleFactor: m.scaleFactor,
-  }));
-
-/**
- * Which monitor a physical point is on, or -1 when it is on none of them (the
- * gap between two displays of different heights is a real place a window's
- * corner can sit). Callers decide what "none" means for them.
- */
-const monitorIndexAt = (
-  mons: Array<{ position: { x: number; y: number }; size: { width: number; height: number } }>,
-  x: number,
-  y: number,
-): number =>
-  mons.findIndex(
-    (m) =>
-      x >= m.position.x &&
-      x < m.position.x + m.size.width &&
-      y >= m.position.y &&
-      y < m.position.y + m.size.height,
-  );
-
-/**
- * The window's size in logical pixels. Wells are computed from this, never
- * from the physical size, because the physical footprint changes with the
- * display's pixel density and a well computed for the wrong one lands the
- * bar off the far edge of a Retina screen.
- */
-const logicalWindowSize = async (win: ReturnType<typeof getCurrentWindow>) => {
-  const [size, scale] = await Promise.all([win.outerSize(), win.scaleFactor()]);
-  return { windowWidth: size.width / scale, windowHeight: size.height / scale };
-};
-
 const pillButton =
   "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/[0.12] hover:text-white";
 
@@ -756,9 +659,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // it: the pane opened downward off the bottom of the screen, and the close,
   // computed against the wrong direction, teleported the bar to the middle of
   // the display. The slot is known the moment the bar lands.
-  const [dock, setDock] = useState<WellSlot | null>(null);
-  const dockRef = useRef<WellSlot | null>(null);
-  dockRef.current = dock;
+  //
+  // It lives in the shared dock store (`lib/barDock.ts`) rather than in this
+  // component, because `useWindowSize` anchors every resize on the same edges
+  // and is not a component. It used to be local state here, which is why only
+  // the Pill grew correctly.
+  const dock = useDockSlot();
   const growUp = dockGrowsUp(dock);
   const anchorX = dockAnchorX(dock);
 
@@ -1693,7 +1599,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         // The window now has exactly the compact frame, so the resize
         // controller starts from it instead of asking for it again.
         issuedRef.current = restingFrame(dockGrowsUp(target));
-        setDock({ fx: target.fx, fy: target.fy });
+        setDockSlot(windowLabel, { fx: target.fx, fy: target.fy });
         try {
           await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y });
         } catch {
@@ -1787,195 +1693,22 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   // === DRAG ANYWHERE, SNAP INTO A WELL ===
   //
-  // A mousedown anywhere except the text input and the chat body arms a
-  // drag; moving past the threshold hands the gesture to the OS window drag
-  // and swallows the click that would otherwise fire on release. A press
-  // and release without movement is an ordinary click on the button.
+  // One gesture, shared by every appearance (`hooks/useDragWindow.ts`): a
+  // mousedown anywhere except text entry arms a drag, moving past the
+  // threshold hands the gesture to the OS window drag and swallows the click
+  // that would otherwise fire on release, and a press and release without
+  // movement is an ordinary click on the button.
   //
-  // The bar drags anywhere, but on release it glides into the nearest well —
-  // the tidy anchor points around every display (corners + edge-midpoints).
-  // The user aims roughly; the wells make it land deliberately.
-
-  const dragArmRef = useRef<{ x: number; y: number } | null>(null);
-  const draggedRef = useRef(false);
-  // Set the moment a drag hands off to the OS; consumed once on release to
-  // settle the bar into the nearest well.
-  const snapArmedRef = useRef(false);
-  const snapAnimatingRef = useRef(false);
-  // Whether the snap-well drop indicator overlay is currently shown, so we
-  // hide it exactly once on release regardless of which settle path fires.
-  const snapOverlayShownRef = useRef(false);
-
-  /**
-   * On release after a drag, glide the bar into the nearest well — the tidy
-   * anchor points around every display (corners and edge-midpoints). The bar
-   * still drags anywhere; the wells only decide where it lands.
-   */
-  const settleIntoWell = useCallback(async () => {
-    // Hide the drop indicator overlay on any release path, even if the settle
-    // below no-ops (drag not armed, or already consumed by another path).
-    if (snapOverlayShownRef.current) {
-      snapOverlayShownRef.current = false;
-      void emit(EVENTS.SNAP_WELLS_HIDE);
-    }
-    if (!snapArmedRef.current || snapAnimatingRef.current) return;
-    snapArmedRef.current = false;
-    try {
-      const win = getCurrentWindow();
-      const [pos, logical, monitors] = await Promise.all([
-        win.outerPosition(),
-        logicalWindowSize(win),
-        availableMonitors(),
-      ]);
-      if (!monitors.length) return;
-      const wells = computeWells(toMonitorRects(monitors), { ...logical, includeCenter: true });
-      const target = nearestWell({ x: pos.x, y: pos.y }, wells);
-      if (!target) return;
-      snapAnimatingRef.current = true;
-      await animateWindowTo(win, { x: pos.x, y: pos.y }, { x: target.x, y: target.y });
-      // The well decides the growth direction and the anchored column from
-      // here on; remember where it landed so the bar reopens here next launch.
-      setDock({ fx: target.fx, fy: target.fy });
-      try {
-        await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y });
-      } catch (error) {
-        console.debug("FloatingBar: persist well failed:", error);
-      }
-    } catch (error) {
-      console.debug("FloatingBar: settle into well failed:", error);
-    } finally {
-      snapAnimatingRef.current = false;
-    }
-  }, []);
-
-  // The cursor moved to another display (backend poll): re-home the compact pill
-  // to the same drag-well slot on that display, so it is always where the user
-  // is looking. Only the idle pill follows — a dragging bar or an open chat pane
-  // is left where it is.
-  const handleCursorDisplayChange = useCallback(
-    async ({ x, y }: { x: number; y: number }) => {
-      if (paneOpen || isWorking) return;
-      if (snapArmedRef.current || snapAnimatingRef.current) return;
-      const slot = dockRef.current;
-      if (!slot) return;
-      const contains = (
-        m: { position: { x: number; y: number }; size: { width: number; height: number } },
-        px: number,
-        py: number,
-      ) =>
-        px >= m.position.x &&
-        px < m.position.x + m.size.width &&
-        py >= m.position.y &&
-        py < m.position.y + m.size.height;
-      try {
-        const win = getCurrentWindow();
-        const [logical, pos, mons] = await Promise.all([
-          logicalWindowSize(win),
-          win.outerPosition(),
-          availableMonitors(),
-        ]);
-        if (!mons.length) return;
-        const targetIdx = mons.findIndex((m) => contains(m, x, y));
-        if (targetIdx < 0) return;
-        // Already on the cursor's display: nothing to do.
-        const barIdx = mons.findIndex((m) => contains(m, pos.x, pos.y));
-        if (barIdx === targetIdx) return;
-        const wells = computeWells(toMonitorRects(mons), { ...logical, includeCenter: true });
-        // The same place on the new display: same corner, same padding, its
-        // own size and pixel density, so centre stays centre and a corner
-        // stays a corner instead of the old physical coordinates landing
-        // somewhere else (or off-screen) on a display of a different shape.
-        const target = wellForSlot(slot, targetIdx, wells);
-        if (!target) return;
-        await win.setPosition(new PhysicalPosition(target.x, target.y));
-        setDock({ fx: target.fx, fy: target.fy });
-        try {
-          await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y });
-        } catch {
-          // best effort persist
-        }
-      } catch (error) {
-        console.debug("FloatingBar: cursor-follow move failed:", error);
-      }
-    },
-    [paneOpen, isWorking],
-  );
-
-  useEffect(() => {
-    const unlisteners: Array<() => void> = [];
-    let active = true;
-    void (async () => {
-      const fn = await listen<{ x: number; y: number }>(
-        EVENTS.BAR_CURSOR_DISPLAY_CHANGED,
-        (event) => void handleCursorDisplayChange(event.payload),
-      );
-      if (active) unlisteners.push(fn);
-      else fn();
-    })();
-    return () => {
-      active = false;
-      unlisteners.forEach((fn) => fn());
-    };
-  }, [handleCursorDisplayChange]);
-
-  const onRootMouseDown = useCallback((e: ReactMouseEvent) => {
-    if (e.button !== 0) return;
-    const target = e.target as HTMLElement;
-    draggedRef.current = false;
-    if (target.closest("input, textarea, [data-no-drag]")) return;
-    dragArmRef.current = { x: e.clientX, y: e.clientY };
-  }, []);
-
-  const onRootMouseMove = useCallback((e: ReactMouseEvent) => {
-    const start = dragArmRef.current;
-    if (!start) return;
-    if (
-      Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) <
-      DRAG_THRESHOLD_PX
-    )
-      return;
-    dragArmRef.current = null;
-    draggedRef.current = true;
-    snapArmedRef.current = true;
-    e.preventDefault();
-    const win = getCurrentWindow();
-    // Show the snap-well drop indicator overlay for the length of the drag.
-    if (!snapOverlayShownRef.current) {
-      snapOverlayShownRef.current = true;
-      logicalWindowSize(win)
-        .then((logical) => emit(EVENTS.SNAP_WELLS_SHOW, logical))
-        .catch((error) =>
-          console.debug("FloatingBar: snap-wells-show failed:", error),
-        );
-    }
-    win
-      .startDragging()
-      .catch((error) => console.debug("FloatingBar: startDragging failed:", error));
-  }, []);
-
-  const onRootMouseUp = useCallback(() => {
-    dragArmRef.current = null;
-  }, []);
-
-  const onRootClickCapture = useCallback(
-    (e: ReactMouseEvent) => {
-      if (!draggedRef.current) return;
-      draggedRef.current = false;
-      e.stopPropagation();
-      e.preventDefault();
-      void settleIntoWell();
-    },
-    [settleIntoWell],
-  );
-
-  // A drag that ends off the pill (fast flick, release outside) never fires a
-  // click, so a window-level mouseup is the reliable settle trigger; whichever
-  // path fires first disarms the other.
-  useEffect(() => {
-    const onUp = () => void settleIntoWell();
-    window.addEventListener("mouseup", onUp, true);
-    return () => window.removeEventListener("mouseup", onUp, true);
-  }, [settleIntoWell]);
+  // On release the window glides into the nearest well and the dock store is
+  // told where it landed. All of that used to live here, which is why the
+  // Pill was the only look with gravity wells; it is now wherever the drag
+  // hook is called, so a look added later gets it with no wiring.
+  //
+  // The display-follow is paused while the chat pane is open or the agent is
+  // working: only the idle pill follows the cursor between displays.
+  const { dragProps, swallowClickAfterDrag } = useBarDrag({
+    displayFollowPaused: paneOpen || isWorking,
+  });
 
   // === RENDER ===
 
@@ -2044,10 +1777,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         anchorX === "start" ? "items-start" : anchorX === "end" ? "items-end" : "items-center",
       )}
       style={{ padding: BAR_PAD }}
-      onMouseDownCapture={onRootMouseDown}
-      onMouseMove={onRootMouseMove}
-      onMouseUp={onRootMouseUp}
-      onClickCapture={onRootClickCapture}
+      {...dragProps}
+      onClickCapture={swallowClickAfterDrag}
       // Through the same verified path the native tracking area uses. These
       // used to set `hovered` directly, which is the flicker: growing the
       // window under a resting cursor fires a DOM mouseleave with no

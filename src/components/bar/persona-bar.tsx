@@ -15,7 +15,7 @@ import { Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { COMMANDS, EVENTS, UI } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
-import { useDragWindowWithThreshold } from "@/hooks/useDragWindow";
+import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
@@ -204,7 +204,6 @@ interface PersonaBarProps {
 
 export function PersonaBar(_props: PersonaBarProps) {
   const reducedMotion = useReducedMotion() ?? false;
-  const drag = useDragWindowWithThreshold();
   const { resizeWindowIfChanged } = useWindowSize(WINDOW_LABEL);
   const chat = useBarConversation();
 
@@ -245,6 +244,12 @@ export function PersonaBar(_props: PersonaBarProps) {
   const hasAnswerContent = visibleText.length > 0 || spokenText.length > 0;
   const streaming = !!answer?.isStreaming;
   const working = isWorkingState(bar.barState) || chat.isProcessing;
+
+  // Drag from anywhere, land in a gravity well. A tap still reaches the head:
+  // the gesture only becomes a drag past the movement threshold.
+  const { dragProps, swallowClickAfterDrag } = useBarDrag({
+    displayFollowPaused: working,
+  });
 
   // ── Juno's bubble: open and close ──
   const [answerOpen, setAnswerOpen] = useState(false);
@@ -681,9 +686,7 @@ export function PersonaBar(_props: PersonaBarProps) {
       data-testid="avatar-root"
       data-open={open ? "true" : "false"}
       data-facing-up={facingUp ? "true" : "false"}
-      onMouseDown={drag.onMouseDown}
-      onMouseMove={drag.onMouseMove}
-      onMouseUp={drag.onMouseUp}
+      {...dragProps}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onFocusCapture={() => setFocusWithin(true)}
@@ -691,6 +694,7 @@ export function PersonaBar(_props: PersonaBarProps) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
       }}
       onClickCapture={(e) => {
+        if (swallowClickAfterDrag(e)) return;
         if (answerOpen && (e.target as HTMLElement).closest("button, input, a")) engage();
       }}
     >

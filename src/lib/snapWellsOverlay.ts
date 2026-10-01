@@ -10,6 +10,10 @@
  * the overlay's local CSS space so the cut-out holes line up with where the bar
  * will actually land, across displays with different scale factors.
  *
+ * Which of those holes is brightened is decided in physical pixels, not here:
+ * see `predictedWindowOrigin` in `./barDock` and the highlight poll in
+ * `components/SnapWellsOverlay.tsx`.
+ *
  * Kept free of Tauri imports so it can be unit tested without a running window.
  */
 
