@@ -175,6 +175,13 @@ Safe mode sees it" rule protects nothing: a real file write arrives as
 `smart_create_file`, `str_replace_based_edit_tool`, or bash, and none of the
 three is classified.
 
+`write_file` and `open_url` do appear as `ToolDefinition`s, in
+`src/tools/mod.rs::list_tools`. That function has **no callers**: the other
+`list_tools` hits in the tree are trait methods on the real tool providers. It
+is a catalogue of around twenty tool definitions that nothing registers, which
+is why grepping for the name finds something and the model never sees it. It is
+also why the classifier's file arms looked plausible for so long.
+
 So the enabling work for this whole policy is **give Juno real file tools**:
 move, rename, delete, and write, each taking an explicit list of paths. Then
 blast radius is `paths.len()`, reversibility is a property of the tool, and the
