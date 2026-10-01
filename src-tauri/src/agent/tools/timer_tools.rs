@@ -819,7 +819,12 @@ mod timer_tools_impl {
     /// threshold of 0 means "any change at all" rather than "fire on the first
     /// tick whether or not anything moved".
     pub(super) fn change_detected(ratio: f64, threshold: f32) -> bool {
-        ratio > 0.0 && ratio >= f64::from(threshold)
+        // Compare in the threshold's own precision. Widening 0.1f32 to f64
+        // gives 0.10000000149..., so a ratio of exactly 0.1 never reached a
+        // threshold of 0.1 and a watch asked to fire at 10% did not fire at
+        // 10%. The zero test stays in f64 so a perfectly still screen is
+        // still exactly zero.
+        ratio > 0.0 && (ratio as f32) >= threshold
     }
 
     /// Capture the watched region of the screen.
