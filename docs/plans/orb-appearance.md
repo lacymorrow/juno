@@ -129,7 +129,7 @@ The orb column is what the canvas does. The words column is what the panel shows
 | finishing | green bloom to 84%, once | none | 300ms (Rust: Default) |
 | success | green bloom, once | none | 300ms |
 | error | one red object (the three colours collapse), one inward flinch of 12% over 560ms, then holds | the error itself, in red | 3s (Rust: Default) or Escape |
-| stopping | base hue dimming, 40% chroma, 70% bright, 66%, slow turn | none | Rust: Default |
+| stopping | base hue dimming, 45% chroma, 72% bright, 66%, slow turn | none | Rust: Default |
 
 Local conditions, layered on top:
 
@@ -164,8 +164,6 @@ Eight uniforms, each of them something a person can see.
 Four decisions inside that table are the design:
 
 - **Rest is quiet, not faint.** The first pass had rest at 0.55 bright and 0.35 chroma, which looked right on a light desktop and all but vanished on a black one. The Orb has no chrome, so there is no separation glow to fall back on the way the pill has one: the ring itself has to carry it. Rest is now 0.82 and 0.5, which reads on both. A test holds a floor under every resting state so a later tuning pass cannot quietly drop back.
-
-
 - **`uTime` is advanced here, not read from the frame clock.** That is what makes `flow: 0` a freeze rather than a slow drift, and a freeze is what an approval needed.
 - **Thinking is motion, not a colour.** Working keeps the orb's own violet and cyan and says the work through turning, a quickening pulse and a racing inside. Only three hues exist: the orb's own, cool for the open microphone, green for your words landing and for done. Each one is a message that must not be missed, which is the opposite of the six pastel buckets this replaced.
 - **`uMono` exists for exactly one state.** A failure must not read as a mood, so the triad collapses into one red object. A test asserts no other state ever sets it.
