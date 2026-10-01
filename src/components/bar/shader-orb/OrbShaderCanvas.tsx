@@ -434,9 +434,14 @@ export function OrbShaderCanvas({ drive, frameloop, onSettled, size }: OrbShader
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size]);
 
+  // Checked after every render, not only when `frameloop` changes. Two state
+  // updates can batch into one render: the loop's own "I have gone to sleep"
+  // and a bar-state-update's "stay awake". The prop then never transitions,
+  // and a dependency array would leave a sleeping loop with nothing to wake
+  // it. Waking an awake loop is a no-op, so this is the cheap side to err on.
   useEffect(() => {
     if (frameloop === "always") wakeRef.current?.();
-  }, [frameloop]);
+  });
 
   return (
     <div
