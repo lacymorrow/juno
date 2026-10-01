@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.62] - 2026-10-01
+
+### Fixed
+
+- **audio:** the default voice engine needs no API key (#669) (cd133a58)
+
 ## [0.8.61] - 2026-10-01
 
 ### Fixed
@@ -744,7 +750,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.61...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.62...HEAD
+[0.8.62]: https://github.com/lacymorrow/juno/compare/cua-v0.8.61...v0.8.62
 [0.8.61]: https://github.com/lacymorrow/juno/compare/cua-v0.8.60...v0.8.61
 [0.8.58]: https://github.com/lacymorrow/juno/compare/cua-v0.8.57...v0.8.58
 [0.8.57]: https://github.com/lacymorrow/juno/compare/cua-v0.8.56...v0.8.57
