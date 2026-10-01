@@ -14,6 +14,19 @@ name: Build branch
 # main commit, which `juno-build main` reuses without building.
 on:
   workflow_dispatch:
+    inputs:
+      # Apple Silicon by default, because that is what everyone on the team
+      # runs and a universal build compiles both halves for twice the wait.
+      # `universal-apple-darwin` is how a branch gets onto an Intel Mac at all
+      # (graphite) — `juno-build --universal <branch>` passes it.
+      target:
+        description: "Rust target triple to build"
+        required: false
+        default: aarch64-apple-darwin
+        type: choice
+        options:
+          - aarch64-apple-darwin
+          - universal-apple-darwin
   push:
     branches: [main]
 
@@ -28,6 +41,10 @@ permissions:
 jobs:
   build:
     runs-on: macos-latest
+
+    env:
+      # The `push:` trigger supplies no inputs, so default here as well.
+      BUILD_TARGET: ${{ inputs.target || 'aarch64-apple-darwin' }}
 
     steps:
       # Full history so build.rs can stamp the build number (commit count).
@@ -46,7 +63,10 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
-          targets: aarch64-apple-darwin
+          # Both, always: `universal-apple-darwin` is not itself an installable
+          # target, it is the two halves lipo'd together, so a universal build
+          # needs them both present.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
@@ -103,7 +123,7 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          bunx tauri build --target aarch64-apple-darwin --bundles app \
+          bunx tauri build --target "$BUILD_TARGET" --bundles app \
             --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       # An artifact is a zip, which drops the executable bits and symlinks an
@@ -112,9 +132,13 @@ jobs:
         id: pkg
         run: |
           set -euo pipefail
-          app="target/aarch64-apple-darwin/release/bundle/macos/Juno.app"
+          app="target/$BUILD_TARGET/release/bundle/macos/Juno.app"
           [ -d "$app" ] || { echo "no Juno.app at $app" >&2; exit 1; }
           codesign --verify --deep --strict "$app"
+          # Say which architectures actually made it in. A universal build that
+          # quietly produced one slice would install and run fine on the runner
+          # and fail only on the Intel Mac it was built for.
+          lipo -info "$app/Contents/MacOS/juno" || true
           tar -czf Juno.app.tar.gz -C "$(dirname "$app")" Juno.app
           echo "name=juno-$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
 

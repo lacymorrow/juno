@@ -342,7 +342,26 @@ fn whisper_path_on_disk(app: &AppHandle, def: &ModelDef) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
+/// Whether the running Mac can use this model at all, before asking whether it
+/// is on disk.
+///
+/// Parakeet's loader is compiled on Apple Silicon only (`parakeet-rs` ->
+/// `ort-sys` has no prebuilt ONNX Runtime for `x86_64-apple-darwin`), so on
+/// Intel the files can be present — an app-data folder copied from an Apple
+/// Silicon Mac is enough — and still load nothing.
+fn arch_supports(def: &ModelDef) -> bool {
+    !def.arm64_only || is_arm64(&current_arch())
+}
+
+/// On-disk *and* runnable. The architecture check comes first on purpose: it is
+/// what keeps `active_model_id` from naming a model that `catalog_for_arch`
+/// leaves out of the list, which would show the Models pane with no active row,
+/// and what keeps `use_stt_model` from switching to an engine this build does
+/// not contain.
 fn is_downloaded(app: &AppHandle, def: &ModelDef) -> bool {
+    if !arch_supports(def) {
+        return false;
+    }
     match def.engine {
         Engine::Whisper => whisper_path_on_disk(app, def).is_some(),
         Engine::Parakeet => {
@@ -527,7 +546,7 @@ pub fn start_download(
     activate_when_done: bool,
 ) -> Result<(), String> {
     let def = find_def(model_id).ok_or_else(|| format!("Unknown dictation model: {}", model_id))?;
-    if def.arm64_only && !is_arm64(&current_arch()) {
+    if !arch_supports(def) {
         return Err(format!("{} is only available on Apple Silicon.", def.name));
     }
     if is_downloaded(app, def) {
@@ -931,6 +950,12 @@ async fn persist_choice(app: &AppHandle, def: &ModelDef, settle_offer: bool) -> 
 pub async fn use_stt_model(model_id: String, app: AppHandle) -> Result<(), String> {
     let def =
         find_def(&model_id).ok_or_else(|| format!("Unknown dictation model: {}", model_id))?;
+    // Before "not downloaded", because on Intel a Parakeet row would be
+    // permanently undownloadable and "not downloaded yet" would be a lie
+    // suggesting a download would fix it.
+    if !arch_supports(def) {
+        return Err(format!("{} is only available on Apple Silicon.", def.name));
+    }
     if !is_downloaded(&app, def) {
         return Err(format!("{} is not downloaded yet.", def.name));
     }
@@ -1144,6 +1169,36 @@ mod tests {
         assert_eq!(tier_for("x86_64", "large-v3-turbo"), Some(BALANCED));
         assert_eq!(tier_for("x86_64", "parakeet-ctc"), None);
         assert_eq!(recommended_id("x86_64"), "large-v3-turbo");
+    }
+
+    /// `catalog_for_arch` hides Parakeet on Intel, but a model id can also
+    /// arrive from a synced settings store, from `apply_persisted_stt_model` at
+    /// startup, or from an `invoke` the UI never rendered. `arch_supports` is
+    /// the gate on those paths, and it has to track the *running* machine, not
+    /// the catalog's opinion of one.
+    #[test]
+    fn arm64_only_models_are_unusable_off_apple_silicon() {
+        let parakeet = find_def(PARAKEET_ID).expect("parakeet is in the catalog");
+        assert!(parakeet.arm64_only, "Parakeet is the gated engine");
+        assert_eq!(arch_supports(parakeet), is_arm64(&current_arch()));
+
+        // Nothing else got caught in the gate: Whisper builds on every Mac, so
+        // every Whisper row must stay reachable.
+        for def in CATALOG.iter().filter(|m| m.engine == Engine::Whisper) {
+            assert!(arch_supports(def), "{} should run anywhere", def.id);
+        }
+    }
+
+    /// The gate is only ever Parakeet. A second `arm64_only` entry would narrow
+    /// what an Intel Mac can do without anyone deciding to.
+    #[test]
+    fn parakeet_is_the_only_arm64_only_entry() {
+        let gated: Vec<_> = CATALOG
+            .iter()
+            .filter(|m| m.arm64_only)
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(gated, [PARAKEET_ID]);
     }
 
     #[test]

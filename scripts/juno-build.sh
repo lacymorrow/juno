@@ -106,14 +106,22 @@ extract() {
 }
 
 # ---------------------------------------------------------------- release tag
+# Tauri names the updater tarball after the build target, so releases carry
+# different asset names over time: `Juno_universal.app.tar.gz` up to v0.6.0,
+# `Juno_aarch64.app.tar.gz` from 65b4d20b to v0.8.x, universal again from
+# LAC-4089. Match the shape rather than one name so installing an older release
+# keeps working.
 fetch_release() {
-  local tag="$1" dir="$cache/$1"
+  local tag="$1" dir="$cache/$1" tarball
   if [[ ! -d "$dir/Juno.app" ]]; then
     mkdir -p "$dir"
     say "Downloading $tag..."
-    gh release download "$tag" --repo "$repo" --pattern 'Juno_aarch64.app.tar.gz' --dir "$dir" --clobber \
+    gh release download "$tag" --repo "$repo" --pattern 'Juno_*.app.tar.gz' --dir "$dir" --clobber \
       || die "$tag has no app download yet; its build may still be running"
-    extract "$dir/Juno_aarch64.app.tar.gz" "$dir"
+    # --pattern can match the .sig alongside the tarball; take the tarball.
+    tarball=$(find "$dir" -maxdepth 1 -name 'Juno_*.app.tar.gz' | head -1)
+    [[ -n "$tarball" ]] || die "$tag published no .app.tar.gz"
+    extract "$tarball" "$dir"
   fi
   install_app "$dir/Juno.app" "$tag"
 }
