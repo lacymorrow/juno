@@ -369,15 +369,35 @@ export function useSettings() {
 	useEventListener<{ agent?: { execution_mode?: string } }>(
 		SETTINGS.EVENTS_SETTINGS_CHANGED,
 		(payload) => {
+			// This event carries the whole settings file, so everything the
+			// cache above is holding is now out of date. Dropping all of it,
+			// rather than the one key this handler goes on to read, is what
+			// keeps a pane added later honest: it follows its own section
+			// event and gets fresh values when it asks for them.
+			invalidateCache();
 			const mode = payload?.agent?.execution_mode;
 			if (!mode) return;
-			invalidateCache("agentMode");
 			setAgentMode(mode);
 		},
 	);
 
+	/**
+	 * Read every setting back out of Rust and redraw from it.
+	 *
+	 * The cache below exists to collapse the burst of identical reads several
+	 * windows make while they mount, and it holds each value for 30 seconds.
+	 * An explicit load is not part of that burst: it is somebody asking what
+	 * the settings are *now*, so it starts by throwing the cache away.
+	 *
+	 * Without that, "Reset all settings" wrote the defaults, reloaded, and was
+	 * served the pre-reset values straight back out of the cache, so every
+	 * pane redrew exactly what it already showed while the toast said the
+	 * reset had worked. `ongoingRequests` still dedupes genuinely concurrent
+	 * calls, which is the part of the cache that was earning its keep.
+	 */
 	const loadAllSettings = useCallback(async () => {
 		setIsLoading(true);
+		invalidateCache();
 		try {
 			// Load all settings with caching to prevent duplicate API calls during startup
 			const [

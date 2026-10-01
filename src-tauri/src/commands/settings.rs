@@ -430,9 +430,17 @@ pub async fn set_advanced_settings_enabled(
         })
 }
 
-/// Reset all settings to defaults
+/// Reset all settings to defaults that work on this machine.
+///
+/// The policy lives in [`crate::settings::reset`], which is also where the
+/// tests for it are. This is the Tauri door onto it and nothing more: a second
+/// copy of "what the defaults are" here is how the compiled-in default
+/// provider got written over a machine that has no key for it.
+/// Returns the display name of the provider the reset settled on, so the
+/// confirmation can name it. Which provider a reset lands on is the outcome
+/// the person most needs to know and the one they could least see.
 #[command]
-pub async fn reset_centralized_settings(app_handle: AppHandle) -> Result<(), String> {
+pub async fn reset_centralized_settings(app_handle: AppHandle) -> Result<String, String> {
     let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
         format_error(
             templates::FAILED_TO_INITIALIZE,
@@ -441,14 +449,14 @@ pub async fn reset_centralized_settings(app_handle: AppHandle) -> Result<(), Str
         )
     })?;
 
-    // Reset to defaults
-    let default_settings = AppSettings::default();
-    settings_manager
-        .save_all_settings(&default_settings)
+    let active_provider = crate::settings::reset::reset_to_available_defaults(&settings_manager)
         .await
         .map_err(|e| format_error(templates::FAILED_TO_RESTORE, actions::SETTINGS, e))?;
 
-    Ok(())
+    let display_name = crate::agent::providers::types::Provider::from_str(&active_provider)
+        .map(|p| p.display_name().to_string());
+
+    Ok(display_name.unwrap_or(active_provider))
 }
 
 /// Export all settings as JSON string
