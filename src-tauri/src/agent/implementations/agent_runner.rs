@@ -25,6 +25,27 @@ use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing a
 pub(crate) const BATCH_HALT_SKIPPED_MESSAGE: &str =
     "Not executed: an earlier computer action in this turn failed.";
 
+/// The text of a tool result as the model will actually read it.
+///
+/// This is the other half of the lying problem, and it was upstream of the
+/// prompt. `format_task_output` summarises a multi-field object as "Result
+/// with N fields", and that string is what went into the conversation. So a
+/// bash call that failed arrived as `Result with 2 fields`: its exit code and
+/// its error text never reached the model, which left "it worked" as the only
+/// reading available. `{"windows": [...], "count": 3}` from
+/// `list_visible_windows` arrived the same way.
+///
+/// A result with more than one field keeps its JSON. One-field objects and
+/// bare strings keep the old unwrapping, which is what makes a file read or a
+/// command's output read as text rather than as a quoted blob.
+pub(crate) fn tool_result_content(output: &serde_json::Value) -> String {
+    match output {
+        serde_json::Value::Object(map) if map.len() > 1 => serde_json::to_string(output)
+            .unwrap_or_else(|_| crate::agents::base_agent::format_task_output(output)),
+        _ => crate::agents::base_agent::format_task_output(output),
+    }
+}
+
 /// True when a tool call should be treated as a failure.
 ///
 /// Two failure shapes exist and both must halt the batch:
@@ -68,7 +89,45 @@ where
     /// Set before `run` rather than passed through it, so the trait signature
     /// every implementor shares stays as it is.
     pending_images: Option<Vec<String>>,
+    /// The app this run opened or focused, and when Juno last looked at it.
+    ///
+    /// Per-run state, because the question it answers is per-task: "is the app
+    /// I am working in still there?" A run that never touched an app never
+    /// checks.
+    watched_app: Option<WatchedApp>,
 }
+
+/// What [`DefaultAgentRunner::check_before_tool`] decided about one call.
+enum PreCheck {
+    /// Nothing to observe and nothing in the way.
+    Proceed,
+    /// Run it, then look at this app and report what changed.
+    Watch {
+        app: String,
+        kind: crate::agent::app_observation::AppCommand,
+        before: crate::agent::app_observation::Presence,
+    },
+    /// Do not run it. Hand the model this instead, which says what Juno found
+    /// and asks the person what to do.
+    Refuse(serde_json::Value),
+}
+
+/// An app this run acted on, and the last time Juno confirmed it was running.
+#[derive(Debug, Clone)]
+struct WatchedApp {
+    name: String,
+    last_seen_running: std::time::Instant,
+}
+
+/// How stale a "the app is running" observation may be before the next screen
+/// action re-checks it.
+///
+/// This number is the whole cost control. One check is a single `osascript`
+/// call, about 0.8 s on zero, so checking before every keystroke in a typed
+/// sentence would cost more than the typing. Two seconds is long enough that
+/// a burst of actions pays for one check, and short enough that a person who
+/// closes the app has closed it before the next click.
+const LIVENESS_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl<M, T> DefaultAgentRunner<M, T>
 where
@@ -96,6 +155,7 @@ where
             app_handle: Arc::new(app_handle), // Store AppHandle
             session_id: None,
             pending_images: None,
+            watched_app: None,
         }
     }
 
@@ -123,6 +183,7 @@ where
             app_handle: Arc::new(app_handle), // Store AppHandle
             session_id: None,
             pending_images: None,
+            watched_app: None,
         }
     }
 
@@ -217,6 +278,124 @@ where
         }
 
         false
+    }
+
+    /// What has to happen around one tool call for Juno to be honest about it.
+    ///
+    /// Three outcomes, and the reasoning for each is in the variant.
+    async fn check_before_tool(&mut self, tool_call: &crate::agent::core::ToolCall) -> PreCheck {
+        use crate::agent::app_observation as observation;
+
+        // A command that launches, focuses or drives an app: look before, so
+        // "it was already running" and "I launched it" stay separable, and
+        // watch it afterwards.
+        if let Some(target) = observation::app_command_target(&tool_call.name, &tool_call.input) {
+            let observed = observation::observe(&target.app).await;
+            // `NotFound` means nothing on this Mac answers to the name: no
+            // bundle on disk and no process running under it. AppleScript
+            // resolves a literal app name when it compiles the script, so such
+            // a command puts a modal picker in front of the person, listing
+            // every app they have, and no runtime check can take that back.
+            // It does not run. `open -a` fails cleanly instead of prompting,
+            // so it is not gated here.
+            if target.names_app_literally
+                && matches!(
+                    observed.presence,
+                    crate::agent::app_observation::Presence::NotFound
+                )
+            {
+                log::warn!(
+                    "Refusing a command that addresses an app Juno cannot find: {}",
+                    target.app
+                );
+                return PreCheck::Refuse(observation::unknown_app_result(&target.app));
+            }
+            return PreCheck::Watch {
+                app: target.app,
+                kind: target.kind,
+                before: observed.presence,
+            };
+        }
+
+        // An action on whatever is on screen, in a run that opened an app:
+        // confirm the app is still there before clicking where it used to be.
+        if observation::acts_on_screen(&tool_call.name, &tool_call.input) {
+            let Some(watched) = self.watched_app.clone() else {
+                return PreCheck::Proceed;
+            };
+            if watched.last_seen_running.elapsed() < LIVENESS_MAX_AGE {
+                return PreCheck::Proceed;
+            }
+            let action = tool_call
+                .input
+                .get("action")
+                .and_then(|a| a.as_str())
+                .unwrap_or(tool_call.name.as_str());
+            let presence = observation::observe(&watched.name).await.presence;
+            match observation::screen_action_for(&watched.name, action, presence) {
+                observation::ScreenAction::Act => {
+                    if presence.is_running() {
+                        self.watched_app = Some(WatchedApp {
+                            name: watched.name,
+                            last_seen_running: std::time::Instant::now(),
+                        });
+                    }
+                }
+                observation::ScreenAction::Ask(output) => {
+                    log::info!(
+                        "{} closed mid-task; asking instead of acting on it",
+                        watched.name
+                    );
+                    // Stop watching: the question has been asked once, and
+                    // asking it again on every later action would nag.
+                    self.watched_app = None;
+                    return PreCheck::Refuse(output);
+                }
+            }
+        }
+
+        PreCheck::Proceed
+    }
+
+    /// Put what Juno saw after a launch into the result the model reads.
+    ///
+    /// This is the mechanism, not the prompt: the model is handed the observed
+    /// state, so "Spotify is open on your screen" is unsupported unless Juno
+    /// actually saw that.
+    async fn attach_observation(
+        &mut self,
+        app: String,
+        kind: crate::agent::app_observation::AppCommand,
+        before: crate::agent::app_observation::Presence,
+        tool_result: Result<crate::agent::core::ToolResult, AgentError>,
+    ) -> Result<crate::agent::core::ToolResult, AgentError> {
+        // A call that failed outright is already an honest answer; there is
+        // nothing to add and nothing launched to observe.
+        let mut result = tool_result?;
+
+        let report = crate::agent::app_observation::settle(&app, kind, before).await;
+        log::info!("Observed after acting on {}: {}", app, report.sentence());
+
+        self.watched_app = report.after.presence.is_running().then(|| WatchedApp {
+            name: app,
+            last_seen_running: std::time::Instant::now(),
+        });
+
+        match &mut result.output {
+            serde_json::Value::Object(map) => {
+                map.insert("app_state".to_string(), report.to_json());
+            }
+            other => {
+                // A bare string or number result: keep it, and add the
+                // observation alongside rather than replacing it.
+                let previous = other.clone();
+                *other = serde_json::json!({
+                    "output": previous,
+                    "app_state": report.to_json(),
+                });
+            }
+        }
+        Ok(result)
     }
 
     async fn transition_state(&mut self, new_state: AgentState) {
@@ -373,19 +552,45 @@ where
                 );
             }
 
+            // Look before claiming, and notice when the world changed under
+            // this run. Either can decide the call must not run at all.
+            let (refusal, watch) = match self.check_before_tool(tool_call).await {
+                PreCheck::Proceed => (None, None),
+                PreCheck::Refuse(output) => (Some(output), None),
+                PreCheck::Watch { app, kind, before } => (None, Some((app, kind, before))),
+            };
+
             // Race tool execution against the cancellation signal so slow tools
             // (browser navigation, network requests) are interrupted immediately
             // when the user presses Escape — not just between tools.
             let mut cancel_for_tool = cancel_rx.clone();
-            let tool_result = tokio::select! {
-                result = self.tool_provider.execute_tool(tool_call.clone()) => result,
-                _ = cancel_for_tool.wait_for(|&v| v) => {
-                    log::info!(
-                        "Tool '{}' interrupted by cancellation signal during execution (tool {}/{} in batch)",
-                        tool_call.name, i + 1, batch.len()
-                    );
-                    return Ok(false);
+            let tool_result = if let Some(output) = refusal {
+                // Declined before it ran, so there is nothing to race.
+                Ok(crate::agent::core::ToolResult {
+                    call_id: tool_call.id.clone(),
+                    output,
+                })
+            } else {
+                tokio::select! {
+                    result = self.tool_provider.execute_tool(tool_call.clone()) => result,
+                    _ = cancel_for_tool.wait_for(|&v| v) => {
+                        log::info!(
+                            "Tool '{}' interrupted by cancellation signal during execution (tool {}/{} in batch)",
+                            tool_call.name, i + 1, batch.len()
+                        );
+                        return Ok(false);
+                    }
                 }
+            };
+
+            // The observation rides back with the result, so the model's own
+            // material says what happened rather than that the call was sent.
+            let tool_result = match watch {
+                Some((app, kind, before)) => {
+                    self.attach_observation(app, kind, before, tool_result)
+                        .await
+                }
+                None => tool_result,
             };
 
             // PERFORMANCE OPTIMIZATION: Replace hardcoded delays with intelligent completion detection
@@ -908,7 +1113,7 @@ where
                             crate::agents::base_agent::format_task_output(&result.output)
                         })
                     } else {
-                        crate::agents::base_agent::format_task_output(&result.output)
+                        tool_result_content(&result.output)
                     }
                 }
                 Err(e) => format!("Error: {}", e),
@@ -2009,5 +2214,52 @@ mod batch_halt_tests {
             "not_computer",
             &serde_json::json!({ "action": "left_click" })
         ));
+    }
+
+    /// The failure a prompt could never fix: what the model reads.
+    ///
+    /// A bash call that fails returns `{"output": ..., "exit_code": 1}`, and
+    /// the old summary turned that into "Result with 2 fields". The exit code
+    /// and the error text were gone before the model saw them, so "it worked"
+    /// was the only available reading. Every fact in the result has to survive
+    /// the trip.
+    #[test]
+    fn a_failed_command_reaches_the_model_as_what_it_was() {
+        let failed = serde_json::json!({
+            "output": "Unable to find application named 'Spotfiy'",
+            "exit_code": 1
+        });
+        let content = tool_result_content(&failed);
+        assert!(
+            content.contains("exit_code"),
+            "the exit code must survive: {content}"
+        );
+        assert!(
+            content.contains("Unable to find application"),
+            "the error text must survive: {content}"
+        );
+        assert_ne!(content, "Result with 2 fields");
+
+        // An observation attached to a result survives the same trip.
+        let observed = serde_json::json!({
+            "output": "",
+            "exit_code": 0,
+            "app_state": { "state": "not_running", "observed": "Spotify launched and then exited." }
+        });
+        assert!(tool_result_content(&observed).contains("launched and then exited"));
+    }
+
+    #[test]
+    fn single_field_and_plain_results_still_read_as_text() {
+        // Unchanged behaviour, and worth keeping: a one-field result unwraps
+        // so a file's contents reach the model as text, not as quoted JSON.
+        assert_eq!(
+            tool_result_content(&serde_json::json!({ "output": "hello" })),
+            "hello"
+        );
+        assert_eq!(
+            tool_result_content(&serde_json::Value::String("hello".into())),
+            "hello"
+        );
     }
 }

@@ -81,6 +81,52 @@ Good: <TTS>This looks like the system preferences for Displays. At the top you h
 </examples>"#
     }
 
+    /// 👁️ **SAY ONLY WHAT YOU OBSERVED** - the honesty rule, and how to ask
+    ///
+    /// This fragment is the reminder, not the mechanism. The mechanism is in
+    /// `agent/app_observation.rs`: a command that launches, focuses or drives
+    /// an app comes back with an `app_state` field holding what macOS reported
+    /// afterwards, so the honest sentence is the only one the result supports.
+    /// This text tells the model to read it. Do not delete the mechanism and
+    /// keep the text; a line asking the model to verify is a request, and the
+    /// bug comes back the first time it is not followed.
+    pub fn honest_observation() -> &'static str {
+        r#"👁️ **SAY ONLY WHAT YOU OBSERVED**
+
+"It is open on your screen" is a claim about the screen. If nothing looked at the screen, you may not say it.
+
+**A command that ran is not an outcome.** `open -a "Spotify"` exits 0 when Spotify fails to start, starts behind the person's editor, or starts minimized. Exit 0 means the command was accepted, nothing more.
+
+**Juno looks for you.** Any command that launches, focuses or drives an app comes back with an `app_state` field holding what macOS reported afterwards:
+
+| `app_state.state` | What you may say |
+|---|---|
+| `running_frontmost` | It is open on their screen |
+| `running_not_frontmost` | It is running, behind something else |
+| `running_minimized` | It is running but minimized, not on screen |
+| `running_no_windows` | It is running with no windows open |
+| `not_running` | It is not running |
+| `no_such_app` | You could not find an app by that name |
+| `unknown` | The check failed, so the state is unverified |
+
+Use those words. `app_state.observed` is already one honest sentence about what was found; say that, not something better. If the state is anything but `running_frontmost`, do not tell the person the app is open on their screen. Never upgrade `unknown` into success.
+
+**Never report a step as done because the tool call was accepted.** Report what the result says.
+
+**WHEN IT DID NOT WORK, OR THE WORLD CHANGED, ASK**
+
+One plain sentence about what you found, then one question. Then stop and wait.
+
+- Good: "Spotify opened and then quit. Want me to try Apple Music instead?"
+- Good: "Spotify closed while I was working on it. Do you still want music playing?"
+- Good: "I could not find an app called Spotfiy. Which one did you mean?"
+- Bad: "I apologize for the inconvenience. The operation failed with exit code 1."
+- Bad: running the same command again without saying anything.
+- Bad: moving on to something else as though the task were finished.
+
+No error dumps, no exit codes, no file paths, no apologies. The person may not know what a file path is. Do not retry silently, and do not abandon the task silently."#
+    }
+
     /// 🎯 **ACCESSIBILITY-FIRST COMPUTER USE STRATEGY** - Critical for accurate interaction
     pub fn accessibility_first_strategy() -> &'static str {
         r#"🎯 **ACCESSIBILITY-FIRST COMPUTER USE STRATEGY** - CRITICAL FOR ACCURACY
@@ -110,15 +156,27 @@ Before opening any application, **check the Running Applications and Visible Win
 
 **Examples**:
 ```bash
-# Open app directly
+# Open or bring an app forward. Use this; a name macOS cannot place fails
+# cleanly here, which leaves you something to recover from.
 open -a "Spotify"
 
-# AppleScript for complex actions
-osascript -e 'tell application "System Settings" to activate'
-
-# Keyboard shortcut simulation
+# Keyboard shortcut simulation. "System Events" is on every Mac, so naming it
+# is always safe.
 osascript -e 'tell application "System Events" to keystroke "n" using command down'
 ```
+
+**🚫 NEVER put an app name inside `tell application "..."` unless you have
+confirmed that app exists.** AppleScript resolves the name when it compiles
+the script, before any of your checks run, and a name macOS cannot place
+stops everything to show the person a modal picker listing every app they
+own. They have to dismiss it by hand. `System Events` is the one exception,
+because it ships with macOS.
+
+To find out what is installed or running, read `running_apps` and
+`visible_windows` in your system context, or call `list_visible_windows` or
+`get_app_windows`. Never address an app by name to test whether it is there.
+Juno refuses a command that names an app it cannot find, and tells you to ask
+the person which app they meant.
 
 ## **✅ TIER 1: accessibility_interface tool (Computer Use API)**
 **When to use**: When AppleScript can't achieve the task and you need UI interaction
@@ -1758,8 +1816,9 @@ impl DefaultPrompts {
     /// Main system prompt for single agent mode (streamlined)
     pub fn system_default() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
+            PromptFragments::honest_observation(),
             PromptFragments::chain_of_thought_framework(),
             PromptFragments::multishot_examples(),
             PromptFragments::response_prefilling_patterns(),
@@ -1789,8 +1848,9 @@ impl DefaultPrompts {
     /// Development-only self-aware system prompt (streamlined)
     pub fn system_default_development() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
+            PromptFragments::honest_observation(),
             PromptFragments::chain_of_thought_framework(),
             PromptFragments::multishot_examples(),
             PromptFragments::response_prefilling_patterns(),
@@ -1991,7 +2051,7 @@ For complex desktop tasks, think through your approach:
 1. **Understand the Request**: What exactly needs to be done?
 2. **Plan the Interaction**: Which accessibility methods will work best?
 3. **Execute Systematically**: Use accessibility tools, fall back to computer tool if needed
-4. **Verify Results**: Confirm the task was completed successfully
+4. **Verify Results**: Look at the result and report what it says, never that the call was sent
 </approach>
 
 {}
@@ -2006,7 +2066,10 @@ For complex desktop tasks, think through your approach:
 
 {}
 
+{}
+
 {}"#,
+            PromptFragments::honest_observation(),
             PromptFragments::chain_of_thought_framework(),
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::native_accessibility_tools(),
@@ -2132,6 +2195,121 @@ Be careful with file operations - always verify paths and permissions. When edit
             ],
             version: "2.3.0".to_string(),
             customizable: true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The honesty rule has to be in the prompt that actually runs. A
+    /// fragment dropped from a `format!` arg list is invisible until someone
+    /// reads the composed string, and this workstream has already lost one
+    /// allowlist entry that way.
+    #[test]
+    fn every_acting_prompt_carries_the_honesty_rule() {
+        for (name, template) in [
+            ("system_default", DefaultPrompts::system_default()),
+            (
+                "system_default_development",
+                DefaultPrompts::system_default_development(),
+            ),
+            ("desktop_expert", DefaultPrompts::desktop_expert()),
+        ] {
+            assert!(
+                template.content.contains("SAY ONLY WHAT YOU OBSERVED"),
+                "{name} lost the honesty rule"
+            );
+            assert!(
+                template.content.contains("app_state"),
+                "{name} does not tell the model where the observation is"
+            );
+        }
+    }
+
+    /// Companion mode watches and advises; it takes no actions, so it has no
+    /// tool results to be honest about. Named here so the omission reads as a
+    /// decision rather than an oversight.
+    #[test]
+    fn companion_mode_is_deliberately_left_out() {
+        assert!(!DefaultPrompts::system_companion()
+            .content
+            .contains("SAY ONLY WHAT YOU OBSERVED"));
+    }
+
+    #[test]
+    fn the_rule_forbids_asserting_an_unobserved_state() {
+        let rule = PromptFragments::honest_observation();
+        assert!(rule.contains("If nothing looked at the screen, you may not say it."));
+        assert!(rule.contains("A command that ran is not an outcome."));
+        assert!(rule.contains("Never upgrade `unknown` into success."));
+        // Every state the mechanism can report has to be named, or the model
+        // meets a word the prompt never explained.
+        for state in [
+            "running_frontmost",
+            "running_not_frontmost",
+            "running_minimized",
+            "running_no_windows",
+            "not_running",
+            "no_such_app",
+            "unknown",
+        ] {
+            assert!(rule.contains(state), "the rule never mentions {state}");
+        }
+    }
+
+    /// The names in the prompt and the names the code emits are one
+    /// vocabulary. If they drift, the model is reading a glossary for a
+    /// different program.
+    #[test]
+    fn the_prompt_and_the_observation_code_use_the_same_words() {
+        use crate::agent::app_observation::Presence;
+        let rule = PromptFragments::honest_observation();
+        for presence in [
+            Presence::Unknown,
+            Presence::NotFound,
+            Presence::NotRunning,
+            Presence::Frontmost,
+            Presence::Background,
+            Presence::Minimized,
+            Presence::NoWindows,
+        ] {
+            assert!(
+                rule.contains(presence.as_str()),
+                "{:?} reports as {:?}, which the prompt does not explain",
+                presence,
+                presence.as_str()
+            );
+        }
+    }
+
+    /// The form that puts a modal app picker in front of the person must not
+    /// be taught by example anywhere in the prompts that act.
+    #[test]
+    fn no_prompt_teaches_naming_an_unconfirmed_app_in_applescript() {
+        for (name, template) in [
+            ("system_default", DefaultPrompts::system_default()),
+            (
+                "system_default_development",
+                DefaultPrompts::system_default_development(),
+            ),
+            ("desktop_expert", DefaultPrompts::desktop_expert()),
+        ] {
+            for line in template.content.lines() {
+                let Some(rest) = line.split_once("tell application \"").map(|(_, r)| r) else {
+                    continue;
+                };
+                // Prose about the rule is fine; an example is not. Examples
+                // are the lines that invoke it.
+                if !line.contains("osascript") {
+                    continue;
+                }
+                assert!(
+                    rest.starts_with("System Events\""),
+                    "{name} teaches `tell application \"...\"` with an app name: {line}"
+                );
+            }
         }
     }
 }
