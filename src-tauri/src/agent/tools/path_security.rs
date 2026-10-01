@@ -1,14 +1,18 @@
 //! # Path Security Helpers
 //!
-//! Shared canonicalization and workspace-boundary enforcement for agent file
-//! operations. This is the single implementation of the "resolve symlinks and
-//! `..` segments, then require the result to live inside an allowed root"
-//! logic that previously existed only in `basic_tools` (security audit
-//! 2026-02-08, items #13/#14/#18).
+//! Shared canonicalization, credential blocklist and workspace-boundary
+//! enforcement for every file operation in Juno. This is the single
+//! implementation of "resolve symlinks and `..` segments, then require the
+//! result to live inside an allowed root" (security audit 2026-02-08, items
+//! #13/#14/#18, and LAC-4013 Fix B which removed the last two copies of it).
 //!
-//! ## Used by:
-//! - `basic_tools::validate_file_path` (read path canonicalization)
-//! - `anthropic_computer_use::validate_file_path` (str_replace editor tool)
+//! Policy layers on top of this, it is never re-implemented:
+//! - `crate::path_gate::authorize` (every file-touching `#[tauri::command]`,
+//!   adding the per-operation policy for read / list / write / delete)
+//! - `basic_tools::validate_file_path` (`read_file` / `write_file` tools,
+//!   adding extension lists and the configured size cap)
+//! - `anthropic_computer_use::validate_file_path` (str_replace editor tool,
+//!   adding an extension allowlist)
 //! - `enhanced_coding_tools::create_file_with_content` (smart_create_file)
 
 use std::fs::File;
@@ -191,11 +195,19 @@ pub fn sensitive_path_reason(path: &Path) -> Option<String> {
 /// Resolve `path_str` to an absolute, canonical path and require it to live
 /// inside one of the allowed `roots`.
 ///
-/// Relative paths are resolved against the current working directory before
-/// canonicalization, matching the behavior of `basic_tools`. An empty `roots`
-/// slice fails closed: no boundary can be established, so access is denied.
+/// This is the only implementation of "resolve, then require the result inside
+/// an allowed root". Resolution is [`resolve_path_lenient`], so relative paths
+/// go against the current working directory, symlinks are followed, and a path
+/// whose parent does not exist yet still normalizes. An empty `roots` slice
+/// fails closed: no boundary can be established, so access is denied.
 /// Sensitive credential/key files are denied even inside the boundary
-/// (security audit 2026-02-08, item #32).
+/// (security audit 2026-02-08, item #32), and the blocklist is applied both to
+/// the path as written and to the resolved path.
+///
+/// Callers add their own policy on top of this; none of them re-implement it.
+/// `crate::path_gate` is the command surface's entry point and layers the
+/// per-operation policy on; `basic_tools` and `anthropic_computer_use` layer
+/// on extension and size policy for model-driven tool calls.
 pub fn resolve_within_roots(path_str: &str, roots: &[PathBuf]) -> Result<PathBuf, String> {
     // The blocklist runs on the path as written, before any resolution: a
     // symlink *named* `id_rsa` is credential-shaped regardless of what it
