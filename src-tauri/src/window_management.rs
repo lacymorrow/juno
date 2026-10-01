@@ -381,6 +381,13 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
 
     crate::platform::macos::raise_above_chat_window(&app, window_labels::SETTINGS);
 
+    // Raising settings above the chat window was never the whole fix: the
+    // floating bar sits above both, at a level the chat window does not have,
+    // so settings came up above the chat and still underneath the bar. The bar
+    // has to be told to get out of the way, and that decision lives in one
+    // place now.
+    crate::bar_stacking::note_front(&app, window_labels::SETTINGS);
+
     Ok(())
 }
 
@@ -398,7 +405,9 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
 /// there is nothing left to keep a hidden one alive for.
 #[tauri::command]
 pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::close_window(&app, window_labels::SETTINGS).await
+    let closed = WindowManager::close_window(&app, window_labels::SETTINGS).await;
+    crate::bar_stacking::note_window_gone(&app, window_labels::SETTINGS);
+    closed
 }
 
 /// Open the native onboarding window.
@@ -416,13 +425,19 @@ pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
             warn!("Could not hide the floating bar for onboarding: {}", e);
         }
     }
-    WindowManager::create_or_show_window(&app, window_labels::ONBOARDING).await
+    WindowManager::create_or_show_window(&app, window_labels::ONBOARDING).await?;
+    // The bar is hidden outright for onboarding, above. This covers the race
+    // where the startup timer puts it back on screen anyway: hidden or not, it
+    // is not allowed to be on top of the setup window.
+    crate::bar_stacking::note_front(&app, window_labels::ONBOARDING);
+    Ok(())
 }
 
 /// Close the native onboarding window, putting the bar back if we took it away.
 #[tauri::command]
 pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
     let result = WindowManager::close_window(&app, window_labels::ONBOARDING).await;
+    crate::bar_stacking::note_window_gone(&app, window_labels::ONBOARDING);
     if BAR_HIDDEN_FOR_ONBOARDING.swap(false, std::sync::atomic::Ordering::SeqCst) {
         if let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) {
             if let Err(e) = bar.show() {
@@ -489,11 +504,16 @@ pub async fn close_main_window(app: AppHandle) -> Result<(), String> {
 /// in only one of them leaves the other three showing two copies of the same
 /// conversation.
 pub fn announce_main_window(app: &AppHandle, open: bool) {
+    // The bar's place in the window stack depends on this too: the chat window
+    // and the bar show the same conversation, so an idle bar belongs behind it.
     if open {
+        crate::bar_stacking::note_front(app, window_labels::MAIN);
         // The bar already knows how to put its pane away.
         if let Err(e) = app.emit(constants::events::bar::DISMISS_PANE, ()) {
             warn!("Could not tell the bar to dismiss its pane: {}", e);
         }
+    } else {
+        crate::bar_stacking::note_window_gone(app, window_labels::MAIN);
     }
     let event = if open {
         constants::events::bar::MAIN_WINDOW_OPENED
