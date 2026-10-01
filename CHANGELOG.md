@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.48] - 2026-10-01
+
+### Fixed
+
+- **constants:** the generator cannot ship a wrong value, and cannot skip one quietly (#651) (17e84177)
+- **triggers:** a gesture is a trigger, not a mode of one (LAC-4070) (#650) (90a0e267)
+
 ## [0.8.46] - 2026-10-01
 
 ### Fixed
@@ -691,7 +698,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.46...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.48...HEAD
+[0.8.48]: https://github.com/lacymorrow/juno/compare/cua-v0.8.47...v0.8.48
 [0.8.46]: https://github.com/lacymorrow/juno/compare/cua-v0.8.45...v0.8.46
 [0.8.45]: https://github.com/lacymorrow/juno/compare/cua-v0.8.44...v0.8.45
 [0.8.44]: https://github.com/lacymorrow/juno/compare/cua-v0.8.43...v0.8.44
