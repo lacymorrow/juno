@@ -5,10 +5,12 @@ use tauri::{
 };
 
 pub mod always_listening;
+pub mod capture_failure;
 pub mod commands;
 pub mod config;
 pub mod constants;
 pub mod controller;
+pub mod devices;
 pub mod engine;
 pub mod engine_manager;
 pub mod engine_parakeet;
@@ -20,8 +22,13 @@ pub mod utils;
 pub mod wake_word;
 
 pub use always_listening::AlwaysListeningController;
+pub use capture_failure::CaptureStartFailure;
 pub use config::VoiceTranscriptionConfig;
 pub use controller::VoiceController;
+pub use devices::{
+    effective_input_device_name, list_input_devices, preferred_input_device,
+    set_preferred_input_device, AudioDeviceInfo,
+};
 pub use engine::{startup_provider, SttProvider, TranscriptionEngine, TranscriptionSession};
 pub use engine_manager::EngineManager;
 pub use engine_parakeet::{

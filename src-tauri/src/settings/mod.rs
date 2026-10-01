@@ -240,6 +240,27 @@ pub struct CloudSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSettings {
     pub tts_provider: String,
+    /// The microphone Juno listens on, by name. `None` follows the system,
+    /// which is what every install did before this existed.
+    ///
+    /// A name, not a stable identifier, because that is how cpal addresses a
+    /// device. A chosen microphone that is not connected falls back to the
+    /// system default rather than refusing to listen; see
+    /// `tauri_plugin_voice_transcription::devices::choose_input`.
+    #[serde(default)]
+    pub input_device: Option<String>,
+    /// The speaker Juno's own voice plays through, by name. `None` follows the
+    /// system.
+    ///
+    /// Honoured by the macOS voice (`say -a`), which is the voice the Audio
+    /// pane offers. Audio that arrives from a cloud engine as a file is played
+    /// by `afplay`, which can only use the system output device.
+    #[serde(default)]
+    pub output_device: Option<String>,
+    /// Which macOS voice speaks as Juno, by `say -v` name. `None` means the
+    /// voice the Mac is already set to use.
+    #[serde(default)]
+    pub system_voice: Option<String>,
     #[serde(default = "AudioSettings::default_kokoro_voice")]
     pub kokoro_voice: String,
     #[serde(default)]
@@ -556,6 +577,9 @@ impl Default for AudioSettings {
     fn default() -> Self {
         Self {
             tts_provider: defaults::TTS_PROVIDER.to_string(),
+            input_device: None,
+            output_device: None,
+            system_voice: None,
             kokoro_voice: Self::default_kokoro_voice(),
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: Self::default_chatterbox_exaggeration(),

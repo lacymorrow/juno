@@ -16,6 +16,21 @@ pub mod voice_transcription {
     pub const AUDIO_LEVEL: &str = "voice-transcription:audio-level";
 }
 
+/// Microphone capture failures, and the fallbacks that avoided one.
+///
+/// These exist because the capture threads used to log an error and return,
+/// leaving the settings window claiming Juno was listening. The host app
+/// listens for these by the same names; a test in src-tauri asserts the two
+/// copies agree.
+pub mod voice_capture {
+    /// The microphone never opened. Payload fields: code, message, device
+    /// (may be null), listening (always false).
+    pub const FAILED: &str = "voice-capture:failed";
+    /// The chosen microphone was not connected, so another one stood in.
+    /// Payload fields: requested, used.
+    pub const DEVICE_SUBSTITUTED: &str = "voice-capture:device-substituted";
+}
+
 /// Plugin system events
 pub mod plugin {
     pub const VOICE_TRANSCRIPTION_DICTATION_STARTED: &str =

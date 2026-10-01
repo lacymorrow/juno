@@ -1,6 +1,6 @@
 # Human-forward Settings (spec)
 
-**Status:** Slice 1 merged (PR #604, v0.8.6). Slice 2 merged (PR #606). Slice 3 is PR #611.
+**Status:** Slice 1 merged (PR #604, v0.8.6). Slice 2 merged (PR #606). Slice 3 is PR #611. Slice 4 is PR #652.
 **DRI:** Frontend Engineer for slices 1 and 2. Founding Engineer for slice 3 (Rust).
 **Reference:** `docs/design/settings-ux-reference.md` (research, principles, skills).
 
@@ -110,6 +110,24 @@ Frontend (`KeyCaps.tsx`, `ShortcutRecorder.tsx`, `TriggersSettings.tsx`):
 - The hold hint says what a tap does.
 
 Considered and cut, each a follow-up if wanted: the onboarding tryout (a separate screen, its own slice), side-specific bare modifiers such as Right Option (needs the event tap work in the FluidVoice teardown, B2 and B3), keyboard detection to pre-fill a chord when no Globe key exists (needs IOKit), and "Use it anyway" on a conflict (the backend refuses duplicates, and letting one row silently take another's key is the trap Raycast warns about).
+
+## Slice 4: audio you can choose, and a voice you can hear
+
+**Status:** PR #652.
+
+**The ask.** Lacy, 2026-10-01, during live testing: "we need audio settings like microphone and speaker choices"; "normal users don't know what TTS is, make TTS provider an advanced setting, add a more familiar setting like Juno's voice"; "consolidate settings like AI provider and TTS into a single Providers pane, voice should remain under Audio".
+
+**Ten seconds.** Audio pane. Three questions in the order a person would ask them: what hears me, what speaks, what does it sound like. Tap a voice and Juno says a sentence in it, through the speaker just chosen. No confirm, no Play button, no toast.
+
+**The voice picker is the appearance picker's idea applied to sound.** A short curated list, each entry a name and one honest line, and you can check it before you keep it. "You can see it" becomes "you can hear it", so selecting is the audition. Descriptors name the accent, which is checkable against the locale `say` reports, rather than a tone nobody has heard.
+
+- "Voice & Audio" is now **Audio**: microphone, speaker, Juno's voice, then the dictation group.
+- "AI Provider" is now **Providers**, and the TTS engine moved there as "Voice engine", behind the advanced toggle. The engine is plumbing; the voice is a preference.
+- Silence is the first row of the voice list, not an "Off" option in an engine dropdown.
+- Devices are chosen, persisted and resolved in Rust (`tauri_plugin_voice_transcription::devices`). A chosen microphone that is not connected falls back to the system default and the pane says which one went away; changing the microphone restarts a running listener.
+- Capture failures are a `CaptureStartFailure` enum whose `code()` and `message()` match exhaustively, reported on `voice-capture:failed` with `listening: false`. Juno switches always-listening off and shows the sentence. A new exit path does not compile until it has words.
+
+Considered and cut: curated voices for the cloud engines (one mechanism that works end to end beats five half-wired ones; the Mac's own voice needs no account, works offline and starts instantly); routing cloud audio to a chosen speaker (`afplay` plays to the default output and takes no device argument, so that needs file playback moved onto cpal); a microphone level meter (it would open the microphone to draw a settings pane).
 
 ## What was considered and cut
 

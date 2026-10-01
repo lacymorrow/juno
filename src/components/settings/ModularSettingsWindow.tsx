@@ -74,19 +74,23 @@ export const settingsCategories: MacCategory[] = [
   },
   {
     id: "voice",
-    name: "Voice & Audio",
+    name: "Audio",
     icon: <Mic className="h-3.5 w-3.5" />,
     tile: "bg-[#FF2D55]",
-    description: "Voice transcription and audio settings",
-    keywords: "microphone dictation speech transcription tts audio input output",
+    description: "Microphone, speaker, and Juno's voice",
+    keywords:
+      "microphone mic speaker output input device headphones airpods voice juno's voice sound dictation speech transcription say",
   },
   {
     id: "ai",
-    name: "AI Provider",
+    // One pane for "which service does the work": the AI provider and the
+    // voice engine. The voice itself stays under Audio.
+    name: "Providers",
     icon: <Cpu className="h-3.5 w-3.5" />,
     tile: "bg-[#64D2FF]",
-    description: "Configure AI models and providers",
-    keywords: "model anthropic openai gemini api key provider claude llm",
+    description: "Which services Juno uses",
+    keywords:
+      "model anthropic openai gemini api key provider claude llm tts text to speech voice engine elevenlabs kokoro supertonic chatterbox",
   },
   {
     id: "models",
@@ -197,8 +201,13 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "models", rowId: "model-row-parakeet-ctc", label: "Balanced dictation model", keywords: "parakeet balanced recommended dictation model download" },
   { sectionId: "models", rowId: "model-row-tiny-en", label: "Fast dictation model", keywords: "whisper tiny fast dictation model" },
   { sectionId: "models", rowId: "model-row-large-v3", label: "Most accurate dictation model", keywords: "whisper large accurate dictation model download" },
-  // AI Provider
+  // Audio
+  { sectionId: "voice", rowId: "audio-input-device", label: "Listen through", keywords: "microphone mic input device listen headphones airpods usb interface" },
+  { sectionId: "voice", rowId: "audio-output-device", label: "Speak through", keywords: "speaker output device sound headphones airpods play" },
+  { sectionId: "voice", rowId: "juno-voice", label: "Juno's voice", keywords: "voice juno voice samantha alex daniel karen moira accent silent mute speak out loud" },
+  // Providers
   { sectionId: "ai", rowId: "ai-provider", label: "Active Provider", keywords: "provider anthropic openai gemini claude" },
+  { sectionId: "ai", rowId: "tts-provider", label: "Speaks with", keywords: "tts text to speech voice engine elevenlabs kokoro supertonic chatterbox replicate", advanced: true },
   { sectionId: "ai", rowId: "max-tokens", label: "Max Tokens", keywords: "tokens length limit output", advanced: true },
   { sectionId: "ai", rowId: "temperature", label: "Temperature", keywords: "temperature randomness creativity sampling", advanced: true },
   { sectionId: "ai", rowId: "system-prompt", label: "System Prompt", keywords: "system prompt instructions persona", advanced: true },
