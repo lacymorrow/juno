@@ -771,25 +771,30 @@ const PROMPT_GRACE: Duration = Duration::from_secs(90);
 /// The bar is always on top, and the alerts macOS raises on Juno's behalf are
 /// not: a screen-recording prompt appeared *behind* the bar, unreadable and
 /// unclickable, asking for a permission the person could not grant because
-/// Juno was sitting on the button. Lowering the bar's window level for the
-/// duration is the only thing that reliably keeps it out of the way, since the
+/// Juno was sitting on the button. Lowering the bar out of the always-on-top
+/// band is the only thing that reliably keeps it out of the way, since the
 /// prompt's own level is the system's business and not ours to predict.
 ///
-/// Restored on a timer rather than on an answer, because there is no event for
-/// "the person dismissed a system alert". The permissions poller also restores
+/// Released on a timer rather than on an answer, because there is no event for
+/// "the person dismissed a system alert". The permissions poller also releases
 /// it early the moment the grant lands.
+///
+/// Where the bar then goes is not decided here. This records one fact for
+/// `crate::bar_stacking`, which owns the decision. That is what stops a prompt
+/// answered while the person is still reading settings from putting the bar
+/// back on top of settings, which is what the old unconditional restore did.
 pub fn step_aside_for_prompt(app: &AppHandle) {
-    crate::platform::macos::set_bar_floating(app, false);
+    crate::bar_stacking::hold_for_system_prompt(app);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(PROMPT_GRACE).await;
-        crate::platform::macos::set_bar_floating(&app, true);
+        crate::bar_stacking::release_system_prompt_hold(&app);
     });
 }
 
-/// Put the bar back above other windows now that the prompt is answered.
+/// The prompt has been answered, so stop expecting one.
 pub fn restore_bar_after_prompt(app: &AppHandle) {
-    crate::platform::macos::set_bar_floating(app, true);
+    crate::bar_stacking::clear_system_prompt_holds(app);
 }
 
 /// Forget a pending relaunch, because the grant turned out to be visible.

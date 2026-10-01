@@ -25,6 +25,7 @@ pub mod agent;
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod agents; // Multi-agent system with specialized agents
 pub mod anthropic;
+pub mod bar_stacking; // Where the floating bar sits in the window stack, and why
 pub mod build_info; // Which build this is: version, commit, branch, demo cohort
 pub mod cleanup; // Application cleanup and resource management
 pub mod cli;
@@ -1202,20 +1203,44 @@ pub fn run() {
                         }
                         window_management::announce_main_window(app_handle, false);
                     }
+                    // Which of Juno's windows the person is working in is the
+                    // main input to where the floating bar belongs in the
+                    // stack, and AppKit's key window is the authority on it.
+                    // Taking it from here rather than from whichever code path
+                    // opened the window also covers the routes that code never
+                    // sees: clicking between two Juno windows, clicking away to
+                    // another app, the red X, Cmd+W.
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event: tauri::WindowEvent::Focused(focused),
+                        ..
+                    } => {
+                        bar_stacking::note_focus(app_handle, label.as_str(), focused);
+                    }
                     tauri::RunEvent::WindowEvent {
                         label,
                         event: tauri::WindowEvent::Destroyed,
                         ..
-                    } if label.as_str() == "onboarding" => {
-                        // Clean up escape key registration when onboarding window is closed
-                        // (e.g., user clicks the red X instead of completing/skipping)
-                        let app_handle = app_handle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Err(e) = commands::set_onboarding_active(app_handle, false).await
-                            {
-                                warn!("Failed to clean up onboarding state on window close: {}", e);
-                            }
-                        });
+                    } => {
+                        // A destroyed window does not reliably resign key on
+                        // the way out, so it is said plainly here.
+                        bar_stacking::note_window_gone(app_handle, label.as_str());
+
+                        if label.as_str() == "onboarding" {
+                            // Clean up escape key registration when onboarding window is closed
+                            // (e.g., user clicks the red X instead of completing/skipping)
+                            let app_handle = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) =
+                                    commands::set_onboarding_active(app_handle, false).await
+                                {
+                                    warn!(
+                                        "Failed to clean up onboarding state on window close: {}",
+                                        e
+                                    );
+                                }
+                            });
+                        }
                     }
                     // The event loop is over; the process is about to end. Any
                     // persistent Claude CLI processes must die with it —

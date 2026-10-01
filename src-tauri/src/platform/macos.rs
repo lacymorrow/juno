@@ -4,6 +4,7 @@
 //! It handles window styling, mouse tracking, accessibility features, and other
 //! Cocoa/AppKit integrations needed for proper macOS behavior.
 
+use crate::bar_stacking::BarStacking;
 use crate::constants;
 use crate::constants::{errors::templates, events};
 use tauri::{AppHandle, Emitter, Manager};
@@ -58,6 +59,12 @@ pub fn apply_macos_setup(app_handle: &AppHandle) {
         // the layout can be learned.
         computer_use_ai_sdk::prime_cmd_v_keycode();
 
+        // The bar's level is set above as part of building it. Deriving it once
+        // more from the situation means even the resting state comes from the
+        // one function that owns the decision, rather than from a line of
+        // setup code that could drift from it.
+        crate::bar_stacking::apply(app_handle);
+
         info!("macOS specific setup completed");
     }
 
@@ -68,44 +75,72 @@ pub fn apply_macos_setup(app_handle: &AppHandle) {
     }
 }
 
-/// `NSFloatingWindowLevel`: above ordinary windows, below system alerts.
-#[cfg(target_os = "macos")]
-const BAR_LEVEL_FLOATING: i64 = 3;
-
-/// `NSNormalWindowLevel`: in the ordinary stack, so a dialog can cover it.
-#[cfg(target_os = "macos")]
-const BAR_LEVEL_NORMAL: i64 = 0;
-
-/// Put the bar back in the ordinary window stack, or return it to floating.
+/// Put the floating bar where [`crate::bar_stacking`] says it belongs.
 ///
-/// Even floating is too high for one case: the permission alerts macOS raises
-/// on Juno's own behalf can sit at ordinary level, so an always-on-top bar
-/// covers the very dialog Juno just asked for. While a prompt is expected,
-/// the bar gets out of the way.
+/// Two AppKit calls, and both are needed for the lowered cases. `setLevel:`
+/// alone is not enough: it orders a window to the front of the level it moves
+/// into, so a bar dropped from floating to normal can land on top of the very
+/// window it was getting out from under. The explicit
+/// `orderWindow:NSWindowBelow relativeTo:` is app-relative, so it puts the bar
+/// under that one window and changes nothing about the rest of the system.
+///
+/// Levels are not app-relative, which is the whole reason the ordering call is
+/// here. See `crate::bar_stacking` for what that cost once already.
 #[cfg(target_os = "macos")]
-pub fn set_bar_floating(app_handle: &AppHandle, floating: bool) {
-    let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) else {
+pub fn apply_bar_stacking(
+    app_handle: &AppHandle,
+    stacking: BarStacking,
+    front_label: Option<&'static str>,
+) {
+    let Some(bar) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) else {
         return;
     };
-    let Ok(ns_window_ptr) = window.ns_window() else {
+    let Ok(bar_ptr) = bar.ns_window() else {
         return;
     };
-    let level = if floating {
-        BAR_LEVEL_FLOATING
+
+    // Only resolved for the intent that asks for it, and only for a window
+    // that is actually on screen: ordering against a window that is not there
+    // is a silent no-op with a worse failure mode than skipping it.
+    let front_ptr = if stacking.orders_below_front() {
+        front_label
+            .and_then(|label| app_handle.get_webview_window(label))
+            .filter(|window| window.is_visible().unwrap_or(false))
+            .and_then(|window| window.ns_window().ok())
     } else {
-        BAR_LEVEL_NORMAL
+        None
     };
-    let addr = ns_window_ptr as usize;
+
+    let level = stacking.ns_window_level();
+    let bar_addr = bar_ptr as usize;
+    let front_addr = front_ptr.map(|ptr| ptr as usize);
+
+    // NSWindow levels and ordering are main-thread-only, and every caller here
+    // is a command or an event handler on some other thread. Queueing also
+    // means this runs after any activation AppKit is part-way through, which is
+    // the re-order being corrected.
     if let Err(e) = app_handle.run_on_main_thread(move || unsafe {
-        let ns_window = addr as cocoa_id;
-        ns_window.setLevel_(level);
+        let bar = bar_addr as cocoa_id;
+        bar.setLevel_(level);
+        if let Some(front_addr) = front_addr {
+            let front = front_addr as cocoa_id;
+            #[allow(unexpected_cfgs)]
+            let front_number: i64 = msg_send![front, windowNumber];
+            #[allow(unexpected_cfgs)]
+            let _: () = msg_send![bar, orderWindow: NS_WINDOW_BELOW relativeTo: front_number];
+        }
     }) {
-        warn!("Could not change the floating bar's window level: {}", e);
+        warn!("Could not restack the floating bar: {}", e);
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn set_bar_floating(_app_handle: &AppHandle, _floating: bool) {}
+pub fn apply_bar_stacking(
+    _app_handle: &AppHandle,
+    _stacking: BarStacking,
+    _front_label: Option<&'static str>,
+) {
+}
 
 /// Setup macOS-specific styling and behavior for the floating bar window
 #[cfg(target_os = "macos")]
@@ -117,6 +152,10 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
         match window.ns_window() {
             Ok(ns_window_ptr) => {
                 let ns_window = ns_window_ptr as cocoa_id;
+                // The bar's resting place in the stack. Every change to it
+                // afterwards goes through `crate::bar_stacking`, which owns the
+                // decision; this is only the value it starts at.
+                let resting_level = BarStacking::Floating.ns_window_level();
                 unsafe {
                     // NSFloatingWindowLevel. This used to be 5, which put the
                     // bar above system alerts: a screen-recording prompt came
@@ -124,7 +163,7 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
                     // the documented level for an accessory window, above
                     // ordinary windows and below anything the system needs to
                     // put in front of a person.
-                    ns_window.setLevel_(BAR_LEVEL_FLOATING);
+                    ns_window.setLevel_(resting_level);
                     ns_window.setOpaque_(NO);
                     ns_window.setHasShadow_(NO);
                     // Visible across all spaces, full-screen apps, and Cmd+` cycle excluded
@@ -820,6 +859,11 @@ pub mod mouse_tracking {
 #[cfg(target_os = "macos")]
 const NS_WINDOW_ABOVE: i64 = 1;
 
+/// `NSWindowBelow`: order one window directly below another. The window stays
+/// on screen; `NSWindowOut` (0) is the one that takes it away.
+#[cfg(target_os = "macos")]
+const NS_WINDOW_BELOW: i64 = -1;
+
 /// Put `label` directly above Juno's chat window, without raising its level.
 ///
 /// Showing and focusing a window is not enough on its own. Activating an
@@ -841,6 +885,12 @@ const NS_WINDOW_ABOVE: i64 = 1;
 /// Ordering is relative to Juno's own chat window, so the rest of the system
 /// is untouched: click another app and settings goes behind it, as a settings
 /// window should.
+///
+/// This raises a window above the *chat* window and nothing more. The floating
+/// bar is at a higher level than either of them, so on its own this left
+/// settings above the chat window and still underneath the bar. Lowering the
+/// bar is `crate::bar_stacking`'s job, and the window being raised here reports
+/// itself to it.
 #[cfg(target_os = "macos")]
 pub fn raise_above_chat_window(app_handle: &AppHandle, label: &str) {
     let Some(window) = app_handle.get_webview_window(label) else {
