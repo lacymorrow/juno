@@ -68,9 +68,12 @@ jobs:
           [ -n "$channel" ] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
-      # Apple Silicon only, to match the current release build. The Parakeet STT
-      # engine ships prebuilt ONNX Runtime binaries for aarch64 but not x86_64
-      # macOS, so a universal or Intel build fails on the Intel half.
+      # Apple Silicon only, and now by choice rather than necessity. Until
+      # LAC-4089 an Intel half could not link at all (Parakeet -> ort-sys has no
+      # prebuilt ONNX Runtime for x86_64 macOS); Parakeet is feature-gated now
+      # and the release is universal again. A demo build is recorded on the
+      # team's own Macs, so the second half would be twice the wait for a slice
+      # nobody plays.
       - name: Install Rust (pinned toolchain)
         uses: dtolnay/rust-toolchain@master
         with:
