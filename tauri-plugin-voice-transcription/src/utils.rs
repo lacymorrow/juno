@@ -330,6 +330,40 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
     model_path.to_string()
 }
 
+/// Averages one frame's channels down to a single sample.
+///
+/// A microphone is not always mono or stereo. A device that reports three
+/// channels (an interface, an array mic, an aggregate device) used to make the
+/// worker thread log "Unsupported channel count" and return, which switched
+/// always-listening off while the settings UI still showed it on: the control
+/// said the feature was running and nothing was listening. Averaging is
+/// correct for any channel count, so there is no count left to reject.
+///
+/// A trailing partial frame is divided by the samples it actually has, not by
+/// the channel count, so the last frame of a buffer is not quietly attenuated.
+pub(crate) fn downmix_f32_to_mono(data: &[f32], channels: usize) -> Vec<f32> {
+    if channels <= 1 {
+        return data.to_vec();
+    }
+    data.chunks(channels)
+        .map(|frame| frame.iter().sum::<f32>() / frame.len() as f32)
+        .collect()
+}
+
+/// The same downmix for integer input, scaled to f32 before averaging.
+///
+/// Scaling first is what keeps the sum from overflowing: averaging in i16 and
+/// converting afterwards wraps as soon as two channels are both loud.
+pub(crate) fn downmix_i16_to_mono(data: &[i16], channels: usize) -> Vec<f32> {
+    const I16_SCALE: f32 = 32768.0;
+    if channels <= 1 {
+        return data.iter().map(|&s| s as f32 / I16_SCALE).collect();
+    }
+    data.chunks(channels)
+        .map(|frame| frame.iter().map(|&s| s as f32 / I16_SCALE).sum::<f32>() / frame.len() as f32)
+        .collect()
+}
+
 #[cfg(test)]
 mod transcription_filter_tests {
     use super::filter_transcription_text;
@@ -389,5 +423,78 @@ mod transcription_filter_tests {
             filter_transcription_text("move my mouse in a slow circle"),
             "move my mouse in a slow circle"
         );
+    }
+}
+
+#[cfg(test)]
+mod downmix_tests {
+    use super::{downmix_f32_to_mono, downmix_i16_to_mono};
+
+    #[test]
+    fn mono_input_passes_through_untouched() {
+        let frames = [0.1_f32, -0.2, 0.3];
+        assert_eq!(downmix_f32_to_mono(&frames, 1), frames.to_vec());
+    }
+
+    #[test]
+    fn stereo_input_averages_its_two_channels() {
+        // Two frames: (1.0, 0.0) and (-1.0, 1.0).
+        let frames = [1.0_f32, 0.0, -1.0, 1.0];
+        assert_eq!(downmix_f32_to_mono(&frames, 2), vec![0.5, 0.0]);
+    }
+
+    /// The device that started this: three channels used to abort the worker.
+    #[test]
+    fn a_three_channel_device_still_yields_audio() {
+        let frames = [0.3_f32, 0.6, 0.9, 1.0, 1.0, 1.0];
+        let mono = downmix_f32_to_mono(&frames, 3);
+        assert_eq!(mono.len(), 2);
+        assert!((mono[0] - 0.6).abs() < 1e-6, "got {}", mono[0]);
+        assert!((mono[1] - 1.0).abs() < 1e-6, "got {}", mono[1]);
+    }
+
+    #[test]
+    fn any_channel_count_collapses_to_one_sample_per_frame() {
+        for channels in 1..=8_usize {
+            let frames = vec![0.5_f32; channels * 4];
+            let mono = downmix_f32_to_mono(&frames, channels);
+            assert_eq!(mono.len(), 4, "{} channels", channels);
+            for sample in mono {
+                assert!((sample - 0.5).abs() < 1e-6, "{} channels", channels);
+            }
+        }
+    }
+
+    /// A short read at the end of a buffer must not be averaged as if the
+    /// missing channels had sent silence.
+    #[test]
+    fn a_partial_trailing_frame_is_not_attenuated() {
+        let frames = [1.0_f32, 1.0, 1.0, 1.0];
+        let mono = downmix_f32_to_mono(&frames, 3);
+        assert_eq!(mono.len(), 2);
+        assert!((mono[1] - 1.0).abs() < 1e-6, "got {}", mono[1]);
+    }
+
+    #[test]
+    fn integer_input_is_scaled_then_averaged() {
+        let frames = [i16::MAX, 0];
+        let mono = downmix_i16_to_mono(&frames, 2);
+        assert_eq!(mono.len(), 1);
+        assert!((mono[0] - 0.5).abs() < 1e-3, "got {}", mono[0]);
+    }
+
+    /// Averaging in i16 first would wrap here. Scaling first does not.
+    #[test]
+    fn two_loud_integer_channels_do_not_overflow() {
+        let frames = [i16::MAX, i16::MAX];
+        let mono = downmix_i16_to_mono(&frames, 2);
+        assert_eq!(mono.len(), 1);
+        assert!(mono[0] > 0.99, "got {}", mono[0]);
+    }
+
+    #[test]
+    fn integer_mono_input_is_only_scaled() {
+        let mono = downmix_i16_to_mono(&[0, i16::MIN], 1);
+        assert_eq!(mono, vec![0.0, -1.0]);
     }
 }

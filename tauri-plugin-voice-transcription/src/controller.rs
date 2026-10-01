@@ -15,6 +15,7 @@ use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
 
 use crate::error::{Error, Result};
+use crate::utils::{downmix_f32_to_mono, downmix_i16_to_mono};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 const SINC_LENGTH: usize = 256;
@@ -309,23 +310,10 @@ impl VoiceController {
             }
         }
 
-        // i16 → f32 normalization ([-32768, 32767] → [-1.0, 1.0])
-        let audio_f32: Vec<f32> = samples_i16.iter().map(|&s| s as f32 / 32768.0).collect();
-
-        let mut processed_audio = if channels == 2 {
-            // Stereo → mono: average left + right channels
-            audio_f32
-                .chunks_exact(2)
-                .map(|pair| (pair[0] + pair[1]) / 2.0)
-                .collect()
-        } else if channels == 1 {
-            audio_f32
-        } else {
-            return Err(format!(
-                "Unsupported number of channels: {}. Only mono (1) or stereo (2) is supported.",
-                channels
-            ));
-        };
+        // i16 → f32 normalization ([-32768, 32767] → [-1.0, 1.0]), averaging
+        // however many channels the file carries down to the single channel
+        // Whisper wants.
+        let mut processed_audio = downmix_i16_to_mono(&samples_i16, channels as usize);
 
         // Resample if needed
         if sample_rate != WHISPER_SAMPLE_RATE {
@@ -407,7 +395,7 @@ impl VoiceController {
         let device = host.default_input_device()
             .ok_or_else(|| Error::AudioDevice("No default input device found. This may indicate microphone permission was not granted — check System Settings > Privacy & Security > Microphone.".to_string()))?;
 
-        let supported_configs_iter = device.supported_input_configs().map_err(|e| {
+        let mut supported_configs_iter = device.supported_input_configs().map_err(|e| {
             Error::AudioDevice(format!(
                 "Failed to get input device configs (microphone permission may be denied): {:?}",
                 e
@@ -415,7 +403,10 @@ impl VoiceController {
         })?;
 
         let selected_config_range = supported_configs_iter
-            .filter(|c| c.channels() == 1 || c.channels() == 2) // Support both mono and stereo
+            // No channel filter. Any count downmixes to mono below, and
+            // filtering for 1 or 2 used to leave a device that only offers
+            // three with "No suitable input config found", which reads as a
+            // broken microphone rather than as a limit we imposed.
             .find(|c| {
                 (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000)
                     && (c.sample_format() == SampleFormat::F32
@@ -433,7 +424,6 @@ impl VoiceController {
                         e
                     ))
                 })?
-                .filter(|c| c.channels() == 1 || c.channels() == 2) // Support both mono and stereo
                 .find(|c| {
                     c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16
                 })
@@ -535,16 +525,7 @@ impl VoiceController {
                 match device.build_input_stream(
                     &config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        let audio_data = if channels == 2 {
-                            // Convert stereo to mono by averaging channels
-                            let mono_data: Vec<f32> = data
-                                .chunks_exact(2)
-                                .map(|chunk| (chunk[0] + chunk[1]) / 2.0)
-                                .collect();
-                            mono_data
-                        } else {
-                            data.to_vec()
-                        };
+                        let audio_data = downmix_f32_to_mono(data, channels as usize);
 
                         if let Err(e) = tx_clone.send(audio_data) {
                             tracing::error!("Failed to send audio data: {:?}", e);
@@ -568,18 +549,7 @@ impl VoiceController {
                 match device.build_input_stream(
                     &config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        // Handle stereo to mono conversion for i16
-                        let mono_data = if channels == 2 {
-                            data.chunks_exact(2)
-                                .map(|chunk| ((chunk[0] as i32 + chunk[1] as i32) / 2) as i16)
-                                .collect::<Vec<i16>>()
-                        } else {
-                            data.to_vec()
-                        };
-
-                        // i16 → f32 normalization
-                        let audio_f32: Vec<f32> =
-                            mono_data.iter().map(|&s| s as f32 / 32768.0).collect();
+                        let audio_f32 = downmix_i16_to_mono(data, channels as usize);
                         if let Err(e) = tx_clone.send(audio_f32) {
                             tracing::error!("Failed to send converted audio data: {:?}", e);
                         }
@@ -612,8 +582,11 @@ impl VoiceController {
         info!("[AudioThread] Audio stream started.");
         info!("[AudioThread] Recording at {} Hz with {} channel(s), will resample to {} Hz for Whisper.", 
               actual_rate, channels, WHISPER_SAMPLE_RATE);
-        if channels == 2 {
-            info!("[AudioThread] Stereo input detected - will convert to mono for processing.");
+        if channels > 1 {
+            info!(
+                "[AudioThread] {} input channels detected - averaging down to mono for processing.",
+                channels
+            );
         }
 
         // Resampler setup
