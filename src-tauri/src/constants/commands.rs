@@ -206,6 +206,9 @@ pub mod triggers {
     pub const SET_TRIGGERS: &str = "set_triggers";
     /// The key worth naming for each target, so onboarding can teach the real one
     pub const GET_TRIGGER_HINTS: &str = "get_trigger_hints";
+    /// What is wrong with a trigger list right now, so an inline error can be
+    /// derived from what is on screen instead of remembered from a refusal
+    pub const GET_TRIGGER_ISSUES: &str = "get_trigger_issues";
     /// Listen for a bare modifier key while a screen asks someone to press theirs
     pub const SET_TRIGGER_CAPTURE: &str = "set_trigger_capture";
     /// Open the macOS Keyboard pane, where "Press globe key to" lives
