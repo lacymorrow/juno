@@ -100,3 +100,72 @@ jobs:
       # prevent.
       - name: Test the voice plugin
         run: cargo test --manifest-path tauri-plugin-voice-transcription/Cargo.toml
+
+  # The Intel half of the universal build.
+  #
+  # The `rust` job above compiles the runner's own architecture (arm64), so
+  # nothing here ever checked x86_64 — and the release is the only build that
+  # does, which makes a release the worst possible place to find out. Parakeet
+  # is feature-gated to Apple Silicon (`parakeet-rs` -> `ort-sys` has no
+  # prebuilt ONNX Runtime for `x86_64-apple-darwin`); the gate is a pile of
+  # `#[cfg(target_arch)]`, and a missed one is invisible on an arm64 runner.
+  #
+  # `cargo check`, not `clippy` or `test`: this job exists to prove the Intel
+  # half *compiles*. Lints are architecture-independent and the suite ran above,
+  # so repeating either would only double the slowest job in CI. Tests that do
+  # differ by architecture assert against `cfg!(target_arch)` and so are checked
+  # here as code even though they are not run.
+  rust-intel:
+    name: Rust (x86_64 check)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      # Read the pin rather than using @stable. rustup honours
+      # `rust-toolchain.toml` and auto-installs that toolchain with only the
+      # *host* target, so `dtolnay/rust-toolchain@stable` would add
+      # x86_64-apple-darwin to a toolchain cargo never invokes and the build
+      # fails with `can't find crate for core`. The `rust` job above gets away
+      # with @stable because it only ever needs the host target. Same reasoning,
+      # same two steps, as release-tauri.yml and build-branch.yml.
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          [ -n "$channel" ] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust (pinned toolchain)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: x86_64-apple-darwin
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          # Its own key: a cross-target build shares almost no artifacts with
+          # the host-target one, and sharing the key would make each job
+          # repeatedly evict the other's cache.
+          shared-key: ci-x86_64
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      # tauri-build reads `frontendDist` (../dist) at compile time, so the
+      # frontend bundle has to exist before any cargo invocation.
+      - name: Build frontend for tauri-build
+        run: |
+          bun install
+          bun run build
+
+      # `--all-targets` so the arch-gated `#[cfg(test)]` code is compiled too.
+      # Those tests are where the Intel fallback is asserted, and a gate that
+      # only breaks the test build still breaks the release.
+      - name: Check (x86_64)
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --target x86_64-apple-darwin
+
+      - name: Check the voice plugin (x86_64)
+        run: cargo check --manifest-path tauri-plugin-voice-transcription/Cargo.toml --all-targets --target x86_64-apple-darwin
