@@ -207,6 +207,23 @@ fn classify_shell_risk(input: &Value) -> RiskLevel {
     // than reckless.
     let parsed = ShellCommand::parse(cmd);
 
+    // Emptying the Trash. The one act that defeats the construction every
+    // other delete now relies on: `rm` is safe because deletes go to the
+    // Trash, and this makes every one of those deletes permanent,
+    // retroactively and in bulk. Nobody asking Juno to tidy a folder is
+    // asking for that.
+    //
+    // Critical, so it asks in every mode including the permissive one. It
+    // costs almost nothing, because nobody empties the Trash in the course of
+    // ordinary work.
+    //
+    // This is a path check against two fixed locations, not an attempt to
+    // infer intent from syntax, and it needs a destructive command alongside
+    // the path so that looking in the Trash is not mistaken for emptying it.
+    if empties_the_trash(&parsed) {
+        return RiskLevel::Critical;
+    }
+
     // Critical: irreversible or privilege-escalating patterns
     if parsed.mentions("sudo")
         || parsed.mentions("rm -rf")
@@ -256,6 +273,45 @@ fn classify_shell_risk(input: &Value) -> RiskLevel {
     //     and Privacy, where Medium asks too. That is the setting the old
     //     global flag was supposed to be and never was.
     RiskLevel::Medium
+}
+
+/// The macOS Trash directories. `~/.Trash` is the boot volume's; `.Trashes`
+/// is the per-volume one on anything else.
+const TRASH_PATHS: &[&str] = &[".trash", ".trashes"];
+
+/// Commands that destroy what they are pointed at. The Trash gate needs one of
+/// these alongside a Trash path, so that `ls ~/.Trash` is reading and
+/// `rm -rf ~/.Trash/*` is emptying.
+const DESTRUCTIVE_WORDS: &[&str] = &["rm", "rmdir", "unlink", "srm", "shred"];
+
+/// Whether this command empties the Trash.
+///
+/// Deliberately narrow: a fixed pair of known paths and a short list of
+/// commands that destroy. It is not trying to read intent out of syntax, which
+/// is the thing this file is moving away from; it is checking whether a command
+/// points a destroying tool at the one directory whose contents are the undo
+/// history for every delete Juno has made.
+///
+/// A structured tool would be better and is the eventual home for this. There
+/// is no such tool today, and leaving the act ungated until one exists would
+/// mean the `rm`-to-Trash construction could be undone without a word.
+fn empties_the_trash(parsed: &ShellCommand) -> bool {
+    // The AppleScript route names the act outright and carries neither a Trash
+    // path nor a destroying command word, so it is checked first rather than
+    // behind the path test.
+    if parsed.mentions("empty trash") || parsed.mentions("empty the trash") {
+        return true;
+    }
+
+    let mentions_trash = TRASH_PATHS.iter().any(|path| parsed.mentions(path));
+    if !mentions_trash {
+        return false;
+    }
+
+    parsed
+        .tokens()
+        .iter()
+        .any(|token| DESTRUCTIVE_WORDS.contains(&token.as_str()))
 }
 
 fn classify_computer_use_risk(input: &Value) -> RiskLevel {
@@ -855,6 +911,48 @@ mod tests {
                 "{command:?} must be Critical, and Critical asks in every mode"
             );
         }
+    }
+
+    /// Emptying the Trash asks, in every mode, because it is the one act that
+    /// defeats the construction every other delete relies on. `rm` stopped
+    /// asking because deletes go to the Trash; this makes all of them
+    /// permanent at once.
+    #[test]
+    fn emptying_the_trash_is_critical_but_looking_in_it_is_not() {
+        for command in [
+            "rm -rf ~/.Trash/*",
+            "rm -rf ~/.Trash",
+            "rm -r /Volumes/Backup/.Trashes",
+            "srm -rf ~/.Trash/old",
+            "shred ~/.Trash/secret.txt",
+            "unlink ~/.Trash/a",
+            "osascript -e 'tell application \"Finder\" to empty trash'",
+        ] {
+            assert_eq!(
+                classify_risk("bash", &json!({"command": command})),
+                RiskLevel::Critical,
+                "{command:?} empties the Trash, which has to ask in every mode"
+            );
+        }
+
+        // Reading the Trash is reading. The gate needs a destroying command
+        // alongside the path, or every `ls` of the Trash would interrupt.
+        for command in ["ls ~/.Trash", "du -sh ~/.Trash", "find ~/.Trash -name x"] {
+            assert_ne!(
+                classify_risk("bash", &json!({"command": command})),
+                RiskLevel::Critical,
+                "{command:?} only looks in the Trash"
+            );
+        }
+
+        // And an ordinary delete is still an ordinary delete: it goes to the
+        // Trash, so it is recoverable and must not be dragged up to Critical.
+        // (`rm -rf ./build` is Critical for an unrelated reason, the literal
+        // `rm -rf` pattern, so it would not show anything here.)
+        assert_eq!(
+            classify_risk("bash", &json!({"command": "rm -r ./build"})),
+            RiskLevel::High
+        );
     }
 
     /// Deleting is recoverable now: Juno's shell session runs its own `rm`
