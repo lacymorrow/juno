@@ -764,24 +764,42 @@ describe("FloatingBar", () => {
     expect(invoke).toHaveBeenCalledWith("stop_all_operations");
   });
 
-  it("dismisses the pane on Escape only when nothing is running", async () => {
+  it("returns the bar to rest on one Escape, whatever is running", async () => {
     vi.useFakeTimers();
     await renderBar();
 
     await submitUserMessage("Hello");
-    // Still processing: Escape belongs to the Rust stop-key monitor.
+    // Mid-run. One press reports the key to Rust (which decides what stopping
+    // means) and puts the pane away; it does not take two presses, and it is
+    // not left to whether the bar happens to be the focused window.
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.getByTestId("bar-chat-pane")).toBeInTheDocument();
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledWith("ui_handle_interaction", interaction("escape"));
+    expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
 
     await streamAssistant("m1", "Hi.");
     await fire("agent-active", false);
-    fireEvent.keyDown(document, { key: "Escape" });
-
-    expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
+    await setBarState({ barState: "default" });
     act(() => {
       vi.advanceTimersByTime(SHRINK_DELAY_MS);
     });
     expect(lastResize()).toMatchObject({ width: 88, height: 76, anchorY: 16 });
+  });
+
+  it("dismisses the pane when Rust reports an Escape it had nothing to stop", async () => {
+    await renderBar();
+
+    await submitUserMessage("Hello");
+    await streamAssistant("m1", "Hi.");
+    await fire("agent-active", false);
+    await setBarState({ barState: "default" });
+    expect(screen.getByTestId("bar-chat-pane")).toBeInTheDocument();
+
+    // The person pressed Escape in another app: Rust's passive monitor saw it,
+    // found nothing running, and asked the bar to put itself away.
+    await fire("bar-dismiss-pane", null);
+
+    expect(screen.queryByTestId("bar-chat-pane")).not.toBeInTheDocument();
   });
 
   it("reopens a dismissed pane when the next query arrives", async () => {

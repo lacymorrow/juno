@@ -17,6 +17,7 @@ import { COMMANDS, EVENTS, UI } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useEscapeToIdle } from "@/hooks/useEscapeToIdle";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
 import { SkillGhostText, SkillSuggestionList } from "@/components/SkillAutocomplete";
@@ -118,6 +119,11 @@ async function sendInteraction(type: string, data?: Record<string, unknown>): Pr
   } catch (error) {
     console.error("Avatar: interaction failed:", error);
   }
+}
+
+/** Escape, reported to Rust. What stopping means is Rust's decision. */
+function reportEscape(): void {
+  void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
 }
 
 /** Whether the window's centre is in the bottom half of its display. Bubbles
@@ -367,23 +373,26 @@ export function PersonaBar(_props: PersonaBarProps) {
     };
   }, []);
 
+  // Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
+  useEscapeToIdle({
+    barState: bar.barState,
+    working: working,
+    overlayOpen: answerOpen || noticeOpen,
+    composerOpen: composerOpen,
+    popupOpen: skill.open,
+    collapse: closeAnswer,
+    report: reportEscape,
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (working) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        } else if (answerOpen || noticeOpen) {
-          closeAnswer();
-        } else if (composerOpen) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        }
-      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         void sendInteraction(UI.INTERACTION_TYPES_ENTER);
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [working, answerOpen, noticeOpen, composerOpen, closeAnswer]);
+  }, []);
 
   const idle = isIdleState(bar.barState);
   const onHeadClick = useCallback(() => {

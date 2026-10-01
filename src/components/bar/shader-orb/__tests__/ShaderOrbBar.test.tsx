@@ -370,7 +370,7 @@ describe("ShaderOrbBar", () => {
       vi.advanceTimersByTime(SHRINK_DELAY_MS + 10);
     });
     expect(posture()).toBe("orb");
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith("ui_handle_interaction", expect.anything());
   });
 
   it("turns steadily while Juno drives the cursor, and opens the sheet when it asks", async () => {

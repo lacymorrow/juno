@@ -16,6 +16,7 @@ import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useEscapeToIdle } from "@/hooks/useEscapeToIdle";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
 import { SkillGhostText, SkillSuggestionList } from "@/components/SkillAutocomplete";
@@ -142,6 +143,11 @@ async function sendInteraction(type: string, data?: Record<string, unknown>): Pr
   } catch (error) {
     console.error("Studio: interaction failed:", error);
   }
+}
+
+/** Escape, reported to Rust. What stopping means is Rust's decision. */
+function reportEscape(): void {
+  void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
 }
 
 // === THE SCRIPT'S PIECES ===
@@ -389,23 +395,26 @@ export function VoiceAIBar(_props: VoiceAIBarProps = {}) {
     };
   }, []);
 
+  // Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
+  useEscapeToIdle({
+    barState: bar.barState,
+    working: working,
+    overlayOpen: scriptOpen,
+    composerOpen: typeOpen,
+    popupOpen: skill.open,
+    collapse: closeScript,
+    report: reportEscape,
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (working) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        } else if (scriptOpen) {
-          closeScript();
-        } else if (typeOpen) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        }
-      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         void sendInteraction(UI.INTERACTION_TYPES_ENTER);
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [working, scriptOpen, typeOpen, closeScript]);
+  }, []);
 
   const idle = isIdleState(bar.barState) && !scriptOpen;
   const onDeckClick = useCallback(() => {

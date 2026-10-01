@@ -9,6 +9,7 @@ import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useEscapeToIdle } from "@/hooks/useEscapeToIdle";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
 import { SkillGhostText, SkillSuggestionList } from "@/components/SkillAutocomplete";
@@ -124,6 +125,11 @@ async function sendInteraction(type: string, data?: Record<string, unknown>): Pr
   } catch (error) {
     console.error("Halo: interaction failed:", error);
   }
+}
+
+/** Escape, reported to Rust. What stopping means is Rust's decision. */
+function reportEscape(): void {
+  void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
 }
 
 // === THE CAPTION ===
@@ -285,6 +291,11 @@ export function HaloBar() {
   // ── Juno asking for the cursor ──
   const [askOpen, setAskOpen] = useState(false);
   useEventListener(EVENTS.INPUT_CONTROL_REQUEST, () => setAskOpen(true));
+  /** Escape: the answer and the cursor question both leave the ring. */
+  const collapse = useCallback(() => {
+    dismiss();
+    setAskOpen(false);
+  }, [dismiss]);
   useEffect(() => {
     if (isDriving || isVoiceState(state)) setAskOpen(false);
   }, [isDriving, state]);
@@ -392,23 +403,26 @@ export function HaloBar() {
     };
   }, []);
 
+  // Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
+  useEscapeToIdle({
+    barState: state,
+    working: working,
+    overlayOpen: answerShowing || askOpen || !!approval,
+    composerOpen: composerOpen,
+    popupOpen: skill.open,
+    collapse: collapse,
+    report: reportEscape,
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (working) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        } else if (answerShowing) {
-          dismiss();
-        } else if (composerOpen) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        }
-      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         void sendInteraction(UI.INTERACTION_TYPES_ENTER);
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [working, answerShowing, composerOpen, dismiss]);
+  }, []);
 
   const idle = isIdleState(state) && !answerShowing && !approval;
   const onRingClick = useCallback(() => {
