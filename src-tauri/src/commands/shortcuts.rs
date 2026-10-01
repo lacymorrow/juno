@@ -261,10 +261,11 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     // Import parse_shortcut_string from lib.rs
     use crate::parse_shortcut_string;
 
-    // Register every keyboard binding across the enabled activation triggers.
-    // The set is deduped: two triggers may not share a binding (validated on
-    // save), but the same combo must never be registered twice. Mouse bindings
-    // and voice phrases are handled by their own subsystems, not here.
+    // Register every key the enabled triggers bind, each exactly once.
+    // `bound_keys` has already collapsed the rows: the globe key carrying a
+    // Hold row and a Double-tap-and-hold row is one key here, and the gesture
+    // recognizer resolves which of them a given edge belongs to. Voice phrases
+    // are handled by their own subsystem, not here.
     //
     // This is also the one place that decides which watcher a key goes to. A
     // bare modifier such as Fn is a keyboard binding like any other as far as
@@ -273,29 +274,23 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     // the flags-changed monitor takes it instead. The branch is here, in the
     // registration layer, rather than in the shape of a binding.
     let triggers = state.get_triggers().unwrap_or_default();
-    let mut registered_combos: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // The bindings are about to change, so no half-finished gesture from the
+    // old set may carry over into the new one.
+    crate::events::shortcuts::recognizer::forget_all();
+
     let mut mouse_bindings: Vec<crate::platform::mouse_button_monitor::MouseBinding> = Vec::new();
     let mut modifier_bindings: Vec<crate::platform::modifier_key_monitor::ModifierBinding> =
         Vec::new();
-    for trigger in triggers.iter().filter(|t| t.enabled) {
-        let Some(binding) = trigger.binding.as_ref() else {
-            continue;
-        };
-        match crate::triggers::watcher_for(binding) {
+    for binding in crate::triggers::bound_keys(&triggers) {
+        match crate::triggers::watcher_for(&binding) {
             crate::triggers::Watcher::GlobalShortcut => {
-                let crate::triggers::Binding::Keyboard { shortcut: combo } = binding else {
+                let crate::triggers::Binding::Keyboard { shortcut: combo } = &binding else {
                     continue;
                 };
-                let key = combo.to_lowercase();
-                if !registered_combos.insert(key) {
-                    continue; // already registered this combo
-                }
                 match parse_shortcut_string(combo) {
                     Some(shortcut) => match app.global_shortcut().register(shortcut) {
-                        Ok(()) => info!(
-                            "✅ Registered trigger shortcut: {} ({:?} -> {:?})",
-                            combo, trigger.method, trigger.target
-                        ),
+                        Ok(()) => info!("✅ Registered trigger key: {}", combo),
                         Err(e) => error!(
                             "❌ Failed to register trigger shortcut ({}): {} - may be missing Input Monitoring permissions",
                             combo, e
@@ -304,12 +299,8 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
                     None => warn!("Failed to parse trigger shortcut: {}", combo),
                 }
             }
-            crate::triggers::Watcher::ModifierKey(key) => {
-                modifier_bindings.push((key, trigger.method, trigger.target));
-            }
-            crate::triggers::Watcher::MouseButton(button) => {
-                mouse_bindings.push((button, trigger.method, trigger.target));
-            }
+            crate::triggers::Watcher::ModifierKey(key) => modifier_bindings.push(key),
+            crate::triggers::Watcher::MouseButton(button) => mouse_bindings.push(button),
         }
     }
 
@@ -367,7 +358,12 @@ pub async fn validate_keyboard_shortcut(
     // conflicted with its own current binding ("already assigned to Dictation
     // Input") and Save stayed disabled, which is why neither activation
     // shortcut could be rebound.
-    let editing_key = shortcut_name
+    // `trigger_<id>` names the row being edited. The id is what tells "this
+    // combo is already mine" from "this combo belongs to another row", and it
+    // is also how the gesture asking for the key is looked up: the globe key
+    // can hold for one row and double-tap-and-hold for another, so whether a
+    // key is free depends on which gesture wants it.
+    let editing_id = shortcut_name
         .as_deref()
         .and_then(|name| name.strip_prefix("trigger_"));
 
@@ -378,7 +374,7 @@ pub async fn validate_keyboard_shortcut(
 
     let triggers = state.get_triggers().unwrap_or_default();
     if let Some(conflict) =
-        crate::triggers::combo_conflict(&triggers, &shortcut_value, editing_key, &reserved)
+        crate::triggers::combo_conflict(&triggers, &shortcut_value, editing_id, &reserved)
     {
         return Err(conflict);
     }

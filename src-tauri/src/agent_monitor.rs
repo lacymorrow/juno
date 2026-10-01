@@ -6,16 +6,17 @@ use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info, warn};
 
 /// What a release meant for the agent input monitor. Mirrors dictation's
-/// `HoldRelease` so `fire_trigger_edge` can drive the same double-tap
-/// recognizer decision on both targets.
+/// `HoldRelease` so the gesture recognizer reads a release the same way on
+/// both targets: only a short one opens the double-tap window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentRelease {
     /// Held past the threshold: the transcription is stopped and handed to
     /// the agent for processing.
     Committed,
     /// A short tap that opened the microphone but did not commit: the agent
-    /// session is cancelled. The gesture recognizer may promote a second
-    /// press inside the double-tap window into a Press start.
+    /// session is cancelled. This is the one release that opens the key's
+    /// double-tap window, if any gesture on that key is waiting for a second
+    /// press.
     Cancelled,
     /// Release without a preceding transcription start: for `AgentTriggerMode::Tap`
     /// this fired the toggle path; for `Hold` nothing happened.
@@ -315,8 +316,8 @@ pub async fn on_agent_input_released_with_mode(
         // Tap mode: no start yet on press; release should initiate agent transcription
         if matches!(trigger_mode, AgentTriggerMode::Tap) {
             info!("[AgentMonitor] Tap trigger: starting agent transcription on release");
-            // Mark the agent voice session open so the NEXT tap of this toggle
-            // is caught by the stop-guard (fire_trigger_edge) and finalizes the
+            // Mark the agent voice session open so the NEXT press of this key
+            // is caught by the stop-guard in `fire_key_edge` and finalizes the
             // query, instead of starting a second session. Cleared when the
             // session ends in handle_agent_transcription_stop / _cancel.
             set_bar_voice_active(true);

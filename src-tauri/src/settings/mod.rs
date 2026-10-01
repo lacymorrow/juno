@@ -474,10 +474,7 @@ impl Default for AppSettings {
             advanced_settings_enabled: defaults::ADVANCED_SETTINGS_ENABLED,
             cli: CLISettings::default(),
             voice_transcription: VoiceTranscriptionSettings::default(),
-            triggers: crate::triggers::default_triggers(
-                defaults::AGENT_MODE,
-                defaults::DICTATION_INPUT,
-            ),
+            triggers: crate::triggers::default_triggers(),
             updates: UpdateSettings::default(),
         }
     }
