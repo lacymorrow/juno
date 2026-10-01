@@ -16,7 +16,7 @@
 use tauri::{AppHandle, Manager};
 use tracing::{debug, info, warn};
 
-use crate::triggers::{Binding, TriggerMethod, TriggerTarget};
+use crate::triggers::TriggerTarget;
 
 /// How recently the machine must have booted for a launch to read as a login
 /// item rather than someone opening Juno on purpose.
@@ -48,34 +48,24 @@ pub async fn on_first_run(app: &AppHandle) {
 
 /// The line she opens with, naming the key that was actually bound.
 fn introduction(app: &AppHandle) -> String {
-    let Some(key) = summoning_key(app) else {
+    let Some((gesture, key)) = summoning_key(app) else {
         return INTRO_UNBOUND.to_string();
     };
-    format!("Hi, I'm Juno. Hold {key} whenever you want to talk to me.")
+    format!("Hi, I'm Juno. {gesture} {key} whenever you want to talk to me.")
 }
 
-/// The binding worth naming, spoken rather than spelled.
+/// The gesture and key worth naming, spoken rather than spelled.
 ///
-/// Dictation first: it is the one people reach for without thinking about it,
-/// and it is what "talk to me" describes. A mouse button is skipped, because
-/// "hold Mouse Button 4" is not a sentence anybody wants read aloud.
-fn summoning_key(app: &AppHandle) -> Option<String> {
+/// Read from the same hint onboarding draws, so the voice and the screen name
+/// the same key. Talking to Juno comes first because that is literally what
+/// the line describes; dictation is the fallback. A mouse button and a wake
+/// phrase are skipped by the hint, because "hold Mouse Button 4" is not a
+/// sentence anybody wants read aloud.
+fn summoning_key(app: &AppHandle) -> Option<(String, String)> {
     let triggers = app.state::<crate::state::AppState>().get_triggers().ok()?;
-
-    let pick = |target: TriggerTarget| {
-        triggers
-            .iter()
-            .filter(|t| t.enabled && t.target == target)
-            .filter(|t| matches!(t.method, TriggerMethod::PushToTalk | TriggerMethod::Toggle))
-            .find_map(|t| match t.binding.as_ref() {
-                Some(Binding::Keyboard { shortcut }) => Some(shortcut.clone()),
-                _ => None,
-            })
-    };
-
-    pick(TriggerTarget::Dictation)
-        .or_else(|| pick(TriggerTarget::Agent))
-        .map(|combo| spoken(&combo))
+    let hint = crate::triggers::hint_for(&triggers, TriggerTarget::Agent)
+        .or_else(|| crate::triggers::hint_for(&triggers, TriggerTarget::Dictation))?;
+    Some((hint.gesture, spoken(&hint.shortcut)))
 }
 
 /// Turn a combo into something a voice can read.

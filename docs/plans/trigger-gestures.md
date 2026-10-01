@@ -1,95 +1,119 @@
-# Trigger gestures: hold, double tap, double tap and hold
+# Triggers as sentences
 
-**Status:** planned 2026-09-29. Phase 1 is the next PR on `feat/trigger-double-tap`. Phase 2 follows as its own PR.
-**DRI:** Backend Engineer (LAC). Lacy approves.
+**Status:** planned 2026-09-29, replacing the first draft of this file (derived double tap, secondary target). Two PRs:
+- Backend: gesture model, row IDs, migration, key-sharing rules, gesture recognizer. LAC-4070, Backend Engineer. **Built 2026-10-01.**
+- Screen: the sentence editor. Separate ticket, Frontend Engineer, starts once the backend PR merges. **Not started.**
 
-## The rule
+Lacy approves both.
 
-No key both holds and single-taps to activate. A short tap on a hold key is almost always a fumbled hold, and a quick stop-tap on a toggle key looks just like the first half of a double tap.
+**What actually shipped first, and why this file was rewritten.** The backend was implemented on 2026-09-29 at 20:28 against the *first* draft of this plan, the one with a derived double tap. The plan was rewritten nine minutes later, at 20:37, to the independent-gesture model below. The code was never redone, and it squash-merged to main, so the wrong model went out: a hold key answered a second press by starting a hands-free session on the same target, and the settings copy told people so ("Double-tap it to keep listening until you press it again"). Nobody wanted that. The backend was rebuilt to this file on 2026-10-01, which is where the model, the sharing table and the recognizer below now describe live code rather than a plan. Two deliberate departures from what is written below, both recorded in the PR: the defaults are Lacy's later instruction (hold the globe key to talk to Juno, hold Option+Space to dictate) rather than the three rows in step 4, and greying out an unpickable gesture belongs to the screen PR, because the sharing table is the backend's and this PR did not grow a second copy of it in TypeScript.
 
-The pairs allowed on one key:
+## What the person sees
 
-| Primary | May pair with | Never |
+```
+Hold               [🌐]      to  [talk to Juno ▾]     Let go to send
+Double-tap & hold  [🌐]      to  [dictate ▾]          Let go to finish
+Tap                [Space]   to  [dictate ▾]          Tap again to finish
+Say   [hey] [juno]           to  [dictate ▾]
++ Add trigger
+```
+
+Every word you can change is a control. The gesture and the target are small menus, the key is the recorder we already have (`ShortcutRecorder`, `KeyCaps`), and the voice phrase keeps its hey toggle and text field. The grey line on the right is generated from the gesture, so the row explains how it ends and the old paragraph hints go away.
+
+A note on Wispr Flow: it lists actions ("Push to talk", "Hands-free", "Command Mode") and gives each one a key, and its double tap is built in (`docs/design/settings-ux-reference.md:7`). This screen is a sentence builder instead. Juno has two targets and five gestures, so an action list would be mostly empty rows. A sentence list only shows what the person uses.
+
+## Gestures
+
+| Gesture | Starts | Ends |
 |---|---|---|
-| Hold | double tap (always on, derived) or double tap and hold (phase 2) | single tap |
-| Press (tap to start, tap to stop) | double tap and hold (phase 2) | double tap |
+| Hold | key down | release |
+| Tap | release of a short press | next press of the same key |
+| Double tap | second press, see resolution below | next press of the same key |
+| Double tap and hold | second press, see resolution below | release |
+| Say | wake phrase | end of speech, as today |
 
-A hold key has one second gesture, never both. When phase 2 gives it a double tap and hold, that replaces its double tap.
+This covers what exists today: `push_to_talk` becomes Hold, `toggle` becomes Tap, `voice` becomes Say.
 
-## Why this reverses part of slice 3
+## Which gestures can share a key
 
-Slice 3 (PR #611, `b00ddb5c`) made a short tap on a hold key keep the session running hands-free. Hands-free is the Press trigger's behavior reached from a different key, and it was built as a second implementation: `hands_free` and `swallow_next_release` in `dictation_monitor.rs`, and `set_bar_voice_active(true)` on a tap in `agent_monitor.rs`. The research it cites (`docs/design/settings-ux-reference.md:12`) says Wispr Flow reaches hands-free by double-tapping the push-to-talk key. Slice 3 picked single tap, which is the pairing the rule above forbids.
+**Tap can't share a key with Hold or Double tap.** A short tap on a hold key is usually a fumbled hold, and a quick stop-tap on a tap key looks just like the first half of a double tap. Any other mix is allowed, and each gesture appears at most once per key.
 
-## First ten seconds (phase 1)
+| On one key | Allowed |
+|---|---|
+| Hold + Double tap | yes |
+| Hold + Double tap and hold | yes |
+| Double tap + Double tap and hold | yes (Lacy, 2026-09-29) |
+| Hold + Double tap + Double tap and hold | yes |
+| Tap + Double tap and hold | yes |
+| Hold + Tap | no |
+| Tap + Double tap | no |
 
-Someone holds Fn, talks, lets go: words appear. Same as today. They double-tap Fn: the start cue plays, the bar shows listening, and it keeps listening with their hands off the keyboard. They press Fn once more and the words land. A quick accidental tap on Fn does nothing.
+`triggers::validate` and `combo_conflict` enforce this table and nothing looser. The screen greys out a gesture that can't be picked and says why ("🌐 already has *Hold to talk to Juno*"), so a save never fails after the fact.
 
-## Phase 1: remove single-tap hands-free, add derived double tap
+## Resolving a press (the recognizer)
 
-### Remove (restore pre-#611 behavior on a short hold)
+There's one recognizer per bound key, sitting in `events/shortcuts.rs` in front of `fire_trigger_edge`. Every input source reaches it: global shortcuts, `platform/modifier_key_monitor.rs` for Fn, and `platform/mouse_button_monitor.rs`. It keeps only gesture bookkeeping (last short release, which second-press branch is pending, and whether to swallow the next release). It holds no session state and has no hands-free mode.
 
-- `dictation_monitor.rs`: drop `hands_free`, `swallow_next_release`, `HoldRelease::HandsFree`, `end_hands_free`, and the watchdog exemptions. A release under `HOLD_DURATION_MS` cancels again (`TRANSCRIPTION_CANCEL`, sets `last_cancellation_time`). Keep the `HoldRelease` enum with `Committed` / `Cancelled` / `Nothing`; it reads better than the old tuple.
-- `agent_monitor.rs`: `end_hold` records the cancellation and bumps the generation again; the `else if agent_started` release branch emits `agent::CANCEL` again instead of `set_bar_voice_active(true)`.
-- Replace the five slice-3 hands-free tests with tests for the restored cancel and the new recognizer.
-- Keep from slice 3: the 400 ms threshold, key caps, the recorder, sentence labels.
+Constants live in `constants/agent.rs` `monitor_sessions`: `HOLD_DURATION_MS` 400 (exists), `DOUBLE_TAP_WINDOW_MS` 300, `SECOND_PRESS_HOLD_MS` 250.
 
-### Add: a double tap on a hold key runs the Press code path
+**A tap or double-tap session is running:** the next press of that key stops it on the down edge, and its release is swallowed. This beats every gesture below. (Agent: `bar_voice_active()` already does this. Dictation: a press while `is_dictation_active()` is true and the monitor isn't tracking a hold goes to `handle_dictation_tap_mode`.)
 
-A small per-trigger gesture recognizer in front of the monitors, in `events/shortcuts.rs` (every source reaches `fire_trigger_edge`: global shortcuts, `platform/modifier_key_monitor.rs` for Fn, `platform/mouse_button_monitor.rs`). It keeps only gesture bookkeeping: the time of the last short release, and a "swallow the next release" flag. There is no session state and no hands-free mode.
+**First press:**
+- If the key has Hold, it goes through the hold path unchanged (mic at 15 ms). A release at 400 ms or later commits. A shorter release cancels, as it did before #611, and opens the window.
+- If the key has Tap, a tap starts on release (the Press code path, called directly). The window opens only if the key also has Double tap and hold.
+- If the key has only double gestures, the first press does nothing and a short release opens the window.
 
-For a Hold trigger:
+**Second press, inside the window:**
+- **Double tap only:** fires the Tap code path for its target on the down edge and swallows the release.
+- **Double tap and hold only:** starts a hold for its target on the down edge. Its release ends it.
+- **Both:** undecided at first. A release before `SECOND_PRESS_HOLD_MS` is a double tap, and the Tap path starts on that release. Still held at `SECOND_PRESS_HOLD_MS` means double tap and hold: the hold starts and the start cue plays at that moment. This is the one place that waits. It only applies when both gestures share a key, and the cue tells the person when to talk. Buffering the audio from the down edge to avoid the wait is a follow-up, and only worth doing if people report clipped words.
+- **After a Tap (Tap + Double tap and hold):** the tap session is running. Still held at `SECOND_PRESS_HOLD_MS` means the tap session is cancelled and the double-tap-and-hold hold starts. A release before that is an ordinary stop. The window only opens from the tap that **started** a session, so stopping after a real sentence can never trigger it.
 
-1. First press and release go through the hold path unchanged. The mic opens at 15 ms, as it does now. A release under 400 ms cancels, and the recognizer notes the time.
-2. A second press within `DOUBLE_TAP_WINDOW_MS` (start at 300, a constant in `constants/agent.rs` `monitor_sessions`) of that release is a double tap. On its **down edge** the recognizer calls the same function the Press trigger calls, and swallows the matching release:
-   - dictation: `handle_dictation_tap_mode(app)`
-   - agent: `agent_monitor::on_agent_input_released_with_mode(app, AgentTriggerMode::Tap)`
-   Firing on the down edge keeps it instant and means a slightly long second press still counts.
-3. Stopping: the next press of the same key while that session runs has to reach the Press stop, not start a hold on top of it.
-   - Agent: already true. `bar_voice_active()` in `fire_trigger_edge` ends the session on release.
-   - Dictation: in the dictation branch, a press that arrives while `AppState::is_dictation_active()` is true and the monitor is not tracking a hold goes to `handle_dictation_tap_mode` (which stops), and its release is swallowed. That check is derived from state that already exists. It likely also fixes a live bug (confirm first): pressing the hold key while a Press session runs appears to start a second hold on top of it, because the monitor does not know about Press sessions.
+"The Tap code path" means exactly what the Tap trigger calls today: `handle_dictation_tap_mode(app)` for dictation, and `agent_monitor::on_agent_input_released_with_mode(app, AgentTriggerMode::Tap)` for the agent.
 
-Press triggers get no double tap.
+## Backend PR (LAC-4070)
 
-### Risk to verify
+1. **Remove single-tap hands-free** from slice 3 (#611, `b00ddb5c`): `hands_free`, `swallow_next_release`, `HoldRelease::HandsFree`, `end_hands_free` and the watchdog exemptions in `dictation_monitor.rs`, and the tap branch's `set_bar_voice_active(true)` in `agent_monitor.rs`. A short hold cancels again (`TRANSCRIPTION_CANCEL` / `agent::CANCEL`, cooldown, generation bump). Keep `HoldRelease` as `Committed` / `Cancelled` / `Nothing`. Keep the 400 ms threshold, key caps, recorder and labels.
+2. **Model** (`triggers/mod.rs`): add `id: String` (a UUID, generated when missing), and replace `method` with `gesture: Gesture { Hold, Tap, DoubleTap, DoubleTapHold, Say }`, keeping `#[serde(alias = "method")]` plus a value map so old stores load. `Trigger::key_str` stops being identity; every one of its ~19 users moves to `id`. `derive_legacy` projects Hold and Tap as before and skips the double gestures.
+3. **Migration**, run once. Every existing Hold row also gets a Double tap row on the same key and target, so nobody loses the hands-free they had from slice 3. They reach it by double tap instead of a single tap.
+4. **Defaults for new installs:** Hold ⌥Space to dictate, Double-tap ⌥Space to dictate, Tap ⌥D to talk to Juno.
+5. **Validation** per the sharing table. Say rows must have unique phrases.
+6. **Registration:** a key used by several rows is registered once. `dispatch_activation_triggers` hands the edge to that key's recognizer instead of looping over matching rows.
+7. **Tests** (CI only, never cargo locally): the sharing table, the migration (old `method` store in, rows with IDs and added Double tap rows out), every recognizer branch above driven by fake timestamps (the `held_for_ms` pattern), and cancel-then-start back to back on one voice controller. That last one is the known risk: the first tap's cancel and the double tap's start land about 300 ms apart.
+8. **Docs:** `docs/features/unified-triggers.md` and a one-line pointer in `docs/plans/settings-human-forward.md` slice 3.
 
-The first tap's cancel and the double tap's start land within about 300 ms on the same voice controller. `COOLDOWN_AFTER_CANCEL_MS` (150) only guards `start_hold`, and the Press path doesn't go through `start_hold`, so the cooldown won't block it. What still needs checking is whether `TRANSCRIPTION_CANCEL` finishes before `TRANSCRIPTION_START` arrives. The generation counter in `agent_monitor.rs` exists for exactly this race; dictation needs the same check. Add a test that runs cancel and then start back to back, and do one manual walk on a CI build (`juno-build feat/trigger-double-tap`).
+## Screen PR (second ticket)
 
-### Copy
-
-- `TriggersSettings.tsx` `METHOD_HINT.push_to_talk`: "Hold the key while you speak, let go to finish. Double-tap it to keep listening until you press it again."
-- `docs/features/unified-triggers.md`: replace the slice-3 tap paragraph.
-- `docs/plans/settings-human-forward.md` slice 3: one line pointing here.
-
-### Validation (phase 1)
-
-`triggers::validate` and `combo_conflict` stay one-binding-per-trigger in phase 1. A key shared by a Hold row and a Press row would make the double tap and the Press trigger fight over it, so the existing refusal is correct.
-
-## Phase 2: double tap and hold as a secondary target
-
-The original ask: hold to dictate, double tap and hold to talk to Juno.
-
-- Model: a Hold or Press trigger gets an optional `secondary: Option<TriggerTarget>`. Don't add a new `TriggerMethod`: it isn't a row of its own, it's a second gesture on an existing key. When `secondary` is set on a Hold row, it replaces that row's derived double tap.
-- Recognizer: a second press inside the window starts a **hold** for the secondary target on its down edge (`on_agent_input_pressed` / `on_dictation_input_pressed`), and its release ends that hold normally. On a Press row, the window starts from the tap that **started** a session, never from the stop tap, so stopping quickly can't trigger it.
-- Validation: `secondary` must differ from the row's own target. A secondary target counts as a binding for conflict checks, so no other row can also claim that key for that target.
-- UI: one optional line under the row, "Double-tap and hold to talk to Juno", with a target picker. It's off by default.
+`src/components/settings/sections/TriggersSettings.tsx` is mostly rewritten; `TriggerRow` becomes `TriggerSentence`.
+- **Controls:** gesture menu, key recorder, target menu, the generated "how it ends" line, enable switch, and delete on hover. Menu items that can't be picked are greyed out with the reason from `combo_conflict`.
+- **Voice rows:** `Say [hey] [phrase] to [target]`, with the existing hey toggle and phrase field inline.
+- **"+ Add trigger"** is the one primary action. It adds the next sensible sentence (a gesture and target that fit the rules) with the recorder open.
+- **States:**
+  - No triggers: "Nothing summons Juno yet" and the add button.
+  - A key macOS refuses: the row shows the backend's sentence.
+  - Globe key: `GlobeKeyNote` attaches only to rows using 🌐.
+  - Voice rows without microphone permission: a one-line fix link.
+- **Accessibility:** each sentence has an accessible name built from its words, the menus work from the keyboard, and the recorder keeps its Escape/Enter/Backspace behavior.
+- **Evidence:** screenshots of the default list, the empty state, a greyed-out gesture with its reason, and the add flow, plus a recording of hold, double tap and double-tap-and-hold on one key in a `juno-build` install. Save them under `docs/frontend/screenshots/trigger-sentences/`.
 
 ## Considered and cut
 
-- Double tap as a separate setting or row. It's derived, like Wispr's, so there's nothing to configure.
-- A new `DoubleTapHold` method or row. It's a property of a key, not a trigger.
-- Delaying the first tap's cue to hide the cancel-then-start. Every press would pay that latency, just to tidy up the double tap.
-- Holding the first tap's audio open to hand it to the double tap. That rebuilds hands-free state, which is the thing this plan removes.
-- Making the window configurable. Start with 300 ms and only revisit if people report misses.
+- Double tap as a built-in, invisible gesture (the first draft of this file). A visible row is honest, and one that comes pre-filled and can be deleted gives the same convenience.
+- A `secondary` target field. Double tap and hold is just another row.
+- Single tap on a hold key. It's the rule.
+- New targets (paste last transcript, cancel, command mode). The target menu makes them cheap to add later, but none ship here.
+- A configurable window. Start at 300 / 250 ms and revisit only if people report misses.
+- Delaying the first press's cue to hide the cancel-then-start. Every press would pay that latency.
 
-## Demo test (phase 1 PR)
+## Demo test
 
-1. Ten seconds: above.
-2. Removed: single-tap hands-free (state, tests, hint text). Cut: listed above.
-3. One primary action per row: hold. Double tap is secondary, and the hint mentions it.
-4. Defaults: every hold key gets double tap with no setup.
-5. States: an accidental tap cancels silently after the start cue. The Fn and mouse sources go through the same recognizer.
-6. Instant: the double tap fires on the second down edge, and the cue plays on that edge.
-7. Seams: all three input sources, both targets.
-8. Stage test: hold, double tap, and press to stop, all on Fn, with no settings visit.
-9. Evidence: CI green, recognizer and cancel/start unit tests, and a screen recording of the walk on a `juno-build` install.
-10. DRI: Backend Engineer.
+1. Ten seconds: the list reads as sentences, and changing "dictate" to "talk to Juno" is one click.
+2. Removed: single-tap hands-free, per-row paragraph hints, method:target identity. Cut: listed above.
+3. One primary action: "+ Add trigger".
+4. Defaults: three rows cover hold, hands-free and the agent with no setup.
+5. States: empty, refused key, globe key, missing microphone permission.
+6. Instant: every gesture except the shared-key double-tap-and-hold starts on an edge. That one waits 250 ms, and the cue marks it.
+7. Seams: keyboard, Fn and mouse all go through one recognizer, for both targets.
+8. Stage test: hold, double tap and double-tap-and-hold on 🌐 in one take.
+9. Evidence: CI green, tests, screenshots, recording.
+10. DRI: Backend Engineer (LAC-4070), Frontend Engineer (screen).

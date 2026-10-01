@@ -1,7 +1,10 @@
 //! # Global Shortcut Handler
 //!
-//! This module handles all global keyboard shortcuts for the Juno application,
-//! including escape key handling, agent mode toggle, and dictation input shortcuts.
+//! Every way a key or a mouse button can summon Juno arrives here. The two
+//! utility shortcuts (Escape to stop, Cmd+Comma to open settings) are fixed
+//! constants; everything else is a [`crate::triggers::Trigger`], and a key is
+//! handed to [`recognizer`], which decides which of that key's independent
+//! gestures the edge belongs to.
 
 use std::sync::Mutex;
 use std::time::Instant;
@@ -12,6 +15,7 @@ use tracing::{debug, error, info};
 
 use crate::constants::{errors::templates, events, monitor_sessions};
 use crate::state;
+use crate::triggers::{Binding, KeyGestures, TriggerTarget};
 
 /// Parse a shortcut string into a Shortcut object
 pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
@@ -26,14 +30,11 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         event.state()
     );
 
-    let app_state = app.state::<state::AppState>();
-
     // The two utility shortcuts are fixed constants, not settings: Escape
     // cancels and Cmd+Comma opens settings, the way every Mac app does it, so
     // there is nothing to look up and nothing a stored value could override.
-    // Activation (agent + dictation) is driven by the triggers matrix below,
-    // and voice is a trigger method of its own, so there is no
-    // voice-activation shortcut at all.
+    // Activation is driven by the triggers below, and Say is a gesture of its
+    // own, so there is no voice-activation shortcut at all.
     let stop_shortcut: Option<Shortcut> =
         parse_shortcut_string(crate::constants::settings::defaults::STOP_CURRENT_TASK);
     let settings_shortcut: Option<Shortcut> =
@@ -53,23 +54,17 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
         }
     }
 
-    // Route the incoming shortcut through the activation triggers: any enabled
-    // key-bound trigger whose combo matches fires by its own method/target, so
-    // the bounded matrix (push-to-talk / toggle x agent / dictation) works even
-    // when several combos are bound.
-    dispatch_activation_triggers(app, &app_state, shortcut, event);
+    dispatch_activation_triggers(app, shortcut, event);
 }
 
-/// Fire every enabled keyboard trigger whose binding matches `shortcut`.
-fn dispatch_activation_triggers(
-    app: &AppHandle,
-    app_state: &tauri::State<'_, state::AppState>,
-    shortcut: &Shortcut,
-    event: &ShortcutEvent,
-) {
-    use crate::triggers::{Binding, TriggerTarget};
-
-    let triggers = match app_state.get_triggers() {
+/// Hand a matching combo to its key's recognizer.
+///
+/// One key, one call, however many rows describe it. The old loop dispatched
+/// per matching row and had to carry two "already fired" flags to stop a single
+/// press from activating the same target twice; a key is now resolved once and
+/// the recognizer says which gesture it was.
+fn dispatch_activation_triggers(app: &AppHandle, shortcut: &Shortcut, event: &ShortcutEvent) {
+    let triggers = match app.state::<state::AppState>().get_triggers() {
         Ok(t) => t,
         Err(e) => {
             error!("[GlobalShortcut] Failed to read triggers: {}", e);
@@ -77,23 +72,14 @@ fn dispatch_activation_triggers(
         }
     };
 
-    // One key press is one activation per target, however many rows describe it.
-    // Two enabled triggers can legitimately share a combo while pointing at
-    // different targets, but nothing good comes of dispatching the same target
-    // twice for a single edge: the second call re-enters a session the first
-    // one just started, and the UI is told "agent mode activated" once per
-    // matching row. That is where the stack of identical toasts came from.
-    let mut fired_agent = false;
-    let mut fired_dictation = false;
-
-    for trigger in triggers.iter().filter(|t| t.enabled) {
-        let Some(Binding::Keyboard { shortcut: combo }) = &trigger.binding else {
-            continue; // voice + mouse handled elsewhere
+    for binding in crate::triggers::bound_keys(&triggers) {
+        let Binding::Keyboard { shortcut: combo } = &binding else {
+            continue; // mouse buttons have their own monitor
         };
         // A bare modifier such as Fn is a keyboard binding, but the plugin
         // cannot register it and the flags-changed monitor fires it directly.
-        // Skipping it here keeps that one edge from arriving twice if the
-        // combo parser ever learns to spell it.
+        // Skipping it here keeps that one edge from arriving twice if the combo
+        // parser ever learns to spell it.
         if crate::triggers::bare_modifier(combo).is_some() {
             continue;
         }
@@ -103,37 +89,13 @@ fn dispatch_activation_triggers(
         if *shortcut != parsed {
             continue;
         }
-        // Logged at info, because "the shortcut does nothing" is the report
-        // that keeps coming back and this is the line that settles it: the
-        // registration log above says the combo was claimed, and this one says
-        // a press of it arrived and was routed.
-        info!(
-            "[GlobalShortcut] {} fired {} ({:?})",
-            combo,
-            trigger.label(),
-            event.state()
-        );
-
-        match trigger.target {
-            TriggerTarget::Agent => {
-                if fired_agent {
-                    continue;
-                }
-                fired_agent = true;
-                handle_agent_mode_shortcut(app, event, trigger.method);
-            }
-            TriggerTarget::Dictation => {
-                if fired_dictation {
-                    continue;
-                }
-                fired_dictation = true;
-                handle_dictation_input_shortcut(app, event, trigger.method);
-            }
-        }
-
-        if fired_agent && fired_dictation {
-            break;
-        }
+        // Logged at info, because "the shortcut does nothing" is the report that
+        // keeps coming back and this is the line that settles it: the
+        // registration log says the combo was claimed, and this one says a press
+        // of it arrived and was routed.
+        info!("[GlobalShortcut] {} fired ({:?})", combo, event.state());
+        fire_key_edge(app, &binding, event.state() == ShortcutState::Pressed);
+        return;
     }
 }
 
@@ -231,280 +193,825 @@ pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
     });
 }
 
-/// # Double-tap gesture recognizer for hold keys
+/// # The gesture recognizer
 ///
-/// Sits in front of `fire_trigger_edge` so every activation source — global
-/// shortcuts, `platform::modifier_key_monitor` for Fn, `platform::mouse_button_monitor` —
-/// gets the same gesture. There is no session state and no hands-free mode: the
-/// recognizer only remembers the time of the last *short* release per
-/// `(TriggerTarget, KeySignature)` and a flag to swallow the release of a
-/// press that fired a double tap.
+/// One recognizer per bound key, sitting in front of the agent and dictation
+/// monitors. Every input source reaches it: global shortcuts,
+/// `platform::modifier_key_monitor` for Fn, and
+/// `platform::mouse_button_monitor`.
 ///
-/// The rule: a hold key gets a derived double tap. When a second press lands
-/// within `DOUBLE_TAP_WINDOW_MS` of the previous short release, the recognizer
-/// runs the *Press* code path on that press's down edge and swallows the
-/// matching release. The rule from the plan: no key both holds and single-taps
-/// to activate; double tap is the only way a hold key reaches the toggle
-/// behavior.
-mod double_tap {
+/// Its whole job is to say **which independent gesture** an edge belongs to. It
+/// does not own a session, it has no hands-free mode, and it never sends one
+/// gesture's edge to another gesture's target. What it remembers per key is
+/// only gesture bookkeeping: when a short release opened the double-tap window,
+/// which second-press branch is still undecided, whether a release has already
+/// been claimed, and whether a double-tap-and-hold is currently down.
+///
+/// What it replaced was a derived double tap: a recognizer that turned a second
+/// press of a *hold* key into the hold trigger's own tap path, so one row
+/// silently answered two gestures. A double tap is a row of its own now, with
+/// its own key and its own target.
+///
+/// The edges take `now` rather than reading the clock, so the state machine is
+/// a pure function of its inputs and the tests drive it with synthetic timings
+/// instead of real keys. [`promote`] is the exception and takes no clock: the
+/// caller's timer *is* the clock, and it and the release race each other for
+/// the same `pending` under one lock, so whichever arrives first wins outright.
+pub mod recognizer {
+    use std::collections::HashMap;
+    use std::sync::LazyLock;
+    use std::time::Duration;
+
     use super::*;
-    use crate::triggers::TriggerTarget;
 
-    /// A per-source key so a mouse-button double tap does not fuse with a
-    /// Fn-key single tap. We identify by trigger target and by whether this
-    /// arrived from a keyboard-ish or mouse-ish source; the recognizer is
-    /// installed at `fire_trigger_edge`, which sees the same `(method, target,
-    /// pressed)` from every source, so we key by target alone and the source
-    /// distinction is enforced by the flag being per-target.
-    #[derive(Debug, Default)]
-    struct TargetGesture {
-        last_short_release: Option<Instant>,
-        swallow_next_release: bool,
+    /// What one edge resolves to. The caller performs it.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Decision {
+        /// This edge belongs to no gesture on this key.
+        Ignore,
+        /// Start the hold path for this target. The microphone opens at
+        /// `IMMEDIATE_START_MS` and `HOLD_DURATION_MS` decides whether the
+        /// release commits.
+        HoldPress(TriggerTarget),
+        /// End the hold path for this target.
+        HoldRelease(TriggerTarget),
+        /// Run the Tap code path for this target now. That path starts a
+        /// session when none is running and stops the one that is.
+        Tap(TriggerTarget),
+        /// A second press two gestures could claim. This is the one place that
+        /// waits: still held at `SECOND_PRESS_HOLD_MS` means `hold` starts, and
+        /// a release before then means `quick`.
+        Resolve { quick: Quick, hold: TriggerTarget },
+    }
+
+    /// What a release before `SECOND_PRESS_HOLD_MS` turns out to mean.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Quick {
+        /// A double tap: run the Tap code path for this target.
+        Tap(TriggerTarget),
+        /// An ordinary stop of the tap session already running on this key.
+        Stop(TriggerTarget),
+    }
+
+    /// The outcome of a second press that was held long enough.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Promoted {
+        /// The double-tap-and-hold target whose hold starts now.
+        pub hold: TriggerTarget,
+        /// A tap session this press is taking the key away from, which is
+        /// cancelled rather than finished: the person is starting something
+        /// else, not ending what they said.
+        pub cancel: Option<TriggerTarget>,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct Pending {
+        quick: Quick,
+        hold: TriggerTarget,
     }
 
     #[derive(Debug, Default)]
-    struct RecognizerState {
-        agent: TargetGesture,
-        dictation: TargetGesture,
+    struct KeyState {
+        /// When the short release that opened the double-tap window happened.
+        window_opened_at: Option<Instant>,
+        /// A second press no gesture has claimed yet.
+        pending: Option<Pending>,
+        /// The next release of this key has already been accounted for.
+        swallow_release: bool,
+        /// A double-tap-and-hold is down; its release ends that target.
+        holding: Option<TriggerTarget>,
     }
 
-    static STATE: Mutex<RecognizerState> = Mutex::new(RecognizerState {
-        agent: TargetGesture {
-            last_short_release: None,
-            swallow_next_release: false,
-        },
-        dictation: TargetGesture {
-            last_short_release: None,
-            swallow_next_release: false,
-        },
-    });
+    static KEYS: LazyLock<Mutex<HashMap<String, KeyState>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
 
-    fn with_slot<R>(target: TriggerTarget, f: impl FnOnce(&mut TargetGesture) -> R) -> R {
-        let mut guard = match STATE.lock() {
+    fn with<R>(key: &str, f: impl FnOnce(&mut KeyState) -> R) -> R {
+        let mut guard = match KEYS.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
-        let slot = match target {
-            TriggerTarget::Agent => &mut guard.agent,
-            TriggerTarget::Dictation => &mut guard.dictation,
-        };
-        f(slot)
+        f(guard.entry(key.to_string()).or_default())
     }
 
-    /// Decision on a press-down edge.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum PressDecision {
-        /// Ordinary hold-key press. Route through the monitor.
-        Hold,
-        /// Second press inside the window: run the Press code path on this
-        /// down edge and swallow the matching release.
-        DoubleTapFired,
+    fn window_ms() -> Duration {
+        Duration::from_millis(monitor_sessions::DOUBLE_TAP_WINDOW_MS)
     }
 
-    /// Called on the down edge of a Hold trigger. Returns whether this press
-    /// is a double tap that must run the Press code path.
-    pub fn on_hold_press(target: TriggerTarget) -> PressDecision {
-        with_slot(target, |slot| {
-            if let Some(released_at) = slot.last_short_release.take() {
-                if released_at.elapsed().as_millis()
-                    <= monitor_sessions::DOUBLE_TAP_WINDOW_MS as u128
-                {
-                    slot.swallow_next_release = true;
-                    return PressDecision::DoubleTapFired;
+    /// Resolve a press-down edge.
+    ///
+    /// `session` is the tap or double-tap session this key is currently
+    /// running, read from the session registry rather than from a flag of the
+    /// recognizer's own. That is what lets it hold no session state: "stop what
+    /// a tap started" is a question something else already answers.
+    pub fn on_press(
+        key: &str,
+        gestures: KeyGestures,
+        session: Option<TriggerTarget>,
+        now: Instant,
+    ) -> Decision {
+        with(key, |s| {
+            let in_window = s
+                .window_opened_at
+                .take()
+                .is_some_and(|at| now.duration_since(at) <= window_ms());
+
+            if in_window {
+                if let Some(hold) = gestures.double_tap_hold {
+                    let quick = match (session, gestures.double_tap) {
+                        // A tap session is running and this key also
+                        // double-taps-and-holds. A quick release is the
+                        // ordinary stop; holding on takes the key for the hold.
+                        (Some(target), _) => Quick::Stop(target),
+                        (None, Some(target)) => Quick::Tap(target),
+                        (None, None) => {
+                            // Nothing else wants this press, so there is
+                            // nothing to wait for: the hold starts on the down
+                            // edge like any other hold.
+                            s.holding = Some(hold);
+                            s.swallow_release = false;
+                            return Decision::HoldPress(hold);
+                        }
+                    };
+                    s.pending = Some(Pending { quick, hold });
+                    return Decision::Resolve { quick, hold };
+                }
+                if let Some(target) = gestures.double_tap {
+                    // Double tap alone: the Tap code path on the down edge, and
+                    // the release that follows belongs to this gesture.
+                    s.swallow_release = true;
+                    return Decision::Tap(target);
                 }
             }
-            PressDecision::Hold
+
+            // A tap or double-tap session is running: the next press of that key
+            // stops it on the down edge, and its release is swallowed.
+            if let Some(target) = session {
+                s.swallow_release = true;
+                return Decision::Tap(target);
+            }
+
+            if let Some(target) = gestures.hold {
+                return Decision::HoldPress(target);
+            }
+
+            // Tap acts on the release. A key carrying only double gestures does
+            // nothing at all on a first press, which is the rule: no keyboard
+            // trigger fires on a single tap of a hold key.
+            Decision::Ignore
         })
     }
 
-    /// On the release edge: swallow this release if the previous press fired
-    /// a double tap. Returns true when the caller must NOT dispatch to the
-    /// monitor. Called synchronously from `fire_trigger_edge`, so it must not
-    /// depend on any async work.
-    pub fn check_swallow_on_release(target: TriggerTarget) -> bool {
-        with_slot(target, |slot| {
-            if slot.swallow_next_release {
-                slot.swallow_next_release = false;
-                slot.last_short_release = None;
-                true
-            } else {
-                false
+    /// Resolve a release edge.
+    pub fn on_release(key: &str, gestures: KeyGestures, _now: Instant) -> Decision {
+        with(key, |s| {
+            if s.swallow_release {
+                s.swallow_release = false;
+                s.window_opened_at = None;
+                return Decision::Ignore;
             }
+
+            // An undecided second press. Reaching here at all means the release
+            // beat the `SECOND_PRESS_HOLD_MS` timer to the mutex, so this is the
+            // short reading: `promote` takes `pending` under the same lock, and
+            // whichever arrives first wins outright.
+            if let Some(p) = s.pending.take() {
+                // Either reading runs the Tap code path: that path starts a
+                // session when none is open and stops the one that is, which is
+                // exactly the difference between a double tap and an ordinary
+                // stop.
+                let target = match p.quick {
+                    Quick::Tap(target) | Quick::Stop(target) => target,
+                };
+                return Decision::Tap(target);
+            }
+
+            if let Some(target) = s.holding.take() {
+                return Decision::HoldRelease(target);
+            }
+
+            if let Some(target) = gestures.hold {
+                return Decision::HoldRelease(target);
+            }
+
+            if let Some(target) = gestures.tap {
+                return Decision::Tap(target);
+            }
+
+            Decision::Ignore
         })
     }
 
-    /// After the monitor's release returns its outcome, call this to arm or
-    /// close the double-tap window. Only a short-tap cancel arms the window;
-    /// a committed hold and "nothing happened" both close it.
-    pub fn note_release_outcome(target: TriggerTarget, was_short_tap: bool) {
-        with_slot(target, |slot| {
-            if was_short_tap {
-                slot.last_short_release = Some(Instant::now());
+    /// Record what the hold monitor made of a release.
+    ///
+    /// Only a short release opens the double-tap window, and only on a key that
+    /// has a gesture waiting for a second press. A committed hold and an idle
+    /// release both close it, so a key with one gesture never carries a hidden
+    /// second meaning.
+    pub fn note_hold_release(key: &str, gestures: KeyGestures, was_short: bool, now: Instant) {
+        with(key, |s| {
+            s.window_opened_at = if was_short && gestures.has_double() {
+                Some(now)
             } else {
-                slot.last_short_release = None;
-            }
+                None
+            };
         });
     }
 
-    /// Ensure the next release is swallowed. Used when a press fires the tap
-    /// code path via a non-recognizer route (e.g. "press while active =
-    /// stop"), so the trailing release does not double-fire.
-    pub fn arm_swallow(target: TriggerTarget) {
-        with_slot(target, |slot| {
-            slot.swallow_next_release = true;
-            slot.last_short_release = None;
+    /// Record that a Tap gesture's release just *started* a session.
+    ///
+    /// The window opens only from the tap that started something, so stopping
+    /// after a real sentence can never be read as the first half of a double
+    /// tap. And only when the key has a double-tap-and-hold to offer, since
+    /// Tap cannot share a key with Hold or Double tap.
+    pub fn note_tap_started(key: &str, gestures: KeyGestures, now: Instant) {
+        with(key, |s| {
+            s.window_opened_at = if gestures.double_tap_hold.is_some() {
+                Some(now)
+            } else {
+                None
+            };
         });
     }
 
+    /// `SECOND_PRESS_HOLD_MS` after an undecided second press: is it a hold?
+    ///
+    /// `Some` means the key is still down and the double-tap-and-hold has
+    /// earned it. `None` means the release got here first and was already
+    /// resolved as the short reading.
+    pub fn promote(key: &str) -> Option<Promoted> {
+        with(key, |s| {
+            let p = s.pending.take()?;
+            s.holding = Some(p.hold);
+            Some(Promoted {
+                hold: p.hold,
+                cancel: match p.quick {
+                    Quick::Stop(target) => Some(target),
+                    Quick::Tap(_) => None,
+                },
+            })
+        })
+    }
+
+    /// Forget every key's bookkeeping.
+    ///
+    /// Called whenever the triggers are re-registered. A half-finished gesture
+    /// is about a binding that may not exist any more, and an open window left
+    /// over from the old set would make the first press after a rebind mean
+    /// something nobody asked for.
+    pub fn forget_all() {
+        let mut guard = match KEYS.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.clear();
+    }
+
+    /// Forget one key. Tests keep to their own keys so they can run in
+    /// parallel against the process-global map.
     #[cfg(test)]
-    pub(super) fn reset() {
-        with_slot(TriggerTarget::Agent, |slot| {
-            slot.last_short_release = None;
-            slot.swallow_next_release = false;
-        });
-        with_slot(TriggerTarget::Dictation, |slot| {
-            slot.last_short_release = None;
-            slot.swallow_next_release = false;
-        });
+    fn forget(key: &str) {
+        let mut guard = match KEYS.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.remove(key);
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
-        use std::sync::Mutex as StdMutex;
+        use crate::triggers::TriggerTarget::{Agent, Dictation};
 
-        // The recognizer state is a process-global `static`, so cargo test's
-        // default parallelism would let tests scribble on each other. This
-        // serialises them without pulling in a dev-dep.
-        static SERIAL: StdMutex<()> = StdMutex::new(());
+        const KEY: &str = "fn (globe)";
 
-        fn guard() -> std::sync::MutexGuard<'static, ()> {
-            match SERIAL.lock() {
-                Ok(g) => g,
-                Err(poisoned) => poisoned.into_inner(),
+        fn fresh(key: &str) {
+            forget(key);
+        }
+
+        fn hold_only(target: TriggerTarget) -> KeyGestures {
+            KeyGestures {
+                hold: Some(target),
+                ..Default::default()
             }
         }
 
-        fn press(target: TriggerTarget) -> PressDecision {
-            on_hold_press(target)
+        fn hold_and_double_tap(hold: TriggerTarget, double: TriggerTarget) -> KeyGestures {
+            KeyGestures {
+                hold: Some(hold),
+                double_tap: Some(double),
+                ..Default::default()
+            }
         }
 
-        #[test]
-        fn a_lonely_press_is_a_hold() {
-            let _g = guard();
-            reset();
-            assert_eq!(press(TriggerTarget::Agent), PressDecision::Hold);
-            assert!(!check_swallow_on_release(TriggerTarget::Agent));
+        fn hold_and_double_tap_hold(hold: TriggerTarget, dth: TriggerTarget) -> KeyGestures {
+            KeyGestures {
+                hold: Some(hold),
+                double_tap_hold: Some(dth),
+                ..Default::default()
+            }
         }
 
+        fn tap_and_double_tap_hold(tap: TriggerTarget, dth: TriggerTarget) -> KeyGestures {
+            KeyGestures {
+                tap: Some(tap),
+                double_tap_hold: Some(dth),
+                ..Default::default()
+            }
+        }
+
+        /// A moment `ms` after `base`.
+        fn at(base: Instant, ms: u64) -> Instant {
+            base + Duration::from_millis(ms)
+        }
+
+        /* ------------------------------------------------------------ */
+        /* A hold key is only a hold key                                */
+        /* ------------------------------------------------------------ */
+
         #[test]
-        fn a_second_press_after_a_short_tap_within_the_window_fires_a_double_tap() {
-            let _g = guard();
-            reset();
-            assert_eq!(press(TriggerTarget::Dictation), PressDecision::Hold);
-            note_release_outcome(TriggerTarget::Dictation, true);
-            // Immediately press again — well inside the window.
+        fn a_hold_key_holds_and_nothing_else() {
+            let key = "hold-only";
+            fresh(key);
+            let g = hold_only(Dictation);
+            let t0 = Instant::now();
+
             assert_eq!(
-                press(TriggerTarget::Dictation),
-                PressDecision::DoubleTapFired
+                on_press(key, g, None, t0),
+                Decision::HoldPress(Dictation),
+                "the down edge starts the hold"
             );
-            // The matching release must be swallowed so the monitor does not
-            // also start a fresh session on the way up.
-            assert!(check_swallow_on_release(TriggerTarget::Dictation));
-        }
-
-        #[test]
-        fn a_committed_hold_does_not_open_the_double_tap_window() {
-            let _g = guard();
-            reset();
-            assert_eq!(press(TriggerTarget::Agent), PressDecision::Hold);
-            note_release_outcome(TriggerTarget::Agent, false); // committed, not a tap
-            assert_eq!(press(TriggerTarget::Agent), PressDecision::Hold);
-        }
-
-        #[test]
-        fn the_windows_are_per_target() {
-            let _g = guard();
-            reset();
-            assert_eq!(press(TriggerTarget::Agent), PressDecision::Hold);
-            note_release_outcome(TriggerTarget::Agent, true);
-            // A press on the dictation key inside the agent's window does not
-            // fuse into a double tap.
-            assert_eq!(press(TriggerTarget::Dictation), PressDecision::Hold);
-        }
-
-        #[test]
-        fn arm_swallow_takes_the_next_release() {
-            let _g = guard();
-            reset();
-            arm_swallow(TriggerTarget::Dictation);
-            assert!(check_swallow_on_release(TriggerTarget::Dictation));
-            assert!(
-                !check_swallow_on_release(TriggerTarget::Dictation),
-                "the flag is one-shot"
-            );
-        }
-
-        #[test]
-        fn a_late_second_press_does_not_fire() {
-            let _g = guard();
-            reset();
-            // Simulate a release from just outside the window by writing the
-            // slot's last_short_release directly.
-            with_slot(TriggerTarget::Agent, |slot| {
-                slot.last_short_release = Some(
-                    Instant::now()
-                        - std::time::Duration::from_millis(
-                            monitor_sessions::DOUBLE_TAP_WINDOW_MS + 50,
-                        ),
-                );
-            });
-            assert_eq!(press(TriggerTarget::Agent), PressDecision::Hold);
-        }
-
-        #[test]
-        fn the_swallow_flag_survives_release_and_stops_the_matching_up_edge() {
-            let _g = guard();
-            reset();
-            // Press-tap-press flow. The window is armed on the release of the
-            // first tap; the second press promotes to DoubleTapFired and arms
-            // the swallow flag; the release of the *second* press must be
-            // swallowed so the monitor does not treat that up edge as a
-            // release of a hold it never saw the down edge for.
-            let _ = press(TriggerTarget::Dictation);
-            note_release_outcome(TriggerTarget::Dictation, true);
             assert_eq!(
-                press(TriggerTarget::Dictation),
-                PressDecision::DoubleTapFired
+                on_release(key, g, at(t0, 500)),
+                Decision::HoldRelease(Dictation)
             );
-            assert!(check_swallow_on_release(TriggerTarget::Dictation));
-            // Once consumed, a further release goes through normally.
-            assert!(!check_swallow_on_release(TriggerTarget::Dictation));
+            note_hold_release(key, g, false, at(t0, 500)); // committed
+
+            // A second press is just another hold. Nothing on this key taps.
+            assert_eq!(
+                on_press(key, g, None, at(t0, 550)),
+                Decision::HoldPress(Dictation)
+            );
+        }
+
+        #[test]
+        fn a_short_tap_on_a_hold_only_key_opens_no_window() {
+            // The deleted behaviour: a short cancel followed by a second press
+            // used to fire the trigger's own tap path and keep listening. With
+            // no double gesture bound there is nothing for a second press to
+            // mean, so it is a hold again.
+            let key = "hold-only-short";
+            fresh(key);
+            let g = hold_only(Agent);
+            let t0 = Instant::now();
+
+            assert_eq!(on_press(key, g, None, t0), Decision::HoldPress(Agent));
+            assert_eq!(on_release(key, g, at(t0, 90)), Decision::HoldRelease(Agent));
+            note_hold_release(key, g, true, at(t0, 90)); // short = cancelled
+
+            assert_eq!(
+                on_press(key, g, None, at(t0, 150)),
+                Decision::HoldPress(Agent),
+                "a hold key has no derived double tap any more"
+            );
+        }
+
+        /* ------------------------------------------------------------ */
+        /* Hold + Double tap on one key                                 */
+        /* ------------------------------------------------------------ */
+
+        #[test]
+        fn a_double_tap_fires_its_own_target_not_the_holds() {
+            // The point of the model. Holding talks to Juno; double-tapping the
+            // same key dictates. Two rows, two targets, one key.
+            let key = "hold-plus-double";
+            fresh(key);
+            let g = hold_and_double_tap(Agent, Dictation);
+            let t0 = Instant::now();
+
+            assert_eq!(on_press(key, g, None, t0), Decision::HoldPress(Agent));
+            assert_eq!(on_release(key, g, at(t0, 80)), Decision::HoldRelease(Agent));
+            note_hold_release(key, g, true, at(t0, 80));
+
+            assert_eq!(
+                on_press(key, g, None, at(t0, 200)),
+                Decision::Tap(Dictation),
+                "the second press is the double tap's own trigger"
+            );
+            assert_eq!(
+                on_release(key, g, at(t0, 260)),
+                Decision::Ignore,
+                "its release belongs to that press, not to a hold"
+            );
+        }
+
+        #[test]
+        fn a_late_second_press_is_a_fresh_hold() {
+            let key = "late-second";
+            fresh(key);
+            let g = hold_and_double_tap(Agent, Dictation);
+            let t0 = Instant::now();
+
+            note_hold_release(key, g, true, t0);
+            let late = at(t0, monitor_sessions::DOUBLE_TAP_WINDOW_MS + 50);
+            assert_eq!(on_press(key, g, None, late), Decision::HoldPress(Agent));
+        }
+
+        #[test]
+        fn a_second_press_exactly_on_the_window_edge_still_counts() {
+            let key = "window-edge";
+            fresh(key);
+            let g = hold_and_double_tap(Agent, Dictation);
+            let t0 = Instant::now();
+            note_hold_release(key, g, true, t0);
+            let edge = at(t0, monitor_sessions::DOUBLE_TAP_WINDOW_MS);
+            assert_eq!(on_press(key, g, None, edge), Decision::Tap(Dictation));
+        }
+
+        #[test]
+        fn a_committed_hold_closes_the_window() {
+            let key = "committed";
+            fresh(key);
+            let g = hold_and_double_tap(Agent, Dictation);
+            let t0 = Instant::now();
+            note_hold_release(key, g, false, t0); // a real hold, not a tap
+            assert_eq!(
+                on_press(key, g, None, at(t0, 50)),
+                Decision::HoldPress(Agent)
+            );
+        }
+
+        #[test]
+        fn a_running_double_tap_session_stops_on_the_next_press() {
+            let key = "double-stop";
+            fresh(key);
+            let g = hold_and_double_tap(Agent, Dictation);
+            let t0 = Instant::now();
+
+            // The double tap has started a dictation session.
+            assert_eq!(
+                on_press(key, g, Some(Dictation), t0),
+                Decision::Tap(Dictation),
+                "the press stops it on the down edge"
+            );
+            assert_eq!(on_release(key, g, at(t0, 60)), Decision::Ignore);
+        }
+
+        /* ------------------------------------------------------------ */
+        /* Hold + Double tap and hold: the headline case                */
+        /* ------------------------------------------------------------ */
+
+        #[test]
+        fn holding_the_second_press_starts_the_other_trigger() {
+            let key = "hold-plus-dth";
+            fresh(key);
+            let g = hold_and_double_tap_hold(Agent, Dictation);
+            let t0 = Instant::now();
+
+            // First press, short: a cancelled hold, which opens the window.
+            assert_eq!(on_press(key, g, None, t0), Decision::HoldPress(Agent));
+            assert_eq!(on_release(key, g, at(t0, 70)), Decision::HoldRelease(Agent));
+            note_hold_release(key, g, true, at(t0, 70));
+
+            // Second press. Only one gesture wants it, so it starts at once:
+            // nothing to disambiguate means nothing to wait for.
+            assert_eq!(
+                on_press(key, g, None, at(t0, 180)),
+                Decision::HoldPress(Dictation)
+            );
+            assert_eq!(
+                on_release(key, g, at(t0, 900)),
+                Decision::HoldRelease(Dictation),
+                "and its own release ends it, not the hold trigger's"
+            );
+        }
+
+        #[test]
+        fn the_hold_trigger_still_works_after_a_double_tap_and_hold() {
+            let key = "both-still-work";
+            fresh(key);
+            let g = hold_and_double_tap_hold(Agent, Dictation);
+            let t0 = Instant::now();
+
+            note_hold_release(key, g, true, t0);
+            assert_eq!(
+                on_press(key, g, None, at(t0, 100)),
+                Decision::HoldPress(Dictation)
+            );
+            assert_eq!(
+                on_release(key, g, at(t0, 800)),
+                Decision::HoldRelease(Dictation)
+            );
+            note_hold_release(key, g, false, at(t0, 800));
+
+            // Back to the plain hold.
+            assert_eq!(
+                on_press(key, g, None, at(t0, 2000)),
+                Decision::HoldPress(Agent)
+            );
+            assert_eq!(
+                on_release(key, g, at(t0, 2600)),
+                Decision::HoldRelease(Agent)
+            );
+        }
+
+        /* ------------------------------------------------------------ */
+        /* Double tap + Double tap and hold: the one place that waits    */
+        /* ------------------------------------------------------------ */
+
+        #[test]
+        fn a_second_press_two_gestures_want_is_resolved_by_how_long_it_is_held() {
+            let key = "ambiguous";
+            fresh(key);
+            let g = KeyGestures {
+                double_tap: Some(Agent),
+                double_tap_hold: Some(Dictation),
+                ..Default::default()
+            };
+            let t0 = Instant::now();
+
+            // A key with only double gestures does nothing on a first press, and
+            // its short release opens the window.
+            assert_eq!(on_press(key, g, None, t0), Decision::Ignore);
+            assert_eq!(on_release(key, g, at(t0, 60)), Decision::Ignore);
+            note_hold_release(key, g, true, at(t0, 60));
+
+            assert_eq!(
+                on_press(key, g, None, at(t0, 160)),
+                Decision::Resolve {
+                    quick: Quick::Tap(Agent),
+                    hold: Dictation
+                },
+                "undecided until the key has been held long enough"
+            );
+
+            // Released early: the double tap wins, on its own target.
+            assert_eq!(on_release(key, g, at(t0, 260)), Decision::Tap(Agent));
+            assert_eq!(promote(key), None, "the timer finds nothing left to claim");
+        }
+
+        #[test]
+        fn still_held_at_the_threshold_is_the_double_tap_and_hold() {
+            let key = "ambiguous-held";
+            fresh(key);
+            let g = KeyGestures {
+                double_tap: Some(Agent),
+                double_tap_hold: Some(Dictation),
+                ..Default::default()
+            };
+            let t0 = Instant::now();
+            note_hold_release(key, g, true, t0);
+
+            assert!(matches!(
+                on_press(key, g, None, at(t0, 100)),
+                Decision::Resolve { .. }
+            ));
+            assert_eq!(
+                promote(key),
+                Some(Promoted {
+                    hold: Dictation,
+                    cancel: None
+                })
+            );
+            assert_eq!(
+                on_release(key, g, at(t0, 1200)),
+                Decision::HoldRelease(Dictation),
+                "the release ends the hold the timer started"
+            );
+        }
+
+        #[test]
+        fn promote_and_release_cannot_both_claim_the_same_press() {
+            // The race the recognizer has to settle, because the timer and the
+            // key race each other. Both take `pending` under one lock, so
+            // whichever arrives first wins and the other finds nothing.
+            let key = "race";
+            fresh(key);
+            let g = KeyGestures {
+                double_tap: Some(Agent),
+                double_tap_hold: Some(Dictation),
+                ..Default::default()
+            };
+            let t0 = Instant::now();
+            note_hold_release(key, g, true, t0);
+            let _ = on_press(key, g, None, at(t0, 50));
+
+            assert!(promote(key).is_some(), "the timer got there first");
+            assert_eq!(
+                on_release(key, g, at(t0, 60)),
+                Decision::HoldRelease(Dictation),
+                "so the release ends that hold rather than firing a double tap"
+            );
+            assert_eq!(promote(key), None, "and nothing is claimed twice");
+        }
+
+        /* ------------------------------------------------------------ */
+        /* Tap + Double tap and hold                                    */
+        /* ------------------------------------------------------------ */
+
+        #[test]
+        fn a_tap_fires_on_the_release_of_the_first_press() {
+            let key = "tap";
+            fresh(key);
+            let g = KeyGestures {
+                tap: Some(Dictation),
+                ..Default::default()
+            };
+            let t0 = Instant::now();
+
+            assert_eq!(
+                on_press(key, g, None, t0),
+                Decision::Ignore,
+                "the press must not start hold tracking"
+            );
+            assert_eq!(on_release(key, g, at(t0, 100)), Decision::Tap(Dictation));
+        }
+
+        #[test]
+        fn a_tap_session_stops_on_the_next_press_of_its_key() {
+            let key = "tap-stop";
+            fresh(key);
+            let g = KeyGestures {
+                tap: Some(Dictation),
+                ..Default::default()
+            };
+            let t0 = Instant::now();
+
+            assert_eq!(
+                on_press(key, g, Some(Dictation), t0),
+                Decision::Tap(Dictation)
+            );
+            assert_eq!(
+                on_release(key, g, at(t0, 80)),
+                Decision::Ignore,
+                "the stop happened on the down edge"
+            );
+        }
+
+        #[test]
+        fn holding_the_press_after_a_tap_cancels_the_tap_and_starts_the_hold() {
+            let key = "tap-plus-dth";
+            fresh(key);
+            let g = tap_and_double_tap_hold(Dictation, Agent);
+            let t0 = Instant::now();
+
+            // A tap starts a dictation session, and that is the release the
+            // window opens from.
+            assert_eq!(on_press(key, g, None, t0), Decision::Ignore);
+            assert_eq!(on_release(key, g, at(t0, 90)), Decision::Tap(Dictation));
+            note_tap_started(key, g, at(t0, 90));
+
+            assert_eq!(
+                on_press(key, g, Some(Dictation), at(t0, 200)),
+                Decision::Resolve {
+                    quick: Quick::Stop(Dictation),
+                    hold: Agent
+                }
+            );
+            assert_eq!(
+                promote(key),
+                Some(Promoted {
+                    hold: Agent,
+                    cancel: Some(Dictation)
+                }),
+                "the tap session is cancelled, not finished"
+            );
+        }
+
+        #[test]
+        fn a_quick_press_after_a_tap_is_an_ordinary_stop() {
+            let key = "tap-plus-dth-stop";
+            fresh(key);
+            let g = tap_and_double_tap_hold(Dictation, Agent);
+            let t0 = Instant::now();
+            note_tap_started(key, g, t0);
+
+            assert!(matches!(
+                on_press(key, g, Some(Dictation), at(t0, 120)),
+                Decision::Resolve {
+                    quick: Quick::Stop(Dictation),
+                    ..
+                }
+            ));
+            assert_eq!(
+                on_release(key, g, at(t0, 200)),
+                Decision::Tap(Dictation),
+                "a quick release finishes the sentence the ordinary way"
+            );
+        }
+
+        #[test]
+        fn stopping_after_a_real_sentence_opens_no_window() {
+            // The window opens only from the tap that *started* a session, so a
+            // stop long after cannot be mistaken for the first half of a
+            // double tap.
+            let key = "tap-stop-no-window";
+            fresh(key);
+            let g = tap_and_double_tap_hold(Dictation, Agent);
+            let t0 = Instant::now();
+
+            // Stop the session: press down (stop), release swallowed.
+            assert_eq!(
+                on_press(key, g, Some(Dictation), t0),
+                Decision::Tap(Dictation)
+            );
+            assert_eq!(on_release(key, g, at(t0, 70)), Decision::Ignore);
+
+            // Nothing opened a window, so the next press is an ordinary first
+            // press and the tap fires on its release.
+            assert_eq!(on_press(key, g, None, at(t0, 150)), Decision::Ignore);
+            assert_eq!(on_release(key, g, at(t0, 240)), Decision::Tap(Dictation));
+        }
+
+        #[test]
+        fn a_tap_on_a_key_without_a_double_gesture_opens_no_window() {
+            let key = "tap-alone";
+            fresh(key);
+            let g = KeyGestures {
+                tap: Some(Dictation),
+                ..Default::default()
+            };
+            let t0 = Instant::now();
+            note_tap_started(key, g, t0);
+            assert_eq!(
+                on_press(key, g, None, at(t0, 50)),
+                Decision::Ignore,
+                "a first press on a tap-only key does nothing"
+            );
+        }
+
+        /* ------------------------------------------------------------ */
+        /* Keys do not bleed into each other                            */
+        /* ------------------------------------------------------------ */
+
+        #[test]
+        fn each_key_has_its_own_recognizer() {
+            fresh("key-a");
+            fresh("key-b");
+            let g = hold_and_double_tap(Agent, Dictation);
+            let t0 = Instant::now();
+
+            note_hold_release("key-a", g, true, t0);
+            // A press on another key inside key-a's window is a first press.
+            assert_eq!(
+                on_press("key-b", g, None, at(t0, 50)),
+                Decision::HoldPress(Agent)
+            );
+            // key-a's window is untouched.
+            assert_eq!(
+                on_press("key-a", g, None, at(t0, 100)),
+                Decision::Tap(Dictation)
+            );
+        }
+
+        #[test]
+        fn forgetting_a_key_clears_its_window() {
+            fresh(KEY);
+            let g = hold_and_double_tap(Agent, Dictation);
+            let t0 = Instant::now();
+            note_hold_release(KEY, g, true, t0);
+            forget(KEY);
+            assert_eq!(
+                on_press(KEY, g, None, at(t0, 50)),
+                Decision::HoldPress(Agent)
+            );
+        }
+
+        #[test]
+        fn an_unbound_key_decides_nothing() {
+            let key = "unbound";
+            fresh(key);
+            let g = KeyGestures::default();
+            let t0 = Instant::now();
+            assert_eq!(on_press(key, g, None, t0), Decision::Ignore);
+            assert_eq!(on_release(key, g, at(t0, 50)), Decision::Ignore);
         }
     }
 }
 
-/// Handle agent mode shortcut (Option+D by default)
-/// Shared activation routing for a key OR mouse trigger edge. Owns the
-/// onboarding and bar-voice guards so both input sources behave identically,
-/// then drives the agent/dictation monitors by the trigger's own method.
+/// Route one edge of one physical key.
 ///
-/// The gesture recognizer above sits in front of the monitors for `PushToTalk`
-/// triggers, so a second press inside `DOUBLE_TAP_WINDOW_MS` of a cancelled
-/// short tap runs the Press code path on its down edge instead of starting a
-/// fresh hold. Press triggers get no double tap by design.
-pub(crate) fn fire_trigger_edge(
-    app: &AppHandle,
-    method: crate::triggers::TriggerMethod,
-    target: crate::triggers::TriggerTarget,
-    pressed: bool,
-) {
-    use crate::triggers::{TriggerMethod, TriggerTarget};
-
+/// The single entry point for every input source: global shortcuts,
+/// `platform::modifier_key_monitor` for Fn, and
+/// `platform::mouse_button_monitor`. It owns the onboarding and bar-voice
+/// guards so all three behave identically, asks [`recognizer`] which of the
+/// key's gestures this edge belongs to, and performs the answer.
+pub(crate) fn fire_key_edge(app: &AppHandle, binding: &Binding, pressed: bool) {
+    let signature = binding.signature();
     let app_state = app.state::<state::AppState>();
 
-    // During onboarding, activation is suppressed (callers still emit their own
-    // visual-feedback events before calling this).
+    let triggers = app_state.get_triggers().unwrap_or_default();
+    let gestures = crate::triggers::gestures_on_key(&triggers, &signature);
+    if gestures.is_empty() {
+        return;
+    }
+
+    // Visual feedback first, from every source. Onboarding lights its key caps
+    // from these events, so a trigger on the globe key has to emit them too:
+    // the modifier monitor used to call straight into activation, which is why
+    // the final onboarding screen could only ever light up for a combo.
+    emit_key_feedback(app, gestures, pressed);
+
+    // During onboarding, activation is suppressed. Feedback above still fires.
     if app_state.is_onboarding_active() {
         return;
     }
@@ -519,208 +1026,219 @@ pub(crate) fn fire_trigger_edge(
         return;
     }
 
+    let now = Instant::now();
+    let decision = if pressed {
+        let session = running_tap_session(&app_state, gestures);
+        recognizer::on_press(&signature, gestures, session, now)
+    } else {
+        recognizer::on_release(&signature, gestures, now)
+    };
+
+    debug!(
+        "[GestureRecognizer] {} {} -> {:?}",
+        signature,
+        if pressed { "down" } else { "up" },
+        decision
+    );
+    perform(app, &signature, gestures, decision);
+}
+
+/// Which gestures this key serves, as visual-feedback events.
+fn emit_key_feedback(app: &AppHandle, gestures: KeyGestures, pressed: bool) {
+    let state = if pressed { "pressed" } else { "released" };
+    for target in gestures.targets() {
+        let (event, name) = match target {
+            TriggerTarget::Agent => (events::shortcuts::AGENT_MODE, "agent_mode"),
+            TriggerTarget::Dictation => (events::shortcuts::DICTATION_INPUT, "dictation_input"),
+        };
+        if let Err(e) = app.emit(
+            event,
+            serde_json::json!({ "state": state, "shortcut": name }),
+        ) {
+            error!("[GestureRecognizer] Failed to emit {}: {}", event, e);
+        }
+    }
+}
+
+/// The tap or double-tap session this key is running, if any.
+///
+/// Read from the voice-session registry, which records how each session began,
+/// rather than from a flag the recognizer keeps. A session started by holding
+/// ends when the key comes up, so it is never something a later press stops;
+/// one started by a tap is exactly what the next press of that key stops.
+fn running_tap_session(
+    app_state: &tauri::State<'_, state::AppState>,
+    gestures: KeyGestures,
+) -> Option<TriggerTarget> {
+    let session = app_state.current_voice_session()?;
+    // A session that has already been stopped and is waiting on its transcript
+    // is not something a press can stop again.
+    if !session.is_live() {
+        return None;
+    }
+    if session.method != state::VoiceStartMethod::Toggle {
+        return None;
+    }
+    let target = match session.target {
+        state::VoiceTarget::Agent => TriggerTarget::Agent,
+        state::VoiceTarget::Dictation => TriggerTarget::Dictation,
+    };
+    // Only a key that actually taps that target stops it. Another key's hold
+    // has no business ending somebody else's sentence.
+    let owns = gestures.tap == Some(target) || gestures.double_tap == Some(target);
+    if owns {
+        Some(target)
+    } else {
+        None
+    }
+}
+
+/// Carry out one recognizer decision.
+fn perform(
+    app: &AppHandle,
+    signature: &str,
+    gestures: KeyGestures,
+    decision: recognizer::Decision,
+) {
+    use recognizer::Decision;
+
+    match decision {
+        Decision::Ignore => {}
+        Decision::HoldPress(target) => start_hold(app, target),
+        Decision::HoldRelease(target) => end_hold(app, signature, gestures, target),
+        Decision::Tap(target) => run_tap_path(app, signature, gestures, target),
+        Decision::Resolve { .. } => {
+            // The one place that waits. The start cue plays when the hold
+            // actually begins, which is what tells the person when to talk.
+            let app_clone = app.clone();
+            let key = signature.to_string();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    monitor_sessions::SECOND_PRESS_HOLD_MS,
+                ))
+                .await;
+                let Some(promoted) = recognizer::promote(&key) else {
+                    return; // the release got there first
+                };
+                if let Some(cancel) = promoted.cancel {
+                    info!(
+                        "[GestureRecognizer] Cancelling the {:?} tap session: the key is being held",
+                        cancel
+                    );
+                    cancel_session(&app_clone, cancel);
+                }
+                info!(
+                    "[GestureRecognizer] Second press held past {} ms -> hold {:?}",
+                    monitor_sessions::SECOND_PRESS_HOLD_MS,
+                    promoted.hold
+                );
+                start_hold(&app_clone, promoted.hold);
+            });
+        }
+    }
+}
+
+fn start_hold(app: &AppHandle, target: TriggerTarget) {
     match target {
-        TriggerTarget::Agent => match method {
-            TriggerMethod::PushToTalk => {
-                if pressed {
-                    let decision = double_tap::on_hold_press(TriggerTarget::Agent);
-                    if decision == double_tap::PressDecision::DoubleTapFired {
-                        info!(
-                            "[GestureRecognizer] Agent double-tap on down edge — Press code path"
-                        );
-                        // The Press (Tap) code path opens the session and
-                        // marks bar-voice-active. The matching release will
-                        // be swallowed by `check_swallow_on_release`.
-                        let app_clone = app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            crate::agent_monitor::on_agent_input_released_with_mode(
-                                &app_clone,
-                                state::AgentTriggerMode::Tap,
-                            )
-                            .await;
-                        });
-                        return;
-                    }
-                    tauri::async_runtime::spawn(async move {
-                        crate::agent_monitor::on_agent_input_pressed().await;
-                    });
-                } else {
-                    if double_tap::check_swallow_on_release(TriggerTarget::Agent) {
-                        info!(
-                            "[GestureRecognizer] Swallowing agent release that belongs to the double-tap start"
-                        );
-                        return;
-                    }
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let outcome = crate::agent_monitor::on_agent_input_released_with_mode(
-                            &app_clone,
-                            state::AgentTriggerMode::Hold,
-                        )
-                        .await;
-                        // Only a short-tap cancel arms the double-tap window.
-                        // A committed hold or an idle release both close it.
-                        double_tap::note_release_outcome(
-                            TriggerTarget::Agent,
-                            matches!(outcome, crate::agent_monitor::AgentRelease::Cancelled),
-                        );
-                    });
-                }
-            }
-            TriggerMethod::Toggle => {
-                // Tap: act on the release edge only (press+release = one tap),
-                // mirroring the dictation arm below. The press must NOT start
-                // hold-tracking: the background monitor polls every 100ms and
-                // `check_and_start_agent` fires at IMMEDIATE_START_MS (0ms), so
-                // any tick landing inside the tap flipped `agent_started` true
-                // and the release then took the cancel path instead of starting
-                // the toggle. A natural tap is ~100ms, so the toggle was a coin
-                // flip. Skipping the press keeps `hold_start_time` unset, the
-                // poll never engages, and the release reliably toggles.
-                if !pressed {
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        crate::agent_monitor::on_agent_input_released_with_mode(
-                            &app_clone,
-                            state::AgentTriggerMode::Tap,
-                        )
-                        .await;
-                    });
-                }
-            }
-            TriggerMethod::Voice => {} // voice never routes through key/mouse dispatch
-        },
-        TriggerTarget::Dictation => match method {
-            TriggerMethod::PushToTalk => {
-                if pressed {
-                    // A press on the dictation hold key while a dictation
-                    // session is already active is a stop, not a hold start.
-                    // Run the Press code path (which stops when active) and
-                    // swallow the matching release. Derived from state that
-                    // already exists (`is_dictation_active`), so no new mode
-                    // flag is needed.
-                    if app_state.is_dictation_active() {
-                        info!(
-                            "[GestureRecognizer] Dictation press while session is active — stopping"
-                        );
-                        handle_dictation_tap_mode(app);
-                        double_tap::arm_swallow(TriggerTarget::Dictation);
-                        return;
-                    }
-
-                    let decision = double_tap::on_hold_press(TriggerTarget::Dictation);
-                    if decision == double_tap::PressDecision::DoubleTapFired {
-                        info!(
-                            "[GestureRecognizer] Dictation double-tap on down edge — Press code path"
-                        );
-                        handle_dictation_tap_mode(app);
-                        return;
-                    }
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        crate::dictation_monitor::on_dictation_input_pressed(&app_clone).await;
-                    });
-                } else {
-                    if double_tap::check_swallow_on_release(TriggerTarget::Dictation) {
-                        info!(
-                            "[GestureRecognizer] Swallowing dictation release that belongs to the double-tap start"
-                        );
-                        return;
-                    }
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let outcome =
-                            crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
-                        double_tap::note_release_outcome(
-                            TriggerTarget::Dictation,
-                            matches!(outcome, crate::dictation_monitor::HoldRelease::Cancelled),
-                        );
-                    });
-                }
-            }
-            TriggerMethod::Toggle => {
-                // Tap: act on the release edge only (press+release = one tap).
-                if !pressed {
-                    handle_dictation_tap_mode(app);
-                }
-            }
-            TriggerMethod::Voice => {} // voice never routes through key/mouse dispatch
-        },
+        TriggerTarget::Agent => {
+            tauri::async_runtime::spawn(async move {
+                crate::agent_monitor::on_agent_input_pressed().await;
+            });
+        }
+        TriggerTarget::Dictation => {
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::dictation_monitor::on_dictation_input_pressed(&app_clone).await;
+            });
+        }
     }
 }
 
-fn handle_agent_mode_shortcut(
-    app: &AppHandle,
-    event: &ShortcutEvent,
-    method: crate::triggers::TriggerMethod,
-) {
-    // Emit shortcut detection events for visual feedback in onboarding
-    let shortcut_state = match event.state() {
-        ShortcutState::Pressed => "pressed",
-        ShortcutState::Released => "released",
+fn end_hold(app: &AppHandle, signature: &str, gestures: KeyGestures, target: TriggerTarget) {
+    let app_clone = app.clone();
+    let key = signature.to_string();
+    match target {
+        TriggerTarget::Agent => {
+            tauri::async_runtime::spawn(async move {
+                let outcome = crate::agent_monitor::on_agent_input_released_with_mode(
+                    &app_clone,
+                    state::AgentTriggerMode::Hold,
+                )
+                .await;
+                // Only a short-tap cancel opens the double-tap window. A
+                // committed hold and an idle release both close it.
+                recognizer::note_hold_release(
+                    &key,
+                    gestures,
+                    matches!(outcome, crate::agent_monitor::AgentRelease::Cancelled),
+                    Instant::now(),
+                );
+            });
+        }
+        TriggerTarget::Dictation => {
+            tauri::async_runtime::spawn(async move {
+                let outcome =
+                    crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
+                recognizer::note_hold_release(
+                    &key,
+                    gestures,
+                    matches!(outcome, crate::dictation_monitor::HoldRelease::Cancelled),
+                    Instant::now(),
+                );
+            });
+        }
+    }
+}
+
+/// The Tap code path: exactly what a Tap trigger calls.
+fn run_tap_path(app: &AppHandle, signature: &str, gestures: KeyGestures, target: TriggerTarget) {
+    let starting = !session_live_for(app, target);
+    match target {
+        TriggerTarget::Agent => {
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::agent_monitor::on_agent_input_released_with_mode(
+                    &app_clone,
+                    state::AgentTriggerMode::Tap,
+                )
+                .await;
+            });
+        }
+        TriggerTarget::Dictation => handle_dictation_tap_mode(app),
+    }
+    if starting {
+        recognizer::note_tap_started(signature, gestures, Instant::now());
+    }
+}
+
+/// Is a session already open for this target?
+///
+/// Decides whether the Tap path above is about to start something or stop
+/// something, which is the difference between opening the double-tap window
+/// and leaving it shut.
+fn session_live_for(app: &AppHandle, target: TriggerTarget) -> bool {
+    let app_state = app.state::<state::AppState>();
+    match target {
+        TriggerTarget::Agent => crate::agent_monitor::bar_voice_active(),
+        TriggerTarget::Dictation => app_state.is_dictation_active(),
+    }
+}
+
+/// Discard whatever this target has captured so far.
+///
+/// Used when a second press takes the key away from a tap session: the person
+/// is starting something else, not finishing what they said.
+fn cancel_session(app: &AppHandle, target: TriggerTarget) {
+    let event = match target {
+        TriggerTarget::Agent => events::agent::CANCEL,
+        TriggerTarget::Dictation => events::dictation::TRANSCRIPTION_CANCEL,
     };
-
-    if let Err(e) = app.emit(
-        events::shortcuts::AGENT_MODE,
-        serde_json::json!({
-            "state": shortcut_state,
-            "shortcut": "agent_mode"
-        }),
-    ) {
-        error!(
-            "[Agent Mode Shortcut] Failed to emit shortcut detection event: {}",
-            e
-        );
+    if let Err(e) = app.emit(event, ()) {
+        error!("[GestureRecognizer] Failed to emit {}: {}", event, e);
     }
-
-    // Route the actual activation (onboarding + bar-voice guards live in the
-    // shared core, so keyboard and mouse triggers behave identically).
-    fire_trigger_edge(
-        app,
-        method,
-        crate::triggers::TriggerTarget::Agent,
-        event.state() == ShortcutState::Pressed,
-    );
 }
 
-// Removed handle_agent_tap_mode - unified through AgentMonitor
-
-/// Handle dictation input shortcut (Option+Space by default)
-fn handle_dictation_input_shortcut(
-    app: &AppHandle,
-    event: &ShortcutEvent,
-    method: crate::triggers::TriggerMethod,
-) {
-    // Emit shortcut detection events for visual feedback in onboarding
-    let shortcut_state = match event.state() {
-        ShortcutState::Pressed => "pressed",
-        ShortcutState::Released => "released",
-    };
-
-    if let Err(e) = app.emit(
-        events::shortcuts::DICTATION_INPUT,
-        serde_json::json!({
-            "state": shortcut_state,
-            "shortcut": "dictation_input"
-        }),
-    ) {
-        error!(
-            "[Dictation Input Shortcut] Failed to emit shortcut detection event: {}",
-            e
-        );
-    }
-
-    // Route the actual activation through the shared core (onboarding +
-    // bar-voice guards, tap/hold from this trigger's method).
-    fire_trigger_edge(
-        app,
-        method,
-        crate::triggers::TriggerTarget::Dictation,
-        event.state() == ShortcutState::Pressed,
-    );
-}
-
-/// Handle dictation tap mode (new functionality)
+/// Handle dictation tap mode: start a session, or stop the one that is running.
 fn handle_dictation_tap_mode(app: &AppHandle) {
     info!("[Dictation Tap Mode] Entered handle_dictation_tap_mode");
 
@@ -768,7 +1286,9 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
             // Emit dictation transcription start event instead of active event
             // This will be handled by the event listener in events/handlers.rs
             // Say how this was triggered, so the session records its method at
-            // birth rather than a stop path inferring it later.
+            // birth rather than a stop path inferring it later. "toggle" is the
+            // registry's word for a session a tap opened, which is what the
+            // recognizer reads back when deciding whether a later press stops it.
             if let Err(e) = app_handle.emit(
                 events::dictation::TRANSCRIPTION_START,
                 serde_json::json!({ "method": "toggle" }),

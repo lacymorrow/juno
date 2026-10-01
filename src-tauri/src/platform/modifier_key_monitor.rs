@@ -23,11 +23,16 @@
 //! its own Accessibility alert on Juno's behalf, which is exactly the surprise
 //! the onboarding work went to some trouble to remove.
 
-use crate::triggers::{ModifierKey, TriggerMethod, TriggerTarget};
+use crate::triggers::ModifierKey;
 use tauri::AppHandle;
 
-/// A bare modifier key mapped to the trigger it activates.
-pub type ModifierBinding = (ModifierKey, TriggerMethod, TriggerTarget);
+/// A bare modifier key a trigger is bound to.
+///
+/// Just the key. Which gestures it carries, and what each one does, is read
+/// from the trigger list when the edge arrives, so the globe key can hold for
+/// one target and double-tap-and-hold for another without this observer
+/// knowing anything about either.
+pub type ModifierBinding = ModifierKey;
 
 /// Which edge a `flagsChanged` event represents for `target`, if any.
 ///
@@ -181,29 +186,32 @@ mod imp {
             return;
         }
 
-        // Copy out the matching triggers, then release the lock before routing.
-        let matches: Vec<(bool, super::TriggerMethod, super::TriggerTarget)> = {
+        // Which bound keys this event is an edge of. Read and release the lock
+        // before routing, because routing reads the trigger list.
+        let edges: Vec<(ModifierBinding, bool)> = {
             let guard = match BINDINGS.lock() {
                 Ok(g) => g,
                 Err(poisoned) => poisoned.into_inner(),
             };
             guard
                 .iter()
-                .filter_map(|(key, method, target)| {
-                    modifier_edge(key_code, flags, *key).map(|pressed| (pressed, *method, *target))
-                })
+                .filter_map(|key| modifier_edge(key_code, flags, *key).map(|down| (*key, down)))
                 .collect()
         };
 
-        for (pressed, method, target) in matches {
+        for (key, pressed) in edges {
             debug!(
-                "[ModifierKeyMonitor] key {} {} -> {:?}/{:?}",
-                key_code,
-                if pressed { "down" } else { "up" },
-                method,
-                target
+                "[ModifierKeyMonitor] {} {}",
+                key.label(),
+                if pressed { "down" } else { "up" }
             );
-            crate::events::shortcuts::fire_trigger_edge(app, method, target, pressed);
+            crate::events::shortcuts::fire_key_edge(
+                app,
+                &crate::triggers::Binding::Keyboard {
+                    shortcut: key.shortcut().to_string(),
+                },
+                pressed,
+            );
         }
     }
 

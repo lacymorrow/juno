@@ -35,7 +35,9 @@ import { KeyCaps } from "../KeyCaps";
 /* Backend contract (frozen — mirror the serde shape exactly)                 */
 /* -------------------------------------------------------------------------- */
 
-type TriggerMethod = "push_to_talk" | "toggle" | "voice";
+// Five independent gestures. A double tap is not a second way to reach a hold
+// trigger; it is a row of its own, with its own key and its own target.
+type Gesture = "hold" | "tap" | "double_tap" | "double_tap_hold" | "say";
 type TriggerTarget = "agent" | "dictation";
 
 type BindingTab = "keyboard" | "mouse";
@@ -49,7 +51,9 @@ type Binding =
   | { kind: "mouse"; button: number };
 
 interface Trigger {
-  method: TriggerMethod;
+  /** The row's identity. A new row sends "" and the backend gives it one. */
+  id: string;
+  gesture: Gesture;
   target: TriggerTarget;
   binding: Binding | null;
   phrase: string | null;
@@ -62,11 +66,14 @@ interface Trigger {
 /* -------------------------------------------------------------------------- */
 
 // A trigger reads as one sentence about the gesture and what it does:
-// "Hold to dictate", "Say a phrase to talk to Juno". Never the mechanism.
-const METHOD_LABEL: Record<TriggerMethod, string> = {
-  push_to_talk: "Hold",
-  toggle: "Press",
-  voice: "Say a phrase",
+// "Hold to dictate", "Double-tap and hold to talk to Juno". Never the
+// mechanism. Mirrors `Gesture::label` / `TriggerTarget::label` in Rust.
+const GESTURE_LABEL: Record<Gesture, string> = {
+  hold: "Hold",
+  tap: "Tap",
+  double_tap: "Double-tap",
+  double_tap_hold: "Double-tap and hold",
+  say: "Say",
 };
 
 const TARGET_LABEL: Record<TriggerTarget, string> = {
@@ -74,24 +81,41 @@ const TARGET_LABEL: Record<TriggerTarget, string> = {
   dictation: "to dictate",
 };
 
-const METHOD_HINT: Record<TriggerMethod, string> = {
-  push_to_talk:
-    "Hold the key while you speak, let go to finish. Double-tap it to keep listening until you press it again.",
-  toggle: "Press once to start, again to stop.",
-  voice: "Say the phrase out loud and Juno listens.",
+// How each gesture ends, mirroring `Gesture::ending` in Rust. Generated from
+// the gesture alone, so the line beside a row can only ever describe that row.
+// The paragraph this replaced taught a second gesture reaching the same target
+// ("Double-tap it to keep listening"), which is the behaviour the gesture model
+// deleted: a double tap is its own row now.
+const GESTURE_ENDING: Record<Gesture, string> = {
+  hold: "Let go to finish.",
+  tap: "Press the key again to finish.",
+  double_tap: "Press the key again to finish.",
+  double_tap_hold: "Let go to finish.",
+  say: "Juno starts listening when it hears the phrase.",
 };
 
-const ALL_METHODS: TriggerMethod[] = ["push_to_talk", "toggle", "voice"];
+const ALL_GESTURES: Gesture[] = [
+  "hold",
+  "tap",
+  "double_tap",
+  "double_tap_hold",
+  "say",
+];
 const ALL_TARGETS: TriggerTarget[] = ["agent", "dictation"];
 
-const triggerKey = (t: Pick<Trigger, "method" | "target">) =>
-  `${t.method}:${t.target}`;
-
-const comboLabel = (method: TriggerMethod, target: TriggerTarget) =>
-  `${METHOD_LABEL[method]} ${TARGET_LABEL[target]}`;
+const comboLabel = (gesture: Gesture, target: TriggerTarget) =>
+  `${GESTURE_LABEL[gesture]} ${TARGET_LABEL[target]}`;
 
 const errStr = (e: unknown) =>
   typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+
+/**
+ * `applyTriggers` rethrows so the recorder, which awaits it, can show the
+ * reason inline. A fire-and-forget caller already has the message in
+ * `rowError`, so it swallows the rejection rather than leaving an unhandled one
+ * behind.
+ */
+const ignoreHandled = () => {};
 
 /**
  * AppKit mouse-button numbering → a human label.
@@ -147,30 +171,24 @@ function browserButtonToAppKit(button: number): number {
 }
 
 /**
- * The factory bindings, mirroring `triggers::defaults` in Rust. Rows without
- * one have nothing to reset to.
+ * The factory bindings, mirroring `triggers::default_triggers` in Rust: hold
+ * the globe key to talk to Juno, hold Option+Space to dictate. A row whose
+ * sentence is not one of those two has nothing to reset to.
  */
 const DEFAULT_BINDINGS: Partial<Record<string, string>> = {
-  "toggle:agent": "Option+D",
-  "push_to_talk:dictation": "Option+Space",
+  "hold:agent": "Fn",
+  "hold:dictation": "Option+Space",
 };
 
-function defaultsFor(method: TriggerMethod, target: TriggerTarget): Trigger {
-  if (method === "voice") {
-    return {
-      method,
-      target,
-      binding: null,
-      phrase: target === "agent" ? "juno" : "transcribe",
-      require_hey_prefix: false,
-      enabled: true,
-    };
-  }
+/** A new row. The id is the backend's to hand out. */
+function defaultsFor(gesture: Gesture, target: TriggerTarget): Trigger {
   return {
-    method,
+    id: "",
+    gesture,
     target,
     binding: null,
-    phrase: null,
+    phrase:
+      gesture === "say" ? (target === "agent" ? "juno" : "transcribe") : null,
     require_hey_prefix: false,
     enabled: true,
   };
@@ -185,8 +203,17 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Inline conflict/error, pinned to the row that caused it.
-  const [rowError, setRowError] = useState<{ key: string; message: string } | null>(
+  // The refusal from the last save the backend would not take, beside the row
+  // that caused it.
+  //
+  // It only ever describes *that* attempt. An accepted save means the stored
+  // list has no conflict in it, so every conflict message must go at that
+  // moment, which is the fix for the error that outlived its cause: this used
+  // to clear only when the row being edited happened to be the row the message
+  // was pinned to, so "Fn (globe) is bound to more than one trigger" sat on
+  // screen for the rest of the session once the conflict was fixed from the
+  // other row.
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(
     null,
   );
 
@@ -209,6 +236,9 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
+    // Whatever the backend hands back is a list it accepted, so no refusal
+    // about it can still be true.
+    setRowError(null);
     try {
       const list = await invoke<Trigger[]>(COMMANDS.TRIGGERS_GET_TRIGGERS);
       persistedRef.current = list;
@@ -229,12 +259,13 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
 
   /**
    * Persist the whole list. Optimistic: `triggers` already reflects `next`.
-   * On success we adopt the backend's normalized list; on a conflict we revert
-   * to the last accepted list and surface the error on `editedKey`, then
-   * rethrow so callers (the recorder) can show the reason.
+   * On success we adopt the backend's normalized list and drop any standing
+   * refusal, because the list the backend just accepted has no conflict in it.
+   * On a refusal we revert to the last accepted list and show the reason
+   * beside `editedId`, then rethrow so callers (the recorder) can show it too.
    */
   const applyTriggers = useCallback(
-    async (next: Trigger[], editedKey: string) => {
+    async (next: Trigger[], editedId: string) => {
       // Drop any save still waiting out its debounce. It carries a list from
       // before this change, so letting it land afterwards would quietly undo
       // the binding that was just recorded.
@@ -248,10 +279,10 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         });
         persistedRef.current = normalized;
         setTriggers(normalized);
-        setRowError((prev) => (prev?.key === editedKey ? null : prev));
+        setRowError(null);
       } catch (e) {
         setTriggers(persistedRef.current);
-        setRowError({ key: editedKey, message: errStr(e) });
+        setRowError({ id: editedId, message: errStr(e) });
         throw e;
       }
     },
@@ -259,10 +290,10 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   );
 
   const scheduleSave = useCallback(
-    (next: Trigger[], editedKey: string) => {
+    (next: Trigger[], editedId: string) => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        void applyTriggers(next, editedKey);
+        applyTriggers(next, editedId).catch(ignoreHandled);
       }, 300);
     },
     [applyTriggers],
@@ -274,12 +305,12 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
    * row switches itself on is the backend's call, not this screen's.
    */
   const setBindingFor = useCallback(
-    async (key: string, binding: Binding | null) => {
+    async (id: string, binding: Binding | null) => {
       const next = triggersRef.current.map((t) =>
-        triggerKey(t) === key ? { ...t, binding } : t,
+        t.id === id ? { ...t, binding } : t,
       );
       setTriggers(next);
-      await applyTriggers(next, key);
+      await applyTriggers(next, id);
     },
     [applyTriggers],
   );
@@ -318,53 +349,62 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   );
 
   const patchTrigger = useCallback(
-    (
-      key: string,
-      patch: Partial<Trigger>,
-      opts: { immediate?: boolean } = {},
-    ) => {
+    (id: string, patch: Partial<Trigger>, opts: { immediate?: boolean } = {}) => {
       const next = triggersRef.current.map((t) =>
-        triggerKey(t) === key ? { ...t, ...patch } : t,
+        t.id === id ? { ...t, ...patch } : t,
       );
       setTriggers(next);
-      if (opts.immediate) void applyTriggers(next, key);
-      else scheduleSave(next, key);
+      if (opts.immediate) applyTriggers(next, id).catch(ignoreHandled);
+      else scheduleSave(next, id);
     },
     [applyTriggers, scheduleSave],
   );
 
   const addTrigger = useCallback(
-    (method: TriggerMethod, target: TriggerTarget) => {
-      const created = defaultsFor(method, target);
-      const key = triggerKey(created);
+    async (gesture: Gesture, target: TriggerTarget) => {
+      const created = defaultsFor(gesture, target);
       const next = [...triggers, created];
       setTriggers(next);
-      void applyTriggers(next, key);
-      // Enter the record flow for key methods; voice edits inline in place.
-      if (method !== "voice") {
-        setBindingTab((prev) => ({ ...prev, [key]: "keyboard" }));
-        setEditingKey(key);
+      // The id comes back with the saved list, so the record flow waits for it:
+      // a row cannot be edited before it has an identity to be edited by.
+      try {
+        const saved = await invoke<Trigger[]>(COMMANDS.TRIGGERS_SET_TRIGGERS, {
+          triggers: next,
+        });
+        persistedRef.current = saved;
+        setTriggers(saved);
+        setRowError(null);
+        if (gesture === "say") return; // a Say row edits its phrase in place
+        const added = saved[saved.length - 1];
+        if (!added) return;
+        setBindingTab((prev) => ({ ...prev, [added.id]: "keyboard" }));
+        setEditingKey(added.id);
+      } catch (e) {
+        setTriggers(persistedRef.current);
+        setRowError({ id: "", message: errStr(e) });
       }
     },
-    [triggers, applyTriggers],
+    [triggers],
   );
 
   const removeTrigger = useCallback(
-    (key: string) => {
-      const next = triggers.filter((t) => triggerKey(t) !== key);
+    (id: string) => {
+      const next = triggers.filter((t) => t.id !== id);
       setTriggers(next);
-      if (editingKey === key) setEditingKey(null);
-      setRowError((prev) => (prev?.key === key ? null : prev));
-      void applyTriggers(next, key);
+      if (editingKey === id) setEditingKey(null);
+      setRowError((prev) => (prev?.id === id ? null : prev));
+      applyTriggers(next, id).catch(ignoreHandled);
     },
     [triggers, editingKey, applyTriggers],
   );
 
-  const present = new Set(triggers.map(triggerKey));
-  const remaining: Array<{ method: TriggerMethod; target: TriggerTarget }> = [];
-  for (const method of ALL_METHODS)
-    for (const target of ALL_TARGETS)
-      if (!present.has(`${method}:${target}`)) remaining.push({ method, target });
+  // Every gesture, for every target. Nothing is filtered out: a row is its own
+  // identity now, so two Hold rows on two different keys are an ordinary pair
+  // rather than a duplicate. Which gestures may share one *key* is the
+  // backend's table, and a refusal names the row that already has it.
+  const addable: Array<{ gesture: Gesture; target: TriggerTarget }> = [];
+  for (const gesture of ALL_GESTURES)
+    for (const target of ALL_TARGETS) addable.push({ gesture, target });
 
   /* --------------------------- loading / error --------------------------- */
 
@@ -402,23 +442,23 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   const addMenu = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" disabled={remaining.length === 0}>
+        <Button size="sm">
           <Plus className="size-3.5" />
           Add trigger
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        {remaining.map(({ method, target }) => (
+      <DropdownMenuContent align="end" className="w-64">
+        {addable.map(({ gesture, target }) => (
           <DropdownMenuItem
-            key={`${method}:${target}`}
-            onSelect={() => addTrigger(method, target)}
+            key={`${gesture}:${target}`}
+            onSelect={() => void addTrigger(gesture, target)}
           >
-            {method === "voice" ? (
+            {gesture === "say" ? (
               <Mic className="size-3.5 text-muted-foreground" />
             ) : (
               <Keyboard className="size-3.5 text-muted-foreground" />
             )}
-            {comboLabel(method, target)}
+            {comboLabel(gesture, target)}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -459,46 +499,40 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
       >
         {triggers.map((trigger) => (
           <TriggerRow
-            key={triggerKey(trigger)}
+            key={trigger.id}
             trigger={trigger}
-            editing={editingKey === triggerKey(trigger)}
-            bindingTab={bindingTab[triggerKey(trigger)] ?? "keyboard"}
-            rowError={
-              rowError?.key === triggerKey(trigger) ? rowError.message : null
-            }
+            editing={editingKey === trigger.id}
+            bindingTab={bindingTab[trigger.id] ?? "keyboard"}
+            rowError={rowError?.id === trigger.id ? rowError.message : null}
             alwaysListening={Boolean(settings.alwaysListeningActive)}
             onOpenEditor={() => {
-              const key = triggerKey(trigger);
               setBindingTab((prev) => ({
                 ...prev,
-                [key]: trigger.binding?.kind === "mouse" ? "mouse" : "keyboard",
+                [trigger.id]:
+                  trigger.binding?.kind === "mouse" ? "mouse" : "keyboard",
               }));
-              setEditingKey(key);
+              setEditingKey(trigger.id);
             }}
             onCloseEditor={() => setEditingKey(null)}
             onTabChange={(tab) =>
-              setBindingTab((prev) => ({
-                ...prev,
-                [triggerKey(trigger)]: tab,
-              }))
+              setBindingTab((prev) => ({ ...prev, [trigger.id]: tab }))
             }
             onPatch={patchTrigger}
             onSetBinding={setBindingFor}
-            onRemove={() => removeTrigger(triggerKey(trigger))}
+            onRemove={() => removeTrigger(trigger.id)}
           />
         ))}
       </SettingsGroup>
 
-      <div className="flex items-center justify-between px-1">
-        <p className="text-[12px] text-muted-foreground">
-          {remaining.length === 0
-            ? "Every trigger type is in use."
-            : `${remaining.length} more ${
-                remaining.length === 1 ? "combination" : "combinations"
-              } available.`}
+      {/* A refusal the list as a whole caused, such as a key a row that has
+          since been deleted was holding. Shown here rather than nowhere. */}
+      {rowError && !triggers.some((t) => t.id === rowError.id) && (
+        <p className="px-1 text-[12px] leading-snug text-destructive" role="alert">
+          {rowError.message}
         </p>
-        {addMenu}
-      </div>
+      )}
+
+      <div className="flex items-center justify-end px-1">{addMenu}</div>
     </div>
   );
 }
@@ -517,13 +551,13 @@ interface TriggerRowProps {
   onCloseEditor: () => void;
   onTabChange: (tab: BindingTab) => void;
   onPatch: (
-    key: string,
+    id: string,
     patch: Partial<Trigger>,
     opts?: { immediate?: boolean },
   ) => void;
   /** Record a binding on this row. One implementation, in the parent, so a
       key recorded by pressing it and one chosen here take the same path. */
-  onSetBinding: (key: string, binding: Binding | null) => Promise<void>;
+  onSetBinding: (id: string, binding: Binding | null) => Promise<void>;
   onRemove: () => void;
 }
 
@@ -540,14 +574,14 @@ function TriggerRow({
   onSetBinding,
   onRemove,
 }: TriggerRowProps) {
-  const key = triggerKey(trigger);
-  const isVoice = trigger.method === "voice";
+  const key = trigger.id;
+  const isVoice = trigger.gesture === "say";
 
-  const MethodIcon = isVoice
+  const GestureIcon = isVoice
     ? Mic
     : trigger.binding?.kind === "mouse"
       ? MousePointer2
-      : trigger.method === "toggle"
+      : trigger.gesture === "tap" || trigger.gesture === "double_tap"
         ? Command
         : Keyboard;
 
@@ -564,17 +598,17 @@ function TriggerRow({
               : "bg-muted text-muted-foreground",
           )}
         >
-          <MethodIcon className="h-3.5 w-3.5" />
+          <GestureIcon className="h-3.5 w-3.5" />
         </span>
 
         <div className={cn("min-w-0 flex-1", !trigger.enabled && "opacity-55")}>
           {/* One sentence: the gesture, then what it does. */}
           <div className="flex items-baseline gap-1 text-[13px]">
-            <span className="font-medium">{METHOD_LABEL[trigger.method]}</span>
+            <span className="font-medium">{GESTURE_LABEL[trigger.gesture]}</span>
             <span className="text-muted-foreground">{TARGET_LABEL[trigger.target]}</span>
           </div>
           <p className="text-[12px] leading-snug text-muted-foreground">
-            {METHOD_HINT[trigger.method]}
+            {GESTURE_ENDING[trigger.gesture]}
           </p>
         </div>
 
@@ -585,7 +619,7 @@ function TriggerRow({
             size="xs"
             onClick={() => (editing ? onCloseEditor() : onOpenEditor())}
             aria-label={`Edit binding for ${comboLabel(
-              trigger.method,
+              trigger.gesture,
               trigger.target,
             )}`}
             className={cn(
@@ -614,14 +648,14 @@ function TriggerRow({
           onCheckedChange={(checked) =>
             onPatch(key, { enabled: checked }, { immediate: true })
           }
-          aria-label={`Enable ${comboLabel(trigger.method, trigger.target)}`}
+          aria-label={`Enable ${comboLabel(trigger.gesture, trigger.target)}`}
         />
 
         <Button
           variant="ghost"
           size="icon-xs"
           onClick={onRemove}
-          aria-label={`Delete ${comboLabel(trigger.method, trigger.target)}`}
+          aria-label={`Delete ${comboLabel(trigger.gesture, trigger.target)}`}
           className="text-muted-foreground hover:text-destructive"
         >
           <Trash2 className="size-3.5" />
@@ -725,7 +759,10 @@ function TriggerRow({
                     : ""
                 }
                 shortcutName={`trigger_${key}`}
-                defaultShortcut={DEFAULT_BINDINGS[key] ?? null}
+                defaultShortcut={
+                  DEFAULT_BINDINGS[`${trigger.gesture}:${trigger.target}`] ??
+                  null
+                }
                 onSave={(shortcut) =>
                   setBindingNow({ kind: "keyboard", shortcut })
                 }

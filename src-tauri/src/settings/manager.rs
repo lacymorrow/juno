@@ -732,8 +732,10 @@ impl SettingsManager {
 
     /// Read the unified triggers list. When the store predates the model (key
     /// missing or empty array), synthesize it from the legacy shortcut fields
-    /// so an upgrading user keeps their setup. The migrated list is not written
-    /// back here; it persists on the next `save_all_settings`.
+    /// so an upgrading user keeps their setup; when it predates gestures,
+    /// [`crate::triggers::migrate_to_gestures`] brings it forward. The migrated
+    /// list is not written back here; it persists on the next
+    /// `save_all_settings`.
     fn get_triggers_from_store(
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
@@ -762,7 +764,9 @@ impl SettingsManager {
             });
 
         match stored {
-            Some(triggers) if !triggers.is_empty() => crate::triggers::dedupe_by_key(triggers),
+            Some(triggers) if !triggers.is_empty() => {
+                crate::triggers::migrate_to_gestures(triggers)
+            }
             _ => crate::triggers::migrate_from_legacy(
                 &keyboard_shortcuts.agent_mode,
                 &agent.trigger_mode,
