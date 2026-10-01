@@ -3,7 +3,7 @@ use computer_use_ai_sdk::Desktop;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -155,6 +155,15 @@ pub struct ToolApprovalRequest {
     pub risk_level: RiskLevel,
     pub target_app: Option<String>,
     pub timeout_seconds: u64,
+    /// Which conversation asked, so a "do not ask again" granted here is
+    /// scoped to it and a new conversation starts clean.
+    #[serde(default = "default_conversation_key")]
+    pub conversation_key: String,
+}
+
+/// The conversation key for a runner with no session id of its own.
+pub fn default_conversation_key() -> String {
+    "default".to_string()
 }
 
 impl ToolApprovalRequest {
@@ -172,7 +181,14 @@ impl ToolApprovalRequest {
             risk_level: RiskLevel::default(),
             target_app: None,
             timeout_seconds: 60,
+            conversation_key: default_conversation_key(),
         }
+    }
+
+    /// Scope a "do not ask again" granted on this request to one conversation.
+    pub fn with_conversation(mut self, conversation_key: String) -> Self {
+        self.conversation_key = conversation_key;
+        self
     }
 
     pub fn with_risk(mut self, risk_level: RiskLevel) -> Self {
@@ -267,7 +283,6 @@ pub struct AgentExecutionState {
     pub execution_id: Option<String>,
     pub current_step: Option<u32>,
     pub max_steps: Option<u32>,
-    pub tool_approval_required: bool,
 }
 
 /// UI and display settings grouped together
@@ -354,6 +369,10 @@ pub struct AppState {
     pub mcp_manager: Arc<TokioMutex<MCPManager>>,
     pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>,
     pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>,
+    /// Standing "do not ask again" grants: conversation key to tool names.
+    /// In memory only, so a restart forgets them. See
+    /// [`AppState::grant_tool_for_conversation`].
+    session_tool_grants: Arc<TokioMutex<HashMap<String, HashSet<String>>>>,
 
     // Pre-captured screenshot from PTT release (set during STT finalization, consumed on first agent screenshot call).
     // Tuple stores (screenshot, capture_time) so stale entries can be discarded.
@@ -459,6 +478,7 @@ impl AppState {
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
+            session_tool_grants: Arc::new(TokioMutex::new(HashMap::new())),
             pending_ptt_screenshot: Arc::new(TokioMutex::new(None)),
 
             // Initialize simple state
@@ -2071,22 +2091,39 @@ impl AppState {
             })
     }
 
-    // Methods for tool approval setting
-    pub fn set_tool_approval_required(&self, required: bool) -> Result<(), String> {
-        self.agent_execution
-            .lock()
-            .map(|mut execution| execution.tool_approval_required = required)
-            .map_err(|e| format_error(templates::FAILED_TO_SET, "tool approval required", e))
+    // Standing "do not ask again" grants, scoped to one conversation.
+    //
+    // A grant lets one tool through without a prompt for the rest of the
+    // conversation it was given in, and no longer. It is held in memory only:
+    // quitting Juno forgets every grant, which is why there is no screen to
+    // review and revoke them. Changing the permission mode clears them all,
+    // which is the one place a person goes to change their mind.
+    //
+    // The floor still applies. `permission_policy::requires_approval` checks
+    // Critical before it checks the grant, so granting terminal commands for a
+    // conversation does not grant `sudo rm -rf /`.
+
+    /// Stop asking about `tool_name` for the rest of `conversation`.
+    pub async fn grant_tool_for_conversation(&self, conversation: &str, tool_name: &str) {
+        let mut grants = self.session_tool_grants.lock().await;
+        grants
+            .entry(conversation.to_string())
+            .or_default()
+            .insert(tool_name.to_string());
     }
 
-    pub fn is_tool_approval_required(&self) -> bool {
-        self.agent_execution
-            .lock()
-            .map(|execution| execution.tool_approval_required)
-            .unwrap_or_else(|e| {
-                error!("Failed to check tool approval requirement: {}", e);
-                false // Safe fallback
-            })
+    /// Whether this conversation already said not to ask about this tool.
+    pub async fn tool_granted_for_conversation(&self, conversation: &str, tool_name: &str) -> bool {
+        let grants = self.session_tool_grants.lock().await;
+        grants
+            .get(conversation)
+            .map(|tools| tools.contains(tool_name))
+            .unwrap_or(false)
+    }
+
+    /// Forget every standing grant. Called when the permission mode changes.
+    pub async fn clear_tool_grants(&self) {
+        self.session_tool_grants.lock().await.clear();
     }
 
     // Methods for managing tool approval requests
@@ -2125,6 +2162,13 @@ impl AppState {
     pub async fn remove_tool_approval(&self, tool_id: &str) -> Option<ToolApprovalRequest> {
         let mut pending_guard = self.pending_tool_approvals.lock().await;
         pending_guard.remove(tool_id)
+    }
+
+    /// One pending request, so a command can read which tool and which
+    /// conversation a "do not ask again" applies to.
+    pub async fn get_pending_tool_approval(&self, tool_id: &str) -> Option<ToolApprovalRequest> {
+        let pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.get(tool_id).cloned()
     }
 
     pub async fn get_pending_tool_approvals(&self) -> Vec<ToolApprovalRequest> {

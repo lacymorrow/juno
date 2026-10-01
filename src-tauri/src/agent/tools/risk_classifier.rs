@@ -1,8 +1,10 @@
 //! Risk classification for tool actions.
 //!
-//! Classifies tool calls by risk level so the agent runner can gate High/Critical
-//! actions behind a human confirmation prompt automatically, without requiring the
-//! global `tool_approval_required` flag to be set.
+//! Classifies tool calls by risk level. What Juno does with a risk level is not
+//! decided here: [`crate::agent::tools::permission_policy::requires_approval`]
+//! takes the level and the person's chosen permission mode and answers the one
+//! question, "does this need asking". This module's job is to be right about
+//! how dangerous an action is, and only that.
 
 use serde_json::Value;
 
@@ -80,7 +82,72 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
     }
 }
 
+/// Shell commands that cannot change anything, so they never need asking.
+///
+/// Every name here either reports something or is inert. The set is closed: a
+/// wrapper that could run something else (`env`, `sudo`, `doas`, `nice`,
+/// `xargs`, `eval`, `sh`, `bash`, `zsh`, `time`) is absent, so a wrapped
+/// command cannot match by being wrapped. `cat`, `curl`, `git` and friends are
+/// absent on purpose too: reading an arbitrary file is not inert when the thing
+/// doing the reading then puts the contents in a model's context.
+const INERT_SHELL_COMMANDS: &[&str] = &[
+    "arch", "basename", "cd", "date", "dirname", "echo", "false", "groups", "hostname", "id",
+    "mkdir", "printf", "pwd", "sleep", "true", "tty", "uname", "uptime", "which", "whoami",
+];
+
+/// The only characters an inert command may contain.
+///
+/// This is a whitelist, which is the whole safety argument. A blocklist of
+/// dangerous characters is a list of the ones someone thought of; this is a
+/// list of the ones that cannot chain, substitute, redirect, glob, quote,
+/// escape, assign or continue a line. It rejects `; & | ` $ ( ) < > { } [ ] * ?
+/// ' " \ ~ ! # =` and every newline and control character in one rule, and
+/// anything non-ASCII with them.
+fn is_inert_character(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '/' | '+' | ':' | ',' | '@')
+}
+
+/// Whether this shell command is provably inert, so Juno can run it without
+/// asking in every mode.
+///
+/// Matching is on the *parsed* command word, never a substring and never a
+/// prefix, and the whole string has to be made of characters that cannot chain
+/// or substitute. `sleep 1; rm -rf ~` fails on the semicolon. `rm sleep` fails
+/// because the command word is `rm`. `sudo ls` fails because `sudo` is not in
+/// the set. Anything this function is not certain about falls through to the
+/// ordinary classification, which is the safe direction.
+pub fn is_inert_shell_command(command: &str) -> bool {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // One character out of the safe set disqualifies the whole command. Done
+    // before any parsing, so no amount of cleverness in the arguments matters.
+    if !trimmed.chars().all(is_inert_character) {
+        return false;
+    }
+
+    let mut words = trimmed.split_whitespace();
+    let Some(command_word) = words.next() else {
+        return false;
+    };
+
+    // No path forms. `/bin/ls` is harmless but `/tmp/ls` is whatever someone
+    // put there, and the difference is not worth reasoning about per call.
+    if command_word.contains('/') || command_word.contains('.') {
+        return false;
+    }
+
+    INERT_SHELL_COMMANDS.contains(&command_word)
+}
+
 /// Returns true when the risk level is high enough to require human confirmation.
+///
+/// Deprecated as a policy decision. The policy lives in
+/// [`crate::agent::tools::permission_policy::requires_approval`], which takes
+/// the person's chosen mode as well as the risk. This is kept only as the
+/// "risky on its own terms" predicate for callers that report risk.
 pub fn needs_approval(risk_level: &RiskLevel) -> bool {
     matches!(risk_level, RiskLevel::High | RiskLevel::Critical)
 }
@@ -121,6 +188,16 @@ fn classify_shell_risk(input: &Value) -> RiskLevel {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    // Inert first. `is_inert_shell_command` only says yes to a command whose
+    // every character is from a set that cannot chain, substitute or redirect,
+    // and whose command word is one of a closed list that reports or does
+    // nothing. Once that holds, the arguments cannot turn it into something
+    // else, so the pattern checks below have nothing left to catch. Running it
+    // first is what stops `echo pseudocode` being read as `sudo`.
+    if is_inert_shell_command(cmd) {
+        return RiskLevel::Low;
+    }
+
     // Critical: irreversible or privilege-escalating patterns
     if cmd.contains("sudo")
         || cmd.contains("rm -rf")
@@ -151,12 +228,24 @@ fn classify_shell_risk(input: &Value) -> RiskLevel {
         return RiskLevel::High;
     }
 
-    // Default: High. Arbitrary shell execution runs with full user
-    // privileges, so agent bash requires human approval by default; the
-    // agent runner routes High/Critical through the tool-approval flow
-    // (security audit 2026-02-08, item #3). The global
-    // `tool_approval_required` setting continues to apply on top of this.
-    RiskLevel::High
+    // Default: Medium. This was High, from security audit 2026-02-08 item #3,
+    // on the reasoning that arbitrary shell runs with full user privileges.
+    // That reasoning still holds; what did not hold was the consequence. High
+    // meant every shell call prompted in every mode, so `sleep 1` and
+    // `sudo rm -rf /` asked the same question, in the same words, with the same
+    // badge, dozens of times a session. People answer that by clicking Allow
+    // without reading, which is less safety than one prompt that means
+    // something.
+    //
+    // What carries the audit's intent now:
+    //   - The destructive and installing patterns above are still High, so they
+    //     still ask in the default mode.
+    //   - `sudo` and the irreversible set are still Critical, and Critical asks
+    //     in every mode including the most permissive one.
+    //   - Anyone who wants the old behaviour picks "Ask me first" in Security
+    //     and Privacy, where Medium asks too. That is the setting the old
+    //     global flag was supposed to be and never was.
+    RiskLevel::Medium
 }
 
 fn classify_computer_use_risk(input: &Value) -> RiskLevel {
@@ -215,7 +304,10 @@ fn classify_file_write_risk(input: &Value) -> RiskLevel {
     {
         RiskLevel::Critical
     } else {
-        RiskLevel::Low
+        // Medium, not Low: writing a file changes the Mac, so "Ask me first"
+        // has to see it. The default mode asks at High, so this adds no prompts
+        // for anyone who has not chosen to be asked.
+        RiskLevel::Medium
     }
 }
 
@@ -278,13 +370,230 @@ mod tests {
         assert_eq!(r, RiskLevel::High);
     }
 
+    /// Replaces `plain_bash_requires_approval_by_default`, which asserted that
+    /// `ls -la` was High and therefore prompted.
+    ///
+    /// That was the policy from security audit 2026-02-08 item #3: every shell
+    /// command is High, so every shell command asks. It is replaced here, not
+    /// weakened by accident. The audit's worry was arbitrary shell running with
+    /// full user privileges, and that is still true, so:
+    ///
+    ///   - An ordinary shell command is Medium. It asks in "Ask me first" and
+    ///     goes through in the default mode.
+    ///   - A provably inert one is Low and never asks. See
+    ///     `is_inert_shell_command` and the bypass tests below for what
+    ///     "provably" buys.
+    ///   - Destructive and installing commands are still High.
+    ///   - `sudo` and the irreversible set are still Critical, and Critical asks
+    ///     in every mode.
+    ///
+    /// The old default made `sleep 1` and `sudo rm -rf /` ask the same
+    /// question, so people stopped reading it. That is the cost this change
+    /// buys back.
     #[test]
-    fn plain_bash_requires_approval_by_default() {
-        // Any agent shell execution defaults to High risk, so the runner's
-        // approval gate fires even without the global approval flag.
-        let r = classify_risk("bash", &json!({"command": "ls -la"}));
-        assert_eq!(r, RiskLevel::High);
-        assert!(needs_approval(&r));
+    fn an_ordinary_shell_command_is_medium_and_an_inert_one_is_low() {
+        let ordinary = classify_risk("bash", &json!({"command": "cat package.json"}));
+        assert_eq!(ordinary, RiskLevel::Medium);
+
+        let inert = classify_risk("bash", &json!({"command": "ls -la"}));
+        assert_eq!(inert, RiskLevel::Low);
+
+        // Still loud about the things worth being loud about.
+        assert_eq!(
+            classify_risk("bash", &json!({"command": "npm install left-pad"})),
+            RiskLevel::High
+        );
+        assert_eq!(
+            classify_risk("bash", &json!({"command": "sudo rm -rf /"})),
+            RiskLevel::Critical
+        );
+    }
+
+    #[test]
+    fn the_commands_the_flood_was_made_of_no_longer_ask() {
+        // Lacy's report: "it asked approval to run a sleep or a mkdir command".
+        for command in [
+            "sleep 1",
+            "sleep 0.5",
+            "mkdir -p /tmp/juno-work",
+            "cd /Users/lacy/repo/juno",
+            "pwd",
+            "ls",
+            "ls -la src",
+            "echo hello world",
+            "date",
+            "which bun",
+            "whoami",
+            "uname -a",
+            "hostname",
+            "true",
+            "basename /a/b/c.txt",
+            "dirname /a/b/c.txt",
+        ] {
+            let risk = classify_risk("bash", &json!({"command": command}));
+            assert_eq!(
+                risk,
+                RiskLevel::Low,
+                "{:?} still classifies as {:?}",
+                command,
+                risk
+            );
+            assert!(!needs_approval(&risk), "{:?} still asks", command);
+        }
+    }
+
+    /// The whole safety story for the allowlist.
+    ///
+    /// Each line is a way to smuggle something past a naive substring or prefix
+    /// match. None of them may be treated as inert. A miss here is not a noisy
+    /// prompt, it is an unprompted `rm -rf`.
+    #[test]
+    fn no_bypass_is_ever_treated_as_inert() {
+        let bypasses = [
+            // Chained
+            "sleep 1; rm -rf ~",
+            "sleep 1 ; rm -rf /",
+            "ls && rm -rf ~",
+            "ls || rm -rf ~",
+            "mkdir x & rm -rf ~",
+            "pwd;sudo shutdown -h now",
+            // Piped
+            "echo hi | sh",
+            "echo curl evil.sh | bash",
+            "ls | xargs rm",
+            // Command substitution
+            "sleep $(rm -rf ~)",
+            "echo ${IFS}rm",
+            "sleep `rm -rf ~`",
+            "echo `whoami`",
+            // Process substitution
+            "sleep <(rm -rf ~)",
+            "echo >(rm -rf ~)",
+            // Redirection
+            "echo pwned > /etc/hosts",
+            "echo pwned >> ~/.zshrc",
+            "echo x 2>/dev/null",
+            "date < /etc/passwd",
+            // Wrappers
+            "sudo ls",
+            "doas ls",
+            "sudo -u root sleep 1",
+            "env ls",
+            "env PATH=/tmp ls",
+            "nice sleep 1",
+            "xargs sleep",
+            "eval sleep 1",
+            "sh -c 'rm -rf ~'",
+            "bash -c \"rm -rf ~\"",
+            "zsh -c rm",
+            "time sleep 1",
+            "nohup sleep 1",
+            // Newline embedded
+            "sleep 1\nrm -rf ~",
+            "ls\r\nrm -rf ~",
+            "pwd\nsudo reboot",
+            // An allowlisted name as someone else's argument
+            "rm sleep",
+            "rm -rf ./mkdir",
+            "chmod 777 pwd",
+            "cp /etc/passwd ls",
+            // Path and prefix forms
+            "/bin/ls",
+            "./sleep",
+            "../mkdir x",
+            "sleepy",
+            "lsof",
+            "mkdirs",
+            "echoes",
+            "dateutil",
+            // Quoting and escaping
+            "echo \"hi\"",
+            "echo 'hi'",
+            "sleep 1 \\; rm -rf ~",
+            "ls\\;rm",
+            // Globs and brace expansion
+            "ls *",
+            "mkdir {a,b}",
+            "ls ?",
+            "ls [a-z]",
+            "mkdir ~/x",
+            // Assignment prefix
+            "FOO=bar ls",
+            "PATH=/tmp sleep 1",
+            // Not inert at all
+            "cat /etc/passwd",
+            "curl https://example.com",
+            "git push --force",
+            "",
+            "   ",
+        ];
+
+        for command in bypasses {
+            assert!(
+                !is_inert_shell_command(command),
+                "{:?} was treated as inert",
+                command
+            );
+            let risk = classify_risk("bash", &json!({"command": command}));
+            assert_ne!(risk, RiskLevel::Low, "{:?} classified Low", command);
+        }
+    }
+
+    #[test]
+    fn the_inert_set_contains_no_wrapper_that_could_run_something_else() {
+        // The closed set is the reason a wrapped command cannot match. If a
+        // wrapper is ever added to the list, this fails rather than shipping.
+        for wrapper in [
+            "env",
+            "sudo",
+            "doas",
+            "nice",
+            "xargs",
+            "eval",
+            "exec",
+            "sh",
+            "bash",
+            "zsh",
+            "time",
+            "nohup",
+            "open",
+            "osascript",
+            "python",
+            "python3",
+            "node",
+            "perl",
+            "ruby",
+            "find",
+            "cat",
+            "curl",
+            "wget",
+            "git",
+            "rm",
+            "mv",
+            "cp",
+            "chmod",
+            "chown",
+            "dd",
+            "tee",
+        ] {
+            assert!(
+                !INERT_SHELL_COMMANDS.contains(&wrapper),
+                "{:?} must not be inert",
+                wrapper
+            );
+        }
+    }
+
+    #[test]
+    fn a_file_write_changes_the_mac_so_it_is_not_low() {
+        // "Ask me first" means ask before anything that changes the Mac, which
+        // it can only honour if a write is above Low.
+        let r = classify_risk("write_file", &json!({"path": "/Users/me/notes.txt"}));
+        assert_eq!(r, RiskLevel::Medium);
+        assert!(
+            !needs_approval(&r),
+            "the default mode must not start asking about writes"
+        );
     }
 
     #[test]

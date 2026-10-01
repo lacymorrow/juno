@@ -91,3 +91,80 @@ describe("useBackendEvents: unified submission state", () => {
     expect(setIsProcessing).toHaveBeenCalledWith(false);
   });
 });
+
+/**
+ * The dead control this fixes.
+ *
+ * An approval that nobody answered inside the window was denied in Rust and
+ * announced nowhere, so `approval_state` stayed "pending": the row kept its
+ * Allow and Don't allow buttons and pressing either did nothing, because the
+ * request they referred to no longer existed. Rust now emits
+ * `tool-approval-resolved` for every outcome, and these pin the frontend half
+ * shut so it cannot rot back.
+ */
+describe("useBackendEvents: an approval question always settles", () => {
+  beforeEach(() => {
+    handlers.clear();
+  });
+
+  const pendingRow = {
+    role: "tool_call_request",
+    content: "Run this in the terminal: npm install",
+    tool_id: "batch-1",
+    approval_state: "pending",
+  };
+
+  function resolve(payload: unknown) {
+    const { setConversationWithPruning } = renderBackendEvents();
+    handlers.get("tool-approval-resolved")?.(payload);
+    const updater = setConversationWithPruning.mock.calls[0]?.[0] as
+      | ((prev: unknown[]) => unknown[])
+      | undefined;
+    return updater;
+  }
+
+  it("is listening for the resolution at all", () => {
+    renderBackendEvents();
+    expect(handlers.has("tool-approval-resolved")).toBe(true);
+  });
+
+  it("settles a timed-out row to denied, so the buttons go away", () => {
+    const updater = resolve({
+      tool_id: "batch-1",
+      resolution: "denied",
+      reason: "nobody answered in time",
+    });
+
+    expect(updater?.([pendingRow])).toEqual([
+      { ...pendingRow, approval_state: "denied" },
+    ]);
+  });
+
+  it("settles an allowed row to approved", () => {
+    const updater = resolve({ tool_id: "batch-1", resolution: "approved" });
+
+    expect(updater?.([pendingRow])).toEqual([
+      { ...pendingRow, approval_state: "approved" },
+    ]);
+  });
+
+  it("leaves other rows and already-answered rows alone", () => {
+    const answered = { ...pendingRow, tool_id: "batch-0", approval_state: "approved" };
+    const other = { role: "user", content: "hi" };
+    const updater = resolve({ tool_id: "batch-1", resolution: "denied" });
+
+    // An "approved" row must not be rewritten to "denied" by a late
+    // resolution, and nothing without this tool_id may be touched.
+    expect(updater?.([answered, other, pendingRow])).toEqual([
+      answered,
+      other,
+      { ...pendingRow, approval_state: "denied" },
+    ]);
+  });
+
+  it("ignores a resolution with no tool_id instead of rewriting the transcript", () => {
+    const { setConversationWithPruning } = renderBackendEvents();
+    handlers.get("tool-approval-resolved")?.({ resolution: "denied" });
+    expect(setConversationWithPruning).not.toHaveBeenCalled();
+  });
+});

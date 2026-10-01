@@ -102,10 +102,10 @@ use crate::commands::dictation_state_manager::{
 
 // Import tool configuration commands explicitly
 use crate::commands::{
-    approve_tool_execution, clear_pending_tool_approvals, deny_tool_execution, get_enabled_tools,
-    get_pending_tool_approvals, get_registered_tools, get_tool_approval_required, get_tool_config,
-    get_tool_configuration_summary, get_tool_configurations, is_tool_enabled,
-    reset_tool_configuration, set_all_tools_enabled, set_tool_approval_required,
+    allow_tool_for_conversation, approve_tool_execution, clear_pending_tool_approvals,
+    deny_tool_execution, get_enabled_tools, get_pending_tool_approvals, get_permission_mode,
+    get_registered_tools, get_tool_config, get_tool_configuration_summary, get_tool_configurations,
+    is_tool_enabled, reset_tool_configuration, set_all_tools_enabled, set_permission_mode,
     set_tool_category_enabled, set_tool_enabled, test_dynamic_tool_categorization,
     test_tool_config, test_tool_config_command,
 };
@@ -576,8 +576,9 @@ pub fn run() {
             test_tool_config,
             test_tool_config_command,
             test_dynamic_tool_categorization,
-            set_tool_approval_required,
-            get_tool_approval_required,
+            set_permission_mode,
+            get_permission_mode,
+            allow_tool_for_conversation,
             approve_tool_execution,
             deny_tool_execution,
             get_pending_tool_approvals,

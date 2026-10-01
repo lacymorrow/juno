@@ -375,6 +375,8 @@ export function useBackendEvents({
 		risk_level?: "low" | "medium" | "high" | "critical";
 		target_app?: string;
 		timeout_seconds?: number;
+		/** What "Always allow" would cover. Null when it is not on offer. */
+		always_allow_label?: string | null;
 	}>(
 		EVENTS.TOOLS_APPROVAL_REQUEST,
 		(payload) => {
@@ -388,9 +390,35 @@ export function useBackendEvents({
 					approval_state: "pending",
 					risk_level: payload.risk_level,
 					target_app: payload.target_app,
+					always_allow_label: payload.always_allow_label ?? null,
 					approval_timeout_seconds: payload.timeout_seconds ?? 60,
 					timestamp: payload.timestamp,
 			}));
+		}
+	);
+
+	// Listen for tool-approval-resolved — settle the row however the question ended.
+	//
+	// Before this event the backend denied a timed-out approval and told the
+	// frontend nothing, so `approval_state` stayed "pending": the Allow and
+	// Don't allow buttons stayed on screen and pressing either did nothing,
+	// because the request they referred to was gone. The same hole swallowed a
+	// cancelled run. Rust now reports every outcome and this is what lands it.
+	useEventListener<{
+		tool_id: string;
+		resolution: "approved" | "denied";
+		reason?: string;
+	}>(
+		EVENTS.TOOLS_APPROVAL_RESOLVED,
+		(payload) => {
+			if (!payload?.tool_id) return;
+			setConversationWithPruning((prev) =>
+				prev.map((msg) =>
+					msg.tool_id === payload.tool_id && msg.approval_state === "pending"
+						? { ...msg, approval_state: payload.resolution }
+						: msg,
+				),
+			);
 		}
 	);
 

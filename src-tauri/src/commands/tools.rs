@@ -1,8 +1,11 @@
 use serde_json::{json, Value};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tracing::info;
 
+use crate::agent::tools::permission_policy::PermissionMode;
 use crate::agent::tools::{tool_config::ToolConfigManager, ToolCategory};
+use crate::settings::manager::SettingsManager;
+use crate::settings::AgentSettings;
 use crate::state::AppState;
 
 /// Get all tool configurations organized by category
@@ -247,23 +250,84 @@ pub async fn test_tool_config(state: State<'_, AppState>) -> Result<String, Stri
     ))
 }
 
-/// Set tool approval required setting
+/// How much Juno interrupts to ask permission.
+///
+/// Replaces `get_tool_approval_required`. That one read a boolean held in
+/// memory, written to no file, that the approval gate then outvoted with a risk
+/// threshold, so it reported a setting nobody could change the behaviour with.
 #[tauri::command]
-pub async fn set_tool_approval_required(
-    required: bool,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    info!("Setting tool approval required: {}", required);
-    let _ = state.set_tool_approval_required(required);
-    Ok(())
+pub async fn get_permission_mode(app_handle: AppHandle) -> Result<String, String> {
+    let settings = agent_settings(&app_handle).await?;
+    Ok(PermissionMode::from_setting(&settings.permission_mode)
+        .as_setting()
+        .to_string())
 }
 
-/// Get tool approval required setting
+/// Change how much Juno interrupts, and forget every standing "do not ask
+/// again" while we are here.
+///
+/// Clearing the grants is the revoke surface for them. They live for one
+/// conversation and one app run, so there is no list to review, but a person
+/// who comes here to change their mind about permissions should not find an
+/// old grant still in force behind the new setting.
 #[tauri::command]
-pub async fn get_tool_approval_required(state: State<'_, AppState>) -> Result<bool, String> {
-    let required = state.is_tool_approval_required();
-    info!("Current tool approval required setting: {}", required);
-    Ok(required)
+pub async fn set_permission_mode(
+    mode: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let parsed = PermissionMode::from_setting(&mode);
+    info!("Setting permission mode to {}", parsed.as_setting());
+
+    let mut settings = agent_settings(&app_handle).await?;
+    settings.permission_mode = parsed.as_setting().to_string();
+    settings_manager(&app_handle)?
+        .set_agent_settings(&settings)
+        .await?;
+
+    state.clear_tool_grants().await;
+
+    Ok(parsed.as_setting().to_string())
+}
+
+/// Approve this request and stop asking about the same tool for the rest of
+/// this conversation.
+///
+/// Scope is deliberate: one tool, one conversation, memory only. A grant that
+/// outlived the app would need a screen to review and revoke it, and a grant
+/// nobody can find is worse than a prompt. Critical actions are never granted:
+/// `permission_policy::requires_approval` checks the floor before the grant,
+/// and the prompt does not offer the button for them.
+#[tauri::command]
+pub async fn allow_tool_for_conversation(
+    tool_id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let Some(request) = state.get_pending_tool_approval(&tool_id).await else {
+        info!("Tool {} is no longer waiting for an answer", tool_id);
+        return Ok(false);
+    };
+
+    state
+        .grant_tool_for_conversation(&request.conversation_key, &request.tool_name)
+        .await;
+    info!(
+        "Will not ask again about {} in conversation {}",
+        request.tool_name, request.conversation_key
+    );
+
+    Ok(state.approve_tool(&tool_id).await)
+}
+
+/// The settings manager, or a message the UI can show.
+fn settings_manager(app_handle: &AppHandle) -> Result<State<'_, SettingsManager>, String> {
+    app_handle
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "Settings are not available yet".to_string())
+}
+
+async fn agent_settings(app_handle: &AppHandle) -> Result<AgentSettings, String> {
+    settings_manager(app_handle)?.get_agent_settings().await
 }
 
 /// Approve a pending tool execution
