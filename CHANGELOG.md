@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.46] - 2026-10-01
+
+### Fixed
+
+- **permissions:** one shell parser, and deleting goes to the Trash (#648) (5550d864)
+
 ## [0.8.45] - 2026-10-01
 
 ### Fixed
@@ -685,7 +691,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.45...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.46...HEAD
+[0.8.46]: https://github.com/lacymorrow/juno/compare/cua-v0.8.45...v0.8.46
 [0.8.45]: https://github.com/lacymorrow/juno/compare/cua-v0.8.44...v0.8.45
 [0.8.44]: https://github.com/lacymorrow/juno/compare/cua-v0.8.43...v0.8.44
 [0.8.43]: https://github.com/lacymorrow/juno/compare/cua-v0.8.42...v0.8.43
