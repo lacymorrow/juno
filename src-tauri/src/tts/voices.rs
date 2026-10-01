@@ -18,8 +18,17 @@
 
 use crate::state::AppState;
 use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, State};
 use tracing::{info, warn};
+
+/// Which audition is current.
+///
+/// Tapping a second voice stops the first, and `say` exits non-zero on the
+/// signal that stopped it. That is the interaction working, not a failure, so
+/// a sample that has been taken over reports nothing: without this, browsing
+/// voices quickly would put an error on screen for every one you interrupted.
+static AUDITION: AtomicU64 = AtomicU64::new(0);
 
 /// The sentence a voice says when it is selected. Short on purpose: an
 /// audition that runs long gets talked over by the next tap.
@@ -325,6 +334,7 @@ pub async fn preview_juno_voice(state: State<'_, AppState>) -> Result<(), String
 /// Anything already playing is stopped first: tapping a second voice should
 /// interrupt the first, not queue behind it.
 async fn speak_sample(state: &State<'_, AppState>) -> Result<(), String> {
+    let generation = AUDITION.fetch_add(1, Ordering::SeqCst) + 1;
     crate::tts::stop_speech();
     crate::tts::reset_tts_stop_flag();
 
@@ -333,9 +343,16 @@ async fn speak_sample(state: &State<'_, AppState>) -> Result<(), String> {
     let voice = effective_voice_name(&installed, chosen.as_deref());
     let device = state.get_output_device().unwrap_or_default();
 
-    crate::tts::system::speak_directly(VOICE_SAMPLE_TEXT.to_string(), voice, device)
-        .await
-        .map(|outcome| info!("[Voices] Sample finished: {outcome}"))
+    let outcome =
+        crate::tts::system::speak_directly(VOICE_SAMPLE_TEXT.to_string(), voice, device).await;
+
+    if AUDITION.load(Ordering::SeqCst) != generation {
+        // Another voice was tapped while this one was speaking. Being cut off
+        // is what was asked for, so it is not reported.
+        return Ok(());
+    }
+
+    outcome.map(|finish| info!("[Voices] Sample finished: {finish}"))
 }
 
 #[cfg(test)]
