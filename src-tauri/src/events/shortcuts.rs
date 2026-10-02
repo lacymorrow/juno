@@ -161,6 +161,12 @@ pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
         // it as "close the chat pane" instead, so the global monitor lets Escape
         // dismiss the pane even when the bar is not focused. The pane arms this
         // monitor only while it is open (see `set_bar_pane_open`).
+        //
+        // The bar's own state is not reset here: the look answers with the
+        // `escape` interaction, which lands in `bar_escape_to_idle`, and only
+        // the look knows whether a popup inside it owns this press (the skill
+        // autocomplete). The local monitor sees presses on Juno's own windows
+        // too, so resetting here would collapse the bar under that popup.
         if !crate::commands::escape_key_coordinator::something_to_stop(&app_handle_clone).await {
             info!("[Escape Key] Pressed while idle - dismissing chat pane");
             if let Err(e) = app_handle_clone.emit(events::bar::DISMISS_PANE, ()) {
@@ -189,6 +195,11 @@ pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
                 "[Escape Key] Failed to stop operations via coordinator: {}",
                 e
             );
+        }
+        // Whatever the stop left behind (a `Stopping` the response never
+        // cleared, a composer), the bar ends at rest.
+        if let Some(manager) = crate::commands::ui_commands::get_ui_manager().await {
+            manager.lock().await.escape_to_idle().await;
         }
     });
 }

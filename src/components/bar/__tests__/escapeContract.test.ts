@@ -119,3 +119,33 @@ describe("every bar appearance shares one Escape", () => {
     }
   });
 });
+
+describe("Rust's half of the one Escape", () => {
+  const rust = read("src-tauri/src/commands/ui_commands.rs");
+
+  it("runs the reported Escape outside the UI manager lock", () => {
+    // The press every look reports (`ui_handle_interaction(escape)`) used to
+    // run the coordinated stop while holding the manager's tokio mutex, and
+    // the stop takes that same mutex. The first press hung forever, the lock
+    // was never released, and every press after it did nothing. That is why
+    // the shared hook from #664 "did not hold": the report it made deadlocked.
+    const start = rust.indexOf("pub async fn ui_handle_interaction(");
+    expect(start).toBeGreaterThan(-1);
+    const body = rust.slice(start, rust.indexOf("\n}\n", start));
+    const escapeAt = body.indexOf("bar_escape_to_idle(");
+    const lockAt = body.indexOf("let mut manager = manager.lock().await;");
+    expect(escapeAt, "Escape is routed to bar_escape_to_idle").toBeGreaterThan(-1);
+    expect(lockAt).toBeGreaterThan(-1);
+    expect(escapeAt).toBeLessThan(lockAt);
+    expect(body).not.toContain("stop_all_operations");
+  });
+
+  it("treats every element id a look reports under as the bar", () => {
+    const start = rust.indexOf("fn is_bar_element(");
+    expect(start).toBeGreaterThan(-1);
+    const body = rust.slice(start, rust.indexOf("\n}\n", start));
+    for (const id of ["FLOATING_BAR", "APP_BAR", "VOICE_AI_BAR", "DYNAMIC_BAR"]) {
+      expect(body).toContain(`ui::element_ids::${id}`);
+    }
+  });
+});

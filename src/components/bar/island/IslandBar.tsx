@@ -5,13 +5,14 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useReducedMotion } from "motion/react";
-import { Volume2 } from "lucide-react";
+import { MessageSquare, Mic, Type, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
@@ -29,6 +30,7 @@ import type { ChatMessage } from "@/types/chat";
 import { IslandDot, IslandShell, IslandWords } from "./IslandShell";
 import { LingerRing } from "./LingerRing";
 import { useLinger } from "./useLinger";
+import { ISLAND_BUTTON_ATTR, useIslandHover } from "./useIslandHover";
 import {
   ISLAND_SIZES,
   LINGER_MS,
@@ -58,6 +60,10 @@ import {
  * for the answer, with a ring that drains until the island settles again.
  * There is no chat pane. The island shows the current turn; history lives in
  * the main window.
+ *
+ * At rest and under the pointer, the capsule widens just enough to show its
+ * controls, the same three the Pill offers: talk, type, and the last answer
+ * (the way back to a card that was closed).
  */
 
 /** Backend element id for interactions. Must match `ui::element_ids::DYNAMIC_BAR`. */
@@ -244,12 +250,17 @@ export function IslandBar() {
   const barRef = useRef(bar);
   barRef.current = bar;
   const inputRef = useRef("");
+  // A card put away (Escape, the ring, its timer) settles all the way to the
+  // capsule, even with the pointer resting on it. The controls come back the
+  // next time the pointer arrives.
+  const [hoverHeld, setHoverHeld] = useState(false);
   const closeCard = useCallback(() => {
     setCardOpen(false);
     setSpokenOpen(false);
-    // Focus put Rust in its input state while the card was up. With nothing
-    // typed, tell it the composer blurred so it shrinks to Default and the
-    // island settles to the capsule rather than the line.
+    setHoverHeld(true);
+    // The follow-up field put Rust in its input state while the card was up.
+    // With nothing typed, tell it the composer blurred so it shrinks to
+    // Default and the island settles to the capsule rather than the line.
     if (isInputState(barRef.current.barState) && inputRef.current.trim() === "") {
       void sendInteraction(UI.INTERACTION_TYPES_BLUR);
     }
@@ -274,8 +285,12 @@ export function IslandBar() {
     if (isVoiceState(bar.barState)) closeCard();
   }, [bar.barState, closeCard]);
 
-  // ── Engagement and the ring ──
-  const [hovered, setHovered] = useState(false);
+  // ── Hover, engagement and the ring ──
+  const hover = useIslandHover();
+  const hovered = hover.hovered;
+  useEffect(() => {
+    if (!hovered && hoverHeld) setHoverHeld(false);
+  }, [hovered, hoverHeld]);
   const [focusWithin, setFocusWithin] = useState(false);
   const [engaged, setEngaged] = useState(false);
   const [ringEpoch, setRingEpoch] = useState(0);
@@ -342,13 +357,20 @@ export function IslandBar() {
   }, [lineOpen, cardOpen]);
 
   // ── OS focus, keys, click ──
+  //
+  // Only losing focus is reported. Reporting the window GAINING focus is what
+  // made dragging the island buggy: a press on the capsule makes the window
+  // key, Rust read that as "expand to the input line", and the island grew to
+  // 340px and resized its window under the cursor in the middle of the drag.
+  // The Pill made the same call for the same reason. Opening the line is a
+  // click (or the type control), never a side effect of focus.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let mounted = true;
     getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
-        if (!mounted) return;
-        void sendInteraction(focused ? UI.INTERACTION_TYPES_FOCUS : UI.INTERACTION_TYPES_BLUR);
+        if (!mounted || focused) return;
+        void sendInteraction(UI.INTERACTION_TYPES_BLUR);
       })
       .then((fn) => {
         if (mounted) unlisten = fn;
@@ -387,8 +409,53 @@ export function IslandBar() {
     if (idle) void sendInteraction(UI.INTERACTION_TYPES_CLICK);
   }, [idle]);
 
+  // ── The hover controls ──
+  const hasTurn = !!(turn.question || turn.answer);
+  /** Bring the last answer back. The way home after a card was closed. */
+  const openCard = useCallback(() => {
+    setCardOpen(true);
+    setSpokenOpen(false);
+    setEngaged(false);
+    setRingEpoch((e) => e + 1);
+  }, []);
+  // The tray's "Show/Hide Chat" is the same way back, from the menu bar.
+  const hasTurnRef = useRef(hasTurn);
+  hasTurnRef.current = hasTurn;
+  const cardOpenRef = useRef(cardOpen);
+  cardOpenRef.current = cardOpen;
+  useEventListener(EVENTS.BAR_TOGGLE_PANE, () => {
+    if (cardOpenRef.current) closeCard();
+    else if (hasTurnRef.current) openCard();
+  });
+  const startTalking = useCallback((e: ReactMouseEvent) => {
+    e.stopPropagation();
+    void invoke(COMMANDS.AGENT_AGENT_VOICE, { action: "start" }).catch((error) =>
+      console.error("Island: could not start listening:", error),
+    );
+  }, []);
+  const startTyping = useCallback((e: ReactMouseEvent) => {
+    e.stopPropagation();
+    // Typing has to land here, so the window is made key on purpose.
+    getCurrentWindow()
+      .setFocus()
+      .catch((error) => console.debug("Island: window activation failed:", error));
+    void sendInteraction(UI.INTERACTION_TYPES_CLICK);
+  }, []);
+  const showAnswer = useCallback(
+    (e: ReactMouseEvent) => {
+      e.stopPropagation();
+      openCard();
+    },
+    [openCard],
+  );
+
   // ── Posture and size ──
-  const posture = postureFor({ state: bar.barState, cardOpen, driving: isDriving });
+  const posture = postureFor({
+    state: bar.barState,
+    cardOpen,
+    driving: isDriving,
+    hovered: hovered && !hoverHeld,
+  });
   const [cardContentH, setCardContentH] = useState(ISLAND_SIZES.card.minHeight);
   // The card's content, measured through a callback ref: the body mounts
   // after the posture switches, so a plain ref would be empty when the
@@ -476,6 +543,52 @@ export function IslandBar() {
     layer = (
       <div className="flex h-full w-full items-center justify-center" data-testid="island-capsule">
         <IslandDot look={dot} level={dotLevel} />
+      </div>
+    );
+  } else if (posture === "hover") {
+    const control = (name: string) =>
+      cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-full text-white/55 transition-colors",
+        "hover:bg-white/[0.12] hover:text-white",
+        hover.hoveredButton === name && "bg-white/[0.12] text-white",
+      );
+    layer = (
+      <div className="flex h-full w-full items-center gap-2 pl-3.5 pr-1" data-testid="island-hover">
+        <IslandDot look={dot} level={dotLevel} />
+        <div className="ml-auto flex items-center gap-0.5">
+          <button
+            type="button"
+            {...{ [ISLAND_BUTTON_ATTR]: "mic" }}
+            onClick={startTalking}
+            aria-label="Talk to Juno"
+            title="Talk to Juno"
+            className={control("mic")}
+          >
+            <Mic className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            {...{ [ISLAND_BUTTON_ATTR]: "type" }}
+            onClick={startTyping}
+            aria-label="Type to Juno"
+            title="Type to Juno"
+            className={control("type")}
+          >
+            <Type className="size-3.5" />
+          </button>
+          {hasTurn && (
+            <button
+              type="button"
+              {...{ [ISLAND_BUTTON_ATTR]: "answer" }}
+              onClick={showAnswer}
+              aria-label="Show last answer"
+              title="Show last answer"
+              className={control("answer")}
+            >
+              <MessageSquare className="size-3.5" />
+            </button>
+          )}
+        </div>
       </div>
     );
   } else if (posture === "line") {
@@ -641,8 +754,7 @@ export function IslandBar() {
     <div
       className="relative h-screen w-screen cursor-grab overflow-hidden bg-transparent select-none active:cursor-grabbing"
       {...dragProps}
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
+      {...hover.pointerProps}
       onFocusCapture={() => setFocusWithin(true)}
       onBlurCapture={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);

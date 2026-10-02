@@ -8,8 +8,8 @@ import type { ChatMessage } from "@/types/chat";
  * table in docs/plans/island-appearance.md is a unit test.
  */
 
-/** The five shapes the island takes. */
-export type Posture = "capsule" | "ear" | "line" | "status" | "card";
+/** The six shapes the island takes. */
+export type Posture = "capsule" | "hover" | "ear" | "line" | "status" | "card";
 
 /** Empty space around the island so its shadow is not clipped by the window. */
 export const SHADOW_PAD = 24;
@@ -34,12 +34,16 @@ export interface IslandSize {
  *  not lurch wider the instant someone stops talking. */
 export const ISLAND_SIZES: {
   capsule: IslandSize;
+  hover: IslandSize;
   ear: IslandSize;
   line: IslandSize;
   status: IslandSize;
   card: { width: number; minHeight: number; maxHeight: number; radius: number };
 } = {
   capsule: { width: 92, height: 28, radius: 14 },
+  // The capsule with its controls showing: the dot plus up to three 24px
+  // buttons. Barely taller, so it reads as the same object, not a new one.
+  hover: { width: 132, height: 32, radius: 16 },
   ear: { width: 300, height: 32, radius: 16 },
   line: { width: 340, height: 36, radius: 18 },
   status: { width: 300, height: 32, radius: 16 },
@@ -92,15 +96,20 @@ export interface PostureInput {
   cardOpen: boolean;
   /** Juno holds the physical cursor; the island has to say so in words. */
   driving?: boolean;
+  /**
+   * The pointer is over the island and it may show its controls. Only an idle
+   * island answers it; every other posture already has something to say.
+   */
+  hovered?: boolean;
 }
 
 /** Which posture a combination of backend state and local state gets. */
-export function posture({ state, cardOpen, driving = false }: PostureInput): Posture {
+export function posture({ state, cardOpen, driving = false, hovered = false }: PostureInput): Posture {
   if (cardOpen) return "card";
   if (driving) return "status";
   if (isInputState(state)) return "line";
   if (isVoiceState(state)) return "ear";
-  if (isIdleState(state)) return "capsule";
+  if (isIdleState(state)) return hovered ? "hover" : "capsule";
   // Working, speaking, error, success, finishing, stopping: one line.
   return "status";
 }

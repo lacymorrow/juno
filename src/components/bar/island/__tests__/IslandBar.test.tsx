@@ -3,10 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import type { ChatMessage } from "@/types/chat";
 import { LINGER_MS, SHRINK_DELAY_MS } from "../islandModel";
+import { LEAVE_VERIFY_MS } from "../useIslandHover";
 
 // ── Tauri and hook stand-ins ────────────────────────────────────────
 
-const { invoke, listenHandlers, eventHandlers, resizeWindowIfChanged, chat } = vi.hoisted(() => ({
+const { invoke, listenHandlers, eventHandlers, resizeWindowIfChanged, chat, focusHandlers, setFocus } = vi.hoisted(() => ({
+  focusHandlers: [] as Array<(event: { payload: boolean }) => void>,
+  setFocus: vi.fn(async () => {}),
   invoke: vi.fn((..._args: unknown[]): Promise<unknown> => Promise.resolve(true)),
   listenHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   eventHandlers: new Map<string, (payload: unknown) => void>(),
@@ -29,9 +32,27 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     label: "floating-bar",
-    onFocusChanged: vi.fn(async () => () => {}),
+    onFocusChanged: vi.fn(async (handler: (event: { payload: boolean }) => void) => {
+      focusHandlers.push(handler);
+      return () => {};
+    }),
     startDragging: vi.fn(async () => {}),
+    setFocus,
+    // The window sits at the origin; the cursor is parked outside it, so a
+    // verified leave is believed.
+    outerPosition: async () => ({ x: 0, y: 0 }),
+    outerSize: async () => ({ width: 200, height: 100 }),
+    scaleFactor: async () => 1,
+    setPosition: vi.fn(async () => {}),
   }),
+  cursorPosition: async () => ({ x: 900, y: 900 }),
+  availableMonitors: async () => [],
+  PhysicalPosition: class {
+    constructor(
+      public x: number,
+      public y: number,
+    ) {}
+  },
 }));
 vi.mock("@/hooks/useEventListener", () => ({
   useEventListener: (event: string, handler: (payload: unknown) => void) => {
@@ -114,7 +135,27 @@ beforeEach(() => {
   resizeWindowIfChanged.mockClear();
   chat.messages = [];
   chat.isProcessing = false;
+  focusHandlers.length = 0;
+  setFocus.mockClear();
 });
+
+/** A pointer leave is believed only once the cursor is checked, a moment later. */
+async function leaveVerified(el: HTMLElement) {
+  fireEvent.pointerLeave(el);
+  await act(async () => {
+    vi.advanceTimersByTime(LEAVE_VERIFY_MS + 10);
+  });
+  await act(async () => {});
+}
+
+const rootEl = () => screen.getByTestId("island-shell").closest(".h-screen") as HTMLElement;
+
+const sentInteraction = (type: string) =>
+  invoke.mock.calls.some(
+    ([cmd, args]) =>
+      cmd === "ui_handle_interaction" &&
+      (args as { interaction?: { interaction_type?: string } })?.interaction?.interaction_type === type,
+  );
 
 afterEach(() => {
   vi.useRealTimers();
@@ -302,7 +343,7 @@ describe("IslandBar", () => {
     // Pressing a button cancels the ring outright while the pointer stays.
     expect(screen.getByTestId("island-linger").getAttribute("data-counting")).toBe("false");
     // Once the pointer leaves, a fresh ring starts.
-    fireEvent.pointerLeave(root);
+    await leaveVerified(root);
     expect(screen.getByTestId("island-linger").getAttribute("data-counting")).toBe("true");
     expect(screen.getByTestId("island-linger").getAttribute("data-paused")).toBe("false");
   });
@@ -361,5 +402,132 @@ describe("IslandBar", () => {
         }),
       }),
     );
+  });
+
+  it("shows its controls under the pointer and puts them away when it leaves", async () => {
+    render(<IslandBar />);
+    expect(posture()).toBe("capsule");
+    fireEvent.pointerEnter(rootEl());
+    expect(posture()).toBe("hover");
+    expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Type to Juno" })).toBeInTheDocument();
+    // Nothing has been asked yet, so there is no answer to offer.
+    expect(screen.queryByRole("button", { name: "Show last answer" })).toBeNull();
+    await leaveVerified(rootEl());
+    expect(posture()).toBe("capsule");
+  });
+
+  it("answers the native tracking area too, which is what fires while another app is active", async () => {
+    render(<IslandBar />);
+    await act(async () => {
+      eventHandlers.get(EVENTS.SYSTEM_MOUSE_ENTERED_WINDOW)?.(null);
+    });
+    expect(posture()).toBe("hover");
+    await act(async () => {
+      eventHandlers.get(EVENTS.SYSTEM_MOUSE_LEFT_WINDOW)?.(null);
+      vi.advanceTimersByTime(LEAVE_VERIFY_MS + 10);
+    });
+    await act(async () => {});
+    expect(posture()).toBe("capsule");
+  });
+
+  it("hover controls talk and type without the click also opening the line", async () => {
+    render(<IslandBar />);
+    fireEvent.pointerEnter(rootEl());
+    invoke.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Talk to Juno" }));
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "start" });
+    expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Type to Juno" }));
+    expect(setFocus).toHaveBeenCalled();
+    expect(invoke.mock.calls.filter(([cmd]) => cmd === "ui_handle_interaction")).toHaveLength(1);
+    expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(true);
+  });
+
+  it("brings a closed answer back from the hover controls", async () => {
+    const { rerender } = render(<IslandBar />);
+    chat.messages = [
+      { role: "user", content: "Q", timestamp: 1 },
+      { role: "assistant", content: "Sunny, 72.", messageId: "m1", timestamp: 2 },
+    ];
+    rerender(<IslandBar />);
+    expect(posture()).toBe("card");
+    await act(async () => {
+      vi.advanceTimersByTime(LINGER_MS + 100);
+    });
+    expect(posture()).toBe("capsule");
+
+    fireEvent.pointerEnter(rootEl());
+    fireEvent.click(screen.getByRole("button", { name: "Show last answer" }));
+    expect(posture()).toBe("card");
+    expect(screen.getByTestId("answer")).toHaveTextContent("Sunny, 72.");
+  });
+
+  it("the tray's Show/Hide Chat toggles the last answer", async () => {
+    const { rerender } = render(<IslandBar />);
+    chat.messages = [
+      { role: "user", content: "Q", timestamp: 1 },
+      { role: "assistant", content: "A", messageId: "m1", timestamp: 2 },
+    ];
+    rerender(<IslandBar />);
+    expect(posture()).toBe("card");
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
+    });
+    expect(posture()).toBe("capsule");
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
+    });
+    expect(posture()).toBe("card");
+  });
+
+  it("Escape under the pointer settles all the way to the capsule", async () => {
+    const { rerender } = render(<IslandBar />);
+    chat.messages = [
+      { role: "user", content: "Q", timestamp: 1 },
+      { role: "assistant", content: "A", messageId: "m1", timestamp: 2 },
+    ];
+    rerender(<IslandBar />);
+    fireEvent.pointerEnter(rootEl());
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(posture()).toBe("capsule");
+    // Pressing it again is harmless.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(posture()).toBe("capsule");
+    // The controls come back the next time the pointer arrives.
+    await leaveVerified(rootEl());
+    fireEvent.pointerEnter(rootEl());
+    expect(posture()).toBe("hover");
+  });
+
+  it("drags through a hover control without pressing it", async () => {
+    render(<IslandBar />);
+    fireEvent.pointerEnter(rootEl());
+    const mic = screen.getByRole("button", { name: "Talk to Juno" });
+    invoke.mockClear();
+    fireEvent.mouseDown(mic, { button: 0, clientX: 40, clientY: 40 });
+    fireEvent.mouseMove(mic, { clientX: 70, clientY: 50 });
+    fireEvent.mouseUp(mic);
+    fireEvent.click(mic);
+    expect(invoke).not.toHaveBeenCalledWith("agent_voice", expect.anything());
+    // Still hovered after the drag: the controls stay put.
+    expect(posture()).toBe("hover");
+  });
+
+  it("never tells Rust the window gained focus, so grabbing it to drag cannot open the line", async () => {
+    render(<IslandBar />);
+    await act(async () => {});
+    expect(focusHandlers.length).toBeGreaterThan(0);
+    invoke.mockClear();
+    await act(async () => {
+      focusHandlers.forEach((h) => h({ payload: true }));
+    });
+    expect(sentInteraction(UI.INTERACTION_TYPES_FOCUS)).toBe(false);
+    // Losing focus is still reported, so an empty line folds away.
+    await act(async () => {
+      focusHandlers.forEach((h) => h({ payload: false }));
+    });
+    expect(sentInteraction(UI.INTERACTION_TYPES_BLUR)).toBe(true);
   });
 });
