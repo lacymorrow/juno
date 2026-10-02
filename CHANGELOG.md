@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.68] - 2026-10-02
+
+### Fixed
+
+- show what this Mac can do, with the control that changes it (#673) (fd4f5694)
+
 ## [0.8.67] - 2026-10-02
 
 ### Fixed
@@ -774,7 +780,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.67...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.68...HEAD
+[0.8.68]: https://github.com/lacymorrow/juno/compare/cua-v0.8.67...v0.8.68
 [0.8.67]: https://github.com/lacymorrow/juno/compare/cua-v0.8.66...v0.8.67
 [0.8.66]: https://github.com/lacymorrow/juno/compare/cua-v0.8.65...v0.8.66
 [0.8.64]: https://github.com/lacymorrow/juno/compare/cua-v0.8.63...v0.8.64
