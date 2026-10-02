@@ -32,13 +32,15 @@
 
 // The audition states, aliased so each emit reads as one line.
 use crate::constants::events::juno_voice::{
-    AUDITION as AUDITION_EVENT, DONE as EVENT_DONE, FAILED as EVENT_FAILED,
-    PREPARING as EVENT_PREPARING, SPEAKING as EVENT_SPEAKING,
+    AUDITION as AUDITION_EVENT, DONE as EVENT_DONE, ENGINE_READY as ENGINE_READY_EVENT,
+    FAILED as EVENT_FAILED, PREPARING as EVENT_PREPARING, SPEAKING as EVENT_SPEAKING,
 };
 use crate::state::AppState;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex as StdMutex;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 use tracing::{info, warn};
 
@@ -225,6 +227,8 @@ pub struct VoiceInventory {
     pub macos: Vec<InstalledVoice>,
     /// The Kokoro voice embeddings on disk, by id.
     pub kokoro: Vec<String>,
+    /// Why Kokoro could not get ready, when its last load failed.
+    pub kokoro_problem: Option<String>,
 }
 
 /// Which voice will actually speak, and whether that is the one asked for.
@@ -289,67 +293,154 @@ fn best_installed<'a>(
         .max_by_key(|voice| voice_quality(&voice.name))
 }
 
-/// What a row says about itself. The quality is worth one word when it is
-/// better than the version every Mac already has.
-fn macos_descriptor(entry: &CatalogVoice, quality: VoiceQuality) -> String {
-    match quality {
-        VoiceQuality::Premium => format!("{} Premium.", entry.descriptor),
-        VoiceQuality::Enhanced => format!("{} Enhanced.", entry.descriptor),
-        VoiceQuality::Compact => entry.descriptor.to_string(),
+fn is_english(locale: &str) -> bool {
+    locale.starts_with("en_") || locale.starts_with("en-")
+}
+
+/// The accent, from the locale `say` reports. Used for a downloaded voice the
+/// catalog does not name, so its row still says something checkable.
+fn accent_for_locale(locale: &str) -> &'static str {
+    match locale.get(3..5).unwrap_or("") {
+        "US" => "American English.",
+        "GB" => "British English.",
+        "AU" => "Australian English.",
+        "IE" => "Irish English.",
+        "IN" => "Indian English.",
+        "ZA" => "South African English.",
+        "NZ" => "New Zealand English.",
+        _ => "English.",
     }
 }
 
-/// The catalog voices this Mac has, best version of each, catalog order.
-pub fn macos_voices(installed: &[InstalledVoice]) -> Vec<ProviderVoice> {
-    SYSTEM_VOICE_CATALOG
+/// What a row says about itself. The quality is worth one word when it is
+/// better than the version every Mac already has.
+fn with_quality(descriptor: &str, quality: VoiceQuality) -> String {
+    match quality {
+        VoiceQuality::Premium => format!("{descriptor} Premium."),
+        VoiceQuality::Enhanced => format!("{descriptor} Enhanced."),
+        VoiceQuality::Compact => descriptor.to_string(),
+    }
+}
+
+/// How a Mac voice ranks. Higher is better; see [`MacCandidate::rank`].
+type MacRank<'a> = (
+    VoiceQuality,
+    bool,
+    bool,
+    std::cmp::Reverse<usize>,
+    std::cmp::Reverse<&'a str>,
+);
+
+/// One Mac voice worth offering, with what it takes to rank it.
+struct MacCandidate<'a> {
+    voice: &'a InstalledVoice,
+    /// Its place in [`SYSTEM_VOICE_CATALOG`], when the catalog names it.
+    catalog_rank: Option<usize>,
+    descriptor: &'static str,
+}
+
+impl<'a> MacCandidate<'a> {
+    /// Quality first, always: a downloaded voice is the point of downloading
+    /// it, and the compact ones are what somebody means by "robotic". Then a
+    /// voice the catalog vouches for, then American English (Juno's prompts
+    /// and sample are American English), then catalog order, then the name,
+    /// so the ranking is total and never flickers between two reads.
+    fn rank(&self) -> MacRank<'a> {
+        (
+            voice_quality(&self.voice.name),
+            self.catalog_rank.is_some(),
+            self.voice.locale.starts_with("en_US"),
+            std::cmp::Reverse(self.catalog_rank.unwrap_or(usize::MAX)),
+            std::cmp::Reverse(self.voice.name.as_str()),
+        )
+    }
+}
+
+/// Every Mac voice worth offering, best first.
+///
+/// The catalog, each entry at the best version installed, plus any other
+/// English voice this Mac has as an Enhanced or Premium download. Those are
+/// exactly the voices somebody went to System Settings to get, so they are
+/// offered whatever they are called. Compact voices outside the catalog are
+/// not: that is where the novelty voices live ("Bad News", "Bubbles").
+fn mac_candidates(installed: &[InstalledVoice]) -> Vec<MacCandidate<'_>> {
+    let mut candidates: Vec<MacCandidate<'_>> = SYSTEM_VOICE_CATALOG
         .iter()
-        .filter_map(|entry| {
-            let voice = best_installed(entry, installed)?;
-            Some(ProviderVoice {
-                id: voice.name.clone(),
-                name: entry.name.to_string(),
-                descriptor: macos_descriptor(entry, voice_quality(&voice.name)),
+        .enumerate()
+        .filter_map(|(rank, entry)| {
+            Some(MacCandidate {
+                voice: best_installed(entry, installed)?,
+                catalog_rank: Some(rank),
+                descriptor: entry.descriptor,
             })
+        })
+        .collect();
+
+    for voice in installed {
+        let base = voice_base_name(&voice.name);
+        let quality = voice_quality(&voice.name);
+        let in_catalog = SYSTEM_VOICE_CATALOG
+            .iter()
+            .any(|entry| entry.name == base && voice.locale.starts_with(entry.locale_prefix));
+        if in_catalog || quality == VoiceQuality::Compact || !is_english(&voice.locale) {
+            continue;
+        }
+        // One row per voice: keep the best version of it.
+        match candidates.iter_mut().find(|c| {
+            c.catalog_rank.is_none()
+                && voice_base_name(&c.voice.name) == base
+                && c.voice.locale == voice.locale
+        }) {
+            Some(existing) if voice_quality(&existing.voice.name) >= quality => {}
+            Some(existing) => existing.voice = voice,
+            None => candidates.push(MacCandidate {
+                voice,
+                catalog_rank: None,
+                descriptor: accent_for_locale(&voice.locale),
+            }),
+        }
+    }
+
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.rank()));
+    candidates
+}
+
+/// The voices this Mac has worth offering, best first, so the default is the
+/// row at the top.
+pub fn macos_voices(installed: &[InstalledVoice]) -> Vec<ProviderVoice> {
+    mac_candidates(installed)
+        .into_iter()
+        .map(|candidate| ProviderVoice {
+            id: candidate.voice.name.clone(),
+            name: voice_base_name(&candidate.voice.name).to_string(),
+            descriptor: with_quality(candidate.descriptor, voice_quality(&candidate.voice.name)),
         })
         .collect()
 }
 
-/// The default macOS voice, and the order it degrades in.
+/// The default macOS voice: the top of the ranking.
 ///
-/// 1. A Premium version of a catalog voice, highest in the catalog first.
-/// 2. An Enhanced version, same order.
-/// 3. A compact catalog voice, same order. On a Mac with nothing downloaded
-///    this is Samantha, because Samantha is what a Mac ships with.
+/// 1. A Premium voice, catalog first, then any other English one.
+/// 2. An Enhanced voice, same order.
+/// 3. A compact catalog voice. On a Mac with nothing downloaded this is
+///    Samantha, because Samantha is what a Mac ships with.
 /// 4. `None`, which runs `say` with no `-v` at all and so uses whichever
 ///    voice the Mac is set to. A missing voice must not produce silence, and
 ///    the Mac's own choice is a real voice.
 ///
-/// Quality beats catalog position deliberately: a downloaded Enhanced Daniel
-/// is a better answer to "use the good voice" than a compact Ava would be,
-/// and anyone who downloaded a voice did it to hear that voice.
+/// Chosen by rank, never by name, so a voice Apple ships next year is the
+/// default the day somebody downloads it.
 pub fn best_macos_voice(installed: &[InstalledVoice]) -> Option<String> {
-    SYSTEM_VOICE_CATALOG
-        .iter()
-        .enumerate()
-        .filter_map(|(rank, entry)| {
-            let voice = best_installed(entry, installed)?;
-            Some((
-                voice_quality(&voice.name),
-                std::cmp::Reverse(rank),
-                voice.name.clone(),
-            ))
-        })
-        .max()
-        .map(|(_, _, name)| name)
+    mac_candidates(installed)
+        .first()
+        .map(|candidate| candidate.voice.name.clone())
 }
 
-/// True when nothing better than the compact version of any catalog voice is
-/// installed. The pane says where the better ones come from.
+/// True when this Mac has no English voice better than the compact ones. The
+/// pane offers the control that gets a better one.
 pub fn only_compact_voices(installed: &[InstalledVoice]) -> bool {
-    SYSTEM_VOICE_CATALOG.iter().all(|entry| {
-        best_installed(entry, installed)
-            .map(|voice| voice_quality(&voice.name) == VoiceQuality::Compact)
-            .unwrap_or(true)
+    !installed.iter().any(|voice| {
+        is_english(&voice.locale) && voice_quality(&voice.name) > VoiceQuality::Compact
     })
 }
 
@@ -441,6 +532,77 @@ pub fn engine_label(engine: &str) -> &'static str {
         OFF_PROVIDER => "Nothing",
         _ => "This engine",
     }
+}
+
+/// The engines Juno can speak with, in the order the picker offers them.
+///
+/// Silence is not one of them. It is the first row of the voice list, so it
+/// is not offered twice.
+pub const ENGINES: &[&str] = &[
+    "system",
+    "kokoro",
+    "elevenlabs",
+    "replicate",
+    "chatterbox",
+    "supertonic",
+];
+
+/// What an engine needs before it can make a sound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EngineNeeds {
+    /// An API key from an account somewhere.
+    pub account_key: bool,
+    /// The network, every time it speaks.
+    pub network: bool,
+    /// A download before its first word.
+    pub download: bool,
+    /// A server somebody has to start.
+    pub server: bool,
+}
+
+impl EngineNeeds {
+    pub fn nothing(self) -> bool {
+        self == Self::default()
+    }
+}
+
+/// What each engine needs. This is the whole argument for the default: the
+/// Mac's own voice needs none of it and starts speaking as `say` starts
+/// synthesising, on every Mac Juno runs on.
+pub fn engine_needs(engine: &str) -> EngineNeeds {
+    match engine.to_ascii_lowercase().as_str() {
+        "system" | OFF_PROVIDER => EngineNeeds::default(),
+        "kokoro" => EngineNeeds {
+            download: true,
+            ..EngineNeeds::default()
+        },
+        "supertonic" => EngineNeeds {
+            server: true,
+            ..EngineNeeds::default()
+        },
+        _ => EngineNeeds {
+            account_key: true,
+            network: true,
+            ..EngineNeeds::default()
+        },
+    }
+}
+
+/// One engine the picker offers.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct EngineOption {
+    pub id: String,
+    pub name: String,
+}
+
+pub fn engine_options() -> Vec<EngineOption> {
+    ENGINES
+        .iter()
+        .map(|id| EngineOption {
+            id: id.to_string(),
+            name: engine_label(id).to_string(),
+        })
+        .collect()
 }
 
 /// The engine whose voices the pane lists.
@@ -550,6 +712,7 @@ pub fn resolve_kokoro_voice(stored: Option<&str>) -> String {
     let inventory = VoiceInventory {
         macos: Vec::new(),
         kokoro: installed_kokoro_voices(),
+        kokoro_problem: None,
     };
     resolve_voice("kokoro", &inventory, stored)
         .voice
@@ -593,6 +756,9 @@ pub struct JunoVoiceList {
     /// True when the Mac is speaking and every voice it has is the compact
     /// version. The better ones are a download, and the pane says where.
     pub better_voices_available: bool,
+    /// The engines the advanced picker offers, so the pane holds no list of
+    /// engine names of its own.
+    pub engines: Vec<EngineOption>,
 }
 
 /// Build the rows.
@@ -641,11 +807,21 @@ pub fn voice_list(
                 speaks: true,
             });
         }
+        // Kokoro downloads its model and voices as it loads, which starts the
+        // moment it is chosen. Until that lands there is nothing to list, and
+        // if it failed the reason is the useful thing to show.
         ProviderVoices::Known(_) => {
-            note = Some(format!(
-                "{} has no voices on this Mac yet. It downloads them the first time it speaks.",
-                engine_label(&engine)
-            ));
+            note = Some(match &inventory.kokoro_problem {
+                Some(problem) => format!(
+                    "{} could not get ready: {}. Your Mac's voice speaks until it can.",
+                    engine_label(&engine),
+                    problem.trim().trim_end_matches('.')
+                ),
+                None => format!(
+                    "{} is getting its voices ready. They show up here when it is done.",
+                    engine_label(&engine)
+                ),
+            });
         }
         ProviderVoices::Elsewhere(reason) => note = Some(reason.to_string()),
     }
@@ -666,6 +842,7 @@ pub fn voice_list(
         provider: provider.to_string(),
         engine_label: engine_label(&engine).to_string(),
         better_voices_available: is_mac && only_compact_voices(&inventory.macos),
+        engines: engine_options(),
         engine,
         options,
         note,
@@ -768,12 +945,51 @@ pub fn installed_kokoro_voices() -> Vec<String> {
     ids
 }
 
+/// The Mac's voices as last read, and when.
+///
+/// Listing them spawns `say`, and that spawn used to sit between a tap on a
+/// voice and the sample starting. A tap only needs to check the id it was
+/// handed against a list the pane was drawn from moments ago, so it reads
+/// this; drawing the pane always reads afresh, so a voice downloaded while
+/// Juno is running shows up the next time the pane opens.
+static MAC_VOICES: StdMutex<Option<(Instant, Vec<InstalledVoice>)>> = StdMutex::new(None);
+const MAC_VOICES_FRESH_FOR: Duration = Duration::from_secs(60);
+
+/// How old a reading of this machine may be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Freshness {
+    /// Read it now.
+    Now,
+    /// A reading from the last minute will do.
+    Recent,
+}
+
+async fn macos_inventory(freshness: Freshness) -> Vec<InstalledVoice> {
+    if freshness == Freshness::Recent {
+        let cached = MAC_VOICES
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+            .filter(|(read_at, _)| read_at.elapsed() < MAC_VOICES_FRESH_FOR);
+        if let Some((_, voices)) = cached {
+            return voices;
+        }
+    }
+    let voices = installed_macos_voices().await;
+    if !voices.is_empty() {
+        if let Ok(mut guard) = MAC_VOICES.lock() {
+            *guard = Some((Instant::now(), voices.clone()));
+        }
+    }
+    voices
+}
+
 /// Everything this engine needs known about this machine, and nothing else:
 /// the Mac's list costs a process and Kokoro's costs a directory read.
-pub async fn inventory_for(engine: &str) -> VoiceInventory {
+pub async fn inventory_for(engine: &str, freshness: Freshness) -> VoiceInventory {
     VoiceInventory {
         macos: if engine.eq_ignore_ascii_case("system") {
-            installed_macos_voices().await
+            macos_inventory(freshness).await
         } else {
             Vec::new()
         },
@@ -781,6 +997,11 @@ pub async fn inventory_for(engine: &str) -> VoiceInventory {
             installed_kokoro_voices()
         } else {
             Vec::new()
+        },
+        kokoro_problem: if engine.eq_ignore_ascii_case("kokoro") {
+            crate::tts::kokoro::load_problem()
+        } else {
+            None
         },
     }
 }
@@ -853,13 +1074,13 @@ fn report_audition(
 ///
 /// `voice` names the row for the pane only. What actually speaks is the voice
 /// stored for the engine, which both callers have just resolved.
-fn audition(app_handle: &AppHandle, state: &State<'_, AppState>, engine: &str, voice: &str) {
+fn audition(app_handle: &AppHandle, state: &AppState, engine: &str, voice: &str) {
     let generation = AUDITION.fetch_add(1, Ordering::SeqCst) + 1;
     crate::tts::stop_speech();
     crate::tts::reset_tts_stop_flag();
 
     let app = app_handle.clone();
-    let app_state = (**state).clone();
+    let app_state = state.clone();
     let engine = engine.to_string();
     let voice = voice.to_string();
 
@@ -915,14 +1136,45 @@ fn audition_failure(engine: &str, error: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Commands
+// Changing the engine and the voice
 // ---------------------------------------------------------------------------
+
+/// Serialises every change to the engine and its voice.
+///
+/// Each command reads the audio settings, awaits a listing of this machine,
+/// then writes the whole struct back. Two of those interleaved is a lost
+/// update: the pane opening (which resolves and can write) racing a tap on a
+/// voice, or two quick taps, could each read the old choice and the slower
+/// one would write it back over the newer. That is a selection snapping back
+/// with nothing in the UI to blame. A tokio mutex, because it is held across
+/// those awaits; nothing that holds it waits on anything that takes it.
+static VOICE_CHANGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Hold [`VOICE_CHANGE`] for another command that rewrites the audio
+/// settings an engine reads, so it cannot interleave with a voice change.
+pub async fn lock_voice_change() -> tokio::sync::MutexGuard<'static, ()> {
+    VOICE_CHANGE.lock().await
+}
 
 fn settings_manager(
     app_handle: &AppHandle,
 ) -> Result<crate::settings::manager::SettingsManager, String> {
     crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager: {e}"))
+}
+
+/// Keep the local model matched to the engine in force: warm Kokoro when it
+/// is speaking, free it when it is not. Called only after a change has been
+/// written, so it acts on the engine that is actually in force. When a load
+/// finishes the pane is told, because Kokoro's voices are on disk only once
+/// it has.
+pub fn sync_engine_model(app_handle: &AppHandle, provider: &str) {
+    let app = app_handle.clone();
+    crate::tts::kokoro::sync_with_engine(provider, move || {
+        if let Err(e) = app.emit(ENGINE_READY_EVENT, "kokoro") {
+            warn!("[Voices] Could not report that Kokoro is ready: {e}");
+        }
+    });
 }
 
 /// Resolve, and make the resolution true.
@@ -932,14 +1184,15 @@ fn settings_manager(
 /// stored choice cannot be honoured, the voice that will actually speak is
 /// what gets stored and what the running app is told. Without this the pane
 /// would light the voice it resolved while `say` went on using the stale one
-/// in `AppState`.
+/// in `AppState`. Callers hold [`VOICE_CHANGE`].
 async fn resolve_and_list(
     manager: &crate::settings::manager::SettingsManager,
-    state: &State<'_, AppState>,
+    state: &AppState,
     audio: &mut crate::settings::AudioSettings,
+    freshness: Freshness,
 ) -> Result<JunoVoiceList, String> {
     let engine = listed_engine(&audio.tts_provider).to_string();
-    let inventory = inventory_for(&engine).await;
+    let inventory = inventory_for(&engine, freshness).await;
     let stored = audio.voice_for(&engine).map(str::to_string);
     let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
 
@@ -956,10 +1209,91 @@ async fn resolve_and_list(
             .await
             .map_err(|e| format!("Failed to save Juno's voice: {e}"))?;
     }
-    push_voice_to_state(state.inner(), &engine, resolution.voice.as_deref())?;
+    push_voice_to_state(state, &engine, resolution.voice.as_deref())?;
 
     Ok(voice_list(&audio.tts_provider, &inventory, &resolution))
 }
+
+/// Put the stored engine and voice in force: at startup, and after a reset.
+///
+/// The best voice this Mac has is only the default if it is actually in
+/// force. With nothing stored, `say` used to run on whichever voice System
+/// Settings happens to be set to, which on a Mac upgraded from an old one is a
+/// voice from 2005. A reset wrote the defaults to disk and left the running
+/// app speaking in the old voice until the next launch, so it runs this too.
+pub async fn apply_stored_voice(app_handle: &AppHandle, state: &AppState) -> Result<(), String> {
+    let _change = VOICE_CHANGE.lock().await;
+    let manager = settings_manager(app_handle)?;
+    let mut audio = manager
+        .get_audio_settings()
+        .await
+        .map_err(|e| format!("Failed to get audio settings: {e}"))?;
+    if !audio.tts_provider.trim().is_empty() {
+        state.set_tts_provider(audio.tts_provider.clone())?;
+    }
+    let list = resolve_and_list(&manager, state, &mut audio, Freshness::Now).await?;
+    info!(
+        "[Voices] {} speaks as {}",
+        list.engine,
+        list.options
+            .iter()
+            .find(|o| o.selected)
+            .map(|o| o.id.as_str())
+            .unwrap_or("its own default")
+    );
+    sync_engine_model(app_handle, &audio.tts_provider);
+    Ok(())
+}
+
+/// Change the engine, and answer with that engine's voices.
+///
+/// The voice is resolved against the new engine before anything is written,
+/// so the new engine is never left holding an id another engine named, and
+/// the answer is the list the pane draws: the engine picker and the rows
+/// cannot disagree because they come back in one reply.
+pub async fn switch_engine(
+    provider: &str,
+    app_handle: &AppHandle,
+    state: &AppState,
+) -> Result<JunoVoiceList, String> {
+    let provider = provider.trim().to_ascii_lowercase();
+    if provider != OFF_PROVIDER && !ENGINES.contains(&provider.as_str()) {
+        return Err(format!("Juno cannot speak with {provider}."));
+    }
+
+    let _change = VOICE_CHANGE.lock().await;
+    let manager = settings_manager(app_handle)?;
+    let mut audio = manager
+        .get_audio_settings()
+        .await
+        .map_err(|e| format!("Failed to get audio settings: {e}"))?;
+
+    audio.tts_provider = provider.clone();
+    let engine = listed_engine(&provider).to_string();
+    let inventory = inventory_for(&engine, Freshness::Recent).await;
+    let stored = audio.voice_for(&engine).map(str::to_string);
+    let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
+    audio.set_voice_for(&engine, resolution.voice.clone());
+
+    manager
+        .set_audio_settings(&audio)
+        .await
+        .map_err(|e| format!("Failed to save audio settings: {e}"))?;
+    state.set_tts_provider(provider.clone())?;
+    push_voice_to_state(state, &engine, resolution.voice.as_deref())?;
+    sync_engine_model(app_handle, &provider);
+
+    info!(
+        "[Voices] Engine is {} speaking as {}",
+        provider,
+        resolution.voice.as_deref().unwrap_or("its own default")
+    );
+    Ok(voice_list(&provider, &inventory, &resolution))
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
 
 /// The rows the Audio pane draws.
 #[tauri::command]
@@ -967,12 +1301,13 @@ pub async fn get_juno_voices(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<JunoVoiceList, String> {
+    let _change = VOICE_CHANGE.lock().await;
     let manager = settings_manager(&app_handle)?;
     let mut audio = manager
         .get_audio_settings()
         .await
         .map_err(|e| format!("Failed to get audio settings: {e}"))?;
-    resolve_and_list(&manager, &state, &mut audio).await
+    resolve_and_list(&manager, state.inner(), &mut audio, Freshness::Now).await
 }
 
 /// Pick Juno's voice, and hear it.
@@ -981,15 +1316,13 @@ pub async fn get_juno_voices(
 /// no optimistic selection and therefore nothing to revert.
 ///
 /// Picking a voice does not change the engine. It only turns sound back on.
-/// The first version of this wrote `tts_provider = "system"` on every pick,
-/// so choosing a voice while Kokoro was selected silently undid the engine
-/// choice, which is the whole of "it doesn't stick".
 #[tauri::command]
 pub async fn set_juno_voice(
     id: String,
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<JunoVoiceList, String> {
+    let _change = VOICE_CHANGE.lock().await;
     let manager = settings_manager(&app_handle)?;
     let mut audio = manager
         .get_audio_settings()
@@ -997,7 +1330,10 @@ pub async fn set_juno_voice(
         .map_err(|e| format!("Failed to get audio settings: {e}"))?;
 
     let engine = listed_engine(&audio.tts_provider).to_string();
-    let inventory = inventory_for(&engine).await;
+    // The pane was drawn from a fresh reading moments ago, so a recent one is
+    // enough to check the id against, and it keeps a process spawn out of
+    // the gap between the tap and the sound.
+    let mut inventory = inventory_for(&engine, Freshness::Recent).await;
 
     if id == SILENT_ID {
         // Silence is the engine switched off. Every engine keeps the voice
@@ -1009,6 +1345,7 @@ pub async fn set_juno_voice(
             .map_err(|e| format!("Failed to save Juno's voice: {e}"))?;
         state.set_tts_provider(OFF_PROVIDER.to_string())?;
         crate::tts::stop_speech();
+        sync_engine_model(&app_handle, OFF_PROVIDER);
         info!("[Voices] Juno is silent");
 
         let stored = audio.voice_for(&engine).map(str::to_string);
@@ -1016,21 +1353,28 @@ pub async fn set_juno_voice(
         return Ok(voice_list(&audio.tts_provider, &inventory, &resolution));
     }
 
+    let offered = |inventory: &VoiceInventory| match provider_voices(&engine, inventory) {
+        ProviderVoices::Known(rows) => rows.iter().any(|row| row.id == id),
+        ProviderVoices::Elsewhere(_) => false,
+    };
     let chosen = if id == SYSTEM_DEFAULT_ID && engine.eq_ignore_ascii_case("system") {
         None
     } else {
-        match provider_voices(&engine, &inventory) {
-            ProviderVoices::Known(rows) if rows.iter().any(|row| row.id == id) => Some(id.clone()),
-            _ => {
-                return Err(format!(
-                    "{} has no voice called {}.",
-                    engine_label(&engine),
-                    id
-                ))
-            }
+        if !offered(&inventory) {
+            // A voice installed since the last reading.
+            inventory = inventory_for(&engine, Freshness::Now).await;
         }
+        if !offered(&inventory) {
+            return Err(format!(
+                "{} has no voice called {}.",
+                engine_label(&engine),
+                id
+            ));
+        }
+        Some(id.clone())
     };
 
+    let provider_changed = !audio.tts_provider.eq_ignore_ascii_case(&engine);
     audio.tts_provider = engine.clone();
     audio.set_voice_for(&engine, chosen.clone());
     manager
@@ -1040,6 +1384,9 @@ pub async fn set_juno_voice(
 
     state.set_tts_provider(engine.clone())?;
     push_voice_to_state(state.inner(), &engine, chosen.as_deref())?;
+    if provider_changed {
+        sync_engine_model(&app_handle, &engine);
+    }
 
     info!(
         "[Voices] {} speaks as {}",
@@ -1052,7 +1399,7 @@ pub async fn set_juno_voice(
         substituted: false,
     };
     let list = voice_list(&audio.tts_provider, &inventory, &resolution);
-    audition(&app_handle, &state, &engine, &id);
+    audition(&app_handle, state.inner(), &engine, &id);
     Ok(list)
 }
 
@@ -1062,27 +1409,30 @@ pub async fn preview_juno_voice(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let manager = settings_manager(&app_handle)?;
-    let audio = manager
-        .get_audio_settings()
-        .await
-        .map_err(|e| format!("Failed to get audio settings: {e}"))?;
+    let (engine, row) = {
+        let _change = VOICE_CHANGE.lock().await;
+        let manager = settings_manager(&app_handle)?;
+        let audio = manager
+            .get_audio_settings()
+            .await
+            .map_err(|e| format!("Failed to get audio settings: {e}"))?;
 
-    if audio.tts_provider.eq_ignore_ascii_case(OFF_PROVIDER) {
-        // Silence is a choice. Replaying it would contradict it.
-        return Ok(());
-    }
+        if audio.tts_provider.eq_ignore_ascii_case(OFF_PROVIDER) {
+            // Silence is a choice. Replaying it would contradict it.
+            return Ok(());
+        }
 
-    let engine = listed_engine(&audio.tts_provider).to_string();
-    let inventory = inventory_for(&engine).await;
-    let stored = audio.voice_for(&engine).map(str::to_string);
-    let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
-    let row = resolution
-        .voice
-        .clone()
-        .unwrap_or_else(|| SYSTEM_DEFAULT_ID.to_string());
+        let engine = listed_engine(&audio.tts_provider).to_string();
+        let inventory = inventory_for(&engine, Freshness::Recent).await;
+        let stored = audio.voice_for(&engine).map(str::to_string);
+        let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
+        let row = resolution
+            .voice
+            .unwrap_or_else(|| SYSTEM_DEFAULT_ID.to_string());
+        (engine, row)
+    };
 
-    audition(&app_handle, &state, &engine, &row);
+    audition(&app_handle, state.inner(), &engine, &row);
     Ok(())
 }
 
@@ -1117,6 +1467,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         VoiceInventory {
             macos: parse_say_voice_list(SAY_OUTPUT),
             kokoro: Vec::new(),
+            kokoro_problem: None,
         }
     }
 
@@ -1124,6 +1475,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         VoiceInventory {
             macos: parse_say_voice_list(SAY_OUTPUT_WITH_DOWNLOADS),
             kokoro: Vec::new(),
+            kokoro_problem: None,
         }
     }
 
@@ -1135,6 +1487,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
                 "am_michael".to_string(),
                 "bf_emma".to_string(),
             ],
+            kokoro_problem: None,
         }
     }
 
@@ -1345,6 +1698,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         let bare = VoiceInventory {
             macos: parse_say_voice_list("Zarvox              en_US    # Hello.\n"),
             kokoro: Vec::new(),
+            kokoro_problem: None,
         };
         assert_eq!(best_macos_voice(&bare.macos), None);
 
@@ -1524,5 +1878,153 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         let message = audition_failure("kokoro", "Failed to load Kokoro-82M model: no network");
         assert!(message.starts_with("Kokoro could not speak the sample:"));
         assert!(!message.contains('—'));
+    }
+
+    // -- the default engine ------------------------------------------------
+
+    /// The default is the engine that needs nothing: no key, no network, no
+    /// download, no server. Anything else is silence, or a wait, on a fresh
+    /// install.
+    #[test]
+    fn the_default_engine_needs_nothing() {
+        let default = crate::constants::settings::defaults::TTS_PROVIDER;
+        assert!(engine_needs(default).nothing(), "{default} needs something");
+        assert!(ENGINES.contains(&default));
+        assert_eq!(listed_engine(default), "system");
+    }
+
+    /// Kokoro sounds good but downloads 82MB and renders a whole clip before
+    /// the first sound, and every cloud engine needs an account. None of them
+    /// can be the default for that reason, and each says why.
+    #[test]
+    fn every_other_engine_needs_something_and_so_is_not_the_default() {
+        for engine in ENGINES.iter().filter(|e| **e != "system") {
+            assert!(!engine_needs(engine).nothing(), "{engine}");
+            assert_ne!(*engine, crate::constants::settings::defaults::TTS_PROVIDER);
+        }
+        assert!(engine_needs("kokoro").download);
+        for cloud in ["elevenlabs", "replicate", "chatterbox"] {
+            assert!(engine_needs(cloud).account_key, "{cloud}");
+        }
+    }
+
+    /// The same default on an Intel Mac. Nothing about it is gated by
+    /// architecture, and this pins that it stays so on the x86_64 build.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn an_intel_mac_gets_the_same_default_engine() {
+        assert_eq!(crate::constants::settings::defaults::TTS_PROVIDER, "system");
+        assert!(engine_needs(crate::constants::settings::defaults::TTS_PROVIDER).nothing());
+    }
+
+    // -- ranking by quality, not by name -----------------------------------
+
+    /// A downloaded voice the catalog has never heard of is still the best
+    /// voice on the Mac, and the default, because it is ranked by quality.
+    /// The novelty voices stay out.
+    #[test]
+    fn a_downloaded_voice_the_catalog_does_not_name_wins_on_quality() {
+        let installed = parse_say_voice_list(
+            "\
+Eddy (English (US)) en_US    # Hello! My name is Eddy.
+Evan (Enhanced)     en_US    # Hello! My name is Evan.
+Samantha            en_US    # Hello! My name is Samantha.
+Bubbles             en_US    # Hello! My name is Bubbles.
+",
+        );
+        assert_eq!(
+            best_macos_voice(&installed),
+            Some("Evan (Enhanced)".to_string())
+        );
+        let rows = macos_voices(&installed);
+        assert_eq!(rows[0].id, "Evan (Enhanced)", "the default is the top row");
+        assert_eq!(rows[0].name, "Evan");
+        assert_eq!(rows[0].descriptor, "American English. Enhanced.");
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert!(!names.contains(&"Eddy"), "{names:?}");
+        assert!(!names.contains(&"Bubbles"), "{names:?}");
+        assert!(!only_compact_voices(&installed));
+    }
+
+    /// With nothing stored (a fresh install, or a reset) the Mac speaks in the
+    /// best voice installed, and the list is ordered so that is the top row.
+    #[test]
+    fn nothing_stored_resolves_to_the_best_voice_installed() {
+        let inventory = mac_with_downloads();
+        let resolution = resolve_voice("system", &inventory, None);
+        assert_eq!(resolution.voice.as_deref(), Some("Ava (Premium)"));
+        assert!(!resolution.substituted);
+        let rows = macos_voices(&inventory.macos);
+        assert_eq!(rows[0].id, "Ava (Premium)");
+        let qualities: Vec<VoiceQuality> = rows.iter().map(|r| voice_quality(&r.id)).collect();
+        let mut sorted = qualities.clone();
+        sorted.sort();
+        sorted.reverse();
+        assert_eq!(qualities, sorted, "best first");
+    }
+
+    // -- each engine lists its own voices ----------------------------------
+
+    /// Every engine's rows are that engine's voices and nobody else's, and the
+    /// voice it resolves to is one of its own rows.
+    #[test]
+    fn every_engine_lists_only_its_own_voices() {
+        let inventory = kokoro_mac();
+        let mac_ids: Vec<String> = inventory.macos.iter().map(|v| v.name.clone()).collect();
+        for engine in ENGINES {
+            let list = list_for(engine, &inventory, None);
+            assert_eq!(list.engine, *engine);
+            let rows: Vec<&JunoVoiceOption> =
+                list.options.iter().filter(|o| o.kind == "voice").collect();
+            for row in &rows {
+                let belongs = match *engine {
+                    "system" => mac_ids.contains(&row.id),
+                    "kokoro" => inventory.kokoro.contains(&row.id),
+                    "supertonic" => ["M1", "F1"].contains(&row.id.as_str()),
+                    _ => false,
+                };
+                assert!(belongs, "{engine} offered {}", row.id);
+            }
+            let resolved = resolve_voice(engine, &inventory, None).voice;
+            if let Some(voice) = resolved {
+                assert!(
+                    rows.iter().any(|row| row.id == voice),
+                    "{engine} resolved to {voice}, which it does not list"
+                );
+            }
+        }
+    }
+
+    /// Kokoro loads as soon as it is chosen. Before its voices land the pane
+    /// says it is getting ready; if the load failed, it says why instead of
+    /// waiting forever.
+    #[test]
+    fn kokoro_says_why_it_has_no_voices_yet() {
+        let loading = list_for("kokoro", &VoiceInventory::default(), None);
+        assert!(loading
+            .note
+            .unwrap_or_default()
+            .contains("getting its voices ready"));
+
+        let failed = VoiceInventory {
+            kokoro_problem: Some("no network.".to_string()),
+            ..VoiceInventory::default()
+        };
+        let note = list_for("kokoro", &failed, None).note.unwrap_or_default();
+        assert!(note.contains("could not get ready: no network."), "{note}");
+        assert!(!note.contains(".."), "{note}");
+    }
+
+    /// The engine picker comes from here, and silence is not in it: silence
+    /// is the first row of the voice list.
+    #[test]
+    fn the_engine_picker_is_every_engine_and_not_silence() {
+        let list = list_for("kokoro", &kokoro_mac(), None);
+        let ids: Vec<&str> = list.engines.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ENGINES.to_vec());
+        assert!(!ids.contains(&OFF_PROVIDER));
+        for engine in &list.engines {
+            assert_ne!(engine.name, "This engine", "{} has no name", engine.id);
+        }
     }
 }

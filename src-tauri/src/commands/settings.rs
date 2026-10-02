@@ -440,8 +440,11 @@ pub async fn set_advanced_settings_enabled(
 /// confirmation can name it. Which provider a reset lands on is the outcome
 /// the person most needs to know and the one they could least see.
 #[command]
-pub async fn reset_centralized_settings(app_handle: AppHandle) -> Result<String, String> {
-    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+pub async fn reset_centralized_settings(
+    app_handle: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
+    let settings_manager = SettingsManager::new(app_handle.clone()).map_err(|e| {
         format_error(
             templates::FAILED_TO_INITIALIZE,
             components::SETTINGS_MANAGER,
@@ -452,6 +455,17 @@ pub async fn reset_centralized_settings(app_handle: AppHandle) -> Result<String,
     let active_provider = crate::settings::reset::reset_to_available_defaults(&settings_manager)
         .await
         .map_err(|e| format_error(templates::FAILED_TO_RESTORE, actions::SETTINGS, e))?;
+
+    // The reset is on disk, but the running app still held the old audio
+    // settings, so Juno went on speaking in the old voice until the next
+    // launch. Load them the way startup does, which also resolves the default
+    // voice to the best one this Mac has and frees a local model nobody uses.
+    if let Err(e) =
+        crate::commands::load_audio_settings_from_centralized_settings(&app_handle, state.inner())
+            .await
+    {
+        tracing::warn!("[Settings] Reset could not reload the audio settings: {e}");
+    }
 
     let display_name = crate::agent::providers::types::Provider::from_str(&active_provider)
         .map(|p| p.display_name().to_string());

@@ -205,9 +205,9 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "voice", rowId: "audio-input-device", label: "Listen through", keywords: "microphone mic input device listen headphones airpods usb interface" },
   { sectionId: "voice", rowId: "audio-output-device", label: "Speak through", keywords: "speaker output device sound headphones airpods play" },
   { sectionId: "voice", rowId: "juno-voice", label: "Juno's voice", keywords: "voice juno voice samantha alex daniel karen moira accent silent mute speak out loud" },
+  { sectionId: "voice", rowId: "voice-engine", label: "Voice engine", keywords: "tts text to speech voice engine elevenlabs kokoro local supertonic chatterbox replicate", advanced: true },
   // Providers
   { sectionId: "ai", rowId: "ai-provider", label: "Active Provider", keywords: "provider anthropic openai gemini claude" },
-  { sectionId: "ai", rowId: "tts-provider", label: "Speaks with", keywords: "tts text to speech voice engine elevenlabs kokoro supertonic chatterbox replicate", advanced: true },
   { sectionId: "ai", rowId: "max-tokens", label: "Max Tokens", keywords: "tokens length limit output", advanced: true },
   { sectionId: "ai", rowId: "temperature", label: "Temperature", keywords: "temperature randomness creativity sampling", advanced: true },
   { sectionId: "ai", rowId: "system-prompt", label: "System Prompt", keywords: "system prompt instructions persona", advanced: true },
