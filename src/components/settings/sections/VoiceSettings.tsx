@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import {
   Select,
   SelectContent,
@@ -5,8 +6,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import { toast } from "sonner";
+import { COMMANDS } from "@/lib/constants.generated";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { VoicePicker } from "../VoicePicker";
@@ -15,7 +19,8 @@ import { VoicePicker } from "../VoicePicker";
 // option's own one-line description.
 const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
   paste: "Pastes with Cmd+V. Most compatible.",
-  clipboard_free: "Types the transcript directly. Never touches your clipboard.",
+  clipboard_free:
+    "Types the transcript directly. Never touches your clipboard.",
 };
 
 /**
@@ -24,17 +29,6 @@ const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
  * sentinel that would later look like a device name.
  */
 const FOLLOW_SYSTEM = "__system__";
-
-/**
- * Where macOS keeps the voices worth downloading.
- *
- * Said rather than offered: Juno cannot install a voice for somebody, and a
- * button that opened a pane Juno does not control would be a control that
- * names a behaviour it is not wired to. The sentence appears only when Rust
- * says every voice this Mac has is the compact one.
- */
-const BETTER_VOICES_HINT =
-  "Better versions of these download in System Settings, under Accessibility and Spoken Content.";
 
 /**
  * Audio: which microphone Juno hears you on, which speaker it answers from,
@@ -68,6 +62,27 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     void loadJunoVoices();
   }, [loadAudioDevices, loadJunoVoices]);
 
+  // The voices Juno can speak with are the voices macOS has installed, and
+  // the good ones are downloads the person has not made yet. Juno cannot
+  // install a voice, so a sentence about where better voices come from would
+  // be the whole answer; but the person can install one, and a condition the
+  // person can change is owed the control that changes it, not a sentence.
+  // This opens the pane that holds it. Shown only when Rust reports a better
+  // voice is available to download (`better_voices_available`), so a Mac that
+  // already has the good ones is not told there are better ones to get.
+  const openVoiceDownloads = useCallback(async () => {
+    try {
+      await invoke(COMMANDS.PERMISSIONS_OPEN_SYSTEM_PREFERENCES, {
+        preferencePane: "spoken_content",
+      });
+    } catch (error) {
+      console.error("Failed to open the voice settings pane:", error);
+      toast.error(
+        "Could not open System Settings. Look under Accessibility, then Spoken Content.",
+      );
+    }
+  }, []);
+
   const inputs = audioDevices?.inputs ?? [];
   const outputs = audioDevices?.outputs ?? [];
 
@@ -90,10 +105,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
   // Two sentences at most. "Tap the one you are using to hear it again" was
   // the third and it is gone: tapping a row plays it, so tapping the chosen
   // one playing it again is what somebody would expect anyway.
-  const voiceFooter = [
-    engineNote ?? "Pick one and you will hear it.",
-    junoVoices?.better_voices_available ? BETTER_VOICES_HINT : undefined,
-  ]
+  const voiceFooter = [engineNote ?? "Pick one and you will hear it."]
     .filter(Boolean)
     .join(" ");
 
@@ -124,14 +136,18 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
           <Select
             value={audioDevices?.chosen_input ?? FOLLOW_SYSTEM}
             onValueChange={(value) =>
-              void handleAudioInputDeviceChange(value === FOLLOW_SYSTEM ? null : value)
+              void handleAudioInputDeviceChange(
+                value === FOLLOW_SYSTEM ? null : value,
+              )
             }
           >
             <SelectTrigger id="audio-input-device" className="w-[250px]">
               <SelectValue placeholder="Select a microphone" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={FOLLOW_SYSTEM}>Whatever my Mac is using</SelectItem>
+              <SelectItem value={FOLLOW_SYSTEM}>
+                Whatever my Mac is using
+              </SelectItem>
               {inputs.map((device) => (
                 <SelectItem key={device.name} value={device.name}>
                   {device.name}
@@ -162,14 +178,18 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
           <Select
             value={audioDevices?.chosen_output ?? FOLLOW_SYSTEM}
             onValueChange={(value) =>
-              void handleAudioOutputDeviceChange(value === FOLLOW_SYSTEM ? null : value)
+              void handleAudioOutputDeviceChange(
+                value === FOLLOW_SYSTEM ? null : value,
+              )
             }
           >
             <SelectTrigger id="audio-output-device" className="w-[250px]">
               <SelectValue placeholder="Select a speaker" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={FOLLOW_SYSTEM}>Whatever my Mac is using</SelectItem>
+              <SelectItem value={FOLLOW_SYSTEM}>
+                Whatever my Mac is using
+              </SelectItem>
               {outputs.map((device) => (
                 <SelectItem key={device.name} value={device.name}>
                   {device.name}
@@ -197,6 +217,22 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             />
           }
         />
+
+        {junoVoices?.better_voices_available && (
+          <SettingsRow
+            id="more-voices"
+            label="More voices"
+            description="Your Mac can download voices that sound much more like a person. New ones show up in this list."
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void openVoiceDownloads()}
+            >
+              Add Voices
+            </Button>
+          </SettingsRow>
+        )}
       </SettingsGroup>
 
       <SettingsGroup
