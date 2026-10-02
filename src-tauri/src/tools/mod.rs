@@ -6,6 +6,20 @@ use std::sync::Arc;
 
 #[allow(unused_variables)] // desktop parameter is not used currently
 pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
+    list_tool_definitions()
+}
+
+/// The same catalog, with no `Desktop` to construct first.
+///
+/// [`list_tools`] has never read its `desktop` argument, and needing one was
+/// the only reason this catalog could not be read by a test. The risk gate's
+/// drift test (`agent::tools::risk_classifier::gate_name_truth`) walks these
+/// names and fails when one of them writes a file and nothing classifies it,
+/// which is how `text_editor_insert`, `text_editor_str_replace` and
+/// `text_editor_undo_edit` sat here unclassified.
+///
+/// Both entry points return the one list, so there is nothing to drift.
+pub fn list_tool_definitions() -> Vec<ToolDefinition> {
     // Keep existing tools and add new ones
     let tools = vec![
         // --- Existing Tools (Corrected Construction) ---

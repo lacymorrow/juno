@@ -89,9 +89,30 @@ pub fn requires_approval(mode: PermissionMode, risk: &RiskLevel, granted: bool) 
         return false;
     }
     match mode {
-        // Everything that changes the Mac is Medium or above, so Low is the
-        // only thing that goes through: looking around, taking a screenshot,
-        // running an inert shell command.
+        // Ask about everything the classifier puts above Low.
+        //
+        // This comment used to say "everything that changes the Mac is Medium
+        // or above, so Low is the only thing that goes through". That was not
+        // true, and stating an invariant the code does not hold is what stopped
+        // the next reader checking: Anthropic's text editor
+        // (`str_replace_based_edit_tool`), the `text_editor_*` family and the
+        // two file tools in `desktop_tools` all matched no arm in
+        // `risk_classifier`, came through here as Low, and rewrote files on
+        // disk with no prompt in the mode whose name is a promise to ask. They
+        // are classified now, and `risk_classifier::gate_name_truth` fails the
+        // build if a tool Juno can execute goes unclassified again.
+        //
+        // What is true: Low is the classifier's judgement that an action
+        // leaves nothing behind worth interrupting for. Reading, looking, a
+        // screenshot, an inert shell command, and desktop or page input the
+        // person is watching happen (a click, a keystroke, a scroll) are all
+        // Low. The last of those is deliberate and is the one case where "ask
+        // first" does not: a prompt per click is a prompt nobody reads, which
+        // is less safety than one prompt that means something. Everything that
+        // writes a file, deletes one, runs a command, runs a script, types
+        // into a page or grants a standing capability is Medium or above and
+        // asks here. `risk_classifier::DELIBERATELY_UNGATED_TOOLS` is the list
+        // of what Low covers and why, rather than a sentence like this one.
         PermissionMode::AskFirst => !matches!(risk, RiskLevel::Low),
         // Destructive, installing, or capability-granting actions are High.
         PermissionMode::AskWhenRisky => matches!(risk, RiskLevel::High),
@@ -176,14 +197,41 @@ pub fn describe_action(tool_name: &str, tool_input: &Value) -> String {
             }
         }
 
-        "write_file" | "create_file" => match short_path(path()) {
+        // Every name the risk classifier's file arms guard needs a sentence
+        // here, or a person gets asked to approve "Use text editor str
+        // replace", which is the tool name with the underscores taken out.
+        // `risk_classifier::gate_name_truth::everything_the_gate_stops_reads_as_a_sentence`
+        // fails when one of them falls through to the generic fallback.
+        "write_file" | "create_file" | "text_editor_create" => match short_path(path()) {
             Some(name) => format!("Write to {}", name),
             None => "Write to a file".to_string(),
         },
-        "edit_file" | "str_replace_editor" => match short_path(path()) {
-            Some(name) => format!("Change {}", name),
-            None => "Change a file".to_string(),
-        },
+        "edit_file" | "text_editor_insert" | "text_editor_str_replace" | "open_file_and_type" => {
+            match short_path(path()) {
+                Some(name) => format!("Change {}", name),
+                None => "Change a file".to_string(),
+            }
+        }
+        // Anthropic's editor carries the verb in `command`, the same way the
+        // risk classifier reads it, so the sentence says which of the two
+        // things it is about to do.
+        "str_replace_based_edit_tool" => {
+            let verb = if field("command") == Some("create") {
+                "Write to"
+            } else {
+                "Change"
+            };
+            match short_path(path()) {
+                Some(name) => format!("{} {}", verb, name),
+                None => format!("{} a file", verb),
+            }
+        }
+        // Takes no arguments: it restores whatever Juno last edited, from one
+        // snapshot that the undo itself spends. Naming a path here would be a
+        // guess, so it does not.
+        "text_editor_undo_edit" => "Undo the last file change Juno made".to_string(),
+        "save_and_close_file" => "Save the file you have open, and close it".to_string(),
+        "run_applescript" => "Run a script on your Mac".to_string(),
         "delete_file" | "remove_file" | "unlink_file" => match short_path(path()) {
             Some(name) => format!("Delete {}", name),
             None => "Delete a file".to_string(),
@@ -449,6 +497,60 @@ mod tests {
         assert_eq!(
             describe_action("computer", &json!({"action": "key", "text": "cmd+q"})),
             "Press cmd+q"
+        );
+    }
+
+    /// The file tools the risk gate started stopping need sentences of their
+    /// own. Without these arms the prompt reads "Use text editor str replace",
+    /// which is the tool name with the underscores taken out.
+    #[test]
+    fn the_file_tools_the_gate_now_stops_read_as_sentences() {
+        let notes = json!({"path": "/Users/me/docs/notes.txt"});
+        let notes_by_file_path = json!({"file_path": "/Users/me/docs/notes.txt"});
+
+        assert_eq!(
+            describe_action("text_editor_create", &notes_by_file_path),
+            "Write to notes.txt"
+        );
+        assert_eq!(
+            describe_action("text_editor_str_replace", &notes_by_file_path),
+            "Change notes.txt"
+        );
+        assert_eq!(
+            describe_action("text_editor_insert", &notes_by_file_path),
+            "Change notes.txt"
+        );
+        assert_eq!(
+            describe_action("open_file_and_type", &notes_by_file_path),
+            "Change notes.txt"
+        );
+        assert_eq!(
+            describe_action("text_editor_undo_edit", &json!({})),
+            "Undo the last file change Juno made"
+        );
+        assert_eq!(
+            describe_action("save_and_close_file", &json!({})),
+            "Save the file you have open, and close it"
+        );
+        assert_eq!(
+            describe_action("run_applescript", &json!({"script": "beep"})),
+            "Run a script on your Mac"
+        );
+
+        // Anthropic's editor says which of the two things it is doing, read
+        // from `command` exactly as the risk classifier reads it.
+        let mut creating = notes.clone();
+        creating["command"] = json!("create");
+        assert_eq!(
+            describe_action("str_replace_based_edit_tool", &creating),
+            "Write to notes.txt"
+        );
+
+        let mut replacing = notes.clone();
+        replacing["command"] = json!("str_replace");
+        assert_eq!(
+            describe_action("str_replace_based_edit_tool", &replacing),
+            "Change notes.txt"
         );
     }
 
