@@ -165,6 +165,10 @@ pub mod juno_voice {
     pub const DONE: &str = "done";
     /// The engine could not speak it, and `message` says why.
     pub const FAILED: &str = "failed";
+    /// A local engine finished loading in the background, or gave up.
+    /// Payload: the engine id. Its voices are on disk now (or the list can say
+    /// why not), so the pane reads them again.
+    pub const ENGINE_READY: &str = "juno-voice:engine-ready";
 }
 
 /// Timer events

@@ -14,6 +14,7 @@ import { COMMANDS } from "@/lib/constants.generated";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { VoicePicker } from "../VoicePicker";
+import TtsEngineGroup from "./TtsEngineGroup";
 
 // The insertion-mode row re-explains itself: its subtitle is the selected
 // option's own one-line description.
@@ -34,9 +35,10 @@ const FOLLOW_SYSTEM = "__system__";
  * Audio: which microphone Juno hears you on, which speaker it answers from,
  * and which voice it answers in.
  *
- * The voice is here and the engine is under Providers on purpose. The engine
- * is plumbing; the voice is a preference, and it is the only one of the three
- * you can check by ear, which is why picking it plays it.
+ * One primary action: pick the voice, and hear it. The engine that voice
+ * belongs to sits directly above the list, behind Advanced, because changing
+ * the engine changes the list; it used to live a pane away, under Providers,
+ * where a change could not be seen to do anything.
  *
  * The rows belong to whichever engine is speaking, and Rust decides what they
  * are. This file holds no list of voices and no list of engine names: both
@@ -54,6 +56,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     handleAudioOutputDeviceChange,
     handleJunoVoiceChange,
     handlePreviewJunoVoice,
+    handleTtsProviderChange,
     dismissCaptureFailure,
   } = settings;
 
@@ -95,19 +98,11 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
       ? `Juno hears you through ${audioDevices.effective_input}.`
       : "Juno cannot find a microphone.";
 
-  // Which engine the rows came from is worth saying only when it is not the
-  // Mac: on the Mac the voice names are the whole answer.
-  const engineNote =
-    junoVoices && junoVoices.engine !== "system"
-      ? `${junoVoices.engine_label} is giving Juno her voice. Pick one and you will hear it.`
-      : undefined;
-
-  // Two sentences at most. "Tap the one you are using to hear it again" was
-  // the third and it is gone: tapping a row plays it, so tapping the chosen
-  // one playing it again is what somebody would expect anyway.
-  const voiceFooter = [engineNote ?? "Pick one and you will hear it."]
-    .filter(Boolean)
-    .join(" ");
+  // One sentence, and only when there is a voice to pick. An engine whose
+  // voices are chosen elsewhere says so in the list itself.
+  const voiceFooter = junoVoices?.options.some((option) => option.speaks)
+    ? "Pick one and you will hear it."
+    : undefined;
 
   const speakerNote = audioDevices?.missing_output
     ? `${audioDevices.missing_output} is not connected. Juno is using your Mac's output instead.`
@@ -206,6 +201,27 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
       </SettingsGroup>
 
       <SettingsGroup title="Juno's voice" footer={voiceFooter}>
+        {/* The engines come from Rust with the list, and the value is the
+            engine the rows belong to, so the two cannot disagree. */}
+        <SettingsRow advanced htmlFor="voice-engine" label="Engine">
+          <Select
+            value={junoVoices?.engine ?? ""}
+            onValueChange={(value) => void handleTtsProviderChange(value)}
+            disabled={!junoVoices}
+          >
+            <SelectTrigger id="voice-engine" className="w-[190px]">
+              <SelectValue placeholder="Your Mac" />
+            </SelectTrigger>
+            <SelectContent>
+              {(junoVoices?.engines ?? []).map((engine) => (
+                <SelectItem key={engine.id} value={engine.id}>
+                  {engine.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+
         <SettingsRow
           id="juno-voice"
           below={
@@ -234,6 +250,8 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
           </SettingsRow>
         )}
       </SettingsGroup>
+
+      <TtsEngineGroup settings={settings} />
 
       <SettingsGroup
         title="After you finish speaking"

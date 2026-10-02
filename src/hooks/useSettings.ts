@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -70,6 +70,8 @@ export interface JunoVoiceList {
 	note: string | null;
 	/** True when every voice this Mac has is the compact one. */
 	better_voices_available: boolean;
+	/** The engines the advanced picker offers. Silence is not one: it is a row. */
+	engines: { id: string; name: string }[];
 }
 
 /**
@@ -439,7 +441,6 @@ export function useSettings() {
 		try {
 			// Load all settings with caching to prevent duplicate API calls during startup
 			const [
-				currentTtsProvider,
 				availableProviders,
 				currentActiveProvider,
 				currentAgentMode,
@@ -453,7 +454,6 @@ export function useSettings() {
 				sensitivity,
 				wakeWords
 			] = await Promise.all([
-				getCachedOrFetch('ttsProvider', () => invokeCommand<string>(COMMANDS.TTS_GET_TTS_PROVIDER)),
 				getCachedOrFetch('providers', () => invokeCommand<ProviderInfo[]>(COMMANDS.PROVIDERS_GET_PROVIDERS)),
 				getCachedOrFetch('activeProvider', () => invokeCommand<string>(COMMANDS.PROVIDERS_GET_ACTIVE_PROVIDER)),
 				getCachedOrFetch('agentMode', () => invokeCommand<string>(COMMANDS.AGENT_GET_AGENT_MODE)),
@@ -469,7 +469,10 @@ export function useSettings() {
 			]);
 
 			// Set all state values
-			setTtsProvider(currentTtsProvider);
+			// The engine comes with its voices, from one command, so the engine
+			// picker and the voice rows are never drawn from two reads taken
+			// at different moments.
+			void loadJunoVoices();
 			setProviders(availableProviders);
 			setActiveProvider(currentActiveProvider);
 			setAgentMode(currentAgentMode);
@@ -676,18 +679,32 @@ export function useSettings() {
 		}
 	}, []);
 
-	const loadJunoVoices = useCallback(async () => {
-		try {
-			const list = await invoke<JunoVoiceList>(COMMANDS.AUDIO_GET_JUNO_VOICES);
+	// Every answer about Juno's voice is numbered, and only the newest one is
+	// drawn. Opening the pane, picking a voice and changing the engine each
+	// come back with the whole list; a slow read that was asked first and
+	// answered last used to overwrite a newer pick, which is a selection
+	// snapping back while Rust held the right answer all along.
+	const voiceRequest = useRef(0);
+	const applyVoiceList = useCallback(
+		async (request: () => Promise<JunoVoiceList>) => {
+			const ticket = ++voiceRequest.current;
+			const list = await request();
+			if (ticket !== voiceRequest.current) return;
 			setJunoVoices(list);
 			// The list carries the engine it belongs to, so the engine picker
-			// and the voice rows cannot disagree about which engine is in
-			// force. They used to, and that was most of "it doesn't stick".
+			// and the voice rows cannot disagree about which engine is in force.
 			setTtsProvider(list.provider);
+		},
+		[],
+	);
+
+	const loadJunoVoices = useCallback(async () => {
+		try {
+			await applyVoiceList(() => invoke<JunoVoiceList>(COMMANDS.AUDIO_GET_JUNO_VOICES));
 		} catch (error) {
 			console.error("Failed to load Juno's voices:", error);
 		}
-	}, []);
+	}, [applyVoiceList]);
 
 	const handleAudioInputDeviceChange = useCallback(
 		async (name: string | null) => {
@@ -734,15 +751,14 @@ export function useSettings() {
 	 */
 	const handleJunoVoiceChange = useCallback(async (id: string) => {
 		try {
-			const list = await invoke<JunoVoiceList>(COMMANDS.AUDIO_SET_JUNO_VOICE, { id });
-			setJunoVoices(list);
-			setTtsProvider(list.provider);
-			invalidateCache("ttsProvider");
+			await applyVoiceList(() =>
+				invoke<JunoVoiceList>(COMMANDS.AUDIO_SET_JUNO_VOICE, { id }),
+			);
 		} catch (error) {
 			console.error("Failed to set Juno's voice:", error);
 			toast.error(String(error));
 		}
-	}, []);
+	}, [applyVoiceList]);
 
 	/** Hear the voice already chosen again. */
 	const handlePreviewJunoVoice = useCallback(async () => {
@@ -753,6 +769,12 @@ export function useSettings() {
 			toast.error(String(error));
 		}
 	}, []);
+
+	// A local engine finished loading in the background. Its voices are on
+	// disk now, or the list can say why not.
+	useEventListener<string>(EVENTS.JUNO_VOICE_ENGINE_READY, () => {
+		void loadJunoVoices();
+	});
 
 	// What the sample is doing. Rust owns this, so every window that draws
 	// the picker shows the same thing at the same time.
@@ -782,26 +804,22 @@ export function useSettings() {
 	);
 
 	// Handler functions
+	/**
+	 * Change the engine. Rust answers with the new engine's voices, resolved
+	 * and in force, and that answer is what gets drawn. No optimistic value
+	 * and no toast: the picker showing the new engine, with that engine's
+	 * voices underneath it, is the confirmation.
+	 */
 	const handleTtsProviderChange = useCallback(async (newProvider: string) => {
-		await invokeCommand(
-			COMMANDS.TTS_SET_TTS_PROVIDER,
-			{ provider: newProvider },
-			{
-				showSuccessToast: true,
-				successMessage: `TTS provider set to: ${newProvider === "off"
-					? "Off"
-					: newProvider.charAt(0).toUpperCase() + newProvider.slice(1)
-					}`,
-				errorMessage: "Failed to set TTS provider"
-			}
-		);
-		invalidateCache('ttsProvider');
-		setTtsProvider(newProvider);
-		// The engine changed, so the voices did. Rust has already resolved the
-		// new engine's voice; this is what stops the Audio pane going on
-		// showing the old engine's rows.
-		await loadJunoVoices();
-	}, [invokeCommand, loadJunoVoices]);
+		try {
+			await applyVoiceList(() =>
+				invoke<JunoVoiceList>(COMMANDS.TTS_SET_TTS_PROVIDER, { provider: newProvider }),
+			);
+		} catch (error) {
+			console.error("Failed to change Juno's voice engine:", error);
+			toast.error(String(error));
+		}
+	}, [applyVoiceList]);
 
 	const handleChatterboxSettingsChange = useCallback(async (
 		referenceAudioUrl: string,
@@ -828,12 +846,13 @@ export function useSettings() {
 
 	const handleSupertonicSettingsChange = useCallback(async (
 		serverUrl: string,
-		voice: string,
 		speed: number,
 	) => {
+		// No voice: it is chosen in the voice list, and sending the one this
+		// pane last saw would write an old choice back over a newer one.
 		await invokeCommand(
 			COMMANDS.TTS_SET_SUPERTONIC_SETTINGS,
-			{ serverUrl, voice, speed },
+			{ serverUrl, voice: null, speed },
 			{
 				showSuccessToast: true,
 				successMessage: "Supertonic settings saved",
@@ -841,7 +860,6 @@ export function useSettings() {
 			}
 		);
 		setSupertonicServerUrl(serverUrl);
-		setSupertonicVoice(voice);
 		setSupertonicSpeed(speed);
 	}, [invokeCommand]);
 

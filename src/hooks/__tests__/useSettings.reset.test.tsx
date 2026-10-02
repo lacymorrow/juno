@@ -17,7 +17,9 @@ vi.mock("@/hooks/useEventListener", () => ({
 }));
 
 /** A value `loadAllSettings` reads through the cache. */
-const TTS_PROVIDER = "get_tts_provider_command";
+const ACTIVE_PROVIDER = "get_active_provider";
+/** Juno.s voice and its engine, read fresh on every load, never cached. */
+const JUNO_VOICES = "get_juno_voices";
 /** A value only `loadToolConfigurations` reads through the cache. */
 const TOOL_CONFIGS = "get_tool_configurations";
 
@@ -46,7 +48,7 @@ describe("useSettings: a reset is visible", () => {
     await act(async () => {
       await result.current.loadAllSettings();
     });
-    const afterFirstLoad = callsTo(TTS_PROVIDER);
+    const afterFirstLoad = callsTo(ACTIVE_PROVIDER);
     expect(afterFirstLoad).toBeGreaterThan(0);
 
     // A second load, well inside the cache's 30-second window.
@@ -54,7 +56,9 @@ describe("useSettings: a reset is visible", () => {
       await result.current.loadAllSettings();
     });
 
-    expect(callsTo(TTS_PROVIDER)).toBeGreaterThan(afterFirstLoad);
+    expect(callsTo(ACTIVE_PROVIDER)).toBeGreaterThan(afterFirstLoad);
+    // The voice engine is read with its voices, and a reset changes both.
+    expect(callsTo(JUNO_VOICES)).toBeGreaterThanOrEqual(2);
   });
 
   // The backend emits settings_changed on every whole-settings write, which is

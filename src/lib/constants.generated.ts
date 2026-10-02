@@ -66,6 +66,7 @@ export const EVENTS = {
   JUNO_VOICE_SPEAKING: 'speaking',
   JUNO_VOICE_DONE: 'done',
   JUNO_VOICE_FAILED: 'failed',
+  JUNO_VOICE_ENGINE_READY: 'juno-voice:engine-ready',
   TIMER_EXPIRED: 'timer-expired',
   TIMER_QUEUED: 'timer-queued',
   TIMER_PROCESSED: 'timer-processed',

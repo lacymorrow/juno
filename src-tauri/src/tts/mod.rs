@@ -510,78 +510,20 @@ pub async fn stop_tts() -> Result<(), String> {
     Ok(())
 }
 
-// New command to set TTS provider
+/// Change the engine Juno speaks with.
+///
+/// Answers with the new engine's voices, resolved and in force, so the pane
+/// draws exactly what Rust decided rather than guessing and being corrected.
+/// The work lives in [`voices::switch_engine`], which also warms or frees the
+/// local model to match.
 #[tauri::command]
 pub async fn set_tts_provider_command(
     provider: String,
     app_handle: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<voices::JunoVoiceList, String> {
     info!("Setting TTS provider to: {}", provider);
-
-    // Validate provider
-    let valid_providers = [
-        "off",
-        "system",
-        "elevenlabs",
-        "replicate",
-        "kokoro",
-        "chatterbox",
-        "supertonic",
-    ];
-    if !valid_providers.contains(&provider.as_str()) {
-        return Err(format!(
-            "Invalid TTS provider: {}. Valid providers: {:?}",
-            provider, valid_providers
-        ));
-    }
-
-    // Get current settings from centralized system
-    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-
-    let mut audio_settings = settings_manager
-        .get_audio_settings()
-        .await
-        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
-
-    // Update centralized settings
-    audio_settings.tts_provider = provider.clone();
-
-    // The engine changed, so the voice has to be one this engine has. A voice
-    // id belongs to the engine that named it, and carrying one across is how
-    // the Audio pane came to offer macOS voices while Kokoro was speaking.
-    // Resolving here means the new engine is never left holding a dangling id
-    // that would reach it as an error and then silence.
-    let engine = voices::listed_engine(&provider).to_string();
-    let inventory = voices::inventory_for(&engine).await;
-    let stored = audio_settings.voice_for(&engine).map(str::to_string);
-    let resolution = voices::resolve_voice(&engine, &inventory, stored.as_deref());
-    if resolution.substituted {
-        warn!(
-            "[TTS] {} cannot speak as {:?}; using {:?} instead",
-            engine, stored, resolution.voice
-        );
-    }
-    audio_settings.set_voice_for(&engine, resolution.voice.clone());
-
-    settings_manager
-        .set_audio_settings(&audio_settings)
-        .await
-        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
-
-    // Update app state for backward compatibility
-    state
-        .set_tts_provider(provider.clone())
-        .map_err(|e| format!("Failed to set tts_provider: {}", e))?;
-    voices::push_voice_to_state(state.inner(), &engine, resolution.voice.as_deref())?;
-
-    info!(
-        "TTS provider set to: {} speaking as {} (saved to centralized settings)",
-        provider,
-        resolution.voice.as_deref().unwrap_or("its own default")
-    );
-    Ok(())
+    voices::switch_engine(&provider, &app_handle, state.inner()).await
 }
 
 // Command to get the Kokoro voice from centralized settings
@@ -666,6 +608,7 @@ pub async fn set_chatterbox_settings_command(
         ));
     }
 
+    let _change = voices::lock_voice_change().await;
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
@@ -1167,13 +1110,13 @@ pub async fn get_supertonic_settings_command(
 #[tauri::command]
 pub async fn set_supertonic_settings_command(
     server_url: String,
-    voice: String,
+    voice: Option<String>,
     speed: f64,
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     info!(
-        "Setting Supertonic settings: server_url={}, voice={}, speed={:.2}",
+        "Setting Supertonic settings: server_url={}, voice={:?}, speed={:.2}",
         server_url, voice, speed
     );
 
@@ -1184,6 +1127,10 @@ pub async fn set_supertonic_settings_command(
         ));
     }
 
+    // The voice is chosen in the voice list, which writes it under the same
+    // lock. Taking it here, and leaving the voice alone unless one is passed,
+    // is what stops saving the server URL from writing an old voice back.
+    let _change = voices::lock_voice_change().await;
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
@@ -1193,7 +1140,9 @@ pub async fn set_supertonic_settings_command(
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
     audio_settings.supertonic_server_url = server_url.clone();
-    audio_settings.supertonic_voice = voice.clone();
+    if let Some(voice) = &voice {
+        audio_settings.supertonic_voice = voice.clone();
+    }
     audio_settings.supertonic_speed = speed;
 
     settings_manager
@@ -1204,9 +1153,11 @@ pub async fn set_supertonic_settings_command(
     state
         .set_supertonic_server_url(server_url)
         .map_err(|e| format!("Failed to set Supertonic server URL in state: {}", e))?;
-    state
-        .set_supertonic_voice(voice)
-        .map_err(|e| format!("Failed to set Supertonic voice in state: {}", e))?;
+    if let Some(voice) = voice {
+        state
+            .set_supertonic_voice(voice)
+            .map_err(|e| format!("Failed to set Supertonic voice in state: {}", e))?;
+    }
     state
         .set_supertonic_speed(speed)
         .map_err(|e| format!("Failed to set Supertonic speed in state: {}", e))?;
