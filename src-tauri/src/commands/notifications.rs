@@ -2,14 +2,7 @@ use crate::state::AppState;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_notification::{NotificationExt, PermissionState};
-
-/// The System Settings pane that holds the one switch a person can change.
-///
-/// Matches the `"notifications"` arm of
-/// [`crate::commands::permissions::open_system_preferences`], so the screen can
-/// send someone straight there.
-pub const SYSTEM_SETTINGS_PANE: &str = "notifications";
+use tauri_plugin_notification::NotificationExt;
 
 /// What there is to decide about notifications.
 ///
@@ -36,154 +29,70 @@ pub struct NotificationData {
     pub timeout: Option<u32>, // Override default duration
 }
 
-/// What the notification plugin reports about permission, as a variant.
+/// What macOS says about Juno's notifications, read from
+/// `UNUserNotificationCenter.getNotificationSettings`.
 ///
-/// It used to be three booleans derived by stringifying the plugin's value and
-/// substring-matching it:
-///
-/// ```ignore
-/// let granted = permission.to_string().to_lowercase().contains("granted");
-/// let denied  = permission.to_string().to_lowercase().contains("denied");
-/// let default = !granted && !denied;
-/// ```
-///
-/// Any value whose text held neither word landed in `default` with nothing
-/// said, and a `Display` impl that changed shape upstream would have moved the
-/// answer without moving a line of Juno. Matching the variants puts that
-/// decision where the compiler can see it.
-///
-/// Worth knowing what this value is and is not: on desktop the plugin's
-/// `permission_state()` is a hard-coded `Ok(PermissionState::Granted)`. It asks
-/// macOS nothing. So this is a report of what the plugin said, never evidence
-/// that a banner will appear, which is why nothing built from it is allowed to
-/// use the word "allowed".
+/// This is the real authorization, the same one System Settings >
+/// Notifications > Juno shows. The notification plugin's own permission check
+/// is a hard-coded `granted` on desktop and asks macOS nothing, so it is not
+/// used here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PluginPermission {
-    Granted,
+pub enum NotificationAuthorization {
+    /// The person allowed notifications (including quiet delivery).
+    Authorized,
+    /// The person turned notifications off for Juno.
     Denied,
-    MustAsk,
-    /// The plugin could not answer. Its own state, not a third guess folded
-    /// into one of the three above.
-    Unknown,
+    /// macOS has never asked. `request_notification_permission` asks.
+    NotDetermined,
+    /// This process cannot post notifications as Juno (a development build or
+    /// a binary outside Juno.app), so there is nothing to ask or to change.
+    Unavailable,
 }
 
-impl From<PermissionState> for PluginPermission {
-    fn from(state: PermissionState) -> Self {
-        // Exhaustive on purpose, with no catch-all arm. `PermissionState` is a
-        // closed enum, so a variant added upstream breaks this build instead of
-        // quietly reading as one of the answers below.
-        match state {
-            PermissionState::Granted => Self::Granted,
-            PermissionState::Denied => Self::Denied,
-            PermissionState::Prompt | PermissionState::PromptWithRationale => Self::MustAsk,
-        }
-    }
-}
-
-/// Whether a notification Juno posts can reach the screen at all.
-///
-/// Rust decides this and the screen draws the answer. Three of the four states
-/// are facts Juno can establish about itself; the fourth is the honest edge of
-/// what a desktop app can know, because macOS does not report a per-app
-/// notification choice back to an app posting through this API.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NotificationAvailability {
-    /// Juno will hand the notification to macOS, and macOS decides from there.
-    MacosDecides,
-    /// Switched off in Juno's own settings.
-    OffInJuno,
-    /// A development build posts under `com.apple.Terminal`, never under Juno.
-    DevBuild,
-    /// Running outside the `.app` bundle, so macOS has no app to attribute a
-    /// notification to.
-    Unbundled,
-}
-
-impl NotificationAvailability {
-    /// Why nothing will appear, in a sentence someone can act on, or `None`
-    /// when Juno has no reason to think nothing will appear.
-    pub fn blocked_reason(self) -> Option<&'static str> {
-        match self {
-            Self::MacosDecides => None,
-            Self::OffInJuno => {
-                Some("Notifications are off in Juno. Turn on Show notifications above.")
-            }
-            Self::DevBuild => Some(
-                "This is a development build. macOS posts its notifications under Terminal \
-                 rather than Juno, so a Juno banner cannot appear. Test from an installed Juno.",
-            ),
-            Self::Unbundled => Some(
-                "Juno is running outside Juno.app, so macOS has no app to attribute a \
-                 notification to and shows nothing. Run the installed Juno.app.",
-            ),
+impl NotificationAuthorization {
+    /// Map `UNAuthorizationStatus`'s raw value.
+    ///
+    /// 0 notDetermined, 1 denied, 2 authorized, 3 provisional, 4 ephemeral.
+    /// Provisional and ephemeral both deliver, so both read as authorized. A
+    /// value this build does not know is `Unavailable`, never a guess.
+    pub fn from_raw(raw: isize) -> Self {
+        match raw {
+            0 => Self::NotDetermined,
+            1 => Self::Denied,
+            2..=4 => Self::Authorized,
+            _ => Self::Unavailable,
         }
     }
 
-    /// The short line at the right edge of the row.
-    pub fn headline(self) -> &'static str {
-        match self {
-            Self::MacosDecides => "macOS decides",
-            Self::OffInJuno => "Off in Juno",
-            Self::DevBuild => "Development build",
-            Self::Unbundled => "Not running from Juno.app",
-        }
-    }
-
-    /// The sentence under the label. A blocked state explains itself; the
-    /// unblocked one says exactly how far Juno's knowledge goes, because the
-    /// row that used to sit here read "Allowed" on a machine where no
-    /// notification had appeared for weeks.
-    pub fn detail(self) -> &'static str {
-        self.blocked_reason().unwrap_or(
-            "Juno hands every notification to macOS. Whether one appears is your choice in \
-             System Settings > Notifications > Juno, and macOS does not report that choice \
-             back to an app, so Juno cannot promise you will see one.",
-        )
-    }
-
-    /// Whether Juno should try at all.
-    pub fn can_notify(self) -> bool {
-        self.blocked_reason().is_none()
-    }
-
-    /// The System Settings pane worth opening, if any. A development build and
-    /// an unbundled binary have no row in that pane, so the screen does not
-    /// send anyone there to look for one.
-    pub fn system_settings_pane(self) -> Option<&'static str> {
-        match self {
-            Self::MacosDecides => Some(SYSTEM_SETTINGS_PANE),
-            Self::OffInJuno | Self::DevBuild | Self::Unbundled => None,
-        }
+    /// Whether macOS will show a notification from Juno.
+    pub fn allows_notifications(self) -> bool {
+        self == Self::Authorized
     }
 }
 
-/// Everything the notifications pane draws, decided in Rust.
+/// Everything the notifications row draws.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationStatus {
-    pub availability: NotificationAvailability,
-    pub plugin_permission: PluginPermission,
-    pub headline: String,
-    pub detail: String,
-    pub can_notify: bool,
-    pub system_settings_pane: Option<String>,
+    pub authorization: NotificationAuthorization,
+    /// Why nothing can be posted, when `authorization` is `unavailable`.
+    pub unavailable_reason: Option<String>,
 }
 
-/// Assemble the pane's copy from the two things Juno knows.
-pub fn status_for(
-    availability: NotificationAvailability,
-    plugin_permission: PluginPermission,
-) -> NotificationStatus {
-    NotificationStatus {
-        availability,
-        plugin_permission,
-        headline: availability.headline().to_string(),
-        detail: availability.detail().to_string(),
-        can_notify: availability.can_notify(),
-        system_settings_pane: availability.system_settings_pane().map(str::to_string),
-    }
+/// The two links that open System Settings > Notifications, most specific
+/// first: the pane scoped to Juno's bundle id, then the pane itself.
+pub fn notification_settings_urls(bundle_id: &str) -> [String; 2] {
+    [
+        format!(
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id={}",
+            bundle_id
+        ),
+        "x-apple.systempreferences:com.apple.preference.notifications".to_string(),
+    ]
 }
+
+const DENIED_REASON: &str = "Notifications are off for Juno in System Settings.";
+const NOT_ASKED_REASON: &str = "Allow notifications for Juno first.";
 
 /// Get notification settings
 #[tauri::command]
@@ -217,7 +126,8 @@ fn notifications_enabled(app: &AppHandle) -> bool {
 /// Whether this process is the executable inside a `.app` bundle.
 ///
 /// macOS attributes a user notification to a bundle. A loose binary has none,
-/// so there is nothing for the person to authorize and nothing appears.
+/// and `UNUserNotificationCenter` raises when asked for one, so nothing here
+/// touches it until this is true.
 #[cfg(target_os = "macos")]
 fn running_from_app_bundle() -> bool {
     let Ok(exe) = std::env::current_exe() else {
@@ -232,28 +142,109 @@ fn running_from_app_bundle() -> bool {
     true
 }
 
-/// What Juno can establish, right now, about whether a notification will show.
-pub fn availability(app: &AppHandle) -> NotificationAvailability {
-    if !notifications_enabled(app) {
-        return NotificationAvailability::OffInJuno;
-    }
-    // Bound to a value so this reads as the runtime question it is: `is_dev()`
-    // is a `const fn` over the `custom-protocol` feature.
-    let dev_build = tauri::is_dev();
-    if dev_build {
-        return NotificationAvailability::DevBuild;
+/// Why this process cannot post notifications as Juno, if it cannot.
+fn unavailable_reason() -> Option<&'static str> {
+    if tauri::is_dev() {
+        return Some(
+            "This is a development build, so notifications appear under Terminal rather than Juno.",
+        );
     }
     if !running_from_app_bundle() {
-        return NotificationAvailability::Unbundled;
+        return Some("Juno is running outside Juno.app, so macOS has no app to notify as.");
     }
-    NotificationAvailability::MacosDecides
+    None
+}
+
+/// Ask macOS for Juno's authorization. `None` means it did not answer in time.
+#[cfg(target_os = "macos")]
+fn read_authorization() -> Option<NotificationAuthorization> {
+    use block2::RcBlock;
+    use objc2_user_notifications::{UNNotificationSettings, UNUserNotificationCenter};
+    use std::ptr::NonNull;
+
+    let (tx, rx) = std::sync::mpsc::channel::<isize>();
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let block = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
+        // SAFETY: macOS hands the handler a live settings object.
+        let raw = unsafe { settings.as_ref() }.authorizationStatus().0;
+        let _ = tx.send(raw);
+    });
+    center.getNotificationSettingsWithCompletionHandler(&block);
+    rx.recv_timeout(std::time::Duration::from_secs(3))
+        .ok()
+        .map(NotificationAuthorization::from_raw)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_authorization() -> Option<NotificationAuthorization> {
+    Some(NotificationAuthorization::Authorized)
+}
+
+/// Show the system permission prompt and wait for the answer.
+#[cfg(target_os = "macos")]
+fn request_authorization() -> Result<(), String> {
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_foundation::NSError;
+    use objc2_user_notifications::{UNAuthorizationOptions, UNUserNotificationCenter};
+
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let block = RcBlock::new(move |_granted: Bool, _error: *mut NSError| {
+        let _ = tx.send(());
+    });
+    center.requestAuthorizationWithOptions_completionHandler(
+        UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+        &block,
+    );
+    // The prompt waits on a person, so this is generous.
+    rx.recv_timeout(std::time::Duration::from_secs(300))
+        .map_err(|_| "macOS did not answer the notification prompt.".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn request_authorization() -> Result<(), String> {
+    Ok(())
+}
+
+/// What macOS currently allows for Juno.
+pub fn current_status() -> NotificationStatus {
+    if let Some(reason) = unavailable_reason() {
+        return NotificationStatus {
+            authorization: NotificationAuthorization::Unavailable,
+            unavailable_reason: Some(reason.to_string()),
+        };
+    }
+    match read_authorization() {
+        Some(authorization) => NotificationStatus {
+            authorization,
+            unavailable_reason: None,
+        },
+        None => {
+            warn!("macOS did not report notification settings in time");
+            NotificationStatus {
+                authorization: NotificationAuthorization::Unavailable,
+                unavailable_reason: Some(
+                    "macOS did not report Juno's notification settings.".into(),
+                ),
+            }
+        }
+    }
 }
 
 /// The refusal [`deliver`] returns before it reaches the plugin, if any.
-fn refusal(availability: NotificationAvailability) -> Result<(), String> {
-    match availability.blocked_reason() {
-        Some(reason) => Err(reason.to_string()),
-        None => Ok(()),
+fn refusal(enabled: bool, status: &NotificationStatus) -> Result<(), String> {
+    if !enabled {
+        return Err("Notifications are off in Juno. Turn on Show notifications.".to_string());
+    }
+    match status.authorization {
+        NotificationAuthorization::Authorized => Ok(()),
+        NotificationAuthorization::Denied => Err(DENIED_REASON.to_string()),
+        NotificationAuthorization::NotDetermined => Err(NOT_ASKED_REASON.to_string()),
+        NotificationAuthorization::Unavailable => Err(status
+            .unavailable_reason
+            .clone()
+            .unwrap_or_else(|| "Notifications are unavailable.".to_string())),
     }
 }
 
@@ -261,17 +252,11 @@ fn refusal(availability: NotificationAvailability) -> Result<(), String> {
 ///
 /// The one door. Everything that notifies goes through here, so "off" is a
 /// single check in a single place rather than a promise each call site has to
-/// remember to keep.
-///
-/// What this cannot promise, and why: `tauri_plugin_notification` posts through
-/// `NSUserNotificationCenter` inside `tauri::async_runtime::spawn` and returns
-/// `Ok(())` before the post is attempted, discarding whatever the post did. So
-/// a delivery failure never comes back here, and `Ok(())` from this function
-/// means Juno handed the notification over, never that anyone saw it. Only the
-/// refusals Juno can establish itself are errors, and they are checked first.
+/// remember to keep. `Ok(())` means macOS allows Juno's notifications and the
+/// plugin took this one; the plugin posts asynchronously, so it still does not
+/// mean anyone saw it.
 pub fn deliver(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
-    let availability = availability(app);
-    if let Err(reason) = refusal(availability) {
+    if let Err(reason) = refusal(notifications_enabled(app), &current_status()) {
         info!("Withholding '{}': {}", title, reason);
         return Err(reason);
     }
@@ -297,33 +282,48 @@ pub fn notify(app: &AppHandle, title: &str, body: &str) {
     }
 }
 
-/// What the notifications pane should say.
+/// What macOS currently allows for Juno, for the notifications row.
 #[tauri::command]
-pub async fn check_notification_permission(app: AppHandle) -> Result<NotificationStatus, String> {
-    let plugin_permission = match app.notification().permission_state() {
-        Ok(state) => PluginPermission::from(state),
-        Err(e) => {
-            // Not fatal, and not "granted" either: the state is unknown and the
-            // pane says so rather than picking one of the other answers.
-            error!("Could not read the notification permission state: {}", e);
-            PluginPermission::Unknown
+pub async fn check_notification_permission() -> Result<NotificationStatus, String> {
+    tauri::async_runtime::spawn_blocking(current_status)
+        .await
+        .map_err(|e| format!("Could not read notification settings: {}", e))
+}
+
+/// Show the real macOS permission prompt, then report the answer.
+#[tauri::command]
+pub async fn request_notification_permission() -> Result<NotificationStatus, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        if let Some(reason) = unavailable_reason() {
+            return Err(reason.to_string());
         }
-    };
+        request_authorization()?;
+        Ok(current_status())
+    })
+    .await
+    .map_err(|e| format!("Could not ask for notifications: {}", e))?
+}
 
-    let availability = availability(&app);
-    info!(
-        "Notifications: {:?} (the plugin reports {:?})",
-        availability, plugin_permission
-    );
-
-    Ok(status_for(availability, plugin_permission))
+/// Open System Settings > Notifications for Juno.
+///
+/// Tries the pane scoped to Juno's bundle id, then the general pane.
+#[tauri::command]
+pub async fn open_notification_settings(app: AppHandle) -> Result<(), String> {
+    let bundle_id = app.config().identifier.clone();
+    for url in notification_settings_urls(&bundle_id) {
+        match std::process::Command::new("open").arg(&url).status() {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => warn!("`open {}` exited with {}", url, status),
+            Err(e) => error!("`open {}` failed: {}", url, e),
+        }
+    }
+    Err("Could not open System Settings".to_string())
 }
 
 /// Send a notification.
 ///
 /// Returns the reason when there is one, rather than the `Ok(())` it used to
-/// return whatever happened. Its two in-process callers, a finished background
-/// agent session and one waiting for input, already log what comes back.
+/// return whatever happened.
 #[tauri::command]
 pub async fn send_notification(
     app: AppHandle,
@@ -333,12 +333,7 @@ pub async fn send_notification(
     deliver(&app, &data.title, &data.message)
 }
 
-/// Send one notification because someone asked for one.
-///
-/// It returns what happened. The body it replaces was `notify(...)` followed by
-/// `Ok(())`, so the command could not fail from the screen's point of view no
-/// matter what the notification did, and pressing the button looked like
-/// success on a machine where notifications had not worked in weeks.
+/// Send one notification because someone asked for one, and say what happened.
 #[tauri::command]
 pub async fn test_notification(app: AppHandle) -> Result<(), String> {
     deliver(
@@ -352,131 +347,61 @@ pub async fn test_notification(app: AppHandle) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    const EVERY_AVAILABILITY: [NotificationAvailability; 4] = [
-        NotificationAvailability::MacosDecides,
-        NotificationAvailability::OffInJuno,
-        NotificationAvailability::DevBuild,
-        NotificationAvailability::Unbundled,
-    ];
-
-    const EVERY_PERMISSION: [PluginPermission; 4] = [
-        PluginPermission::Granted,
-        PluginPermission::Denied,
-        PluginPermission::MustAsk,
-        PluginPermission::Unknown,
-    ];
-
-    const BLOCKED: [NotificationAvailability; 3] = [
-        NotificationAvailability::OffInJuno,
-        NotificationAvailability::DevBuild,
-        NotificationAvailability::Unbundled,
-    ];
-
-    /// Every state the plugin can hand us maps to a state of ours. `From` has
-    /// no catch-all arm, so a variant added upstream fails to compile rather
-    /// than reading as one of these.
     #[test]
-    fn every_plugin_permission_maps_to_a_variant() {
-        assert_eq!(
-            PluginPermission::from(PermissionState::Granted),
-            PluginPermission::Granted
-        );
-        assert_eq!(
-            PluginPermission::from(PermissionState::Denied),
-            PluginPermission::Denied
-        );
-        assert_eq!(
-            PluginPermission::from(PermissionState::Prompt),
-            PluginPermission::MustAsk
-        );
-        assert_eq!(
-            PluginPermission::from(PermissionState::PromptWithRationale),
-            PluginPermission::MustAsk
-        );
+    fn raw_status_maps_to_authorization() {
+        use NotificationAuthorization::*;
+        assert_eq!(NotificationAuthorization::from_raw(0), NotDetermined);
+        assert_eq!(NotificationAuthorization::from_raw(1), Denied);
+        assert_eq!(NotificationAuthorization::from_raw(2), Authorized);
+        // Provisional and ephemeral both deliver.
+        assert_eq!(NotificationAuthorization::from_raw(3), Authorized);
+        assert_eq!(NotificationAuthorization::from_raw(4), Authorized);
+        // Unknown is never read as allowed.
+        assert_eq!(NotificationAuthorization::from_raw(9), Unavailable);
+        assert_eq!(NotificationAuthorization::from_raw(-1), Unavailable);
     }
 
-    /// An unreadable permission state is its own answer and survives to the
-    /// screen as one. The substring match this replaces computed
-    /// `default = !granted && !denied`, so anything it did not recognise
-    /// became "Not asked" and the pane offered a button to fix it.
     #[test]
-    fn an_unknown_permission_stays_unknown() {
-        let status = status_for(
-            NotificationAvailability::MacosDecides,
-            PluginPermission::Unknown,
-        );
-        assert_eq!(status.plugin_permission, PluginPermission::Unknown);
-    }
-
-    /// The reported defect: "it doesn't show anything, even though it says
-    /// allowed". No state may say that word, in any combination, because the
-    /// plugin's desktop `permission_state()` is a hard-coded `Granted` that
-    /// asks macOS nothing.
-    #[test]
-    fn no_status_claims_notifications_are_allowed() {
-        for availability in EVERY_AVAILABILITY {
-            for permission in EVERY_PERMISSION {
-                let status = status_for(availability, permission);
-                let copy = format!("{} {}", status.headline, status.detail).to_lowercase();
-                assert!(
-                    !copy.contains("allowed"),
-                    "{:?} with {:?} claims allowed: {}",
-                    availability,
-                    permission,
-                    copy
-                );
-            }
+    fn only_authorized_allows_notifications() {
+        use NotificationAuthorization::*;
+        assert!(Authorized.allows_notifications());
+        for a in [Denied, NotDetermined, Unavailable] {
+            assert!(!a.allows_notifications());
         }
     }
 
-    /// A blocked state is a sentence someone can act on, not a shrug, and it
-    /// does not send anyone to a System Settings pane that holds no row for it.
-    #[test]
-    fn a_blocked_state_explains_itself() {
-        for availability in BLOCKED {
-            let reason = availability
-                .blocked_reason()
-                .expect("a blocked state has a reason");
-            assert!(reason.ends_with('.'), "{:?}: {}", availability, reason);
-            assert!(!availability.can_notify());
-
-            let status = status_for(availability, PluginPermission::Granted);
-            assert!(!status.can_notify);
-            assert_eq!(status.detail, reason);
-            assert!(status.system_settings_pane.is_none());
+    fn status(authorization: NotificationAuthorization) -> NotificationStatus {
+        NotificationStatus {
+            authorization,
+            unavailable_reason: None,
         }
     }
 
-    /// The one unblocked state still promises nothing, and is the only one that
-    /// points at the place a person can change the answer.
     #[test]
-    fn the_unblocked_state_points_at_system_settings_without_promising() {
-        let status = status_for(
-            NotificationAvailability::MacosDecides,
-            PluginPermission::Granted,
-        );
-        assert!(status.can_notify);
+    fn a_send_is_refused_unless_juno_and_macos_both_allow_it() {
+        use NotificationAuthorization::*;
+        assert!(refusal(true, &status(Authorized)).is_ok());
+        assert!(refusal(false, &status(Authorized)).is_err());
+        assert_eq!(refusal(true, &status(Denied)).unwrap_err(), DENIED_REASON);
         assert_eq!(
-            status.system_settings_pane.as_deref(),
-            Some(SYSTEM_SETTINGS_PANE)
+            refusal(true, &status(NotDetermined)).unwrap_err(),
+            NOT_ASKED_REASON
         );
-        assert!(status.detail.contains("System Settings"));
+        assert!(refusal(true, &status(Unavailable)).is_err());
     }
 
-    /// What `test_notification` returns when nothing will appear. `deliver`
-    /// runs this before it reaches the plugin, so the error reaches the screen
-    /// instead of the old unconditional `Ok(())`.
+    /// The reported defect: the Open Settings button failed. The row now opens
+    /// the pane scoped to Juno, with the general pane as the fallback.
     #[test]
-    fn a_blocked_send_is_an_error_and_not_ok() {
-        for availability in BLOCKED {
-            let result = refusal(availability);
-            assert_eq!(
-                result.as_ref().err().map(String::as_str),
-                availability.blocked_reason(),
-                "{:?} did not refuse with its own reason",
-                availability
-            );
-        }
-        assert!(refusal(NotificationAvailability::MacosDecides).is_ok());
+    fn settings_links_target_juno_then_the_general_pane() {
+        let urls = notification_settings_urls("com.juno.desktop");
+        assert_eq!(
+            urls[0],
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.juno.desktop"
+        );
+        assert_eq!(
+            urls[1],
+            "x-apple.systempreferences:com.apple.preference.notifications"
+        );
     }
 }

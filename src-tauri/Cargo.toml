@@ -122,6 +122,12 @@ cron = "0.17.0"
 # Objective-C blocks for NSEvent monitor handlers (passive stop-key observer).
 # Already in the dependency graph via `cocoa`; this just makes it a direct dep.
 block = "0.1"
+# Real notification authorization (UNUserNotificationCenter): the status the
+# Notifications row reads and the system prompt it triggers.
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "UNUserNotificationCenter", "UNNotificationSettings"] }
 # Metal GPU acceleration for Kokoro-82M on Apple Silicon
 any-tts = { version = "0.1", default-features = false, features = ["kokoro", "download", "metal"] }
 

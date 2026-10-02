@@ -4194,6 +4194,7 @@ dependencies = [
  "axum 0.7.9",
  "base64 0.22.1",
  "block",
+ "block2",
  "chromiumoxide",
  "chrono",
  "clap",
@@ -4220,6 +4221,9 @@ dependencies = [
  "lru",
  "objc",
  "objc-sys",
+ "objc2",
+ "objc2-foundation",
+ "objc2-user-notifications",
  "once_cell",
  "open",
  "percent-encoding",
@@ -5371,6 +5375,8 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
+ "bitflags 2.13.2",
+ "block2",
  "objc2",
  "objc2-foundation",
 ]

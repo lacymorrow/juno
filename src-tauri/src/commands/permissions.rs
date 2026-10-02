@@ -508,7 +508,7 @@ pub async fn open_system_preferences(preference_pane: String) -> Result<(), Stri
             }
             // Not a Privacy & Security row: notifications live in their own
             // pane, and it is the only place a person can let Juno's banners
-            // through. See `commands::notifications::SYSTEM_SETTINGS_PANE`.
+            // through. The Notifications row uses `open_notification_settings`.
             "notifications" => {
                 "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
             }

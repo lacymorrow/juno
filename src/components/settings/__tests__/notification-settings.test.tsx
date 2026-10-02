@@ -11,108 +11,109 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { COMMANDS } from "@/lib/constants.generated";
 import NotificationSettings from "@/components/settings/sections/NotificationSettings";
-import type { NotificationStatus } from "@/types/notifications";
+import type { NotificationAuthorization, NotificationStatus } from "@/types/notifications";
 
-/** What Rust reports when it has no reason to think a notification is blocked. */
-const MACOS_DECIDES: NotificationStatus = {
-  availability: "macos_decides",
-  plugin_permission: "granted",
-  headline: "macOS decides",
-  detail:
-    "Juno hands every notification to macOS. Whether one appears is your choice in System Settings > Notifications > Juno, and macOS does not report that choice back to an app, so Juno cannot promise you will see one.",
-  can_notify: true,
-  system_settings_pane: "notifications",
-};
+const status = (authorization: NotificationAuthorization): NotificationStatus => ({
+  authorization,
+  unavailable_reason: null,
+});
 
-/** What Rust reports from a dev build, where no Juno banner can ever appear. */
-const DEV_BUILD: NotificationStatus = {
-  availability: "dev_build",
-  plugin_permission: "granted",
-  headline: "Development build",
-  detail:
-    "This is a development build. macOS posts its notifications under Terminal rather than Juno, so a Juno banner cannot appear. Test from an installed Juno.",
-  can_notify: false,
-  system_settings_pane: null,
-};
-
-function mockBackend(status: NotificationStatus, test?: () => Promise<unknown>) {
+function mockBackend(initial: NotificationStatus) {
+  let current = initial;
   invoke.mockImplementation((command: string) => {
     switch (command) {
       case COMMANDS.NOTIFICATIONS_GET_NOTIFICATION_SETTINGS:
         return Promise.resolve({ enabled: true });
       case COMMANDS.NOTIFICATIONS_CHECK_NOTIFICATION_PERMISSION:
-        return Promise.resolve(status);
-      case COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION:
-        return test ? test() : Promise.resolve(null);
+        return Promise.resolve(current);
+      case COMMANDS.NOTIFICATIONS_REQUEST_NOTIFICATION_PERMISSION:
+        current = status("authorized");
+        return Promise.resolve(current);
       default:
         return Promise.resolve(null);
     }
   });
+  return (next: NotificationStatus) => {
+    current = next;
+  };
 }
 
-describe("the notifications pane says only what Rust knows", () => {
+describe("the notifications row shows what macOS allows", () => {
   beforeEach(() => {
     invoke.mockReset();
   });
 
-  // The reported defect: "if I click test notifications and one, it doesn't
-  // show anything, even though it says allowed". The word came from the
-  // plugin's desktop permission check, which is a hard-coded `granted`.
-  it("never says allowed, and draws the sentence Rust wrote", async () => {
-    mockBackend(MACOS_DECIDES);
+  it("not determined: the one action asks macOS, and the switch stays off", async () => {
+    mockBackend(status("not_determined"));
     render(<NotificationSettings />);
 
-    await waitFor(() => expect(screen.getByText(MACOS_DECIDES.headline)).toBeInTheDocument());
-    expect(screen.getByText(MACOS_DECIDES.detail)).toBeInTheDocument();
-    expect(screen.queryByText(/allowed/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /ask/i })).not.toBeInTheDocument();
+    const allow = await screen.findByRole("button", { name: /allow notifications/i });
+    expect(screen.getByRole("switch")).toBeDisabled();
+    expect(screen.getByRole("switch")).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: /send one/i })).not.toBeInTheDocument();
+
+    fireEvent.click(allow);
+    expect(invoke).toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_REQUEST_NOTIFICATION_PERMISSION);
+    // The answer comes back and the row turns live.
+    await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
   });
 
-  it("shows why nothing will appear and does not offer a test that cannot work", async () => {
-    mockBackend(DEV_BUILD);
+  it("denied: one line, a button that opens Juno's pane, and a switch that reads off", async () => {
+    mockBackend(status("denied"));
     render(<NotificationSettings />);
 
-    await waitFor(() => expect(screen.getByText(DEV_BUILD.detail)).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /send one/i })).toBeDisabled();
-    // Nothing in that pane holds a row for a dev build, so nobody is sent there.
-    expect(screen.queryByRole("button", { name: /open settings/i })).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("Notifications are off for Juno in System Settings."),
+    ).toBeInTheDocument();
+    // Juno's own setting is on, but the system has them off: never "enabled".
+    expect(screen.getByRole("switch")).toBeDisabled();
+    expect(screen.getByRole("switch")).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: /send one/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /open system settings/i }));
+    expect(invoke).toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_OPEN_NOTIFICATION_SETTINGS);
   });
 
-  // `test_notification` used to call `notify`, discard the result and return
-  // `Ok(())` whatever happened, so a refusal reached the screen as success.
-  it("shows the reason when the backend refuses to send", async () => {
-    mockBackend(MACOS_DECIDES, () => Promise.reject(DEV_BUILD.detail));
+  it("denied: coming back to the window re-reads the answer", async () => {
+    const setStatus = mockBackend(status("denied"));
     render(<NotificationSettings />);
+    await screen.findByRole("button", { name: /open system settings/i });
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /send one/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: /send one/i }));
+    setStatus(status("authorized"));
+    fireEvent.focus(window);
 
-    await waitFor(() => expect(screen.getByText(DEV_BUILD.detail)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+    expect(screen.getByRole("switch")).toBeChecked();
   });
 
-  // A successful send means Juno handed the notification to macOS, never that
-  // anyone saw it: the plugin returns before it posts. The copy says so.
-  it("does not claim a sent notification was seen", async () => {
-    mockBackend(MACOS_DECIDES);
+  it("authorized: the switch is live and a test can be sent", async () => {
+    mockBackend(status("authorized"));
     render(<NotificationSettings />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /send one/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: /send one/i }));
+    const send = await screen.findByRole("button", { name: /send one/i });
+    expect(screen.getByRole("switch")).toBeEnabled();
+    expect(screen.getByRole("switch")).toBeChecked();
 
-    await waitFor(() => expect(screen.getByText(/if nothing appeared/i)).toBeInTheDocument());
+    fireEvent.click(send);
+    expect(invoke).toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
+    await waitFor(() => expect(screen.getByText("Sent.")).toBeInTheDocument());
   });
 
-  it("opens the one pane where a person can change the answer", async () => {
-    mockBackend(MACOS_DECIDES);
-    render(<NotificationSettings />);
-
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /open settings/i })).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
-
-    expect(invoke).toHaveBeenCalledWith(COMMANDS.PERMISSIONS_OPEN_SYSTEM_SETTINGS, {
-      permission_type: "notifications",
+  it("authorized: shows the reason when the backend refuses to send", async () => {
+    invoke.mockImplementation((command: string) => {
+      if (command === COMMANDS.NOTIFICATIONS_GET_NOTIFICATION_SETTINGS)
+        return Promise.resolve({ enabled: true });
+      if (command === COMMANDS.NOTIFICATIONS_CHECK_NOTIFICATION_PERMISSION)
+        return Promise.resolve(status("authorized"));
+      if (command === COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION)
+        return Promise.reject("macOS would not take the notification.");
+      return Promise.resolve(null);
     });
+    render(<NotificationSettings />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /send one/i }));
+    await waitFor(() =>
+      expect(screen.getByText("macOS would not take the notification.")).toBeInTheDocument(),
+    );
   });
 });
