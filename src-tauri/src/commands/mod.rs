@@ -15,6 +15,7 @@ pub mod debug_utils;
 pub mod dev;
 pub mod dictation;
 pub mod safari_tools;
+pub mod starters;
 // Removed deprecated dictation_reset module
 pub mod agent_continuation;
 pub mod agent_sessions; // Parallel agent-session registry commands (LAC-1432)
