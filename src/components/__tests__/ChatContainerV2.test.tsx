@@ -4,7 +4,16 @@ import { isDevelopment } from "@/lib";
 import { ChatContainerV2 } from "../chat/ChatContainerV2";
 import type { ChatMessage } from "@/types/chat";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
+const STARTER = vi.hoisted(() => ({
+  id: "chess",
+  title: "Play chess with me",
+  prompt: "Play chess with me. Open Chess and make the first move as white.",
+}));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn((cmd: string) =>
+    Promise.resolve(cmd === "get_starters" ? [STARTER] : undefined),
+  ),
+}));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
   emit: vi.fn(),
@@ -72,26 +81,36 @@ const messageRows = (container: HTMLElement): Element[] => {
   return Array.from(list.children);
 };
 
-const renderChat = (conversation: ChatMessage[]) =>
+const renderChat = (conversation: ChatMessage[], onExamplePromptSelect = vi.fn()) =>
   render(
     <ChatContainerV2
       conversation={conversation}
       copiedMessageId={null}
       onCopyResponse={vi.fn()}
       onShareResponse={vi.fn()}
-      onExamplePromptSelect={vi.fn()}
+      onExamplePromptSelect={onExamplePromptSelect}
     />,
   );
 
 describe("ChatContainerV2 empty state", () => {
-  it("keeps the example prompts up when only the app has spoken", () => {
+  it("keeps the example prompts up when only the app has spoken", async () => {
     // The backend's "Connected" note used to count as a conversation and
     // replace the prompts the moment anything could actually be sent.
     renderChat([system(CONNECTED, 1_700_000_000_000)]);
 
-    expect(screen.getByText("What can I help you with?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Screenshot" })).toBeInTheDocument();
+    expect(screen.getByText("Let's get something done.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: STARTER.title })).toBeInTheDocument();
     expect(screen.queryByText(CONNECTED)).not.toBeInTheDocument();
+  });
+
+  it("sends a starter as the request when it is tapped", async () => {
+    const onExamplePromptSelect = vi.fn();
+    renderChat([], onExamplePromptSelect);
+
+    fireEvent.click(await screen.findByRole("button", { name: STARTER.title }));
+
+    expect(onExamplePromptSelect).toHaveBeenCalledTimes(1);
+    expect(onExamplePromptSelect).toHaveBeenCalledWith(STARTER.prompt);
   });
 
   it("shows the conversation, system notes included, once the person has sent something", () => {
@@ -101,8 +120,8 @@ describe("ChatContainerV2 empty state", () => {
       system("Stopped by the person.", 1_700_000_002_000),
     ]);
 
-    expect(screen.queryByText("What can I help you with?")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Screenshot" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Let's get something done.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: STARTER.title })).not.toBeInTheDocument();
     expect(screen.getByText("Open Safari")).toBeInTheDocument();
     expect(screen.getByText(CONNECTED)).toBeInTheDocument();
     expect(screen.getByText("Stopped by the person.")).toBeInTheDocument();

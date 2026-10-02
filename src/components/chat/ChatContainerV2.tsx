@@ -264,10 +264,10 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
             <div className="m-auto flex flex-col items-center justify-center space-y-6 py-6">
               <div className="space-y-2 text-center">
                 <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                  What can I help you with?
+                  Let's get something done.
                 </h1>
                 <p className="text-sm text-muted-foreground">
-                  Desktop automation, web browsing, file management, and more.
+                  Pick one, or just tell me what you need.
                 </p>
               </div>
 
