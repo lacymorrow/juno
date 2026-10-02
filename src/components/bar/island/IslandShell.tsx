@@ -11,9 +11,13 @@ import { VOICE_TRANSITION, voiceScale } from "../voiceLevel";
  * reflows: every layer fills the shell absolutely.
  */
 
-/** Hairline plus depth so the black shape reads on a black wallpaper too. */
+/**
+ * Hairline plus depth so the black shape reads on a black wallpaper too. The
+ * deepest layer must end inside SHADOW_PAD or the window edge slices it into
+ * a hard line; islandShadow.test.ts holds it there.
+ */
 export const ISLAND_GLOW =
-  "0 0 0 0.5px rgba(255,255,255,0.22), 0 1px 2px rgba(0,0,0,0.5), 0 10px 28px rgba(0,0,0,0.45)";
+  "0 0 0 0.5px rgba(255,255,255,0.22), 0 1px 2px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.35)";
 
 /** One spring for the shape. Settles in about 320ms with no corner overshoot. */
 const SPRING = { type: "spring" as const, stiffness: 380, damping: 34, mass: 1 };
