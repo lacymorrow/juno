@@ -380,7 +380,7 @@ const getOnboardingSteps = (
   {
     id: "appearance",
     title: "Pick how Juno looks",
-    description: "This is the bar you will see when you talk to Juno. Change it any time in Settings.",
+    description: "This is how Juno shows up when you talk to it. Change it any time in Settings.",
     icon: null, // The live preview is the content here.
     action: "Continue",
   },
