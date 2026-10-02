@@ -171,6 +171,34 @@ impl AudioLevelFolder {
 
 // === CORE UI MANAGER ===
 
+/// Where one Escape press takes the bar, decided from the bar state alone.
+///
+/// Every state but a resting one goes to `Default`. `None` means the bar is
+/// already at rest and the press changes nothing, so pressing again is
+/// harmless. `AlwaysListening` and `DictationReady` are resting: they are
+/// standing intents the coordinated stop re-arms, not activities.
+pub(crate) fn escape_target(state: &BarState) -> Option<BarState> {
+    match state {
+        BarState::Default | BarState::DictationReady | BarState::AlwaysListening => None,
+        _ => Some(BarState::Default),
+    }
+}
+
+/// Whether the bar state alone says Escape has work to stop. Resting states
+/// and a bare composer do not; every other state does, even before the run
+/// behind it has registered anywhere else.
+pub(crate) fn escape_stops_work(state: &BarState) -> bool {
+    !matches!(
+        state,
+        BarState::Default
+            | BarState::DictationReady
+            | BarState::AlwaysListening
+            | BarState::Expanding
+            | BarState::Input
+            | BarState::Shrinking
+    )
+}
+
 #[derive(Debug)]
 pub struct UIManager {
     pub app_handle: AppHandle,
@@ -317,6 +345,25 @@ impl UIManager {
         );
         self.bar_state = new_state;
         self.emit_bar_state_update().await;
+    }
+
+    /// Put the bar back to the idle bar after an Escape press.
+    ///
+    /// The stop itself (agent, TTS, dictation, monitors) has already run by
+    /// the time this is called; this is only the bar's half. It clears what
+    /// the composer was holding and cancels any pending transition, so a
+    /// delayed `Expanding -> Input` timer cannot re-open the bar a moment
+    /// after Escape closed it. Already resting: nothing changes, which is what
+    /// makes a second and third press harmless.
+    pub async fn escape_to_idle(&mut self) {
+        let Some(next) = escape_target(&self.bar_state) else {
+            return;
+        };
+        self.input_value.clear();
+        self.current_error = None;
+        self.current_transition_id = None;
+        self.agent_state = None;
+        self.set_bar_state(next).await;
     }
 
     pub async fn handle_bar_click(&mut self) -> Result<(), String> {
@@ -1278,14 +1325,25 @@ pub async fn ui_handle_interaction(
     );
 
     if let Some(manager) = get_ui_manager().await {
+        let is_bar = is_bar_element(&element_id);
+
+        // Escape is handled before the manager is locked, never inside the
+        // match below. The coordinated stop takes this same lock (it moves the
+        // bar to `Stopped` and stops dictation through it), and a tokio mutex
+        // is not re-entrant: running the stop while holding the guard hung the
+        // first Escape forever, left the manager locked so every later bar
+        // interaction hung behind it, and left the stop latch set so every
+        // later Escape was skipped as "already in progress".
+        if is_bar && interaction.interaction_type == ui::interaction_types::ESCAPE {
+            debug!("Escape key pressed on bar component: {}", element_id);
+            let app_handle = manager.lock().await.app_handle.clone();
+            bar_escape_to_idle(&app_handle, "Escape key pressed via UI").await;
+            return Ok(());
+        }
+
         let mut manager = manager.lock().await;
 
-        // Check if this is a bar component (floating-bar, app-bar, voice-ai-bar, dynamic-bar)
-        if element_id == ui::element_ids::FLOATING_BAR
-            || element_id == ui::element_ids::APP_BAR
-            || element_id == ui::element_ids::VOICE_AI_BAR
-            || element_id == ui::element_ids::DYNAMIC_BAR
-        {
+        if is_bar {
             match interaction.interaction_type.as_str() {
                 ui::interaction_types::CLICK => manager.handle_bar_click().await,
                 ui::interaction_types::SUBMIT => {
@@ -1326,16 +1384,6 @@ pub async fn ui_handle_interaction(
                     // Handle initialization specially - just acknowledge receipt
                     debug!("Initialized bar component: {}", element_id);
                     Ok(())
-                }
-                ui::interaction_types::ESCAPE => {
-                    // Handle escape key - delegate to stop coordinator for proper cancellation
-                    debug!("Escape key pressed on bar component: {}", element_id);
-                    let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
-                    coordinator
-                        .stop_all_operations(&manager.app_handle, "Escape key pressed via UI")
-                        .await
-                        .map_err(|e| e.to_string())
-                        .map(|_| ())
                 }
                 ui::interaction_types::ENTER => {
                     // Handle enter key - submit current input if any
@@ -1396,6 +1444,45 @@ pub async fn ui_handle_interaction(
         }
     } else {
         Err("UI Manager not initialized".to_string())
+    }
+}
+
+/// Every bar appearance reports interactions under one of these ids.
+fn is_bar_element(element_id: &str) -> bool {
+    element_id == ui::element_ids::FLOATING_BAR
+        || element_id == ui::element_ids::APP_BAR
+        || element_id == ui::element_ids::VOICE_AI_BAR
+        || element_id == ui::element_ids::DYNAMIC_BAR
+}
+
+/// # One Escape, for every appearance
+///
+/// Stop whatever is running, then put the bar back to the idle bar. Both
+/// routes a press arrives on end here: the bar's own keydown (reported as the
+/// `escape` interaction) and the passive stop-key monitor. Neither holds the
+/// UI manager lock while the stop runs, because the stop takes it.
+///
+/// The stop is skipped only for a bar that is just a composer (or already at
+/// rest) with nothing running, so closing an empty line does not tear down
+/// voice triggers and timers for nothing. Any working state runs the stop even
+/// if the run has not registered yet (a query accepted a moment ago). Either
+/// way the bar ends at rest, and a press on a bar already at rest changes
+/// nothing.
+pub async fn bar_escape_to_idle(app_handle: &AppHandle, reason: &str) {
+    let state = match get_ui_manager().await {
+        Some(manager) => manager.lock().await.bar_state.clone(),
+        None => BarState::Default,
+    };
+    if escape_stops_work(&state)
+        || crate::commands::escape_key_coordinator::something_to_stop(app_handle).await
+    {
+        let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
+        if let Err(e) = coordinator.stop_all_operations(app_handle, reason).await {
+            error!("Escape: coordinated stop failed: {}", e);
+        }
+    }
+    if let Some(manager) = get_ui_manager().await {
+        manager.lock().await.escape_to_idle().await;
     }
 }
 
@@ -1685,6 +1772,102 @@ mod tests {
         assert_eq!(
             folder.fold(0.8, false, 0.0, t0 + Duration::from_millis(180)),
             None
+        );
+    }
+
+    /// Escape from any non-resting state lands on the idle bar; from a
+    /// resting state it changes nothing, so repeated presses are harmless.
+    #[test]
+    fn escape_returns_every_state_to_idle_and_is_idempotent() {
+        use BarState::*;
+        let busy = [
+            Expanding,
+            Input,
+            Shrinking,
+            Submitting,
+            Loading,
+            Success,
+            Error,
+            Speaking,
+            Listening,
+            Transcribing,
+            Dictating,
+            Finishing,
+            AgentResponding,
+            Stopping,
+        ];
+        for state in busy {
+            let first = escape_target(&state);
+            assert_eq!(first, Some(Default), "{:?} must return to idle", state);
+            // The second press sees the state the first one produced.
+            assert_eq!(escape_target(&first.unwrap()), None);
+        }
+        for resting in [Default, DictationReady, AlwaysListening] {
+            assert_eq!(escape_target(&resting), None, "{:?} is at rest", resting);
+        }
+    }
+
+    /// A composer is closed without a coordinated stop; anything working
+    /// is stopped even if the run has not registered yet.
+    #[test]
+    fn escape_stops_work_only_when_the_bar_is_working() {
+        use BarState::*;
+        for quiet in [
+            Default,
+            DictationReady,
+            AlwaysListening,
+            Expanding,
+            Input,
+            Shrinking,
+        ] {
+            assert!(
+                !escape_stops_work(&quiet),
+                "{:?} has nothing to stop",
+                quiet
+            );
+        }
+        for busy in [
+            Submitting,
+            Loading,
+            AgentResponding,
+            Listening,
+            Dictating,
+            Transcribing,
+            Speaking,
+            Finishing,
+            Stopping,
+            Error,
+            Success,
+        ] {
+            assert!(escape_stops_work(&busy), "{:?} must be stopped", busy);
+        }
+    }
+
+    /// The deadlock that made Escape dead in the shipping app: the escape
+    /// interaction ran the coordinated stop while holding the UI manager
+    /// guard, and the stop takes that same guard. Pin that Escape is routed
+    /// before the lock, and that the locked match never runs the stop.
+    #[test]
+    fn escape_never_runs_the_stop_under_the_manager_lock() {
+        let src = include_str!("ui_commands.rs");
+        let start = src
+            .find("pub async fn ui_handle_interaction(")
+            .expect("ui_handle_interaction exists");
+        let end = start + src[start..].find("\n}\n").expect("function ends");
+        let body = &src[start..end];
+        let escape_at = body
+            .find("bar_escape_to_idle(")
+            .expect("Escape is routed to bar_escape_to_idle");
+        let locked_at = body
+            .find("let mut manager = manager.lock().await;")
+            .expect("the interaction match takes the lock");
+        assert!(
+            escape_at < locked_at,
+            "Escape must be handled before the manager guard is taken"
+        );
+        assert!(
+            !body.contains("stop_all_operations"),
+            "the coordinated stop must never run inside ui_handle_interaction"
         );
     }
 
