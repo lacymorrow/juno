@@ -37,10 +37,10 @@ import { BarHost } from "../BarHost";
 
 /** What a person has in their settings store, and what they must still see. */
 const STORED: readonly { value: string; name: string; look: string }[] = [
+  { value: "dynamic", name: "Island", look: "island" },
   { value: "floating", name: "Pill", look: "pill" },
   { value: "app", name: "Bar", look: "bar" },
   { value: "voice_ai", name: "Studio", look: "studio" },
-  { value: "dynamic", name: "Island", look: "island" },
   { value: "shader_orb", name: "Orb", look: "react-bits-orb" },
   { value: "orb", name: "Presence", look: "elevenlabs-orb" },
   { value: "react_orb", name: "Halo", look: "halo-ring" },
@@ -107,9 +107,13 @@ describe("a stored appearance after the rename", () => {
   });
 
   it("falls back to the default look for a value no release ever wrote", async () => {
-    expect(appearanceEntry("halo").value).toBe(UI.BAR_APPEARANCES_FLOATING);
-    expect(appearanceEntry(null).value).toBe(UI.BAR_APPEARANCES_FLOATING);
+    expect(appearanceEntry("halo").value).toBe(UI.BAR_APPEARANCES_DEFAULT);
+    expect(appearanceEntry(null).value).toBe(UI.BAR_APPEARANCES_DEFAULT);
     await mount("react_bits_orb");
-    expect(screen.getByTestId("look").textContent).toBe("pill");
+    expect(screen.getByTestId("look").textContent).toBe("island");
+  });
+
+  it("starts a new install on Island", () => {
+    expect(UI.BAR_APPEARANCES_DEFAULT).toBe(UI.BAR_APPEARANCES_DYNAMIC);
   });
 });

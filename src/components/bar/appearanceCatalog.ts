@@ -16,9 +16,14 @@ export interface AppearanceEntry {
 
 export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
   {
+    value: UI.BAR_APPEARANCES_DYNAMIC,
+    name: "Island",
+    descriptor: "One small shape that grows to hold the answer, then settles back. The default.",
+  },
+  {
     value: UI.BAR_APPEARANCES_FLOATING,
     name: "Pill",
-    descriptor: "A small pill that opens when you speak. The default.",
+    descriptor: "A small pill that opens when you speak.",
   },
   {
     value: UI.BAR_APPEARANCES_APP,
@@ -29,11 +34,6 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
     value: UI.BAR_APPEARANCES_VOICE_AI,
     name: "Studio",
     descriptor: "A light recording studio: a real waveform, a teleprompter, and the answer as a script.",
-  },
-  {
-    value: UI.BAR_APPEARANCES_DYNAMIC,
-    name: "Island",
-    descriptor: "One small shape that grows to hold the answer, then settles back.",
   },
   {
     value: UI.BAR_APPEARANCES_SHADER_ORB,
@@ -61,7 +61,7 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
 export function appearanceEntry(value: string | null | undefined): AppearanceEntry {
   return (
     APPEARANCE_CATALOG.find((entry) => entry.value === value) ??
-    APPEARANCE_CATALOG[0]
+    APPEARANCE_CATALOG.find((entry) => entry.value === UI.BAR_APPEARANCES_DEFAULT)!
   );
 }
 

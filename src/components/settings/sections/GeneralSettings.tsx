@@ -26,7 +26,7 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     useState(false);
   const [onboardingInfo, setOnboardingInfo] = useState<any>(null);
   const [barAppearance, setBarAppearance] = useState<string>(
-    UI.BAR_APPEARANCES_FLOATING
+    UI.BAR_APPEARANCES_DEFAULT
   );
   const [barAppearanceLoading, setBarAppearanceLoading] = useState(false);
   const [followCursorDisplay, setFollowCursorDisplay] = useState(true);

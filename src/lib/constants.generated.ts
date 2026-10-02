@@ -418,6 +418,7 @@ export const UI = {
   BAR_APPEARANCES_REACT_ORB: 'react_orb',
   BAR_APPEARANCES_SHADER_ORB: 'shader_orb',
   BAR_APPEARANCES_PERSONA: 'persona',
+  BAR_APPEARANCES_DEFAULT: 'dynamic',
   BAR_STATES_DEFAULT: 'default',
   BAR_STATES_EXPANDING: 'expanding',
   BAR_STATES_INPUT: 'input',

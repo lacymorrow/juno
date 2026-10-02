@@ -126,7 +126,7 @@ impl Default for FloatingBarConfig {
             auto_hide: false,
             auto_hide_delay: timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
             opacity: 0.95,
-            bar_appearance: ui::bar_appearances::FLOATING.to_string(),
+            bar_appearance: ui::bar_appearances::DEFAULT.to_string(),
             show_glow_border: crate::constants::settings::defaults::show_glow_border(),
         }
     }
