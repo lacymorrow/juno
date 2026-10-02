@@ -20,6 +20,8 @@ pub struct Starter {
 struct StarterSpec {
     starter: Starter,
     /// Tools the request needs. Every one must resolve to a registered family.
+    /// Read only by the test that holds each starter to a real tool.
+    #[cfg_attr(not(test), allow(dead_code))]
     tools: &'static [&'static str],
 }
 

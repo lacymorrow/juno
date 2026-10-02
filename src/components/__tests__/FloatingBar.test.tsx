@@ -850,15 +850,24 @@ describe("FloatingBar", () => {
     await act(async () => {});
   }
 
+  /** One starter as Rust's get_starters returns it. */
+  const STARTER = { id: "screen", title: "What's on my screen?", prompt: "What's on my screen? Look at it and tell me what I'm working on." };
+
   it("sends an example prompt from the pane's empty state the way a typed follow-up goes", async () => {
     // The bar's own connectivity probe; the mock returns nothing by default,
     // which reads as an error.
     invoke.mockImplementation((command: unknown) =>
-      Promise.resolve(command === "check_server_status" ? { backend_running: true } : undefined),
+      Promise.resolve(
+        command === "check_server_status"
+          ? { backend_running: true }
+          : command === "get_starters"
+            ? [STARTER]
+            : undefined,
+      ),
     );
     await openEmptyPane();
 
-    const screenshot = screen.getByRole("button", { name: "Screenshot" });
+    const screenshot = await screen.findByRole("button", { name: STARTER.title });
     expect(screenshot).toBeEnabled();
     expect(screen.queryByTestId("example-prompts-connecting")).not.toBeInTheDocument();
 
@@ -869,7 +878,7 @@ describe("FloatingBar", () => {
     // used to be a deliberate no-op, so the buttons did nothing in the bar.
     expect(invoke).toHaveBeenCalledWith(
       "ui_handle_interaction",
-      interaction("submit", { value: "Take a screenshot and open System Preferences" }),
+      interaction("submit", { value: STARTER.prompt }),
     );
     expect(invoke).not.toHaveBeenCalledWith("dispatch_query", expect.anything());
   });
@@ -902,11 +911,12 @@ describe("FloatingBar", () => {
         ? new Promise<{ backend_running: boolean }>((resolve) => {
             connected = resolve;
           })
-        : Promise.resolve(),
+        : Promise.resolve(command === "get_starters" ? [STARTER] : undefined),
     );
     await openEmptyPane();
 
-    const screenshot = () => screen.getByRole("button", { name: "Screenshot" });
+    await screen.findByRole("button", { name: STARTER.title });
+    const screenshot = () => screen.getByRole("button", { name: STARTER.title });
     expect(screenshot()).toBeDisabled();
     expect(screen.getByTestId("example-prompts-connecting")).toHaveTextContent("Connecting…");
     fireEvent.click(screenshot());
@@ -922,7 +932,7 @@ describe("FloatingBar", () => {
     await act(async () => {});
     expect(invoke).toHaveBeenCalledWith(
       "ui_handle_interaction",
-      interaction("submit", { value: "Take a screenshot and open System Preferences" }),
+      interaction("submit", { value: STARTER.prompt }),
     );
   });
 

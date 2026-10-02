@@ -530,6 +530,7 @@ export const COMMANDS = {
   SETTINGS_SET_SMART_ROUTING_ENABLED: 'set_smart_routing_enabled',
   CORE_GET_DEMO_INFO: 'get_demo_info',
   CORE_GET_DEBUG_MODE: 'get_debug_mode',
+  CORE_GET_STARTERS: 'get_starters',
   CORE_SET_DEBUG_MODE: 'set_debug_mode',
   CORE_GET_PERFORMANCE_MONITORING: 'get_performance_monitoring',
   CORE_SET_PERFORMANCE_MONITORING: 'set_performance_monitoring',

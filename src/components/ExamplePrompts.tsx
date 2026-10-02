@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { COMMANDS } from "@/lib/constants.generated";
 import { isDevelopment } from "@/lib";
 import { cn } from "@/lib/utils";
 import {
@@ -69,7 +70,7 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    invoke<Starter[]>("get_starters")
+    invoke<Starter[]>(COMMANDS.CORE_GET_STARTERS)
       .then((list) => {
         if (!cancelled && Array.isArray(list)) setStarters(list);
       })
