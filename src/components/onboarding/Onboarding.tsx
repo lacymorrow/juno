@@ -347,8 +347,14 @@ interface ClaudeCliStatus {
 /** The dictation model onboarding offers, when the backend says to. */
 interface DictationOffer {
   modelId: string;
-  /** Short family name for the button ("Parakeet"). */
-  family: string;
+  /**
+   * What the model does, not what it is: the tier name the backend gives the
+   * row ("Balanced"), which is also the name this person will later see
+   * selected in Settings, Models. The model's own name and the engine behind
+   * it never reach this screen; neither is something a person can act on, and
+   * the one being offered depends on the Mac.
+   */
+  tierName: string;
   sizeMb: number;
 }
 
@@ -397,16 +403,19 @@ const getOnboardingSteps = (
         },
       ]),
   // Offered, never assumed: a 600 MB download is the person's call. The
-  // backend decides whether to ask at all (Apple Silicon, not downloaded, not
-  // declined before), so an Intel Mac or a repeat run never sees this screen.
+  // backend decides whether to ask at all, and which model to ask about: every
+  // Mac has a best model it can actually run, so every Mac gets this screen
+  // once. It is skipped only when that model is already on disk, or the person
+  // already said no, or already chose for themselves.
   ...(dictationOffer
     ? [
         {
           id: "dictation-model",
           title: "Better dictation",
-          description: `${dictationOffer.family} is a speech model that runs on your Mac. Faster and more accurate than the one built in, and your voice never leaves the machine.`,
+          description:
+            "A speech model that runs on your Mac. More accurate than the one built in, and your voice never leaves the machine.",
           icon: null, // The model card below is the content here.
-          action: `Download ${dictationOffer.family} (${dictationOffer.sizeMb} MB)`,
+          action: `Download (${dictationOffer.sizeMb} MB)`,
         },
       ]
     : []),
@@ -1182,15 +1191,17 @@ export default function OnboardingFlow({
         if (!mounted) return;
 
         // Should setup offer the recommended dictation model? The backend
-        // answers no on Intel, when it is already on disk, or when the person
-        // declined before.
+        // answers that, including which model it is: the catalog it returns is
+        // already the one this Mac can run, so the recommended row is read off
+        // it rather than guessed at here. Nothing on this screen depends on
+        // what kind of Mac it is.
         try {
           const stt = await invoke<SttModelsStatus>(COMMANDS.STT_MODELS_GET_STATUS);
           const recommended = stt.models.find((m) => m.recommended);
           if (mounted && stt.offer_recommended && recommended && !recommended.downloaded) {
             setDictationOffer({
               modelId: recommended.id,
-              family: recommended.engine === "parakeet" ? "Parakeet" : "Whisper",
+              tierName: recommended.tier_name ?? "Better dictation",
               sizeMb: recommended.size_mb,
             });
           }
@@ -2019,7 +2030,7 @@ export default function OnboardingFlow({
                   <div className="rounded-xl border border-border bg-card p-4">
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="text-[14px] font-semibold text-foreground">
-                        {dictationOffer.family}
+                        {dictationOffer.tierName}
                       </span>
                       <span className="text-[12px] tabular-nums text-muted-foreground">
                         {dictationOffer.sizeMb} MB
@@ -2046,7 +2057,7 @@ export default function OnboardingFlow({
                     )}
                     {sttDownload === "done" && (
                       <p className="mt-3 text-[12px] text-muted-foreground" role="status">
-                        Downloaded. {dictationOffer.family} is now your dictation model.
+                        Downloaded. Juno is dictating with it now.
                       </p>
                     )}
                     {sttDownload === "failed" && (

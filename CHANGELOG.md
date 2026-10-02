@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.68] - 2026-10-02
+
+### Fixed
+
+- show what this Mac can do, with the control that changes it (#673) (fd4f5694)
+
+## [0.8.67] - 2026-10-02
+
+### Fixed
+
+- **security:** one path gate for every file-touching command (#672) (9055705a)
+
+## [0.8.66] - 2026-10-02
+
+### Fixed
+
+- put the file tools back inside the approval gate, and pin the names (#667) (af85dbec)
+
+## [0.8.64] - 2026-10-01
+
+### Fixed
+
+- **timer:** make the shipping screen and file monitors honest, bounded and stoppable (#670) (13a021e1)
+
+## [0.8.63] - 2026-10-01
+
+### Fixed
+
+- delete the second, ungated agent executor instead of gating it (#671) (68ae4513)
+
+## [0.8.62] - 2026-10-01
+
+### Fixed
+
+- **audio:** the default voice engine needs no API key (#669) (cd133a58)
+
+## [0.8.61] - 2026-10-01
+
+### Fixed
+
+- a reset lands on a provider that works, and the UI shows it (#661) (675cd31e)
+
+## [0.8.58] - 2026-10-01
+
+### Fixed
+
+- **bar:** one Escape, shared by every appearance, always back to idle (#664) (076d5510)
+
+## [0.8.57] - 2026-10-01
+
+### Fixed
+
+- **notifications:** the test button reports what happened, and the row stops saying "allowed" (#663) (65507bb7)
+
+## [0.8.55] - 2026-10-01
+
+### Fixed
+
+- **settings:** a trigger conflict is a field state, not a remembered refusal (#662) (b3bd40ab)
+
+## [0.8.54] - 2026-10-01
+
+### Added
+
+- show the screenshots a turn took, in the chat (#657) (99b55f53)
+
+## [0.8.53] - 2026-10-01
+
+### Fixed
+
+- **macos:** the floating bar decides whether it is on top, and settings wins (#658) (5546f3a4)
+
 ## [0.8.50] - 2026-10-01
 
 ### Added
@@ -708,7 +780,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.50...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.68...HEAD
+[0.8.68]: https://github.com/lacymorrow/juno/compare/cua-v0.8.67...v0.8.68
+[0.8.67]: https://github.com/lacymorrow/juno/compare/cua-v0.8.66...v0.8.67
+[0.8.66]: https://github.com/lacymorrow/juno/compare/cua-v0.8.65...v0.8.66
+[0.8.64]: https://github.com/lacymorrow/juno/compare/cua-v0.8.63...v0.8.64
+[0.8.63]: https://github.com/lacymorrow/juno/compare/cua-v0.8.62...v0.8.63
+[0.8.62]: https://github.com/lacymorrow/juno/compare/cua-v0.8.61...v0.8.62
+[0.8.61]: https://github.com/lacymorrow/juno/compare/cua-v0.8.60...v0.8.61
+[0.8.58]: https://github.com/lacymorrow/juno/compare/cua-v0.8.57...v0.8.58
+[0.8.57]: https://github.com/lacymorrow/juno/compare/cua-v0.8.56...v0.8.57
+[0.8.55]: https://github.com/lacymorrow/juno/compare/cua-v0.8.54...v0.8.55
+[0.8.54]: https://github.com/lacymorrow/juno/compare/cua-v0.8.53...v0.8.54
+[0.8.53]: https://github.com/lacymorrow/juno/compare/cua-v0.8.52...v0.8.53
 [0.8.50]: https://github.com/lacymorrow/juno/compare/cua-v0.8.49...v0.8.50
 [0.8.48]: https://github.com/lacymorrow/juno/compare/cua-v0.8.47...v0.8.48
 [0.8.46]: https://github.com/lacymorrow/juno/compare/cua-v0.8.45...v0.8.46

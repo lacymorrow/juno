@@ -13,10 +13,14 @@ pub mod controller;
 pub mod devices;
 pub mod engine;
 pub mod engine_manager;
+// The Parakeet loader only links on Apple Silicon; see parakeet_model for the
+// part every build needs.
+#[cfg(target_arch = "aarch64")]
 pub mod engine_parakeet;
 pub mod engine_whisper;
 pub mod error;
 pub mod mic_permissions;
+pub mod parakeet_model;
 pub mod shared_whisper;
 pub mod utils;
 pub mod wake_word;
@@ -31,11 +35,12 @@ pub use devices::{
 };
 pub use engine::{startup_provider, SttProvider, TranscriptionEngine, TranscriptionSession};
 pub use engine_manager::EngineManager;
-pub use engine_parakeet::{
-    missing_parakeet_files, parakeet_file_url, parakeet_total_bytes, ParakeetFile,
-    ParakeetModelStatus, PARAKEET_HF_REPO, PARAKEET_HF_REVISION, PARAKEET_MODEL_FILES,
-};
 pub use error::{Error, Result};
+pub use parakeet_model::{
+    missing_parakeet_files, parakeet_file_url, parakeet_ready, parakeet_total_bytes,
+    parakeet_unsupported_reason, ParakeetFile, ParakeetModelStatus, PARAKEET_HF_REPO,
+    PARAKEET_HF_REVISION, PARAKEET_MODEL_FILES, PARAKEET_SUPPORTED, PARAKEET_UNSUPPORTED_REASON,
+};
 pub use shared_whisper::SharedWhisperManager;
 pub use utils::{downloaded_models_dir, resolve_model_path, resolve_parakeet_model_dir};
 
@@ -213,14 +218,19 @@ fn build_plugin<R: Runtime + 'static>(
             // allocates its Metal buffers and warms it up, and all of that is
             // thrown away seconds later when the app applies the saved choice.
             let saved_provider = read_saved_provider.as_ref().and_then(|read| read(app));
-            let parakeet_ready =
-                missing_parakeet_files(std::path::Path::new(&parakeet_model_dir)).is_empty();
-            let provider = startup_provider(saved_provider.as_deref(), parakeet_ready);
+            // Both halves of the question: does this build contain Parakeet,
+            // and is the model on disk. An Intel build answers false to the
+            // first, so a saved "parakeet" boots Whisper instead of asking
+            // for an engine that was never linked in.
+            let parakeet_usable =
+                crate::parakeet_model::parakeet_ready(std::path::Path::new(&parakeet_model_dir));
+            let provider = startup_provider(saved_provider.as_deref(), parakeet_usable);
             tracing::info!(
-                "[VoicePlugin] STT provider: {} (saved: {}, parakeet on disk: {})",
+                "[VoicePlugin] STT provider: {} (saved: {}, parakeet usable: {}, parakeet supported by this build: {})",
                 provider,
                 saved_provider.as_deref().unwrap_or("<none>"),
-                parakeet_ready
+                parakeet_usable,
+                crate::parakeet_model::PARAKEET_SUPPORTED
             );
 
             // Load the STT model in a background task — model files can be >1 GB

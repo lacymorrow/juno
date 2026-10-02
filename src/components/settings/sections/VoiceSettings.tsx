@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import {
   Select,
   SelectContent,
@@ -5,8 +6,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import { toast } from "sonner";
+import { COMMANDS } from "@/lib/constants.generated";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { VoicePicker } from "../VoicePicker";
@@ -15,7 +19,8 @@ import { VoicePicker } from "../VoicePicker";
 // option's own one-line description.
 const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
   paste: "Pastes with Cmd+V. Most compatible.",
-  clipboard_free: "Types the transcript directly. Never touches your clipboard.",
+  clipboard_free:
+    "Types the transcript directly. Never touches your clipboard.",
 };
 
 /**
@@ -25,15 +30,6 @@ const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
  */
 const FOLLOW_SYSTEM = "__system__";
 
-/** Engine names as a person would say them, for the one line that names one. */
-const TTS_ENGINE_NAMES: Record<string, string> = {
-  elevenlabs: "ElevenLabs",
-  kokoro: "Kokoro",
-  replicate: "Replicate",
-  chatterbox: "Chatterbox",
-  supertonic: "Supertonic",
-};
-
 /**
  * Audio: which microphone Juno hears you on, which speaker it answers from,
  * and which voice it answers in.
@@ -41,12 +37,16 @@ const TTS_ENGINE_NAMES: Record<string, string> = {
  * The voice is here and the engine is under Providers on purpose. The engine
  * is plumbing; the voice is a preference, and it is the only one of the three
  * you can check by ear, which is why picking it plays it.
+ *
+ * The rows belong to whichever engine is speaking, and Rust decides what they
+ * are. This file holds no list of voices and no list of engine names: both
+ * used to live here, and both were wrong the moment the engine changed.
  */
 export default function VoiceSettings({ settings }: SettingsSectionProps) {
   const {
     audioDevices,
     junoVoices,
-    speakingVoiceId,
+    voiceAudition,
     captureFailure,
     loadAudioDevices,
     loadJunoVoices,
@@ -62,7 +62,27 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     void loadJunoVoices();
   }, [loadAudioDevices, loadJunoVoices]);
 
-  const engineName = TTS_ENGINE_NAMES[settings.ttsProvider];
+  // The voices Juno can speak with are the voices macOS has installed, and
+  // the good ones are downloads the person has not made yet. Juno cannot
+  // install a voice, so a sentence about where better voices come from would
+  // be the whole answer; but the person can install one, and a condition the
+  // person can change is owed the control that changes it, not a sentence.
+  // This opens the pane that holds it. Shown only when Rust reports a better
+  // voice is available to download (`better_voices_available`), so a Mac that
+  // already has the good ones is not told there are better ones to get.
+  const openVoiceDownloads = useCallback(async () => {
+    try {
+      await invoke(COMMANDS.PERMISSIONS_OPEN_SYSTEM_PREFERENCES, {
+        preferencePane: "spoken_content",
+      });
+    } catch (error) {
+      console.error("Failed to open the voice settings pane:", error);
+      toast.error(
+        "Could not open System Settings. Look under Accessibility, then Spoken Content.",
+      );
+    }
+  }, []);
+
   const inputs = audioDevices?.inputs ?? [];
   const outputs = audioDevices?.outputs ?? [];
 
@@ -74,6 +94,20 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     : audioDevices?.effective_input
       ? `Juno hears you through ${audioDevices.effective_input}.`
       : "Juno cannot find a microphone.";
+
+  // Which engine the rows came from is worth saying only when it is not the
+  // Mac: on the Mac the voice names are the whole answer.
+  const engineNote =
+    junoVoices && junoVoices.engine !== "system"
+      ? `${junoVoices.engine_label} is giving Juno her voice. Pick one and you will hear it.`
+      : undefined;
+
+  // Two sentences at most. "Tap the one you are using to hear it again" was
+  // the third and it is gone: tapping a row plays it, so tapping the chosen
+  // one playing it again is what somebody would expect anyway.
+  const voiceFooter = [engineNote ?? "Pick one and you will hear it."]
+    .filter(Boolean)
+    .join(" ");
 
   const speakerNote = audioDevices?.missing_output
     ? `${audioDevices.missing_output} is not connected. Juno is using your Mac's output instead.`
@@ -102,14 +136,18 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
           <Select
             value={audioDevices?.chosen_input ?? FOLLOW_SYSTEM}
             onValueChange={(value) =>
-              void handleAudioInputDeviceChange(value === FOLLOW_SYSTEM ? null : value)
+              void handleAudioInputDeviceChange(
+                value === FOLLOW_SYSTEM ? null : value,
+              )
             }
           >
             <SelectTrigger id="audio-input-device" className="w-[250px]">
               <SelectValue placeholder="Select a microphone" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={FOLLOW_SYSTEM}>Whatever my Mac is using</SelectItem>
+              <SelectItem value={FOLLOW_SYSTEM}>
+                Whatever my Mac is using
+              </SelectItem>
               {inputs.map((device) => (
                 <SelectItem key={device.name} value={device.name}>
                   {device.name}
@@ -140,14 +178,18 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
           <Select
             value={audioDevices?.chosen_output ?? FOLLOW_SYSTEM}
             onValueChange={(value) =>
-              void handleAudioOutputDeviceChange(value === FOLLOW_SYSTEM ? null : value)
+              void handleAudioOutputDeviceChange(
+                value === FOLLOW_SYSTEM ? null : value,
+              )
             }
           >
             <SelectTrigger id="audio-output-device" className="w-[250px]">
               <SelectValue placeholder="Select a speaker" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={FOLLOW_SYSTEM}>Whatever my Mac is using</SelectItem>
+              <SelectItem value={FOLLOW_SYSTEM}>
+                Whatever my Mac is using
+              </SelectItem>
               {outputs.map((device) => (
                 <SelectItem key={device.name} value={device.name}>
                   {device.name}
@@ -163,26 +205,34 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      <SettingsGroup
-        title="Juno's voice"
-        footer="Pick one and you will hear it. Pick the one you are using to hear it again."
-      >
-        {engineName && (
-          <SettingsRow
-            description={`${engineName} is giving Juno her voice right now. Pick one of these to use a voice from your Mac instead.`}
-          />
-        )}
+      <SettingsGroup title="Juno's voice" footer={voiceFooter}>
         <SettingsRow
           id="juno-voice"
           below={
             <VoicePicker
-              options={junoVoices}
+              list={junoVoices}
               onChange={(id) => void handleJunoVoiceChange(id)}
               onReplay={() => void handlePreviewJunoVoice()}
-              speakingId={speakingVoiceId}
+              audition={voiceAudition}
             />
           }
         />
+
+        {junoVoices?.better_voices_available && (
+          <SettingsRow
+            id="more-voices"
+            label="More voices"
+            description="Your Mac can download voices that sound much more like a person. New ones show up in this list."
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void openVoiceDownloads()}
+            >
+              Add Voices
+            </Button>
+          </SettingsRow>
+        )}
       </SettingsGroup>
 
       <SettingsGroup

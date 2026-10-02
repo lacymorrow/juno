@@ -17,6 +17,7 @@ import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useEscapeToIdle } from "@/hooks/useEscapeToIdle";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
 import { SkillGhostText, SkillSuggestionList } from "@/components/SkillAutocomplete";
@@ -119,6 +120,11 @@ async function sendInteraction(type: string, data?: Record<string, unknown>): Pr
   } catch (error) {
     console.error("Island: interaction failed:", error);
   }
+}
+
+/** Escape, reported to Rust. What stopping means is Rust's decision. */
+function reportEscape(): void {
+  void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
 }
 
 // === THE APPROVAL ROW ===
@@ -355,23 +361,26 @@ export function IslandBar() {
     };
   }, []);
 
+  // Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
+  useEscapeToIdle({
+    barState: bar.barState,
+    working: working,
+    overlayOpen: cardOpen,
+    composerOpen: lineOpen,
+    popupOpen: skill.open,
+    collapse: closeCard,
+    report: reportEscape,
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (working) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        } else if (cardOpen) {
-          closeCard();
-        } else if (lineOpen) {
-          void sendInteraction(UI.INTERACTION_TYPES_ESCAPE);
-        }
-      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         void sendInteraction(UI.INTERACTION_TYPES_ENTER);
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [working, cardOpen, lineOpen, closeCard]);
+  }, []);
 
   const idle = isIdleState(bar.barState) && !cardOpen;
   const onIslandClick = useCallback(() => {

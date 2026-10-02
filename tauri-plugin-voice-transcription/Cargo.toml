@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-voice-transcription"
-version = "0.8.52"
+version = "0.8.68"
 edition = "2021"
 links = "tauri-plugin-voice-transcription"
 authors = ["Juno Contributors"]
@@ -24,7 +24,6 @@ tauri = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 whisper-rs = { version = "0.11.0", features = ["metal"] }
-parakeet-rs = "0.3"
 cpal = "0.15"
 rubato = "0.14.1"
 hound = "3.5"
@@ -36,6 +35,15 @@ crossbeam-channel = "0.5"
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 base64 = "0.22"
 chrono = "0.4"
+
+# Parakeet pulls in `ort-sys`, which ships a prebuilt ONNX Runtime for
+# aarch64-apple-darwin and nothing else. As an unconditional dependency it
+# broke the x86_64 half of `--target universal-apple-darwin` at link time,
+# which is why releases were pinned to Apple Silicon. Gated here, the Intel
+# half links, and `engine_parakeet` is the only module that disappears with it
+# (see src/parakeet_model.rs for what stays).
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+parakeet-rs = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

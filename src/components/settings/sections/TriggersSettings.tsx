@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import {
+  AlertCircle,
   Command,
   Globe,
   Keyboard,
@@ -25,6 +27,7 @@ import { cn } from "@/lib/utils";
 
 import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useDerivedIssues } from "@/hooks/useDerivedIssues";
 
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup } from "../ui";
@@ -59,6 +62,16 @@ interface Trigger {
   phrase: string | null;
   require_hey_prefix: boolean;
   enabled: boolean;
+}
+
+/**
+ * One thing wrong with the list now, addressed to the row that causes it.
+ * Mirrors `triggers::TriggerIssue` in Rust, which derives the whole set from
+ * the list every time it is asked, so there is no such thing as an old issue.
+ */
+interface TriggerIssue {
+  trigger_id: string;
+  message: string;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -110,10 +123,25 @@ const errStr = (e: unknown) =>
   typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
 
 /**
+ * Ask Rust what is wrong with this list. Module scope, so it is one stable
+ * function and `useDerivedIssues` is not re-asking because the component
+ * re-rendered.
+ *
+ * The rule, the sharing table and the wording all live in `triggers::issues`,
+ * which is also what a save refuses on. This screen renders that answer and
+ * owns none of it, so a conflict reads the same sentence wherever it is shown
+ * and goes away for the same reasons everywhere.
+ */
+const listIssues = (list: Trigger[]) =>
+  invoke<TriggerIssue[]>(COMMANDS.TRIGGERS_GET_TRIGGER_ISSUES, {
+    triggers: list,
+  });
+
+/**
  * `applyTriggers` rethrows so the recorder, which awaits it, can show the
- * reason inline. A fire-and-forget caller already has the message in
- * `rowError`, so it swallows the rejection rather than leaving an unhandled one
- * behind.
+ * reason inline. A fire-and-forget caller needs nothing from the rejection,
+ * because the sentence it would have carried is derived from the list that is
+ * now on screen, so it swallows it rather than leaving an unhandled one behind.
  */
 const ignoreHandled = () => {};
 
@@ -203,19 +231,21 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // The refusal from the last save the backend would not take, beside the row
-  // that caused it.
+  // What is wrong with the list on screen, asked of Rust every time the list
+  // changes and never remembered between answers.
   //
-  // It only ever describes *that* attempt. An accepted save means the stored
-  // list has no conflict in it, so every conflict message must go at that
-  // moment, which is the fix for the error that outlived its cause: this used
-  // to clear only when the row being edited happened to be the row the message
-  // was pinned to, so "Fn (globe) is bound to more than one trigger" sat on
-  // screen for the rest of the session once the conflict was fixed from the
-  // other row.
-  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(
-    null,
-  );
+  // This replaced a refusal held in local state, which is why the message used
+  // to outlive its cause. A rejected save handed down one sentence pinned to
+  // the row being edited, and that sentence then needed something to come along
+  // and invalidate it. An accepted save did; nothing else did, so somebody who
+  // hit the conflict and simply stopped was left reading "Fn (globe) already
+  // has Hold to talk to Juno" for the rest of the session, about a list that no
+  // longer looked like that. There is nowhere for a stale one to live now: the
+  // question is asked about the rows being drawn, so the answer cannot describe
+  // anything else, and it is never hidden on a timer while it is still true.
+  const issues = useDerivedIssues(triggers, listIssues, !loading);
+  const issueFor = (id: string) =>
+    issues.find((i) => i.trigger_id === id)?.message ?? null;
 
   // Which key row has its binding editor open, and which capture tab it shows.
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -236,9 +266,6 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    // Whatever the backend hands back is a list it accepted, so no refusal
-    // about it can still be true.
-    setRowError(null);
     try {
       const list = await invoke<Trigger[]>(COMMANDS.TRIGGERS_GET_TRIGGERS);
       persistedRef.current = list;
@@ -259,13 +286,22 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
 
   /**
    * Persist the whole list. Optimistic: `triggers` already reflects `next`.
-   * On success we adopt the backend's normalized list and drop any standing
-   * refusal, because the list the backend just accepted has no conflict in it.
-   * On a refusal we revert to the last accepted list and show the reason
-   * beside `editedId`, then rethrow so callers (the recorder) can show it too.
+   *
+   * A refused save leaves the list as the person left it, which is the other
+   * half of deriving the message. Reverting used to throw their edit away and
+   * then show a sentence about a conflict that was no longer anywhere on
+   * screen, so the message had to be remembered, and remembering it is what let
+   * it go stale. Keeping the edit makes the sentence a true statement about a
+   * visible row, lets it clear the moment they fix it from either side, and
+   * means fixing the other row saves the binding they wanted instead of making
+   * them record it again. The invalid list is only ever in this window: the
+   * backend refused it, so no key is registered to it.
+   *
+   * A failure the derivation does not explain is a different thing. It
+   * describes an attempt, not a field, so it reverts and goes to a toast.
    */
   const applyTriggers = useCallback(
-    async (next: Trigger[], editedId: string) => {
+    async (next: Trigger[]) => {
       // Drop any save still waiting out its debounce. It carries a list from
       // before this change, so letting it land afterwards would quietly undo
       // the binding that was just recorded.
@@ -279,10 +315,12 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         });
         persistedRef.current = normalized;
         setTriggers(normalized);
-        setRowError(null);
       } catch (e) {
-        setTriggers(persistedRef.current);
-        setRowError({ id: editedId, message: errStr(e) });
+        const explained = await listIssues(next).catch(() => []);
+        if (explained.length === 0) {
+          setTriggers(persistedRef.current);
+          toast.error(errStr(e));
+        }
         throw e;
       }
     },
@@ -290,10 +328,10 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   );
 
   const scheduleSave = useCallback(
-    (next: Trigger[], editedId: string) => {
+    (next: Trigger[]) => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        applyTriggers(next, editedId).catch(ignoreHandled);
+        applyTriggers(next).catch(ignoreHandled);
       }, 300);
     },
     [applyTriggers],
@@ -310,7 +348,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         t.id === id ? { ...t, binding } : t,
       );
       setTriggers(next);
-      await applyTriggers(next, id);
+      await applyTriggers(next);
     },
     [applyTriggers],
   );
@@ -354,8 +392,8 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         t.id === id ? { ...t, ...patch } : t,
       );
       setTriggers(next);
-      if (opts.immediate) applyTriggers(next, id).catch(ignoreHandled);
-      else scheduleSave(next, id);
+      if (opts.immediate) applyTriggers(next).catch(ignoreHandled);
+      else scheduleSave(next);
     },
     [applyTriggers, scheduleSave],
   );
@@ -373,15 +411,16 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         });
         persistedRef.current = saved;
         setTriggers(saved);
-        setRowError(null);
         if (gesture === "say") return; // a Say row edits its phrase in place
         const added = saved[saved.length - 1];
         if (!added) return;
         setBindingTab((prev) => ({ ...prev, [added.id]: "keyboard" }));
         setEditingKey(added.id);
       } catch (e) {
+        // A new row is blank, so it cannot be the thing a rule refuses. Any
+        // refusal here is about the save itself.
         setTriggers(persistedRef.current);
-        setRowError({ id: "", message: errStr(e) });
+        toast.error(errStr(e));
       }
     },
     [triggers],
@@ -392,8 +431,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
       const next = triggers.filter((t) => t.id !== id);
       setTriggers(next);
       if (editingKey === id) setEditingKey(null);
-      setRowError((prev) => (prev?.id === id ? null : prev));
-      applyTriggers(next, id).catch(ignoreHandled);
+      applyTriggers(next).catch(ignoreHandled);
     },
     [triggers, editingKey, applyTriggers],
   );
@@ -503,7 +541,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
             trigger={trigger}
             editing={editingKey === trigger.id}
             bindingTab={bindingTab[trigger.id] ?? "keyboard"}
-            rowError={rowError?.id === trigger.id ? rowError.message : null}
+            issue={issueFor(trigger.id)}
             alwaysListening={Boolean(settings.alwaysListeningActive)}
             onOpenEditor={() => {
               setBindingTab((prev) => ({
@@ -524,13 +562,18 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         ))}
       </SettingsGroup>
 
-      {/* A refusal the list as a whole caused, such as a key a row that has
-          since been deleted was holding. Shown here rather than nowhere. */}
-      {rowError && !triggers.some((t) => t.id === rowError.id) && (
-        <p className="px-1 text-[12px] leading-snug text-destructive" role="alert">
-          {rowError.message}
-        </p>
-      )}
+      {/* An issue addressed to a row this list is not drawing, which only a
+          row the window has not saved yet can produce. Shown here rather than
+          nowhere, and it goes when the derivation stops returning it. */}
+      {issues
+        .filter((i) => !triggers.some((t) => t.id === i.trigger_id))
+        .map((i) => (
+          <IssueLine
+            key={`${i.trigger_id}:${i.message}`}
+            message={i.message}
+            className="px-1"
+          />
+        ))}
 
       <div className="flex items-center justify-end px-1">{addMenu}</div>
     </div>
@@ -545,7 +588,8 @@ interface TriggerRowProps {
   trigger: Trigger;
   editing: boolean;
   bindingTab: BindingTab;
-  rowError: string | null;
+  /** What is wrong with this row now, derived, or null while it is fine. */
+  issue: string | null;
   alwaysListening: boolean;
   onOpenEditor: () => void;
   onCloseEditor: () => void;
@@ -565,7 +609,7 @@ function TriggerRow({
   trigger,
   editing,
   bindingTab,
-  rowError,
+  issue,
   alwaysListening,
   onOpenEditor,
   onCloseEditor,
@@ -779,12 +823,32 @@ function TriggerRow({
           ) : (
             <MouseCapture
               current={trigger.binding?.kind === "mouse" ? trigger.binding : null}
-              onCapture={async (button) => {
-                await setBindingNow({ kind: "mouse", button });
-                onCloseEditor();
-              }}
+              onCapture={(button) =>
+                // Close only if it took. A refused button leaves the editor
+                // open with the reason under the row, so another one is a
+                // click away.
+                setBindingNow({ kind: "mouse", button }).then(
+                  onCloseEditor,
+                  ignoreHandled,
+                )
+              }
               onCancel={onCloseEditor}
             />
+          )}
+
+          {/* Clearing the field is a way out. A row whose key is taken can be
+              left unbound instead of rebound: the backend allows an unbound
+              row and switches it off, so whatever was wrong with the binding
+              stops being wrong. Both tabs, because a mouse button is a
+              binding too. */}
+          {trigger.binding && (
+            <button
+              type="button"
+              onClick={() => void setBindingNow(null).catch(ignoreHandled)}
+              className="text-[12px] text-muted-foreground hover:text-foreground"
+            >
+              Remove binding
+            </button>
           )}
         </div>
       )}
@@ -793,12 +857,38 @@ function TriggerRow({
           and nothing else on this screen is affected by it. */}
       {!isVoice && isFnBinding(trigger.binding) && <GlobeKeyNote />}
 
-      {rowError && (
-        <p className="mt-2 text-[12px] leading-snug text-destructive">
-          {rowError}
-        </p>
-      )}
+      {issue && <IssueLine message={issue} className="mt-2" />}
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* One derived issue                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A field error: a small red icon and the backend's sentence, nothing else.
+ * No badge, no dismiss, no timer. It is on screen because the condition holds
+ * and it leaves because the condition does.
+ */
+function IssueLine({
+  message,
+  className,
+}: {
+  message: string;
+  className?: string;
+}) {
+  return (
+    <p
+      role="alert"
+      className={cn(
+        "flex items-start gap-1.5 text-[12px] leading-snug text-destructive",
+        className,
+      )}
+    >
+      <AlertCircle className="mt-[2px] size-3 shrink-0" aria-hidden />
+      <span>{message}</span>
+    </p>
   );
 }
 

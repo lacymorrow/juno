@@ -842,6 +842,12 @@ impl UIManager {
         Ok(())
     }
 
+    /// Set the *floating panel's* window level.
+    ///
+    /// Not the floating bar: that window's level is owned by
+    /// `crate::bar_stacking`, which decides it from the situation rather than
+    /// taking a number from a caller. Nothing should grow a second way to set
+    /// the bar's level here.
     pub async fn set_panel_level(&self, level: i32) -> Result<(), String> {
         info!("UI Manager: Setting panel window level: {}", level);
 

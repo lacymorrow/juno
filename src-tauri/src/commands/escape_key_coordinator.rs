@@ -461,6 +461,17 @@ pub(crate) async fn something_to_stop(app_handle: &AppHandle) -> bool {
     {
         return true;
     }
+    // An armed screen or file monitor is polling the world and can start a
+    // turn on its own, so it is something to stop even with no run in flight.
+    // Without this clause, Escape pressed while a watch was the only thing
+    // happening read as "nothing to do" and dismissed the chat pane instead,
+    // which is how a watch capturing the screen became unstoppable.
+    if crate::agent::tools::timer_tools::timer_manager()
+        .has_armed_monitor()
+        .await
+    {
+        return true;
+    }
     state.agent_sessions().len().await > 0
 }
 

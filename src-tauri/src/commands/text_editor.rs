@@ -3,7 +3,6 @@
 use crate::state::AppState;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
 use tracing::{error, info, warn};
 // Use helper from parent module
@@ -39,7 +38,7 @@ fn update_undo_state(
 
 #[tauri::command]
 pub(crate) async fn text_editor_view(path: String) -> Result<String, String> {
-    use crate::commands::debug_utils::{log_debug_operation, validators, DebugConfig};
+    use crate::commands::debug_utils::{log_debug_operation, DebugConfig};
 
     // Note: For text editor operations, we can't easily access AppState for debug settings,
     // so we'll use a simplified debug approach based on cfg!(debug_assertions)
@@ -50,24 +49,28 @@ pub(crate) async fn text_editor_view(path: String) -> Result<String, String> {
         DebugConfig::production_mode()
     };
 
-    // Unconditional path check (LAC-4013) — this used to be skipped entirely
-    // in release builds. Interim until wired to path_security (Fix B).
-    validators::valid_file_path(&path)?;
+    // The one gate (LAC-4013 Fix B). All I/O below is on the resolved path, so
+    // the path that was checked is the path that is opened.
+    let path_buf = crate::path_gate::authorize(&path, crate::path_gate::PathOp::Read)?;
 
     log_debug_operation(
         "text_editor_view",
-        &format!("Reading file content: {}", path),
+        &format!("Reading file content: {}", path_buf.display()),
         &debug_config,
     );
-    info!(path = %Path::new(&path).display(), "Executing text_editor_view");
+    info!(path = %path_buf.display(), "Executing text_editor_view");
 
-    match fs::read_to_string(&path) {
+    match fs::read_to_string(&path_buf) {
         Ok(content) => {
             info!("Successfully read file content (length: {})", content.len());
             Ok(content)
         }
         Err(e) => {
-            let error_msg = format_error(templates::FAILED_TO_LOAD, &format!("file '{}'", path), e);
+            let error_msg = format_error(
+                templates::FAILED_TO_LOAD,
+                &format!("file '{}'", path_buf.display()),
+                e,
+            );
             error!("{}", error_msg);
             Err(error_msg)
         }
@@ -82,7 +85,7 @@ pub(crate) async fn text_editor_create(
     app: AppHandle,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -92,11 +95,11 @@ pub(crate) async fn text_editor_create(
         DebugConfig::production_mode()
     };
 
-    // Unconditional path check (LAC-4013). Interim until wired to
-    // path_security::resolve_within_default_roots (Fix B).
-    validators::valid_file_path(&path)?;
+    // The one gate (LAC-4013 Fix B). Write admits a target that does not exist
+    // yet and a parent directory that does not exist yet, which is what this
+    // command creates below.
+    let path_buf = crate::path_gate::authorize(&path, crate::path_gate::PathOp::Write)?;
 
-    let path_buf: PathBuf = path.into();
     log_debug_operation(
         "text_editor_create",
         &format!("Creating/overwriting file: {}", path_buf.display()),
@@ -205,16 +208,16 @@ pub(crate) async fn text_editor_str_replace(
         DebugConfig::production_mode()
     };
 
-    // Unconditional checks (LAC-4013). The path check is interim until wired
-    // to path_security (Fix B). The empty-`find` check is load-bearing:
-    // `content.replace("", …)` inserts the replacement between every
-    // character and corrupts the whole file.
-    validators::valid_file_path(&path)?;
+    // The one gate (LAC-4013 Fix B). This command reads and then writes, so it
+    // asks for the stronger of the two.
+    let path_buf = crate::path_gate::authorize(&path, crate::path_gate::PathOp::Write)?;
+
+    // The empty-`find` check is load-bearing: `content.replace("", …)` inserts
+    // the replacement between every character and corrupts the whole file.
     validators::non_empty_text(&find).map_err(|_| {
         "Find string cannot be empty: replacing an empty string would corrupt the file".to_string()
     })?;
 
-    let path_buf: PathBuf = path.into();
     log_debug_operation(
         "text_editor_str_replace",
         &format!(
@@ -293,7 +296,7 @@ pub(crate) async fn text_editor_insert(
     app: AppHandle,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        log_debug_operation, send_debug_notification, should_enable_debug, validators, DebugConfig,
+        log_debug_operation, send_debug_notification, should_enable_debug, DebugConfig,
     };
 
     let debug_enabled = should_enable_debug(false, &state);
@@ -303,12 +306,10 @@ pub(crate) async fn text_editor_insert(
         DebugConfig::production_mode()
     };
 
-    // Unconditional path check (LAC-4013). Interim until wired to
-    // path_security::resolve_within_default_roots (Fix B). A `line_number`
-    // of 0 is handled below via `saturating_sub`, so no check needed here.
-    validators::valid_file_path(&path)?;
+    // The one gate (LAC-4013 Fix B). A `line_number` of 0 is handled below via
+    // `saturating_sub`, so no check needed here.
+    let path_buf = crate::path_gate::authorize(&path, crate::path_gate::PathOp::Write)?;
 
-    let path_buf: PathBuf = path.into();
     log_debug_operation(
         "text_editor_insert",
         &format!(
@@ -446,7 +447,22 @@ pub(crate) async fn text_editor_undo_edit(
 
         if let Some(prev_content) = prev_content_option {
             if let Some(content_to_restore) = prev_content {
-                // Had previous content, so restore it
+                // Had previous content, so restore it.
+                //
+                // Re-gated (LAC-4013 Fix B). The stored path was authorized
+                // when it was created or edited, but undo is a separate
+                // operation on state that outlives the call that set it, and a
+                // gate that trusts stored state is not a gate.
+                let path = match crate::path_gate::authorize(
+                    &path.to_string_lossy(),
+                    crate::path_gate::PathOp::Write,
+                ) {
+                    Ok(resolved) => resolved,
+                    Err(e) => {
+                        error!("Undo refused: {}", e);
+                        return Err(format!("Undo failed: {}", e));
+                    }
+                };
                 info!(path = %path.display(), "Restoring previous content");
                 match fs::write(&path, &content_to_restore) {
                     Ok(_) => {
@@ -477,7 +493,19 @@ pub(crate) async fn text_editor_undo_edit(
                     }
                 }
             } else {
-                // No previous content, meaning the last operation was create, so delete the file
+                // No previous content, meaning the last operation was create,
+                // so delete the file. Re-gated for the same reason as the
+                // restore branch above (LAC-4013 Fix B).
+                let path = match crate::path_gate::authorize(
+                    &path.to_string_lossy(),
+                    crate::path_gate::PathOp::Delete,
+                ) {
+                    Ok(resolved) => resolved,
+                    Err(e) => {
+                        error!("Undo refused: {}", e);
+                        return Err(format!("Undo failed: {}", e));
+                    }
+                };
                 info!(path = %path.display(), "Deleting file created by last operation");
                 match fs::remove_file(&path) {
                     Ok(_) => {

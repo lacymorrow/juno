@@ -40,12 +40,12 @@ pub mod keyboard;
 pub mod mcp;
 pub mod media; // Live player state/control for <NowPlayingCard> (no fake state)
 pub mod memory;
+pub mod monitors; // What is watching the screen or a file right now, and the stop for it
 pub mod mouse;
 pub mod native_permissions;
 pub mod notifications;
 pub mod onboarding;
 pub mod onboarding_analytics;
-pub mod orchestrator;
 pub mod permission_diagnostics; // What macOS answers right now, and the reset for a stale grant
 pub mod permissions;
 pub mod persistent_memory;
@@ -118,7 +118,6 @@ pub use self::memory::*;
 pub use self::mouse::*;
 pub use self::onboarding::*;
 pub use self::onboarding_analytics::*;
-pub use self::orchestrator::*;
 pub use self::permission_diagnostics::*;
 pub use self::permissions::*;
 pub use self::ui_commands::*; // Re-export consolidated UI API commands
@@ -261,7 +260,35 @@ pub async fn load_audio_settings_from_centralized_settings(
         audio_settings.input_device.clone(),
     );
     let _ = state.set_output_device(audio_settings.output_device.clone());
-    let _ = state.set_system_voice(audio_settings.system_voice.clone());
+
+    // Juno's voice, resolved before anything can speak in it.
+    //
+    // The best voice this Mac has is only the default if it is actually in
+    // force. A stored voice that is no longer installed, or no stored voice at
+    // all, used to leave `say` on whichever voice System Settings happens to
+    // be set to, which on a Mac upgraded from an old one is a voice from 2005.
+    // Resolving here is what makes the default a default rather than a label
+    // in a settings pane nobody opened. The same resolution runs when the
+    // engine changes and when the Audio pane is drawn; this is the one that
+    // covers an install that never visits either.
+    let engine = crate::tts::voices::listed_engine(&audio_settings.tts_provider).to_string();
+    let inventory = crate::tts::voices::inventory_for(&engine).await;
+    let stored = audio_settings.voice_for(&engine).map(str::to_string);
+    let resolution = crate::tts::voices::resolve_voice(&engine, &inventory, stored.as_deref());
+    let _ = crate::tts::voices::push_voice_to_state(state, &engine, resolution.voice.as_deref());
+    if resolution.voice != stored {
+        tracing::info!(
+            "Juno's voice for {} resolved from {:?} to {:?}",
+            engine,
+            stored,
+            resolution.voice
+        );
+        let mut resolved = audio_settings.clone();
+        resolved.set_voice_for(&engine, resolution.voice.clone());
+        if let Err(e) = settings_manager.set_audio_settings(&resolved).await {
+            tracing::warn!("Failed to store the voice Juno resolved at startup: {}", e);
+        }
+    }
 
     let _ = state.set_always_listening_active(audio_settings.always_listening_active);
     let _ = state.set_always_listening_sensitivity(audio_settings.always_listening_sensitivity);

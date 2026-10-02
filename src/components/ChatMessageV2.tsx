@@ -48,6 +48,8 @@ import {
   ShieldAlert,
   Clock,
   AppWindow,
+  Image as ImageIcon,
+  ImageOff,
 } from "lucide-react";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -56,6 +58,7 @@ import { UI, COMMANDS } from "@/lib/constants.generated";
 export type { ChatMessage } from "@/types/chat";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 import type { ShareAnchor } from "@/hooks/useConversation";
+import type { TurnScreenshot } from "@/lib/turn-summary";
 
 const ACTION_VERB: Record<string, string> = {
   left_click: "Clicked",
@@ -94,6 +97,14 @@ interface ChatMessageProps {
    * the rest, so the default here is the production answer.
    */
   showToolDetails?: boolean;
+  /**
+   * Every capture this turn made, for an assistant reply.
+   *
+   * The images live on the tool rows, which the transcript does not draw, so
+   * the reply has to be handed them. The container computes the list because
+   * only it can see the turn; this component only draws it.
+   */
+  screenshots?: TurnScreenshot[];
 }
 
 // Compact accordion for TTS spoken content
@@ -118,6 +129,8 @@ function TTSContentDisplay({
   return (
     <div className="mt-1">
       <button
+        type="button"
+        aria-expanded={isExpanded}
         onClick={() => setIsExpanded(!isExpanded)}
         className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors"
       >
@@ -133,6 +146,126 @@ function TTSContentDisplay({
       {isExpanded && (
         <div className="mt-1 pl-5 text-xs text-muted-foreground/80 italic leading-relaxed">
           {spokenText}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A capture that cannot be drawn, said in words instead of a broken image. */
+function CaptureProblem({ text }: { text: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+      <ImageOff className="h-3 w-3 shrink-0" />
+      <span>{text}</span>
+    </span>
+  );
+}
+
+/**
+ * What the agent saw, behind one disclosure.
+ *
+ * Sibling of TTSContentDisplay on purpose. A turn has two side channels — what
+ * it said aloud and what it looked at — and they read as one family of compact
+ * rows rather than two inventions. Collapsed by default, because a computer-use
+ * turn takes five or six full-screen captures and a wall of retina PNGs buries
+ * the answer the person actually asked for.
+ *
+ * Collapsed means unmounted, not hidden: the `isExpanded &&` below removes the
+ * `<img>` elements so the browser can release the decoded bitmaps. The base64
+ * strings sit in the conversation either way, so this decides what is decoded,
+ * never what is retained.
+ */
+function ScreenshotDisclosure({
+  screenshots,
+}: {
+  screenshots?: TurnScreenshot[];
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  // Which images the browser refused, by position. A data URI that is truncated
+  // or not actually a PNG fires `onError` and would otherwise leave the broken
+  // image glyph sitting in the transcript.
+  const [brokenAt, setBrokenAt] = useState<Record<number, true>>({});
+
+  if (!screenshots?.length) return null;
+
+  const shown = screenshots.filter((shot) => shot.base64);
+  const missing = screenshots.length - shown.length;
+
+  // Nothing came back at all. There is nothing to open, so this is a plain
+  // status line — an icon and words, no chevron — and the label never claims
+  // Juno saw a screen it never got.
+  if (shown.length === 0) {
+    return (
+      <div className="mt-1">
+        <CaptureProblem
+          text={
+            missing === 1
+              ? "A screen capture did not come back."
+              : `${missing} screen captures did not come back.`
+          }
+        />
+      </div>
+    );
+  }
+
+  // Counts what there is to look at, so the label and the stack agree. A later
+  // `onError` is reported per image rather than by rewriting this line, which
+  // would change the row's text under the reader's cursor.
+  const label =
+    shown.length === 1 ? "Saw the screen" : `Saw the screen ${shown.length} times`;
+
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        aria-expanded={isExpanded}
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors"
+      >
+        {isExpanded ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+        <ImageIcon className="h-3 w-3" />
+        <span>{label}</span>
+      </button>
+
+      {isExpanded && (
+        // A stack in capture order, not a strip. Several retina screens side by
+        // side in a 360px pane are too small to read, and the order is the story
+        // of the turn.
+        <div className="mt-1.5 flex flex-col gap-1.5 pl-5">
+          {shown.map((shot, i) =>
+            brokenAt[i] ? (
+              <CaptureProblem
+                key={i}
+                text="This capture could not be shown."
+              />
+            ) : (
+              <img
+                key={i}
+                src={`data:image/png;base64,${shot.base64}`}
+                alt={
+                  shown.length > 1
+                    ? `Screenshot ${i + 1} of ${shown.length}${shot.toolName ? ` from ${shot.toolName}` : ""}`
+                    : `Screenshot${shot.toolName ? ` from ${shot.toolName}` : ""}`
+                }
+                onError={() => setBrokenAt((prev) => ({ ...prev, [i]: true }))}
+                className="w-full max-h-[320px] rounded-md border border-border/40 object-contain"
+              />
+            )
+          )}
+          {missing > 0 && (
+            <CaptureProblem
+              text={
+                missing === 1
+                  ? "One more capture did not come back."
+                  : `${missing} more captures did not come back.`
+              }
+            />
+          )}
         </div>
       )}
     </div>
@@ -540,6 +673,7 @@ export function ChatMessageComponent({
   onApprovalUpdate,
   onContinuationUpdate,
   showToolDetails = false,
+  screenshots,
 }: ChatMessageProps) {
   const copied = copiedMessageId === `copy-${index}`;
   const exportInput = (): ResponseExportInput => ({
@@ -670,15 +804,13 @@ export function ChatMessageComponent({
                 errorText={msg.success ? undefined : msg.result_content}
               />
             )}
-            {msg.screenshot_base64 && (
-              <div className="mt-2">
-                <img
-                  src={`data:image/png;base64,${msg.screenshot_base64}`}
-                  alt="Tool screenshot"
-                  className="max-h-[300px] rounded-lg border border-border/30"
-                />
-              </div>
-            )}
+            <ScreenshotDisclosure
+              screenshots={
+                msg.screenshot_base64
+                  ? [{ base64: msg.screenshot_base64, toolName: msg.tool_name }]
+                  : undefined
+              }
+            />
             {msg.tool_id && (
               <Confirmation
                 state={
@@ -757,15 +889,13 @@ export function ChatMessageComponent({
               output={msg.tool_output}
               errorText={(msg.success ?? true) ? undefined : msg.content}
             />
-            {msg.screenshot_base64 && (
-              <div className="mt-2">
-                <img
-                  src={`data:image/png;base64,${msg.screenshot_base64}`}
-                  alt="Tool screenshot"
-                  className="max-h-[300px] rounded-lg border border-border/30"
-                />
-              </div>
-            )}
+            <ScreenshotDisclosure
+              screenshots={
+                msg.screenshot_base64
+                  ? [{ base64: msg.screenshot_base64, toolName: msg.tool_name }]
+                  : undefined
+              }
+            />
           </ToolContent>
         </Tool>
       </div>
@@ -824,21 +954,16 @@ export function ChatMessageComponent({
           />
         )}
 
-        {msg.screenshot_base64 && (
-          <div className="mt-2 border-t pt-2">
-            <div className="text-xs text-muted-foreground mb-1">
-              {msg.role === "system"
-                ? "Screenshot captured by AI:"
-                : "Screenshot:"}
-            </div>
-            <div className="relative">
-              <img
-                src={`data:image/png;base64,${msg.screenshot_base64}`}
-                alt="Screenshot"
-                className="rounded-lg w-full object-contain max-h-[300px] border border-border/30"
-              />
-            </div>
-          </div>
+        {/* What this turn saw, next to what it said. The two rows are the same
+            shape on purpose; see ScreenshotDisclosure.
+
+            This used to read `msg.screenshot_base64` straight off the bubble,
+            which was never set on an assistant or system message: Rust's
+            SubmitQueryResult carries `screenshot_data`, always None. The images
+            ride on the tool rows the transcript hides, so the container gathers
+            the turn's captures and hands them down. */}
+        {msg.role === "assistant" && (
+          <ScreenshotDisclosure screenshots={screenshots} />
         )}
 
         {msg.isStreaming && (

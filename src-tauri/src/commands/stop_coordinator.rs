@@ -314,6 +314,34 @@ impl StopCoordinator {
         .await;
         cleanup_results.push("Floating bar updated".to_string());
 
+        // 7b. Cancel every armed timer: screen monitors, file monitors and
+        // pending delays alike.
+        //
+        // These poll the world and then call `submit_query` on their own
+        // (`events/timer_handlers.rs`), so a person pressing Escape while one
+        // is armed means stop it. Nothing outside `timer_tools.rs` used to
+        // cancel them: the only cancel path was a tool the model could call,
+        // so a watch capturing the screen every two seconds could not be
+        // stopped by the person it was watching.
+        //
+        // Numbered 7b rather than renumbering the steps below it: this file is
+        // shared, and a comment-only renumber is a conflict for nothing. It has
+        // to run before step 8, which releases the stop key for every user,
+        // including the one an armed monitor holds.
+        if let Some(monitor_op_id) = self.try_register_operation("timer_monitor_stop").await {
+            let cancelled = crate::agent::tools::timer_tools::timer_manager()
+                .cancel_all_timers(Some(app_handle))
+                .await;
+            if !cancelled.is_empty() {
+                info!(
+                    "[StopCoordinator] Cancelled {} armed timer(s)",
+                    cancelled.len()
+                );
+                cleanup_results.push(format!("{} armed timer(s) cancelled", cancelled.len()));
+            }
+            self.unregister_operation(&monitor_op_id).await;
+        }
+
         // 8. CRITICAL: Cooperatively unregister all escape key users to release key to other apps
         // Uses unregister_all_users (not force_reset) so stale unregister calls from
         // agent cleanup paths safely no-op instead of decrementing a new operation's count.

@@ -25,6 +25,7 @@ pub mod agent;
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod agents; // Multi-agent system with specialized agents
 pub mod anthropic;
+pub mod bar_stacking; // Where the floating bar sits in the window stack, and why
 pub mod build_info; // Which build this is: version, commit, branch, demo cohort
 pub mod cleanup; // Application cleanup and resource management
 pub mod cli;
@@ -42,6 +43,7 @@ pub mod greeting; // The one line Juno says when she starts
 pub mod input_control; // Background operation and consent for taking the physical cursor
 pub mod integration; // Application integration patterns, component coordination, and event listeners
 pub mod menu; // Menu management for app and tray menus
+pub mod path_gate; // The one place that answers "may this path be touched, for this purpose"
 pub mod permission_gate; // Asking for a macOS permission at the moment it is needed
 pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
@@ -79,11 +81,11 @@ use commands::{
     accessibility_click, accessibility_scan, always_listening::*, app_url::*, autostart::*,
     computer, core::*, dictation::*, element::*, error_recovery::*, execute_accessibility_tool,
     execute_safari_tool, filesystem::*, get_accessibility_tool_definitions, keyboard::*, media::*,
-    memory::*, mouse::*, orchestrator::*, permission_diagnostics::*, permissions::*,
-    persistent_memory::*, providers::*, safari_clear_cache, safari_click_element,
-    safari_execute_javascript, safari_extract_dom, safari_get_url, safari_is_active,
-    safari_list_clickable_elements, safari_navigate, safari_type_text, shell::*, sound::*,
-    test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
+    memory::*, mouse::*, permission_diagnostics::*, permissions::*, persistent_memory::*,
+    providers::*, safari_clear_cache, safari_click_element, safari_execute_javascript,
+    safari_extract_dom, safari_get_url, safari_is_active, safari_list_clickable_elements,
+    safari_navigate, safari_type_text, shell::*, sound::*, test_accessibility_permissions,
+    text_editor::*, ui_commands::*, window::*,
 };
 
 // Import specific sound commands from sound.rs
@@ -323,32 +325,17 @@ pub fn run() {
             submit_query,
             anthropic::clear_conversation_history, // Add conversation history clearing
             commands::test_system_context,         // Test system context gathering
-            // Orchestrator Commands
-            submit_orchestrated_query,
-            get_orchestrator_status,
-            configure_orchestrator,
-            create_orchestrator_task,
-            get_task_history,
-            get_active_tasks,
-            get_agent_capabilities,
-            cancel_task,
-            // Enhanced Orchestrator Commands (90.2% Performance Improvement)
-            commands::orchestrator::execute_intelligent_parallel_tasks,
-            commands::orchestrator::intelligent_task_splitting,
-            commands::orchestrator::get_orchestrator_performance_metrics,
-            commands::orchestrator::execute_optimized_workflow,
-            commands::orchestrator::configure_enhanced_orchestrator,
-            commands::orchestrator::benchmark_orchestrator_performance,
+            // The fourteen orchestrator commands that used to sit here are gone.
+            // They were the only way to reach a second agent executor that ran
+            // tool calls without consulting the approval gate, and no caller
+            // anywhere invoked them. Multi-agent runs go through submit_query,
+            // which delegates to gated AgentRunners (see agents/mod.rs).
             // Parallel Agent Sessions (LAC-1432) — per-agent cursors, switcher, escape targeting
             commands::agent_sessions::list_agent_sessions,
             commands::agent_sessions::get_focused_agent_session,
             commands::agent_sessions::focus_agent_session,
             commands::agent_sessions::cancel_focused_agent_session,
             commands::agent_sessions::cancel_agent_session,
-            // Workflow Orchestration Commands
-            execute_mcp_task,
-            get_workflow_templates,
-            execute_workflow_template,
             // Memory Management Commands
             get_memory_status,
             clear_conversation_memory,
@@ -628,6 +615,7 @@ pub fn run() {
             set_triggers,
             set_trigger_capture,
             commands::triggers::get_trigger_hints,
+            commands::triggers::get_trigger_issues,
             commands::triggers::open_keyboard_settings,
             validate_keyboard_shortcut,
             commands::conversations::list_conversations,
@@ -639,6 +627,9 @@ pub fn run() {
             commands::escape_key_coordinator::get_escape_key_coordinator_status,
             commands::escape_key_coordinator::force_unregister_escape_key,
             commands::escape_key_coordinator::test_escape_key_flow,
+            // Armed monitors: what is watching, and the stop for it
+            commands::monitors::list_armed_monitors,
+            commands::monitors::stop_armed_monitors,
             // Stop Coordinator Commands
             commands::stop_coordinator::coordinated_stop_all_operations,
             commands::stop_coordinator::coordinator_emergency_stop_all_operations,
@@ -817,7 +808,6 @@ pub fn run() {
             commands::notifications::get_notification_settings,
             commands::notifications::set_notifications_enabled,
             commands::notifications::check_notification_permission,
-            commands::notifications::request_notification_permission,
             commands::notifications::send_notification,
             commands::notifications::test_notification,
             // Core Commands
@@ -1202,20 +1192,44 @@ pub fn run() {
                         }
                         window_management::announce_main_window(app_handle, false);
                     }
+                    // Which of Juno's windows the person is working in is the
+                    // main input to where the floating bar belongs in the
+                    // stack, and AppKit's key window is the authority on it.
+                    // Taking it from here rather than from whichever code path
+                    // opened the window also covers the routes that code never
+                    // sees: clicking between two Juno windows, clicking away to
+                    // another app, the red X, Cmd+W.
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event: tauri::WindowEvent::Focused(focused),
+                        ..
+                    } => {
+                        bar_stacking::note_focus(app_handle, label.as_str(), focused);
+                    }
                     tauri::RunEvent::WindowEvent {
                         label,
                         event: tauri::WindowEvent::Destroyed,
                         ..
-                    } if label.as_str() == "onboarding" => {
-                        // Clean up escape key registration when onboarding window is closed
-                        // (e.g., user clicks the red X instead of completing/skipping)
-                        let app_handle = app_handle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Err(e) = commands::set_onboarding_active(app_handle, false).await
-                            {
-                                warn!("Failed to clean up onboarding state on window close: {}", e);
-                            }
-                        });
+                    } => {
+                        // A destroyed window does not reliably resign key on
+                        // the way out, so it is said plainly here.
+                        bar_stacking::note_window_gone(app_handle, label.as_str());
+
+                        if label.as_str() == "onboarding" {
+                            // Clean up escape key registration when onboarding window is closed
+                            // (e.g., user clicks the red X instead of completing/skipping)
+                            let app_handle = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) =
+                                    commands::set_onboarding_active(app_handle, false).await
+                                {
+                                    warn!(
+                                        "Failed to clean up onboarding state on window close: {}",
+                                        e
+                                    );
+                                }
+                            });
+                        }
                     }
                     // The event loop is over; the process is about to end. Any
                     // persistent Claude CLI processes must die with it —

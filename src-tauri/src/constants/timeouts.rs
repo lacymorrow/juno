@@ -64,13 +64,10 @@ pub const MCP_GRACEFUL_SHUTDOWN_SECONDS: u64 = 3;
 pub const MCP_MAX_BACKOFF_DELAY_SECONDS: u64 = 30;
 pub const MCP_SERVER_STARTUP_TIMEOUT_SECONDS: u64 = 45;
 
-// Orchestrator and agent timeouts
-// Default time one orchestrator task gets when it does not ask for its own.
-// Agent tasks drive apps and browsers, so this is minutes, not seconds.
-pub const ORCHESTRATOR_PARALLEL_EXECUTION_TIMEOUT_SECONDS: u64 = 120;
-// A task may ask for its own timeout; it is clamped to this range.
-pub const ORCHESTRATOR_MIN_TIMEOUT_SECONDS: u64 = 30;
-pub const ORCHESTRATOR_MAX_TIMEOUT_SECONDS: u64 = 600; // 10 minutes
+// The three ORCHESTRATOR_*_TIMEOUT_SECONDS constants that were here are gone.
+// They clamped per-task timeouts for the ungated `agents::Orchestrator`'s
+// parallel task queue, which was removed; the gated path in `agent/` bounds a
+// run by MAX_ITERATIONS instead, so nothing read them.
 
 // Smart routing (beta): the whole classifier round trip, connect included.
 // Past this the query runs on the standard path, unrouted.

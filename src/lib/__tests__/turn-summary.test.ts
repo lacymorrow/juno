@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTurnSummary, summarizeTurn } from "@/lib/turn-summary";
+import { formatTurnSummary, summarizeTurn, turnScreenshots } from "@/lib/turn-summary";
 import type { ChatMessage } from "@/types/chat";
 
 const user = (t: number): ChatMessage => ({ role: "user", content: "go", timestamp: t });
@@ -69,6 +69,75 @@ describe("summarizeTurn", () => {
 	it("survives a turn with no preceding user message", () => {
 		// The very first messages can arrive without a question in front of them.
 		expect(summarizeTurn([tool("computer"), reply(100)], 1)?.actions).toBe(1);
+	});
+});
+
+describe("turnScreenshots", () => {
+	it("returns the captures of this turn only", () => {
+		const convo = [
+			user(0), tool("computer", { screenshot_base64: "one" }), reply(100),
+			user(200), tool("computer", { screenshot_base64: "two" }), reply(300),
+		];
+		expect(turnScreenshots(convo, 5).map((s) => s.base64)).toEqual(["two"]);
+		expect(turnScreenshots(convo, 2).map((s) => s.base64)).toEqual(["one"]);
+	});
+
+	it("keeps them in capture order", () => {
+		const convo = [
+			user(0),
+			tool("computer", { screenshot_base64: "a" }),
+			tool("computer", { tool_args: { action: "left_click" } }),
+			tool("computer", { screenshot_base64: "b" }),
+			reply(100),
+		];
+		expect(turnScreenshots(convo, 4).map((s) => s.base64)).toEqual(["a", "b"]);
+	});
+
+	it("includes a capture that came back without an image", () => {
+		// A denied screen-recording permission, a failed capture, or an image
+		// pruned from visual context. The disclosure says so; dropping the entry
+		// here would make it silent instead.
+		const convo = [user(0), tool("capture_screenshot"), reply(100)];
+		expect(turnScreenshots(convo, 2)).toEqual([
+			{ base64: undefined, toolName: "capture_screenshot" },
+		]);
+	});
+
+	it("includes a result whose request was lost", () => {
+		const orphan: ChatMessage = {
+			role: "tool_call_result",
+			content: "done",
+			tool_name: "capture_screenshot",
+			screenshot_base64: "orphan",
+		};
+		expect(turnScreenshots([user(0), orphan, reply(100)], 2).map((s) => s.base64))
+			.toEqual(["orphan"]);
+	});
+
+	it("reports captures while the reply is still streaming", () => {
+		// The summary line waits for the stream to close; this does not. A
+		// computer-use turn holds the bubble open for a minute and the person
+		// watching it work wants the captures as they land.
+		const open: ChatMessage = { ...reply(1000), isStreaming: true };
+		const convo = [user(0), tool("computer", { screenshot_base64: "live" }), open];
+		expect(summarizeTurn(convo, 2)).toBeNull();
+		expect(turnScreenshots(convo, 2)).toHaveLength(1);
+	});
+
+	it("is empty for anything that is not an assistant reply", () => {
+		expect(turnScreenshots([user(0), tool("computer", { screenshot_base64: "x" })], 1))
+			.toEqual([]);
+	});
+
+	it("agrees with the count the summary line prints", () => {
+		const convo = [
+			user(0),
+			tool("computer", { screenshot_base64: "a" }),
+			tool("capture_screenshot"),
+			tool("computer", { tool_args: { action: "left_click" } }),
+			reply(100),
+		];
+		expect(summarizeTurn(convo, 4)?.screenshots).toBe(turnScreenshots(convo, 4).length);
 	});
 });
 

@@ -76,6 +76,26 @@ Orchestrator (src/anthropic.rs)
 - **Memory**: Arc-based cloning for thread safety
 - **Tools**: Lazy initialization for expensive resources
 
+**There is exactly one agent execution path, and `src/agent` (singular) is
+it.** The orchestrator and every specialist it delegates to are
+`DefaultAgentRunner`s built in `anthropic.rs`, so every tool call in a
+multi-agent run passes through `AgentRunner::check_batch_approval` →
+`risk_classifier` → `permission_policy`.
+
+`src/agents` (plural) used to hold a second executor: an `Orchestrator`, a
+`SpecializedAgent` trait, an `AgentFactory`, and `SystemAgent` /
+`BrowserAgent` / `DesktopAgent`, each dispatching tool calls through its own
+`handle_task`. None of it consulted the gate, so `SystemAgent` wrote files
+with nothing asked. It was removed, not gated, because nothing reached it:
+the fourteen Tauri commands that exposed it had no caller anywhere. What is
+left in `src/agents` is the session registry, which the gated runner genuinely
+shares, and a test (`agents_holds_no_executor`) that fails if a dispatcher
+reappears there.
+
+**A new agent belongs in `src/agent`, behind `AgentRunner`.** A second
+executor is how the gate gets bypassed by construction rather than by
+mistake.
+
 ### Core Components
 
 ```
@@ -246,24 +266,40 @@ let security_config = if cfg!(debug_assertions) {
 } else {
     SecurityConfig::default() // Production mode
 };
-
-// Path validation
-fn validate_file_path(path: &str, config: &SecurityConfig) -> Result<PathBuf, String> {
-    let path = Path::new(path);
-    
-    // Prevent path traversal
-    if path.to_string_lossy().contains("../") {
-        return Err("Path traversal not allowed".to_string());
-    }
-    
-    // Workspace boundary enforcement
-    let canonical = path.canonicalize()
-        .map_err(|_| "Invalid path".to_string())?;
-        
-    // Additional security checks...
-    Ok(canonical)
-}
 ```
+
+### Path Validation
+
+This section used to show a `validate_file_path` that tested
+`contains("../")` and then called `path.canonicalize()`. Do not write that.
+A `".."` substring test is not path normalization: it misses an absolute path
+to a sensitive location entirely, and it misses a symlink inside an allowed
+directory pointing outside it. Bare `canonicalize()` fails for a path that
+does not exist yet, which is every write to a new file, and the usual
+"fix" is to fall back to the unchecked raw string.
+
+**One answer, owned in one place.** `src/path_gate.rs::authorize(path, op)` is
+the only answer to "may this path be touched, for this purpose". Every
+file-touching `#[tauri::command]` calls it and does its I/O on the `PathBuf`
+it returns, so the path that was checked is the path that is opened. `PathOp`
+(`Read`, `List`, `Write`, `Delete`) parameterizes it; a new operation adds a
+variant and declares its policy in one exhaustive match. A test reads the
+command sources and fails if a command touches the filesystem without
+calling the gate.
+
+**Three layers, one parser.**
+
+| Layer | Owns | Where |
+|---|---|---|
+| Resolution | normalize the way the kernel does, follow symlinks, credential blocklist, workspace boundary | `agent/tools/path_security.rs` |
+| Per-operation policy | read size ceiling, list is a directory, write may create | `path_gate.rs` |
+| Tool-level policy | extension allow and block lists for model-driven tool calls | `agent/tools/basic_tools.rs`, `agent/tools/anthropic_computer_use.rs` |
+
+The blocklist and the boundary apply to **every** operation, `list_files`
+included. Enumerating `~/.ssh` is a disclosure even when the file bodies are
+refused: it tells an agent exactly what to go after.
+
+A new path check anywhere else is the LAC-4013 bug again. Add a `PathOp`.
 
 ### Command Security
 
@@ -500,7 +536,7 @@ fix, the test binary dies and reports nothing.
 
 ### Escape Key Management
 - Register escape key ONLY during agent execution
-- Register at start of `submit_query`/`submit_orchestrated_query`
+- Register at start of `submit_query`, which is the only agent entry point
 - Always unregister on **every** exit path — completion, error, cancellation, AND early returns
 
 ### Deadlock Prevention
