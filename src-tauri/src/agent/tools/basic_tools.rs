@@ -215,52 +215,25 @@ fn list_directory_contents(path: &PathBuf) -> Result<String, String> {
 mod basic_tools_impl {
     use super::*;
 
-    /// Validates file path with proper security checks
+    /// Validates a file path for the `read_file` / `write_file` agent tools.
     ///
-    /// # Security Checks:
-    /// - Path traversal prevention
-    /// - Workspace boundary enforcement
-    /// - File extension validation
-    /// - Size limit enforcement
+    /// Resolution, the credential blocklist and the workspace boundary come
+    /// from [`crate::agent::tools::path_security`]. What this function adds on
+    /// top is the extension allow and block list and the configured size cap,
+    /// which are tool-level policy.
+    ///
+    /// The `".."` substring tests that used to sit at the top are gone. They
+    /// were not path normalization: in production a legitimate `a/sub/../b.txt`
+    /// inside the workspace was refused, and in development anything short of
+    /// four `..` segments was waved through, while neither test said anything
+    /// about an absolute path to a sensitive location. Resolution decides now
+    /// (LAC-4013 Fix B).
     fn validate_file_path(path_str: &str, config: &SecurityConfig) -> Result<PathBuf, String> {
-        // Basic validation
-        if path_str.is_empty() {
-            return Err("Empty path not allowed".to_string());
-        }
-
-        // In development mode, be very permissive
-        if config.debug_mode {
-            // Only prevent the most extreme path traversal
-            if path_str.contains("../../../..") || path_str == "../../.." {
-                return Err("Excessive path traversal is not allowed".to_string());
-            }
-        } else {
-            // In production, be slightly more restrictive
-            if path_str.contains("..") {
-                return Err("Path traversal (..) is not allowed in production".to_string());
-            }
-
-            // Block only the most sensitive files in production
-            if path_str.contains("/etc/passwd") || path_str.contains("/etc/shadow") {
-                return Err("Access to system password files is not allowed".to_string());
-            }
-        }
-
         let path = PathBuf::from(path_str);
 
-        // Block sensitive credential/key files by name, directory, and
-        // extension in ALL build modes: SSH keys and ~/.ssh, AWS credentials,
-        // .netrc/.npmrc, keychains, wallets/keystores, *.p12/*.pfx, and the
-        // dotenv family (security audit 2026-02-08, items #19/#32). Checked
-        // again on the canonical path below in case traversal hides the name.
-        if let Some(reason) = crate::agent::tools::path_security::sensitive_path_reason(&path) {
-            return Err(format!(
-                "Access denied: sensitive file is blocked ({})",
-                reason
-            ));
-        }
-
-        // Validate file extensions
+        // Validate file extensions. This is the only policy this function
+        // still owns: an extension allow and block list that makes sense for a
+        // model-driven tool call and nowhere else.
         if let Some(extension) = path.extension() {
             let ext_str = extension.to_string_lossy().to_lowercase();
 
@@ -293,52 +266,19 @@ mod basic_tools_impl {
             }
         }
 
-        // Resolve to absolute path
-        let full_path = if path.is_absolute() {
-            path
-        } else {
-            let current_dir = std::env::current_dir()
-                .map_err(|e| format!("Failed to get current directory: {}", e))?;
-            current_dir.join(&path)
-        };
-
-        // Canonicalize path to resolve symlinks and normalize (shared helper,
-        // also used by anthropic_computer_use and enhanced_coding_tools)
-        let canonical_path = crate::agent::tools::path_security::canonicalize_lenient(&full_path);
-
-        // Re-check the sensitive-file blocklist on the canonical path so a
-        // symlink or traversal cannot hide a blocked name (#32)
-        if let Some(reason) =
-            crate::agent::tools::path_security::sensitive_path_reason(&canonical_path)
-        {
-            return Err(format!(
-                "Access denied: sensitive file is blocked ({})",
-                reason
-            ));
-        }
-
-        // Enforce workspace boundaries. An empty root list fails closed:
-        // without a boundary, every path would be "inside" (#12/#27).
-        if config.workspace_roots.is_empty() {
-            return Err(
-                "Access denied: No workspace boundary is available for file access".to_string(),
-            );
-        }
-        let allowed = config.workspace_roots.iter().any(|root| {
-            let canonical_root = crate::agent::tools::path_security::canonicalize_lenient(root);
-            canonical_path.starts_with(&canonical_root)
-        });
-        if !allowed {
-            return Err(format!(
-                "Access denied: Path is outside the workspace boundary. Workspace: {}",
-                config
-                    .workspace_roots
-                    .iter()
-                    .map(|r| r.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
+        // Resolution, the credential blocklist and the workspace boundary are
+        // `path_security`'s answer, not a second copy of it here.
+        //
+        // This function used to reimplement the roots loop, the fail-closed
+        // empty-roots case and the blocklist re-check inline, which is how two
+        // gates answering the same question drift apart (LAC-4013 Fix B). They
+        // happened to agree; that is luck, not a design. `resolve_within_roots`
+        // also normalizes paths whose parent does not exist yet, which
+        // `canonicalize_lenient` could not.
+        let canonical_path = crate::agent::tools::path_security::resolve_within_roots(
+            path_str,
+            &config.workspace_roots,
+        )?;
 
         // Only check file size if file exists
         if canonical_path.exists() {

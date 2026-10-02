@@ -1,26 +1,106 @@
 //! # Path Security Helpers
 //!
-//! Shared canonicalization and workspace-boundary enforcement for agent file
-//! operations. This is the single implementation of the "resolve symlinks and
-//! `..` segments, then require the result to live inside an allowed root"
-//! logic that previously existed only in `basic_tools` (security audit
-//! 2026-02-08, items #13/#14/#18).
+//! Shared canonicalization, credential blocklist and workspace-boundary
+//! enforcement for every file operation in Juno. This is the single
+//! implementation of "resolve symlinks and `..` segments, then require the
+//! result to live inside an allowed root" (security audit 2026-02-08, items
+//! #13/#14/#18, and LAC-4013 Fix B which removed the last two copies of it).
 //!
-//! ## Used by:
-//! - `basic_tools::validate_file_path` (read path canonicalization)
-//! - `anthropic_computer_use::validate_file_path` (str_replace editor tool)
+//! Policy layers on top of this, it is never re-implemented:
+//! - `crate::path_gate::authorize` (every file-touching `#[tauri::command]`,
+//!   adding the per-operation policy for read / list / write / delete)
+//! - `basic_tools::validate_file_path` (`read_file` / `write_file` tools,
+//!   adding extension lists and the configured size cap)
+//! - `anthropic_computer_use::validate_file_path` (str_replace editor tool,
+//!   adding an extension allowlist)
 //! - `enhanced_coding_tools::create_file_with_content` (smart_create_file)
 
 use std::fs::File;
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
 
-/// Canonicalize a path, tolerating files that do not exist yet.
+/// Resolve `path_str` to an absolute path with no `.` or `..` segments and
+/// every symlink in the existing portion followed, tolerating components that
+/// do not exist yet.
+///
+/// ## Why not a `".."` substring test
+///
+/// A substring test is not path normalization. It misses an absolute path to a
+/// sensitive location entirely (`/Users/x/.ssh/id_rsa` contains no `..`), and
+/// it misses a symlink inside an allowed directory that points outside it.
+///
+/// ## Why not plain `canonicalize`
+///
+/// [`std::fs::canonicalize`] fails for a path that does not exist yet, which
+/// is every write to a new file. [`canonicalize_lenient`] handles one missing
+/// final component but still fails when the parent directory is also missing,
+/// which is exactly what `set_file_content` and `text_editor_create` do when
+/// they `create_dir_all` the parent. This walks the components instead.
+///
+/// ## Why the walk, and in this order
+///
+/// Components are applied one at a time from the root. After each existing
+/// component the accumulator is canonicalized, so a symlink is followed
+/// *before* the next component is applied, and `..` pops the symlink's real
+/// parent rather than its lexical one. Resolving `..` lexically first gives a
+/// different and weaker answer: `/root/link/../etc/passwd` normalizes
+/// lexically to `/root/etc/passwd` (inside the boundary) while the kernel
+/// opens whatever `link`'s real parent holds. Matching the kernel's order is
+/// the whole point.
+///
+/// Once a component does not exist, canonicalization stops succeeding and the
+/// remaining components accumulate literally. They carry no `.` or `..`
+/// because those are handled by this loop, so the result is still normalized.
+pub fn resolve_path_lenient(path_str: &str) -> Result<PathBuf, String> {
+    let trimmed = path_str.trim();
+    if trimmed.is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
+    if trimmed == "~" || trimmed.starts_with("~/") {
+        return Err(
+            "Home-relative paths ('~') are not expanded here; pass an absolute path".to_string(),
+        );
+    }
+
+    let raw = PathBuf::from(trimmed);
+    let absolute = if raw.is_absolute() {
+        raw
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?
+            .join(raw)
+    };
+
+    let mut resolved = PathBuf::from(std::path::MAIN_SEPARATOR_STR);
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
+            Component::ParentDir => {
+                if !resolved.pop() {
+                    return Err("Path traverses above the filesystem root".to_string());
+                }
+            }
+            Component::Normal(name) => {
+                resolved.push(name);
+                if let Ok(real) = resolved.canonicalize() {
+                    resolved = real;
+                }
+            }
+        }
+    }
+
+    Ok(resolved)
+}
+
+/// Canonicalize a path, tolerating a file whose final component does not
+/// exist yet.
 ///
 /// For an existing path this is `std::fs::canonicalize`. For a path whose
-/// final component does not exist yet (e.g. a file about to be created), the
-/// parent directory is canonicalized and the file name re-appended, so `..`
-/// segments and symlinks in the directory portion are still resolved.
+/// final component is missing the parent directory is canonicalized and the
+/// file name re-appended. It still fails to normalize when the *parent* is
+/// also missing; [`resolve_path_lenient`] is the general form and is what the
+/// boundary check uses. This remains for canonicalizing workspace roots,
+/// which always exist.
 pub fn canonicalize_lenient(full_path: &Path) -> PathBuf {
     match full_path.canonicalize() {
         Ok(p) => p,
@@ -115,26 +195,31 @@ pub fn sensitive_path_reason(path: &Path) -> Option<String> {
 /// Resolve `path_str` to an absolute, canonical path and require it to live
 /// inside one of the allowed `roots`.
 ///
-/// Relative paths are resolved against the current working directory before
-/// canonicalization, matching the behavior of `basic_tools`. An empty `roots`
-/// slice fails closed: no boundary can be established, so access is denied.
+/// This is the only implementation of "resolve, then require the result inside
+/// an allowed root". Resolution is [`resolve_path_lenient`], so relative paths
+/// go against the current working directory, symlinks are followed, and a path
+/// whose parent does not exist yet still normalizes. An empty `roots` slice
+/// fails closed: no boundary can be established, so access is denied.
 /// Sensitive credential/key files are denied even inside the boundary
-/// (security audit 2026-02-08, item #32).
+/// (security audit 2026-02-08, item #32), and the blocklist is applied both to
+/// the path as written and to the resolved path.
+///
+/// Callers add their own policy on top of this; none of them re-implement it.
+/// `crate::path_gate` is the command surface's entry point and layers the
+/// per-operation policy on; `basic_tools` and `anthropic_computer_use` layer
+/// on extension and size policy for model-driven tool calls.
 pub fn resolve_within_roots(path_str: &str, roots: &[PathBuf]) -> Result<PathBuf, String> {
-    if path_str.is_empty() {
-        return Err("Empty path not allowed".to_string());
+    // The blocklist runs on the path as written, before any resolution: a
+    // symlink *named* `id_rsa` is credential-shaped regardless of what it
+    // points at, and resolution would replace the name with the target's.
+    if let Some(reason) = sensitive_path_reason(Path::new(path_str.trim())) {
+        return Err(format!(
+            "Access denied: sensitive file is blocked ({})",
+            reason
+        ));
     }
 
-    let path = PathBuf::from(path_str);
-    let full_path = if path.is_absolute() {
-        path
-    } else {
-        let current_dir = std::env::current_dir()
-            .map_err(|e| format!("Failed to get current directory: {}", e))?;
-        current_dir.join(&path)
-    };
-
-    let canonical_path = canonicalize_lenient(&full_path);
+    let canonical_path = resolve_path_lenient(path_str)?;
 
     if let Some(reason) = sensitive_path_reason(&canonical_path) {
         return Err(format!(
@@ -454,6 +539,61 @@ mod tests {
     fn empty_roots_fail_closed() {
         let result = resolve_within_roots("/tmp/anything.txt", &[]);
         assert!(result.is_err(), "empty roots must deny access");
+    }
+
+    #[test]
+    fn parent_traversal_pops_a_symlinks_real_parent_not_its_lexical_one() {
+        // The ordering that makes a lexical normalizer wrong. `inside/link`
+        // points at `outside/sub`, so `inside/link/../secret.txt` is
+        // `outside/secret.txt` to the kernel and `inside/secret.txt` to a
+        // normalizer that resolves `..` before following symlinks. Only the
+        // first answer refuses, and the first answer is the one the open uses.
+        let inside = temp_root();
+        let outside = temp_root();
+        let sub = outside.path().join("sub");
+        std::fs::create_dir(&sub).unwrap_or_else(|e| panic!("mkdir failed: {}", e));
+        let link = inside.path().join("link");
+        std::os::unix::fs::symlink(&sub, &link).unwrap_or_else(|e| panic!("symlink failed: {}", e));
+
+        let sneaky = link.join("..").join("secret.txt");
+        let resolved = resolve_path_lenient(&sneaky.to_string_lossy())
+            .unwrap_or_else(|e| panic!("resolve failed: {}", e));
+
+        let canonical_outside = canonicalize_lenient(outside.path());
+        assert!(
+            resolved.starts_with(&canonical_outside),
+            "expected the symlink's real parent ({}), got {}",
+            canonical_outside.display(),
+            resolved.display()
+        );
+
+        let result =
+            resolve_within_roots(&sneaky.to_string_lossy(), &[inside.path().to_path_buf()]);
+        assert!(
+            result.is_err(),
+            "the boundary must refuse this, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn resolve_path_lenient_normalizes_a_path_whose_parent_does_not_exist() {
+        // `canonicalize_lenient` cannot do this: it needs the parent to exist.
+        // A write to a new file under a new directory is the common case.
+        let dir = temp_root();
+        let deep = dir.path().join("a").join("b").join("c.txt");
+
+        let resolved = resolve_path_lenient(&deep.to_string_lossy())
+            .unwrap_or_else(|e| panic!("resolve failed: {}", e));
+        assert!(resolved.is_absolute());
+        assert!(!resolved.to_string_lossy().contains("/./"));
+        assert!(resolved.ends_with("a/b/c.txt"));
+        assert!(resolved.starts_with(canonicalize_lenient(dir.path())));
+    }
+
+    #[test]
+    fn resolve_path_lenient_refuses_traversal_above_the_filesystem_root() {
+        assert!(resolve_path_lenient("/../../../etc/hosts").is_err());
     }
 
     #[test]

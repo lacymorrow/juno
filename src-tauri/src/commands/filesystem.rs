@@ -57,11 +57,9 @@ pub async fn list_files(
     debug_mode: Option<bool>,
 ) -> Result<String, String> {
     use crate::commands::debug_utils::{
-        send_debug_notification, should_enable_debug, validators::valid_file_path, DebugConfig,
-        DebugOperation,
+        send_debug_notification, should_enable_debug, DebugConfig, DebugOperation,
     };
     use std::fs;
-    use std::path::Path;
     use tracing::{error, info, warn};
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
@@ -72,22 +70,24 @@ pub async fn list_files(
 
     let debug_op = DebugOperation::start("list_files", debug_config.clone());
 
-    // Unconditional path check (LAC-4013). Interim until this command is
-    // wired to path_security::resolve_within_default_roots (Fix B).
-    if let Err(e) = valid_file_path(&path_str) {
-        let err_msg = format!("Invalid path: {}", e);
-        if debug_config.send_notifications {
-            send_debug_notification(&app, "List Files Error", &err_msg)?;
+    // The one gate (LAC-4013 Fix B). Enumerating a directory is a disclosure
+    // even when the file bodies are refused, so List gets the same credential
+    // blocklist and the same workspace boundary as Read.
+    let path = match crate::path_gate::authorize(&path_str, crate::path_gate::PathOp::List) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            let err_msg = format!("Invalid path: {}", e);
+            if debug_config.send_notifications {
+                send_debug_notification(&app, "List Files Error", &err_msg)?;
+            }
+            debug_op.complete(Some(&app), false);
+            return Err(err_msg);
         }
-        debug_op.complete(Some(&app), false);
-        return Err(err_msg);
-    }
+    };
 
     if debug_config.log_operations {
-        info!("[FILESYSTEM] Listing files in: {}", path_str);
+        info!("[FILESYSTEM] Listing files in: {}", path.display());
     }
-
-    let path = Path::new(&path_str);
 
     if !path.exists() {
         let err_msg = format!("Path does not exist: {:?}", path);
@@ -113,7 +113,7 @@ pub async fn list_files(
         return Err(err_msg);
     }
 
-    let entries = match fs::read_dir(path) {
+    let entries = match fs::read_dir(&path) {
         Ok(entries) => entries,
         Err(e) => {
             let err_msg = format!("Failed to read directory '{:?}': {}", path, e);
@@ -194,11 +194,9 @@ pub async fn get_file_content(
     debug_mode: Option<bool>,
 ) -> Result<String, String> {
     use crate::commands::debug_utils::{
-        send_debug_notification, should_enable_debug, validators::valid_file_path, DebugConfig,
-        DebugOperation,
+        send_debug_notification, should_enable_debug, DebugConfig, DebugOperation,
     };
     use std::fs;
-    use std::path::Path;
     use tracing::{error, info};
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
@@ -209,22 +207,23 @@ pub async fn get_file_content(
 
     let debug_op = DebugOperation::start("get_file_content", debug_config.clone());
 
-    // Unconditional path check (LAC-4013). Interim until this command is
-    // wired to path_security::resolve_within_default_roots (Fix B).
-    if let Err(e) = valid_file_path(&path_str) {
-        let err_msg = format!("Invalid path: {}", e);
-        if debug_config.send_notifications {
-            send_debug_notification(&app, "Get File Content Error", &err_msg)?;
+    // The one gate (LAC-4013 Fix B). Read adds a size ceiling on top of the
+    // blocklist and the boundary.
+    let file_path = match crate::path_gate::authorize(&path_str, crate::path_gate::PathOp::Read) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            let err_msg = format!("Invalid path: {}", e);
+            if debug_config.send_notifications {
+                send_debug_notification(&app, "Get File Content Error", &err_msg)?;
+            }
+            debug_op.complete(Some(&app), false);
+            return Err(err_msg);
         }
-        debug_op.complete(Some(&app), false);
-        return Err(err_msg);
-    }
+    };
 
     if debug_config.log_operations {
-        info!("[FILESYSTEM] Reading file: {}", path_str);
+        info!("[FILESYSTEM] Reading file: {}", file_path.display());
     }
-
-    let file_path = Path::new(&path_str);
 
     if !file_path.exists() {
         let err_msg = format!("File does not exist: {:?}", file_path);
@@ -250,7 +249,7 @@ pub async fn get_file_content(
         return Err(err_msg);
     }
 
-    let content = match fs::read_to_string(file_path) {
+    let content = match fs::read_to_string(&file_path) {
         Ok(content) => content,
         Err(e) => {
             let err_msg = format!("Failed to read file '{:?}': {}", file_path, e);
@@ -296,11 +295,9 @@ pub async fn set_file_content(
     debug_mode: Option<bool>,
 ) -> Result<(), String> {
     use crate::commands::debug_utils::{
-        send_debug_notification, should_enable_debug, validators::valid_file_path, DebugConfig,
-        DebugOperation,
+        send_debug_notification, should_enable_debug, DebugConfig, DebugOperation,
     };
     use std::fs;
-    use std::path::Path;
     use tracing::{error, info};
 
     let debug_config = if should_enable_debug(debug_mode.unwrap_or(false), &state) {
@@ -311,26 +308,29 @@ pub async fn set_file_content(
 
     let debug_op = DebugOperation::start("set_file_content", debug_config.clone());
 
-    // Unconditional path check (LAC-4013). Interim until this command is
-    // wired to path_security::resolve_within_default_roots (Fix B).
-    if let Err(e) = valid_file_path(&path_str) {
-        let err_msg = format!("Invalid path: {}", e);
-        if debug_config.send_notifications {
-            send_debug_notification(&app, "Set File Content Error", &err_msg)?;
+    // The one gate (LAC-4013 Fix B). Write admits a target that does not exist
+    // yet, and a parent directory that does not exist yet, because this
+    // command creates both; the boundary is still decided on the resolved
+    // prospective path, not on the raw string.
+    let file_path = match crate::path_gate::authorize(&path_str, crate::path_gate::PathOp::Write) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            let err_msg = format!("Invalid path: {}", e);
+            if debug_config.send_notifications {
+                send_debug_notification(&app, "Set File Content Error", &err_msg)?;
+            }
+            debug_op.complete(Some(&app), false);
+            return Err(err_msg);
         }
-        debug_op.complete(Some(&app), false);
-        return Err(err_msg);
-    }
+    };
 
     if debug_config.log_operations {
         info!(
             "[FILESYSTEM] Writing to file: {} ({} chars)",
-            path_str,
+            file_path.display(),
             content.len()
         );
     }
-
-    let file_path = Path::new(&path_str);
 
     // Create parent directories if they don't exist
     if let Some(parent) = file_path.parent() {
@@ -374,7 +374,7 @@ pub async fn set_file_content(
         return Err(err_msg);
     }
 
-    match fs::write(file_path, &content) {
+    match fs::write(&file_path, &content) {
         Ok(_) => {
             if debug_config.send_notifications {
                 let preview = if content.len() > 100 {
