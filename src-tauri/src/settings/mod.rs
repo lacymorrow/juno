@@ -565,7 +565,7 @@ impl Default for FloatingBarSettings {
             auto_hide: false,
             auto_hide_delay: crate::constants::timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
             opacity: 0.95,
-            bar_appearance: ui::bar_appearances::FLOATING.to_string(),
+            bar_appearance: ui::bar_appearances::DEFAULT.to_string(),
             follow_cursor_display: defaults::follow_cursor_display(),
             show_glow_border: defaults::show_glow_border(),
         }

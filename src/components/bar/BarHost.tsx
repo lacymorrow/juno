@@ -8,6 +8,7 @@ import { FloatingBar } from "@/components/FloatingBar";
 import { AppBar } from "@/components/bar/app-bar";
 import { IslandBar } from "@/components/bar/island/IslandBar";
 import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
+import { appearanceEntry } from "./appearanceCatalog";
 // Lazy-load heavy components to avoid pulling Three.js/Rive into shared bundles
 const loadOrb = () => import("@/components/bar/elevenlabs-orb-bar");
 const loadHalo = () => import("@/components/bar/react-orb-bar");
@@ -62,7 +63,7 @@ export function BarHost() {
             auto_hide: false,
             auto_hide_delay: TIMEOUTS.UI_NOTIFICATION_DISPLAY_MS,
             opacity: 0.95,
-            bar_appearance: UI.BAR_APPEARANCES_FLOATING,
+            bar_appearance: UI.BAR_APPEARANCES_DEFAULT,
             show_glow_border: true,
           });
         }
@@ -91,7 +92,9 @@ export function BarHost() {
     };
   }, []);
 
-  const appearance = barConfig?.bar_appearance ?? UI.BAR_APPEARANCES_FLOATING;
+  // A value no release wrote (or none at all) draws the default look, the same
+  // entry the picker shows for it.
+  const appearance = appearanceEntry(barConfig?.bar_appearance).value;
   const loaded = barConfig !== null;
 
   useEffect(() => {

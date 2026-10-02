@@ -21,7 +21,7 @@
 
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
-import { COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
+import { COMMANDS, UI, WINDOW_LABELS } from "@/lib/constants.generated";
 /** The label the bar's window carries in the shipping app. */
 export const BAR_WINDOW_LABEL = WINDOW_LABELS.FLOATING_BAR;
 
@@ -93,7 +93,7 @@ const listeners = new Set<() => void>();
  * route sets this from its query string before mounting `BarHost`, so the real
  * host picks the same component the shipping app would for that setting.
  */
-let previewAppearance: string = "floating";
+let previewAppearance: string = UI.BAR_APPEARANCES_DEFAULT;
 
 export function setPreviewAppearance(appearance: string): void {
   previewAppearance = appearance;
