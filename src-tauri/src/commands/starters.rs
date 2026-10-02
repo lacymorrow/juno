@@ -51,7 +51,7 @@ const SPECS: &[StarterSpec] = &[
     StarterSpec {
         starter: Starter {
             id: "flight",
-            title: "Find me a flight",
+            title: "Find a cheap flight to Tokyo",
             prompt: "Find me the cheapest flight to Tokyo next month and show me the best three options.",
         },
         tools: &[
