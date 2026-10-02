@@ -14,13 +14,15 @@ import {
 /**
  * Settings > Models: one list of dictation models.
  *
- * Everyone sees three rows (Fast, Balanced, Most accurate). Advanced settings
- * reveal the rest of the catalog as more rows in the same list. Each row has
- * exactly one action for its state: Download, a progress bar with a cancel,
- * Use, or an Active check. A trash icon appears only on downloaded, inactive
- * rows; the bundled model is never deletable. The backend decides all of it:
- * which rows exist for this Mac, which one the engine is really running, and
- * what is on disk. This file only draws that.
+ * Everyone sees three rows (Fast, Balanced, Most accurate), named for what
+ * they do and not for what they are: the model's own name and the engine
+ * behind it are implementation, and they appear only once Advanced is on,
+ * alongside the rest of the catalog as more rows in the same list. Each row
+ * has exactly one action for its state: Download, a progress bar with a
+ * cancel, Use, or an Active check. A trash icon appears only on downloaded,
+ * inactive rows; the bundled model is never deletable. The backend decides
+ * all of it: which rows exist for this Mac, which one the engine is really
+ * running, and what is on disk. This file only draws that.
  */
 
 const MB = 1024 * 1024;
@@ -57,6 +59,8 @@ function engineLabel(engine: SttModelInfo["engine"]): string {
 interface RowProps {
   model: SttModelInfo;
   stt: SttModelsController;
+  /** Advanced is on, so the model's own name and its engine may be shown. */
+  advanced: boolean;
 }
 
 function DownloadingAction({
@@ -97,9 +101,15 @@ function DownloadingAction({
   );
 }
 
-function ModelRow({ model, stt }: RowProps) {
+function ModelRow({ model, stt, advanced }: RowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState<"use" | "delete" | null>(null);
+
+  // One name per row, and the same one everywhere: the tier's outcome name
+  // when it has one, the model's own name in the Advanced rows that do not.
+  // Every accessible name on the row is built from it, so what a screen
+  // reader says is what the screen says.
+  const title = model.tier_name ?? model.name;
 
   const downloading = stt.progress?.model_id === model.id;
   const anotherDownloading = !!stt.progress && !downloading;
@@ -150,7 +160,7 @@ function ModelRow({ model, stt }: RowProps) {
         variant="outline"
         onClick={runUse}
         disabled={busy !== null}
-        aria-label={`Use ${model.name}`}
+        aria-label={`Use ${title}`}
       >
         {busy === "use" ? <Loader2 className="animate-spin" aria-hidden /> : null}
         Use
@@ -163,7 +173,7 @@ function ModelRow({ model, stt }: RowProps) {
         size="sm"
         onClick={() => stt.download(model.id)}
         disabled={!stt.online || anotherDownloading}
-        aria-label={`${label}: ${model.name}`}
+        aria-label={`${label}: ${title}`}
         title={
           !stt.online
             ? "No internet connection"
@@ -187,18 +197,20 @@ function ModelRow({ model, stt }: RowProps) {
     >
       <div className="min-w-0 space-y-1.5">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="text-[14px] font-semibold">
-            {model.tier_name ?? model.name}
-          </span>
+          <span className="text-[14px] font-semibold">{title}</span>
           {model.recommended && (
             <span className="rounded-full bg-[#007AFF]/10 px-1.5 py-px text-[10px] font-medium text-[#007AFF]">
               Recommended
             </span>
           )}
         </div>
+        {/* The size is the only number that changes what a person decides
+            here; the model's name and the engine behind it are the kind of
+            thing you look up, not the kind of thing you choose by, so they
+            wait for Advanced. */}
         <p className="text-[12px] text-muted-foreground">
-          {model.tier_name ? `${model.name} · ` : ""}
-          {engineLabel(model.engine)} · {model.size_mb} MB
+          {advanced ? `${model.name} · ${engineLabel(model.engine)} · ` : ""}
+          {model.size_mb} MB
           {model.bundled ? " · Included" : ""}
         </p>
         <div className="space-y-1 pt-0.5">
@@ -219,14 +231,14 @@ function ModelRow({ model, stt }: RowProps) {
 
       <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
         {confirmDelete ? (
-          <div className="flex items-center gap-1.5" role="group" aria-label={`Remove ${model.name}?`}>
+          <div className="flex items-center gap-1.5" role="group" aria-label={`Remove ${title}?`}>
             <span className="text-[12px] text-muted-foreground">Remove?</span>
             <Button
               size="sm"
               variant="destructive"
               onClick={runDelete}
               disabled={busy !== null}
-              aria-label={`Confirm remove ${model.name}`}
+              aria-label={`Confirm remove ${title}`}
             >
               Remove
             </Button>
@@ -248,7 +260,7 @@ function ModelRow({ model, stt }: RowProps) {
                 variant="ghost"
                 className="text-muted-foreground"
                 onClick={() => setConfirmDelete(true)}
-                aria-label={`Remove ${model.name}`}
+                aria-label={`Remove ${title}`}
                 title="Remove from this Mac"
               >
                 <Trash2 />
@@ -287,7 +299,7 @@ export default function ModelsSettings() {
                 {downloadingModel && (
                   <p className="flex items-center gap-1.5">
                     <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                    Downloading {downloadingModel.name}
+                    Downloading {downloadingModel.tier_name ?? downloadingModel.name}
                     {stt.progress?.activate_when_done
                       ? ". Dictation keeps working; it switches over when this lands."
                       : "."}
@@ -295,7 +307,7 @@ export default function ModelsSettings() {
                 )}
                 {changed && (
                   <p className="flex items-center justify-between gap-2">
-                    <span>{changed.name} is now active.</span>
+                    <span>{changed.tier_name ?? changed.name} is now active.</span>
                     <button
                       type="button"
                       onClick={stt.dismissChange}
@@ -320,7 +332,9 @@ export default function ModelsSettings() {
             }
           />
         ) : (
-          visible.map((model) => <ModelRow key={model.id} model={model} stt={stt} />)
+          visible.map((model) => (
+            <ModelRow key={model.id} model={model} stt={stt} advanced={advanced} />
+          ))
         )}
       </SettingsGroup>
     </div>

@@ -140,7 +140,7 @@ export default function TtsEngineGroup({ settings }: SettingsSectionProps) {
 
       {settings.ttsProvider === "supertonic" && (
         <>
-          <SettingsRow description="Supertonic is an MIT-licensed on-device engine: 31 languages, 167x real time on Apple silicon. Needs pip install supertonic && supertonic serve." />
+          <SettingsRow description="Supertonic is an MIT-licensed engine that runs on your Mac: 31 languages, far faster than real time. Needs pip install supertonic && supertonic serve." />
 
           <SettingsRow
             htmlFor="supertonic-server-url"

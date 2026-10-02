@@ -96,6 +96,13 @@ function rowIds(): string[] {
     .map((el) => el.getAttribute("data-testid")!.replace("model-row-", ""));
 }
 
+/** The heading each row actually shows a person, in order. */
+function rowTitles(): string[] {
+  return screen
+    .getAllByTestId(/^model-row-/)
+    .map((el) => el.querySelector("span.font-semibold")!.textContent!.trim());
+}
+
 // src/test/setup.ts makes navigator.onLine writable (not configurable).
 function setOnline(online: boolean) {
   (navigator as unknown as { onLine: boolean }).onLine = online;
@@ -114,7 +121,11 @@ describe("Models pane: one list, three tiers, full catalog under Advanced", () =
     const balanced = screen.getByTestId("model-row-parakeet-ctc");
     expect(within(balanced).getByText("Balanced")).toBeInTheDocument();
     expect(within(balanced).getByText("Recommended")).toBeInTheDocument();
-    expect(within(balanced).getByText(/Parakeet CTC 0.6B · Parakeet · 612 MB/)).toBeInTheDocument();
+    // The outcome, the size, and nothing else: the model's own name and the
+    // engine behind it are not things a person chooses by.
+    expect(within(balanced).getByText(/^612 MB$/)).toBeInTheDocument();
+    expect(screen.queryByText(/Parakeet CTC/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Whisper/)).not.toBeInTheDocument();
   });
 
   it("never renders a Parakeet row on Intel and recommends large-v3-turbo", async () => {
@@ -123,7 +134,12 @@ describe("Models pane: one list, three tiers, full catalog under Advanced", () =
     expect(rowIds()).toEqual(["tiny-en", "large-v3-turbo", "large-v3"]);
     expect(screen.queryByText(/Parakeet/)).not.toBeInTheDocument();
     const balanced = screen.getByTestId("model-row-large-v3-turbo");
+    expect(within(balanced).getByText("Balanced")).toBeInTheDocument();
     expect(within(balanced).getByText("Recommended")).toBeInTheDocument();
+    // Same three outcome names as any other Mac. Nothing names the hardware,
+    // and nothing says a model is missing: the row simply is not there.
+    expect(rowTitles()).toEqual(["Fast", "Balanced", "Most accurate"]);
+    expect(screen.queryByText(/Intel|Apple Silicon|arm64|x86_64/i)).not.toBeInTheDocument();
   });
 
   it("reveals the rest of the catalog as more rows in the same list when Advanced is on", async () => {
@@ -133,6 +149,17 @@ describe("Models pane: one list, three tiers, full catalog under Advanced", () =
     expect(rowIds()).toEqual(["tiny-en", "parakeet-ctc", "large-v3", "large-v3-turbo", "small-en"]);
     // Still one Active mark, no second section.
     expect(screen.getAllByText("Active")).toHaveLength(1);
+    // And this is where the implementation appears: the model's own name and
+    // the engine behind it, on the same rows, for whoever asked to see them.
+    const balanced = screen.getByTestId("model-row-parakeet-ctc");
+    expect(within(balanced).getByText("Balanced")).toBeInTheDocument();
+    expect(
+      within(balanced).getByText(/Parakeet CTC 0.6B · Parakeet · 612 MB/),
+    ).toBeInTheDocument();
+    // A row with no tier has no outcome name, so it keeps its own.
+    expect(
+      within(screen.getByTestId("model-row-small-en")).getByText("Whisper small.en"),
+    ).toBeInTheDocument();
   });
 
   it("says once, for the whole section, that models run on the Mac", async () => {
@@ -147,7 +174,7 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
     mockBackend(() => status(arm64Models()));
     await mount();
     const parakeet = screen.getByTestId("model-row-parakeet-ctc");
-    expect(within(parakeet).getByRole("button", { name: /Download: Parakeet/ })).toBeEnabled();
+    expect(within(parakeet).getByRole("button", { name: "Download: Balanced" })).toBeEnabled();
     expect(within(parakeet).queryByRole("button", { name: /^Use/ })).not.toBeInTheDocument();
     expect(within(parakeet).queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
   });
@@ -169,11 +196,12 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
     const parakeet = screen.getByTestId("model-row-parakeet-ctc");
     expect(within(parakeet).getByLabelText("Download progress")).toBeInTheDocument();
     expect(within(parakeet).getByText(/50% · 306 of 612 MB/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/Downloading Balanced/);
     expect(within(parakeet).getByRole("button", { name: "Cancel download" })).toBeEnabled();
     expect(within(parakeet).queryByRole("button", { name: /Download:/ })).not.toBeInTheDocument();
 
     const large = screen.getByTestId("model-row-large-v3");
-    expect(within(large).getByRole("button", { name: /Download: Whisper large-v3/ })).toBeDisabled();
+    expect(within(large).getByRole("button", { name: "Download: Most accurate" })).toBeDisabled();
   });
 
   it("renders Use (and a trash) for a downloaded, inactive model", async () => {
@@ -182,8 +210,8 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
     mockBackend(() => status(models));
     await mount();
     const parakeet = screen.getByTestId("model-row-parakeet-ctc");
-    expect(within(parakeet).getByRole("button", { name: "Use Parakeet CTC 0.6B" })).toBeEnabled();
-    expect(within(parakeet).getByRole("button", { name: "Remove Parakeet CTC 0.6B" })).toBeEnabled();
+    expect(within(parakeet).getByRole("button", { name: "Use Balanced" })).toBeEnabled();
+    expect(within(parakeet).getByRole("button", { name: "Remove Balanced" })).toBeEnabled();
     expect(within(parakeet).queryByRole("button", { name: /Download:/ })).not.toBeInTheDocument();
   });
 
@@ -199,7 +227,7 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
     expect(screen.queryByRole("button", { name: "Active" })).not.toBeInTheDocument();
     // tiny.en is now downloaded-and-inactive: it gets Use, but being bundled, no trash.
     const tiny = screen.getByTestId("model-row-tiny-en");
-    expect(within(tiny).getByRole("button", { name: "Use Whisper tiny.en" })).toBeEnabled();
+    expect(within(tiny).getByRole("button", { name: "Use Fast" })).toBeEnabled();
     expect(within(tiny).queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
   });
 
@@ -208,7 +236,7 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
     models[1].downloaded = true;
     mockBackend(() => status(models));
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Use Parakeet CTC 0.6B" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use Balanced" }));
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith(COMMANDS.STT_MODELS_USE, { modelId: "parakeet-ctc" }),
     );
@@ -222,9 +250,9 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
       return false;
     });
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: /Download: Parakeet/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Download: Balanced" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Try again: Parakeet/ })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "Try again: Balanced" })).toBeEnabled(),
     );
     expect(screen.getByRole("alert")).toHaveTextContent(/Download failed/);
   });
@@ -235,9 +263,9 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
     models[1].downloaded = true;
     mockBackend(() => status(models));
     await mount();
-    expect(screen.getByRole("button", { name: /Download: Whisper large-v3/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Download: Most accurate" })).toBeDisabled();
     expect(screen.getByText(/No internet connection/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Use Parakeet CTC 0.6B" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Use Balanced" })).toBeEnabled();
   });
 });
 
@@ -248,7 +276,7 @@ describe("Models pane: delete", () => {
     mockBackend(() => status(models));
     await mount();
     expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Remove Parakeet CTC 0.6B" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Balanced" })).toBeInTheDocument();
   });
 
   it("confirms inline with one tap and then calls the one delete command", async () => {
@@ -256,10 +284,10 @@ describe("Models pane: delete", () => {
     models[1].downloaded = true;
     mockBackend(() => status(models));
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Remove Parakeet CTC 0.6B" }));
-    const confirm = screen.getByRole("group", { name: "Remove Parakeet CTC 0.6B?" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove Balanced" }));
+    const confirm = screen.getByRole("group", { name: "Remove Balanced?" });
     expect(within(confirm).getByText("Remove?")).toBeInTheDocument();
-    fireEvent.click(within(confirm).getByRole("button", { name: "Confirm remove Parakeet CTC 0.6B" }));
+    fireEvent.click(within(confirm).getByRole("button", { name: "Confirm remove Balanced" }));
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith(COMMANDS.STT_MODELS_DELETE, { modelId: "parakeet-ctc" }),
     );
@@ -270,9 +298,9 @@ describe("Models pane: delete", () => {
     models[1].downloaded = true;
     mockBackend(() => status(models));
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Remove Parakeet CTC 0.6B" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Balanced" }));
     fireEvent.click(screen.getByRole("button", { name: "Keep" }));
-    expect(screen.getByRole("button", { name: "Use Parakeet CTC 0.6B" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use Balanced" })).toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalledWith(COMMANDS.STT_MODELS_DELETE, expect.anything());
   });
 });

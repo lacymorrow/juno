@@ -139,10 +139,19 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                     {cli && !cli.available ? (
                       <>
                         Juno runs on your Claude subscription through Claude Code.
-                        Install it from{" "}
-                        <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                          claude.ai/code
-                        </code>
+                        {" "}
+                        {/* Not installed is a condition the person can change,
+                            so the place they change it is a link they can
+                            press, the way the same row in setup already does
+                            it, rather than an address to retype. */}
+                        <a
+                          href="https://claude.ai/code"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#007AFF] hover:underline dark:text-[#0A84FF]"
+                        >
+                          Get Claude Code
+                        </a>
                         , or choose another provider above.
                       </>
                     ) : cli && !cli.authenticated ? (

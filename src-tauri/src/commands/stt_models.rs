@@ -234,6 +234,38 @@ pub fn recommended_id(arch: &str) -> &'static str {
     }
 }
 
+/// Whether setup should offer this Mac's Balanced model.
+///
+/// Rust decides this, not the UI: the offer screen only asks whether to draw
+/// itself. Three ways it settles, and all three are remembered:
+/// - the person said "Not now" (`declined`),
+/// - the person already picked Parakeet by hand (`stt_provider`; picking
+///   anything by hand in the Models pane also sets `declined`),
+/// - the model is already on disk.
+///
+/// Nothing here is gated on the kind of Mac. A Mac that cannot run Parakeet
+/// has a different Balanced row, not an empty offer: the failure mode this
+/// replaced left those Macs dictating on the bundled model for good.
+pub fn should_offer_recommended(
+    arch: &str,
+    declined: bool,
+    stt_provider: &str,
+    recommended_on_disk: bool,
+) -> bool {
+    !declined
+        && !stt_provider.eq_ignore_ascii_case("parakeet")
+        && !recommended_on_disk
+        && find_def(recommended_id(arch)).is_some()
+}
+
+/// What to say when something asks for a model this Mac's catalog does not
+/// list. The row is absent from every pane, so nothing a person can tap
+/// reaches this; it still never names the hardware, because naming a thing
+/// the person cannot change only teaches them a word and a worry.
+fn not_in_catalog_message(def: &ModelDef) -> String {
+    format!("{} is not available on this Mac.", def.name)
+}
+
 // ---------------------------------------------------------------------------
 // Serialized shapes
 // ---------------------------------------------------------------------------
@@ -465,9 +497,14 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
     // Intel Mac that is offered nothing dictates on the bundled tiny.en
     // forever. `recommended_id` is Parakeet on Apple Silicon (unchanged) and
     // large-v3-turbo on Intel, which the offer UI already renders.
-    let offer_recommended = !settings.parakeet_download_declined
-        && !settings.stt_provider.eq_ignore_ascii_case("parakeet")
-        && !find_def(recommended_id(&arch)).is_some_and(|d| is_downloaded(app, d));
+    let recommended_on_disk =
+        find_def(recommended_id(&arch)).is_some_and(|d| is_downloaded(app, d));
+    let offer_recommended = should_offer_recommended(
+        &arch,
+        settings.parakeet_download_declined,
+        &settings.stt_provider,
+        recommended_on_disk,
+    );
 
     Ok(SttModelsStatus {
         arch,
@@ -538,7 +575,7 @@ pub fn start_download(
 ) -> Result<(), String> {
     let def = find_def(model_id).ok_or_else(|| format!("Unknown dictation model: {}", model_id))?;
     if def.arm64_only && !is_arm64(&current_arch()) {
-        return Err(format!("{} is only available on Apple Silicon.", def.name));
+        return Err(not_in_catalog_message(def));
     }
     if is_downloaded(app, def) {
         let _ = app.emit(
@@ -1179,6 +1216,76 @@ mod tests {
         assert_eq!(tier_for("x86_64", "large-v3-turbo"), Some(BALANCED));
         assert_eq!(tier_for("x86_64", "parakeet-ctc"), None);
         assert_eq!(recommended_id("x86_64"), "large-v3-turbo");
+    }
+
+    /// The defect this guards: the offer used to be gated on the kind of Mac,
+    /// so a Mac without Parakeet was offered nothing and kept dictating on the
+    /// bundled model. 12.8 word error rate against the 7.8 of the model it can
+    /// actually run.
+    #[test]
+    fn every_mac_is_offered_the_best_model_it_can_actually_run() {
+        for arch in ["aarch64", "x86_64"] {
+            assert!(
+                should_offer_recommended(arch, false, "whisper", false),
+                "{arch} must be offered its Balanced model on a fresh install"
+            );
+            let offered = find_def(recommended_id(arch)).expect("recommended is in the catalog");
+            let bundled = find_def(BUNDLED_ID).expect("bundled is in the catalog");
+            assert!(
+                offered.accuracy > bundled.accuracy,
+                "{arch} is offered a model more accurate than the bundled one"
+            );
+            assert!(
+                catalog_for_arch(arch).iter().any(|m| m.id == offered.id),
+                "{arch} is only offered a model its own catalog lists"
+            );
+        }
+    }
+
+    #[test]
+    fn an_offer_once_settled_is_never_made_again() {
+        for arch in ["aarch64", "x86_64"] {
+            // "Not now".
+            assert!(
+                !should_offer_recommended(arch, true, "whisper", false),
+                "{arch}"
+            );
+            // Already on disk.
+            assert!(
+                !should_offer_recommended(arch, false, "whisper", true),
+                "{arch}"
+            );
+        }
+        // Parakeet picked by hand, before the declined flag was written.
+        assert!(!should_offer_recommended(
+            "aarch64", false, "parakeet", false
+        ));
+    }
+
+    /// A person cannot change which Mac they own, so nothing they read names
+    /// it. This is the one string left on an architecture-gated path.
+    #[test]
+    fn nothing_a_person_reads_names_the_hardware() {
+        let message = not_in_catalog_message(find_def(PARAKEET_ID).unwrap());
+        for word in [
+            "Apple Silicon",
+            "Apple silicon",
+            "Intel",
+            "arm64",
+            "aarch64",
+            "x86_64",
+            "architecture",
+            "Neural Engine",
+        ] {
+            assert!(
+                !message.contains(word),
+                "{message:?} must not contain {word:?}"
+            );
+        }
+        for tier in [FAST, BALANCED, ACCURATE] {
+            assert!(!tier.name.contains("Intel"), "{}", tier.name);
+            assert!(!tier.name.contains("Apple"), "{}", tier.name);
+        }
     }
 
     #[test]
