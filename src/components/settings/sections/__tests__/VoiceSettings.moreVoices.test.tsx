@@ -46,6 +46,7 @@ function voiceList(betterVoicesAvailable: boolean): JunoVoiceList {
     ],
     note: null,
     better_voices_available: betterVoicesAvailable,
+    engines: [{ id: "system", name: "Your Mac" }],
   };
 }
 
