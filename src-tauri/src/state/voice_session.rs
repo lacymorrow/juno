@@ -373,6 +373,40 @@ impl VoiceSessionRegistry {
     }
 }
 
+/// Does a tap on a dictation trigger mean "stop", rather than "start"?
+///
+/// The tap path used to ask the dictation liveness flag and nothing else, and
+/// that flag is a mirror: every path sets it by hand, so it drifts in both
+/// directions, and each direction had its own stuck state.
+///
+/// * Flag up, no session — a start that failed after raising the flag. A tap
+///   read "active", routed to the stop path, which claimed nothing and
+///   returned, so the flag stayed up and every later tap did the same. The
+///   stop path reconciles that case now; routing the tap there is what gets it
+///   the chance to.
+/// * Session open, flag down — a capture or a transcription that failed and
+///   cleared the flag without retiring the session. A tap read "idle" and
+///   routed to the start path, where `begin` refuses while a session stands,
+///   so the tap did nothing at all, silently, forever.
+///
+/// Asking the registry first fixes the second case and keeps the first: the
+/// registry is the record that *owns* the microphone, and a tap cannot open a
+/// second session while one stands, so the only thing a tap can mean then is
+/// "end it".
+///
+/// An **agent** session is the exception, and deliberately not a stop: the
+/// dictation trigger does not speak for the agent's microphone, and handing
+/// this to the stop path would submit the agent's query on a tap of the
+/// dictation key. It cannot start either — `begin` refuses — so it stays the
+/// refused start it has always been, logged rather than acted on.
+pub fn dictation_tap_means_stop(open: Option<VoiceSession>, dictation_flag_up: bool) -> bool {
+    match open {
+        Some(session) if session.target == VoiceTarget::Dictation => true,
+        Some(_) => false,
+        None => dictation_flag_up,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -771,5 +805,59 @@ mod tests {
             VoiceStartMethod::from(Gesture::Tap),
             VoiceStartMethod::Toggle
         );
+    }
+
+    // --- what a dictation tap means -------------------------------------
+
+    fn live(target: VoiceTarget) -> VoiceSession {
+        VoiceSession {
+            id: 7,
+            target,
+            method: VoiceStartMethod::Toggle,
+            phase: VoicePhase::Live,
+        }
+    }
+
+    #[test]
+    fn a_tap_with_a_dictation_session_open_is_a_stop() {
+        assert!(dictation_tap_means_stop(
+            Some(live(VoiceTarget::Dictation)),
+            true
+        ));
+    }
+
+    #[test]
+    fn a_tap_stops_a_dictation_session_even_when_the_flag_has_drifted_down() {
+        // The stuck state: a capture or transcription that failed cleared the
+        // flag and left the session standing. Reading the flag made the tap a
+        // start, `begin` refused it, and nothing happened — forever.
+        assert!(
+            dictation_tap_means_stop(Some(live(VoiceTarget::Dictation)), false),
+            "a session nobody can start over must be endable by a tap"
+        );
+    }
+
+    #[test]
+    fn a_tap_with_a_flag_up_and_no_session_is_a_stop_so_the_flag_gets_reconciled() {
+        assert!(dictation_tap_means_stop(None, true));
+    }
+
+    #[test]
+    fn a_tap_with_nothing_open_and_nothing_claimed_is_a_start() {
+        assert!(!dictation_tap_means_stop(None, false));
+    }
+
+    #[test]
+    fn a_dictation_tap_never_stops_an_agent_session() {
+        // Handing this to the dictation stop path would submit the agent's
+        // query on a tap of the dictation key.
+        assert!(!dictation_tap_means_stop(
+            Some(live(VoiceTarget::Agent)),
+            false
+        ));
+        assert!(!dictation_tap_means_stop(
+            Some(live(VoiceTarget::Agent)),
+            true
+        ));
     }
 }

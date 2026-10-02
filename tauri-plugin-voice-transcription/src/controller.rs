@@ -43,6 +43,54 @@ fn sinc_resampling_params() -> SincInterpolationParameters {
     }
 }
 
+/// Bring a window of captured audio down (or up) to the 16 kHz the engines
+/// want, for the **partial** decodes only.
+///
+/// Partials cannot share the session's `SincFixedIn`, and sharing it is why
+/// "show words as I speak" did nothing for most people. That resampler is
+/// built for a fixed 1024-frame chunk and, given a longer buffer, rubato
+/// silently uses only the first `chunk_size` frames of it
+/// (`asynchro_sinc.rs`: `copy_from_slice(&wave_in[chan][..self.chunk_size])`).
+/// So a ten-second live window reached the engine as the first 21 ms of
+/// itself, decoded to nothing, and no partial was ever emitted — on every
+/// microphone that does not already run at 16 kHz. The final decode builds
+/// its own correctly sized resampler, which is why the finished sentence was
+/// always right and only the live words were missing. It looked like the
+/// model's fault; it was the microphone's sample rate.
+///
+/// A fixed-chunk resampler is also stateful, and the live window re-sends
+/// overlapping audio on every cadence, which a stateful resampler cannot be
+/// fed correctly. Hence a pure, per-call conversion: stateless by
+/// construction, sized to whatever it is handed, and cheap enough for a
+/// 600 ms cadence. Partials are display-only provisional text, so averaging
+/// the input frames that fall inside each output frame (a crude anti-alias)
+/// is accurate enough; the final decode keeps the sinc resampler.
+fn resample_for_partial(audio: &[f32], from_rate: u32) -> Vec<f32> {
+    if audio.is_empty() || from_rate == 0 || from_rate == WHISPER_SAMPLE_RATE {
+        return audio.to_vec();
+    }
+
+    let out_len = (audio.len() as u64 * WHISPER_SAMPLE_RATE as u64 / from_rate as u64) as usize;
+    if out_len == 0 {
+        return Vec::new();
+    }
+
+    let step = f64::from(from_rate) / f64::from(WHISPER_SAMPLE_RATE);
+    let last = audio.len() - 1;
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let start = ((i as f64 * step).floor() as usize).min(last);
+        let end = ((((i + 1) as f64) * step).ceil() as usize).min(audio.len());
+        if end <= start {
+            out.push(audio[start]);
+            continue;
+        }
+        let span = &audio[start..end];
+        out.push(span.iter().sum::<f32>() / span.len() as f32);
+    }
+    out
+}
+
 /// How often the live-partial window is re-decoded, at most.
 const LIVE_PARTIAL_CADENCE: Duration = Duration::from_millis(600);
 /// How much audio the live-partial window keeps; caps the per-decode cost.
@@ -581,20 +629,6 @@ impl VoiceController {
         info!("[AudioThread] Recording at {} Hz with {} channel(s), will resample to {} Hz for Whisper.",
               actual_rate, channels, WHISPER_SAMPLE_RATE);
 
-        // Resampler setup
-        let mut chunk_resampler: Option<SincFixedIn<f32>> = None;
-        if actual_rate != WHISPER_SAMPLE_RATE {
-            let params = sinc_resampling_params();
-            chunk_resampler = SincFixedIn::new(
-                WHISPER_SAMPLE_RATE as f64 / actual_rate as f64,
-                2.0,
-                params,
-                1024,
-                1,
-            )
-            .ok();
-        }
-
         let mut audio_buffer_for_whisper_chunks: Vec<f32> = Vec::new();
         let partial_buffer_capacity_samples = (actual_rate as u64 * 1500 / 1000) as usize;
         let mut raw_full_session_audio: Vec<f32> = Vec::new();
@@ -641,7 +675,6 @@ impl VoiceController {
                         &audio_buffer_for_whisper_chunks,
                         &raw_full_session_audio,
                         actual_rate,
-                        chunk_resampler.as_mut(),
                         &app_handle,
                         &last_buffer_arc,
                     );
@@ -706,7 +739,6 @@ impl VoiceController {
                             session.as_mut(),
                             window,
                             actual_rate,
-                            chunk_resampler.as_mut(),
                             &app_handle,
                             true,
                         );
@@ -718,7 +750,6 @@ impl VoiceController {
                         session.as_mut(),
                         &audio_buffer_for_whisper_chunks,
                         actual_rate,
-                        chunk_resampler.as_mut(),
                         &app_handle,
                         false,
                     );
@@ -732,22 +763,10 @@ impl VoiceController {
         session: &mut dyn TranscriptionSession,
         audio_buffer: &[f32],
         actual_rate: u32,
-        resampler: Option<&mut SincFixedIn<f32>>,
         app_handle: &AppHandle<R>,
         provisional: bool,
     ) {
-        let audio_to_transcribe = if actual_rate != WHISPER_SAMPLE_RATE {
-            if let Some(r) = resampler {
-                match r.process(&[audio_buffer.to_vec()], None) {
-                    Ok(mut resampled) if !resampled.is_empty() => resampled.remove(0),
-                    _ => return,
-                }
-            } else {
-                return;
-            }
-        } else {
-            audio_buffer.to_vec()
-        };
+        let audio_to_transcribe = resample_for_partial(audio_buffer, actual_rate);
 
         if audio_to_transcribe.is_empty() {
             return;
@@ -777,7 +796,6 @@ impl VoiceController {
         audio_buffer: &[f32],
         raw_full_session_audio: &[f32],
         actual_rate: u32,
-        resampler: Option<&mut SincFixedIn<f32>>,
         app_handle: &AppHandle<R>,
         last_buffer_arc: &Arc<Mutex<Option<Vec<f32>>>>,
     ) {
@@ -787,7 +805,6 @@ impl VoiceController {
                 session,
                 audio_buffer,
                 actual_rate,
-                resampler,
                 app_handle,
                 false,
             );
@@ -875,7 +892,26 @@ impl VoiceController {
                 }
             }
         } else {
-            info!("[AudioThread] No audio to transcribe (empty buffer)");
+            // An empty transcript is still this session's transcript, and it
+            // has to be emitted.
+            //
+            // The app registers a voice session when the microphone opens and
+            // retires it when the transcript arrives. A stop moves it to
+            // "finishing" and leaves it registered, because a transcript is
+            // still owed. This branch used to owe one and never pay it: it
+            // announced the stop and nothing else, so the session stayed
+            // registered forever — and a session standing is what makes the
+            // app refuse every later start. Say nothing at all into a
+            // dictation and dictation was dead until the app restarted, with
+            // the liveness flag already down so nothing looked wrong.
+            //
+            // So the rule is: a session that was asked to finalise always gets
+            // exactly one result, even when there was nothing to decode.
+            info!("[AudioThread] No audio to transcribe (empty buffer); emitting an empty result so the session is closed out");
+            let _ = app_handle.emit(
+                constants::voice_transcription::FINAL_RESULT,
+                serde_json::json!({ "text": "" }),
+            );
             let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
         }
     }
@@ -963,6 +999,63 @@ unsafe impl Send for VoiceController {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The bug these pin: the old partial path shared a `SincFixedIn` built for
+    // 1024-frame chunks, which silently used only the first 1024 frames of
+    // whatever it was handed. A ten-second window became 21 ms of audio and
+    // decoded to nothing, so "show words as I speak" did nothing on every
+    // microphone that does not run at 16 kHz.
+
+    #[test]
+    fn a_partial_window_keeps_its_whole_duration_at_48k() {
+        // Ten seconds at 48 kHz must come back as ten seconds at 16 kHz, not
+        // as the first 1024 input frames.
+        let ten_seconds = vec![0.25_f32; 48_000 * 10];
+        let out = resample_for_partial(&ten_seconds, 48_000);
+        assert_eq!(out.len(), 16_000 * 10);
+    }
+
+    #[test]
+    fn a_partial_window_at_whisper_rate_is_passed_through_untouched() {
+        let audio: Vec<f32> = (0..100).map(|i| i as f32).collect();
+        assert_eq!(resample_for_partial(&audio, WHISPER_SAMPLE_RATE), audio);
+    }
+
+    #[test]
+    fn a_partial_window_keeps_its_signal_rather_than_its_first_frame() {
+        // Averaging, not decimation-by-dropping: a ramp stays a ramp.
+        let audio: Vec<f32> = (0..48).map(|i| i as f32).collect();
+        let out = resample_for_partial(&audio, 48_000);
+        assert_eq!(out.len(), 16);
+        assert_eq!(out[0], 1.0, "mean of 0,1,2");
+        assert_eq!(out[15], 46.0, "mean of 45,46,47");
+    }
+
+    #[test]
+    fn a_partial_window_survives_rates_that_do_not_divide_evenly() {
+        // 44.1 kHz is not a whole multiple of 16 kHz; the window must still
+        // come back whole and in range rather than empty or panicking.
+        let one_second = vec![0.1_f32; 44_100];
+        let out = resample_for_partial(&one_second, 44_100);
+        assert_eq!(out.len(), 16_000);
+        assert!(out.iter().all(|s| (*s - 0.1).abs() < 1e-6));
+    }
+
+    #[test]
+    fn a_partial_window_at_a_lower_rate_is_brought_up_not_dropped() {
+        let audio: Vec<f32> = (0..8).map(|i| i as f32).collect();
+        let out = resample_for_partial(&audio, 8_000);
+        assert_eq!(out.len(), 16);
+        assert!(out.iter().all(|s| s.is_finite()));
+    }
+
+    #[test]
+    fn an_empty_or_nonsense_rate_yields_nothing_rather_than_panicking() {
+        assert!(resample_for_partial(&[], 48_000).is_empty());
+        assert_eq!(resample_for_partial(&[1.0, 2.0], 0), vec![1.0, 2.0]);
+        // Fewer input frames than one output frame is worth: no output, no panic.
+        assert!(resample_for_partial(&[1.0], 48_000).is_empty());
+    }
 
     #[test]
     fn live_window_keeps_only_the_newest_samples() {

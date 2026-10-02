@@ -1,8 +1,142 @@
 use crate::constants::settings::dictation_insertion_modes;
 use crate::settings::manager::SettingsManager;
-use crate::state::AppState;
-use tauri::{AppHandle, Manager, State};
+use crate::state::{AppState, SessionClaim};
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_voice_transcription::VoiceController;
 use tracing::{error, info, warn};
+
+/// The escape-key ledger name every dictation session registers under.
+///
+/// One name, because the ledger is a set: a session that registered under one
+/// spelling and was released under another leaves the stop key armed forever.
+pub const DICTATION_ESCAPE_USER: &str = "dictation_events";
+
+/// Close the microphone, and keep asking until it is actually closed.
+///
+/// Cancel, never stop: stopping finalises the audio and emits a result, which
+/// downstream types out a sentence nobody asked to keep.
+///
+/// The plugin's cancel takes the controller lock with `try_lock` and answers
+/// `Ok(false)` when it is busy, which is a silent no-op — and a controller
+/// left believing it is recording refuses the next `start_dictation` with
+/// "already dictating" for the rest of the run. So this asks again while the
+/// controller still says it is dictating, the same way the agent path already
+/// retries its start through the same contention. Bounded, because a lock
+/// that is still held after this is a bug to see in the log rather than a
+/// loop to sit in.
+async fn close_audio_session(app_handle: &AppHandle) {
+    const ATTEMPTS: u32 = 3;
+    const GAP: std::time::Duration = std::time::Duration::from_millis(50);
+
+    for attempt in 1..=ATTEMPTS {
+        let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() else {
+            return;
+        };
+        match tauri_plugin_voice_transcription::commands::get_dictation_status(controller_state)
+            .await
+        {
+            Ok(false) => return,
+            Ok(true) => {}
+            Err(e) => {
+                warn!(
+                    "[Dictation] Could not tell whether the microphone is open: {}",
+                    e
+                );
+                return;
+            }
+        }
+
+        let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() else {
+            return;
+        };
+        match tauri_plugin_voice_transcription::commands::cancel_dictation(
+            app_handle.clone(),
+            controller_state,
+        )
+        .await
+        {
+            Ok(true) => return,
+            Ok(false) => {
+                if attempt < ATTEMPTS {
+                    tokio::time::sleep(GAP).await;
+                }
+            }
+            Err(e) => {
+                warn!("[Dictation] Could not end the audio session: {}", e);
+                return;
+            }
+        }
+    }
+
+    error!(
+        "[Dictation] The voice controller would not let go of the microphone after {} attempts; the next dictation may be refused as already dictating",
+        ATTEMPTS
+    );
+}
+
+/// End the dictation session, whatever state it is in. The only way a
+/// dictation session ends.
+///
+/// Ending a session is five things, not one: retire its identity in the
+/// registry, put the dictation flag down, reset the input monitor, take the
+/// bar out of dictation mode, and release the stop key. Every exit path used
+/// to do its own subset of that list by hand, and the failure paths did the
+/// smallest subsets:
+///
+/// * a microphone that never opened (`voice-capture:failed`) cleared the flag
+///   but left the session standing, and `begin` refuses while one stands — so
+///   one failed capture killed every later dictation for the life of the
+///   process, with the bar still drawn in dictation mode and Escape declining
+///   to act because nothing *looked* live;
+/// * a transcription that failed retired the session but left the flag up, and
+///   tap mode reads that flag to decide start from stop — so every later tap
+///   took the stop branch, found no session, and returned.
+///
+/// Both are the same shape: half the list. So the list is a function, it is
+/// idempotent, and it is what every exit path calls.
+///
+/// The session is retired *before* the audio is stopped, deliberately: a
+/// transcript the engine finalises on the way down then finds no owner and is
+/// dropped, rather than being typed into whatever is focused.
+pub async fn end_dictation_session(app_handle: &AppHandle, reason: &str) {
+    let app_state = app_handle.state::<AppState>();
+
+    match app_state.claim_voice_discard(SessionClaim::Current) {
+        Ok(session) => info!(
+            "[Dictation] Ending voice session {} ({})",
+            session.describe(),
+            reason
+        ),
+        Err(rejection) => info!(
+            "[Dictation] Nothing to retire ({}); unwinding anyway ({})",
+            rejection.reason(),
+            reason
+        ),
+    }
+
+    close_audio_session(app_handle).await;
+
+    if let Err(e) = app_state.set_dictation_active(false) {
+        warn!("[Dictation] Could not clear the dictation flag: {}", e);
+    }
+
+    crate::dictation_monitor::force_reset_dictation_input_state().await;
+
+    crate::commands::ui_commands::handle_dictation_mode_change(app_handle, false).await;
+
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    if let Err(e) = coordinator
+        .unregister_escape_user(app_handle, DICTATION_ESCAPE_USER)
+        .await
+    {
+        warn!("[Dictation] Could not release the stop key: {}", e);
+    }
+
+    if let Err(e) = app_handle.emit(crate::constants::events::dictation::ACTIVE, false) {
+        error!("[Dictation] Could not announce the end of dictation: {}", e);
+    }
+}
 
 // Command to set the dictation copy-to-clipboard toggle. The name predates
 // the insertion-mode split: this toggle only controls whether the transcript
@@ -154,6 +288,82 @@ fn plan_insertion(insertion_mode: &str, copy_to_clipboard: bool) -> InsertionPla
     }
 }
 
+/// Is Juno allowed to post the keystrokes an insertion is made of?
+///
+/// Both insertion modes come down to posted CGEvents: the paste path posts a
+/// synthetic Command V, the clipboard-free path posts the transcript as
+/// unicode key events, and that path's fallback ladder reaches the
+/// accessibility API for the same job. Without the Accessibility grant macOS
+/// discards a posted event outright — no error, no return value, nothing to
+/// check, because `CGEvent::post` returns `()`. That is the whole reason
+/// "sometimes the text is not pasted" leaves no trace: there is no failure to
+/// log, so every layer above reports success.
+///
+/// Worth checking on every insertion rather than once at startup: a grant can
+/// go away while the app is running, and Juno replaces its own bundle every
+/// time it installs a CI build, which is exactly when macOS quietly
+/// invalidates a grant that System Settings still draws as on.
+#[cfg(target_os = "macos")]
+fn can_post_keystrokes() -> bool {
+    matches!(
+        computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions(false),
+        Ok(true)
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn can_post_keystrokes() -> bool {
+    true
+}
+
+/// Leave the transcript somewhere the person can get it back from.
+///
+/// The paste path with the copy toggle off snapshots the old clipboard and
+/// restores it half a second after the write, guarded by the pasteboard's
+/// change count. Writing the transcript here moves that count, so the restore
+/// stands down and the words survive. Without this, an insertion that did not
+/// land took the sentence with it.
+async fn keep_transcript_recoverable(
+    app_handle: &AppHandle,
+    app_state: &State<'_, AppState>,
+    text: &str,
+) {
+    if let Err(e) = crate::commands::core::set_clipboard(
+        text.to_string(),
+        app_handle.clone(),
+        (*app_state).clone(),
+    )
+    .await
+    {
+        error!(
+            "[Dictation] Could not even put the transcript on the clipboard: {}",
+            e
+        );
+    }
+}
+
+/// Say, where a person can see it, that the words did not go in.
+///
+/// An insertion that fails is the user-visible bug even when the cause is a
+/// genuinely flaky OS call, and until now it was an `error!` line in a log
+/// nobody reads: the dictation simply appeared not to happen. The tray already
+/// turns red on the `app-dictation-error` event, and a notification is the
+/// one surface that works when the focused app is not Juno, which, for a
+/// dictation, it never is.
+fn report_insertion_failure(app_handle: &AppHandle, detail: &str, sentence: &str) {
+    error!("[Dictation] Insertion did not land: {}", detail);
+
+    if let Err(e) = tauri::Emitter::emit(
+        app_handle,
+        crate::constants::events::dictation::ERROR,
+        serde_json::json!({ "message": sentence, "detail": detail }),
+    ) {
+        warn!("[Dictation] Could not announce the failed insertion: {}", e);
+    }
+
+    crate::commands::notifications::notify(app_handle, "Juno could not type that", sentence);
+}
+
 /// Insert a dictation transcript into the focused app using the configured
 /// insertion mode and copy-to-clipboard toggle (see [`InsertionPlan`]).
 ///
@@ -189,32 +399,72 @@ pub async fn insert_dictation_text(app_handle: &AppHandle, text: &str) -> Result
     let plan = plan_insertion(&insertion_mode, copy_to_clipboard);
 
     let started = std::time::Instant::now();
-    if plan.clipboard_free {
+    let attempt = if plan.clipboard_free {
         let owned = text.to_string();
-        let method = tokio::task::spawn_blocking(move || {
+        match tokio::task::spawn_blocking(move || {
             computer_use_ai_sdk::insert_text_clipboard_free(&owned)
         })
         .await
-        .map_err(|e| format!("Clipboard-free insertion task panicked: {}", e))?
-        .map_err(|e| format!("Clipboard-free insertion failed: {}", e))?;
-        info!(
-            "[Dictation] Inserted {} chars in {} ms (mode=clipboard_free, path={})",
-            text.chars().count(),
-            started.elapsed().as_millis(),
-            method
-        );
+        {
+            Ok(Ok(path)) => Ok(format!("mode=clipboard_free, path={}", path)),
+            Ok(Err(e)) => Err(format!("Clipboard-free insertion failed: {}", e)),
+            Err(e) => Err(format!("Clipboard-free insertion task panicked: {}", e)),
+        }
     } else {
         let owned = text.to_string();
         let retain = plan.paste_retains_clipboard;
-        tokio::task::spawn_blocking(move || computer_use_ai_sdk::paste_text_global(&owned, retain))
-            .await
-            .map_err(|e| format!("Paste insertion task panicked: {}", e))?
-            .map_err(|e| format!("Paste insertion failed: {}", e))?;
-        info!(
-            "[Dictation] Inserted {} chars in {} ms (mode=paste, retain_clipboard={})",
+        match tokio::task::spawn_blocking(move || {
+            computer_use_ai_sdk::paste_text_global(&owned, retain)
+        })
+        .await
+        {
+            Ok(Ok(())) => Ok(format!("mode=paste, retain_clipboard={}", retain)),
+            Ok(Err(e)) => Err(format!("Paste insertion failed: {}", e)),
+            Err(e) => Err(format!("Paste insertion task panicked: {}", e)),
+        }
+    };
+
+    // "Sent", deliberately not "inserted". Both paths finish by posting
+    // CGEvents, and a posted event has no outcome to read: the paste path's
+    // `CGEvent::post` returns `()`. The old line said "Inserted N chars", so
+    // a log of a dictation that never landed read as a clean success, which
+    // is how "sometimes the text is not pasted" stayed invisible.
+    match attempt {
+        Ok(how) => info!(
+            "[Dictation] Sent {} chars to the focused app in {} ms ({})",
             text.chars().count(),
             started.elapsed().as_millis(),
-            retain
+            how
+        ),
+        Err(e) => {
+            // The words are not lost. Whatever the insertion mode and the
+            // copy toggle say, a failed insertion leaves the transcript on
+            // the clipboard, because the alternative is a sentence the person
+            // said out loud existing nowhere.
+            keep_transcript_recoverable(app_handle, &app_state, text).await;
+            report_insertion_failure(
+                app_handle,
+                &e,
+                "Juno could not type that. The words are on the clipboard: press Command V to paste them.",
+            );
+            return Err(e);
+        }
+    }
+
+    // An insertion that was *sent* is not an insertion that landed, and when
+    // Accessibility is off it certainly did not: macOS drops a posted CGEvent
+    // entirely, with no error and nothing to check. Say so, and keep the
+    // words. Checked after the attempt rather than before it so this can
+    // never be the reason an insertion that would have worked did not happen.
+    if !can_post_keystrokes() {
+        keep_transcript_recoverable(app_handle, &app_state, text).await;
+        report_insertion_failure(
+            app_handle,
+            "Accessibility is not granted, so the keystrokes Juno posted were discarded by macOS",
+            "Juno is not allowed to type into other apps, so nothing was pasted. The words are on the clipboard. Turn Juno on in System Settings, under Privacy and Security, Accessibility.",
+        );
+        return Err(
+            "Accessibility permission is not granted, so the insertion could not land".to_string(),
         );
     }
 

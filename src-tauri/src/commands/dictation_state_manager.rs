@@ -480,17 +480,20 @@ impl DictationStateManager {
     fn is_valid_transition(&self, from: &DictationState, to: &DictationState) -> bool {
         use DictationState::*;
         match (from, to) {
-            // Allow idempotent Idle -> Idle transitions (for cleanup operations)
-            (Idle, Idle) => true,
+            // Rest is always reachable. `Active -> Idle` used to be refused,
+            // which meant `force_stop_dictation` — the escape hatch the stop
+            // key runs — failed its final transition in exactly the case it
+            // exists for, left this manager believing dictation was still
+            // active, and so never ran `sync_all_components`: the stop key
+            // stayed registered to a session that was gone. A state machine
+            // whose recovery path can be refused is not a recovery path.
+            (_, Idle) => true,
+            (_, ForceResetting) => true,
             (Idle, Starting) => true,
             (Starting, Active { .. }) => true,
             (Starting, Error { .. }) => true,
             (Active { .. }, Stopping) => true,
             (Active { .. }, Error { .. }) => true,
-            (Stopping, Idle) => true,
-            (Error { .. }, Idle) => true,
-            (_, ForceResetting) => true,
-            (ForceResetting, Idle) => true,
             _ => false,
         }
     }
@@ -668,4 +671,65 @@ pub async fn sync_dictation_state(active: bool) -> Result<(), String> {
         target_state
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manager() -> DictationStateManager {
+        DictationStateManager::new()
+    }
+
+    fn active() -> DictationState {
+        DictationState::Active { started_at: 1 }
+    }
+
+    #[test]
+    fn rest_is_reachable_from_every_state() {
+        // The bug this pins: `Active -> Idle` was refused, so
+        // `force_stop_dictation` — what the stop key runs — failed its final
+        // transition in exactly the case it exists for. The manager went on
+        // believing dictation was active, `sync_all_components` never ran, and
+        // the stop key stayed registered to a session that was already gone.
+        let m = manager();
+        for from in [
+            DictationState::Idle,
+            DictationState::Starting,
+            active(),
+            DictationState::Stopping,
+            DictationState::Error {
+                message: "whatever went wrong".to_string(),
+            },
+            DictationState::ForceResetting,
+        ] {
+            assert!(
+                m.is_valid_transition(&from, &DictationState::Idle),
+                "a recovery path that can be refused is not a recovery path: {:?} -> Idle",
+                from
+            );
+        }
+    }
+
+    #[test]
+    fn a_force_reset_is_reachable_from_every_state() {
+        let m = manager();
+        for from in [DictationState::Idle, DictationState::Starting, active()] {
+            assert!(m.is_valid_transition(&from, &DictationState::ForceResetting));
+        }
+    }
+
+    #[test]
+    fn the_ordinary_run_of_a_session_is_still_the_only_way_forward() {
+        let m = manager();
+        assert!(m.is_valid_transition(&DictationState::Idle, &DictationState::Starting));
+        assert!(m.is_valid_transition(&DictationState::Starting, &active()));
+        assert!(m.is_valid_transition(&active(), &DictationState::Stopping));
+
+        // A session cannot appear out of nowhere, and a stop cannot become a
+        // start without passing through rest.
+        assert!(!m.is_valid_transition(&DictationState::Idle, &active()));
+        assert!(!m.is_valid_transition(&DictationState::Stopping, &DictationState::Starting));
+        assert!(!m.is_valid_transition(&active(), &DictationState::Starting));
+    }
 }

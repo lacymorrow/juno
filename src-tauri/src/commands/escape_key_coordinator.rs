@@ -439,6 +439,16 @@ fn current_binding(_app_handle: &AppHandle) -> StopKeyBinding {
 }
 
 /// Is anything live that a stop-key press would need to stop?
+///
+/// An open voice session counts, and it has to: this is the gate in front of
+/// the coordinated stop, so anything it cannot see is something Escape cannot
+/// end. Every other signal here is a flag some path sets by hand, and a flag
+/// that drifted is exactly when the person reaches for Escape. The session
+/// registry is the one record that *owns* the microphone, so asking it is what
+/// makes Escape work on the stuck states rather than only the tidy ones — a
+/// capture that failed with the flag already down used to leave a standing
+/// session that refused every later dictation, while Escape read the flags,
+/// decided nothing was happening, and dismissed the chat pane instead.
 pub(crate) async fn something_to_stop(app_handle: &AppHandle) -> bool {
     let Some(state) = app_handle.try_state::<crate::state::AppState>() else {
         return false;
@@ -446,6 +456,7 @@ pub(crate) async fn something_to_stop(app_handle: &AppHandle) -> bool {
     if state.is_agent_executing()
         || state.is_dictation_active()
         || state.is_onboarding_active()
+        || state.current_voice_session().is_some()
         || crate::tts::is_tts_playing()
     {
         return true;
