@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
 import type { SttDownloadProgress, SttModelsStatus } from "@/hooks/useSttModels";
+import { AppearanceStep } from "./AppearanceStep";
 import { shortcutCaps, type KeyCap } from "@/components/settings/KeyCaps";
 
 // ── Visual language ──────────────────────────────────────────────────────────
@@ -373,6 +374,15 @@ const getOnboardingSteps = (
     // No shadow on the app icon — Apple setup assistants never shadow them.
     icon: <img src="/juno.png" alt="Juno" className="h-24 w-24 object-contain" />,
     action: "Get Started",
+  },
+  // Fun and low-stakes goes first, before anything asks for a key or a
+  // permission. Continue with no choice keeps the default look.
+  {
+    id: "appearance",
+    title: "Pick how Juno looks",
+    description: "This is how Juno shows up when you talk to it. Change it any time in Settings.",
+    icon: null, // The live preview is the content here.
+    action: "Continue",
   },
   // Onboarding stays as short as possible: only what the app needs to function
   // (a provider and permissions). Role capture and the keyboard drills were
@@ -1843,7 +1853,9 @@ export default function OnboardingFlow({
 
   // Skip stays available on the permissions step however little is granted:
   // "later" has to be a real answer, not a dead link.
-  const isSkipHidden = currentStep === onboardingSteps.length - 1;
+  // The appearance step has nothing to skip: Continue keeps the default.
+  const isSkipHidden =
+    currentStep === onboardingSteps.length - 1 || step.id === "appearance";
 
   // The offer screen: its primary action starts the download, then reads
   // Continue; "Not now" is remembered so setup never asks again. Once the
@@ -2023,6 +2035,8 @@ export default function OnboardingFlow({
                   )}
                 </div>
               )}
+
+              {step.id === "appearance" && <AppearanceStep />}
 
               {/* Dictation model offer: one card, one number, one decision. */}
               {step.id === "dictation-model" && dictationOffer && (
