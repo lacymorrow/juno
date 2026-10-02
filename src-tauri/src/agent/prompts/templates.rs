@@ -127,6 +127,18 @@ One plain sentence about what you found, then one question. Then stop and wait.
 No error dumps, no exit codes, no file paths, no apologies. The person may not know what a file path is. Do not retry silently, and do not abandon the task silently."#
     }
 
+    /// Requests to do something happen on the Mac, never as text in chat.
+    ///
+    /// Pinned by `every_acting_prompt_carries_the_act_in_the_real_computer_rule`.
+    /// Every token here is paid on every turn, so keep it short.
+    pub fn act_in_the_real_computer() -> &'static str {
+        r#"**ACT IN THE REAL COMPUTER**
+A request to do something (play a game, write a doc, edit a photo, play music) happens in a real app or site on this Mac, never as text in chat. Chat answers are for questions.
+To do an activity, first find where it can happen: installed apps (`ls /Applications /System/Applications`), then a site in the browser. One obvious place (chess: /System/Applications/Chess.app): open it and go, no asking. None, or several equal ones: ask one short question with options, e.g. "Chess.app isn't here. Play on chess.com or lichess.org?" Then stop.
+Never draw a board or game as ASCII, play "in our heads", or describe a document instead of making it, unless asked.
+Once it is open, do it: screenshot, click the move, screenshot to confirm, then say what you did in one line. In a game you take one side; make your move in the app, then wait for theirs."#
+    }
+
     /// 🎯 **ACCESSIBILITY-FIRST COMPUTER USE STRATEGY** - Critical for accurate interaction
     pub fn accessibility_first_strategy() -> &'static str {
         r#"🎯 **ACCESSIBILITY-FIRST COMPUTER USE STRATEGY** - CRITICAL FOR ACCURACY
@@ -1815,9 +1827,10 @@ impl DefaultPrompts {
     /// Main system prompt for single agent mode (streamlined)
     pub fn system_default() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::honest_observation(),
+            PromptFragments::act_in_the_real_computer(),
             PromptFragments::chain_of_thought_framework(),
             PromptFragments::multishot_examples(),
             PromptFragments::response_prefilling_patterns(),
@@ -1847,9 +1860,10 @@ impl DefaultPrompts {
     /// Development-only self-aware system prompt (streamlined)
     pub fn system_default_development() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::honest_observation(),
+            PromptFragments::act_in_the_real_computer(),
             PromptFragments::chain_of_thought_framework(),
             PromptFragments::multishot_examples(),
             PromptFragments::response_prefilling_patterns(),
@@ -2067,8 +2081,11 @@ For complex desktop tasks, think through your approach:
 
 {}
 
+{}
+
 {}"#,
             PromptFragments::honest_observation(),
+            PromptFragments::act_in_the_real_computer(),
             PromptFragments::chain_of_thought_framework(),
             PromptFragments::accessibility_first_strategy(),
             PromptFragments::native_accessibility_tools(),
@@ -2225,6 +2242,44 @@ mod tests {
                 "{name} does not tell the model where the observation is"
             );
         }
+    }
+
+    /// The rule that stops "play chess" turning into an ASCII board has to be
+    /// in every prompt that acts. Pinned so it cannot silently disappear.
+    #[test]
+    fn every_acting_prompt_carries_the_act_in_the_real_computer_rule() {
+        for (name, template) in [
+            ("system_default", DefaultPrompts::system_default()),
+            (
+                "system_default_development",
+                DefaultPrompts::system_default_development(),
+            ),
+            ("desktop_expert", DefaultPrompts::desktop_expert()),
+        ] {
+            for needle in [
+                "ACT IN THE REAL COMPUTER",
+                "never as text in chat",
+                "Never draw a board or game as ASCII",
+                "/System/Applications/Chess.app",
+                "ask one short question with options",
+            ] {
+                assert!(template.content.contains(needle), "{name} lost {needle:?}");
+            }
+        }
+        assert!(!DefaultPrompts::system_companion()
+            .content
+            .contains("ACT IN THE REAL COMPUTER"));
+    }
+
+    /// The prompt tells the model to look for installed apps with this exact
+    /// command. If it ever needs approval, the demo stalls on a prompt.
+    #[test]
+    fn the_installed_app_lookup_the_prompt_names_runs_without_asking() {
+        use crate::agent::tools::risk_classifier::is_inert_shell_command;
+        let rule = PromptFragments::act_in_the_real_computer();
+        let cmd = "ls /Applications /System/Applications";
+        assert!(rule.contains(cmd));
+        assert!(is_inert_shell_command(cmd));
     }
 
     /// Companion mode watches and advises; it takes no actions, so it has no
