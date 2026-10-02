@@ -2,11 +2,21 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import type { ChatMessage } from "@/types/chat";
-import { HEAD, HEAD_ANCHOR, LINGER_MS, PAD, PANEL_WIDTH, SHRINK_DELAY_MS } from "../avatarModel";
+import {
+  CONTROLS_HEIGHT,
+  GAP,
+  HEAD,
+  HEAD_ANCHOR,
+  LINGER_MS,
+  PAD,
+  PANEL_WIDTH,
+  REST_SIZE,
+  SHRINK_DELAY_MS,
+} from "../avatarModel";
 
 // ── Tauri, Rive and hook stand-ins ──────────────────────────────────
 
-const { invoke, listenHandlers, eventHandlers, resizeWindowIfChanged, chat, monitorY } = vi.hoisted(() => ({
+const { invoke, listenHandlers, eventHandlers, resizeWindowIfChanged, chat, monitorY, focus } = vi.hoisted(() => ({
   invoke: vi.fn((..._args: unknown[]): Promise<unknown> => Promise.resolve(true)),
   listenHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   eventHandlers: new Map<string, (payload: unknown) => void>(),
@@ -18,6 +28,8 @@ const { invoke, listenHandlers, eventHandlers, resizeWindowIfChanged, chat, moni
   },
   // Where the fake window sits: y of its top edge, on a 900px display.
   monitorY: { top: 40 },
+  // The window's focus listener, so a test can make the window key.
+  focus: { handler: null as null | ((event: { payload: boolean }) => void) },
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
@@ -31,12 +43,18 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     label: "floating-bar",
-    onFocusChanged: vi.fn(async () => () => {}),
+    onFocusChanged: vi.fn(async (handler: (event: { payload: boolean }) => void) => {
+      focus.handler = handler;
+      return () => {};
+    }),
+    setFocus: vi.fn(async () => {}),
     startDragging: vi.fn(async () => {}),
     outerPosition: vi.fn(async () => ({ x: 1000, y: monitorY.top })),
     outerSize: vi.fn(async () => ({ width: 116, height: 116 })),
   }),
   availableMonitors: vi.fn(async () => [{ position: { x: 0, y: 0 }, size: { width: 1440, height: 900 } }]),
+  // Far from the window, so a verified leave counts.
+  cursorPosition: vi.fn(async () => ({ x: 0, y: 0 })),
 }));
 vi.mock("@/hooks/useEventListener", () => ({
   useEventListener: (event: string, handler: (payload: unknown) => void) => {
@@ -484,5 +502,122 @@ describe("PersonaBar", () => {
         interaction: expect.objectContaining({ interaction_type: UI.INTERACTION_TYPES_BLUR }),
       }),
     );
+  });
+});
+
+// ── Parity with the Pill and the Island ─────────────────────────────
+
+/** The pointer arrives over the window, the way the native tracking area says it. */
+async function pointerIn() {
+  await act(async () => {
+    eventHandlers.get(EVENTS.SYSTEM_MOUSE_ENTERED_WINDOW)?.(null);
+  });
+  await settle();
+}
+
+async function pointerOut() {
+  await act(async () => {
+    eventHandlers.get(EVENTS.SYSTEM_MOUSE_LEFT_WINDOW)?.(null);
+    vi.advanceTimersByTime(200);
+  });
+  await settle();
+}
+
+const interactions = () =>
+  invoke.mock.calls
+    .filter((c) => c[0] === "ui_handle_interaction")
+    .map((c) => (c[1] as { interaction: { interaction_type: string } }).interaction.interaction_type);
+
+describe("PersonaBar hover, drag and the way back", () => {
+  it("shows talk and type in a small bubble under the pointer at rest, without widening the window", async () => {
+    render(<PersonaBar />);
+    await settle();
+    expect(screen.queryByTestId("avatar-controls")).toBeNull();
+    resizeWindowIfChanged.mockClear();
+    await pointerIn();
+    const controls = screen.getByTestId("avatar-controls");
+    expect(controls.getAttribute("data-tail")).toBe("head");
+    expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Type to Juno" })).toBeInTheDocument();
+    // No answer yet, so nothing to go back to.
+    expect(screen.queryByRole("button", { name: "Show last answer" })).toBeNull();
+    expect(resizeWindowIfChanged).toHaveBeenCalledWith(
+      expect.objectContaining({ width: REST_SIZE, height: REST_SIZE + GAP + CONTROLS_HEIGHT, anchorY: HEAD_ANCHOR }),
+    );
+
+    await pointerOut();
+    expect(screen.queryByTestId("avatar-controls")).toBeNull();
+  });
+
+  it("talk starts listening and type opens the composer", async () => {
+    render(<PersonaBar />);
+    await pointerIn();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Talk to Juno" }));
+    });
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "start" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Type to Juno" }));
+    });
+    expect(interactions()).toContain(UI.INTERACTION_TYPES_CLICK);
+  });
+
+  it("brings a closed answer back from the hover bubble and from the tray", async () => {
+    const { rerender } = render(<PersonaBar />);
+    chat.messages = [
+      { role: "user", content: "Q", timestamp: 1 },
+      { role: "assistant", content: "The answer", messageId: "m1", timestamp: 2 },
+    ];
+    rerender(<PersonaBar />);
+    expect(screen.getByTestId("avatar-answer")).toBeInTheDocument();
+    await pointerIn();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("avatar-answer")).toBeNull();
+
+    // Put away under the pointer, it stays a bare head until the pointer
+    // leaves and comes back.
+    await settle();
+    expect(screen.queryByTestId("avatar-controls")).toBeNull();
+    await pointerOut();
+    await pointerIn();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Show last answer" }));
+    });
+    expect(screen.getByTestId("avatar-answer")).toHaveTextContent("The answer");
+
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
+    });
+    expect(screen.queryByTestId("avatar-answer")).toBeNull();
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
+    });
+    expect(screen.getByTestId("avatar-answer")).toBeInTheDocument();
+  });
+
+  it("does not open the composer when the window becomes key, so a drag never grows the window", async () => {
+    render(<PersonaBar />);
+    await settle();
+    invoke.mockClear();
+    await act(async () => {
+      focus.handler?.({ payload: true });
+    });
+    expect(interactions()).not.toContain(UI.INTERACTION_TYPES_FOCUS);
+    await act(async () => {
+      focus.handler?.({ payload: false });
+    });
+    expect(interactions()).toContain(UI.INTERACTION_TYPES_BLUR);
+  });
+
+  it("Escape over the hover bubble lands on the bare head", async () => {
+    render(<PersonaBar />);
+    await pointerIn();
+    expect(screen.getByTestId("avatar-controls")).toBeInTheDocument();
+    await send(UI.BAR_STATES_LISTENING);
+    expect(screen.queryByTestId("avatar-controls")).toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await send(UI.BAR_STATES_DEFAULT);
+    expect(screen.queryByTestId("avatar-controls")).toBeNull();
+    expect(gesture()).toBe("calm");
   });
 });

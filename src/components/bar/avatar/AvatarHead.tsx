@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Persona } from "@/components/ai-elements/persona";
-import { HEAD, type Cue, type Gesture, type HeadLook } from "./avatarModel";
+import { useSpeechLevel } from "@/hooks/useSpeechLevel";
+import { HEAD, mouthScale, type Cue, type HeadLook } from "./avatarModel";
 import { VOICE_TRANSITION, clampLevel, voiceScale } from "../voiceLevel";
 
 /**
@@ -11,6 +12,10 @@ import { VOICE_TRANSITION, clampLevel, voiceScale } from "../voiceLevel";
  * on top. The Rive file has no eyes, mouth or neck, so the face is SVG and
  * the gestures are transforms on this box. State is told by what the face
  * does, never by an icon.
+ *
+ * The mouth moves only while Juno's voice is actually audible: it follows the
+ * speech level Rust streams from the audio being played, and closes the
+ * moment the sound stops, however long the bar stays in a speaking state.
  */
 
 const KEYFRAMES = `
@@ -43,20 +48,12 @@ const KEYFRAMES = `
 .av-head[data-gesture="nod"] .av-eyes { animation: none; }
 
 .av-mouth { transform-box: fill-box; transform-origin: center; transform: scaleY(0.3); transition: transform 180ms ease-out; }
-.av-head[data-gesture="talk"] .av-mouth { animation: av-talk 760ms ease-in-out infinite; }
-.av-head[data-gesture="wince"] .av-mouth { transform: scaleY(0.3) scaleX(0.7) translateY(1px); }
+.av-mouth[data-talking="true"] { transition: transform 70ms linear; }
+.av-head[data-gesture="wince"] .av-mouth[data-talking="false"] { transform: scaleY(0.3) scaleX(0.7) translateY(1px); }
 
 @keyframes av-blink {
   0%, 90%, 100% { transform: scaleY(1); }
   94% { transform: scaleY(0.08); }
-}
-@keyframes av-talk {
-  0%   { transform: scaleY(0.3); }
-  20%  { transform: scaleY(1.0); }
-  40%  { transform: scaleY(0.45); }
-  60%  { transform: scaleY(1.2); }
-  80%  { transform: scaleY(0.6); }
-  100% { transform: scaleY(0.3); }
 }
 @keyframes av-nod {
   0%   { transform: translateY(0) scaleY(1); }
@@ -101,8 +98,14 @@ const CUE_ANIMATION: Record<Cue["motion"], string | undefined> = {
   still: undefined,
 };
 
-/** The face: two eyes that blink and look, a mouth that moves while talking. */
-function Face({ gesture, blink }: { gesture: Gesture; blink: boolean }) {
+/**
+ * The face: two eyes that blink and look, and a mouth that opens with Juno's
+ * voice. It subscribes to the speech level itself, so only this SVG redraws
+ * at the level's rate, not the sphere or the bar around it.
+ */
+function Face({ blink, reducedMotion }: { blink: boolean; reducedMotion: boolean }) {
+  const voice = useSpeechLevel();
+  const open = mouthScale({ ...voice, reducedMotion });
   return (
     <svg
       className="av-face pointer-events-none absolute inset-0"
@@ -118,7 +121,10 @@ function Face({ gesture, blink }: { gesture: Gesture; blink: boolean }) {
       </g>
       <ellipse
         className="av-mouth"
-        data-talking={gesture === "talk" ? "true" : "false"}
+        data-testid="avatar-mouth"
+        data-talking={voice.speaking ? "true" : "false"}
+        data-open={open.toFixed(2)}
+        style={voice.speaking ? { transform: `scaleY(${open})` } : undefined}
         cx="36"
         cy="47.5"
         rx="5"
@@ -200,7 +206,7 @@ export function AvatarHead({ look, facingUp, reducedMotion, level = 0, onClick, 
           )}
         />
       )}
-      <Face gesture={look.gesture} blink={blink} />
+      <Face blink={blink} reducedMotion={reducedMotion} />
       {look.cue && (
         // The outer span carries the voice swell; the inner one keeps the
         // cue's own breathing, so the two transforms never fight.
