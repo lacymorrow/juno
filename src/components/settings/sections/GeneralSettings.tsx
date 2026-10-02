@@ -13,10 +13,9 @@ import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { UI, COMMANDS } from "@/lib/constants.generated";
-import type { FloatingBarConfig } from "@/types/bar-config";
-import type { BarAppearance } from "@/components/bar/barAppearance";
+import { COMMANDS } from "@/lib/constants.generated";
 import { AppearancePicker } from "../AppearancePicker";
+import { useBarAppearance } from "../useBarAppearance";
 import { UpdatesGroup } from "../UpdatesGroup";
 
 export default function GeneralSettings({ settings }: SettingsSectionProps) {
@@ -25,10 +24,11 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [restartOnboardingLoading, setRestartOnboardingLoading] =
     useState(false);
   const [onboardingInfo, setOnboardingInfo] = useState<any>(null);
-  const [barAppearance, setBarAppearance] = useState<string>(
-    UI.BAR_APPEARANCES_DEFAULT
-  );
-  const [barAppearanceLoading, setBarAppearanceLoading] = useState(false);
+  const {
+    value: barAppearance,
+    saving: barAppearanceLoading,
+    change: handleBarAppearanceChange,
+  } = useBarAppearance();
   const [followCursorDisplay, setFollowCursorDisplay] = useState(true);
   const [followCursorLoading, setFollowCursorLoading] = useState(false);
 
@@ -43,14 +43,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
         // Load onboarding info
         const info = await invoke(COMMANDS.ONBOARDING_GET_ONBOARDING_INFO);
         setOnboardingInfo(info);
-
-        // Load current bar appearance and glow-border preference
-        const barConfig = await invoke<{
-          bar_appearance?: string;
-        }>(COMMANDS.BAR_UI_GET_BAR_CONFIG);
-        if (barConfig?.bar_appearance) {
-          setBarAppearance(barConfig.bar_appearance);
-        }
 
         // Load "follow cursor across displays"
         const barSettings = await invoke<{ follow_cursor_display?: boolean }>(
@@ -139,31 +131,6 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
       });
     } finally {
       setFollowCursorLoading(false);
-    }
-  };
-
-  // No success toast: the bar itself changes on screen, and the picker's stage
-  // shows the new look. A toast would be a second, later, weaker signal.
-  const handleBarAppearanceChange = async (newAppearance: BarAppearance) => {
-    if (barAppearanceLoading) return;
-    setBarAppearanceLoading(true);
-    const previous = barAppearance;
-    setBarAppearance(newAppearance);
-    try {
-      const currentConfig = await invoke<FloatingBarConfig>(COMMANDS.BAR_UI_GET_BAR_CONFIG);
-      const updatedConfig = {
-        ...currentConfig,
-        bar_appearance: newAppearance,
-      };
-      await invoke(COMMANDS.BAR_UI_SET_BAR_CONFIG, { config: updatedConfig });
-    } catch (error) {
-      setBarAppearance(previous);
-      console.error("Failed to update bar appearance:", error);
-      toast.error("Failed to update bar appearance", {
-        description: error as string,
-      });
-    } finally {
-      setBarAppearanceLoading(false);
     }
   };
 
