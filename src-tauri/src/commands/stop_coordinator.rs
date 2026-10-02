@@ -20,6 +20,30 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
         .replacen("{}", &error.to_string(), 1)
 }
 
+/// Holds the "a cleanup is running" latch and puts it down on the way out,
+/// however the way out happens.
+///
+/// `stop_all_operations` used to clear the latch on the line after the cleanup
+/// returned. That line is not reached when the cleanup panics, and it is not
+/// reached when the task is dropped mid-await (a cancelled spawn, an app
+/// shutting down) — and the latch is what every later press of the stop key is
+/// refused by. One such exit and Escape did nothing at all for the rest of the
+/// run, with no error anywhere to say why: `try_start_cleanup` simply answered
+/// "already in progress" forever.
+///
+/// A latch whose release is a statement can be skipped. One whose release is a
+/// `Drop` cannot. Nothing calls this; holding it is the whole contract, which
+/// is why it takes no methods and why the binding is `let _latch` rather than
+/// `let _`: `let _` would drop it immediately and release the latch before the
+/// cleanup it is guarding has run.
+struct CleanupLatch(Arc<AtomicBool>);
+
+impl Drop for CleanupLatch {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Centralized stop coordinator to prevent race conditions and cascading cleanup operations
 pub struct StopCoordinator {
     /// Track active operations to prevent redundant stops
@@ -68,11 +92,6 @@ impl StopCoordinator {
         }
 
         true
-    }
-
-    /// Mark cleanup as completed
-    async fn mark_cleanup_completed(&self) {
-        self.cleanup_in_progress.store(false, Ordering::SeqCst);
     }
 
     /// Register an operation to track its lifecycle
@@ -145,13 +164,15 @@ impl StopCoordinator {
             return Ok("Cleanup skipped - already in progress".to_string());
         }
 
+        // The latch is released by `Drop`, not by a statement further down.
+        // See [`CleanupLatch`].
+        let _latch = CleanupLatch(Arc::clone(&self.cleanup_in_progress));
+
         // Register this cleanup operation
         let cleanup_id = self.register_operation("cleanup").await;
 
         let result = self.perform_coordinated_cleanup(app_handle, reason).await;
 
-        // Mark cleanup as completed
-        self.mark_cleanup_completed().await;
         self.unregister_operation(&cleanup_id).await;
 
         result
@@ -502,4 +523,44 @@ pub async fn coordinator_emergency_stop_all_operations(
 pub async fn get_stop_coordinator_status() -> Result<serde_json::Value, String> {
     let coordinator = get_stop_coordinator();
     Ok(coordinator.get_status().await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_cleanup_latch_is_released_when_its_guard_goes_out_of_scope() {
+        let latch = Arc::new(AtomicBool::new(true));
+        {
+            let _guard = CleanupLatch(Arc::clone(&latch));
+            assert!(
+                latch.load(Ordering::SeqCst),
+                "the latch stays set while the guard is held"
+            );
+        }
+        assert!(
+            !latch.load(Ordering::SeqCst),
+            "a cleanup that returned normally must leave the stop key usable"
+        );
+    }
+
+    #[test]
+    fn the_cleanup_latch_is_released_even_when_the_cleanup_panics() {
+        // This is the case the old explicit release could not cover, and the
+        // reason Escape could die for a whole run: a panic skipped the line
+        // that put the latch down, and every later stop was refused as
+        // "already in progress".
+        let latch = Arc::new(AtomicBool::new(true));
+        let held = Arc::clone(&latch);
+        let outcome = std::panic::catch_unwind(move || {
+            let _guard = CleanupLatch(held);
+            panic!("a cleanup step blew up");
+        });
+        assert!(outcome.is_err(), "the panic is still a panic");
+        assert!(
+            !latch.load(Ordering::SeqCst),
+            "the stop key must still work after a cleanup panics"
+        );
+    }
 }
