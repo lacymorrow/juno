@@ -72,7 +72,7 @@ The "words" column is the single line inside the island. Newest words stay visib
 
 | Rust bar state | Posture | Dot | Words | Leaves when |
 |---|---|---|---|---|
-| default | capsule | white 45%, breathes 4s | none | any state change, click (Rust: Expanding), hover brightens the dot only |
+| default | capsule | white 45%, breathes 4s | none | any state change, click (Rust: Expanding). Under the pointer it widens to the hover posture (132x32): talk, type, and "Show last answer" once there is a turn, the way back to a closed card. The tray Show/Hide Chat toggles the same card. After Escape or a dismissed card it stays a capsule until the pointer leaves and returns |
 | dictation_ready | capsule | green 60%, still | none | dictation starts |
 | shrinking | capsule | white 25% | none | Rust: Default after 300ms |
 | expanding | line | white 70%, still | composer, disabled | Rust: Input after 300ms |

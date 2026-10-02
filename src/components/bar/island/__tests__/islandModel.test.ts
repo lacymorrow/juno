@@ -56,6 +56,20 @@ describe("posture", () => {
     expect(posture({ state: UI.BAR_STATES_LISTENING, cardOpen: true })).toBe("card");
     expect(posture({ state: UI.BAR_STATES_INPUT, cardOpen: false, driving: true })).toBe("status");
   });
+
+  it("only an idle island answers the pointer with its controls", () => {
+    expect(posture({ state: UI.BAR_STATES_DEFAULT, cardOpen: false, hovered: true })).toBe("hover");
+    expect(posture({ state: UI.BAR_STATES_DICTATION_READY, cardOpen: false, hovered: true })).toBe("hover");
+    expect(posture({ state: UI.BAR_STATES_LISTENING, cardOpen: false, hovered: true })).toBe("ear");
+    expect(posture({ state: UI.BAR_STATES_LOADING, cardOpen: false, hovered: true })).toBe("status");
+    expect(posture({ state: UI.BAR_STATES_INPUT, cardOpen: false, hovered: true })).toBe("line");
+    expect(posture({ state: UI.BAR_STATES_DEFAULT, cardOpen: true, hovered: true })).toBe("card");
+    // Barely bigger than the capsule, so it reads as the same object.
+    const h = islandSize("hover");
+    const c = islandSize("capsule");
+    expect(h.height - c.height).toBeLessThanOrEqual(4);
+    expect(h.width).toBeLessThan(islandSize("ear").width);
+  });
 });
 
 describe("sizes", () => {
