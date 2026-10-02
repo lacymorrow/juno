@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   Code,
-  Search,
   FileText,
-  Globe,
   Zap,
   Target,
   Palette,
@@ -23,6 +21,7 @@ import {
   Loader2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { isDevelopment } from "@/lib";
 import { cn } from "@/lib/utils";
 import {
@@ -33,6 +32,13 @@ import {
 
 interface ExamplePrompt {
   icon: LucideIcon;
+  title: string;
+  prompt: string;
+}
+
+/** A starter from the backend, which owns the list. */
+interface Starter {
+  id: string;
   title: string;
   prompt: string;
 }
@@ -56,9 +62,22 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
 }) => {
   const connecting = backendStatus === "connecting";
   const [isDevMode, setIsDevMode] = useState(false);
+  const [starters, setStarters] = useState<Starter[]>([]);
   // Closed on every mount so the pane always opens on the real empty state.
   // The dev commands are a workbench, not the first thing anyone should read.
   const [devCommandsOpen, setDevCommandsOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<Starter[]>("get_starters")
+      .then((list) => {
+        if (!cancelled && Array.isArray(list)) setStarters(list);
+      })
+      .catch((error) => console.warn("Failed to load starters:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const checkDevMode = async () => {
@@ -72,39 +91,6 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
 
     checkDevMode();
   }, []);
-
-  const productionPrompts: ExamplePrompt[] = [
-    {
-      icon: Globe,
-      title: "Browse Web",
-      prompt: "Open Google and search for the latest macOS updates",
-    },
-    {
-      icon: Monitor,
-      title: "Screenshot",
-      prompt: "Take a screenshot and open System Preferences",
-    },
-    {
-      icon: FileText,
-      title: "Create Note",
-      prompt: "Create a new note about my daily goals and open it",
-    },
-    {
-      icon: Code,
-      title: "Code Help",
-      prompt: "Help me understand the current project structure",
-    },
-    {
-      icon: Camera,
-      title: "Describe Screen",
-      prompt: "Take a screenshot and describe what's on my screen",
-    },
-    {
-      icon: Search,
-      title: "Research",
-      prompt: "Research the benefits of AI-human collaboration",
-    },
-  ];
 
   const developmentPrompts: ExamplePrompt[] = [
     {
@@ -217,6 +203,27 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
     },
   ];
 
+  const renderStarters = () => (
+    <div className="flex flex-wrap justify-center gap-2">
+      {starters.map((starter) => (
+        <button
+          key={starter.id}
+          type="button"
+          disabled={connecting}
+          className={cn(
+            "rounded-md border border-border/40 px-3 py-1.5 text-sm text-foreground transition-colors",
+            connecting
+              ? "cursor-default bg-secondary/30 opacity-50"
+              : "cursor-pointer bg-secondary/50 hover:bg-secondary",
+          )}
+          onClick={() => onPromptSelect(starter.prompt)}
+        >
+          {starter.title}
+        </button>
+      ))}
+    </div>
+  );
+
   const renderPrompts = (prompts: ExamplePrompt[]) => (
     <div className="flex flex-wrap justify-center gap-2">
       {prompts.map((example, index) => (
@@ -243,7 +250,7 @@ export const ExamplePrompts: React.FC<ExamplePromptsProps> = ({
     <div className="w-full max-w-lg mx-auto space-y-3">
       {/* Development builds used to swap these out entirely, which meant nobody
           working on Juno ever saw the empty state a real user gets. */}
-      {renderPrompts(productionPrompts)}
+      {renderStarters()}
 
       {/* One line, no toast. The buttons above are the only thing on screen
           that could look ready, so this says why they are not yet. */}
