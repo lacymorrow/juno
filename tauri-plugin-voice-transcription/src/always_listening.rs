@@ -4,6 +4,7 @@ use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use serde_json;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -132,18 +133,56 @@ pub enum AlwaysListeningState {
 }
 
 /// A running microphone, and what it took to get one.
-struct OpenCapture {
-    /// Kept alive by the caller. Dropping it stops capture.
-    stream: cpal::Stream,
-    /// Also kept alive by the caller, and never used again. cpal's stream owns
-    /// the audio unit, so this is belt and braces rather than a requirement,
-    /// and it costs one move.
-    device: cpal::Device,
+pub(crate) struct OpenCapture {
+    /// The stream (and its device), held only to be dropped: dropping it is
+    /// what stops capture and lets macOS take the orange indicator down. Boxed
+    /// so a test can stand in for cpal without opening a real microphone.
+    keepalive: Box<dyn std::any::Any>,
     sample_rate: u32,
     device_name: String,
     /// The microphone the person asked for, when it was not there and another
     /// one stood in.
     substituted_for: Option<String>,
+}
+
+/// How the worker opens its microphone. Runs on the worker thread, because a
+/// cpal stream is not `Send` and must be created and dropped where it lives.
+pub(crate) type CaptureOpener = Arc<
+    dyn Fn(Sender<Vec<f32>>) -> std::result::Result<OpenCapture, CaptureStartFailure> + Send + Sync,
+>;
+
+fn default_capture_opener() -> CaptureOpener {
+    Arc::new(open_capture_stream)
+}
+
+/// One open microphone stream, counted.
+///
+/// The controller is the only owner of the always-listening stream, and this
+/// guard is the stream: it exists exactly as long as capture does. The count
+/// it keeps is what `active_capture_handles` reports, so "is the mic still
+/// open after I turned this off" is a number a test can read rather than an
+/// orange dot somebody has to look at.
+struct CaptureGuard {
+    keepalive: Option<Box<dyn std::any::Any>>,
+    live: Arc<AtomicUsize>,
+}
+
+impl CaptureGuard {
+    fn new(keepalive: Box<dyn std::any::Any>, live: Arc<AtomicUsize>) -> Self {
+        live.fetch_add(1, Ordering::SeqCst);
+        Self {
+            keepalive: Some(keepalive),
+            live,
+        }
+    }
+}
+
+impl Drop for CaptureGuard {
+    fn drop(&mut self) {
+        // Stop the stream first, then say so.
+        drop(self.keepalive.take());
+        self.live.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// Open the microphone always-listening should use.
@@ -175,8 +214,7 @@ fn open_capture_stream(
     )?;
 
     Ok(OpenCapture {
-        stream,
-        device: resolved.device,
+        keepalive: Box::new((stream, resolved.device)),
         sample_rate,
         device_name: resolved.name,
         substituted_for: resolved.substituted_for,
@@ -192,6 +230,8 @@ pub struct AlwaysListeningController {
     sensitivity: f32,
     wake_words: Vec<String>,
     last_activity: Arc<Mutex<Option<Instant>>>,
+    capture_opener: CaptureOpener,
+    live_captures: Arc<AtomicUsize>,
 }
 
 impl AlwaysListeningController {
@@ -213,6 +253,8 @@ impl AlwaysListeningController {
             sensitivity: DEFAULT_SENSITIVITY,
             wake_words: DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect(),
             last_activity: Arc::new(Mutex::new(None)),
+            capture_opener: default_capture_opener(),
+            live_captures: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -238,16 +280,25 @@ impl AlwaysListeningController {
             sensitivity: DEFAULT_SENSITIVITY,
             wake_words: DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect(),
             last_activity: Arc::new(Mutex::new(None)),
+            capture_opener: default_capture_opener(),
+            live_captures: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    /// How many microphone streams this controller has open right now.
+    ///
+    /// Zero whenever always-listening is off. Anything else after a stop is
+    /// the privacy bug this exists to catch: a hot mic nobody asked for.
+    pub fn active_capture_handles(&self) -> usize {
+        self.live_captures.load(Ordering::SeqCst)
     }
 
     pub fn start_always_listening<R: Runtime + 'static>(
         &mut self,
         app_handle: &AppHandle<R>,
     ) -> Result<()> {
-        if self.is_active {
-            return Ok(()); // Already active
-        }
+        // "Already active" is decided in `spawn_worker`, which can tell a live
+        // worker from one that has ended.
 
         // Check microphone permission
         info!("[AlwaysListeningController] Checking microphone permission before starting...");
@@ -269,6 +320,26 @@ impl AlwaysListeningController {
             }
         }
 
+        self.spawn_worker(app_handle)
+    }
+
+    /// Start the worker that owns the microphone. Everything after the
+    /// permission check, so a test can run it without asking macOS.
+    fn spawn_worker<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
+        // A worker that already ended (its microphone would not open) still
+        // looks active from here. Reap it, or "already active" would keep
+        // every later start from doing anything.
+        if self
+            .audio_thread
+            .as_ref()
+            .is_some_and(|(handle, _)| handle.is_finished())
+        {
+            let _ = self.stop_always_listening();
+        }
+        if self.is_active {
+            return Ok(());
+        }
+
         info!("[AlwaysListeningController] Starting always listening mode...");
 
         // Validate engine BEFORE setting is_active to prevent stale state
@@ -288,6 +359,8 @@ impl AlwaysListeningController {
         let sensitivity = self.sensitivity;
         let wake_words = self.wake_words.clone();
         let last_activity_arc = Arc::clone(&self.last_activity);
+        let capture_opener = Arc::clone(&self.capture_opener);
+        let live_captures = Arc::clone(&self.live_captures);
 
         let audio_thread_handle = thread::spawn(move || {
             Self::always_listening_worker(
@@ -297,6 +370,8 @@ impl AlwaysListeningController {
                 sensitivity,
                 wake_words,
                 last_activity_arc,
+                capture_opener,
+                live_captures,
             );
         });
 
@@ -309,6 +384,7 @@ impl AlwaysListeningController {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn always_listening_worker<R: Runtime + 'static>(
         engine: Arc<dyn TranscriptionEngine>,
         app_handle: AppHandle<R>,
@@ -316,6 +392,8 @@ impl AlwaysListeningController {
         mut sensitivity: f32,
         mut wake_words: Vec<String>,
         last_activity: Arc<Mutex<Option<Instant>>>,
+        capture_opener: CaptureOpener,
+        live_captures: Arc<AtomicUsize>,
     ) {
         info!(
             "[AlwaysListening] Worker thread started. Engine: '{}'",
@@ -340,7 +418,7 @@ impl AlwaysListeningController {
         // Every way the microphone can refuse to open is a named failure the
         // person is told about, not a log line and a dead thread. Keep it that
         // way: the one `return` below is the only exit, and it reports first.
-        let opened = match open_capture_stream(audio_data_tx) {
+        let opened = match capture_opener(audio_data_tx) {
             Ok(opened) => opened,
             Err(failure) => {
                 capture_failure::report(&app_handle, &failure);
@@ -348,14 +426,15 @@ impl AlwaysListeningController {
             }
         };
         let OpenCapture {
-            // Held for as long as the loop runs. Dropping the stream stops the
-            // microphone, so it must outlive the loop below.
-            stream: _stream,
-            device: _device,
+            keepalive,
             sample_rate,
             device_name,
             substituted_for,
         } = opened;
+        // Held for as long as the loop runs. Dropping it stops the microphone,
+        // and it drops on every way out of this function, which is the only
+        // place the always-listening stream lives.
+        let _capture = CaptureGuard::new(keepalive, live_captures);
 
         if let Some(requested) = &substituted_for {
             let _ = app_handle.emit(
@@ -1266,8 +1345,15 @@ impl AlwaysListeningController {
         }
     }
 
+    /// The one stop path for the always-listening microphone.
+    ///
+    /// Keyed on the worker, not on `is_active`: if a worker exists, it is told
+    /// to stop and joined, and joining is what guarantees its stream has been
+    /// dropped by the time this returns. Returns whether anything was running.
     pub fn stop_always_listening(&mut self) -> Result<bool> {
-        if !self.is_active {
+        let was_running = self.audio_thread.is_some();
+        if !was_running {
+            self.is_active = false;
             return Ok(false);
         }
 
@@ -1296,7 +1382,7 @@ impl AlwaysListeningController {
         self.state = AlwaysListeningState::Monitoring;
 
         info!("[AlwaysListeningController] Always listening mode stopped");
-        Ok(true)
+        Ok(was_running)
     }
 
     pub fn is_active(&self) -> bool {
@@ -1610,13 +1696,9 @@ impl AlwaysListeningController {
 
 impl Drop for AlwaysListeningController {
     fn drop(&mut self) {
-        if self.is_active {
+        if self.audio_thread.is_some() {
             tracing::info!("[AlwaysListeningController] Drop: stopping active listening");
-            self.is_active = false;
-            if let Some((thread_handle, control_tx)) = self.audio_thread.take() {
-                let _ = control_tx.send(AlwaysListeningMessage::Stop);
-                let _ = thread_handle.join();
-            }
+            let _ = self.stop_always_listening();
         }
     }
 }
@@ -1627,3 +1709,162 @@ impl Drop for AlwaysListeningController {
 // We do NOT impl Sync because mutable fields (is_active, state, audio_thread, etc.) lack interior
 // mutability — the wrapping Mutex handles thread safety.
 unsafe impl Send for AlwaysListeningController {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An engine that hears nothing, so the worker never transcribes.
+    struct SilentEngine;
+    struct SilentSession;
+
+    impl TranscriptionSession for SilentSession {
+        fn transcribe_partial(
+            &mut self,
+            _audio: &[f32],
+        ) -> std::result::Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn transcribe_final(&mut self, _audio: &[f32]) -> std::result::Result<String, String> {
+            Ok(String::new())
+        }
+    }
+
+    impl TranscriptionEngine for SilentEngine {
+        fn name(&self) -> &'static str {
+            "silent"
+        }
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+        fn is_initialized(&self) -> bool {
+            true
+        }
+        fn create_session(&self) -> std::result::Result<Box<dyn TranscriptionSession>, String> {
+            Ok(Box::new(SilentSession))
+        }
+    }
+
+    /// A stand-in microphone: a token in place of the cpal stream, and a
+    /// chunk of silence so the worker loop has something to chew on.
+    fn fake_microphone() -> CaptureOpener {
+        Arc::new(
+            |tx: Sender<Vec<f32>>| -> std::result::Result<OpenCapture, CaptureStartFailure> {
+                let _ = tx.send(vec![0.0; 1600]);
+                Ok(OpenCapture {
+                    keepalive: Box::new(tx),
+                    sample_rate: WHISPER_SAMPLE_RATE,
+                    device_name: "Test Mic".to_string(),
+                    substituted_for: None,
+                })
+            },
+        )
+    }
+
+    fn controller_with_fake_mic() -> AlwaysListeningController {
+        let mut c = AlwaysListeningController::new_with_engine("test", Arc::new(SilentEngine))
+            .expect("controller");
+        c.capture_opener = fake_microphone();
+        c
+    }
+
+    fn wait_for_handles(c: &AlwaysListeningController, want: usize) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while c.active_capture_handles() != want && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(c.active_capture_handles(), want);
+    }
+
+    #[test]
+    fn stopping_leaves_no_microphone_open() {
+        let app = tauri::test::mock_app();
+        let mut c = controller_with_fake_mic();
+
+        c.spawn_worker(app.handle()).expect("start");
+        wait_for_handles(&c, 1);
+
+        assert!(c.stop_always_listening().expect("stop"));
+        // Not eventually: the stop joins the worker, so the stream is gone by
+        // the time it returns.
+        assert_eq!(c.active_capture_handles(), 0);
+        assert!(!c.is_active());
+    }
+
+    #[test]
+    fn stopping_twice_is_harmless_and_restarting_opens_exactly_one() {
+        let app = tauri::test::mock_app();
+        let mut c = controller_with_fake_mic();
+
+        c.spawn_worker(app.handle()).expect("start");
+        // A second start while running must not open a second microphone.
+        c.spawn_worker(app.handle()).expect("start again");
+        wait_for_handles(&c, 1);
+
+        c.stop_always_listening().expect("stop");
+        assert!(!c.stop_always_listening().expect("stop again"));
+        assert_eq!(c.active_capture_handles(), 0);
+
+        c.spawn_worker(app.handle()).expect("restart");
+        wait_for_handles(&c, 1);
+        c.stop_always_listening().expect("stop");
+        assert_eq!(c.active_capture_handles(), 0);
+    }
+
+    #[test]
+    fn swapping_the_engine_releases_the_microphone() {
+        let app = tauri::test::mock_app();
+        let mut c = controller_with_fake_mic();
+
+        c.spawn_worker(app.handle()).expect("start");
+        wait_for_handles(&c, 1);
+
+        c.update_engine(Arc::new(SilentEngine)).expect("swap");
+        assert_eq!(c.active_capture_handles(), 0);
+        assert!(!c.is_active());
+    }
+
+    #[test]
+    fn a_worker_whose_microphone_never_opened_does_not_block_the_next_start() {
+        let app = tauri::test::mock_app();
+        let mut c = controller_with_fake_mic();
+        c.capture_opener = Arc::new(
+            |_tx: Sender<Vec<f32>>| -> std::result::Result<OpenCapture, CaptureStartFailure> {
+                Err(CaptureStartFailure::NoInputDevice)
+            },
+        );
+
+        c.spawn_worker(app.handle()).expect("start");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !c
+            .audio_thread
+            .as_ref()
+            .is_some_and(|(handle, _)| handle.is_finished())
+            && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(c.active_capture_handles(), 0);
+
+        // The microphone is back. Starting again must open it rather than
+        // trust a stale "already active".
+        c.capture_opener = fake_microphone();
+        c.spawn_worker(app.handle()).expect("restart");
+        wait_for_handles(&c, 1);
+        c.stop_always_listening().expect("stop");
+        assert_eq!(c.active_capture_handles(), 0);
+    }
+
+    #[test]
+    fn dropping_the_controller_releases_the_microphone() {
+        let app = tauri::test::mock_app();
+        let mut c = controller_with_fake_mic();
+        let live = Arc::clone(&c.live_captures);
+
+        c.spawn_worker(app.handle()).expect("start");
+        wait_for_handles(&c, 1);
+
+        drop(c);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
+    }
+}

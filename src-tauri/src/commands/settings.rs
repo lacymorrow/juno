@@ -410,7 +410,7 @@ pub async fn set_advanced_settings_enabled(
     app_handle: AppHandle,
     enabled: bool,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
+    let settings_manager = SettingsManager::new(app_handle.clone()).map_err(|e| {
         format_error(
             templates::FAILED_TO_INITIALIZE,
             components::SETTINGS_MANAGER,
@@ -427,7 +427,14 @@ pub async fn set_advanced_settings_enabled(
                 actions::ADVANCED_SETTINGS_TOGGLE,
                 e,
             )
-        })
+        })?;
+
+    // Wake phrases are experimental and live behind this switch, so the
+    // engine follows it now: off releases the microphone, on re-arms a Say
+    // row that is still switched on.
+    crate::commands::triggers::set_voice_triggers_allowed(enabled);
+    crate::commands::triggers::reapply_voice_triggers(&app_handle).await;
+    Ok(())
 }
 
 /// Reset all settings to defaults that work on this machine.
