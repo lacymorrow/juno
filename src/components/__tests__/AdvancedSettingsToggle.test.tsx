@@ -374,7 +374,7 @@ describe("GeneralSettings in basic mode", () => {
     handleSoundEnabledChange: vi.fn(),
   } as any;
 
-  it("keeps launch-at-login and sound effects, hides the power-user cards", async () => {
+  it("keeps launch-at-login and the look, and nothing that lives elsewhere", async () => {
     mockBackend(false);
     render(
       <AdvancedSettingsProvider>
@@ -386,19 +386,21 @@ describe("GeneralSettings in basic mode", () => {
     );
 
     expect(screen.getByText("Open at login")).toBeInTheDocument();
-    expect(screen.getByText("Play sounds")).toBeInTheDocument();
     // How the bar looks is the first thing a person changes; it is never gated.
     expect(screen.getByRole("group", { name: "Bar appearance" })).toBeInTheDocument();
+    // Sounds moved to Audio; agent mode, onboarding and the build line to Advanced.
     for (const hidden of [
+      "Play sounds",
       "Agent mode",
       "Enable big cursor",
       "Restart onboarding",
+      "Build",
     ]) {
       expect(screen.queryByText(hidden)).not.toBeInTheDocument();
     }
   });
 
-  it("shows the power-user cards with the toggle on", async () => {
+  it("stays short with the advanced toggle on: the power-user rows live in Advanced", async () => {
     mockBackend(true);
     render(
       <AdvancedSettingsProvider>
@@ -407,7 +409,7 @@ describe("GeneralSettings in basic mode", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByText("Agent mode")).toBeInTheDocument()
+      expect(invokeMock).toHaveBeenCalledWith(GET_ADVANCED_SETTINGS_ENABLED)
     );
     expect(screen.getByRole("group", { name: "Bar appearance" })).toBeInTheDocument();
     expect(screen.getByText("Open at login")).toBeInTheDocument();
@@ -419,9 +421,8 @@ describe("GeneralSettings in basic mode", () => {
     // outlived the app, so a crash left the pointer enlarged for good. The
     // cursor overlay says the agent is driving instead.
     expect(screen.queryByText("Enable big cursor")).not.toBeInTheDocument();
-    for (const shown of ["Agent mode", "Restart onboarding"]) {
-      // Card titles and field labels can repeat the same text.
-      expect(screen.getAllByText(shown).length).toBeGreaterThan(0);
+    for (const moved of ["Play sounds", "Agent mode", "Restart onboarding"]) {
+      expect(screen.queryByText(moved)).not.toBeInTheDocument();
     }
   });
 });
