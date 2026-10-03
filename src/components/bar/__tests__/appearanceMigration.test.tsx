@@ -37,6 +37,7 @@ import { BarHost } from "../BarHost";
 
 /** What a person has in their settings store, and what they must still see. */
 const STORED: readonly { value: string; name: string; look: string }[] = [
+  { value: "persona", name: "Avatar", look: "avatar" },
   { value: "dynamic", name: "Island", look: "island" },
   { value: "floating", name: "Pill", look: "pill" },
   { value: "app", name: "Bar", look: "bar" },
@@ -44,7 +45,6 @@ const STORED: readonly { value: string; name: string; look: string }[] = [
   { value: "shader_orb", name: "Orb", look: "react-bits-orb" },
   { value: "orb", name: "Presence", look: "elevenlabs-orb" },
   { value: "react_orb", name: "Halo", look: "halo-ring" },
-  { value: "persona", name: "Avatar", look: "avatar" },
 ];
 
 async function mount(stored: string | null) {
@@ -110,10 +110,12 @@ describe("a stored appearance after the rename", () => {
     expect(appearanceEntry("halo").value).toBe(UI.BAR_APPEARANCES_DEFAULT);
     expect(appearanceEntry(null).value).toBe(UI.BAR_APPEARANCES_DEFAULT);
     await mount("react_bits_orb");
-    expect(screen.getByTestId("look").textContent).toBe("island");
+    expect(screen.getByTestId("look").textContent).toBe("avatar");
   });
 
-  it("starts a new install on Island", () => {
-    expect(UI.BAR_APPEARANCES_DEFAULT).toBe(UI.BAR_APPEARANCES_DYNAMIC);
+  it("starts a new install on the Avatar, first in the picker", () => {
+    expect(UI.BAR_APPEARANCES_DEFAULT).toBe(UI.BAR_APPEARANCES_PERSONA);
+    expect(APPEARANCE_CATALOG[0].value).toBe(UI.BAR_APPEARANCES_DEFAULT);
+    expect(APPEARANCE_CATALOG[0].descriptor).toMatch(/The default\.$/);
   });
 });

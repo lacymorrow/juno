@@ -129,7 +129,15 @@ async fn run_say(args: Vec<String>) -> Result<std::process::ExitStatus, String> 
         crate::tts::register_audio_pid(pid);
     }
 
+    // `say` plays out of its own process, so its samples are never visible
+    // here. The mouth gets a talking rhythm that starts when `say` starts
+    // sounding and stops the moment it exits or is killed.
+    let level_session = crate::tts::speech_level::begin(
+        crate::tts::speech_level::LevelSource::Synthetic,
+        std::time::Duration::from_millis(crate::tts::speech_level::SAY_LEAD_MS),
+    );
     let status = child.wait().await;
+    drop(level_session);
 
     if let Some(pid) = pid {
         crate::tts::unregister_audio_pid(pid);

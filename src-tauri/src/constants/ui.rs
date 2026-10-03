@@ -61,10 +61,11 @@ pub mod bar_appearances {
     pub const SHADER_ORB: &str = "shader_orb";
     pub const PERSONA: &str = "persona";
 
-    /// The look a new install (and a settings reset) starts on. Island is the
-    /// one appearance being finished first; the others stay in the picker.
-    /// Every fallback in Rust and the frontend reads this, never a literal.
-    pub const DEFAULT: &str = DYNAMIC;
+    /// The look a new install (and a settings reset) starts on: the Avatar,
+    /// a small character whose mouth moves while Juno speaks. The others stay
+    /// in the picker. Every fallback in Rust and the frontend reads this,
+    /// never a literal.
+    pub const DEFAULT: &str = PERSONA;
 }
 
 /// UI state constants for bar state management

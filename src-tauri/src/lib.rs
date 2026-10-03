@@ -885,6 +885,8 @@ pub fn run() {
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
+            // Juno's speaking level goes to every window from here on.
+            tts::speech_level::bind(app_handle.clone());
 
             // A demo build names the windows declared in tauri.conf.json
             // "Juno Demo". Windows opened later are renamed as they are built.

@@ -1,6 +1,7 @@
 pub mod elevenlabs;
 pub mod kokoro;
 pub mod replicate;
+pub mod speech_level;
 pub mod supertonic;
 pub mod system;
 pub mod voices;
@@ -221,6 +222,9 @@ async fn play_base64_audio_with_tracking(
         .flush()
         .map_err(|e| format!("Failed to flush TTS audio to temporary file: {}", e))?;
 
+    // Measured when the engine handed back WAV, a talking rhythm otherwise.
+    let level_source = speech_level::LevelSource::from_audio_bytes(&audio_bytes);
+
     let temp_path = temp_file.path().to_path_buf();
     let completion_notify = Arc::new(tokio::sync::Notify::new());
     let completion_notify_clone = completion_notify.clone();
@@ -240,6 +244,12 @@ async fn play_base64_audio_with_tracking(
                 .arg(&temp_path)
                 .spawn()
                 .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
+            // The mouth follows these samples on afplay's clock, and stops
+            // when afplay exits or is killed.
+            let level_session = speech_level::begin(
+                level_source,
+                std::time::Duration::from_millis(speech_level::PLAYER_LEAD_MS),
+            );
 
             // Capture PID before moving child into the task so we can kill it precisely
             let child_pid = child.id();
@@ -256,6 +266,7 @@ async fn play_base64_audio_with_tracking(
                 playback_started_clone.store(true, Ordering::SeqCst);
 
                 let result = child.wait().await;
+                drop(level_session);
 
                 // Unregister PID now that the process has exited
                 if let Some(pid) = child_pid {
@@ -314,6 +325,10 @@ async fn play_base64_audio_with_tracking(
                 .arg(&temp_path)
                 .spawn()
                 .map_err(|e| format!("Failed to spawn aplay: {}", e))?;
+            let level_session = speech_level::begin(
+                level_source,
+                std::time::Duration::from_millis(speech_level::PLAYER_LEAD_MS),
+            );
 
             // Capture PID before moving child into the task so we can kill it precisely
             let child_pid = child.id();
@@ -330,6 +345,7 @@ async fn play_base64_audio_with_tracking(
                 playback_started_clone.store(true, Ordering::SeqCst);
 
                 let result = child.wait().await;
+                drop(level_session);
 
                 // Unregister PID now that the process has exited
                 if let Some(pid) = child_pid {

@@ -263,6 +263,16 @@ pub mod menu {
 /// Text-to-speech events
 pub mod tts {
     pub const STOP_REQUESTED: &str = "tts-stop-requested";
+    /// Juno's voice became audible: the first loud frame of an utterance, not
+    /// the start of synthesis. Payload fields: session (number).
+    pub const SPEECH_STARTED: &str = "tts-speech-started";
+    /// How loud Juno's voice is now, about 60 times a second while it plays.
+    /// Payload fields: session (number), level (0 to 1, smoothed). Silence
+    /// is sent once, not repeated.
+    pub const SPEECH_LEVEL: &str = "tts-speech-level";
+    /// The utterance stopped: finished, failed or stopped by Escape. Sent
+    /// only for a session that started. Payload fields: session (number).
+    pub const SPEECH_ENDED: &str = "tts-speech-ended";
 }
 
 /// The voice trigger: the one signal pair the bar renders.

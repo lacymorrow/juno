@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, type CSSProperties, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { BUBBLE_MAX_WIDTH, SYSTEM_BLUE, SYSTEM_GREEN, SYSTEM_RED } from "./avatarModel";
+import { BUBBLE_DEPTH, BUBBLE_MAX_WIDTH, SYSTEM_BLUE, SYSTEM_GREEN, SYSTEM_RED } from "./avatarModel";
 
 /**
  * A comic bubble. One dark shape for both speakers; the tail says who is
@@ -156,7 +156,7 @@ export const Bubble = forwardRef<HTMLDivElement, BubbleProps>(function Bubble(
         width: "fit-content",
         transition: "max-width 220ms cubic-bezier(.2,.8,.2,1)",
         background: FILL,
-        boxShadow: `0 0 0 ${edge === "plain" ? 0.5 : 1}px ${EDGE[edge]}, 0 1px 2px rgba(0,0,0,0.4), 0 10px 28px rgba(0,0,0,0.35)`,
+        boxShadow: `0 0 0 ${edge === "plain" ? 0.5 : 1}px ${EDGE[edge]}, ${BUBBLE_DEPTH}`,
         ["--av-origin" as string]: `${originX} ${originY}`,
         ["--av-enter" as string]: juno ? (facingUp ? "4px" : "-4px") : "0px",
         ...style,
