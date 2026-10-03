@@ -20,6 +20,9 @@ import { SettingsGroup, SettingsRow } from "../ui";
 import { COMMANDS } from "@/lib/constants.generated";
 import { cn } from "@/lib/utils";
 import type { MouseControlMode } from "@/lib/inputControl";
+import { AgentModeGroup } from "../AgentModeGroup";
+import { BuildGroup } from "../BuildGroup";
+import { OnboardingGroup } from "../OnboardingGroup";
 
 interface AdvancedSettingsProps extends SettingsSectionProps {
   onNavigateToPermissions?: () => void;
@@ -461,6 +464,10 @@ export default function AdvancedSettings({
         </SettingsRow>
       </SettingsGroup>
 
+      <AgentModeGroup settings={settings} />
+
+      <OnboardingGroup />
+
       <SettingsGroup title="Reset Settings">
         <SettingsRow
           id="reset-all-settings"
@@ -514,6 +521,8 @@ export default function AdvancedSettings({
           }
         />
       </SettingsGroup>
+
+      <BuildGroup />
     </div>
   );
 }
