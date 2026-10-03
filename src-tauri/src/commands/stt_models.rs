@@ -951,6 +951,11 @@ async fn switch_engine_to(app: &AppHandle, model_id: &str) -> Result<(), String>
         }
     };
     apply_engine_to_controllers(app, engine);
+    // The swap stops the wake-phrase engine and nothing restarted it, so it
+    // stayed off behind a flag that still said "listening". Re-apply the
+    // triggers: it comes back on the new engine if it is wanted, and the flag
+    // is put right if it is not.
+    crate::commands::triggers::reapply_voice_triggers(app).await;
     Ok(())
 }
 

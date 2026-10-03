@@ -564,21 +564,20 @@ pub async fn stop_always_listening<R: tauri::Runtime>(
 ) -> Result<bool, Error> {
     info!("[Plugin] stop_always_listening command called");
 
-    let mut always_listening_controller = match controller.try_lock() {
-        Ok(guard) => guard,
-        Err(std::sync::TryLockError::WouldBlock) => {
-            info!("[Plugin] AlwaysListeningController is busy - stop deferred");
-            return Ok(false);
-        }
-        Err(std::sync::TryLockError::Poisoned(e)) => {
-            return Err(Error::LockError(format!(
-                "AlwaysListeningController mutex is poisoned: {}",
-                e
-            )));
-        }
-    };
-
-    let result = always_listening_controller.stop_always_listening()?;
+    // Wait for the lock. This used to `try_lock` and, when another call held
+    // the controller (a wake-word update, an engine swap, a status read),
+    // return Ok(false) with "stop deferred", deferred to nothing: the caller
+    // had already written the setting off, so the microphone stayed open and
+    // every later stop believed it was already stopped. A stop must always
+    // happen. It blocks while the worker is joined, so run it off the async
+    // runtime. A poisoned lock still holds the controller, so recover it.
+    let controller = Arc::clone(controller.inner());
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut guard = controller.lock().unwrap_or_else(|p| p.into_inner());
+        guard.stop_always_listening()
+    })
+    .await
+    .map_err(|e| Error::ControlError(format!("Always listening stop task failed: {e}")))??;
 
     if result {
         // Emit stopped event through the plugin system

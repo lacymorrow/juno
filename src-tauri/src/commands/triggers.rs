@@ -5,6 +5,8 @@
 //! shortcut / trigger-mode / wake-word fields are derived from it so existing
 //! runtime consumers keep working (see [`crate::triggers::derive_legacy`]).
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::{AppHandle, Emitter, Listener, Manager, State};
 use tracing::{error, info, warn};
 
@@ -12,6 +14,35 @@ use crate::constants::events;
 use crate::settings::manager::SettingsManager;
 use crate::state::{self, AppState};
 use crate::triggers::{self, Trigger};
+
+/// Whether voice triggers may arm the microphone in this run.
+///
+/// Wake phrases are experimental for launch, so they follow the advanced
+/// settings switch (the only place a Say row is shown). Starts closed: until
+/// the stored setting has been read, nothing arms the microphone.
+static VOICE_TRIGGERS_ALLOWED: AtomicBool = AtomicBool::new(false);
+
+/// Record whether voice triggers may arm. Call [`reapply_voice_triggers`]
+/// afterwards so a running engine follows the change.
+pub(crate) fn set_voice_triggers_allowed(allowed: bool) {
+    VOICE_TRIGGERS_ALLOWED.store(allowed, Ordering::SeqCst);
+}
+
+fn voice_triggers_allowed() -> bool {
+    VOICE_TRIGGERS_ALLOWED.load(Ordering::SeqCst)
+}
+
+/// The wake phrases the engine should be armed with right now: the stored
+/// triggers, through the launch gate. Empty means the microphone stays shut.
+pub(crate) fn armed_phrases_now(app: &AppHandle) -> Vec<String> {
+    match app.state::<AppState>().get_triggers() {
+        Ok(t) => triggers::armed_voice_phrases(&t, voice_triggers_allowed()),
+        Err(e) => {
+            warn!("[Triggers] Could not read triggers: {e}");
+            Vec::new()
+        }
+    }
+}
 
 /// Return the current activation triggers.
 #[tauri::command]
@@ -205,6 +236,17 @@ pub async fn apply_stored_voice_triggers(app: &AppHandle) {
         warn!("[Triggers] Could not clear the stale listening flag: {}", e);
     }
 
+    // Open the voice gate only if the stored setting says so. Until this
+    // read, it is closed, so a saved Say row cannot arm the microphone at
+    // launch for somebody who never opted into the experiment.
+    match SettingsManager::new(app.clone()) {
+        Ok(manager) => match manager.get_advanced_settings_enabled().await {
+            Ok(enabled) => set_voice_triggers_allowed(enabled),
+            Err(e) => warn!("[Triggers] Could not read advanced settings, voice stays off: {e}"),
+        },
+        Err(e) => warn!("[Triggers] Could not open settings, voice stays off: {e}"),
+    }
+
     // Arm the retry before the first attempt, never after, so the speech
     // engine cannot become ready in the gap and go unnoticed.
     watch_for_engine_ready(app);
@@ -216,7 +258,7 @@ pub async fn apply_stored_voice_triggers(app: &AppHandle) {
 ///
 /// Kept separate from [`apply_voice_triggers`] so the engine-ready watcher can
 /// call it without the two forming a cycle.
-async fn reapply_voice_triggers(app: &AppHandle) {
+pub(crate) async fn reapply_voice_triggers(app: &AppHandle) {
     let triggers = match app.state::<AppState>().get_triggers() {
         Ok(t) => t,
         Err(e) => {
@@ -271,7 +313,7 @@ async fn sync_voice_listener(
     app_state: &State<'_, AppState>,
     triggers: &[Trigger],
 ) {
-    let voice_phrases = triggers::voice_phrases_for(triggers);
+    let voice_phrases = triggers::armed_voice_phrases(triggers, voice_triggers_allowed());
 
     if voice_phrases.is_empty() {
         if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
@@ -327,14 +369,33 @@ async fn sync_voice_listener(
 /// phrases come from the stored triggers, which is what the engine would be
 /// listening for, and `listening` is the outcome the caller actually observed.
 pub(crate) fn emit_listening_outcome(app: &AppHandle, listening: bool) {
-    let phrases = match app.state::<AppState>().get_triggers() {
-        Ok(t) => triggers::voice_phrases_for(&t),
+    let phrases = armed_phrases_now(app);
+    emit_listening_state(app, listening, &phrases);
+}
+
+/// Bring the wake-phrase engine back after a dictation paused it, if it is
+/// still wanted.
+///
+/// A dictation stops the engine and remembers that it was running. Every
+/// end of that dictation used to restart it from that memory alone, so
+/// switching voice off mid-dictation was undone a moment later: the engine
+/// came back, and the microphone with it. The memory is now consumed once and
+/// only says "re-check": what decides is the stored triggers through the
+/// gate, the same rule a save or a launch uses.
+pub(crate) async fn resume_voice_after_dictation(app: &AppHandle) {
+    let app_state = app.state::<AppState>();
+    let was_listening = match app_state.audio_settings.lock() {
+        Ok(mut audio) => std::mem::take(&mut audio.was_always_listening_active_before_dictation),
         Err(e) => {
-            warn!("[Triggers] Could not read triggers to report listening: {e}");
-            Vec::new()
+            warn!("[Triggers] Audio settings lock poisoned: {e}");
+            false
         }
     };
-    emit_listening_state(app, listening, &phrases);
+    if !was_listening {
+        return;
+    }
+    info!("[Triggers] Dictation finished, re-applying voice triggers");
+    reapply_voice_triggers(app).await;
 }
 
 fn emit_listening_state(app: &AppHandle, listening: bool, phrases: &[String]) {

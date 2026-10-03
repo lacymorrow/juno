@@ -274,27 +274,10 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
     crate::commands::ui_commands::handle_dictation_mode_change(&app_handle, false).await;
     crate::commands::ui_commands::handle_dictation_finished(&app_handle, None).await;
 
-    // Resume always listening mode if it was active before dictation
-    let should_resume_always_listening = app_state
-        .audio_settings
-        .lock()
-        .map(|settings| settings.was_always_listening_active_before_dictation)
-        .unwrap_or(false);
-
-    if should_resume_always_listening {
-        info!("[Dictation Mode] Resuming always listening mode");
-        if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
-            app_handle.clone(),
-            app_state.clone(),
-        )
-        .await
-        {
-            warn!(
-                "[Dictation Mode] Failed to resume always listening mode: {}",
-                e
-            );
-        }
-    }
+    // Bring the wake-phrase engine back if this dictation paused it and voice
+    // is still wanted. Not from the remembered flag alone: that is how voice
+    // switched off mid-dictation came back on (see the function).
+    crate::commands::triggers::resume_voice_after_dictation(&app_handle).await;
 
     info!("[Dictation Mode] Completed dictation successfully");
 }
@@ -384,28 +367,10 @@ async fn handle_voice_transcription_dictation_stopped(app_handle: AppHandle, _pa
     // here — this handler only runs after speech-to-text finalization, which is
     // exactly the multi-second delay that made stopping feel unresponsive.
 
-    // Resume always listening mode if it was active before dictation
-    let app_state = app_handle.state::<crate::state::AppState>();
-    let should_resume_always_listening = app_state
-        .audio_settings
-        .lock()
-        .map(|settings| settings.was_always_listening_active_before_dictation)
-        .unwrap_or(false);
-
-    if should_resume_always_listening {
-        info!("[Voice Transcription Stopped] Resuming always listening mode");
-        if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
-            app_handle.clone(),
-            app_state.clone(),
-        )
-        .await
-        {
-            warn!(
-                "[Voice Transcription Stopped] Failed to resume always listening mode: {}",
-                e
-            );
-        }
-    }
+    // Bring the wake-phrase engine back if this dictation paused it and voice
+    // is still wanted. Not from the remembered flag alone: that is how voice
+    // switched off mid-dictation came back on (see the function).
+    crate::commands::triggers::resume_voice_after_dictation(&app_handle).await;
 }
 
 async fn handle_voice_transcription_error(app_handle: AppHandle) {
@@ -661,28 +626,10 @@ async fn handle_dictation_cancel(app_handle: AppHandle) {
     // idempotent.
     crate::commands::dictation::end_dictation_session(&app_handle, "cancelled").await;
 
-    // Resume always listening mode if it was active before dictation
-    let should_resume_always_listening = app_state
-        .audio_settings
-        .lock()
-        .map(|settings| settings.was_always_listening_active_before_dictation)
-        .unwrap_or(false);
-
-    if should_resume_always_listening {
-        info!("[Dictation Cancel] Resuming always listening mode");
-        let app_state_for_listening = app_handle.state::<state::AppState>();
-        if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
-            app_handle.clone(),
-            app_state_for_listening.clone(),
-        )
-        .await
-        {
-            warn!(
-                "[Dictation Cancel] Failed to resume always listening mode: {}",
-                e
-            );
-        }
-    }
+    // Bring the wake-phrase engine back if this dictation paused it and voice
+    // is still wanted. Not from the remembered flag alone: that is how voice
+    // switched off mid-dictation came back on (see the function).
+    crate::commands::triggers::resume_voice_after_dictation(&app_handle).await;
 
     info!("[Dictation Cancel] Cleanup completed successfully");
 }
@@ -777,31 +724,10 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
         .await;
     }
 
-    // Resume always listening mode if it was active before dictation.
-    // Re-fetch state here rather than holding the earlier `State` handle across
-    // the awaits above.
-    let app_state = app_handle.state::<state::AppState>();
-    let should_resume_always_listening = app_state
-        .audio_settings
-        .lock()
-        .map(|settings| settings.was_always_listening_active_before_dictation)
-        .unwrap_or(false);
-
-    if should_resume_always_listening {
-        info!("[Dictation Stop] Resuming always listening mode");
-        let app_state_for_listening = app_handle.state::<state::AppState>();
-        if let Err(e) = crate::commands::always_listening::start_always_listening_mode(
-            app_handle.clone(),
-            app_state_for_listening.clone(),
-        )
-        .await
-        {
-            warn!(
-                "[Dictation Stop] Failed to resume always listening mode: {}",
-                e
-            );
-        }
-    }
+    // Bring the wake-phrase engine back if this dictation paused it and voice
+    // is still wanted. Not from the remembered flag alone: that is how voice
+    // switched off mid-dictation came back on (see the function).
+    crate::commands::triggers::resume_voice_after_dictation(&app_handle).await;
 }
 
 async fn handle_force_stop_transcription(app_handle: AppHandle) {

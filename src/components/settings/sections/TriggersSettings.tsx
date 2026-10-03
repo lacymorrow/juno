@@ -31,6 +31,7 @@ import { useDerivedIssues } from "@/hooks/useDerivedIssues";
 
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup } from "../ui";
+import { useAdvancedSettings } from "../AdvancedSettingsContext";
 import { ShortcutRecorder } from "../ShortcutRecorder";
 import { KeyCaps } from "../KeyCaps";
 
@@ -227,6 +228,11 @@ function defaultsFor(gesture: Gesture, target: TriggerTarget): Trigger {
 /* -------------------------------------------------------------------------- */
 
 export default function TriggersSettings({ settings }: SettingsSectionProps) {
+  // Wake phrases are experimental for launch. Outside advanced settings a Say
+  // row is not offered and not drawn, and Rust does not arm it either, so
+  // nobody is shown a voice option that would not reliably answer. Hidden
+  // rows stay in `triggers`, so saving the list never deletes them.
+  const { advanced } = useAdvancedSettings();
   const [triggers, setTriggers] = useState<Trigger[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -442,7 +448,12 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   // backend's table, and a refusal names the row that already has it.
   const addable: Array<{ gesture: Gesture; target: TriggerTarget }> = [];
   for (const gesture of ALL_GESTURES)
-    for (const target of ALL_TARGETS) addable.push({ gesture, target });
+    if (advanced || gesture !== "say")
+      for (const target of ALL_TARGETS) addable.push({ gesture, target });
+
+  const visibleTriggers = advanced
+    ? triggers
+    : triggers.filter((t) => t.gesture !== "say");
 
   /* --------------------------- loading / error --------------------------- */
 
@@ -505,7 +516,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
 
   /* ------------------------------ empty state ---------------------------- */
 
-  if (triggers.length === 0) {
+  if (visibleTriggers.length === 0) {
     return (
       <div className="space-y-6">
         <SettingsGroup title="Triggers">
@@ -516,8 +527,9 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
             <div className="space-y-1">
               <p className="text-[14px] font-semibold">No triggers yet</p>
               <p className="text-[12px] leading-snug text-muted-foreground">
-                A trigger is how you summon Juno: a key, a mouse button, or
-                your voice.
+                {advanced
+                  ? "A trigger is how you summon Juno: a key, a mouse button, or your voice."
+                  : "A trigger is how you summon Juno: a key or a mouse button."}
               </p>
             </div>
             {addMenu}
@@ -533,9 +545,13 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
     <div className="space-y-6">
       <SettingsGroup
         title="Triggers"
-        footer="Each row is one way to summon Juno. Mix keys, a mouse button and your voice however you like."
+        footer={
+          advanced
+            ? "Each row is one way to summon Juno. Mix keys, a mouse button and your voice however you like."
+            : "Each row is one way to summon Juno. Mix keys and a mouse button however you like."
+        }
       >
-        {triggers.map((trigger) => (
+        {visibleTriggers.map((trigger) => (
           <TriggerRow
             key={trigger.id}
             trigger={trigger}
@@ -770,6 +786,10 @@ function TriggerRow({
               {alwaysListening ? "Listening" : "Needs mic + always-listening"}
             </span>
           </div>
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Experimental. Juno can miss the phrase, and the microphone stays
+            on while this row is on.
+          </p>
         </div>
       )}
 

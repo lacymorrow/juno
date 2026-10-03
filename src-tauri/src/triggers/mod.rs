@@ -526,6 +526,22 @@ pub fn voice_phrases_for(triggers: &[Trigger]) -> Vec<String> {
         .collect()
 }
 
+/// The phrases the engine may actually arm: [`voice_phrases_for`], unless
+/// voice triggers are switched off for this build.
+///
+/// Wake phrases are experimental for launch. They only arm while advanced
+/// settings are on, which is also the only place a Say row is shown. A Say row
+/// saved before that, or left behind when advanced settings were switched
+/// off, stays in the list untouched but never opens the microphone. Every
+/// start of the engine goes through this, so there is no path that arms the
+/// microphone around it.
+pub fn armed_voice_phrases(triggers: &[Trigger], voice_allowed: bool) -> Vec<String> {
+    if !voice_allowed {
+        return Vec::new();
+    }
+    voice_phrases_for(triggers)
+}
+
 /// Build one row, with a fresh id.
 pub fn trigger(gesture: Gesture, target: TriggerTarget, binding: Option<Binding>) -> Trigger {
     Trigger {
@@ -1708,6 +1724,21 @@ mod tests {
     fn a_disabled_say_trigger_listens_for_nothing() {
         let t = vec![voice("juno", TriggerTarget::Agent, false)];
         assert!(voice_phrases_for(&t).is_empty());
+    }
+
+    #[test]
+    fn a_saved_say_trigger_arms_nothing_while_voice_is_gated() {
+        // Somebody who switched a wake phrase on before it was gated must not
+        // launch into an open microphone.
+        let t = vec![voice("juno", TriggerTarget::Agent, true)];
+        assert!(armed_voice_phrases(&t, false).is_empty());
+        assert_eq!(armed_voice_phrases(&t, true), vec!["juno", "hey juno"]);
+    }
+
+    #[test]
+    fn the_gate_never_arms_a_disabled_say_trigger() {
+        let t = vec![voice("juno", TriggerTarget::Agent, false)];
+        assert!(armed_voice_phrases(&t, true).is_empty());
     }
 
     #[test]
