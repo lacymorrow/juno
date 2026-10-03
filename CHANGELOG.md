@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.80] - 2026-10-03
+
+### Fixed
+
+- **voice:** release the mic when voice activation is off, gate wake phrases for launch (#687) (f9e6c359)
+
 ## [0.8.79] - 2026-10-03
 
 ### Fixed
@@ -816,7 +822,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.79...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.80...HEAD
+[0.8.80]: https://github.com/lacymorrow/juno/compare/cua-v0.8.79...v0.8.80
 [0.8.79]: https://github.com/lacymorrow/juno/compare/cua-v0.8.78...v0.8.79
 [0.8.78]: https://github.com/lacymorrow/juno/compare/cua-v0.8.77...v0.8.78
 [0.8.75]: https://github.com/lacymorrow/juno/compare/cua-v0.8.74...v0.8.75
