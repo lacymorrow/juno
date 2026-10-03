@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.78] - 2026-10-03
+
+### Added
+
+- **avatar:** default look, hover controls, and a mouth that moves with Juno's real voice (#684) (f92529ac)
+
 ## [0.8.75] - 2026-10-02
 
 ### Fixed
@@ -804,7 +810,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.75...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.78...HEAD
+[0.8.78]: https://github.com/lacymorrow/juno/compare/cua-v0.8.77...v0.8.78
 [0.8.75]: https://github.com/lacymorrow/juno/compare/cua-v0.8.74...v0.8.75
 [0.8.73]: https://github.com/lacymorrow/juno/compare/cua-v0.8.72...v0.8.73
 [0.8.72]: https://github.com/lacymorrow/juno/compare/cua-v0.8.71...v0.8.72
