@@ -59,7 +59,7 @@ export const settingsCategories: MacCategory[] = [
     icon: <Settings className="h-3.5 w-3.5" />,
     tile: "bg-[#8E8E93]",
     description: "Basic app settings and preferences",
-    keywords: "startup launch login sound onboarding cursor agent mode",
+    keywords: "startup launch login cursor appearance look",
   },
   {
     id: "triggers",
@@ -79,7 +79,7 @@ export const settingsCategories: MacCategory[] = [
     tile: "bg-[#FF2D55]",
     description: "Microphone, speaker, and Juno's voice",
     keywords:
-      "microphone mic speaker output input device headphones airpods voice juno's voice sound dictation speech transcription say",
+      "microphone mic speaker output input device headphones airpods voice juno's voice sound sounds cue chime dictation speech transcription say",
   },
   {
     id: "ai",
@@ -151,7 +151,7 @@ export const settingsCategories: MacCategory[] = [
     description: "System settings and reset options",
     advanced: true,
     keywords:
-      "reset developer logs debug data storage background dock menu bar mouse control",
+      "reset developer logs debug data storage background dock menu bar mouse control agent mode onboarding build version commit",
   },
 ];
 
@@ -194,7 +194,7 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "general", rowId: "auto-launch", label: "Open at login", keywords: "startup login boot autostart launch" },
   { sectionId: "general", rowId: "big-cursor-enabled", label: "Enable big cursor", keywords: "cursor pointer magnify enlarge big" },
   { sectionId: "general", rowId: "bar-appearance", label: "Bar appearance", keywords: "bar appearance look style pill bar studio island orb halo avatar persona floating preview" },
-  { sectionId: "general", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup", advanced: true },
+  { sectionId: "advanced", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup", advanced: true },
   // Triggers
   { sectionId: "triggers", rowId: "add-trigger", label: "Add trigger", keywords: "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
   // Models

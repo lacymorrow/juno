@@ -162,6 +162,20 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
         </SettingsRow>
       </SettingsGroup>
 
+      <SettingsGroup title="Sound">
+        <SettingsRow
+          htmlFor="sound-enabled"
+          label="Play sounds"
+          description="A soft cue when dictation starts and stops."
+        >
+          <Switch
+            id="sound-enabled"
+            checked={settings.soundEnabled}
+            onCheckedChange={settings.handleSoundEnabledChange}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
       <SettingsGroup
         title="Speaker"
         footer={
