@@ -1,4 +1,4 @@
-//! # Passive bare-modifier monitor (the Fn/globe key)
+//! # Passive bare-modifier monitor (the Fn/globe key, and Fn with Control)
 //!
 //! Fn produces no ordinary key event. It arrives as `NSEventTypeFlagsChanged`,
 //! which the tauri global-shortcut plugin cannot register and a webview never
@@ -8,6 +8,13 @@
 //! Verified on hardware before this was written: a global monitor does receive
 //! the Fn key, reporting `keyCode` 63 with bit `1 << 23` set on press and clear
 //! on release. Clean down and up edges, which is what push-to-talk needs.
+//!
+//! Fn and Control held together is read out of the same flag word: Control is
+//! key code 59 (left) or 62 (right) with bit `1 << 18`, and AppKit keeps the
+//! Function bit set in the flags of Control's own event while Fn is down. The
+//! chord is down while both bits are set and up the moment either clears, which
+//! is what a hold needs. See [`ModifierState`] for how the chord and the plain
+//! globe key share a finger without both firing.
 //!
 //! Caps Lock is deliberately not offered. The same check showed it emits one
 //! event per press and none on release, because it is a hardware toggle: the
@@ -26,15 +33,23 @@
 use crate::triggers::ModifierKey;
 use tauri::AppHandle;
 
-/// A bare modifier key a trigger is bound to.
+/// A bare modifier key, or chord, a trigger is bound to.
 ///
 /// Just the key. Which gestures it carries, and what each one does, is read
-/// from the trigger list when the edge arrives, so the globe key can hold for
-/// one target and double-tap-and-hold for another without this observer
-/// knowing anything about either.
+/// from the trigger list when the edge arrives, so this observer knows nothing
+/// about either.
 pub type ModifierBinding = ModifierKey;
 
-/// Which edge a `flagsChanged` event represents for `target`, if any.
+/// The Function key's virtual key code on `NSEventTypeFlagsChanged`.
+const FN_KEY_CODE: u16 = 63;
+/// `NSEventModifierFlagFunction`.
+const FN_FLAG: usize = 1 << 23;
+/// Left and right Control's virtual key codes.
+const CONTROL_KEY_CODES: [u16; 2] = [59, 62];
+/// `NSEventModifierFlagControl`.
+const CONTROL_FLAG: usize = 1 << 18;
+
+/// Which edge a `flagsChanged` event represents for the plain Fn key, if any.
 ///
 /// `Some(true)` is press, `Some(false)` is release, `None` means the event was
 /// about some other key.
@@ -43,22 +58,98 @@ pub type ModifierBinding = ModifierKey;
 /// Function bit on arrow keys, F1 through F20, Home, End, Page Up, Page Down
 /// and Delete as well, so testing the bit alone would fire the microphone on
 /// every arrow press.
-pub fn modifier_edge(key_code: u16, modifier_flags: usize, target: ModifierKey) -> Option<bool> {
-    if key_code != target.key_code() {
+pub fn modifier_edge(key_code: u16, modifier_flags: usize) -> Option<bool> {
+    if key_code != FN_KEY_CODE {
         return None;
     }
-    Some(modifier_flags & target.flag_bit() != 0)
+    Some(modifier_flags & FN_FLAG != 0)
 }
 
 /// The bare modifier this event is the *press* edge of, if any.
 ///
 /// Capture mode reports presses and ignores releases: someone choosing a key
 /// has chosen it the moment they push it, and reporting the release too would
-/// hand setup the same answer twice.
+/// hand setup the same answer twice. Only the plain globe key is ever
+/// captured; a chord is picked afterwards.
 pub fn captured_key(key_code: u16, modifier_flags: usize) -> Option<ModifierKey> {
-    ModifierKey::ALL
-        .into_iter()
-        .find(|key| modifier_edge(key_code, modifier_flags, *key) == Some(true))
+    (modifier_edge(key_code, modifier_flags) == Some(true)).then_some(ModifierKey::Fn)
+}
+
+/// What is currently held, so a chord and the plain key it contains agree on
+/// who owns the finger.
+///
+/// With both Hold Fn and Hold Fn+Control bound, pressing Fn then Control is one
+/// gesture, the chord, and must not also leave the plain Fn hold running:
+///
+/// - If Control is already down when Fn arrives, the chord starts and the plain
+///   key never does.
+/// - If Fn is down first, the plain key has started. When Control joins, the
+///   plain key is released (a short hold is cancelled by the hold monitor, the
+///   way any brief press is) and the chord starts.
+/// - Either way, the plain key stays quiet until Fn itself comes up, so
+///   letting go of Control while still on Fn does not bring the plain hold
+///   back from the dead.
+#[derive(Debug, Default)]
+pub struct ModifierState {
+    down: std::collections::HashSet<ModifierKey>,
+    /// Fn is down, and belongs to a chord until it is released.
+    fn_yielded: bool,
+}
+
+impl ModifierState {
+    /// Fold one `flagsChanged` event in. Returns the edges it produced, in the
+    /// order they must be delivered: `(key, pressed)`.
+    pub fn on_flags_changed(
+        &mut self,
+        key_code: u16,
+        flags: usize,
+        bound: &[ModifierKey],
+    ) -> Vec<(ModifierKey, bool)> {
+        let fn_held = flags & FN_FLAG != 0;
+        let control_held = flags & CONTROL_FLAG != 0;
+        let mut out = Vec::new();
+
+        // The chord first, so that it can take the finger from the plain key
+        // within the same event.
+        if bound.contains(&ModifierKey::FnControl)
+            && (key_code == FN_KEY_CODE || CONTROL_KEY_CODES.contains(&key_code))
+        {
+            let active = fn_held && control_held;
+            let was = self.down.contains(&ModifierKey::FnControl);
+            if active && !was {
+                if self.down.remove(&ModifierKey::Fn) {
+                    out.push((ModifierKey::Fn, false));
+                }
+                self.fn_yielded = true;
+                self.down.insert(ModifierKey::FnControl);
+                out.push((ModifierKey::FnControl, true));
+            } else if !active && was {
+                self.down.remove(&ModifierKey::FnControl);
+                out.push((ModifierKey::FnControl, false));
+            }
+        }
+
+        if bound.contains(&ModifierKey::Fn) {
+            if let Some(pressed) = modifier_edge(key_code, flags) {
+                if !pressed {
+                    self.fn_yielded = false;
+                    if self.down.remove(&ModifierKey::Fn) {
+                        out.push((ModifierKey::Fn, false));
+                    }
+                } else if !self.fn_yielded && self.down.insert(ModifierKey::Fn) {
+                    out.push((ModifierKey::Fn, true));
+                }
+            }
+        }
+
+        // A chord that is not bound still tracks Fn's release, so a stale
+        // yield cannot outlive the key.
+        if key_code == FN_KEY_CODE && !fn_held {
+            self.fn_yielded = false;
+        }
+
+        out
+    }
 }
 
 /// How long a capture request stands before it lapses on its own.
@@ -75,7 +166,7 @@ const CAPTURE_LEASE: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::{captured_key, modifier_edge, ModifierBinding, CAPTURE_LEASE};
+    use super::{captured_key, ModifierBinding, ModifierState, CAPTURE_LEASE};
     use block::ConcreteBlock;
     use cocoa::base::{id, nil};
     use objc::{class, msg_send, sel, sel_impl};
@@ -98,6 +189,8 @@ mod imp {
     static MONITORS: Mutex<Option<Monitors>> = Mutex::new(None);
     static INSTALLED: AtomicBool = AtomicBool::new(false);
     static BINDINGS: Mutex<Vec<ModifierBinding>> = Mutex::new(Vec::new());
+    /// What is held right now. Reset whenever the bindings change.
+    static HELD: Mutex<Option<ModifierState>> = Mutex::new(None);
     /// While setup is asking someone to press their key, report what arrives
     /// instead of acting on it.
     static CAPTURING: AtomicBool = AtomicBool::new(false);
@@ -186,17 +279,19 @@ mod imp {
             return;
         }
 
-        // Which bound keys this event is an edge of. Read and release the lock
+        // Which bound keys this event is an edge of. Read and release the locks
         // before routing, because routing reads the trigger list.
+        let bound: Vec<ModifierBinding> = match BINDINGS.lock() {
+            Ok(g) => g.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
         let edges: Vec<(ModifierBinding, bool)> = {
-            let guard = match BINDINGS.lock() {
+            let mut held = match HELD.lock() {
                 Ok(g) => g,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            guard
-                .iter()
-                .filter_map(|key| modifier_edge(key_code, flags, *key).map(|down| (*key, down)))
-                .collect()
+            held.get_or_insert_with(ModifierState::default)
+                .on_flags_changed(key_code, flags, &bound)
         };
 
         for (key, pressed) in edges {
@@ -226,6 +321,10 @@ mod imp {
 
         if let Ok(mut guard) = BINDINGS.lock() {
             *guard = bindings.clone();
+        }
+        // Whatever was held belonged to the old bindings.
+        if let Ok(mut held) = HELD.lock() {
+            *held = None;
         }
         if bindings.is_empty() {
             return Ok(());
@@ -470,11 +569,20 @@ mod tests {
     /// The bits and key codes below were read off real hardware, not docs.
     const FN_HELD: usize = 0x00800100;
     const FN_RELEASED: usize = 0x00000100;
+    /// Control's device-independent bit (1 << 18) on top of the base flags.
+    const CONTROL_HELD: usize = 0x00040100;
+    const FN_AND_CONTROL_HELD: usize = FN_HELD | 0x00040000;
+
+    const FN: u16 = 63;
+    const LEFT_CONTROL: u16 = 59;
+    const RIGHT_CONTROL: u16 = 62;
+
+    const BOTH: [ModifierKey; 2] = [ModifierKey::Fn, ModifierKey::FnControl];
 
     #[test]
     fn the_fn_key_reports_press_and_release() {
-        assert_eq!(modifier_edge(63, FN_HELD, ModifierKey::Fn), Some(true));
-        assert_eq!(modifier_edge(63, FN_RELEASED, ModifierKey::Fn), Some(false));
+        assert_eq!(modifier_edge(63, FN_HELD), Some(true));
+        assert_eq!(modifier_edge(63, FN_RELEASED), Some(false));
     }
 
     #[test]
@@ -482,15 +590,15 @@ mod tests {
         // AppKit sets the Function bit for arrows, F1-F20, Home, End, Page
         // Up/Down and Delete. Testing the bit alone would start dictation on
         // every arrow press.
-        assert_eq!(modifier_edge(126, FN_HELD, ModifierKey::Fn), None);
-        assert_eq!(modifier_edge(123, FN_HELD, ModifierKey::Fn), None);
+        assert_eq!(modifier_edge(126, FN_HELD), None);
+        assert_eq!(modifier_edge(123, FN_HELD), None);
     }
 
     #[test]
     fn other_modifiers_are_ignored() {
         // Shift is key code 56 and has its own bit; it must not reach a
         // trigger bound to Fn.
-        assert_eq!(modifier_edge(56, 0x00020102, ModifierKey::Fn), None);
+        assert_eq!(modifier_edge(56, 0x00020102), None);
     }
 
     #[test]
@@ -508,5 +616,167 @@ mod tests {
         assert_eq!(captured_key(96, FN_HELD), None);
         // And an ordinary modifier, which has its own bit entirely.
         assert_eq!(captured_key(56, 0x00020102), None);
+        // Control alone is not the globe key either.
+        assert_eq!(captured_key(LEFT_CONTROL, CONTROL_HELD), None);
+    }
+
+    /* ------------------------------------------------------------ */
+    /* The Fn + Control chord                                        */
+    /* ------------------------------------------------------------ */
+
+    #[test]
+    fn the_chord_is_down_only_while_both_keys_are_held() {
+        let mut st = ModifierState::default();
+        let bound = [ModifierKey::FnControl];
+
+        // Fn alone is not the chord.
+        assert!(st.on_flags_changed(FN, FN_HELD, &bound).is_empty());
+        // Control joins: the chord goes down.
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &bound),
+            vec![(ModifierKey::FnControl, true)]
+        );
+        // Control up while Fn stays: the chord is over.
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_HELD, &bound),
+            vec![(ModifierKey::FnControl, false)]
+        );
+        // Fn up afterwards says nothing more.
+        assert!(st.on_flags_changed(FN, FN_RELEASED, &bound).is_empty());
+    }
+
+    #[test]
+    fn the_chord_works_pressed_in_either_order_and_released_in_either_order() {
+        for (first, second) in [(FN, LEFT_CONTROL), (LEFT_CONTROL, FN)] {
+            let mut st = ModifierState::default();
+            let bound = [ModifierKey::FnControl];
+            let after_first = if first == FN { FN_HELD } else { CONTROL_HELD };
+            assert!(st.on_flags_changed(first, after_first, &bound).is_empty());
+            assert_eq!(
+                st.on_flags_changed(second, FN_AND_CONTROL_HELD, &bound),
+                vec![(ModifierKey::FnControl, true)],
+                "pressed {first} then {second}"
+            );
+            // Release whichever came first.
+            let remaining = if first == FN { CONTROL_HELD } else { FN_HELD };
+            assert_eq!(
+                st.on_flags_changed(first, remaining, &bound),
+                vec![(ModifierKey::FnControl, false)],
+                "released {first} first"
+            );
+            assert!(st.on_flags_changed(second, FN_RELEASED, &bound).is_empty());
+        }
+    }
+
+    #[test]
+    fn the_right_control_key_makes_the_chord_too() {
+        let mut st = ModifierState::default();
+        let bound = [ModifierKey::FnControl];
+        st.on_flags_changed(FN, FN_HELD, &bound);
+        assert_eq!(
+            st.on_flags_changed(RIGHT_CONTROL, FN_AND_CONTROL_HELD, &bound),
+            vec![(ModifierKey::FnControl, true)]
+        );
+    }
+
+    #[test]
+    fn control_alone_and_an_arrow_with_the_function_bit_never_fire_the_chord() {
+        let mut st = ModifierState::default();
+        let bound = [ModifierKey::FnControl];
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound)
+            .is_empty());
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, FN_RELEASED, &bound)
+            .is_empty());
+        // An arrow arrives with the Function bit and, here, Control held.
+        assert!(st
+            .on_flags_changed(126, FN_AND_CONTROL_HELD, &bound)
+            .is_empty());
+    }
+
+    #[test]
+    fn no_release_edge_arrives_for_a_chord_that_never_went_down() {
+        // A stray Control release must not end a hold that never started.
+        let mut st = ModifierState::default();
+        let bound = [ModifierKey::FnControl];
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, FN_RELEASED, &bound)
+            .is_empty());
+        assert!(st.on_flags_changed(FN, FN_RELEASED, &bound).is_empty());
+    }
+
+    #[test]
+    fn holding_fn_then_adding_control_hands_the_finger_from_the_plain_key_to_the_chord() {
+        let mut st = ModifierState::default();
+        assert_eq!(
+            st.on_flags_changed(FN, FN_HELD, &BOTH),
+            vec![(ModifierKey::Fn, true)],
+            "plain Fn starts the moment it goes down"
+        );
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &BOTH),
+            vec![(ModifierKey::Fn, false), (ModifierKey::FnControl, true)],
+            "Control joins: plain Fn is let go, the chord starts"
+        );
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_HELD, &BOTH),
+            vec![(ModifierKey::FnControl, false)],
+            "Control up ends the chord and does not resurrect the plain hold"
+        );
+        assert!(
+            st.on_flags_changed(FN, FN_RELEASED, &BOTH).is_empty(),
+            "Fn up has nothing left to end"
+        );
+        // And the plain key works again on the next press.
+        assert_eq!(
+            st.on_flags_changed(FN, FN_HELD, &BOTH),
+            vec![(ModifierKey::Fn, true)]
+        );
+    }
+
+    #[test]
+    fn control_first_then_fn_is_the_chord_and_the_plain_key_never_starts() {
+        let mut st = ModifierState::default();
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &BOTH)
+            .is_empty());
+        assert_eq!(
+            st.on_flags_changed(FN, FN_AND_CONTROL_HELD, &BOTH),
+            vec![(ModifierKey::FnControl, true)],
+            "no flash of the plain hold"
+        );
+        assert_eq!(
+            st.on_flags_changed(FN, CONTROL_HELD, &BOTH),
+            vec![(ModifierKey::FnControl, false)]
+        );
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, FN_RELEASED, &BOTH)
+            .is_empty());
+    }
+
+    #[test]
+    fn plain_fn_alone_still_holds_and_releases_when_only_it_is_bound() {
+        let mut st = ModifierState::default();
+        let bound = [ModifierKey::Fn];
+        assert_eq!(
+            st.on_flags_changed(FN, FN_HELD, &bound),
+            vec![(ModifierKey::Fn, true)]
+        );
+        // Control while Fn is held means nothing to a plain-Fn binding.
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &bound)
+            .is_empty());
+        assert_eq!(
+            st.on_flags_changed(FN, CONTROL_HELD, &bound),
+            vec![(ModifierKey::Fn, false)]
+        );
+    }
+
+    #[test]
+    fn repeated_flag_events_do_not_repeat_an_edge() {
+        let mut st = ModifierState::default();
+        assert_eq!(st.on_flags_changed(FN, FN_HELD, &BOTH).len(), 1);
+        assert!(st.on_flags_changed(FN, FN_HELD, &BOTH).is_empty());
     }
 }

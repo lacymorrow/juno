@@ -7,14 +7,11 @@
 //! a single object that reads as a sentence: *Hold the globe key to talk to
 //! Juno*.
 //!
-//! Every gesture is a trigger in its own right. A double tap is not something
-//! bolted onto a hold key as a second way to reach the same thing; it is
-//! another row, with its own key and its own target, which the person can see
-//! and delete. The set is therefore unbounded: a row is its `id` and nothing
-//! else, so two rows may share a gesture, a target, or both.
-//!
-//! Which gestures may live on one key is the table in [`can_share_key`], and
-//! [`validate`] enforces that table and nothing looser.
+//! Every gesture is a trigger in its own right: a row with its own key and its
+//! own target, which the person can see and delete. The set is unbounded: a row
+//! is its `id` and nothing else, so two rows may share a gesture, a target, or
+//! both, as long as they sit on different keys. One key means one thing, and
+//! [`validate`] enforces that and nothing looser.
 //!
 //! `triggers` is the source of truth for the settings UI and for shortcut
 //! registration. The legacy `KeyboardShortcuts` / `AgentSettings.trigger_mode` /
@@ -26,29 +23,69 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 /// How a trigger fires.
 ///
-/// Five independent gestures. The wire names of three of them keep the words
-/// the old model used as aliases (`push_to_talk`, `toggle`, `voice`), because a
+/// Three independent gestures. The wire names of all three keep the words the
+/// old model used as aliases (`push_to_talk`, `toggle`, `voice`), because a
 /// store written before gestures existed has to keep working.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// There used to be two more, `double_tap` and `double_tap_hold`. They were
+/// removed because they did not work well. A store that still names one reads
+/// as [`Gesture::Hold`] (see [`StoredGesture`]), and [`load_stored`] settles
+/// what to do with the row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Gesture {
     /// Down edge starts it, release ends it.
-    #[serde(alias = "push_to_talk")]
     Hold,
     /// The release of a press starts it, the next press of the same key ends it.
+    Tap,
+    /// A wake phrase starts it, the end of speech ends it. No key.
+    Say,
+}
+
+/// Every spelling of a gesture a stored or incoming row may use.
+///
+/// The two double gestures are read here and nowhere else. Nothing writes
+/// them: [`Gesture`] serializes as hold, tap or say only.
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum StoredGesture {
+    #[serde(alias = "push_to_talk")]
+    Hold,
     #[serde(alias = "toggle")]
     Tap,
-    /// A second press inside
-    /// [`DOUBLE_TAP_WINDOW_MS`](crate::constants::monitor_sessions::DOUBLE_TAP_WINDOW_MS)
-    /// starts it, the next press of the same key ends it.
     DoubleTap,
-    /// A second press still held at
-    /// [`SECOND_PRESS_HOLD_MS`](crate::constants::monitor_sessions::SECOND_PRESS_HOLD_MS)
-    /// starts it, release ends it.
     DoubleTapHold,
-    /// A wake phrase starts it, the end of speech ends it. No key.
     #[serde(alias = "voice")]
     Say,
+}
+
+impl StoredGesture {
+    fn is_retired(self) -> bool {
+        matches!(self, Self::DoubleTap | Self::DoubleTapHold)
+    }
+}
+
+impl From<StoredGesture> for Gesture {
+    fn from(g: StoredGesture) -> Self {
+        match g {
+            // A retired double gesture is a hold on the same key. Whether that
+            // is allowed to stand is [`load_stored`]'s question, not serde's.
+            StoredGesture::Hold | StoredGesture::DoubleTap | StoredGesture::DoubleTapHold => {
+                Gesture::Hold
+            }
+            StoredGesture::Tap => Gesture::Tap,
+            StoredGesture::Say => Gesture::Say,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Gesture {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(StoredGesture::deserialize(deserializer)?.into())
+    }
 }
 
 /// What a trigger activates.
@@ -63,21 +100,13 @@ pub enum TriggerTarget {
 
 impl Gesture {
     /// Every gesture, in the order the settings menu offers them.
-    pub const ALL: [Gesture; 5] = [
-        Gesture::Hold,
-        Gesture::Tap,
-        Gesture::DoubleTap,
-        Gesture::DoubleTapHold,
-        Gesture::Say,
-    ];
+    pub const ALL: [Gesture; 3] = [Gesture::Hold, Gesture::Tap, Gesture::Say];
 
     /// The serde name. Both sides of the IPC boundary spell it this way.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Hold => "hold",
             Self::Tap => "tap",
-            Self::DoubleTap => "double_tap",
-            Self::DoubleTapHold => "double_tap_hold",
             Self::Say => "say",
         }
     }
@@ -87,8 +116,6 @@ impl Gesture {
         match self {
             Self::Hold => "Hold",
             Self::Tap => "Tap",
-            Self::DoubleTap => "Double-tap",
-            Self::DoubleTapHold => "Double-tap and hold",
             Self::Say => "Say",
         }
     }
@@ -96,13 +123,11 @@ impl Gesture {
     /// How this gesture ends, in the person's words.
     ///
     /// Generated from the gesture, so the line beside a row can only ever
-    /// describe what that row does. The paragraph it replaced described a
-    /// second gesture reaching the same target, which is the behaviour this
-    /// model deleted.
+    /// describe what that row does.
     pub fn ending(self) -> &'static str {
         match self {
-            Self::Hold | Self::DoubleTapHold => "Let go to finish.",
-            Self::Tap | Self::DoubleTap => "Press the key again to finish.",
+            Self::Hold => "Let go to finish.",
+            Self::Tap => "Press the key again to finish.",
             Self::Say => "Juno starts listening when it hears the phrase.",
         }
     }
@@ -134,43 +159,8 @@ impl TriggerTarget {
     }
 }
 
-/// Can these two gestures live on the same key?
-///
-/// The table, which [`validate`] and [`combo_conflict`] enforce and nothing
-/// looser:
-///
-/// | On one key | Allowed |
-/// |---|---|
-/// | Hold + Double tap | yes |
-/// | Hold + Double tap and hold | yes |
-/// | Double tap + Double tap and hold | yes |
-/// | Hold + Double tap + Double tap and hold | yes |
-/// | Tap + Double tap and hold | yes |
-/// | Hold + Tap | no |
-/// | Tap + Double tap | no |
-///
-/// Tap cannot share a key with Hold or Double tap. A short tap on a hold key is
-/// usually a fumbled hold, and a quick stop-tap on a tap key looks exactly like
-/// the first half of a double tap. Every other mix is allowed, and each gesture
-/// appears at most once per key, including a gesture pointing at the other
-/// target: one key cannot mean two things on the same edge.
-pub fn can_share_key(a: Gesture, b: Gesture) -> bool {
-    use Gesture::*;
-    // Say has no key to share.
-    if a == Say || b == Say {
-        return false;
-    }
-    // Each gesture appears at most once per key.
-    if a == b {
-        return false;
-    }
-    !matches!(
-        (a, b),
-        (Tap, Hold) | (Hold, Tap) | (Tap, DoubleTap) | (DoubleTap, Tap)
-    )
-}
-
-/// A key that produces no ordinary key event, only a modifier flag change.
+/// A key, or a chord with it, that produces no ordinary key event, only a
+/// modifier flag change.
 ///
 /// Caps Lock is deliberately absent. Checked on hardware: it emits one event
 /// per press and nothing on release, because it is a hardware toggle, so a
@@ -182,30 +172,18 @@ pub fn can_share_key(a: Gesture, b: Gesture) -> bool {
 pub enum ModifierKey {
     /// The globe key. Reports key code 63 with bit 1 << 23 while held.
     Fn,
+    /// The globe key and Control held together. Neither half arrives as an
+    /// ordinary key, so the plugin cannot register the pair either; the monitor
+    /// reads both halves out of the same flag word.
+    FnControl,
 }
 
 impl ModifierKey {
-    /// Every key setup listens for while asking someone to press theirs.
-    pub const ALL: [ModifierKey; 1] = [ModifierKey::Fn];
-
-    /// The macOS virtual key code reported on `NSEventTypeFlagsChanged`.
-    pub fn key_code(self) -> u16 {
-        match self {
-            Self::Fn => 63,
-        }
-    }
-
-    /// The `NSEventModifierFlag` bit that is set while the key is held.
-    pub fn flag_bit(self) -> usize {
-        match self {
-            Self::Fn => 1 << 23,
-        }
-    }
-
     /// What the settings window calls it.
     pub fn label(self) -> &'static str {
         match self {
             Self::Fn => "Fn (globe)",
+            Self::FnControl => "Fn + Control",
         }
     }
 
@@ -217,33 +195,46 @@ impl ModifierKey {
     pub fn shortcut(self) -> &'static str {
         match self {
             Self::Fn => "Fn",
-        }
-    }
-
-    /// Every spelling of this key a shortcut string may use. Apple has called
-    /// the same physical key both Fn and Globe, and a hand-edited store or an
-    /// older build may carry either.
-    fn aliases(self) -> &'static [&'static str] {
-        match self {
-            Self::Fn => &["fn", "globe"],
+            Self::FnControl => "Fn+Control",
         }
     }
 }
 
-/// The bare modifier key a shortcut string names, if it names one.
+/// Apple has called the same physical key both Fn and Globe, and a hand-edited
+/// store or an older build may carry either.
+fn is_fn_word(word: &str) -> bool {
+    word == "fn" || word == "globe"
+}
+
+fn is_control_word(word: &str) -> bool {
+    word == "control" || word == "ctrl"
+}
+
+/// The bare modifier key, or chord of bare modifiers, a shortcut string names,
+/// if it names one.
 ///
 /// This is the single place that decides which watcher a key goes to. A bare
 /// modifier produces no ordinary key event, so the global-shortcut plugin
 /// cannot register it and [`crate::platform::modifier_key_monitor`] takes it
 /// instead. That is a fact about how the key is watched, which is why it lives
 /// in the registration path and not in the shape of a binding.
+///
+/// `Fn`, `globe`, `Fn+Control` and `Control+Fn` (any case) are bare. `Fn+F5`
+/// is an ordinary combo that merely mentions the key, and the plugin keeps it.
 pub fn bare_modifier(shortcut: &str) -> Option<ModifierKey> {
-    let shortcut = shortcut.trim();
-    ModifierKey::ALL.into_iter().find(|key| {
-        key.aliases()
-            .iter()
-            .any(|a| a.eq_ignore_ascii_case(shortcut))
-    })
+    let parts: Vec<String> = shortcut
+        .split('+')
+        .map(|p| p.trim().to_ascii_lowercase())
+        .collect();
+    match parts.as_slice() {
+        [a] if is_fn_word(a) => Some(ModifierKey::Fn),
+        [a, b]
+            if (is_fn_word(a) && is_control_word(b)) || (is_control_word(a) && is_fn_word(b)) =>
+        {
+            Some(ModifierKey::FnControl)
+        }
+        _ => None,
+    }
 }
 
 /// The physical input bound to a key/mouse gesture.
@@ -360,9 +351,8 @@ pub struct Trigger {
     /// [`ensure_ids`]).
     ///
     /// A row is this id and nothing else. The old model's identity was
-    /// `(method, target)`, which is exactly why a double tap had to be bolted
-    /// onto a hold instead of being a row: there was no room for a second row
-    /// with the same pair.
+    /// `(method, target)`, which left no room for a second row with the same
+    /// pair.
     #[serde(default)]
     pub id: String,
     /// The gesture. `method` is the name the old model used, kept as an alias
@@ -427,40 +417,23 @@ impl Trigger {
 /// Which gestures are bound to one key, and what each one does.
 ///
 /// The recognizer's whole view of a key. It asks "what can this key mean" and
-/// gets an answer per gesture, which is what makes each gesture an independent
-/// trigger with its own target rather than a mode of one trigger.
+/// gets an answer per gesture, each with its own target.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyGestures {
     pub hold: Option<TriggerTarget>,
     pub tap: Option<TriggerTarget>,
-    pub double_tap: Option<TriggerTarget>,
-    pub double_tap_hold: Option<TriggerTarget>,
 }
 
 impl KeyGestures {
     pub fn is_empty(&self) -> bool {
-        self.hold.is_none()
-            && self.tap.is_none()
-            && self.double_tap.is_none()
-            && self.double_tap_hold.is_none()
-    }
-
-    /// Does any gesture on this key wait for a second press?
-    ///
-    /// The recognizer only opens its double-tap window when the answer is yes,
-    /// so a key with a single gesture has no hidden second meaning.
-    pub fn has_double(&self) -> bool {
-        self.double_tap.is_some() || self.double_tap_hold.is_some()
+        self.hold.is_none() && self.tap.is_none()
     }
 
     /// Every target this key can reach, for the visual-feedback events the
     /// onboarding screen listens to.
     pub fn targets(&self) -> Vec<TriggerTarget> {
         let mut out = Vec::new();
-        for target in [self.hold, self.tap, self.double_tap, self.double_tap_hold]
-            .into_iter()
-            .flatten()
-        {
+        for target in [self.hold, self.tap].into_iter().flatten() {
             if !out.contains(&target) {
                 out.push(target);
             }
@@ -479,8 +452,6 @@ pub fn gestures_on_key(triggers: &[Trigger], signature: &str) -> KeyGestures {
         let slot = match t.gesture {
             Gesture::Hold => &mut out.hold,
             Gesture::Tap => &mut out.tap,
-            Gesture::DoubleTap => &mut out.double_tap,
-            Gesture::DoubleTapHold => &mut out.double_tap_hold,
             // Say never has a binding, so it can never land here.
             Gesture::Say => continue,
         };
@@ -563,15 +534,24 @@ pub fn new_id() -> String {
 /// The shortcut string the globe key is recorded as.
 pub const GLOBE_SHORTCUT: &str = "Fn";
 
+/// The shortcut string dictation is recorded as by default: the globe key and
+/// Control held together.
+pub const DICTATION_SHORTCUT: &str = "Fn+Control";
+
 /// The default trigger set for a fresh install.
 ///
 /// Two rows, because two is what a new install needs to be usable and anything
 /// more is setup nobody asked for:
 /// - Hold the globe key to talk to Juno. One key, under the thumb, nothing to
 ///   chord.
-/// - Hold Option+Space to dictate.
+/// - Hold the globe key and Control to dictate. The same thumb, one finger
+///   more, and it cannot be mistaken for the plain hold.
 ///
 /// Both are Hold, so neither key carries a second meaning on a single tap.
+///
+/// Nothing here guesses whether the keyboard has a globe key. There is no
+/// reliable way to know (see [`crate::commands::triggers::set_trigger_capture`]);
+/// setup asks the person to press it instead.
 pub fn default_triggers() -> Vec<Trigger> {
     vec![
         trigger(
@@ -585,7 +565,7 @@ pub fn default_triggers() -> Vec<Trigger> {
             Gesture::Hold,
             TriggerTarget::Dictation,
             Some(Binding::Keyboard {
-                shortcut: "Option+Space".to_string(),
+                shortcut: DICTATION_SHORTCUT.to_string(),
             }),
         ),
     ]
@@ -610,23 +590,120 @@ pub fn ensure_ids(triggers: &mut [Trigger]) {
     }
 }
 
-/// Bring a stored trigger list onto the gesture model, once.
+/// A trigger as it may sit on disk or arrive from a window that has not
+/// reloaded: the same fields as [`Trigger`], but a gesture may still be one of
+/// the two retired double gestures.
+#[derive(Deserialize)]
+struct StoredTrigger {
+    #[serde(default)]
+    id: String,
+    #[serde(alias = "method")]
+    gesture: StoredGesture,
+    target: TriggerTarget,
+    #[serde(default)]
+    binding: Option<Binding>,
+    #[serde(default)]
+    phrase: Option<String>,
+    #[serde(default)]
+    require_hey_prefix: bool,
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
+
+impl From<StoredTrigger> for Trigger {
+    fn from(t: StoredTrigger) -> Self {
+        Trigger {
+            id: t.id,
+            gesture: t.gesture.into(),
+            target: t.target,
+            binding: t.binding,
+            phrase: t.phrase,
+            require_hey_prefix: t.require_hey_prefix,
+            enabled: t.enabled,
+        }
+    }
+}
+
+/// Read a stored trigger list and bring it onto the current model.
 ///
-/// A row for a row. The `method` field is read as `gesture` by serde alias, so
-/// a Hold stays a Hold on the key it was on, with the same target and the same
-/// switch, and the only thing added is the `id` the row now needs to be a row.
-/// Nothing is rebound, nothing is dropped, and nothing new appears.
+/// This is the single door a stored list comes through, and it runs on every
+/// load. It is idempotent: what it returns writes back as a list it leaves
+/// alone, so running it again, or never writing it back, changes nothing.
 ///
-/// An earlier draft of this gave every bound Hold row a Double tap row beside
-/// it, to hand back the hands-free that the derived double tap had been giving
-/// people. That was the same mistake one level down: a trigger with a second
-/// gesture bolted on, now written out as two rows that do the same thing.
-/// Triggers are triggers. If someone wants a double tap, they add one, which is
-/// the entire point of making gestures independent.
-pub fn migrate_to_gestures(stored: Vec<Trigger>) -> Vec<Trigger> {
-    let mut out = stored;
-    ensure_ids(&mut out);
-    out
+/// - `push_to_talk`, `toggle` and `voice` read as Hold, Tap and Say, on the
+///   same key with the same target and switch.
+/// - A row without an `id` is given one.
+/// - A retired double gesture becomes a Hold on the same key. If that would
+///   put two rows on one key, the double row gives way: a dictation row is
+///   rebound to [`DICTATION_SHORTCUT`], and any other row is dropped rather
+///   than double-bound. If even that key is taken, dictation is dropped too.
+///
+/// It never adds a row. Triggers are triggers; nobody is handed a gesture they
+/// did not bind.
+pub fn load_stored(value: &serde_json::Value) -> Result<Vec<Trigger>, serde_json::Error> {
+    let stored: Vec<StoredTrigger> = serde_json::from_value(value.clone())?;
+    Ok(migrate_stored(stored))
+}
+
+/// [`load_stored`] as a serde hook, for the settings structs that carry a
+/// trigger list (an imported settings file goes through it too).
+pub fn deserialize_stored<'de, D>(deserializer: D) -> Result<Vec<Trigger>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(migrate_stored(Vec::<StoredTrigger>::deserialize(
+        deserializer,
+    )?))
+}
+
+fn migrate_stored(stored: Vec<StoredTrigger>) -> Vec<Trigger> {
+    let retired: Vec<bool> = stored.iter().map(|t| t.gesture.is_retired()).collect();
+    let mut rows: Vec<Trigger> = stored.into_iter().map(Trigger::from).collect();
+    ensure_ids(&mut rows);
+
+    // Rows that were never a double gesture stand as they are. The retired
+    // ones are then settled in list order, each against everything already
+    // settled, so the result does not depend on which came first in the file.
+    let mut settled: Vec<Option<Trigger>> = rows
+        .iter()
+        .zip(&retired)
+        .map(|(row, is_retired)| (!is_retired).then(|| row.clone()))
+        .collect();
+
+    for (i, row) in rows.into_iter().enumerate() {
+        if !retired[i] {
+            continue;
+        }
+        let mut row = row;
+        if !takes_a_taken_key(&row, &settled) {
+            settled[i] = Some(row);
+            continue;
+        }
+        if row.target == TriggerTarget::Dictation {
+            row.binding = Some(Binding::Keyboard {
+                shortcut: DICTATION_SHORTCUT.to_string(),
+            });
+            if !takes_a_taken_key(&row, &settled) {
+                settled[i] = Some(row);
+            }
+        }
+    }
+
+    settled.into_iter().flatten().collect()
+}
+
+/// Would this enabled row sit on a key an enabled, already settled row owns?
+fn takes_a_taken_key(row: &Trigger, settled: &[Option<Trigger>]) -> bool {
+    if !row.enabled {
+        return false;
+    }
+    let Some(signature) = row.key_signature() else {
+        return false;
+    };
+    settled
+        .iter()
+        .flatten()
+        .any(|o| o.enabled && o.key_signature().as_deref() == Some(signature.as_str()))
 }
 
 /// Map a legacy trigger-mode string (`"hold"` / `"tap"`) to a gesture.
@@ -702,9 +779,8 @@ pub fn migrate_from_legacy(
 /// Project the trigger list back onto the legacy fields so peripheral consumers
 /// (tray labels, the always-listening controller, the session's recorded start
 /// method) stay coherent. Best-effort and keyboard-only: a mouse or Say primary
-/// trigger leaves the legacy keyboard string untouched, and the two double
-/// gestures are skipped entirely because the legacy fields have no word for
-/// them. Returns the derived pieces: `(agent_combo, agent_mode,
+/// trigger leaves the legacy keyboard string untouched. Returns the derived
+/// pieces: `(agent_combo, agent_mode,
 /// dictation_combo, dictation_mode, always_listening_active, wake_words)`.
 #[allow(clippy::type_complexity)]
 pub fn derive_legacy(
@@ -713,7 +789,7 @@ pub fn derive_legacy(
     prev_dictation_combo: &str,
 ) -> (String, String, String, String, bool, Vec<String>) {
     // Only Hold and Tap project: the legacy pair of modes is "hold" and "tap",
-    // and a double gesture is neither.
+    // and Say has no key.
     let find_key = |target: TriggerTarget| {
         triggers
             .iter()
@@ -802,12 +878,7 @@ pub struct TriggerHints {
 }
 
 /// The order a hint prefers its gestures in.
-const HINT_ORDER: [Gesture; 4] = [
-    Gesture::Hold,
-    Gesture::DoubleTapHold,
-    Gesture::Tap,
-    Gesture::DoubleTap,
-];
+const HINT_ORDER: [Gesture; 2] = [Gesture::Hold, Gesture::Tap];
 
 /// The hint for one target. See [`TriggerHint`].
 pub fn hint_for(triggers: &[Trigger], target: TriggerTarget) -> Option<TriggerHint> {
@@ -906,7 +977,8 @@ pub struct TriggerIssue {
 /// Rules:
 /// - A Say row needs a non-blank phrase, and no two Say rows may listen for the
 ///   same phrase.
-/// - Two gestures on one key must be allowed to share it ([`can_share_key`]).
+/// - One key means one thing: two enabled rows may not share a key, whatever
+///   their gestures or targets.
 /// - No enabled keyboard trigger may take a reserved combo.
 ///
 /// A key/mouse trigger with no binding is allowed through and is switched off
@@ -916,9 +988,9 @@ pub struct TriggerIssue {
 /// shortcuts (Escape to stop, Cmd+Comma to open settings).
 pub fn issues(triggers: &[Trigger], reserved: &[String]) -> Vec<TriggerIssue> {
     let mut out = Vec::new();
-    // (key signature, gesture, row label) for every enabled bound row already
-    // seen, so a refusal can name the row that got there first.
-    let mut claimed: Vec<(String, Gesture, String)> = Vec::new();
+    // (key signature, row label) for every enabled bound row already seen, so a
+    // refusal can name the row that got there first.
+    let mut claimed: Vec<(String, String)> = Vec::new();
     let mut phrases: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for t in triggers.iter().filter(|t| t.enabled) {
@@ -959,17 +1031,14 @@ pub fn issues(triggers: &[Trigger], reserved: &[String]) -> Vec<TriggerIssue> {
             continue;
         }
         let signature = binding.signature();
-        if let Some((_, _, other)) = claimed
-            .iter()
-            .find(|(sig, gesture, _)| *sig == signature && !can_share_key(*gesture, t.gesture))
-        {
+        if let Some((_, other)) = claimed.iter().find(|(sig, _)| *sig == signature) {
             out.push(TriggerIssue {
                 trigger_id: t.id.clone(),
                 message: format!("\"{label}\" already has {other}."),
             });
             continue;
         }
-        claimed.push((signature, t.gesture, t.label()));
+        claimed.push((signature, t.label()));
     }
 
     out
@@ -980,9 +1049,7 @@ pub fn issues(triggers: &[Trigger], reserved: &[String]) -> Vec<TriggerIssue> {
 /// Returns the sentence the save would fail with, so the hint shown while
 /// someone is still typing and the result of pressing Save cannot disagree.
 /// Passing the row being edited is what keeps a row from reporting a conflict
-/// with its own current binding, and the row's gesture is read from the list,
-/// because whether a key is free depends on which gesture wants it: the globe
-/// key can hold *and* double-tap-and-hold, and that is the headline case.
+/// with its own current binding.
 pub fn combo_conflict(
     triggers: &[Trigger],
     combo: &str,
@@ -998,24 +1065,12 @@ pub fn combo_conflict(
         return Some(format!("\"{label}\" is already used by another shortcut."));
     }
 
-    // Which gesture is asking. An id that names no row (a row the window has
-    // not saved yet) gets the strict answer: anything already on that key
-    // conflicts. Guessing generously here would let a save fail after the fact,
-    // which is the one thing this function exists to prevent.
-    let asking = editing_id
-        .and_then(|id| triggers.iter().find(|t| t.id == id))
-        .map(|t| t.gesture);
-
     let signature = binding.signature();
     triggers
         .iter()
         .filter(|t| t.enabled)
         .filter(|t| editing_id.is_none_or(|id| t.id != id))
-        .filter(|t| t.key_signature().as_deref() == Some(signature.as_str()))
-        .find(|t| match asking {
-            Some(gesture) => !can_share_key(t.gesture, gesture),
-            None => true,
-        })
+        .find(|t| t.key_signature().as_deref() == Some(signature.as_str()))
         .map(|t| format!("\"{label}\" already has {}.", t.label()))
 }
 
@@ -1055,59 +1110,32 @@ mod tests {
     }
 
     /* ---------------------------------------------------------------- */
-    /* The sharing table                                                */
+    /* One key, one thing                                               */
     /* ---------------------------------------------------------------- */
 
     #[test]
-    fn hold_and_double_tap_and_hold_share_one_key() {
-        // The headline case. The globe key holds to talk to Juno and
-        // double-taps-and-holds to dictate, and neither is derived from the
-        // other.
-        assert!(can_share_key(Gesture::Hold, Gesture::DoubleTapHold));
-        assert!(can_share_key(Gesture::DoubleTapHold, Gesture::Hold));
-    }
-
-    #[test]
-    fn the_sharing_table_is_exactly_the_plans_table() {
-        use Gesture::*;
-        // yes
-        assert!(can_share_key(Hold, DoubleTap));
-        assert!(can_share_key(Hold, DoubleTapHold));
-        assert!(can_share_key(DoubleTap, DoubleTapHold));
-        assert!(can_share_key(Tap, DoubleTapHold));
-        // no
-        assert!(!can_share_key(Hold, Tap));
-        assert!(!can_share_key(Tap, Hold));
-        assert!(!can_share_key(Tap, DoubleTap));
-        assert!(!can_share_key(DoubleTap, Tap));
-        // and no gesture twice on one key
-        for g in Gesture::ALL {
-            assert!(!can_share_key(g, g), "{g:?} twice on one key");
-        }
-        // Say has no key to share
-        for g in Gesture::ALL {
-            assert!(!can_share_key(Say, g));
-            assert!(!can_share_key(g, Say));
-        }
-    }
-
-    #[test]
-    fn validate_accepts_hold_and_double_tap_and_hold_on_the_globe_key() {
+    fn a_chord_with_the_globe_key_is_a_different_key_from_the_globe_key() {
+        // The owner's setup: holding Fn talks to Juno, holding Fn and Control
+        // dictates. Two keys as far as a row is concerned.
         let ts = vec![
             row(Gesture::Hold, TriggerTarget::Agent, "Fn"),
-            row(Gesture::DoubleTapHold, TriggerTarget::Dictation, "Fn"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "Fn+Control"),
         ];
         assert!(validate(&ts, &[]).is_ok(), "{:?}", validate(&ts, &[]));
+        assert_eq!(bound_keys(&ts).len(), 2);
     }
 
     #[test]
-    fn validate_accepts_all_three_double_capable_gestures_on_one_key() {
-        let ts = vec![
-            row(Gesture::Hold, TriggerTarget::Agent, "Fn"),
-            row(Gesture::DoubleTap, TriggerTarget::Dictation, "Fn"),
-            row(Gesture::DoubleTapHold, TriggerTarget::Dictation, "Fn"),
-        ];
-        assert!(validate(&ts, &[]).is_ok());
+    fn the_chord_has_one_signature_however_it_is_spelled() {
+        let sig = |s: &str| {
+            Binding::Keyboard {
+                shortcut: s.to_string(),
+            }
+            .signature()
+        };
+        assert_eq!(sig("Fn+Control"), sig("control+FN"));
+        assert_eq!(sig("globe+ctrl"), sig("Fn+Control"));
+        assert_ne!(sig("Fn+Control"), sig("Fn"));
     }
 
     #[test]
@@ -1119,15 +1147,6 @@ mod tests {
         let err = validate(&ts, &[]).expect_err("hold and tap cannot share a key");
         assert!(err.contains("Fn (globe)"), "got: {err}");
         assert!(err.contains("Hold to talk to Juno"), "got: {err}");
-    }
-
-    #[test]
-    fn validate_refuses_tap_and_double_tap_on_one_key() {
-        let ts = vec![
-            row(Gesture::Tap, TriggerTarget::Dictation, "Option+Space"),
-            row(Gesture::DoubleTap, TriggerTarget::Agent, "Option+Space"),
-        ];
-        assert!(validate(&ts, &[]).is_err());
     }
 
     #[test]
@@ -1239,164 +1258,294 @@ mod tests {
     /* Migration                                                        */
     /* ---------------------------------------------------------------- */
 
+    /// Load a stored list the way the settings store does.
+    fn load(json: &str) -> Vec<Trigger> {
+        load_stored(&serde_json::from_str(json).expect("valid json")).expect("loads")
+    }
+
+    fn stored_row(gesture: &str, target: &str, shortcut: &str) -> String {
+        format!(
+            r#"{{ "gesture": "{gesture}", "target": "{target}", "binding": {{ "kind": "keyboard", "shortcut": "{shortcut}" }}, "enabled": true }}"#
+        )
+    }
+
+    fn list(rows: &[String]) -> String {
+        format!("[{}]", rows.join(","))
+    }
+
+    fn shortcut_of(t: &Trigger) -> String {
+        match &t.binding {
+            Some(Binding::Keyboard { shortcut }) => shortcut.clone(),
+            other => panic!("expected a keyboard binding, got {other:?}"),
+        }
+    }
+
     #[test]
     fn a_push_to_talk_trigger_on_fn_becomes_a_hold_on_fn() {
-        // The user in the report. Their store says `method: push_to_talk` on
-        // the globe key, and it has to come back as exactly one row: Hold on
-        // the globe key, same target, same switch. Nothing rebound, nothing
-        // dropped, and nothing new beside it.
-        let stored = r#"[{
-            "method": "push_to_talk",
-            "target": "dictation",
-            "binding": { "kind": "keyboard", "shortcut": "Fn" },
-            "phrase": null,
-            "require_hey_prefix": false,
-            "enabled": true
-        }]"#;
-        let read: Vec<Trigger> = serde_json::from_str(stored).expect("the old shape must load");
-        assert_eq!(read[0].gesture, Gesture::Hold);
-        assert!(read[0].id.is_empty(), "the old shape carries no id");
-
-        let migrated = migrate_to_gestures(read);
+        // A store from before gestures. `method: push_to_talk` on the globe
+        // key comes back as exactly one row: Hold on the globe key, same
+        // target, same switch, and an id.
+        let migrated = load(
+            r#"[{
+                "method": "push_to_talk",
+                "target": "dictation",
+                "binding": { "kind": "keyboard", "shortcut": "Fn" },
+                "phrase": null,
+                "require_hey_prefix": false,
+                "enabled": true
+            }]"#,
+        );
         assert_eq!(migrated.len(), 1, "one row in, one row out: {migrated:?}");
-
         let hold = &migrated[0];
         assert_eq!(hold.gesture, Gesture::Hold);
         assert_eq!(hold.target, TriggerTarget::Dictation);
-        assert_eq!(
-            hold.binding,
-            Some(Binding::Keyboard {
-                shortcut: "Fn".to_string()
-            }),
-            "still the globe key"
-        );
-        assert!(hold.enabled, "and still switched on");
+        assert_eq!(shortcut_of(hold), "Fn");
+        assert!(hold.enabled);
         assert!(!hold.id.is_empty(), "and now has a row identity");
         assert!(validate(&migrated, &[]).is_ok());
     }
 
     #[test]
-    fn migration_never_invents_a_row() {
-        // The property, not the example. A trigger is a trigger: nothing about
-        // reading an old store is a reason to hand somebody a gesture they did
-        // not ask for. An earlier draft gave every Hold row a Double tap row
-        // beside it, to keep the hands-free the derived double tap had been
-        // giving people; that was the same mistake one level down, written out
-        // as two rows that do the same thing.
-        let cases: Vec<Vec<Trigger>> = vec![
-            vec![],
-            vec![row(Gesture::Hold, TriggerTarget::Dictation, "Fn")],
-            vec![
-                row(Gesture::Hold, TriggerTarget::Agent, "Fn"),
-                row(Gesture::Hold, TriggerTarget::Dictation, "Option+Space"),
-                row(Gesture::Tap, TriggerTarget::Agent, "Option+D"),
-                trigger(Gesture::DoubleTapHold, TriggerTarget::Dictation, None),
-                voice("juno", TriggerTarget::Agent, true),
-            ],
-        ];
-        for before in cases {
-            // Both ways in: a store from the old model (no ids) and one this
-            // model already wrote.
-            for stripped in [false, true] {
-                let mut input = before.clone();
-                if stripped {
-                    for t in input.iter_mut() {
-                        t.id = String::new();
-                    }
-                }
-                let after = migrate_to_gestures(input);
-                assert_eq!(
-                    after.len(),
-                    before.len(),
-                    "migration produced {} rows from {} (stripped ids: {stripped})",
-                    after.len(),
-                    before.len()
-                );
-                // And row for row, only the id may differ.
-                for (a, b) in after.iter().zip(before.iter()) {
-                    assert_eq!(a.gesture, b.gesture);
-                    assert_eq!(a.target, b.target);
-                    assert_eq!(a.binding, b.binding);
-                    assert_eq!(a.phrase, b.phrase);
-                    assert_eq!(a.enabled, b.enabled);
-                    assert!(!a.id.is_empty());
-                }
-            }
-        }
-    }
-
-    #[test]
     fn migration_maps_every_old_method_name() {
-        let stored = r#"[
+        let migrated = load(
+            r#"[
             { "method": "push_to_talk", "target": "dictation", "binding": { "kind": "keyboard", "shortcut": "Option+Space" }, "enabled": true },
             { "method": "toggle", "target": "agent", "binding": { "kind": "keyboard", "shortcut": "Option+D" }, "enabled": true },
             { "method": "voice", "target": "agent", "binding": null, "phrase": "juno", "require_hey_prefix": false, "enabled": true }
-        ]"#;
-        let read: Vec<Trigger> = serde_json::from_str(stored).expect("loads");
-        assert_eq!(read[0].gesture, Gesture::Hold);
-        assert_eq!(read[1].gesture, Gesture::Tap);
-        assert_eq!(read[2].gesture, Gesture::Say);
-
-        let migrated = migrate_to_gestures(read);
-        // Three rows in, three rows out.
-        assert_eq!(migrated.len(), 3);
-        assert_eq!(
-            migrated
-                .iter()
-                .filter(|t| t.gesture == Gesture::DoubleTap)
-                .count(),
-            0,
-            "nobody is handed a double tap they did not bind"
+        ]"#,
         );
-        // Nothing lost: every original row is still there, on its own key.
-        assert!(migrated
-            .iter()
-            .any(|t| t.gesture == Gesture::Hold && t.target == TriggerTarget::Dictation));
-        assert!(migrated
-            .iter()
-            .any(|t| t.gesture == Gesture::Tap && t.target == TriggerTarget::Agent));
-        assert!(migrated
-            .iter()
-            .any(|t| t.gesture == Gesture::Say && t.phrase.as_deref() == Some("juno")));
+        assert_eq!(migrated.len(), 3);
+        assert_eq!(migrated[0].gesture, Gesture::Hold);
+        assert_eq!(migrated[1].gesture, Gesture::Tap);
+        assert_eq!(migrated[2].gesture, Gesture::Say);
+        assert_eq!(migrated[2].phrase.as_deref(), Some("juno"));
         assert!(validate(&migrated, &[]).is_ok());
     }
 
     #[test]
     fn migration_keeps_an_unbound_row_unbound() {
-        let stored = r#"[{ "method": "push_to_talk", "target": "dictation", "binding": null, "enabled": false }]"#;
-        let read: Vec<Trigger> = serde_json::from_str(stored).expect("loads");
-        let migrated = migrate_to_gestures(read);
+        let migrated = load(
+            r#"[{ "method": "push_to_talk", "target": "dictation", "binding": null, "enabled": false }]"#,
+        );
         assert_eq!(migrated.len(), 1);
         assert_eq!(migrated[0].binding, None);
         assert!(!migrated[0].enabled, "and still switched off");
     }
 
+    /* The retired double gestures ------------------------------------ */
+
     #[test]
-    fn migration_runs_once() {
-        // A list that already has ids was written by this model, so a second
-        // pass is a no-op: same rows, same identities. An unmarked migration
-        // would redo its work on every launch.
-        let first = migrate_to_gestures(vec![Trigger {
-            id: String::new(),
-            gesture: Gesture::Hold,
-            target: TriggerTarget::Agent,
-            binding: Some(Binding::Keyboard {
-                shortcut: "Fn".to_string(),
-            }),
-            phrase: None,
-            require_hey_prefix: false,
-            enabled: true,
-        }]);
-        assert_eq!(first.len(), 1);
-        let second = migrate_to_gestures(first.clone());
-        assert_eq!(second, first, "the second pass changes nothing");
+    fn the_owners_setup_keeps_its_agent_hold_and_dictation_moves_to_fn_control() {
+        // [Hold Fn -> agent, DoubleTapHold Fn -> dictation]
+        let migrated = load(&list(&[
+            stored_row("hold", "agent", "Fn"),
+            stored_row("double_tap_hold", "dictation", "Fn"),
+        ]));
+        assert_eq!(migrated.len(), 2, "{migrated:?}");
+        assert_eq!(migrated[0].gesture, Gesture::Hold);
+        assert_eq!(migrated[0].target, TriggerTarget::Agent);
+        assert_eq!(shortcut_of(&migrated[0]), "Fn");
+        assert_eq!(migrated[1].gesture, Gesture::Hold);
+        assert_eq!(migrated[1].target, TriggerTarget::Dictation);
+        assert_eq!(shortcut_of(&migrated[1]), "Fn+Control");
+        assert!(migrated[1].enabled);
+        assert!(validate(&migrated, &[]).is_ok());
+    }
+
+    #[test]
+    fn the_collision_is_settled_the_same_way_whichever_row_comes_first() {
+        let migrated = load(&list(&[
+            stored_row("double_tap_hold", "dictation", "Fn"),
+            stored_row("hold", "agent", "Fn"),
+        ]));
+        assert_eq!(migrated.len(), 2, "{migrated:?}");
+        // The double row keeps its place in the list, on the new key.
+        assert_eq!(migrated[0].target, TriggerTarget::Dictation);
+        assert_eq!(shortcut_of(&migrated[0]), "Fn+Control");
+        assert_eq!(migrated[1].target, TriggerTarget::Agent);
+        assert_eq!(shortcut_of(&migrated[1]), "Fn");
+    }
+
+    #[test]
+    fn a_double_row_with_a_free_key_simply_becomes_a_hold() {
+        for gesture in ["double_tap", "double_tap_hold"] {
+            let migrated = load(&list(&[
+                stored_row("hold", "agent", "Fn"),
+                stored_row(gesture, "dictation", "Option+Space"),
+            ]));
+            assert_eq!(migrated.len(), 2, "{gesture}");
+            assert_eq!(migrated[1].gesture, Gesture::Hold, "{gesture}");
+            assert_eq!(shortcut_of(&migrated[1]), "Option+Space", "{gesture}");
+        }
+    }
+
+    #[test]
+    fn a_colliding_agent_double_row_is_dropped_not_double_bound() {
+        for gesture in ["double_tap", "double_tap_hold"] {
+            let migrated = load(&list(&[
+                stored_row("hold", "dictation", "Fn"),
+                stored_row(gesture, "agent", "Fn"),
+            ]));
+            assert_eq!(migrated.len(), 1, "{gesture}: {migrated:?}");
+            assert_eq!(migrated[0].target, TriggerTarget::Dictation);
+            assert_eq!(shortcut_of(&migrated[0]), "Fn");
+        }
+    }
+
+    #[test]
+    fn a_double_tap_on_a_tap_key_gives_way_too() {
+        // Tap + double tap and hold used to share a key; Hold + Tap cannot.
+        let migrated = load(&list(&[
+            stored_row("tap", "dictation", "Option+D"),
+            stored_row("double_tap_hold", "agent", "Option+D"),
+        ]));
+        assert_eq!(migrated.len(), 1, "{migrated:?}");
+        assert_eq!(migrated[0].gesture, Gesture::Tap);
+    }
+
+    #[test]
+    fn dictation_is_dropped_if_even_the_default_key_is_taken() {
+        let migrated = load(&list(&[
+            stored_row("hold", "agent", "Fn"),
+            stored_row("hold", "agent", "Fn+Control"),
+            stored_row("double_tap", "dictation", "Fn"),
+        ]));
+        assert_eq!(migrated.len(), 2, "never double-bound: {migrated:?}");
+        assert!(migrated.iter().all(|t| t.target == TriggerTarget::Agent));
+        assert!(validate(&migrated, &[]).is_ok());
+    }
+
+    #[test]
+    fn two_double_rows_on_one_key_leave_one_hold() {
+        let migrated = load(&list(&[
+            stored_row("double_tap", "agent", "Fn"),
+            stored_row("double_tap_hold", "agent", "Fn"),
+        ]));
+        assert_eq!(migrated.len(), 1, "{migrated:?}");
+        assert_eq!(migrated[0].gesture, Gesture::Hold);
+    }
+
+    #[test]
+    fn a_switched_off_double_row_keeps_its_place_and_its_switch() {
+        let migrated = load(
+            r#"[
+            { "gesture": "hold", "target": "agent", "binding": { "kind": "keyboard", "shortcut": "Fn" }, "enabled": true },
+            { "gesture": "double_tap_hold", "target": "dictation", "binding": { "kind": "keyboard", "shortcut": "Fn" }, "enabled": false }
+        ]"#,
+        );
+        assert_eq!(migrated.len(), 2);
+        assert_eq!(migrated[1].gesture, Gesture::Hold);
+        assert!(!migrated[1].enabled);
+        assert_eq!(shortcut_of(&migrated[1]), "Fn", "off rows hold no key");
+        assert!(validate(&migrated, &[]).is_ok());
+    }
+
+    #[test]
+    fn migration_never_invents_a_row() {
+        // The property, not the example: across every shape of old store, the
+        // row count never goes up.
+        let cases: Vec<String> = vec![
+            "[]".to_string(),
+            list(&[stored_row("hold", "dictation", "Fn")]),
+            list(&[
+                stored_row("hold", "agent", "Fn"),
+                stored_row("double_tap_hold", "dictation", "Fn"),
+                stored_row("double_tap", "agent", "Fn"),
+                stored_row("tap", "agent", "Option+D"),
+            ]),
+        ];
+        for json in cases {
+            let before = serde_json::from_str::<Vec<serde_json::Value>>(&json)
+                .unwrap()
+                .len();
+            let after = load(&json).len();
+            assert!(after <= before, "{after} rows from {before}: {json}");
+        }
+    }
+
+    #[test]
+    fn migration_is_idempotent_through_a_save_and_reload() {
+        let once = load(&list(&[
+            stored_row("hold", "agent", "Fn"),
+            stored_row("double_tap_hold", "dictation", "Fn"),
+            stored_row("double_tap", "agent", "Option+D"),
+            stored_row("tap", "dictation", "Option+Space"),
+        ]));
+        // What the store writes, read back through the same door.
+        let written = serde_json::to_value(&once).expect("serialize");
+        assert!(
+            !written.to_string().contains("double_tap"),
+            "nothing writes a retired gesture: {written}"
+        );
+        let twice = load_stored(&written).expect("reload");
+        assert_eq!(twice, once, "the second pass changes nothing");
+        let thrice = load_stored(&serde_json::to_value(&twice).unwrap()).unwrap();
+        assert_eq!(thrice, once);
+    }
+
+    #[test]
+    fn running_the_migration_on_an_unsaved_list_twice_gives_the_same_rows() {
+        // The load is not written back until the next save, so every launch
+        // reads the same old file. The rows must come out the same each time,
+        // apart from the ids handed to rows that had none.
+        let json = list(&[
+            stored_row("hold", "agent", "Fn"),
+            stored_row("double_tap_hold", "dictation", "Fn"),
+        ]);
+        let strip = |ts: Vec<Trigger>| -> Vec<(Gesture, TriggerTarget, Option<Binding>, bool)> {
+            ts.into_iter()
+                .map(|t| (t.gesture, t.target, t.binding, t.enabled))
+                .collect()
+        };
+        assert_eq!(strip(load(&json)), strip(load(&json)));
+    }
+
+    #[test]
+    fn a_deleted_row_stays_deleted_through_save_and_reload() {
+        // The report: "I removed the double tap and it came back." A list the
+        // person has pruned is written, read back and migrated, and nothing
+        // reappears.
+        let mut rows = load(&list(&[
+            stored_row("hold", "agent", "Fn"),
+            stored_row("hold", "dictation", "Fn+Control"),
+            stored_row("tap", "agent", "Option+D"),
+        ]));
+        rows.retain(|t| t.gesture != Gesture::Tap);
+        let reloaded =
+            load_stored(&serde_json::to_value(&rows).expect("serialize")).expect("reload");
+        assert_eq!(reloaded, rows);
+        assert_eq!(reloaded.len(), 2);
+    }
+
+    #[test]
+    fn an_unknown_gesture_is_still_refused() {
+        let v: serde_json::Value =
+            serde_json::from_str(&list(&[stored_row("triple_tap", "agent", "Fn")])).unwrap();
+        assert!(load_stored(&v).is_err());
+    }
+
+    /* Serde back-compat ---------------------------------------------- */
+
+    #[test]
+    fn a_retired_gesture_name_still_reads_and_is_a_hold() {
+        for name in ["double_tap", "double_tap_hold"] {
+            let g: Gesture = serde_json::from_str(&format!("\"{name}\"")).expect("still readable");
+            assert_eq!(g, Gesture::Hold, "{name}");
+        }
+        // And a row from a window that has not reloaded still deserializes.
+        let t: Trigger = serde_json::from_str(
+            r#"{ "id": "x", "gesture": "double_tap_hold", "target": "dictation",
+                 "binding": { "kind": "keyboard", "shortcut": "Fn" } }"#,
+        )
+        .expect("a stale window's row still parses");
+        assert_eq!(t.gesture, Gesture::Hold);
     }
 
     #[test]
     fn ensure_ids_replaces_a_repeated_identity() {
         let mut ts = vec![
             row(Gesture::Hold, TriggerTarget::Agent, "Fn"),
-            row(Gesture::DoubleTap, TriggerTarget::Agent, "Fn"),
+            row(Gesture::Tap, TriggerTarget::Agent, "Option+D"),
         ];
         ts[1].id = ts[0].id.clone();
         ensure_ids(&mut ts);
@@ -1441,14 +1590,14 @@ mod tests {
                 serde_json::from_str(&written).expect("a gesture reads back as itself");
             assert_eq!(read, g);
         }
-        assert_eq!(Gesture::DoubleTapHold.as_str(), "double_tap_hold");
+        assert_eq!(Gesture::ALL.len(), 3, "hold, tap, say and nothing else");
     }
 
     #[test]
     fn a_gesture_row_round_trips_through_the_store() {
-        let ts = vec![row(Gesture::DoubleTapHold, TriggerTarget::Dictation, "Fn")];
+        let ts = vec![row(Gesture::Hold, TriggerTarget::Dictation, "Fn+Control")];
         let written = serde_json::to_string(&ts).expect("serialize");
-        assert!(written.contains("double_tap_hold"), "got: {written}");
+        assert!(written.contains("\"hold\""), "got: {written}");
         assert!(!written.contains("\"method\""), "one live field name");
         let reread: Vec<Trigger> = serde_json::from_str(&written).expect("deserialize");
         assert_eq!(reread, ts);
@@ -1459,7 +1608,7 @@ mod tests {
     /* ---------------------------------------------------------------- */
 
     #[test]
-    fn the_defaults_are_hold_globe_to_talk_and_option_space_to_dictate() {
+    fn the_defaults_are_hold_globe_to_talk_and_hold_globe_control_to_dictate() {
         let ts = default_triggers();
         assert_eq!(
             ts.len(),
@@ -1488,7 +1637,7 @@ mod tests {
         assert_eq!(
             dictation.binding,
             Some(Binding::Keyboard {
-                shortcut: "Option+Space".to_string()
+                shortcut: "Fn+Control".to_string()
             })
         );
 
@@ -1497,13 +1646,32 @@ mod tests {
     }
 
     #[test]
+    fn both_defaults_are_watched_by_the_modifier_monitor_and_are_two_keys() {
+        let ts = default_triggers();
+        let watchers: Vec<Watcher> = bound_keys(&ts).iter().map(watcher_for).collect();
+        assert_eq!(
+            watchers,
+            vec![
+                Watcher::ModifierKey(ModifierKey::Fn),
+                Watcher::ModifierKey(ModifierKey::FnControl)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_defaults_survive_a_trip_through_the_store_unchanged() {
+        let ts = default_triggers();
+        let reloaded = load_stored(&serde_json::to_value(&ts).unwrap()).unwrap();
+        assert_eq!(reloaded, ts);
+    }
+
+    #[test]
     fn no_default_fires_on_a_single_tap() {
         // The standing rule: a keyboard trigger never fires on a single tap of
         // a hold key. Both defaults are Hold, so neither key has a tap meaning
         // at all.
         for t in default_triggers() {
-            assert_ne!(t.gesture, Gesture::Tap);
-            assert_ne!(t.gesture, Gesture::DoubleTap);
+            assert_eq!(t.gesture, Gesture::Hold);
         }
     }
 
@@ -1573,10 +1741,18 @@ mod tests {
     #[test]
     fn the_hint_prefers_hold_over_the_other_gestures() {
         let ts = vec![
-            row(Gesture::DoubleTap, TriggerTarget::Agent, "Option+D"),
+            row(Gesture::Tap, TriggerTarget::Agent, "Option+D"),
             row(Gesture::Hold, TriggerTarget::Agent, "Fn"),
         ];
         assert_eq!(hint_for(&ts, TriggerTarget::Agent).unwrap().shortcut, "Fn");
+    }
+
+    #[test]
+    fn the_hint_for_the_chord_is_the_chord() {
+        let ts = default_triggers();
+        let hint = hint_for(&ts, TriggerTarget::Dictation).expect("a hint");
+        assert_eq!(hint.shortcut, "Fn+Control");
+        assert_eq!(hint.sentence, "Hold to dictate");
     }
 
     /* ---------------------------------------------------------------- */
@@ -1586,20 +1762,21 @@ mod tests {
     #[test]
     fn the_gestures_on_one_key_are_read_off_the_list() {
         let ts = vec![
-            row(Gesture::Hold, TriggerTarget::Agent, "Fn"),
-            row(Gesture::DoubleTapHold, TriggerTarget::Dictation, "globe"),
+            row(Gesture::Hold, TriggerTarget::Agent, "globe"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "Fn+Control"),
             row(Gesture::Tap, TriggerTarget::Dictation, "Option+Space"),
         ];
         let globe = gestures_on_key(&ts, "fn (globe)");
         assert_eq!(globe.hold, Some(TriggerTarget::Agent));
-        assert_eq!(globe.double_tap_hold, Some(TriggerTarget::Dictation));
         assert_eq!(globe.tap, None);
-        assert!(globe.has_double());
-        assert_eq!(globe.targets().len(), 2);
+        assert_eq!(globe.targets(), vec![TriggerTarget::Agent]);
+
+        let chord = gestures_on_key(&ts, "fn + control");
+        assert_eq!(chord.hold, Some(TriggerTarget::Dictation));
 
         let space = gestures_on_key(&ts, "option+space");
         assert_eq!(space.tap, Some(TriggerTarget::Dictation));
-        assert!(!space.has_double());
+        assert_eq!(space.hold, None);
     }
 
     #[test]
@@ -1611,10 +1788,10 @@ mod tests {
 
     #[test]
     fn a_key_used_by_several_rows_is_registered_once() {
+        // A hand-edited store can name one key twice; it is still one key.
         let ts = vec![
             row(Gesture::Hold, TriggerTarget::Agent, "Fn"),
-            row(Gesture::DoubleTap, TriggerTarget::Dictation, "Fn"),
-            row(Gesture::DoubleTapHold, TriggerTarget::Dictation, "globe"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "globe"),
             row(Gesture::Tap, TriggerTarget::Dictation, "Option+Space"),
         ];
         let keys = bound_keys(&ts);
@@ -1641,27 +1818,20 @@ mod tests {
     }
 
     #[test]
-    fn a_double_tap_and_hold_row_may_take_the_hold_rows_key() {
-        // The headline case, checked through the path the recorder uses while
-        // the person is still choosing, so the hint and the save agree.
+    fn a_row_may_not_take_another_rows_key() {
         let mut ts = vec![row(Gesture::Hold, TriggerTarget::Agent, "Fn")];
-        let mut second = trigger(Gesture::DoubleTapHold, TriggerTarget::Dictation, None);
+        let mut second = trigger(Gesture::Hold, TriggerTarget::Dictation, None);
         let second_id = second.id.clone();
         second.enabled = false; // unbound rows persist switched off
         ts.push(second);
-        assert_eq!(combo_conflict(&ts, "Fn", Some(&second_id), &[]), None);
-    }
-
-    #[test]
-    fn a_tap_row_may_not_take_the_hold_rows_key() {
-        let mut ts = vec![row(Gesture::Hold, TriggerTarget::Agent, "Fn")];
-        let mut second = trigger(Gesture::Tap, TriggerTarget::Dictation, None);
-        let second_id = second.id.clone();
-        second.enabled = false;
-        ts.push(second);
-        let msg = combo_conflict(&ts, "Fn", Some(&second_id), &[])
-            .expect("tap cannot share a key with hold");
+        let msg =
+            combo_conflict(&ts, "Fn", Some(&second_id), &[]).expect("one key means one thing");
         assert!(msg.contains("Hold to talk to Juno"), "got: {msg}");
+        assert_eq!(
+            combo_conflict(&ts, "Fn+Control", Some(&second_id), &[]),
+            None,
+            "the chord is a different key"
+        );
     }
 
     #[test]
@@ -1862,7 +2032,7 @@ mod tests {
     fn the_two_switch_rules_do_not_fight() {
         let previous = vec![
             trigger(Gesture::Hold, TriggerTarget::Dictation, None),
-            trigger(Gesture::DoubleTapHold, TriggerTarget::Agent, None),
+            trigger(Gesture::Tap, TriggerTarget::Agent, None),
         ];
         let mut next = previous.clone();
         next[0].enabled = false;
@@ -1906,6 +2076,43 @@ mod tests {
     }
 
     #[test]
+    fn the_globe_control_chord_goes_to_the_modifier_watcher_in_any_spelling() {
+        for spelling in [
+            "Fn+Control",
+            "fn+control",
+            "Control+Fn",
+            "globe+ctrl",
+            " Fn + Control ",
+        ] {
+            assert_eq!(
+                watcher_for(&Binding::Keyboard {
+                    shortcut: spelling.to_string()
+                }),
+                Watcher::ModifierKey(ModifierKey::FnControl),
+                "{spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_chord_names_itself_the_way_a_person_would() {
+        let label = Binding::Keyboard {
+            shortcut: "Fn+Control".to_string(),
+        }
+        .describe();
+        assert_eq!(label, "Fn + Control");
+        assert_eq!(ModifierKey::FnControl.shortcut(), "Fn+Control");
+        assert_eq!(
+            bare_modifier(ModifierKey::FnControl.shortcut()),
+            Some(ModifierKey::FnControl)
+        );
+        assert_eq!(
+            bare_modifier(ModifierKey::Fn.shortcut()),
+            Some(ModifierKey::Fn)
+        );
+    }
+
+    #[test]
     fn an_ordinary_combo_still_goes_to_the_global_shortcut_plugin() {
         assert_eq!(
             watcher_for(&Binding::Keyboard {
@@ -1913,13 +2120,21 @@ mod tests {
             }),
             Watcher::GlobalShortcut
         );
-        assert_eq!(
-            watcher_for(&Binding::Keyboard {
-                shortcut: "Fn+F5".to_string()
-            }),
-            Watcher::GlobalShortcut,
-            "a combo that merely mentions the word is not the bare key"
-        );
+        for combo in [
+            "Fn+F5",
+            "Fn+Option",
+            "Control+Space",
+            "Fn+Control+Space",
+            "Fn+",
+        ] {
+            assert_eq!(
+                watcher_for(&Binding::Keyboard {
+                    shortcut: combo.to_string()
+                }),
+                Watcher::GlobalShortcut,
+                "{combo} is not a bare modifier chord"
+            );
+        }
         assert_eq!(
             watcher_for(&Binding::Mouse { button: 3 }),
             Watcher::MouseButton(3)
@@ -1964,15 +2179,26 @@ mod tests {
         let ts = vec![
             row(Gesture::Tap, TriggerTarget::Agent, "Option+D"),
             row(Gesture::Hold, TriggerTarget::Dictation, "Option+Space"),
-            row(Gesture::DoubleTapHold, TriggerTarget::Dictation, "Fn"),
+            voice("juno", TriggerTarget::Agent, true),
         ];
         let (a_combo, a_mode, d_combo, d_mode, al, words) = derive_legacy(&ts, "old+a", "old+d");
         assert_eq!(a_combo, "Option+D");
         assert_eq!(a_mode, "tap");
-        assert_eq!(d_combo, "Option+Space", "the double gesture is skipped");
+        assert_eq!(d_combo, "Option+Space");
         assert_eq!(d_mode, "hold");
-        assert!(!al);
-        assert!(words.is_empty());
+        assert!(al);
+        assert_eq!(words, vec!["juno", "hey juno"]);
+    }
+
+    #[test]
+    fn derive_legacy_keeps_previous_combo_for_the_chord() {
+        let ts = vec![row(Gesture::Hold, TriggerTarget::Dictation, "Fn+Control")];
+        let (_, _, d_combo, d_mode, ..) = derive_legacy(&ts, "kept+a", "kept+d");
+        assert_eq!(
+            d_combo, "kept+d",
+            "a chord of bare modifiers is not a combo string"
+        );
+        assert_eq!(d_mode, "hold");
     }
 
     #[test]
@@ -1994,16 +2220,6 @@ mod tests {
         )];
         let (a_combo, a_mode, ..) = derive_legacy(&ts, "kept+combo", "kept+d");
         assert_eq!(a_combo, "kept+combo");
-        assert_eq!(a_mode, "hold");
-    }
-
-    #[test]
-    fn derive_legacy_only_sees_double_gestures_as_nothing() {
-        // A list of nothing but double gestures has no legacy spelling, so the
-        // previous values survive rather than being overwritten with a guess.
-        let ts = vec![row(Gesture::DoubleTap, TriggerTarget::Agent, "Fn")];
-        let (a_combo, a_mode, ..) = derive_legacy(&ts, "kept+a", "kept+d");
-        assert_eq!(a_combo, "kept+a");
         assert_eq!(a_mode, "hold");
     }
 

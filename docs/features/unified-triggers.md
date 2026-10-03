@@ -11,108 +11,86 @@ rebuild; the design is `docs/plans/trigger-gestures.md`.
 
 ## The model
 
-**Every gesture is a trigger in its own right.** A double tap is not a second
-way to reach a hold trigger; it is another row, with its own key and its own
-target, which the person can see and delete. A row is its `id` and nothing
-else, so two rows may share a gesture, a target, or both, as long as the
-sharing table below allows their gestures on one key.
+**Every gesture is a trigger in its own right**: a row with its own key and its
+own target, which the person can see and delete. A row is its `id` and nothing
+else, so two rows may share a gesture, a target, or both, as long as they sit on
+different keys.
 
 | Gesture | Starts | Ends |
 | --- | --- | --- |
 | Hold | key down | release |
 | Tap | release of a press | next press of the same key |
-| Double tap | second press inside `DOUBLE_TAP_WINDOW_MS` (300 ms) | next press of the same key |
-| Double tap and hold | second press still held at `SECOND_PRESS_HOLD_MS` (250 ms) | release |
 | Say | wake phrase | end of speech |
+
+There used to be two double-tap gestures. They were removed (2026-10-03)
+because they did not work well; see Migration for what happens to a stored row.
 
 A short press of a Hold key (under `HOLD_DURATION_MS`, 400 ms) cancels the
 session it opened, because a short tap on a hold key is almost always a fumbled
-hold. **No keyboard trigger fires on a single tap of a hold key**, and a key
-carrying only double gestures does nothing at all on a first press.
+hold. **No keyboard trigger fires on a single tap of a hold key.**
 
 `Say` takes a wake phrase instead of a key, with an optional "hey" prefix
 ("juno" or "hey juno"; require the prefixed form with the toggle). Say phrases
-must be unique across rows.
+must be unique across rows. Wake phrases only arm behind advanced settings.
 
 **Target** decides what the activation drives: the agent, or dictation (speech
 typed at the cursor). Voice routing is per phrase, so "juno" can wake the agent
 while "transcribe" starts dictation.
 
 A binding is either a **key combo** or a **mouse button**. The globe key is a
-keyboard binding whose shortcut string is `"Fn"`; that it needs a native
-observer rather than the global-shortcut plugin is a fact about the watching,
-not about the binding.
+keyboard binding whose shortcut string is `"Fn"`, and the globe key held with
+Control is `"Fn+Control"`. Neither produces an ordinary key event, so both need
+a native observer rather than the global-shortcut plugin; that is a fact about
+the watching, not about the binding.
 
-## Which gestures can share a key
+## One key, one thing
 
-| On one key | Allowed |
-| --- | --- |
-| Hold + Double tap | yes |
-| Hold + Double tap and hold | yes |
-| Double tap + Double tap and hold | yes |
-| Hold + Double tap + Double tap and hold | yes |
-| Tap + Double tap and hold | yes |
-| Hold + Tap | no |
-| Tap + Double tap | no |
-
-Tap cannot share a key with Hold or Double tap: a short tap on a hold key is
-usually a fumbled hold, and a quick stop-tap on a tap key looks exactly like
-the first half of a double tap. Each gesture appears at most once per key,
-including a gesture pointing at the other target, because one key cannot mean
-two things on the same edge.
-
-`triggers::can_share_key` is the table. `triggers::validate` and
-`triggers::combo_conflict` enforce it and nothing looser, so the hint shown
-while someone is still choosing a key and the result of saving cannot disagree.
-
-**Hold + Double tap and hold on one key is the headline case:** hold the globe
-key to talk to Juno, double-tap-and-hold the same key to dictate. Two rows, two
-targets, neither derived from the other.
+Two enabled rows may not share a key, whatever their gestures or targets.
+`triggers::validate` and `triggers::combo_conflict` enforce it, so the hint
+shown while someone is still choosing a key and the result of saving cannot
+disagree. `Fn` and `Fn+Control` are different keys.
 
 ## Defaults
 
 A fresh install gets two rows, both Hold, so neither key carries a second
 meaning on a single tap:
 
-- Hold **🌐 (Fn)** to talk to Juno
-- Hold **⌥Space** to dictate
+- Hold **Fn** (the globe key) to talk to Juno
+- Hold **Fn+Control** to dictate
+
+Nothing guesses whether the keyboard has a globe key. There is no reliable way
+to know once a second keyboard is plugged in, and a press is the only proof the
+key reaches Juno, so setup asks the person to press it (`set_trigger_capture`).
+
+### The Fn + Control chord
+
+`platform::modifier_key_monitor::ModifierState` reads both halves out of the
+`flagsChanged` flag word: Fn is key code 63 with bit `1 << 23`, Control is key
+code 59 or 62 with bit `1 << 18`. The chord is down while both bits are set and
+up as soon as either clears. With Hold Fn and Hold Fn+Control both bound, the
+chord takes the finger from the plain key: pressing Control while holding Fn
+releases the plain hold (a short hold is cancelled like any brief press) and
+starts the chord, and the plain key stays quiet until Fn itself comes up.
 
 ## The recognizer
 
 One recognizer per bound key, in `events::shortcuts::recognizer`, in front of
 the agent and dictation monitors. Every input source reaches it through
 `fire_key_edge`: the global-shortcut plugin, `platform::modifier_key_monitor`
-for the globe key, and `platform::mouse_button_monitor`. A key used by several
-rows is registered **once**; the recognizer resolves which of its gestures a
-given edge belongs to.
+for the globe key and its chord, and `platform::mouse_button_monitor`. A key
+used by several rows is registered **once**.
 
-It holds no session state and has no hands-free mode. Per key it remembers only
-gesture bookkeeping: when a short release opened the double-tap window, which
-second-press branch is still undecided, whether a release has been claimed, and
-whether a double-tap-and-hold is down. "Is a tap session running" is read back
-out of the voice-session registry, which records how each session was opened.
+It holds no session state. Per key it remembers one bit: that a press was spent
+stopping a tap session, so its release is swallowed. "Is a tap session running"
+is read back out of the voice-session registry, which records how each session
+was opened.
 
 Resolution:
 
-- **A tap or double-tap session is running:** the next press of that key stops
-  it on the down edge, and its release is swallowed. This beats every gesture
-  below.
-- **First press:** a Hold key goes through the hold path unchanged. A Tap key
-  does nothing until its release. A key with only double gestures does nothing.
-- **Second press, inside the window:** Double tap alone runs the Tap code path
-  on the down edge and swallows the release. Double tap and hold alone starts
-  its hold on the down edge. **Both** is the one place that waits: a release
-  before `SECOND_PRESS_HOLD_MS` is the double tap, still held at that point is
-  the double tap and hold, and the start cue plays when the hold begins, so the
-  person is told when to talk. After a Tap that started a session, holding the
-  second press cancels that session and starts the double-tap-and-hold instead.
-- **The window** opens only from a short Hold release (a cancel) or from the
-  Tap release that *started* a session, and only when some gesture on that key
-  is waiting for a second press. So stopping after a real sentence can never be
-  read as the first half of a double tap.
-
-Every entry point takes `now`, so the state machine is a pure function of its
-inputs and its tests drive it with synthetic timings rather than real keys.
+- **A tap session is running:** the next press of that key stops it on the down
+  edge, and its release is swallowed.
+- **Otherwise a Hold key** starts on the down edge and ends on the release; a
+  **Tap key** acts on the release.
 
 ## Errors
 
@@ -128,7 +106,7 @@ Rust owns all activation logic; the frontend is display-only.
 
 | Concern | Location |
 | ------- | -------- |
-| Data model, migration, validation, sharing table | `src-tauri/src/triggers/mod.rs` |
+| Data model, migration, validation | `src-tauri/src/triggers/mod.rs` |
 | Gesture recognizer + routing | `src-tauri/src/events/shortcuts.rs` |
 | Read/write commands | `src-tauri/src/commands/triggers.rs` (`get_triggers`, `set_triggers`, `get_trigger_hints`) |
 | Persistence + in-memory cache | `settings/` (a `triggers` store key) and `AppState` |
@@ -142,8 +120,7 @@ Rust owns all activation logic; the frontend is display-only.
 `triggers` is the source of truth. The legacy fields (`KeyboardShortcuts`,
 `AgentSettings.trigger_mode`, the always-listening wake words) are **derived**
 from it (`triggers::derive_legacy`), so existing runtime consumers keep working
-without a rewrite. Only Hold and Tap project onto those fields; the legacy pair
-of modes has no word for a double gesture.
+without a rewrite. Only Hold and Tap project onto those fields.
 
 ## Who says which key is bound
 
@@ -159,24 +136,29 @@ been taught a shortcut that did nothing.
 - **No stored triggers:** the list is synthesized from the legacy shortcut,
   tap/hold, and wake-word settings (`migrate_from_legacy`), so an upgrading
   user keeps their setup.
-- **Stored triggers from before gestures:** `migrate_to_gestures` gives every
-  row the `id` it now needs to be a row, and nothing else. `push_to_talk` reads
-  as Hold, `toggle` as Tap and `voice` as Say (serde aliases), and each row
-  keeps its key, its target and its switch. **A row for a row.** Nothing is
-  rebound, nothing is dropped, and nothing new appears, which
-  `migration_never_invents_a_row` pins as a property rather than an example.
-  After it every row has an id, so a second pass is a no-op.
+- **Stored triggers from before gestures, or naming a retired gesture:**
+  `triggers::load_stored` is the one door a stored list comes through. It runs
+  on every load, never adds a row, and is idempotent: what it returns writes
+  back as a list it leaves alone. `push_to_talk` reads as Hold, `toggle` as Tap
+  and `voice` as Say, each keeping its key, its target and its switch, and a
+  row without an id is given one.
 
-  The derived double tap is not preserved in any form. An earlier draft gave
-  every bound Hold row a Double tap row beside it, to hand back the hands-free
-  that behaviour had been giving people; that was the same mistake one level
-  down, two rows doing the same thing. Triggers are triggers. Someone who wants
-  a double tap adds one, which is the entire point of making gestures
-  independent.
+  A stored `double_tap` or `double_tap_hold` row becomes a Hold on the same key.
+  If that would put two rows on one key, the double row gives way:
+
+  | Stored double row | Key already held by another row | Result |
+  | --- | --- | --- |
+  | any target | no | Hold on the same key |
+  | dictation | yes | Hold on `Fn+Control` (dropped if that is taken too) |
+  | agent | yes | dropped, never double-bound |
+
+  So `[Hold Fn -> agent, DoubleTapHold Fn -> dictation]` becomes
+  `[Hold Fn -> agent, Hold Fn+Control -> dictation]`. Serde still reads the old
+  names, and nothing writes them.
 
 ## Adding a gesture or target later
 
 Add a variant to `Gesture` or `TriggerTarget` in `triggers/mod.rs`, give it a
-label, an ending and a row in `can_share_key`, handle it in the recognizer and
+label and an ending, handle it in the recognizer and
 in `perform` (the compiler will point at the non-exhaustive matches), and list
 it in `TriggersSettings.tsx`.

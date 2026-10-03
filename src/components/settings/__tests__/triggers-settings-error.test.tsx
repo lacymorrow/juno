@@ -51,23 +51,8 @@ const row = (
 /* A stand-in for the backend                                                 */
 /* -------------------------------------------------------------------------- */
 
-/**
- * `triggers::can_share_key`, the two pairs that matter here: a Tap may not
- * share a key with a Hold, and the globe key may hold for one row and
- * double-tap-and-hold for another.
- */
-const SHAREABLE = new Set([
-  "hold|double_tap",
-  "hold|double_tap_hold",
-  "double_tap|double_tap_hold",
-  "tap|double_tap_hold",
-]);
-
-const canShare = (a: string, b: string) =>
-  a !== b && (SHAREABLE.has(`${a}|${b}`) || SHAREABLE.has(`${b}|${a}`));
-
 const label = (r: Row) =>
-  `${{ hold: "Hold", tap: "Tap", double_tap_hold: "Double-tap and hold" }[r.gesture]} ${
+  `${{ hold: "Hold", tap: "Tap" }[r.gesture]} ${
     r.target === "agent" ? "to talk to Juno" : "to dictate"
   }`;
 
@@ -84,7 +69,7 @@ function issuesFor(list: Row[]): Array<{ trigger_id: string; message: string }> 
   const claimed: Row[] = [];
   for (const r of list.filter((t) => t.enabled && t.binding)) {
     const other = claimed.find(
-      (c) => c.binding!.shortcut === r.binding!.shortcut && !canShare(c.gesture, r.gesture),
+      (c) => c.binding!.shortcut === r.binding!.shortcut,
     );
     if (other) {
       out.push({ trigger_id: r.id, message: `"${shown(r)}" already has ${label(other)}.` });
@@ -123,13 +108,11 @@ function mountBackend(stored: Row[], opts: Backend = {}) {
 
       case COMMANDS.SHORTCUTS_VALIDATE_KEYBOARD_SHORTCUT: {
         const editing = String(args?.shortcutName ?? "").replace("trigger_", "");
-        const asking = state.list.find((r) => r.id === editing);
         const clash = state.list.find(
           (r) =>
             r.id !== editing &&
             r.enabled &&
-            r.binding?.shortcut === args?.shortcutValue &&
-            !canShare(r.gesture, asking?.gesture ?? ""),
+            r.binding?.shortcut === args?.shortcutValue,
         );
         return clash
           ? Promise.reject(`"${String(args?.shortcutValue)}" already has ${label(clash)}.`)
@@ -336,26 +319,53 @@ describe("a row says how its own gesture ends", () => {
     invoke.mockReset();
     mountBackend([
       row("row-hold", "hold", "agent", "Fn"),
-      row("row-dth", "double_tap_hold", "dictation", "Fn"),
+      row("row-chord", "hold", "dictation", "Fn+Control"),
     ]);
   });
 
-  it("never describes a second gesture reaching the same target", async () => {
-    // The copy the user quoted: "Hold the key while you speak, let go to
-    // finish. Double-tap it to keep listening until you press it again." That
-    // behaviour is deleted, so no row may still describe it.
+  it("describes only the gesture the row has", async () => {
     renderScreen();
     await screen.findByLabelText("Enable Hold to talk to Juno");
 
     expect(screen.getAllByText("Let go to finish.")).toHaveLength(2);
-    expect(screen.queryByText(/Double-tap it to keep listening/i)).toBeNull();
+    expect(screen.queryByText(/Double-tap/i)).toBeNull();
   });
 
-  it("reads Hold and Double-tap and hold as two rows on one key", async () => {
+  it("reads the globe key and the globe-plus-Control chord as two Hold rows", async () => {
     renderScreen();
-    expect(await screen.findByText("Hold")).toBeTruthy();
-    expect(screen.getByText("Double-tap and hold")).toBeTruthy();
-    expect(screen.getByText("to talk to Juno")).toBeTruthy();
-    expect(screen.getByText("to dictate")).toBeTruthy();
+    await screen.findByLabelText("Enable Hold to talk to Juno");
+    expect(screen.getByLabelText("Enable Hold to dictate")).toBeTruthy();
+    // Key caps, named for assistive tech.
+    expect(screen.getByRole("img", { name: "Globe" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Control Globe" })).toBeTruthy();
+  });
+});
+
+describe("the add menu no longer offers a double tap", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    mountBackend([row("row-hold", "hold", "agent", "Fn")]);
+  });
+
+  it("offers Hold and Tap for each target and nothing with 'double' in it", async () => {
+    renderScreen();
+    await screen.findByLabelText("Enable Hold to talk to Juno");
+
+    const trigger = screen.getByRole("button", { name: /Add trigger/ });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+
+    const items = await screen.findAllByRole("menuitem");
+    // Say is offered or not depending on advanced settings; this is about keys.
+    const names = items
+      .map((i) => i.textContent ?? "")
+      .filter((n) => !n.startsWith("Say"));
+    expect(names).toEqual([
+      "Hold to talk to Juno",
+      "Hold to dictate",
+      "Tap to talk to Juno",
+      "Tap to dictate",
+    ]);
+    expect(items.some((i) => /double/i.test(i.textContent ?? ""))).toBe(false);
   });
 });

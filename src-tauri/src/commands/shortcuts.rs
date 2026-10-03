@@ -262,10 +262,9 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     use crate::parse_shortcut_string;
 
     // Register every key the enabled triggers bind, each exactly once.
-    // `bound_keys` has already collapsed the rows: the globe key carrying a
-    // Hold row and a Double-tap-and-hold row is one key here, and the gesture
-    // recognizer resolves which of them a given edge belongs to. Voice phrases
-    // are handled by their own subsystem, not here.
+    // `bound_keys` has already collapsed the rows: a key named twice is one key
+    // here, and the gesture recognizer resolves which gesture a given edge
+    // belongs to. Voice phrases are handled by their own subsystem, not here.
     //
     // This is also the one place that decides which watcher a key goes to. A
     // bare modifier such as Fn is a keyboard binding like any other as far as
@@ -347,8 +346,12 @@ pub async fn validate_keyboard_shortcut(
         return Ok("Enter a shortcut combination".to_string());
     }
 
-    // Validate format
-    validate_shortcut_format(&shortcut_value)?;
+    // Validate format. A bare modifier (Fn, or Fn+Control) is not a combo the
+    // plugin can parse and is not meant to be: the modifier monitor watches it,
+    // so "Reset to default" on a globe-key row must not be refused for it.
+    if crate::triggers::bare_modifier(&shortcut_value).is_none() {
+        validate_shortcut_format(&shortcut_value)?;
+    }
 
     // Conflicts are checked against the triggers, because triggers are the only
     // thing that binds an activation combo now. This used to read the derived
@@ -360,9 +363,7 @@ pub async fn validate_keyboard_shortcut(
     // shortcut could be rebound.
     // `trigger_<id>` names the row being edited. The id is what tells "this
     // combo is already mine" from "this combo belongs to another row", and it
-    // is also how the gesture asking for the key is looked up: the globe key
-    // can hold for one row and double-tap-and-hold for another, so whether a
-    // key is free depends on which gesture wants it.
+    // is also what keeps a row from conflicting with its own binding.
     let editing_id = shortcut_name
         .as_deref()
         .and_then(|name| name.strip_prefix("trigger_"));

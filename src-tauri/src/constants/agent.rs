@@ -274,22 +274,6 @@ pub mod monitor_sessions {
     pub const HOLD_DURATION_MS: u64 = 400;
     pub const IMMEDIATE_START_MS: u64 = 15;
 
-    /// How long the recognizer waits after a short release for a second press
-    /// before it forgets. A press inside the window belongs to whichever
-    /// double gesture is bound to that key. Kept short so a natural second tap
-    /// counts and a slow one-then-later press does not.
-    pub const DOUBLE_TAP_WINDOW_MS: u64 = 300;
-
-    /// How long a second press has to be held before it is a double tap and
-    /// hold rather than a double tap.
-    ///
-    /// The only place the recognizer waits, and only when both gestures share
-    /// one key: with just one of them bound, the second press starts its
-    /// gesture on the down edge. The start cue plays when the hold actually
-    /// begins, so the person is told when to talk rather than losing the first
-    /// word to a silent delay.
-    pub const SECOND_PRESS_HOLD_MS: u64 = 250;
-
     // Max durations
     pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds
     pub const MAX_AGENT_DURATION_MS: u64 = 180_000; // 2 minutes

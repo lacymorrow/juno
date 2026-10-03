@@ -1,6 +1,6 @@
 # Triggers as sentences
 
-**Status:** planned 2026-09-29, replacing the first draft of this file (derived double tap, secondary target). Two PRs:
+**Status:** SUPERSEDED 2026-10-03: both double-tap gestures were removed (they did not work well), leaving Hold, Tap and Say, one gesture per key. See `docs/features/unified-triggers.md` for the live model. Historical plan follows. Originally planned 2026-09-29, replacing the first draft of this file (derived double tap, secondary target). Two PRs:
 - Backend: gesture model, row IDs, migration, key-sharing rules, gesture recognizer. LAC-4070, Backend Engineer. **Built 2026-10-01.**
 - Screen: the sentence editor. Separate ticket, Frontend Engineer, starts once the backend PR merges. **Not started.**
 
