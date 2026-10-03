@@ -31,9 +31,7 @@ pub enum HoldRelease {
     /// Held past the threshold: the session ends and the words are typed.
     Committed,
     /// A short tap that opened the microphone but did not commit: the session
-    /// is cancelled and nothing is typed. The gesture recognizer in
-    /// `events/shortcuts.rs` still gets to promote a second press inside the
-    /// double-tap window into a Press start.
+    /// is cancelled and nothing is typed.
     Cancelled,
     /// Nothing had started, so nothing happens.
     Nothing,
@@ -198,10 +196,7 @@ impl DictationInputMonitorState {
         self.last_cancellation_time = None; // Clear cooldown tracking on reset
     }
 
-    /// True while the monitor is watching a held key. The gesture recognizer
-    /// reads this to decide whether a fresh press is landing while a hold path
-    /// is already in flight; a press that arrives during an active hold must
-    /// not be promoted to a double tap.
+    /// True while the monitor is watching a held key.
     pub fn is_tracking_hold(&self) -> bool {
         self.hold_start_time.is_some() || self.transcription_started
     }
@@ -370,8 +365,7 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
     }
 }
 
-// Called when dictation input key is released. Returns the outcome so the
-// gesture recognizer can arm its double-tap window on a short-tap cancel.
+// Called when dictation input key is released. Returns what the release meant.
 pub async fn on_dictation_input_released(app_handle: &AppHandle) -> HoldRelease {
     let mut state = DICTATION_INPUT_STATE.lock().await;
 

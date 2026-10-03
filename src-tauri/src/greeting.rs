@@ -78,6 +78,9 @@ fn spoken(combo: &str) -> String {
     if let Some(key) = crate::triggers::bare_modifier(combo) {
         return match key {
             crate::triggers::ModifierKey::Fn => "the globe key".to_string(),
+            crate::triggers::ModifierKey::FnControl => {
+                "the globe key and Control together".to_string()
+            }
         };
     }
 
@@ -201,6 +204,11 @@ mod tests {
         // "Fn (globe)" is a label for a settings row, not something to read
         // aloud, and "Fn" on its own gets read as a word.
         assert_eq!(spoken("Fn"), "the globe key");
+    }
+
+    #[test]
+    fn the_globe_control_chord_is_spoken_as_two_keys_together() {
+        assert_eq!(spoken("Fn+Control"), "the globe key and Control together");
     }
 
     #[test]

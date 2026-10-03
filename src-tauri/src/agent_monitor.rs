@@ -6,17 +6,14 @@ use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info, warn};
 
 /// What a release meant for the agent input monitor. Mirrors dictation's
-/// `HoldRelease` so the gesture recognizer reads a release the same way on
-/// both targets: only a short one opens the double-tap window.
+/// `HoldRelease` so a release reads the same way on both targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentRelease {
     /// Held past the threshold: the transcription is stopped and handed to
     /// the agent for processing.
     Committed,
     /// A short tap that opened the microphone but did not commit: the agent
-    /// session is cancelled. This is the one release that opens the key's
-    /// double-tap window, if any gesture on that key is waiting for a second
-    /// press.
+    /// session is cancelled.
     Cancelled,
     /// Release without a preceding transcription start: for `AgentTriggerMode::Tap`
     /// this fired the toggle path; for `Hold` nothing happened.
@@ -147,10 +144,7 @@ impl AgentInputMonitorState {
         (agent_was_started, threshold_was_reached, duration)
     }
 
-    /// True while the monitor is watching a held key. The gesture recognizer
-    /// reads this to decide whether a fresh press is landing while a hold path
-    /// is already in flight; a press during an active hold must not be
-    /// promoted to a double tap.
+    /// True while the monitor is watching a held key.
     pub fn is_tracking_hold(&self) -> bool {
         self.hold_start_time.is_some() || self.agent_started
     }
@@ -275,8 +269,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) -> AgentRelease {
 /// Release handler with an explicit trigger mode, so a specific trigger
 /// (push-to-talk vs toggle) drives the behavior regardless of the global
 /// setting. This lets the unified triggers matrix bind both methods. Returns
-/// the outcome so the gesture recognizer can arm its double-tap window when a
-/// short tap cancels.
+/// what the release meant.
 pub async fn on_agent_input_released_with_mode(
     app_handle: &AppHandle,
     trigger_mode: AgentTriggerMode,
@@ -300,10 +293,7 @@ pub async fn on_agent_input_released_with_mode(
         AgentRelease::Committed
     } else if agent_started {
         // A short tap on a hold key: cancel the spoken query the press
-        // opened. The gesture recognizer in `events/shortcuts.rs` may still
-        // promote a second press inside the double-tap window into a Press
-        // start on its down edge; that is a separate decision and does not
-        // change what this release means.
+        // opened.
         info!(
             "[AgentMonitor] Tapped ({}ms) - cancelling spoken query",
             duration.as_millis()
@@ -506,9 +496,7 @@ mod tests {
         assert!(state.check_and_start_agent());
         let _ = state.end_hold();
 
-        // A press inside the cooldown window is refused; the recognizer's
-        // double-tap promotion bypasses this monitor entirely, so the
-        // cooldown here does not sabotage the double-tap path.
+        // A press inside the cooldown window is refused.
         assert!(!state.start_hold());
     }
 

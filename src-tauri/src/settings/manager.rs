@@ -734,7 +734,7 @@ impl SettingsManager {
     /// Read the unified triggers list. When the store predates the model (key
     /// missing or empty array), synthesize it from the legacy shortcut fields
     /// so an upgrading user keeps their setup; when it predates gestures,
-    /// [`crate::triggers::migrate_to_gestures`] brings it forward. The migrated
+    /// [`crate::triggers::load_stored`] brings it forward. The migrated
     /// list is not written back here; it persists on the next
     /// `save_all_settings`.
     fn get_triggers_from_store(
@@ -746,7 +746,9 @@ impl SettingsManager {
     ) -> Vec<crate::triggers::Trigger> {
         let stored: Option<Vec<crate::triggers::Trigger>> =
             store.get(store_keys::TRIGGERS).and_then(|v| {
-                match serde_json::from_value::<Vec<crate::triggers::Trigger>>(v.clone()) {
+                // The one door a stored list comes through: old method names
+                // and retired gestures are settled here, on every load.
+                match crate::triggers::load_stored(&v) {
                     Ok(triggers) => Some(triggers),
                     Err(e) => {
                         // One unreadable trigger discards the whole saved list
@@ -765,9 +767,7 @@ impl SettingsManager {
             });
 
         match stored {
-            Some(triggers) if !triggers.is_empty() => {
-                crate::triggers::migrate_to_gestures(triggers)
-            }
+            Some(triggers) if !triggers.is_empty() => triggers,
             _ => crate::triggers::migrate_from_legacy(
                 &keyboard_shortcuts.agent_mode,
                 &agent.trigger_mode,

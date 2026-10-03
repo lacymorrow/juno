@@ -50,13 +50,12 @@ describe("what the last onboarding screen teaches", () => {
     expect(after).not.toEqual(before);
   });
 
-  it("names the gesture the row actually uses", () => {
+  it("draws the globe-plus-Control chord as two caps", () => {
     const demo = summonDemo(
-      hints(
-        hint("Fn", "Double-tap and hold", "Double-tap and hold to talk to Juno"),
-      ),
+      hints(null, hint("Fn+Control", "Hold", "Hold to dictate")),
     );
-    expect(demo!.sentence).toBe("Double-tap and hold to talk to Juno");
+    expect(glyphs(demo!.caps)).toEqual(["⌃", "🌐"]);
+    expect(demo!.sentence).toBe("Hold to dictate");
   });
 
   it("falls back to the dictation key when nothing talks to Juno", () => {
