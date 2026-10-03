@@ -749,35 +749,16 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
     );
 }
 
-/// Whether a post-wake command means "quit the whole app", as opposed to just
-/// stopping listening. Quit on explicit quit words, or on "stop"/"close"/"bye"
-/// only when Juno is named ("stop juno"). Bare "stop"/"cancel" must never be a
-/// surprise app-quit, since they also mean "stop the agent" / "stop listening".
-fn is_quit_app_command(text: &str) -> bool {
-    let t = text.to_lowercase();
-    let has_word = |w: &str| t.split_whitespace().any(|word| word == w);
-    if has_word("quit")
-        || has_word("exit")
-        || has_word("goodbye")
-        || has_word("shutdown")
-        || t.contains("shut down")
-    {
-        return true;
-    }
-    // Addressed to Juno by name: "stop juno", "close juno", "bye juno".
-    t.contains("juno") && (has_word("stop") || has_word("close") || has_word("bye"))
-}
-
 /// Handle always listening stop requests
 async fn handle_always_listening_stop_request(app_handle: &AppHandle, spoken_text: &str) {
     // "Quit Juno" / "goodbye" / "shut down" (or a named "stop juno") ends the
     // app; a bare stop word only disarms listening (below).
-    if is_quit_app_command(spoken_text) {
+    if crate::agent::local_intents::quit::is_quit_juno(spoken_text) {
         info!(
             "[AlwaysListening] Quit command heard ('{}') - exiting Juno",
             spoken_text
         );
-        app_handle.exit(0);
+        crate::menu::tray_menu::quit_app(app_handle);
         return;
     }
 

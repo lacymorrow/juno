@@ -33,6 +33,7 @@
 //!   time, date
 //! - [`timer`]: start, check, cancel countdown timers (backend-owned)
 //! - [`apps`]: open or quit an installed app, open a website
+//! - [`quit`]: "quit", "quit Juno": close Juno itself
 //! - [`stop`]: a bare "stop" or "cancel" while a run is in flight
 //!
 //! [`try_handle_local_intent`] is the single entry point `submit_query` calls.
@@ -40,6 +41,7 @@
 
 pub mod apps;
 pub mod media;
+pub mod quit;
 pub mod stop;
 pub mod system;
 pub mod timer;
@@ -183,6 +185,11 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
     // reading of the word (including "stop the music", which `media` owns two
     // lines down) is untouched. See `stop`.
     if stop::try_halt(app_handle, query).await {
+        return true;
+    }
+
+    // Quitting Juno itself, on every input path. Whole utterance only; see `quit`.
+    if quit::try_quit(app_handle, query) {
         return true;
     }
 
