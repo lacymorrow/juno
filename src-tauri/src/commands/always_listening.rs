@@ -14,13 +14,24 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
         .replacen("{}", &error.to_string(), 1)
 }
 
-/// Start always listening mode
+/// Start always listening mode.
+///
+/// Refused unless the stored voice triggers, through the launch gate, want a
+/// wake phrase listened for. This is the one door to the always-listening
+/// microphone, so every caller (a trigger save, launch, the end of a
+/// dictation, the bar's resume control, a device change) obeys the same rule
+/// and none of them can re-open the microphone after voice was switched off.
 #[tauri::command]
 pub async fn start_always_listening_mode(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     info!("[Command] start_always_listening_mode called");
+
+    if crate::commands::triggers::armed_phrases_now(&app).is_empty() {
+        info!("[Command] No voice trigger is armed, the microphone stays off");
+        return Err("No voice trigger is on".to_string());
+    }
 
     // Get current settings from centralized system
     let settings_manager = SettingsManager::new(app.clone())
@@ -31,10 +42,9 @@ pub async fn start_always_listening_mode(
         .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
 
-    // Check if already active
-    if audio_settings.always_listening_active {
-        return Ok("Always listening mode is already active".to_string());
-    }
+    // No early return on the stored flag: the controller knows whether it is
+    // running and starting it twice is a no-op there. Trusting the flag is
+    // what left a stopped engine reporting itself as running.
 
     // Update centralized settings
     audio_settings.always_listening_active = true;
@@ -113,7 +123,15 @@ pub async fn start_always_listening_mode(
     }
 }
 
-/// Stop always listening mode
+/// Stop always listening mode.
+///
+/// Always stops the controller. It used to return early when the stored
+/// flag already read "off", and the flag is not the microphone: a dictation
+/// pause, a failed start or a busy controller could each leave it off over a
+/// worker that was still capturing, and from then on every stop, the
+/// settings toggle included, believed there was nothing to do. The plugin's
+/// stop waits for the controller and joins the worker, so when this returns
+/// the stream has been dropped.
 #[tauri::command]
 pub async fn stop_always_listening_mode(
     app: AppHandle,
@@ -121,69 +139,63 @@ pub async fn stop_always_listening_mode(
 ) -> Result<String, String> {
     info!("[Command] stop_always_listening_mode called");
 
-    // Get current settings from centralized system
-    let settings_manager = SettingsManager::new(app.clone())
-        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-
-    let mut audio_settings = settings_manager
-        .get_audio_settings()
-        .await
-        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
-
-    // Check if already inactive
-    if !audio_settings.always_listening_active {
-        return Ok("Always listening mode is already inactive".to_string());
-    }
-
-    // Update centralized settings
-    audio_settings.always_listening_active = false;
-    settings_manager
-        .set_audio_settings(&audio_settings)
-        .await
-        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
-
-    // Update app state
-    if let Err(e) = state.set_always_listening_active(false) {
-        let err_msg = format!("Failed to set always_listening_active: {}", e);
-        error!("[Command] {}", err_msg);
-        return Err(err_msg);
-    }
-    info!("[Command] Successfully updated app state: always_listening_active = false");
-
-    // Call the plugin command
-    match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
-        Some(controller_state) => {
-            match tauri_plugin_voice_transcription::commands::stop_always_listening(
-                app.clone(),
-                controller_state
-            ).await {
-                Ok(_) => {
-                    info!("[Command] Always listening mode stopped successfully");
-
-                    // Emit event to UI
-                    if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, false) {
-                        error!("{} {}", COMMAND, format_error(FAILED_TO_EMIT, "always-listening-mode-changed", e));
-                    }
-                    crate::commands::triggers::emit_listening_outcome(&app, false);
-
-                    // Update floating bar
-                    crate::commands::ui_commands::handle_always_listening_change(&app, false).await;
-
-                    Ok("Always listening mode stopped successfully".to_string())
-                }
-                Err(e) => {
+    // Stop the microphone first. The bookkeeping below can fail; this must
+    // not wait on it.
+    let stopped =
+        match app.try_state::<Arc<
+            Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>,
+        >>() {
+            Some(controller_state) => {
+                tauri_plugin_voice_transcription::commands::stop_always_listening(
+                    app.clone(),
+                    controller_state,
+                )
+                .await
+                .map_err(|e| {
                     let err_msg = format!("Failed to stop always listening mode: {}", e);
                     error!("[Command] {}", err_msg);
-                    Err(err_msg)
+                    err_msg
+                })?
+            }
+            // No controller, no microphone.
+            None => false,
+        };
+
+    if let Err(e) = state.set_always_listening_active(false) {
+        warn!("[Command] Failed to clear always_listening_active: {}", e);
+    }
+    match SettingsManager::new(app.clone()) {
+        Ok(settings_manager) => match settings_manager.get_audio_settings().await {
+            Ok(mut audio_settings) if audio_settings.always_listening_active => {
+                audio_settings.always_listening_active = false;
+                if let Err(e) = settings_manager.set_audio_settings(&audio_settings).await {
+                    warn!("[Command] Failed to save audio settings: {}", e);
                 }
             }
-        }
-        None => {
-            let err_msg = "Always listening controller not available".to_string();
-            warn!("[Command] {}", err_msg);
-            Err(err_msg)
-        }
+            Ok(_) => {}
+            Err(e) => warn!("[Command] Failed to get audio settings: {}", e),
+        },
+        Err(e) => warn!("[Command] Failed to create settings manager: {}", e),
     }
+
+    info!(
+        "[Command] Always listening stopped (was running: {})",
+        stopped
+    );
+
+    crate::commands::triggers::emit_listening_outcome(&app, false);
+    if stopped {
+        if let Err(e) = app.emit(events::always_listening::MODE_CHANGED, false) {
+            error!(
+                "{} {}",
+                COMMAND,
+                format_error(FAILED_TO_EMIT, "always-listening-mode-changed", e)
+            );
+        }
+        crate::commands::ui_commands::handle_always_listening_change(&app, false).await;
+    }
+
+    Ok("Always listening mode stopped".to_string())
 }
 
 /// Toggle always listening mode
