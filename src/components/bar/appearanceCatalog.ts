@@ -16,9 +16,14 @@ export interface AppearanceEntry {
 
 export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
   {
+    value: UI.BAR_APPEARANCES_PERSONA,
+    name: "Avatar",
+    descriptor: "A character you talk to. It leans in, thinks, and talks back with its mouth moving. The default.",
+  },
+  {
     value: UI.BAR_APPEARANCES_DYNAMIC,
     name: "Island",
-    descriptor: "One small shape that grows to hold the answer, then settles back. The default.",
+    descriptor: "One small shape that grows to hold the answer, then settles back.",
   },
   {
     value: UI.BAR_APPEARANCES_FLOATING,
@@ -49,11 +54,6 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
     value: UI.BAR_APPEARANCES_REACT_ORB,
     name: "Halo",
     descriptor: "A ring that fills as you speak and measures what Juno does.",
-  },
-  {
-    value: UI.BAR_APPEARANCES_PERSONA,
-    name: "Avatar",
-    descriptor: "A character you talk to. It leans in, thinks, and answers in speech bubbles.",
   },
 ];
 

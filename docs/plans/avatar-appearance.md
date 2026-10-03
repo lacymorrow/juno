@@ -34,7 +34,7 @@ Evidence needed: a still per posture, one clip of a turn, tsc, vitest, CI.
 It has no eyes, no mouth, no neck, no blink. So:
 
 - **The file drives what it has.** `listening`, `thinking` and `speaking` follow the state table below (the sphere's inner light moves differently in each). `asleep` is unused: no Rust state means it. `hover` is the file's own pointer reaction and is left alone.
-- **The face is SVG on top.** Two eyes that blink every 4.4s at rest, look toward your bubble while you speak or type, look up and away while thinking, open wide when a tool needs you, squint on a failure. A mouth that is a line at rest and opens and closes in an uneven rhythm while Juno talks. Drawn in the opposite of the sphere's colour, so it reads in both themes.
+- **The face is SVG on top.** Two eyes that blink every 4.4s at rest, look toward your bubble while you speak or type, look up and away while thinking, open wide when a tool needs you, squint on a failure. A mouth that is a line at rest and opens with Juno's voice: it follows `tts-speech-level` (a smoothed 0..1 level Rust streams at about 60 Hz from the audio actually playing) and closes on silence, so it never moves while nothing is audible. Under Reduce Motion it holds half open while Juno speaks. Drawn in the opposite of the sphere's colour, so it reads in both themes.
 - **Gestures are transforms on the head's box** (origin at the neck, 50% 88%): lean (rotate 4deg, toward you 2px, scale 1.04), attend (rotate 2deg), think (rotate -4deg), nod (640ms, two dips), wince (420ms to rotate -3deg scale 0.97, held while the error shows). Reduce Motion turns all of it off.
 - **A flat disc sits under the canvas.** The head is there on the first paint, before the network has delivered the sphere, and stays there if it never does. The disc fades out when the sphere is ready. Offline is not a special state; it is the disc.
 
@@ -115,7 +115,7 @@ Island's `useLinger` and `LingerRing`, unchanged: twelve seconds once the answer
 ## Motion
 
 - Head gestures: `transform` 260ms `cubic-bezier(.2,.8,.2,1)`; nod 640ms; wince 420ms and held.
-- Eyes: look 220ms; blink 4.4s loop with an 80ms close; mouth 760ms uneven loop while talking.
+- Eyes: look 220ms; blink 4.4s loop with an 80ms close; mouth follows the speech level with a 70ms linear transition.
 - Bubbles: laid out hidden (opacity 0, scale 0.96, 4px toward the head) while the window grows, then 180ms opacity and 220ms transform once it has. Leaving: removed from the scene at once; the window shrinks 350ms later.
 - Window protocol, same as Island and Pill: growing, resize then show; shrinking, hide then resize. Both through one `set_bar_frame` so position and size land in the same frame.
 
@@ -143,4 +143,11 @@ Island's `useLinger` and `LingerRing`, unchanged: twelve seconds once the answer
 - `latestTurn` and `answerKey` live in `island/islandModel.ts` and are imported here; they belong in a shared `bar/turn.ts`.
 - Vendor the `.riv` (8KB) once its licence is confirmed, so the sphere does not depend on a third-party blob at launch.
 - The Rive `asleep` input is unused. A "quiet hours" or "muted" state would be the place for it.
-- Audio-driven mouth: `audioLevel` in the bar payload is the microphone, not Juno's voice. If Rust ever emits a playback level, the mouth should follow it instead of a rhythm.
+
+## Default, hover and the voice (2026-10-02)
+
+- The Avatar is the default look (`bar_appearances::DEFAULT`), first in the picker.
+- At rest under the pointer, a small bubble hangs from the head with talk, type and "Show last answer". It fits the resting width, so the window only grows toward the bubbles. A bubble put away under the pointer stays a bare head until the pointer leaves and comes back. The tray's Show/Hide Chat toggles the last answer too.
+- Only blur is reported to Rust, never focus: a press to drag made the window key and Rust expanded to the composer mid-drag.
+- Bubble depth is `BUBBLE_DEPTH` and must end inside `PAD`; `avatarShadow.test.ts` holds it.
+- The mouth: `src-tauri/src/tts/speech_level.rs`. WAV engines (Kokoro, Supertonic) are measured RMS on afplay's clock; `say` and compressed cloud audio get a synthetic syllable rhythm, gated by the real player start and exit. Start latencies (`PLAYER_LEAD_MS`, `SAY_LEAD_MS`) are estimates.

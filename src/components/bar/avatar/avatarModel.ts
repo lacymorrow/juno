@@ -35,6 +35,36 @@ export const STACK_STEP = 8;
 export const LINGER_MS = 12_000;
 /** A shrinking window waits for the bubble to leave before it snaps. */
 export const SHRINK_DELAY_MS = 350;
+/** The hover controls' bubble: three 24px buttons in a 32px row. It fits
+ *  between the side pads of the resting window, so hovering only ever grows
+ *  the window toward the bubbles, never sideways. */
+export const CONTROLS_HEIGHT = 32;
+export const REST_SIZE = HEAD + 2 * PAD;
+/**
+ * The bubbles' depth. The deepest layer must end inside PAD on every side or
+ * the window edge slices it into a hard line; avatarShadow.test.ts holds it.
+ */
+export const BUBBLE_DEPTH = "0 1px 2px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.32)";
+
+// === THE MOUTH ===
+
+/** The mouth's vertical scale, closed. */
+export const MOUTH_CLOSED = 0.3;
+/** Fully open, at the loudest part of an utterance. */
+export const MOUTH_OPEN = 1.3;
+/** Held while speaking when Reduce Motion is on: open, but not flapping. */
+export const MOUTH_STILL = 0.7;
+
+/**
+ * How open the mouth is, from Rust's speech level. Closed whenever Juno is
+ * not audibly speaking, whatever the bar state says.
+ */
+export function mouthScale(input: { speaking: boolean; level: number; reducedMotion: boolean }): number {
+  if (!input.speaking) return MOUTH_CLOSED;
+  if (input.reducedMotion) return MOUTH_STILL;
+  const level = Number.isFinite(input.level) ? Math.min(1, Math.max(0, input.level)) : 0;
+  return MOUTH_CLOSED + (MOUTH_OPEN - MOUTH_CLOSED) * level;
+}
 
 /** macOS system blue: the only accent. */
 export const SYSTEM_BLUE = "#0A84FF";
@@ -122,7 +152,9 @@ export type JunoBubble =
   | { kind: "question" }
   | { kind: "error"; text: string }
   /** A cursor-control notice with nothing else to say. Local, never from a state. */
-  | { kind: "notice" };
+  | { kind: "notice" }
+  /** At rest under the pointer: talk, type, and the way back to the last answer. */
+  | { kind: "controls" };
 
 export interface Scene {
   head: HeadLook;
@@ -148,6 +180,8 @@ export interface SceneInput {
   hasAnswerContent: boolean;
   /** A tool is waiting on Allow or Don't. */
   approvalPending: boolean;
+  /** The pointer is over the avatar (and was not just put away by Escape). */
+  hovered?: boolean;
 }
 
 const BLUE_CUE: Cue = { color: SYSTEM_BLUE, opacity: 1, motion: "breathe" };
@@ -258,7 +292,8 @@ export function junoBubbleFor(input: SceneInput): JunoBubble | null {
     case UI.BAR_STATES_SPEAKING:
       return input.spokenText ? { kind: "speech", text: input.spokenText } : null;
     default:
-      return null;
+      // At rest, the pointer brings out the controls.
+      return input.hovered && isIdleState(state) && !input.answerOpen ? { kind: "controls" } : null;
   }
 }
 
@@ -327,7 +362,11 @@ export function stackHeightFor(measured: number): number {
 export function windowFor(scene: Scene, stackHeight: number): WindowBox {
   const open = scene.yours !== null || scene.junos !== null;
   if (!open) {
-    return { width: HEAD + 2 * PAD, height: HEAD + 2 * PAD, anchorY: HEAD_ANCHOR };
+    return { width: REST_SIZE, height: REST_SIZE, anchorY: HEAD_ANCHOR };
+  }
+  if (scene.yours === null && scene.junos?.kind === "controls") {
+    // A fixed size, not a measured one, so the window grows once on hover.
+    return { width: REST_SIZE, height: REST_SIZE + GAP + CONTROLS_HEIGHT, anchorY: HEAD_ANCHOR };
   }
   const stack = stackHeightFor(stackHeight);
   return {

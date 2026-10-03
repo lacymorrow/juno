@@ -5,13 +5,14 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { availableMonitors, getCurrentWindow } from "@tauri-apps/api/window";
 import { useReducedMotion } from "motion/react";
-import { Volume2 } from "lucide-react";
+import { MessageSquare, Mic, Type, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { COMMANDS, EVENTS, UI } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
@@ -29,6 +30,7 @@ import type { ChatMessage } from "@/types/chat";
 import { answerKey, latestTurn } from "./island/islandModel";
 import { LingerRing } from "./island/LingerRing";
 import { useLinger } from "./island/useLinger";
+import { ISLAND_BUTTON_ATTR, useIslandHover } from "./island/useIslandHover";
 import { AvatarHead } from "./avatar/AvatarHead";
 import { Bubble, ThinkingMark } from "./avatar/Bubble";
 import {
@@ -38,6 +40,7 @@ import {
   HEAD,
   LINGER_MS,
   PAD,
+  REST_SIZE,
   SHRINK_DELAY_MS,
   STACK_STEP,
   isIdleState,
@@ -63,6 +66,11 @@ import {
  * sits in its bubble; it holds up a question when a tool needs you; it
  * winces at a failure; it nods when done. The head is the anchor: the window
  * grows around it and the bubbles never push it.
+ *
+ * Its mouth moves only while Juno is audibly speaking (Rust's speech level,
+ * see AvatarHead). At rest, the pointer brings out a small bubble with the
+ * same three controls the Pill and the Island offer: talk, type, and the way
+ * back to the last answer.
  */
 
 /** Backend element id for interactions. Must match `ui::element_ids::FLOATING_BAR`. */
@@ -264,10 +272,15 @@ export function PersonaBar(_props: PersonaBarProps) {
   const barRef = useRef(bar);
   barRef.current = bar;
   const inputRef = useRef("");
+  // A bubble put away (Escape, the ring, its timer) settles all the way to
+  // the bare head, even with the pointer resting on it. The controls come
+  // back the next time the pointer arrives.
+  const [hoverHeld, setHoverHeld] = useState(false);
   const closeAnswer = useCallback(() => {
     setAnswerOpen(false);
     setNoticeOpen(false);
     setSpokenOpen(true);
+    setHoverHeld(true);
     // Focus put Rust in its input state while the bubble was up. With nothing
     // typed, tell it the composer blurred so it settles back to rest.
     if (isInputState(barRef.current.barState) && inputRef.current.trim() === "") {
@@ -325,8 +338,12 @@ export function PersonaBar(_props: PersonaBarProps) {
     return () => window.clearTimeout(t);
   }, [bar.barState]);
 
-  // ── Engagement and the linger ──
-  const [hovered, setHovered] = useState(false);
+  // ── Hover, engagement and the linger ──
+  const hover = useIslandHover();
+  const hovered = hover.hovered;
+  useEffect(() => {
+    if (!hovered && hoverHeld) setHoverHeld(false);
+  }, [hovered, hoverHeld]);
   const [focusWithin, setFocusWithin] = useState(false);
   const [engaged, setEngaged] = useState(false);
   const [lingerEpoch, setLingerEpoch] = useState(0);
@@ -354,13 +371,20 @@ export function PersonaBar(_props: PersonaBarProps) {
   const engage = useCallback(() => setEngaged(true), []);
 
   // ── OS focus, keys, click ──
+  //
+  // Only losing focus is reported. Reporting the window GAINING focus made a
+  // drag open the composer: pressing the head makes the window key, Rust
+  // read that as "expand to the input", and the window grew to the panel
+  // under the cursor in the middle of the drag. The Pill and the Island made
+  // the same call. Opening the composer is a click on the head (or the type
+  // control), never a side effect of focus.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let mounted = true;
     getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
-        if (!mounted) return;
-        void sendInteraction(focused ? UI.INTERACTION_TYPES_FOCUS : UI.INTERACTION_TYPES_BLUR);
+        if (!mounted || focused) return;
+        void sendInteraction(UI.INTERACTION_TYPES_BLUR);
       })
       .then((fn) => {
         if (mounted) unlisten = fn;
@@ -399,6 +423,45 @@ export function PersonaBar(_props: PersonaBarProps) {
     if (idle) void sendInteraction(UI.INTERACTION_TYPES_CLICK);
   }, [idle]);
 
+  // ── The hover controls ──
+  /** Bring the last answer back. The way home after a bubble was put away. */
+  const openAnswer = useCallback(() => {
+    setAnswerOpen(true);
+    setSpokenOpen(true);
+    setEngaged(false);
+    setLingerEpoch((e) => e + 1);
+  }, []);
+  // The tray's "Show/Hide Chat" is the same way back, from the menu bar.
+  const hasAnswerRef = useRef(hasAnswerContent);
+  hasAnswerRef.current = hasAnswerContent;
+  const answerOpenRef = useRef(answerOpen);
+  answerOpenRef.current = answerOpen;
+  useEventListener(EVENTS.BAR_TOGGLE_PANE, () => {
+    if (answerOpenRef.current) closeAnswer();
+    else if (hasAnswerRef.current) openAnswer();
+  });
+  const startTalking = useCallback((e: ReactMouseEvent) => {
+    e.stopPropagation();
+    void invoke(COMMANDS.AGENT_AGENT_VOICE, { action: "start" }).catch((error) =>
+      console.error("Avatar: could not start listening:", error),
+    );
+  }, []);
+  const startTyping = useCallback((e: ReactMouseEvent) => {
+    e.stopPropagation();
+    // Typing has to land here, so the window is made key on purpose.
+    getCurrentWindow()
+      .setFocus()
+      .catch((error) => console.debug("Avatar: window activation failed:", error));
+    void sendInteraction(UI.INTERACTION_TYPES_CLICK);
+  }, []);
+  const showAnswer = useCallback(
+    (e: ReactMouseEvent) => {
+      e.stopPropagation();
+      openAnswer();
+    },
+    [openAnswer],
+  );
+
   // ── The scene ──
   const question = turn.question || bar.lastSubmittedValue;
   const scene: Scene = sceneFor({
@@ -413,6 +476,7 @@ export function PersonaBar(_props: PersonaBarProps) {
     answerOpen,
     hasAnswerContent,
     approvalPending: !!turn.approval,
+    hovered: hovered && !hoverHeld && !isDriving,
   });
   // A cursor-control notice with nothing else to say gets a plain bubble of
   // its own. It hides itself once the notice is answered (`empty:hidden`).
@@ -465,8 +529,9 @@ export function PersonaBar(_props: PersonaBarProps) {
     if (growing) {
       void (async () => {
         let up = facingUpRef.current;
-        // Opening from rest: decide which way the bubbles go.
-        if (open && prev.width < win.width) {
+        // Opening from rest: decide which way the bubbles go. The hover
+        // controls keep the resting width, so "from rest" is the size.
+        if (open && prev.width <= REST_SIZE && prev.height <= REST_SIZE) {
           try {
             up = await isDockedLow();
           } catch {
@@ -625,6 +690,52 @@ export function PersonaBar(_props: PersonaBarProps) {
           </div>
         </Bubble>
       );
+    } else if (junos.kind === "controls") {
+      const control = (name: string) =>
+        cn(
+          "flex size-6 shrink-0 items-center justify-center rounded-full text-white/55 transition-colors",
+          "hover:bg-white/[0.12] hover:text-white",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A84FF]/70",
+          hover.hoveredButton === name && "bg-white/[0.12] text-white",
+        );
+      junoNode = (
+        <Bubble tail="head" facingUp={facingUp} shown={shown} className="self-center" data-testid="avatar-controls">
+          <div className="flex items-center gap-0.5 p-1" role="group" aria-label="Juno">
+            <button
+              type="button"
+              {...{ [ISLAND_BUTTON_ATTR]: "mic" }}
+              onClick={startTalking}
+              aria-label="Talk to Juno"
+              title="Talk to Juno"
+              className={control("mic")}
+            >
+              <Mic className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              {...{ [ISLAND_BUTTON_ATTR]: "type" }}
+              onClick={startTyping}
+              aria-label="Type to Juno"
+              title="Type to Juno"
+              className={control("type")}
+            >
+              <Type className="size-3.5" />
+            </button>
+            {hasAnswerContent && (
+              <button
+                type="button"
+                {...{ [ISLAND_BUTTON_ATTR]: "answer" }}
+                onClick={showAnswer}
+                aria-label="Show last answer"
+                title="Show last answer"
+                className={control("answer")}
+              >
+                <MessageSquare className="size-3.5" />
+              </button>
+            )}
+          </div>
+        </Bubble>
+      );
     } else if (junos.kind === "notice") {
       junoNode = (
         <Bubble tail="head" facingUp={facingUp} shown={shown} className="self-center empty:hidden" data-testid="avatar-notice">
@@ -696,8 +807,7 @@ export function PersonaBar(_props: PersonaBarProps) {
       data-open={open ? "true" : "false"}
       data-facing-up={facingUp ? "true" : "false"}
       {...dragProps}
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
+      {...hover.pointerProps}
       onFocusCapture={() => setFocusWithin(true)}
       onBlurCapture={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
