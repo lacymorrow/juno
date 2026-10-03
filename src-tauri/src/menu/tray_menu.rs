@@ -1029,7 +1029,7 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
         }
         tray_menu_ids::QUIT => {
             info!("[TrayMenu] Quit menu item clicked");
-            quit_app(app_handle);
+            quit_app(&app_handle);
         }
         _ => {
             // This should never happen since we filter for tray events above
