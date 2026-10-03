@@ -1029,13 +1029,19 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
         }
         tray_menu_ids::QUIT => {
             info!("[TrayMenu] Quit menu item clicked");
-            app_handle.exit(0);
+            quit_app(app_handle);
         }
         _ => {
             // This should never happen since we filter for tray events above
             warn!("[TrayMenu] Unexpected tray menu event: {}", event_id);
         }
     }
+}
+
+/// Quit Juno. The one quit path: the tray menu's Quit row and the "quit"
+/// voice/typed command both call this.
+pub fn quit_app(app_handle: &AppHandle) {
+    app_handle.exit(0);
 }
 
 /// Handle TrayIconEvents like clicks on the icon itself
