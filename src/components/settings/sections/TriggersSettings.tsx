@@ -39,9 +39,9 @@ import { KeyCaps } from "../KeyCaps";
 /* Backend contract (frozen — mirror the serde shape exactly)                 */
 /* -------------------------------------------------------------------------- */
 
-// Five independent gestures. A double tap is not a second way to reach a hold
-// trigger; it is a row of its own, with its own key and its own target.
-type Gesture = "hold" | "tap" | "double_tap" | "double_tap_hold" | "say";
+// Three independent gestures, each a row of its own with its own key and its
+// own target.
+type Gesture = "hold" | "tap" | "say";
 type TriggerTarget = "agent" | "dictation";
 
 type BindingTab = "keyboard" | "mouse";
@@ -80,13 +80,11 @@ interface TriggerIssue {
 /* -------------------------------------------------------------------------- */
 
 // A trigger reads as one sentence about the gesture and what it does:
-// "Hold to dictate", "Double-tap and hold to talk to Juno". Never the
+// "Hold to dictate", "Tap to talk to Juno". Never the
 // mechanism. Mirrors `Gesture::label` / `TriggerTarget::label` in Rust.
 const GESTURE_LABEL: Record<Gesture, string> = {
   hold: "Hold",
   tap: "Tap",
-  double_tap: "Double-tap",
-  double_tap_hold: "Double-tap and hold",
   say: "Say",
 };
 
@@ -97,24 +95,13 @@ const TARGET_LABEL: Record<TriggerTarget, string> = {
 
 // How each gesture ends, mirroring `Gesture::ending` in Rust. Generated from
 // the gesture alone, so the line beside a row can only ever describe that row.
-// The paragraph this replaced taught a second gesture reaching the same target
-// ("Double-tap it to keep listening"), which is the behaviour the gesture model
-// deleted: a double tap is its own row now.
 const GESTURE_ENDING: Record<Gesture, string> = {
   hold: "Let go to finish.",
   tap: "Press the key again to finish.",
-  double_tap: "Press the key again to finish.",
-  double_tap_hold: "Let go to finish.",
   say: "Juno starts listening when it hears the phrase.",
 };
 
-const ALL_GESTURES: Gesture[] = [
-  "hold",
-  "tap",
-  "double_tap",
-  "double_tap_hold",
-  "say",
-];
+const ALL_GESTURES: Gesture[] = ["hold", "tap", "say"];
 const ALL_TARGETS: TriggerTarget[] = ["agent", "dictation"];
 
 const comboLabel = (gesture: Gesture, target: TriggerTarget) =>
@@ -175,15 +162,30 @@ const FN_SHORTCUT = "Fn";
 const isFnShortcut = (shortcut: string) =>
   FN_ALIASES.includes(shortcut.trim().toLowerCase());
 
-/** Whether this binding is the globe key, which macOS has its own plans for. */
+/** The globe key and Control held together, in either order. Mirrors Rust. */
+const isFnChordShortcut = (shortcut: string) => {
+  const parts = shortcut.split("+").map((p) => p.trim().toLowerCase());
+  const isControl = (p: string) => p === "control" || p === "ctrl";
+  return (
+    parts.length === 2 &&
+    ((FN_ALIASES.includes(parts[0]) && isControl(parts[1])) ||
+      (isControl(parts[0]) && FN_ALIASES.includes(parts[1])))
+  );
+};
+
+/** Whether this binding uses the globe key, which macOS has its own plans for. */
 function isFnBinding(binding: Binding | null): boolean {
-  return binding?.kind === "keyboard" && isFnShortcut(binding.shortcut);
+  return (
+    binding?.kind === "keyboard" &&
+    (isFnShortcut(binding.shortcut) || isFnChordShortcut(binding.shortcut))
+  );
 }
 
 function bindingLabel(binding: Binding | null): string {
   if (!binding) return "Set binding";
   if (binding.kind === "keyboard") {
     if (isFnShortcut(binding.shortcut)) return "Fn (globe)";
+    if (isFnChordShortcut(binding.shortcut)) return "Fn + Control";
     return binding.shortcut || "Set binding";
   }
   return mouseLabel(binding.button);
@@ -201,12 +203,12 @@ function browserButtonToAppKit(button: number): number {
 
 /**
  * The factory bindings, mirroring `triggers::default_triggers` in Rust: hold
- * the globe key to talk to Juno, hold Option+Space to dictate. A row whose
- * sentence is not one of those two has nothing to reset to.
+ * the globe key to talk to Juno, hold the globe key and Control to dictate. A
+ * row whose sentence is not one of those two has nothing to reset to.
  */
 const DEFAULT_BINDINGS: Partial<Record<string, string>> = {
   "hold:agent": "Fn",
-  "hold:dictation": "Option+Space",
+  "hold:dictation": "Fn+Control",
 };
 
 /** A new row. The id is the backend's to hand out. */
@@ -641,7 +643,7 @@ function TriggerRow({
     ? Mic
     : trigger.binding?.kind === "mouse"
       ? MousePointer2
-      : trigger.gesture === "tap" || trigger.gesture === "double_tap"
+      : trigger.gesture === "tap"
         ? Command
         : Keyboard;
 

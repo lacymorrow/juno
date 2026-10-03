@@ -47,7 +47,7 @@ pub struct AppSettings {
     /// Unified activation triggers (methods x targets). Source of truth for the
     /// Triggers settings UI and for shortcut/voice registration. Older stores
     /// lack the key and are migrated from the legacy shortcut fields on load.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::triggers::deserialize_stored")]
     pub triggers: Vec<crate::triggers::Trigger>,
     /// Auto-update behaviour. Older stores lack the key and get the defaults,
     /// which is how an install from before this shipped starts updating.

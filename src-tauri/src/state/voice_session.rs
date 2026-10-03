@@ -139,17 +139,16 @@ impl VoiceStartMethod {
 
 impl From<crate::triggers::Gesture> for VoiceStartMethod {
     /// The registry records how a session was *opened*, which is coarser than
-    /// the gesture that opened it: holding and double-tapping-and-holding both
-    /// keep the microphone open for as long as the key is down, and tapping and
-    /// double-tapping both leave it open until the key comes back. That is the
-    /// distinction every stop path cares about, and it is why the recognizer
-    /// can read "a tap started this" back out of the registry instead of
-    /// keeping a session flag of its own.
+    /// the gesture that opened it, and it is the distinction every stop path
+    /// cares about: holding keeps the microphone open for as long as the key is
+    /// down, tapping leaves it open until the key comes back. It is why the
+    /// recognizer can read "a tap started this" back out of the registry
+    /// instead of keeping a session flag of its own.
     fn from(gesture: crate::triggers::Gesture) -> Self {
         use crate::triggers::Gesture;
         match gesture {
-            Gesture::Hold | Gesture::DoubleTapHold => VoiceStartMethod::PushToTalk,
-            Gesture::Tap | Gesture::DoubleTap => VoiceStartMethod::Toggle,
+            Gesture::Hold => VoiceStartMethod::PushToTalk,
+            Gesture::Tap => VoiceStartMethod::Toggle,
             Gesture::Say => VoiceStartMethod::WakePhrase,
         }
     }
@@ -787,23 +786,22 @@ mod tests {
     }
 
     #[test]
-    fn a_held_second_press_records_the_same_way_a_hold_does() {
+    fn each_gesture_records_the_way_it_opened_the_session() {
         // The recognizer reads "a tap started this" back out of the registry,
-        // so which gestures collapse onto which start method is load-bearing:
-        // a double-tap-and-hold session must not look stoppable by a later
-        // press, and a double tap must.
+        // so which gesture maps to which start method is load-bearing: a hold
+        // session must not look stoppable by a later press, and a tap must.
         use crate::triggers::Gesture;
         assert_eq!(
-            VoiceStartMethod::from(Gesture::DoubleTapHold),
+            VoiceStartMethod::from(Gesture::Hold),
             VoiceStartMethod::PushToTalk
-        );
-        assert_eq!(
-            VoiceStartMethod::from(Gesture::DoubleTap),
-            VoiceStartMethod::Toggle
         );
         assert_eq!(
             VoiceStartMethod::from(Gesture::Tap),
             VoiceStartMethod::Toggle
+        );
+        assert_eq!(
+            VoiceStartMethod::from(Gesture::Say),
+            VoiceStartMethod::WakePhrase
         );
     }
 

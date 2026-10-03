@@ -163,11 +163,9 @@ pub async fn set_triggers(
     app_state: State<'_, AppState>,
 ) -> Result<Vec<Trigger>, String> {
     // A row is its id, so nothing is dropped for looking like another row. Two
-    // Hold rows pointing at dictation are a legitimate pair of keys, and the
-    // old uniqueness rule, `(method, target)`, is exactly why a double tap had
-    // to be bolted onto a hold instead of being a row of its own. What is
-    // normalized here is only the identity itself: a row the window has just
-    // created arrives with a blank id and is given one.
+    // Hold rows pointing at dictation are a legitimate pair of keys, on
+    // different keys. What is normalized here is only the identity itself: a
+    // row the window has just created arrives with a blank id and is given one.
     let mut normalized = triggers;
     triggers::ensure_ids(&mut normalized);
 

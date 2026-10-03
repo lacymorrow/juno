@@ -19,6 +19,11 @@ describe("shortcutCaps", () => {
     expect(shortcutCaps("Fn").map((c) => c.glyph)).toEqual(["🌐"]);
   });
 
+  it("draws the globe key and Control as two caps, Control first", () => {
+    expect(shortcutCaps("Fn+Control").map((c) => c.glyph)).toEqual(["⌃", "🌐"]);
+    expect(shortcutCaps("Control+Fn").map((c) => c.glyph)).toEqual(["⌃", "🌐"]);
+  });
+
   it("prints a single letter as its cap", () => {
     expect(shortcutCaps("Option+d").map((c) => c.glyph)).toEqual(["⌥", "D"]);
   });
