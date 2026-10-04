@@ -1,8 +1,8 @@
 use crate::state::AppState;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_notification::NotificationExt;
 
 /// What there is to decide about notifications.
 ///
@@ -181,6 +181,9 @@ fn read_authorization() -> Option<NotificationAuthorization> {
 }
 
 /// Show the system permission prompt and wait for the answer.
+///
+/// macOS shows the prompt only while authorization is not determined; after
+/// that this returns the standing answer at once.
 #[cfg(target_os = "macos")]
 fn request_authorization() -> Result<(), String> {
     use block2::RcBlock;
@@ -188,23 +191,172 @@ fn request_authorization() -> Result<(), String> {
     use objc2_foundation::NSError;
     use objc2_user_notifications::{UNAuthorizationOptions, UNUserNotificationCenter};
 
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
     let center = UNUserNotificationCenter::currentNotificationCenter();
-    let block = RcBlock::new(move |_granted: Bool, _error: *mut NSError| {
-        let _ = tx.send(());
+    let block = RcBlock::new(move |_granted: Bool, error: *mut NSError| {
+        // SAFETY: a non-null error is a live NSError for this call.
+        let error = unsafe { error.as_ref() }.map(|e| e.localizedDescription().to_string());
+        let _ = tx.send(error);
     });
     center.requestAuthorizationWithOptions_completionHandler(
         UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
         &block,
     );
     // The prompt waits on a person, so this is generous.
-    rx.recv_timeout(std::time::Duration::from_secs(300))
-        .map_err(|_| "macOS did not answer the notification prompt.".to_string())
+    match rx.recv_timeout(std::time::Duration::from_secs(300)) {
+        Ok(None) => Ok(()),
+        Ok(Some(error)) => Err(format!("macOS refused the notification request: {}", error)),
+        Err(_) => Err("macOS did not answer the notification prompt.".to_string()),
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
 fn request_authorization() -> Result<(), String> {
     Ok(())
+}
+
+/// A request identifier no other notification from this process shares.
+///
+/// macOS replaces a pending or delivered notification that has the same
+/// identifier, so two timers finishing together must not collide.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn request_identifier(sequence: u64, millis: u128) -> String {
+    format!("juno.{}.{}", millis, sequence)
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn next_request_identifier() -> String {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    request_identifier(SEQUENCE.fetch_add(1, Ordering::Relaxed), millis)
+}
+
+/// Hand one notification to `UNUserNotificationCenter` and wait for its answer.
+///
+/// This is the same center the authorization comes from, so what the
+/// notifications row shows and what posting does can no longer disagree.
+#[cfg(target_os = "macos")]
+fn post(title: &str, body: &str) -> Result<(), String> {
+    use block2::RcBlock;
+    use objc2_foundation::{NSError, NSString};
+    use objc2_user_notifications::{
+        UNMutableNotificationContent, UNNotificationRequest, UNNotificationSound,
+        UNUserNotificationCenter,
+    };
+
+    let content = UNMutableNotificationContent::new();
+    content.setTitle(&NSString::from_str(title));
+    content.setBody(&NSString::from_str(body));
+    content.setSound(Some(&UNNotificationSound::defaultSound()));
+
+    let identifier = NSString::from_str(&next_request_identifier());
+    let request =
+        UNNotificationRequest::requestWithIdentifier_content_trigger(&identifier, &content, None);
+
+    let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+    let block = RcBlock::new(move |error: *mut NSError| {
+        // SAFETY: a non-null error is a live NSError for this call.
+        let error = unsafe { error.as_ref() }.map(|e| e.localizedDescription().to_string());
+        let _ = tx.send(error);
+    });
+    UNUserNotificationCenter::currentNotificationCenter()
+        .addNotificationRequest_withCompletionHandler(&request, Some(&*block));
+
+    match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(None) => Ok(()),
+        Ok(Some(error)) => Err(format!("macOS would not take the notification: {}", error)),
+        Err(_) => {
+            // The request is queued; macOS was slow to confirm. Not a failure.
+            warn!("macOS did not confirm notification '{}' in time", title);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn post(title: &str, _body: &str) -> Result<(), String> {
+    info!("Notification '{}' has no presenter on this platform", title);
+    Ok(())
+}
+
+/// How a notification is presented while Juno is the frontmost app.
+///
+/// Without a delegate saying otherwise, macOS posts a frontmost app's
+/// notifications silently: no banner, no sound. Juno's bar and Settings window
+/// make it frontmost often, which is exactly when the test button is pressed.
+#[cfg(target_os = "macos")]
+fn foreground_presentation() -> objc2_user_notifications::UNNotificationPresentationOptions {
+    use objc2_user_notifications::UNNotificationPresentationOptions as Options;
+    Options::Banner | Options::List | Options::Sound
+}
+
+#[cfg(target_os = "macos")]
+mod presenter {
+    use objc2::rc::Retained;
+    use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
+    use objc2::{define_class, msg_send, AnyThread};
+    use objc2_user_notifications::{
+        UNNotification, UNNotificationPresentationOptions, UNUserNotificationCenter,
+        UNUserNotificationCenterDelegate,
+    };
+
+    define_class!(
+        // SAFETY: NSObject has no subclassing requirements and this class has
+        // no Drop impl.
+        #[unsafe(super(NSObject))]
+        #[name = "JunoNotificationPresenter"]
+        struct Presenter;
+
+        unsafe impl NSObjectProtocol for Presenter {}
+
+        unsafe impl UNUserNotificationCenterDelegate for Presenter {
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn will_present(
+                &self,
+                _center: &UNUserNotificationCenter,
+                _notification: &UNNotification,
+                completion_handler: &block2::DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+            ) {
+                completion_handler.call((super::foreground_presentation(),));
+            }
+        }
+    );
+
+    impl Presenter {
+        fn new() -> Retained<Self> {
+            let this = Self::alloc().set_ivars(());
+            // SAFETY: NSObject's init on a freshly allocated instance.
+            unsafe { msg_send![super(this), init] }
+        }
+    }
+
+    /// Make Juno the center's delegate, once, for the life of the process.
+    pub fn install() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let presenter = Presenter::new();
+            UNUserNotificationCenter::currentNotificationCenter()
+                .setDelegate(Some(ProtocolObject::from_ref(&*presenter)));
+            // The center holds its delegate weakly. Keep this one alive.
+            std::mem::forget(presenter);
+        });
+    }
+}
+
+/// Let notifications show as banners while Juno is frontmost.
+///
+/// Called once from setup. Does nothing where there is no Juno.app to post as,
+/// because the notification center raises without a bundle.
+pub fn install_presenter() {
+    if let Some(reason) = unavailable_reason() {
+        info!("Notification presenter not installed: {}", reason);
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    presenter::install();
 }
 
 /// What macOS currently allows for Juno.
@@ -232,7 +384,16 @@ pub fn current_status() -> NotificationStatus {
     }
 }
 
-/// The refusal [`deliver`] returns before it reaches the plugin, if any.
+/// Whether to show the macOS prompt before posting.
+///
+/// The first time Juno has something to say and macOS has never asked is the
+/// moment to ask, so a timer finishing brings up the prompt rather than
+/// nothing happening at all.
+fn should_ask_first(enabled: bool, authorization: NotificationAuthorization) -> bool {
+    enabled && authorization == NotificationAuthorization::NotDetermined
+}
+
+/// The reason [`deliver`] withholds a notification, if it does.
 fn refusal(enabled: bool, status: &NotificationStatus) -> Result<(), String> {
     if !enabled {
         return Err("Notifications are off in Juno. Turn on Show notifications.".to_string());
@@ -248,37 +409,60 @@ fn refusal(enabled: bool, status: &NotificationStatus) -> Result<(), String> {
     }
 }
 
-/// Hand one notification to macOS, or say why it cannot be handed over.
+/// Post one notification, or say why it was not posted.
 ///
 /// The one door. Everything that notifies goes through here, so "off" is a
-/// single check in a single place rather than a promise each call site has to
-/// remember to keep. `Ok(())` means macOS allows Juno's notifications and the
-/// plugin took this one; the plugin posts asynchronously, so it still does not
-/// mean anyone saw it.
+/// single check in a single place. Blocks while macOS answers (and, the first
+/// time, while the person answers the prompt), so call it off the main thread.
 pub fn deliver(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
-    if let Err(reason) = refusal(notifications_enabled(app), &current_status()) {
+    let enabled = notifications_enabled(app);
+    let mut status = current_status();
+    if should_ask_first(enabled, status.authorization) {
+        if let Err(reason) = request_authorization() {
+            warn!("Asking for notifications failed: {}", reason);
+        }
+        status = current_status();
+    }
+    if let Err(reason) = refusal(enabled, &status) {
         info!("Withholding '{}': {}", title, reason);
         return Err(reason);
     }
-
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .map_err(|e| format!("macOS would not take the notification: {}", e))
+    post(title, body)
 }
 
-/// Notify from a background task, where there is no one to tell.
+/// Notify from anywhere, without waiting and without telling anyone if it
+/// fails.
 ///
 /// The scheduler, a new automation, a finished timer, the request for the
-/// physical mouse and the menu-bar-only hint all land here. None of them has
-/// anything to do with a failure but record it, so this logs the reason and
-/// moves on. Anything a person pressed calls [`deliver`] and shows them what
-/// came back.
+/// physical mouse and the menu-bar-only hint all land here. Some run on the
+/// main thread, and the first notification can wait on the permission prompt,
+/// so the work happens on its own thread. A failure is logged and nothing more.
 pub fn notify(app: &AppHandle, title: &str, body: &str) {
-    if let Err(reason) = deliver(app, title, body) {
-        warn!("Notification '{}' did not go out: {}", title, reason);
+    let app = app.clone();
+    let title = title.to_string();
+    let body = body.to_string();
+    let spawned = std::thread::Builder::new()
+        .name("juno-notify".into())
+        .spawn(move || {
+            if let Err(reason) = deliver(&app, &title, &body) {
+                warn!("Notification '{}' did not go out: {}", title, reason);
+            }
+        });
+    if let Err(e) = spawned {
+        warn!("Could not start the notification thread: {}", e);
+    }
+}
+
+/// [`deliver`] on a blocking thread, logging rather than returning a failure.
+async fn deliver_quietly(app: AppHandle, title: String, body: String) {
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        deliver(&app, &title, &body).map_err(|reason| (title, reason))
+    })
+    .await;
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err((title, reason))) => warn!("Notification '{}' did not go out: {}", title, reason),
+        Err(e) => warn!("Notification thread failed: {}", e),
     }
 }
 
@@ -320,27 +504,30 @@ pub async fn open_notification_settings(app: AppHandle) -> Result<(), String> {
     Err("Could not open System Settings".to_string())
 }
 
-/// Send a notification.
-///
-/// Returns the reason when there is one, rather than the `Ok(())` it used to
-/// return whatever happened.
+/// Send a notification. A failure is logged, never shown.
 #[tauri::command]
 pub async fn send_notification(
     app: AppHandle,
     _state: tauri::State<'_, AppState>,
     data: NotificationData,
 ) -> Result<(), String> {
-    deliver(&app, &data.title, &data.message)
+    deliver_quietly(app, data.title, data.message).await;
+    Ok(())
 }
 
-/// Send one notification because someone asked for one, and say what happened.
+/// Send one notification because someone asked for one.
+///
+/// The banner is the answer. If it cannot go out, the reason is logged and the
+/// row's status (read again by the window afterwards) says what to change.
 #[tauri::command]
 pub async fn test_notification(app: AppHandle) -> Result<(), String> {
-    deliver(
-        &app,
-        "Juno",
-        "This is what a notification from Juno looks like.",
+    deliver_quietly(
+        app,
+        "Juno".to_string(),
+        "This is what a notification from Juno looks like.".to_string(),
     )
+    .await;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -388,6 +575,37 @@ mod tests {
             NOT_ASKED_REASON
         );
         assert!(refusal(true, &status(Unavailable)).is_err());
+    }
+
+    #[test]
+    fn juno_asks_the_first_time_it_has_something_to_say() {
+        use NotificationAuthorization::*;
+        assert!(should_ask_first(true, NotDetermined));
+        // Off in Juno: no prompt for something that will not be posted.
+        assert!(!should_ask_first(false, NotDetermined));
+        // Already answered, or nothing to ask: never prompt again.
+        for a in [Authorized, Denied, Unavailable] {
+            assert!(!should_ask_first(true, a));
+        }
+    }
+
+    #[test]
+    fn request_identifiers_never_collide() {
+        assert_ne!(request_identifier(0, 5), request_identifier(1, 5));
+        assert_eq!(request_identifier(7, 42), "juno.42.7");
+        assert_ne!(next_request_identifier(), next_request_identifier());
+    }
+
+    /// The reported defect: no banner while Juno was frontmost. The delegate
+    /// must ask for a banner, a Notification Center entry and the sound.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn frontmost_notifications_present_as_banners() {
+        use objc2_user_notifications::UNNotificationPresentationOptions as Options;
+        let options = foreground_presentation();
+        assert!(options.contains(Options::Banner));
+        assert!(options.contains(Options::List));
+        assert!(options.contains(Options::Sound));
     }
 
     /// The reported defect: the Open Settings button failed. The row now opens

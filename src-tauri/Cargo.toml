@@ -122,12 +122,14 @@ cron = "0.17.0"
 # Objective-C blocks for NSEvent monitor handlers (passive stop-key observer).
 # Already in the dependency graph via `cocoa`; this just makes it a direct dep.
 block = "0.1"
-# Real notification authorization (UNUserNotificationCenter): the status the
-# Notifications row reads and the system prompt it triggers.
+# Notifications (UNUserNotificationCenter): the authorization the
+# Notifications row reads, the system prompt, the posting itself and the
+# delegate that shows banners while Juno is frontmost. tauri-plugin-notification
+# posts through the deprecated NSUserNotificationCenter, so it is not used to post.
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError"] }
-objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "UNUserNotificationCenter", "UNNotificationSettings"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "UNUserNotificationCenter", "UNNotificationSettings", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationSound", "UNNotificationTrigger"] }
 # Metal GPU acceleration for Kokoro-82M on Apple Silicon
 any-tts = { version = "0.1", default-features = false, features = ["kokoro", "download", "metal"] }
 
