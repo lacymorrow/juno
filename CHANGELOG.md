@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.97] - 2026-10-04
+
+### Fixed
+
+- **triggers:** record any modifier chord, and find the globe key instead of asking (#706) (0bbfdc59)
+
 ## [0.8.96] - 2026-10-04
 
 ### Fixed
@@ -912,7 +918,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.96...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.97...HEAD
+[0.8.97]: https://github.com/lacymorrow/juno/compare/cua-v0.8.96...v0.8.97
 [0.8.96]: https://github.com/lacymorrow/juno/compare/cua-v0.8.95...v0.8.96
 [0.8.95]: https://github.com/lacymorrow/juno/compare/cua-v0.8.94...v0.8.95
 [0.8.94]: https://github.com/lacymorrow/juno/compare/cua-v0.8.93...v0.8.94
