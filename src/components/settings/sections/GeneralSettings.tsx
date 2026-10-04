@@ -96,21 +96,6 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <SettingsGroup title="Startup">
-        <SettingsRow
-          htmlFor="auto-launch"
-          label="Open at login"
-          description="Juno is in the menu bar as soon as you log in."
-        >
-          <Switch
-            id="auto-launch"
-            checked={autoLaunchEnabled}
-            onCheckedChange={handleAutoLaunchChange}
-            disabled={autoLaunchLoading}
-          />
-        </SettingsRow>
-      </SettingsGroup>
-
       <SettingsGroup
         title="Appearance"
         footer="Your bar changes as you browse. Every look goes through the same moments: resting, listening, dictating, done."
@@ -135,6 +120,21 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
             checked={followCursorDisplay}
             onCheckedChange={handleFollowCursorChange}
             disabled={followCursorLoading}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Startup">
+        <SettingsRow
+          htmlFor="auto-launch"
+          label="Open at login"
+          description="Juno is in the menu bar as soon as you log in."
+        >
+          <Switch
+            id="auto-launch"
+            checked={autoLaunchEnabled}
+            onCheckedChange={handleAutoLaunchChange}
+            disabled={autoLaunchLoading}
           />
         </SettingsRow>
       </SettingsGroup>

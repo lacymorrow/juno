@@ -155,7 +155,7 @@ impl BrainFactory {
                                     let mode = AgentMode::from_str(mode_str)
                                         .unwrap_or_else(|| {
                                             warn!("Invalid agent execution mode in settings: '{}'. Using default.", mode_str);
-                                            AgentMode::Multi
+                                            AgentMode::default()
                                         });
                                     info!(
                                         "Loaded agent mode from centralized settings: {:?}",
@@ -178,7 +178,7 @@ impl BrainFactory {
                         info!("Agent settings not found in settings store. Using default.");
                     }
                 }
-                AgentMode::Multi
+                AgentMode::default()
             }
             Err(e) => {
                 warn!("Failed to access settings store for agent mode: {}. Using environment fallback.", e);
@@ -189,10 +189,9 @@ impl BrainFactory {
 
     /// Fallback method that reads from environment (used when centralized settings unavailable)
     fn get_agent_mode_fallback() -> AgentMode {
-        let mode_str = env::var("AGENT_MODE").unwrap_or_else(|_| {
-            "multi".to_string() // Default to multi-agent mode for new app
-        });
-        AgentMode::from_str(&mode_str).unwrap_or(AgentMode::Multi)
+        let mode_str =
+            env::var("AGENT_MODE").unwrap_or_else(|_| AgentMode::default().to_string().to_string());
+        AgentMode::from_str(&mode_str).unwrap_or_default()
     }
 
     /// Get current agent mode from configuration (legacy method - now tries to use centralized settings)

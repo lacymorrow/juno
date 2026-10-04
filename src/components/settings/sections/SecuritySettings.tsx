@@ -24,6 +24,7 @@ import { COMMANDS } from "@/lib/constants.generated";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
+import { Switch } from "@/components/ui/switch";
 import {
   DEFAULT_PERMISSION_MODE,
   PERMISSION_FLOOR,
@@ -272,6 +273,70 @@ function PermissionModeGroup() {
   );
 }
 
+/**
+ * Ask before Juno sends (LAC-4058). Default on. Advanced: it moved here from
+ * the Advanced page so every approval lives on one page.
+ */
+function ApprovalsGroup() {
+  const [askBeforeSend, setAskBeforeSend] = useState(true);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const enabled = await invoke<boolean>(
+          COMMANDS.SETTINGS_GET_CLI_ASK_BEFORE_SEND_ENABLED,
+        );
+        if (mounted) setAskBeforeSend(enabled !== false);
+      } catch (error) {
+        console.error("Failed to load the ask-before-send flag:", error);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleChange = async (enabled: boolean) => {
+    const previous = askBeforeSend;
+    setAskBeforeSend(enabled);
+    try {
+      await invoke(COMMANDS.SETTINGS_SET_CLI_ASK_BEFORE_SEND_ENABLED, {
+        enabled,
+      });
+    } catch (error) {
+      console.error("Failed to update the ask-before-send flag:", error);
+      setAskBeforeSend(previous);
+      toast.error("Could not change that setting");
+    }
+  };
+
+  return (
+    <SettingsGroup
+      title="Approvals"
+      advanced
+      footer="Applies to the Claude CLI provider. Turning this off lets Juno send without asking."
+    >
+      <SettingsRow
+        id="cli-ask-before-send"
+        htmlFor="cli-ask-before-send-switch"
+        label="Ask before Juno sends"
+        description="When Juno is about to send an email or message, create or delete something in a connected account, or put something on your calendar, she shows you what is about to go out and waits for your OK. Declining sends nothing."
+      >
+        <Switch
+          id="cli-ask-before-send-switch"
+          checked={askBeforeSend}
+          onCheckedChange={handleChange}
+          disabled={loading}
+        />
+      </SettingsRow>
+    </SettingsGroup>
+  );
+}
+
 export default function SecuritySettings() {
   // State for granular permissions (from Onboarding)
   const [permissionsState, setPermissionsState] =
@@ -368,6 +433,8 @@ export default function SecuritySettings() {
   return (
     <div className="space-y-6">
       <PermissionModeGroup />
+
+      <ApprovalsGroup />
 
       <SettingsGroup
         title="macOS Permissions"

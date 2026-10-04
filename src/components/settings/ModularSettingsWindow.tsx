@@ -217,6 +217,7 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   // Security & Privacy. The approval row carries the retired Tools row's search
   // terms, so searching "approval" still lands on the control that works.
   { sectionId: "security", rowId: "permission-mode", label: "When Juno needs permission", keywords: "permission permissions approval approve approvals confirm ask autonomy allow always risky safe tools bash terminal don't ask" },
+  { sectionId: "security", rowId: "cli-ask-before-send", label: "Ask before Juno sends", keywords: "approvals approval ask confirm send email message calendar sends", advanced: true },
   // Tools
   { sectionId: "tools", rowId: "smooth-mouse-movement", label: "Enable Smooth Mouse Movement", keywords: "smooth mouse movement animation cursor" },
   // Network
