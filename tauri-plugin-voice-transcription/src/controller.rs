@@ -280,7 +280,7 @@ impl VoiceController {
     /// flag on its own schedule. Whichever runs second used to win: a plain
     /// `*slot = new` silently reset `live_partial` to false, so a flag applied
     /// before the engine finished loading never reached a recording.
-    pub fn adopt(&mut self, mut replacement: VoiceController) {
+    pub fn adopt(&mut self, replacement: VoiceController) {
         if self.live_partial.is_open() {
             info!("[VoiceController] Carrying live_partial=true across controller replacement");
         }
