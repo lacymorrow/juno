@@ -450,6 +450,20 @@ const ESCAPE_CAPS: KeyCap[] = shortcutCaps("Escape");
 /** The shortcut string the globe key is recorded as, mirroring Rust. */
 const GLOBE_SHORTCUT = "Fn";
 
+/**
+ * When the key caps should light for a captured globe-key press.
+ *
+ * `"now"` when the globe key is already the one drawn: the press is the
+ * answer, so light it on key-down. Otherwise the caps change to the globe key
+ * once it is adopted, so light them then, not before and not on a failure.
+ */
+export function globePressTiming(hints: TriggerHints | null): "now" | "after-adopt" {
+  const shown = (hints?.agent?.shortcut ?? hints?.dictation?.shortcut ?? "")
+    .trim()
+    .toLowerCase();
+  return shown === GLOBE_SHORTCUT.toLowerCase() ? "now" : "after-adopt";
+}
+
 /** One target's key, as the backend derives it from the trigger list. */
 export interface TriggerHint {
   /** The shortcut string the key caps are drawn from, e.g. `"Fn"`. */
@@ -969,7 +983,7 @@ export default function OnboardingFlow({
     }
   }, []);
 
-  const adoptFnAsTalkKey = useCallback(async () => {
+  const adoptFnAsTalkKey = useCallback(async (): Promise<boolean> => {
     setFnSaveError(null);
     try {
       const triggers = await invoke<TriggerShape[]>(COMMANDS.TRIGGERS_GET_TRIGGERS);
@@ -1022,7 +1036,7 @@ export default function OnboardingFlow({
           binding.shortcut?.trim().toLowerCase() === "fn"
         );
       });
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return false;
       if (adopted) {
         setFnOffered(true);
         // The caps on screen name a key; a rebind has to move them.
@@ -1030,11 +1044,13 @@ export default function OnboardingFlow({
       } else {
         setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
       }
+      return adopted;
     } catch (error) {
       console.error("[Onboarding] could not switch to the globe key:", error);
       if (mountedRef.current) {
         setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
       }
+      return false;
     }
   }, [refreshTriggerHints]);
 
@@ -1061,8 +1077,20 @@ export default function OnboardingFlow({
     }
   }, [refreshTriggerHints]);
 
+  // The last screen holds capture open, so the monitor swallows the globe key
+  // and reports it here instead of firing the trigger. That report is the only
+  // signal the first press ever produces, so it has to light the key too: the
+  // first press used to adopt the key silently and only the second one, which
+  // fires the trigger, lit it.
   useEventListener<{ key: string }>(EVENTS.TRIGGERS_KEY_CAPTURED, (payload) => {
-    if (payload?.key === "fn") void adoptFnAsTalkKey();
+    if (payload?.key !== "fn") return;
+    const timing = globePressTiming(triggerHints);
+    if (timing === "now") setShortcutPressed(true);
+    void adoptFnAsTalkKey().then((adopted) => {
+      if (adopted && timing === "after-adopt" && mountedRef.current) {
+        setShortcutPressed(true);
+      }
+    });
   });
 
   const refreshRelaunchPending = useCallback(async () => {
