@@ -157,6 +157,22 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
     Ok(())
 }
 
+/// End the recording, waiting for the controller if it is busy, off the async
+/// runtime because joining the audio thread blocks (a stop also runs the final
+/// decode). See [`crate::controller::end_dictation_waiting`] for why this no
+/// longer gives up on a busy lock.
+async fn end_dictation(
+    controller: &Arc<Mutex<VoiceController>>,
+    discard: bool,
+) -> Result<bool, Error> {
+    let controller = Arc::clone(controller);
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::controller::end_dictation_waiting(&controller, discard)
+    })
+    .await
+    .map_err(|e| Error::ControlError(format!("Dictation end task failed: {e}")))?
+}
+
 /// Stop listening and throw the audio away.
 ///
 /// `stop_dictation` always finalises and emits a result, which downstream
@@ -170,22 +186,7 @@ pub async fn cancel_dictation<R: tauri::Runtime>(
 ) -> Result<bool, Error> {
     info!("[Plugin] cancel_dictation command called");
 
-    let mut voice_controller = match controller.try_lock() {
-        Ok(guard) => guard,
-        Err(std::sync::TryLockError::WouldBlock) => {
-            info!("[Plugin] VoiceController is busy; cancel will land when the lock frees");
-            return Ok(false);
-        }
-        Err(std::sync::TryLockError::Poisoned(e)) => {
-            error!("[Plugin] VoiceController mutex is poisoned: {}", e);
-            return Err(Error::LockError(format!(
-                "VoiceController mutex is poisoned: {}",
-                e
-            )));
-        }
-    };
-
-    let result = voice_controller.cancel_dictation()?;
+    let result = end_dictation(controller.inner(), true).await?;
 
     if result {
         app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STOPPED, ())
@@ -205,24 +206,7 @@ pub async fn stop_dictation<R: tauri::Runtime>(
 ) -> Result<bool, Error> {
     info!("[Plugin] stop_dictation command called");
 
-    // Use try_lock to avoid blocking if another operation is in progress
-    let mut voice_controller = match controller.try_lock() {
-        Ok(guard) => guard,
-        Err(std::sync::TryLockError::WouldBlock) => {
-            info!("[Plugin] VoiceController is busy - stop will be handled when lock is available");
-            // Return false to indicate dictation wasn't stopped (it might be already stopping)
-            return Ok(false);
-        }
-        Err(std::sync::TryLockError::Poisoned(e)) => {
-            error!("[Plugin] VoiceController mutex is poisoned: {}", e);
-            return Err(Error::LockError(format!(
-                "VoiceController mutex is poisoned: {}",
-                e
-            )));
-        }
-    };
-
-    let result = voice_controller.stop_dictation()?;
+    let result = end_dictation(controller.inner(), false).await?;
 
     if result {
         // Emit stopped event through the plugin system - sound will be handled automatically by backend

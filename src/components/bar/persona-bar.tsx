@@ -29,6 +29,7 @@ import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import type { ChatMessage } from "@/types/chat";
 import { answerKey, latestTurn } from "./island/islandModel";
 import { LingerRing } from "./island/LingerRing";
+import { VoiceTurnControls, useVoiceTurn } from "./VoiceTurnControls";
 import { useLinger } from "./island/useLinger";
 import { ISLAND_BUTTON_ATTR, useIslandHover } from "./island/useIslandHover";
 import { AvatarHead } from "./avatar/AvatarHead";
@@ -461,6 +462,18 @@ export function PersonaBar(_props: PersonaBarProps) {
     },
     [openAnswer],
   );
+  // Send, type instead, cancel while a turn records: the same set as every
+  // other look (src/lib/voiceTurn.ts).
+  const openTypingAfterVoice = useCallback(() => {
+    getCurrentWindow()
+      .setFocus()
+      .catch((error) => console.debug("Avatar: window activation failed:", error));
+    void sendInteraction(UI.INTERACTION_TYPES_CLICK);
+  }, []);
+  const voiceTurn = useVoiceTurn(bar, {
+    openTyping: openTypingAfterVoice,
+    stopAll: chat.stop,
+  });
 
   // ── The scene ──
   const question = turn.question || bar.lastSubmittedValue;
@@ -633,15 +646,24 @@ export function PersonaBar(_props: PersonaBarProps) {
         // the head has a clear path: a short, dimmed quote on your side.
         style={withAnswer ? { maxWidth: QUOTE_MAX_WIDTH } : undefined}
       >
-        <p
-          className={cn(
-            "px-3.5 py-2",
-            withAnswer && "truncate",
-            yours.tone === "dim" ? "text-white/55" : yours.tone === "provisional" ? "italic text-white/65" : "text-white/90",
-          )}
-        >
-          {yours.text}
-        </p>
+        <div className="flex min-w-0 items-center">
+          <p
+            className={cn(
+              "min-w-0 px-3.5 py-2",
+              withAnswer && "truncate",
+              yours.tone === "dim" ? "text-white/55" : yours.tone === "provisional" ? "italic text-white/65" : "text-white/90",
+            )}
+          >
+            {yours.text}
+          </p>
+          <VoiceTurnControls
+            className="pr-1.5"
+            state={bar}
+            onSend={voiceTurn.send}
+            onType={voiceTurn.typeInstead}
+            onCancel={voiceTurn.cancel}
+          />
+        </div>
       </Bubble>
     );
   }

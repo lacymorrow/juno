@@ -171,6 +171,28 @@ describe("IslandBar", () => {
     expect(screen.getByTestId("island-dot").getAttribute("data-motion")).toBe("breathe");
   });
 
+  it.each([
+    [UI.BAR_STATES_LISTENING, {}],
+    [UI.BAR_STATES_TRANSCRIBING, { transcriptionText: "testing", transcriptionProvisional: true }],
+  ])("offers Send, Type instead and Cancel while a turn records (%s)", async (state, extra) => {
+    render(<IslandBar />);
+    await send(state, extra);
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Type instead" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel without sending" }));
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "cancel" });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "stop" });
+  });
+
+  it("offers no voice controls once the mic has closed", async () => {
+    render(<IslandBar />);
+    await send(UI.BAR_STATES_TRANSCRIBING, { transcriptionProvisional: false });
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+  });
+
   it("the dot swells with your voice while listening, and only then", async () => {
     render(<IslandBar />);
     await send(UI.BAR_STATES_LISTENING, { audioLevel: 0 });

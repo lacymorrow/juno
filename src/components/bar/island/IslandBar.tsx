@@ -29,6 +29,7 @@ import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import type { ChatMessage } from "@/types/chat";
 import { IslandDot, IslandShell, IslandWords } from "./IslandShell";
 import { LingerRing } from "./LingerRing";
+import { VoiceTurnControls, useVoiceTurn } from "../VoiceTurnControls";
 import { useLinger } from "./useLinger";
 import { ISLAND_BUTTON_ATTR, useIslandHover } from "./useIslandHover";
 import {
@@ -448,6 +449,18 @@ export function IslandBar() {
     },
     [openCard],
   );
+  // Send, type instead, cancel while a turn records: the same set as every
+  // other look (src/lib/voiceTurn.ts).
+  const openTypingAfterVoice = useCallback(() => {
+    getCurrentWindow()
+      .setFocus()
+      .catch((error) => console.debug("Island: window activation failed:", error));
+    void sendInteraction(UI.INTERACTION_TYPES_CLICK);
+  }, []);
+  const voiceTurn = useVoiceTurn(bar, {
+    openTyping: openTypingAfterVoice,
+    stopAll: chat.stop,
+  });
 
   // ── Posture and size ──
   const posture = postureFor({
@@ -746,6 +759,13 @@ export function IslandBar() {
       <div className="flex h-full w-full items-center gap-2 pl-3.5 pr-3.5" data-testid={`island-${posture}`}>
         <IslandDot look={dot} level={dotLevel} />
         {words && <IslandWords words={words} />}
+        <VoiceTurnControls
+          className="ml-auto"
+          state={bar}
+          onSend={voiceTurn.send}
+          onType={voiceTurn.typeInstead}
+          onCancel={voiceTurn.cancel}
+        />
       </div>
     );
   }

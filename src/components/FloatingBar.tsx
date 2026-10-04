@@ -21,7 +21,7 @@ import {
   FormEvent,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import {
   availableMonitors,
   cursorPosition,
@@ -29,6 +29,8 @@ import {
 } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, Ear, EarOff, MessageSquare, Mic, Square, Type, X } from "lucide-react";
+import { VoiceTurnControls } from "@/components/bar/VoiceTurnControls";
+import { cancelVoiceTurn, isRecordingTurn, sendVoiceTurn } from "@/lib/voiceTurn";
 import { useReducedMotion } from "motion/react";
 
 import { useWindowSize, type WindowAnchorX, type WindowSizeConfig } from "@/hooks/useWindowSize";
@@ -1123,47 +1125,24 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   }, [closeInput, startTalking]);
 
   /** Send what was said. This is what the old "Stop" button actually did. */
-  const stopTalking = useCallback(async () => {
-    try {
-      await invoke(COMMANDS.AGENT_AGENT_VOICE, { action: "stop" });
-    } catch (error) {
-      console.error("❌ FloatingBar: failed to stop listening:", error);
-    }
-  }, []);
+  const stopTalking = useCallback(() => sendVoiceTurn(), []);
 
   /**
    * Stop listening and throw it away. Nothing is transcribed, nothing sent.
    *
-   * Which cancel that is depends on whose session is open. `agent_voice` speaks
-   * for a spoken query to the agent, and it was used for every voice state, so
-   * cancelling a dictation session reached into the shared voice controller
-   * without telling the dictation state machine anything: the mic went quiet
-   * while `dictation_active`, the dictation monitor and the escape registration
-   * all still believed a session was running, and a key trigger that was still
-   * held simply put it back. From the person's side the X did nothing. A
-   * dictation session is cancelled through its own event, which Rust's
-   * `handle_dictation_cancel` uses to unwind all of that in one place.
-   *
-   * `isDictationMode` rather than the bar state is the discriminator on
-   * purpose: an open dictation mic shows as LISTENING, not DICTATING (the UI
-   * manager's `handle_dictation_started` sets Listening for either kind of
-   * session), so the state alone would miss the case this exists for.
+   * Which cancel that is depends on whose session is open; `cancelVoiceTurn`
+   * (src/lib/voiceTurn.ts) routes a dictation through its own cancel event so
+   * the dictation state machine unwinds with it, and a spoken query through
+   * `agent_voice`. Shared with every other appearance.
    */
-  const isDictationSession =
-    barState.isDictationMode || barState.barState === UI.BAR_STATES_DICTATING;
-  const cancelTalking = useCallback(async () => {
-    try {
-      if (isDictationSession) {
-        // The bar's own state settles from the BAR_STATE_UPDATE that Rust emits
-        // when it puts dictation mode down, exactly as the agent path does.
-        await emit(EVENTS.DICTATION_TRANSCRIPTION_CANCEL);
-        return;
-      }
-      await invoke(COMMANDS.AGENT_AGENT_VOICE, { action: "cancel" });
-    } catch (error) {
-      console.error("❌ FloatingBar: failed to cancel listening:", error);
-    }
-  }, [isDictationSession]);
+  const cancelTalking = useCallback(
+    () =>
+      cancelVoiceTurn({
+        barState: barState.barState,
+        isDictationMode: barState.isDictationMode,
+      }),
+    [barState.barState, barState.isDictationMode],
+  );
 
   /**
    * Changed their mind about talking: drop the audio and open the input.
@@ -1332,7 +1311,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const isIdle = IDLE_STATES.includes(currentUiState);
   const isInputState = INPUT_STATES.includes(currentUiState);
   const isVoice = VOICE_STATES.includes(currentUiState);
-  const isWorking = WORKING_STATES.includes(currentUiState) || chat.isProcessing;
+  // The microphone is open. Wider than `isVoice`: live words while you talk
+  // arrive as TRANSCRIBING, which is otherwise a working state.
+  const isRecording = isRecordingTurn(barState);
+  const isWorking =
+    (WORKING_STATES.includes(currentUiState) && !isRecording) || chat.isProcessing;
   isWorkingRef.current = isWorking;
 
   // === JUNO IS DRIVING ===
@@ -1468,7 +1451,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       void chat.stop();
       return;
     }
-    if (isVoice) {
+    if (isVoice || isRecording) {
       void cancelTalking();
       return;
     }
@@ -1482,6 +1465,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   }, [
     currentUiState,
     isVoice,
+    isRecording,
     isDriving,
     isWorking,
     cancelTalking,
@@ -2031,56 +2015,19 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                 <X className="size-3" />
               </button>
             )}
-            {isVoice && <AudioLevelBars audioLevel={barState.audioLevel} />}
-            {/* Three answers, not one. The single "Stop" here finalised the
-                audio and submitted it, so the only way to abandon a sentence
-                was to say it and then stop the agent. */}
-            {isVoice && currentUiState !== UI.BAR_STATES_ALWAYS_LISTENING && (
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => void stopTalking()}
-                  aria-label="Send"
-                  title="Send"
-                  className={cn(inputControlButton, "bg-white/[0.16] text-white")}
-                >
-                  <ArrowUp className="size-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void switchToTyping()}
-                  aria-label="Type instead"
-                  title="Type instead"
-                  className={inputControlButton}
-                >
-                  <Type className="size-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={stopCurrentActivity}
-                  aria-label="Cancel without sending"
-                  title="Cancel without sending"
-                  className={inputControlButton}
-                >
-                  <X className="size-3" />
-                </button>
-              </div>
-            )}
-            {/* A wake phrase landed and Juno is taking down what follows. There
-                is nothing to send here (the engine decides when the sentence
-                ends) and nothing to switch to, but there is something to stop,
-                and the rule is that when there is, the X is there. */}
-            {currentUiState === UI.BAR_STATES_ALWAYS_LISTENING && (
-              <button
-                type="button"
-                onClick={stopCurrentActivity}
-                aria-label="Cancel without sending"
-                title="Cancel without sending"
-                className={inputControlButton}
-              >
-                <X className="size-3" />
-              </button>
-            )}
+            {(isVoice || isRecording) && <AudioLevelBars audioLevel={barState.audioLevel} />}
+            {/* Send, type instead, cancel: in every recording state, live
+                words included, from the mapping every appearance shares. A
+                wake-phrase capture gets cancel only. */}
+            <VoiceTurnControls
+              state={barState}
+              onSend={() => void stopTalking()}
+              onType={() => void switchToTyping()}
+              onCancel={stopCurrentActivity}
+              buttonClassName={(control) =>
+                cn(inputControlButton, control === "send" && "bg-white/[0.16] text-white")
+              }
+            />
             {isWorking && (
               <button
                 type="button"
