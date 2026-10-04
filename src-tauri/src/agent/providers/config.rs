@@ -390,23 +390,17 @@ fn load_config_from_store_internal(
 /// subscription" was silently moved to the API-key path and told to configure
 /// a key. Only the choice is salvaged; the entries fall back to defaults.
 pub(crate) fn settings_from_value(value: &serde_json::Value) -> CentralizedProviderSettings {
-    if let Ok(parsed) = serde_json::from_value::<CentralizedProviderSettings>(value.clone()) {
-        return parsed;
+    // Field by field: one unreadable field takes its default on its own, and
+    // the saved provider choice survives whatever else is wrong.
+    let mut settings: CentralizedProviderSettings =
+        crate::settings::persist::lenient("providers", value);
+    if Provider::from_str(&settings.active_provider).is_none() {
+        warn!("Saved provider is not one Juno knows; using the default");
+        let defaults = CentralizedProviderSettings::default();
+        settings.active_provider = defaults.active_provider;
+        settings.provider_chosen_by_user = defaults.provider_chosen_by_user;
     }
-    warn!("Saved provider settings did not parse; keeping the saved provider choice only");
-    let mut fallback = CentralizedProviderSettings::default();
-    if let Some(active) = value
-        .get("active_provider")
-        .and_then(|v| v.as_str())
-        .filter(|id| Provider::from_str(id).is_some())
-    {
-        fallback.active_provider = active.to_string();
-        fallback.provider_chosen_by_user = value
-            .get("provider_chosen_by_user")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-    }
-    fallback
+    settings
 }
 
 #[cfg(test)]
