@@ -367,6 +367,9 @@ async fn create_minimal_tauri_app() -> Result<AppHandle, crate::error_handling::
         .manage(app_state)
         // Store first: the voice plugin reads the saved STT provider out of it
         // during its own setup hook, and hooks run in registration order.
+        // Before the store: replace any unreadable store file so the store never
+        // starts empty over a file it would then overwrite.
+        .plugin(crate::settings::persist::guard_plugin())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_voice_transcription::init_with_saved_provider(
             crate::commands::stt_models::saved_stt_provider,

@@ -6,6 +6,8 @@ members = [
 	"tauri-plugin-voice-transcription",
 	"crates/juno-cua",                  # Headless CUA CLI — no Tauri/GUI required
 ]
+# Vendored upstream code is patched in, not linted as ours.
+exclude = ["vendor/tauri-plugin-store"]
 
 # Shared workspace dependencies to reduce duplication
 [workspace.dependencies]
@@ -61,3 +63,7 @@ strip = true
 # Remove once cocoa/objc are migrated to objc2 + block2.
 [patch.crates-io]
 block = { path = "vendor/block" }
+# tauri-plugin-store saves with `fs::write`, so a crash mid-save truncates the
+# settings file and the next launch silently starts from nothing. The vendored
+# copy writes a temp file and renames it over the original. See its Cargo.toml.
+tauri-plugin-store = { path = "vendor/tauri-plugin-store" }

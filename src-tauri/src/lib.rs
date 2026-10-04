@@ -300,6 +300,9 @@ pub fn run() {
         // The store plugin comes before the voice plugin on purpose: plugin setup
         // hooks run in registration order, and the voice plugin reads the saved
         // STT provider out of the store inside its own hook.
+        // Before the store: replace any unreadable store file so the store never
+        // starts empty over a file it would then overwrite.
+        .plugin(crate::settings::persist::guard_plugin())
         .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
         .plugin(tauri_plugin_voice_transcription::init_with_saved_provider(
             crate::commands::stt_models::saved_stt_provider,
