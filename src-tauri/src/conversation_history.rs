@@ -23,7 +23,7 @@ use tauri_plugin_store::StoreExt;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::Mutex as TokioMutex;
 
-const INDEX_FILE: &str = "conversations-index.json";
+pub(crate) const INDEX_FILE: &str = "conversations-index.json";
 const INDEX_KEY: &str = "conversations";
 const CONVERSATION_KEY: &str = "conversation";
 const VERSION: u32 = 1;

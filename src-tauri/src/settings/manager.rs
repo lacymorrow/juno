@@ -3,12 +3,16 @@
 //! Single source of truth for all application settings with reactive updates.
 //! Replaces scattered store operations throughout the codebase.
 
+use std::sync::Arc;
+
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
-use tauri_plugin_store::StoreExt;
+use tauri::{AppHandle, Emitter, Wry};
+use tauri_plugin_store::{Store, StoreExt};
 use tracing::warn;
 
 use crate::constants::settings::{defaults, events, store_keys, validation, SETTINGS_STORE_FILE};
+use crate::settings::persist;
 use crate::settings::{
     AgentSettings, AppSettings, AudioSettings, CLISettings, CloudSettings, FloatingBarSettings,
     KeyboardShortcuts, OnboardingSettings, PromptSettings, ProviderSettings, ToolSettings,
@@ -40,6 +44,34 @@ impl SettingsManager {
         Ok(manager)
     }
 
+    /// The settings store. The file under it was checked before anything
+    /// opened it (see [`persist::guard_plugin`]), and every save of it is an
+    /// atomic replace (see the vendored `tauri-plugin-store`).
+    fn store(&self) -> Result<Arc<Store<Wry>>, String> {
+        self.app_handle
+            .store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))
+    }
+
+    /// Put `entries` in the store and write it to disk, as one turn.
+    ///
+    /// Every write in this manager comes through here and takes
+    /// [`persist::one_writer`]'s turn, so two saves never interleave: a
+    /// whole-settings write cannot have another save land between two of
+    /// its sections, and nothing set by one writer is lost to another.
+    async fn write_entries(&self, entries: Vec<(&'static str, Value)>) -> Result<(), String> {
+        let store = self.store()?;
+        persist::one_writer(|| {
+            for (key, value) in entries {
+                store.set(key, value);
+            }
+            store
+                .save()
+                .map_err(|e| format!("Failed to save settings store: {}", e))
+        })
+        .await
+    }
+
     /// Get the app handle for this settings manager instance
     /// Used internally for creating unique cache keys
     pub fn app_handle(&self) -> &AppHandle {
@@ -48,10 +80,7 @@ impl SettingsManager {
 
     /// Initialize default settings if they don't exist
     async fn initialize_defaults(&self) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
 
         // Check if settings exist, if not, create defaults
         if store.get(store_keys::KEYBOARD_SHORTCUTS).is_none() {
@@ -64,10 +93,7 @@ impl SettingsManager {
 
     /// Get complete application settings
     pub async fn get_all_settings(&self) -> Result<AppSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
 
         // Legacy sections are read first so the triggers list can be migrated
         // from them when a store predates the unified activation model.
@@ -97,10 +123,7 @@ impl SettingsManager {
             cli: self.get_cli_settings_from_store(&store)?,
             voice_transcription: self.get_voice_transcription_settings_from_store(&store)?,
             triggers,
-            updates: store
-                .get(store_keys::UPDATES)
-                .and_then(|value| serde_json::from_value(value).ok())
-                .unwrap_or_default(),
+            updates: read_section(&store, store_keys::UPDATES),
         };
 
         Ok(settings)
@@ -108,89 +131,71 @@ impl SettingsManager {
 
     /// Save complete application settings and emit change events
     pub async fn save_all_settings(&self, settings: &AppSettings) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-
-        // Save each section
-        store.set(
-            store_keys::KEYBOARD_SHORTCUTS,
-            serde_json::to_value(&settings.keyboard_shortcuts)
-                .map_err(|e| format!("Failed to serialize keyboard shortcuts: {}", e))?,
-        );
-        store.set(
-            store_keys::FLOATING_BAR,
-            serde_json::to_value(&settings.floating_bar)
-                .map_err(|e| format!("Failed to serialize floating bar settings: {}", e))?,
-        );
-        store.set(
-            store_keys::AGENT,
-            serde_json::to_value(&settings.agent)
-                .map_err(|e| format!("Failed to serialize agent settings: {}", e))?,
-        );
-        store.set(
-            store_keys::PROVIDERS,
-            serde_json::to_value(&settings.providers)
-                .map_err(|e| format!("Failed to serialize provider settings: {}", e))?,
-        );
-        store.set(
-            store_keys::CLOUD,
-            serde_json::to_value(&settings.cloud)
-                .map_err(|e| format!("Failed to serialize cloud settings: {}", e))?,
-        );
-        store.set(
-            store_keys::AUDIO,
-            serde_json::to_value(&settings.audio)
-                .map_err(|e| format!("Failed to serialize audio settings: {}", e))?,
-        );
-        store.set(
-            store_keys::TOOLS,
-            serde_json::to_value(&settings.tools)
-                .map_err(|e| format!("Failed to serialize tool settings: {}", e))?,
-        );
-        store.set(
-            store_keys::PROMPTS,
-            serde_json::to_value(&settings.prompts)
-                .map_err(|e| format!("Failed to serialize prompt settings: {}", e))?,
-        );
-        store.set(
-            store_keys::ONBOARDING,
-            serde_json::to_value(&settings.onboarding)
-                .map_err(|e| format!("Failed to serialize onboarding settings: {}", e))?,
-        );
-        store.set(
-            store_keys::AUTOSTART_ENABLED,
-            Value::Bool(settings.autostart_enabled),
-        );
-        store.set(
-            store_keys::ADVANCED_SETTINGS_ENABLED,
-            Value::Bool(settings.advanced_settings_enabled),
-        );
-        store.set(
-            store_keys::CLI,
-            serde_json::to_value(&settings.cli)
-                .map_err(|e| format!("Failed to serialize CLI settings: {}", e))?,
-        );
-        store.set(
-            store_keys::VOICE_TRANSCRIPTION,
-            serde_json::to_value(&settings.voice_transcription)
-                .map_err(|e| format!("Failed to serialize voice transcription settings: {}", e))?,
-        );
-        store.set(
-            store_keys::TRIGGERS,
-            serde_json::to_value(&settings.triggers)
-                .map_err(|e| format!("Failed to serialize triggers: {}", e))?,
-        );
-        store.set(
-            store_keys::UPDATES,
-            serde_json::to_value(&settings.updates)
-                .map_err(|e| format!("Failed to serialize update settings: {}", e))?,
-        );
-
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+        // Every section goes to the store and to disk as one write, so no
+        // other save can land between two of its sections.
+        self.write_entries(vec![
+            (
+                store_keys::KEYBOARD_SHORTCUTS,
+                to_json("keyboard shortcuts", &settings.keyboard_shortcuts)?,
+            ),
+            (
+                store_keys::FLOATING_BAR,
+                to_json("floating bar settings", &settings.floating_bar)?,
+            ),
+            (
+                store_keys::AGENT,
+                to_json("agent settings", &settings.agent)?,
+            ),
+            (
+                store_keys::PROVIDERS,
+                to_json("provider settings", &settings.providers)?,
+            ),
+            (
+                store_keys::CLOUD,
+                to_json("cloud settings", &settings.cloud)?,
+            ),
+            (
+                store_keys::AUDIO,
+                to_json("audio settings", &settings.audio)?,
+            ),
+            (
+                store_keys::TOOLS,
+                to_json("tool settings", &settings.tools)?,
+            ),
+            (
+                store_keys::PROMPTS,
+                to_json("prompt settings", &settings.prompts)?,
+            ),
+            (
+                store_keys::ONBOARDING,
+                to_json("onboarding settings", &settings.onboarding)?,
+            ),
+            (
+                store_keys::AUTOSTART_ENABLED,
+                Value::Bool(settings.autostart_enabled),
+            ),
+            (
+                store_keys::ADVANCED_SETTINGS_ENABLED,
+                Value::Bool(settings.advanced_settings_enabled),
+            ),
+            (store_keys::CLI, to_json("CLI settings", &settings.cli)?),
+            (
+                store_keys::VOICE_TRANSCRIPTION,
+                to_json(
+                    "voice transcription settings",
+                    &settings.voice_transcription,
+                )?,
+            ),
+            (
+                store_keys::TRIGGERS,
+                to_json("triggers", &settings.triggers)?,
+            ),
+            (
+                store_keys::UPDATES,
+                to_json("update settings", &settings.updates)?,
+            ),
+        ])
+        .await?;
 
         // A whole-settings write changes every section, so it says so about
         // every section. See `emit_every_section_changed`.
@@ -201,82 +206,52 @@ impl SettingsManager {
 
     // Individual getters
     pub async fn get_keyboard_shortcuts(&self) -> Result<KeyboardShortcuts, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_keyboard_shortcuts_from_store(&store)
     }
 
     pub async fn get_floating_bar_settings(&self) -> Result<FloatingBarSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_floating_bar_settings_from_store(&store)
     }
 
     pub async fn get_agent_settings(&self) -> Result<AgentSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_agent_settings_from_store(&store)
     }
 
     pub async fn get_provider_settings(&self) -> Result<ProviderSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_provider_settings_from_store(&store)
     }
 
     pub async fn get_cloud_settings(&self) -> Result<CloudSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_cloud_settings_from_store(&store)
     }
 
     pub async fn get_audio_settings(&self) -> Result<AudioSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_audio_settings_from_store(&store)
     }
 
     pub async fn get_tool_settings(&self) -> Result<ToolSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_tool_settings_from_store(&store)
     }
 
     pub async fn get_prompt_settings(&self) -> Result<PromptSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_prompt_settings_from_store(&store)
     }
 
     pub async fn get_onboarding_settings(&self) -> Result<OnboardingSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_onboarding_settings_from_store(&store)
     }
 
     pub async fn get_autostart_enabled(&self) -> Result<bool, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         Ok(store
             .get(store_keys::AUTOSTART_ENABLED)
             .and_then(|v| v.as_bool())
@@ -285,10 +260,7 @@ impl SettingsManager {
 
     /// Whether the settings window shows the full (advanced) set of settings.
     pub async fn get_advanced_settings_enabled(&self) -> Result<bool, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         Ok(store
             .get(store_keys::ADVANCED_SETTINGS_ENABLED)
             .and_then(|v| v.as_bool())
@@ -299,48 +271,29 @@ impl SettingsManager {
     /// `updates` key and gets the defaults, which is what starts an old
     /// install updating rather than leaving it stranded.
     pub async fn get_update_settings(&self) -> Result<UpdateSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        Ok(store
-            .get(store_keys::UPDATES)
-            .and_then(|value| serde_json::from_value(value).ok())
-            .unwrap_or_default())
+        let store = self.store()?;
+        Ok(read_section(&store, store_keys::UPDATES))
     }
 
     pub async fn set_update_settings(&self, settings: &UpdateSettings) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::UPDATES,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize update settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("update settings", settings)?,
+        )])
+        .await?;
         self.emit_settings_changed().await;
         Ok(())
     }
 
     pub async fn get_cli_settings(&self) -> Result<CLISettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_cli_settings_from_store(&store)
     }
 
     pub async fn get_voice_transcription_settings(
         &self,
     ) -> Result<VoiceTranscriptionSettings, String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        let store = self.store()?;
         self.get_voice_transcription_settings_from_store(&store)
     }
 
@@ -349,18 +302,11 @@ impl SettingsManager {
         &self,
         shortcuts: &KeyboardShortcuts,
     ) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::KEYBOARD_SHORTCUTS,
-            serde_json::to_value(shortcuts)
-                .map_err(|e| format!("Failed to serialize keyboard shortcuts: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("keyboard shortcuts", shortcuts)?,
+        )])
+        .await?;
 
         self.app_handle
             .emit(events::KEYBOARD_SHORTCUTS_CHANGED, shortcuts)
@@ -373,18 +319,11 @@ impl SettingsManager {
         &self,
         settings: &FloatingBarSettings,
     ) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::FLOATING_BAR,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize floating bar settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("floating bar settings", settings)?,
+        )])
+        .await?;
 
         self.app_handle
             .emit(events::FLOATING_BAR_SETTINGS_CHANGED, settings)
@@ -394,18 +333,11 @@ impl SettingsManager {
     }
 
     pub async fn set_agent_settings(&self, settings: &AgentSettings) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::AGENT,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize agent settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("agent settings", settings)?,
+        )])
+        .await?;
 
         self.app_handle
             .emit(events::AGENT_SETTINGS_CHANGED, settings)
@@ -415,18 +347,11 @@ impl SettingsManager {
     }
 
     pub async fn set_provider_settings(&self, settings: &ProviderSettings) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::PROVIDERS,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize provider settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("provider settings", settings)?,
+        )])
+        .await?;
 
         self.app_handle
             .emit(events::PROVIDER_SETTINGS_CHANGED, settings)
@@ -443,18 +368,11 @@ impl SettingsManager {
             return Err("Invalid heartbeat interval".to_string());
         }
 
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::CLOUD,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize cloud settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("cloud settings", settings)?,
+        )])
+        .await?;
 
         self.app_handle
             .emit(events::CLOUD_SETTINGS_CHANGED, settings)
@@ -471,18 +389,11 @@ impl SettingsManager {
             return Err("Invalid sensitivity value".to_string());
         }
 
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::AUDIO,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize audio settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("audio settings", settings)?,
+        )])
+        .await?;
 
         self.app_handle
             .emit(events::AUDIO_SETTINGS_CHANGED, settings)
@@ -492,18 +403,11 @@ impl SettingsManager {
     }
 
     pub async fn set_tool_settings(&self, settings: &ToolSettings) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::TOOLS,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize tool settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("tool settings", settings)?,
+        )])
+        .await?;
 
         self.app_handle
             .emit(events::TOOL_SETTINGS_CHANGED, settings)
@@ -513,18 +417,11 @@ impl SettingsManager {
     }
 
     pub async fn set_prompt_settings(&self, settings: &PromptSettings) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::PROMPTS,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize prompt settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("prompt settings", settings)?,
+        )])
+        .await?;
 
         self.app_handle
             .emit(events::PROMPT_SETTINGS_CHANGED, settings)
@@ -537,46 +434,30 @@ impl SettingsManager {
         &self,
         settings: &OnboardingSettings,
     ) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::ONBOARDING,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize onboarding settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("onboarding settings", settings)?,
+        )])
+        .await?;
 
         self.emit_settings_changed().await;
         Ok(())
     }
 
     pub async fn set_autostart_enabled(&self, enabled: bool) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(store_keys::AUTOSTART_ENABLED, Value::Bool(enabled));
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+        self.write_entries(vec![(store_keys::AUTOSTART_ENABLED, Value::Bool(enabled))])
+            .await?;
 
         self.emit_settings_changed().await;
         Ok(())
     }
 
     pub async fn set_advanced_settings_enabled(&self, enabled: bool) -> Result<(), String> {
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(store_keys::ADVANCED_SETTINGS_ENABLED, Value::Bool(enabled));
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+        self.write_entries(vec![(
+            store_keys::ADVANCED_SETTINGS_ENABLED,
+            Value::Bool(enabled),
+        )])
+        .await?;
 
         self.emit_settings_changed().await;
         Ok(())
@@ -588,18 +469,8 @@ impl SettingsManager {
             return Err("Command timeout must be between 1 and 3600 seconds".to_string());
         }
 
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
-            store_keys::CLI,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize CLI settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+        self.write_entries(vec![(store_keys::CLI, to_json("CLI settings", settings)?)])
+            .await?;
 
         self.app_handle
             .emit(events::CLI_SETTINGS_CHANGED, settings)
@@ -623,18 +494,11 @@ impl SettingsManager {
             return Err("Buffer duration must be between 1 and 10000 ms".to_string());
         }
 
-        let store = self
-            .app_handle
-            .store(SETTINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to access settings store: {}", e))?;
-        store.set(
+        self.write_entries(vec![(
             store_keys::VOICE_TRANSCRIPTION,
-            serde_json::to_value(settings)
-                .map_err(|e| format!("Failed to serialize voice transcription settings: {}", e))?,
-        );
-        store
-            .save()
-            .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            to_json("voice transcription settings", settings)?,
+        )])
+        .await?;
 
         self.app_handle
             .emit(events::VOICE_TRANSCRIPTION_SETTINGS_CHANGED, settings)
@@ -653,10 +517,7 @@ impl SettingsManager {
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<KeyboardShortcuts, String> {
-        let mut shortcuts: KeyboardShortcuts = store
-            .get(store_keys::KEYBOARD_SHORTCUTS)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
+        let mut shortcuts: KeyboardShortcuts = read_section(store, store_keys::KEYBOARD_SHORTCUTS);
         // Escape and Cmd+Comma stopped being settings. Normalizing them on
         // read, rather than trusting the store, is what stops a custom value
         // written by an older build from outliving the decision, and the next
@@ -670,65 +531,35 @@ impl SettingsManager {
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<FloatingBarSettings, String> {
-        match store
-            .get(store_keys::FLOATING_BAR)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(FloatingBarSettings::default()),
-        }
+        Ok(read_section(store, store_keys::FLOATING_BAR))
     }
 
     fn get_agent_settings_from_store(
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<AgentSettings, String> {
-        match store
-            .get(store_keys::AGENT)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(AgentSettings::default()),
-        }
+        Ok(read_section(store, store_keys::AGENT))
     }
 
     fn get_provider_settings_from_store(
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<ProviderSettings, String> {
-        match store
-            .get(store_keys::PROVIDERS)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(ProviderSettings::default()),
-        }
+        Ok(read_section(store, store_keys::PROVIDERS))
     }
 
     fn get_cloud_settings_from_store(
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<CloudSettings, String> {
-        match store
-            .get(store_keys::CLOUD)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(CloudSettings::default()),
-        }
+        Ok(read_section(store, store_keys::CLOUD))
     }
 
     fn get_audio_settings_from_store(
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<AudioSettings, String> {
-        match store
-            .get(store_keys::AUDIO)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(AudioSettings::default()),
-        }
+        Ok(read_section(store, store_keys::AUDIO))
     }
 
     /// Read the unified triggers list. When the store predates the model (key
@@ -783,65 +614,35 @@ impl SettingsManager {
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<ToolSettings, String> {
-        match store
-            .get(store_keys::TOOLS)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(ToolSettings::default()),
-        }
+        Ok(read_section(store, store_keys::TOOLS))
     }
 
     fn get_prompt_settings_from_store(
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<PromptSettings, String> {
-        match store
-            .get(store_keys::PROMPTS)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(PromptSettings::default()),
-        }
+        Ok(read_section(store, store_keys::PROMPTS))
     }
 
     fn get_onboarding_settings_from_store(
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<OnboardingSettings, String> {
-        match store
-            .get(store_keys::ONBOARDING)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(OnboardingSettings::default()),
-        }
+        Ok(read_section(store, store_keys::ONBOARDING))
     }
 
     fn get_cli_settings_from_store(
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<CLISettings, String> {
-        match store
-            .get(store_keys::CLI)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(CLISettings::default()),
-        }
+        Ok(read_section(store, store_keys::CLI))
     }
 
     fn get_voice_transcription_settings_from_store(
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<VoiceTranscriptionSettings, String> {
-        match store
-            .get(store_keys::VOICE_TRANSCRIPTION)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(settings) => Ok(settings),
-            None => Ok(VoiceTranscriptionSettings::default()),
-        }
+        Ok(read_section(store, store_keys::VOICE_TRANSCRIPTION))
     }
 
     /// Emit general settings changed event for full reactivity
@@ -895,5 +696,22 @@ impl SettingsManager {
             &settings.voice_transcription,
         );
         self.emit_settings_changed().await;
+    }
+}
+
+fn to_json<T: Serialize>(what: &str, value: &T) -> Result<Value, String> {
+    serde_json::to_value(value).map_err(|e| format!("Failed to serialize {}: {}", what, e))
+}
+
+/// Read one section, field by field: a missing section or field takes its
+/// default, an unknown field is ignored, and one field of the wrong type
+/// falls back on its own instead of taking the whole section with it.
+fn read_section<T>(store: &Store<Wry>, key: &str) -> T
+where
+    T: DeserializeOwned + Serialize + Default,
+{
+    match store.get(key) {
+        Some(value) => persist::lenient(key, &value),
+        None => T::default(),
     }
 }
