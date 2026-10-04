@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.88] - 2026-10-04
+
+### Fixed
+
+- **tray:** working New Chat, honest voice rows, bar right-click menu (#695) (b5f06581)
+
 ## [0.8.87] - 2026-10-04
 
 ### Fixed
@@ -858,7 +864,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.87...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.88...HEAD
+[0.8.88]: https://github.com/lacymorrow/juno/compare/cua-v0.8.87...v0.8.88
 [0.8.87]: https://github.com/lacymorrow/juno/compare/cua-v0.8.86...v0.8.87
 [0.8.86]: https://github.com/lacymorrow/juno/compare/cua-v0.8.85...v0.8.86
 [0.8.84]: https://github.com/lacymorrow/juno/compare/cua-v0.8.83...v0.8.84
