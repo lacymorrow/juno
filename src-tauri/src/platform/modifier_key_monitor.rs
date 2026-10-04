@@ -824,6 +824,23 @@ mod tests {
     }
 
     #[test]
+    fn first_fn_down_on_a_fresh_state_is_a_press_edge() {
+        // Nothing is armed lazily: the very first Fn down after launch must
+        // produce its press edge, not the second one.
+        let mut state = ModifierState::default();
+        let bound = [ModifierBinding::hold(ModifierKey::Fn)];
+        assert_eq!(
+            state.on_flags_changed(FN_KEY_CODE, FN_HELD, &bound, 0),
+            vec![(ModifierKey::Fn, true)]
+        );
+    }
+
+    #[test]
+    fn first_fn_down_is_captured_without_any_prior_event() {
+        assert_eq!(captured_key(FN_KEY_CODE, FN_HELD), Some(ModifierKey::Fn));
+    }
+
+    #[test]
     fn other_modifiers_are_ignored() {
         // Shift is key code 56 and has its own bit; it must not reach a
         // trigger bound to Fn.
