@@ -110,110 +110,6 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <SettingsGroup title="Microphone" footer={microphoneNote}>
-        {captureFailure && (
-          <SettingsRow
-            id="capture-failure"
-            label="Juno is not listening"
-            description={captureFailure.message}
-          >
-            <button
-              type="button"
-              onClick={dismissCaptureFailure}
-              className="text-[12px] text-muted-foreground hover:text-foreground"
-            >
-              Dismiss
-            </button>
-          </SettingsRow>
-        )}
-
-        <SettingsRow htmlFor="audio-input-device" label="Listen through">
-          <Select
-            value={audioDevices?.chosen_input ?? FOLLOW_SYSTEM}
-            onValueChange={(value) =>
-              void handleAudioInputDeviceChange(
-                value === FOLLOW_SYSTEM ? null : value,
-              )
-            }
-          >
-            <SelectTrigger id="audio-input-device" className="w-[250px]">
-              <SelectValue placeholder="Select a microphone" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={FOLLOW_SYSTEM}>
-                Whatever my Mac is using
-              </SelectItem>
-              {inputs.map((device) => (
-                <SelectItem key={device.name} value={device.name}>
-                  {device.name}
-                </SelectItem>
-              ))}
-              {/* A choice that has been unplugged stays selectable, so the
-                  Select shows what was chosen rather than snapping to
-                  something the person never picked. That it is not connected
-                  is said once, underneath, not twice. */}
-              {audioDevices?.missing_input && (
-                <SelectItem value={audioDevices.missing_input}>
-                  {audioDevices.missing_input}
-                </SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup title="Sound">
-        <SettingsRow
-          htmlFor="sound-enabled"
-          label="Play sounds"
-          description="A soft cue when dictation starts and stops."
-        >
-          <Switch
-            id="sound-enabled"
-            checked={settings.soundEnabled}
-            onCheckedChange={settings.handleSoundEnabledChange}
-          />
-        </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup
-        title="Speaker"
-        footer={
-          speakerNote ??
-          "Juno's own voice plays here. Cloud voices play through your Mac's output."
-        }
-      >
-        <SettingsRow htmlFor="audio-output-device" label="Speak through">
-          <Select
-            value={audioDevices?.chosen_output ?? FOLLOW_SYSTEM}
-            onValueChange={(value) =>
-              void handleAudioOutputDeviceChange(
-                value === FOLLOW_SYSTEM ? null : value,
-              )
-            }
-          >
-            <SelectTrigger id="audio-output-device" className="w-[250px]">
-              <SelectValue placeholder="Select a speaker" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={FOLLOW_SYSTEM}>
-                Whatever my Mac is using
-              </SelectItem>
-              {outputs.map((device) => (
-                <SelectItem key={device.name} value={device.name}>
-                  {device.name}
-                </SelectItem>
-              ))}
-              {audioDevices?.missing_output && (
-                <SelectItem value={audioDevices.missing_output}>
-                  {audioDevices.missing_output}
-                </SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-      </SettingsGroup>
-
       <SettingsGroup title="Juno's voice" footer={voiceFooter}>
         {/* The engines come from Rust with the list, and the value is the
             engine the rows belong to, so the two cannot disagree. */}
@@ -266,6 +162,110 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
       </SettingsGroup>
 
       <TtsEngineGroup settings={settings} />
+
+      <SettingsGroup title="Sound">
+        <SettingsRow
+          htmlFor="sound-enabled"
+          label="Play sounds"
+          description="A soft cue when dictation starts and stops."
+        >
+          <Switch
+            id="sound-enabled"
+            checked={settings.soundEnabled}
+            onCheckedChange={settings.handleSoundEnabledChange}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Microphone" footer={microphoneNote}>
+        {captureFailure && (
+          <SettingsRow
+            id="capture-failure"
+            label="Juno is not listening"
+            description={captureFailure.message}
+          >
+            <button
+              type="button"
+              onClick={dismissCaptureFailure}
+              className="text-[12px] text-muted-foreground hover:text-foreground"
+            >
+              Dismiss
+            </button>
+          </SettingsRow>
+        )}
+
+        <SettingsRow htmlFor="audio-input-device" label="Listen through">
+          <Select
+            value={audioDevices?.chosen_input ?? FOLLOW_SYSTEM}
+            onValueChange={(value) =>
+              void handleAudioInputDeviceChange(
+                value === FOLLOW_SYSTEM ? null : value,
+              )
+            }
+          >
+            <SelectTrigger id="audio-input-device" className="w-[250px]">
+              <SelectValue placeholder="Select a microphone" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FOLLOW_SYSTEM}>
+                Default microphone
+              </SelectItem>
+              {inputs.map((device) => (
+                <SelectItem key={device.name} value={device.name}>
+                  {device.name}
+                </SelectItem>
+              ))}
+              {/* A choice that has been unplugged stays selectable, so the
+                  Select shows what was chosen rather than snapping to
+                  something the person never picked. That it is not connected
+                  is said once, underneath, not twice. */}
+              {audioDevices?.missing_input && (
+                <SelectItem value={audioDevices.missing_input}>
+                  {audioDevices.missing_input}
+                </SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Speaker"
+        footer={
+          speakerNote ??
+          "Juno's own voice plays here. Cloud voices play through your Mac's output."
+        }
+      >
+        <SettingsRow htmlFor="audio-output-device" label="Speak through">
+          <Select
+            value={audioDevices?.chosen_output ?? FOLLOW_SYSTEM}
+            onValueChange={(value) =>
+              void handleAudioOutputDeviceChange(
+                value === FOLLOW_SYSTEM ? null : value,
+              )
+            }
+          >
+            <SelectTrigger id="audio-output-device" className="w-[250px]">
+              <SelectValue placeholder="Select a speaker" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FOLLOW_SYSTEM}>
+                Default speaker
+              </SelectItem>
+              {outputs.map((device) => (
+                <SelectItem key={device.name} value={device.name}>
+                  {device.name}
+                </SelectItem>
+              ))}
+              {audioDevices?.missing_output && (
+                <SelectItem value={audioDevices.missing_output}>
+                  {audioDevices.missing_output}
+                </SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsGroup>
 
       <SettingsGroup
         title="After you finish speaking"

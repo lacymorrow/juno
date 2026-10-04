@@ -28,8 +28,8 @@ export function AgentModeGroup({ settings }: SettingsSectionProps) {
             <SelectValue placeholder="Select agent mode" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="multi">Multi-Agent (Recommended)</SelectItem>
             <SelectItem value="single">Single Agent</SelectItem>
+            <SelectItem value="multi">Multi-Agent</SelectItem>
           </SelectContent>
         </Select>
       </SettingsRow>

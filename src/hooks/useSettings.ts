@@ -205,7 +205,7 @@ export function useSettings() {
 	const [isLoading, setIsLoading] = useState<boolean>(false);
 
 	// Agent Mode Settings
-	const [agentMode, setAgentMode] = useState<string>("multi");
+	const [agentMode, setAgentMode] = useState<string>("single");
 
 	// Agent Trigger Mode Settings
 	const [agentTriggerMode, setAgentTriggerMode] = useState<string>("tap");

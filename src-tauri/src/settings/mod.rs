@@ -771,4 +771,15 @@ mod tests {
         assert!(settings.dictation_copy_to_clipboard());
         assert!(settings.dictation_clipboard_enabled);
     }
+
+    /// New installs and Reset run one agent. Saved values are not rewritten:
+    /// they deserialize as stored.
+    #[test]
+    fn agent_mode_defaults_to_single() {
+        use crate::agent::providers::config::AgentMode;
+        assert_eq!(defaults::AGENT_EXECUTION_MODE, "single");
+        assert_eq!(AppSettings::default().agent.execution_mode, "single");
+        assert_eq!(AgentMode::default(), AgentMode::Single);
+        assert_eq!(AgentMode::from_str("multi"), Some(AgentMode::Multi));
+    }
 }

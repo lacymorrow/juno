@@ -118,10 +118,6 @@ export default function AdvancedSettings({
   const [smartRouting, setSmartRouting] = useState(false);
   const [smartRoutingLoading, setSmartRoutingLoading] = useState(true);
 
-  // Ask before Juno sends (LAC-4058). Default on.
-  const [askBeforeSend, setAskBeforeSend] = useState(true);
-  const [askBeforeSendLoading, setAskBeforeSendLoading] = useState(true);
-
   // Suppress unused parameter warning for onNavigateToPermissions
   void onNavigateToPermissions;
 
@@ -229,41 +225,6 @@ export default function AdvancedSettings({
     } catch (error) {
       console.error("Failed to update the smart routing flag:", error);
       setSmartRouting(previous);
-      toast.error("Could not change that setting");
-    }
-  };
-
-  // Load the ask-before-send flag on mount.
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      try {
-        const enabled = await invoke<boolean>(
-          COMMANDS.SETTINGS_GET_CLI_ASK_BEFORE_SEND_ENABLED,
-        );
-        if (mounted) setAskBeforeSend(enabled !== false);
-      } catch (error) {
-        console.error("Failed to load the ask-before-send flag:", error);
-      } finally {
-        if (mounted) setAskBeforeSendLoading(false);
-      }
-    };
-    load();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const handleAskBeforeSendChange = async (enabled: boolean) => {
-    const previous = askBeforeSend;
-    setAskBeforeSend(enabled);
-    try {
-      await invoke(COMMANDS.SETTINGS_SET_CLI_ASK_BEFORE_SEND_ENABLED, {
-        enabled,
-      });
-    } catch (error) {
-      console.error("Failed to update the ask-before-send flag:", error);
-      setAskBeforeSend(previous);
       toast.error("Could not change that setting");
     }
   };
@@ -412,24 +373,6 @@ export default function AdvancedSettings({
             id="performance-monitoring"
             checked={settings.performanceMonitoringEnabled}
             onCheckedChange={settings.handlePerformanceMonitoringChange}
-          />
-        </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup
-        title="Approvals"
-        footer="Applies to the Claude CLI provider. Turning this off lets Juno send without asking."
-      >
-        <SettingsRow
-          htmlFor="cli-ask-before-send"
-          label="Ask before Juno sends"
-          description="When Juno is about to send an email or message, create or delete something in a connected account, or put something on your calendar, she shows you what is about to go out and waits for your OK. Declining sends nothing."
-        >
-          <Switch
-            id="cli-ask-before-send"
-            checked={askBeforeSend}
-            onCheckedChange={handleAskBeforeSendChange}
-            disabled={askBeforeSendLoading}
           />
         </SettingsRow>
       </SettingsGroup>
