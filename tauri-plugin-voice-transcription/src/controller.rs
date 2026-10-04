@@ -7,6 +7,7 @@ use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -165,10 +166,39 @@ pub struct VoiceController {
     actual_recording_sample_rate: Arc<Mutex<Option<u32>>>,
     is_initialized: bool,
     initialization_error: Option<String>,
-    /// Live streaming partial transcription. When true the audio thread keeps a
-    /// sliding window and emits cumulative provisional text on a fast cadence
-    /// instead of decoding a fixed chunk and clearing. Display-only; never typed.
-    live_partial: bool,
+    /// "Show words as I speak". When true the audio thread keeps a sliding
+    /// window and emits cumulative provisional text on a fast cadence. When
+    /// false no partial is decoded or emitted at all. Display-only; never typed.
+    /// Shared with the audio thread, which reads it on every pass, so a toggle
+    /// takes effect inside a running session.
+    live_partial: PartialGate,
+}
+
+/// The one switch that decides whether a partial transcript may exist.
+///
+/// Cloning shares the flag. Every partial emission goes through
+/// [`partial_event`], which asks this gate, so the setting cannot be bypassed
+/// by a new code path that forgets to check it.
+#[derive(Clone, Debug, Default)]
+pub struct PartialGate(Arc<AtomicBool>);
+
+impl PartialGate {
+    pub fn set(&self, enabled: bool) {
+        self.0.store(enabled, Ordering::SeqCst);
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// The payload of a partial-result event, or `None` when the setting is off.
+/// The only place a partial event is built.
+fn partial_event(gate: &PartialGate, text: &str, provisional: bool) -> Option<serde_json::Value> {
+    if !gate.is_open() {
+        return None;
+    }
+    Some(serde_json::json!({ "text": text, "provisional": provisional }))
 }
 
 impl VoiceController {
@@ -191,7 +221,7 @@ impl VoiceController {
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
             is_initialized: true,
             initialization_error: None,
-            live_partial: false,
+            live_partial: PartialGate::default(),
         })
     }
 
@@ -218,7 +248,7 @@ impl VoiceController {
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
             is_initialized: false,
             initialization_error: Some(error_message),
-            live_partial: false,
+            live_partial: PartialGate::default(),
         }
     }
 
@@ -234,12 +264,12 @@ impl VoiceController {
             "[VoiceController] Live partial transcription set to {}",
             enabled
         );
-        self.live_partial = enabled;
+        self.live_partial.set(enabled);
     }
 
     /// Whether live streaming partial transcription is on for the next session.
     pub fn live_partial(&self) -> bool {
-        self.live_partial
+        self.live_partial.is_open()
     }
 
     /// Replace this controller with `replacement`, keeping the user-facing
@@ -251,10 +281,10 @@ impl VoiceController {
     /// `*slot = new` silently reset `live_partial` to false, so a flag applied
     /// before the engine finished loading never reached a recording.
     pub fn adopt(&mut self, mut replacement: VoiceController) {
-        if self.live_partial {
+        if self.live_partial.is_open() {
             info!("[VoiceController] Carrying live_partial=true across controller replacement");
         }
-        replacement.live_partial = self.live_partial;
+        replacement.live_partial.set(self.live_partial.is_open());
         *self = replacement;
     }
 
@@ -523,7 +553,7 @@ impl VoiceController {
         let actual_rate_for_thread = actual_rate;
         let app_handle_for_thread = app_handle.clone();
         let channels_for_thread = channels;
-        let live_partial_for_thread = self.live_partial;
+        let live_partial_for_thread = self.live_partial.clone();
 
         let engine = self
             .engine
@@ -583,12 +613,12 @@ impl VoiceController {
         device_name: String,
         config: cpal::StreamConfig,
         sample_format: SampleFormat,
-        live_partial: bool,
+        live_partial: PartialGate,
     ) {
         info!(
             "[AudioThread] Thread started. Engine: '{}', live_partial: {}",
             engine.name(),
-            live_partial
+            live_partial.is_open()
         );
 
         let mut session = match engine.create_session() {
@@ -629,16 +659,7 @@ impl VoiceController {
         info!("[AudioThread] Recording at {} Hz with {} channel(s), will resample to {} Hz for Whisper.",
               actual_rate, channels, WHISPER_SAMPLE_RATE);
 
-        let mut audio_buffer_for_whisper_chunks: Vec<f32> = Vec::new();
-        let partial_buffer_capacity_samples = (actual_rate as u64 * 1500 / 1000) as usize;
         let mut raw_full_session_audio: Vec<f32> = Vec::new();
-
-        info!(
-            "[AudioThread] Partial transcription threshold: {} samples ({:.2} seconds at {}Hz)",
-            partial_buffer_capacity_samples,
-            partial_buffer_capacity_samples as f32 / actual_rate as f32,
-            actual_rate
-        );
 
         // Audio level emission: throttled to ~70ms to match Clicky's sampling rate
         let level_emit_interval = Duration::from_millis(70);
@@ -656,11 +677,8 @@ impl VoiceController {
             match control_rx.try_recv() {
                 Ok(AudioThreadMessage::Stop) => {
                     info!("[AudioThread] Stop message received.");
-                    // In live mode the chunk buffer stays empty: the window was
-                    // already shown, so the final decode starts straight away.
                     info!(
-                        "[AudioThread] Final audio buffer size: {} samples (live window: {} samples)",
-                        audio_buffer_for_whisper_chunks.len(),
+                        "[AudioThread] Live window: {} samples",
                         live_window.samples().len()
                     );
                     info!(
@@ -672,7 +690,6 @@ impl VoiceController {
                     // Process final audio
                     Self::process_final_audio(
                         session.as_mut(),
-                        &audio_buffer_for_whisper_chunks,
                         &raw_full_session_audio,
                         actual_rate,
                         &app_handle,
@@ -712,10 +729,10 @@ impl VoiceController {
             // Process audio data
             if let Ok(audio_chunk) = audio_data_rx.recv_timeout(Duration::from_millis(100)) {
                 raw_full_session_audio.extend_from_slice(&audio_chunk);
-                if live_partial {
+                // Read live, every pass: the setting can change mid-session.
+                let live = live_partial.is_open();
+                if live {
                     live_window.push(&audio_chunk);
-                } else {
-                    audio_buffer_for_whisper_chunks.extend_from_slice(&audio_chunk);
                 }
 
                 // Emit audio level at ~70ms intervals for waveform visualization
@@ -730,30 +747,20 @@ impl VoiceController {
                     last_level_emit = Instant::now();
                 }
 
-                // Process partial transcriptions
-                if live_partial {
-                    // Live mode: decode the whole bounded window (never cleared)
-                    // and emit the cumulative text as provisional. Display-only.
+                // Process partial transcriptions. Off means off: nothing is
+                // decoded, so nothing can be emitted.
+                if live {
+                    // Decode the whole bounded window (never cleared) and emit
+                    // the cumulative text as provisional. Display-only.
                     if let Some(window) = live_window.take_due(Instant::now()) {
                         Self::process_partial_transcription(
                             session.as_mut(),
                             window,
                             actual_rate,
                             &app_handle,
-                            true,
+                            &live_partial,
                         );
                     }
-                } else if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
-                    info!("[AudioThread] Processing partial transcription. Buffer size: {} samples, threshold: {} samples",
-                          audio_buffer_for_whisper_chunks.len(), partial_buffer_capacity_samples);
-                    Self::process_partial_transcription(
-                        session.as_mut(),
-                        &audio_buffer_for_whisper_chunks,
-                        actual_rate,
-                        &app_handle,
-                        false,
-                    );
-                    audio_buffer_for_whisper_chunks.clear();
                 }
             }
         }
@@ -764,8 +771,11 @@ impl VoiceController {
         audio_buffer: &[f32],
         actual_rate: u32,
         app_handle: &AppHandle<R>,
-        provisional: bool,
+        gate: &PartialGate,
     ) {
+        if !gate.is_open() {
+            return;
+        }
         let audio_to_transcribe = resample_for_partial(audio_buffer, actual_rate);
 
         if audio_to_transcribe.is_empty() {
@@ -774,17 +784,15 @@ impl VoiceController {
 
         match session.transcribe_partial(&audio_to_transcribe) {
             Ok(Some(text)) if !text.is_empty() => {
-                if provisional {
-                    tracing::debug!(
-                        "[AudioThread] Live partial ({} samples): '{}'",
-                        audio_to_transcribe.len(),
-                        text
-                    );
-                }
-                let _ = app_handle.emit(
-                    constants::voice_transcription::PARTIAL_RESULT,
-                    serde_json::json!({ "text": text, "provisional": provisional }),
+                tracing::debug!(
+                    "[AudioThread] Live partial ({} samples): '{}'",
+                    audio_to_transcribe.len(),
+                    text
                 );
+                if let Some(payload) = partial_event(gate, &text, true) {
+                    let _ =
+                        app_handle.emit(constants::voice_transcription::PARTIAL_RESULT, payload);
+                }
             }
             Ok(_) => {}
             Err(e) => tracing::error!("[AudioThread] Error transcribing partial chunk: {}", e),
@@ -793,23 +801,11 @@ impl VoiceController {
 
     fn process_final_audio<R: Runtime>(
         session: &mut dyn TranscriptionSession,
-        audio_buffer: &[f32],
         raw_full_session_audio: &[f32],
         actual_rate: u32,
         app_handle: &AppHandle<R>,
         last_buffer_arc: &Arc<Mutex<Option<Vec<f32>>>>,
     ) {
-        // Process any remaining audio in buffer first
-        if !audio_buffer.is_empty() {
-            Self::process_partial_transcription(
-                session,
-                audio_buffer,
-                actual_rate,
-                app_handle,
-                false,
-            );
-        }
-
         // Store raw audio for potential playback
         if let Ok(mut buffer_guard) = last_buffer_arc.lock() {
             *buffer_guard = Some(raw_full_session_audio.to_vec());
@@ -1107,6 +1103,65 @@ mod tests {
             due.len(),
             16,
             "the cumulative window, not only the new chunk"
+        );
+    }
+
+    #[test]
+    fn no_partial_is_built_while_the_setting_is_off_and_one_is_when_on() {
+        let gate = PartialGate::default();
+        assert!(
+            partial_event(&gate, "hello", true).is_none(),
+            "off by default: no partial event exists"
+        );
+
+        gate.set(true);
+        let on = partial_event(&gate, "hello", true).expect("on: a partial is built");
+        assert_eq!(on["text"], "hello");
+        assert_eq!(on["provisional"], true);
+
+        gate.set(false);
+        assert!(partial_event(&gate, "hello", true).is_none());
+    }
+
+    #[test]
+    fn the_gate_is_read_live_through_a_clone_held_by_the_audio_thread() {
+        let mut controller = VoiceController::new_uninitialized("m.bin", "x".into());
+        let held_by_audio_thread = controller.live_partial.clone();
+
+        controller.set_live_partial(true);
+        assert!(
+            held_by_audio_thread.is_open(),
+            "toggle reaches a running session"
+        );
+        controller.set_live_partial(false);
+        assert!(!held_by_audio_thread.is_open());
+    }
+
+    /// Pins the link: the setting is consulted at the decision point, and the
+    /// event name is used nowhere else, so no new path can emit around it.
+    #[test]
+    fn partial_results_are_only_emitted_through_the_gate() {
+        let src = include_str!("controller.rs");
+        let production = src.split("#[cfg(test)]").next().unwrap();
+        assert_eq!(
+            production
+                .matches("voice_transcription::PARTIAL_RESULT")
+                .count(),
+            1,
+            "one emit site for partials"
+        );
+        let emit = production
+            .find("voice_transcription::PARTIAL_RESULT")
+            .unwrap();
+        let before = &production[..emit];
+        let tail = &before[before.len().saturating_sub(400)..];
+        assert!(
+            tail.contains("partial_event(gate"),
+            "the emit is fed by partial_event, which reads the setting"
+        );
+        assert!(
+            production.contains("let live = live_partial.is_open();"),
+            "the audio loop reads the setting on every pass"
         );
     }
 
