@@ -173,6 +173,41 @@ async fn end_dictation(
     .map_err(|e| Error::ControlError(format!("Dictation end task failed: {e}")))?
 }
 
+/// The invariant every end path must leave behind: no dictation input, and
+/// with always-listening off, no input at all.
+///
+/// Logged only. The person never hears about it; the stop itself lives in
+/// [`crate::devices::LiveInput`], and this is the tripwire that says in the
+/// log, with numbers, if a new path ever opens an input it does not close.
+/// Skipped rather than waited for when either controller is busy, because a
+/// busy controller is a recording starting or stopping right now and the
+/// count would be read mid-change.
+fn verify_no_stray_input<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    controller: &Arc<Mutex<VoiceController>>,
+) {
+    let Ok(dictation) = controller.try_lock() else {
+        return;
+    };
+    if dictation.is_dictating() {
+        return;
+    }
+    let dictation_captures = dictation.active_capture_handles();
+    let wake_state = app.try_state::<Arc<Mutex<AlwaysListeningController>>>();
+    let wake_captures = match wake_state.as_ref().map(|s| s.try_lock()) {
+        Some(Ok(wake)) => wake.active_capture_handles(),
+        Some(Err(_)) => return,
+        None => 0,
+    };
+    let open = crate::devices::open_input_streams();
+    let stray = crate::devices::stray_input_streams(open, dictation_captures, wake_captures);
+    if stray > 0 || dictation_captures > 0 {
+        error!(
+            "[Plugin] Microphone invariant broken after a recording ended: {open} input stream(s) open, {dictation_captures} held by dictation, {wake_captures} by always-listening"
+        );
+    }
+}
+
 /// Stop listening and throw the audio away.
 ///
 /// `stop_dictation` always finalises and emits a result, which downstream
@@ -187,6 +222,7 @@ pub async fn cancel_dictation<R: tauri::Runtime>(
     info!("[Plugin] cancel_dictation command called");
 
     let result = end_dictation(controller.inner(), true).await?;
+    verify_no_stray_input(&app, controller.inner());
 
     if result {
         app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STOPPED, ())
@@ -207,6 +243,7 @@ pub async fn stop_dictation<R: tauri::Runtime>(
     info!("[Plugin] stop_dictation command called");
 
     let result = end_dictation(controller.inner(), false).await?;
+    verify_no_stray_input(&app, controller.inner());
 
     if result {
         // Emit stopped event through the plugin system - sound will be handled automatically by backend

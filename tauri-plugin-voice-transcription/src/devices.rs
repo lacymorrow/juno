@@ -13,8 +13,9 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// One microphone, as the settings window lists it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -152,6 +153,26 @@ fn take_device(present: &mut Vec<(String, cpal::Device)>, wanted: &str) -> Optio
         .map(|index| present.remove(index).1)
 }
 
+/// The handle to open for `wanted`: cpal's own default-device handle when
+/// `wanted` is the system default, the enumerated one otherwise.
+///
+/// Which handle matters. cpal 0.15 on macOS gives a stream opened from an
+/// enumerated device (`is_default: false`) a disconnect listener that holds a
+/// strong clone of the stream inside the stream, so dropping the stream never
+/// frees it. A stream from the default-device handle gets no listener and is
+/// freed when dropped. [`LiveInput`] stops the device either way; this keeps
+/// the common case from also leaking the stopped audio unit.
+fn take_for_opening(
+    present: &mut Vec<(String, cpal::Device)>,
+    default: &mut Option<(String, cpal::Device)>,
+    wanted: &str,
+) -> Option<cpal::Device> {
+    if default.as_ref().is_some_and(|(name, _)| name == wanted) {
+        return default.take().map(|(_, device)| device);
+    }
+    take_device(present, wanted)
+}
+
 /// Open the microphone Juno should listen on.
 pub fn resolve_input_device(
     preferred: Option<&str>,
@@ -167,17 +188,18 @@ pub fn resolve_input_device(
         }
     }
 
-    let default_device = host.default_input_device();
     // A device whose name the system will not give us is still openable, so
     // it gets a label rather than being treated as absent.
-    let default_name = default_device
-        .as_ref()
-        .map(|d| d.name().unwrap_or_else(|_| UNNAMED_DEVICE.to_string()));
+    let mut default = host.default_input_device().map(|d| {
+        let name = d.name().unwrap_or_else(|_| UNNAMED_DEVICE.to_string());
+        (name, d)
+    });
+    let default_name = default.as_ref().map(|(name, _)| name.clone());
     let names: Vec<String> = present.iter().map(|(name, _)| name.clone()).collect();
 
     match choose_input(preferred, &names, default_name.as_deref()) {
         InputChoice::Chosen(name) => {
-            let device = take_device(&mut present, &name).ok_or_else(|| {
+            let device = take_for_opening(&mut present, &mut default, &name).ok_or_else(|| {
                 CaptureStartFailure::ChosenDeviceGone {
                     requested: name.clone(),
                 }
@@ -189,8 +211,8 @@ pub fn resolve_input_device(
             })
         }
         InputChoice::Substituted { requested, used } => {
-            let device = take_device(&mut present, &used)
-                .or(default_device)
+            let device = take_for_opening(&mut present, &mut default, &used)
+                .or_else(|| default.take().map(|(_, device)| device))
                 .ok_or_else(|| CaptureStartFailure::ChosenDeviceGone {
                     requested: requested.clone(),
                 })?;
@@ -204,8 +226,8 @@ pub fn resolve_input_device(
             })
         }
         InputChoice::SystemDefault(name) => {
-            let device = take_device(&mut present, &name)
-                .or(default_device)
+            let device = take_for_opening(&mut present, &mut default, &name)
+                .or_else(|| default.take().map(|(_, device)| device))
                 .ok_or(CaptureStartFailure::NoInputDevice)?;
             Ok(ResolvedInput {
                 device,
@@ -217,6 +239,90 @@ pub fn resolve_input_device(
             Some(requested) => CaptureStartFailure::ChosenDeviceGone { requested },
             None => CaptureStartFailure::NoInputDevice,
         }),
+    }
+}
+
+/// Something that keeps an input device running until it is halted.
+///
+/// A running input is what macOS draws the orange microphone indicator for.
+/// The real one is a cpal stream; tests stand in a fake that, like cpal on
+/// macOS, keeps running when it is merely dropped.
+pub(crate) trait InputHalt {
+    /// Stop the device. Safe to call more than once.
+    fn halt(&self);
+}
+
+impl InputHalt for cpal::Stream {
+    fn halt(&self) {
+        if let Err(e) = self.pause() {
+            tracing::warn!("[VoiceDevices] Could not stop the input stream: {e}");
+        }
+    }
+}
+
+/// Every [`LiveInput`] the process has open right now, dictation and
+/// always-listening together.
+fn open_inputs() -> &'static Arc<AtomicUsize> {
+    static OPEN: OnceLock<Arc<AtomicUsize>> = OnceLock::new();
+    OPEN.get_or_init(|| Arc::new(AtomicUsize::new(0)))
+}
+
+/// How many microphone input streams are running in this process.
+///
+/// Zero whenever nothing is recording and always-listening is off. Anything
+/// else is a hot microphone behind an idle bar.
+pub fn open_input_streams() -> usize {
+    open_inputs().load(Ordering::SeqCst)
+}
+
+/// Inputs running that nothing accounts for. Once a recording has ended
+/// (dictation not running) the only input allowed to remain is the one
+/// always-listening holds; with always-listening off that is none.
+pub fn stray_input_streams(open: usize, dictation_captures: usize, wake_captures: usize) -> usize {
+    open.saturating_sub(dictation_captures + wake_captures)
+}
+
+/// An open microphone input that is stopped when it is dropped.
+///
+/// Dropping a cpal stream is not enough on macOS. cpal 0.15 attaches a
+/// disconnect listener to any stream opened from an enumerated device, and
+/// that listener owns a clone of the stream, stored inside the stream. The
+/// cycle means the drop frees nothing: the audio unit keeps running, its
+/// callback keeps firing into a closed channel, and the orange indicator stays
+/// up after every cancel and every send. Since #652 every capture opened an
+/// enumerated device. So the stop is explicit here, and counted, rather than
+/// left to a destructor that never runs.
+pub struct LiveInput {
+    stream: Option<Box<dyn InputHalt>>,
+    open: Arc<AtomicUsize>,
+}
+
+impl LiveInput {
+    /// Wrap a started stream, counted in [`open_input_streams`].
+    pub(crate) fn new(stream: Box<dyn InputHalt>) -> Self {
+        Self::counted(stream, Arc::clone(open_inputs()))
+    }
+
+    /// Wrap a started stream, counted in `open`. Tests pass their own counter
+    /// so parallel tests do not read each other's microphones.
+    pub(crate) fn counted(stream: Box<dyn InputHalt>, open: Arc<AtomicUsize>) -> Self {
+        open.fetch_add(1, Ordering::SeqCst);
+        Self {
+            stream: Some(stream),
+            open,
+        }
+    }
+}
+
+impl Drop for LiveInput {
+    fn drop(&mut self) {
+        if let Some(stream) = self.stream.take() {
+            // Stop first: dropping alone does not stop a cpal stream that
+            // owns a clone of itself.
+            stream.halt();
+            drop(stream);
+            self.open.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -233,7 +339,7 @@ pub fn start_mono_stream(
     config: &cpal::StreamConfig,
     sample_format: SampleFormat,
     audio_data_tx: Sender<Vec<f32>>,
-) -> std::result::Result<cpal::Stream, CaptureStartFailure> {
+) -> std::result::Result<LiveInput, CaptureStartFailure> {
     let channels = config.channels as usize;
     if channels > 1 {
         tracing::info!(
@@ -281,14 +387,17 @@ pub fn start_mono_stream(
         detail: format!("{e:?}"),
     })?;
 
-    stream
-        .play()
-        .map_err(|e| CaptureStartFailure::StreamStartFailed {
+    if let Err(e) = stream.play() {
+        // cpal starts the audio unit while building the stream, so a failed
+        // `play` can still leave a running input behind. Stop it.
+        stream.halt();
+        return Err(CaptureStartFailure::StreamStartFailed {
             device: device_name.to_string(),
             detail: format!("{e:?}"),
-        })?;
+        });
+    }
 
-    Ok(stream)
+    Ok(LiveInput::new(Box::new(stream)))
 }
 
 /// The device the next capture will open, for the settings window to show
@@ -306,6 +415,86 @@ pub fn effective_input_device_name() -> Option<String> {
         InputChoice::Substituted { used, .. } => Some(used),
         InputChoice::SystemDefault(name) => Some(name),
         InputChoice::Nothing { .. } => None,
+    }
+}
+
+/// A microphone for tests that behaves like cpal's on macOS: dropping it does
+/// not stop it, only an explicit halt does.
+#[cfg(test)]
+pub(crate) mod fake_input {
+    use super::{InputHalt, LiveInput};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// Stands in for the device. `running` is what macOS would draw the
+    /// orange indicator for. There is deliberately no `Drop` that clears it:
+    /// the real stream holds a clone of itself, so its drop does nothing.
+    pub(crate) struct CyclicInput {
+        running: Arc<AtomicBool>,
+    }
+
+    impl InputHalt for CyclicInput {
+        fn halt(&self) {
+            self.running.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// A started input, counted in `open`, whose device state is `running`.
+    pub(crate) fn start(open: &Arc<AtomicUsize>, running: &Arc<AtomicBool>) -> LiveInput {
+        running.store(true, Ordering::SeqCst);
+        LiveInput::counted(
+            Box::new(CyclicInput {
+                running: Arc::clone(running),
+            }),
+            Arc::clone(open),
+        )
+    }
+
+    /// The same device without the wrapper, the way capture held it before.
+    pub(crate) fn start_unwrapped(running: &Arc<AtomicBool>) -> CyclicInput {
+        running.store(true, Ordering::SeqCst);
+        CyclicInput {
+            running: Arc::clone(running),
+        }
+    }
+}
+
+#[cfg(test)]
+mod live_input_tests {
+    use super::fake_input;
+    use super::stray_input_streams;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// The bug: dropping the stream was the whole of "stop", and on macOS a
+    /// cpal stream from an enumerated device survives its drop. This pins
+    /// that a bare drop is not enough, so the wrapper is what must stop it.
+    #[test]
+    fn a_dropped_stream_alone_keeps_the_microphone_running() {
+        let running = Arc::new(AtomicBool::new(false));
+        drop(fake_input::start_unwrapped(&running));
+        assert!(running.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn dropping_a_live_input_stops_the_device_and_uncounts_it() {
+        let open = Arc::new(AtomicUsize::new(0));
+        let running = Arc::new(AtomicBool::new(false));
+        let input = fake_input::start(&open, &running);
+        assert_eq!(open.load(Ordering::SeqCst), 1);
+        assert!(running.load(Ordering::SeqCst));
+
+        drop(input);
+        assert_eq!(open.load(Ordering::SeqCst), 0);
+        assert!(!running.load(Ordering::SeqCst), "the device was stopped");
+    }
+
+    #[test]
+    fn only_always_listening_may_hold_an_input_once_a_recording_ends() {
+        assert_eq!(stray_input_streams(0, 0, 0), 0);
+        assert_eq!(stray_input_streams(1, 0, 1), 0, "the wake engine's own");
+        assert_eq!(stray_input_streams(1, 0, 0), 1, "a hot mic behind idle");
+        assert_eq!(stray_input_streams(2, 0, 1), 1);
     }
 }
 

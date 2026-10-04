@@ -1867,4 +1867,45 @@ mod tests {
         drop(c);
         assert_eq!(live.load(Ordering::SeqCst), 0);
     }
+
+    /// The wake engine's stop must stop the device, not just drop the
+    /// handle: the fake keeps running when merely dropped, as cpal's stream
+    /// does on macOS.
+    #[test]
+    fn stopping_stops_the_device_itself() {
+        use crate::devices::fake_input;
+        use std::sync::atomic::AtomicBool;
+
+        let app = tauri::test::mock_app();
+        let open = Arc::new(AtomicUsize::new(0));
+        let running = Arc::new(AtomicBool::new(false));
+        let mut c = controller_with_fake_mic();
+        {
+            let open = Arc::clone(&open);
+            let running = Arc::clone(&running);
+            c.capture_opener = Arc::new(
+                move |tx: Sender<Vec<f32>>| -> std::result::Result<OpenCapture, CaptureStartFailure> {
+                    let input = fake_input::start(&open, &running);
+                    let _ = tx.send(vec![0.0; 1600]);
+                    Ok(OpenCapture {
+                        keepalive: Box::new((input, tx)),
+                        sample_rate: WHISPER_SAMPLE_RATE,
+                        device_name: "Test Mic".to_string(),
+                        substituted_for: None,
+                    })
+                },
+            );
+        }
+
+        c.spawn_worker(app.handle()).expect("start");
+        wait_for_handles(&c, 1);
+        assert_eq!(open.load(Ordering::SeqCst), 1);
+
+        assert!(c.stop_always_listening().expect("stop"));
+        assert_eq!(open.load(Ordering::SeqCst), 0, "no input stream left open");
+        assert!(
+            !running.load(Ordering::SeqCst),
+            "the device was stopped, not just dropped"
+        );
+    }
 }

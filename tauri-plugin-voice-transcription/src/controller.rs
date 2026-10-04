@@ -676,6 +676,34 @@ impl VoiceController {
             }
         };
 
+        // A stop or cancel that is already waiting (a quick press whose release
+        // beat this thread here) is honoured before any input is opened.
+        // Opening the device only to close it again still flashes the orange
+        // indicator, and nothing would be recorded anyway.
+        match control_rx.try_recv() {
+            Ok(AudioThreadMessage::Stop) => {
+                info!("[AudioThread] Stopped before the microphone opened.");
+                Self::process_final_audio(
+                    session.as_mut(),
+                    &[],
+                    actual_rate,
+                    &app_handle,
+                    &last_buffer_arc,
+                );
+                return;
+            }
+            Ok(AudioThreadMessage::Discard) => {
+                info!("[AudioThread] Cancelled before the microphone opened.");
+                let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+                return;
+            }
+            Err(TryRecvError::Disconnected) => {
+                info!("[AudioThread] Control channel gone before the microphone opened.");
+                return;
+            }
+            Err(TryRecvError::Empty) => {}
+        }
+
         // The one exit between here and a running microphone, and it tells the
         // person why. Before this, each of these failures logged an error and
         // returned, leaving the bar drawn as if it were recording.
@@ -1400,6 +1428,214 @@ mod tests {
                 "no capture handle survives the end path (discard={discard})"
             );
             holder.join().unwrap();
+        }
+    }
+
+    // ── The device itself is stopped, in every order a quick press can take ──
+    //
+    // The tests above count the guard that owns the stream. On macOS that was
+    // not the same as the microphone: cpal's stream survived its own drop, so
+    // the count said zero while the orange indicator stayed up. These use a
+    // fake device that, like cpal's, keeps running when merely dropped, and
+    // assert on the device and on a count of open inputs, for a stop and a
+    // cancel, at each point the release can land.
+
+    use crate::devices::fake_input;
+
+    /// Blocks `create_session` until released, so an end can be queued
+    /// before the audio thread reaches the microphone.
+    struct GatedEngine {
+        go: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    }
+
+    impl TranscriptionEngine for GatedEngine {
+        fn name(&self) -> &'static str {
+            "gated"
+        }
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+        fn is_initialized(&self) -> bool {
+            true
+        }
+        fn create_session(&self) -> std::result::Result<Box<dyn TranscriptionSession>, String> {
+            if let Some(go) = self.go.lock().unwrap().take() {
+                let _ = go.recv_timeout(Duration::from_secs(5));
+            }
+            Ok(Box::new(SilentSession))
+        }
+    }
+
+    struct FakeDevice {
+        open: Arc<AtomicUsize>,
+        running: Arc<AtomicBool>,
+        ever_opened: Arc<AtomicBool>,
+    }
+
+    impl FakeDevice {
+        fn new() -> Self {
+            Self {
+                open: Arc::new(AtomicUsize::new(0)),
+                running: Arc::new(AtomicBool::new(false)),
+                ever_opened: Arc::new(AtomicBool::new(false)),
+            }
+        }
+
+        /// Opens the fake device. With `entered`, says so and then waits for
+        /// `go` before finishing, to hold the audio thread mid-open.
+        fn microphone(
+            &self,
+            entered: Option<Sender<()>>,
+            go: Option<std::sync::mpsc::Receiver<()>>,
+        ) -> CaptureOpen {
+            let open = Arc::clone(&self.open);
+            let running = Arc::clone(&self.running);
+            let ever_opened = Arc::clone(&self.ever_opened);
+            Box::new(move |tx: Sender<Vec<f32>>| -> OpenResult {
+                ever_opened.store(true, Ordering::SeqCst);
+                let input = fake_input::start(&open, &running);
+                if let Some(entered) = entered {
+                    let _ = entered.send(());
+                }
+                if let Some(go) = go {
+                    let _ = go.recv_timeout(Duration::from_secs(5));
+                }
+                let _ = tx.send(vec![0.0; 1600]);
+                Ok(Box::new((input, tx)) as Box<dyn std::any::Any>)
+            })
+        }
+
+        fn assert_closed(&self, c: &VoiceController, case: &str) {
+            assert_eq!(
+                self.open.load(Ordering::SeqCst),
+                0,
+                "{case}: an input stream is still open"
+            );
+            assert!(
+                !self.running.load(Ordering::SeqCst),
+                "{case}: the device is still running (orange indicator)"
+            );
+            assert_eq!(c.active_capture_handles(), 0, "{case}: capture handle");
+            assert!(!c.is_dictating(), "{case}: still dictating");
+        }
+    }
+
+    fn end(c: &mut VoiceController, discard: bool) -> bool {
+        if discard {
+            c.cancel_dictation().expect("cancel")
+        } else {
+            c.stop_dictation().expect("stop")
+        }
+    }
+
+    /// Held long enough to open, then let go.
+    #[test]
+    fn an_end_after_the_microphone_opened_stops_the_device() {
+        for discard in [true, false] {
+            let app = tauri::test::mock_app();
+            let device = FakeDevice::new();
+            let mut c = controller();
+            c.spawn_audio_worker(app.handle(), device.microphone(None, None), 16000, 1)
+                .expect("start");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while device.open.load(Ordering::SeqCst) != 1 && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(device.open.load(Ordering::SeqCst), 1, "it opened");
+            assert!(end(&mut c, discard));
+            device.assert_closed(&c, &format!("after open, discard={discard}"));
+        }
+    }
+
+    /// Let go while the device was still opening.
+    #[test]
+    fn an_end_while_the_microphone_is_opening_stops_the_device() {
+        for discard in [true, false] {
+            let app = tauri::test::mock_app();
+            let device = FakeDevice::new();
+            let (entered_tx, entered_rx) = channel::<()>();
+            let (go_tx, go_rx) = channel::<()>();
+            let mut c = controller();
+            c.spawn_audio_worker(
+                app.handle(),
+                device.microphone(Some(entered_tx), Some(go_rx)),
+                16000,
+                1,
+            )
+            .expect("start");
+            entered_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the audio thread reached the device");
+            let releaser = thread::spawn(move || {
+                thread::sleep(Duration::from_millis(50));
+                let _ = go_tx.send(());
+            });
+            assert!(end(&mut c, discard));
+            releaser.join().unwrap();
+            device.assert_closed(&c, &format!("mid-open, discard={discard}"));
+        }
+    }
+
+    /// Let go before the audio thread reached the device at all: it must not
+    /// be opened, not even for a moment.
+    #[test]
+    fn an_end_before_the_microphone_is_reached_never_opens_it() {
+        for discard in [true, false] {
+            let app = tauri::test::mock_app();
+            let device = FakeDevice::new();
+            let (go_tx, go_rx) = channel::<()>();
+            let mut c = VoiceController::new_with_engine(
+                "test",
+                Arc::new(GatedEngine {
+                    go: Mutex::new(Some(go_rx)),
+                }),
+            )
+            .expect("controller");
+            c.spawn_audio_worker(app.handle(), device.microphone(None, None), 16000, 1)
+                .expect("start");
+            let releaser = thread::spawn(move || {
+                thread::sleep(Duration::from_millis(50));
+                let _ = go_tx.send(());
+            });
+            assert!(end(&mut c, discard));
+            releaser.join().unwrap();
+            device.assert_closed(&c, &format!("before open, discard={discard}"));
+            assert!(
+                !device.ever_opened.load(Ordering::SeqCst),
+                "an end that was already waiting opened the microphone (discard={discard})"
+            );
+        }
+    }
+
+    /// The end waited on a busy controller (#687, #694), with the real
+    /// device check this time.
+    #[test]
+    fn an_end_behind_a_busy_controller_stops_the_device() {
+        for discard in [true, false] {
+            let app = tauri::test::mock_app();
+            let device = FakeDevice::new();
+            let mut c = controller();
+            c.spawn_audio_worker(app.handle(), device.microphone(None, None), 16000, 1)
+                .expect("start");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while device.open.load(Ordering::SeqCst) != 1 && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            let shared = Arc::new(Mutex::new(c));
+            let (held_tx, held_rx) = channel::<()>();
+            let holder = {
+                let shared = Arc::clone(&shared);
+                thread::spawn(move || {
+                    let _guard = shared.lock().unwrap();
+                    held_tx.send(()).unwrap();
+                    thread::sleep(Duration::from_millis(100));
+                })
+            };
+            held_rx.recv().unwrap();
+            assert!(end_dictation_waiting(&shared, discard).expect("end"));
+            holder.join().unwrap();
+            let c = shared.lock().unwrap();
+            device.assert_closed(&c, &format!("busy controller, discard={discard}"));
         }
     }
 }
