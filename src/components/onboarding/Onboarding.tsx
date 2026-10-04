@@ -478,6 +478,8 @@ export interface TriggerHint {
 export interface TriggerHints {
   agent: TriggerHint | null;
   dictation: TriggerHint | null;
+  /** Whether a connected keyboard has a globe key. Absent reads as yes. */
+  globe_key?: boolean;
 }
 
 /**
@@ -1062,28 +1064,23 @@ export default function OnboardingFlow({
       .catch((e) => console.debug("[Onboarding] could not read the globe key setting:", e));
   }, []);
 
-  // "My keyboard has no Fn key": hold Right Option to talk to Juno and hold
-  // Control to dictate. The backend writes both rows; Settings can rebind them.
-  const adoptNoFnKeys = useCallback(async () => {
-    setFnSaveError(null);
-    try {
-      await invoke(COMMANDS.TRIGGERS_USE_NO_FN_DEFAULTS);
-      await refreshTriggerHints();
-    } catch (error) {
-      console.error("[Onboarding] could not switch to the no-Fn keys:", error);
-      if (mountedRef.current) {
-        setFnSaveError("Could not switch keys. You can set them in Settings.");
-      }
-    }
-  }, [refreshTriggerHints]);
+  // Nobody is asked whether their keyboard has a globe key. The backend
+  // looks, moves the default holds to keys the keyboard has, and says so
+  // here, so the caps on screen are always the keys that work.
+  useEventListener(EVENTS.TRIGGERS_CHANGED, () => {
+    void refreshTriggerHints();
+  });
 
   // The last screen holds capture open, so the monitor swallows the globe key
   // and reports it here instead of firing the trigger. That report is the only
   // signal the first press ever produces, so it has to light the key too: the
   // first press used to adopt the key silently and only the second one, which
   // fires the trigger, lit it.
-  useEventListener<{ key: string }>(EVENTS.TRIGGERS_KEY_CAPTURED, (payload) => {
-    if (payload?.key !== "fn") return;
+  //
+  // The backend reports a binding once its keys are let go, written the way
+  // a binding is stored, so the globe key on its own arrives as "Fn".
+  useEventListener<{ key?: string; shortcut?: string }>(EVENTS.TRIGGERS_KEY_CAPTURED, (payload) => {
+    if (payload?.shortcut !== GLOBE_SHORTCUT) return;
     const timing = globePressTiming(triggerHints);
     if (timing === "now") setShortcutPressed(true);
     void adoptFnAsTalkKey().then((adopted) => {
@@ -2029,7 +2026,7 @@ export default function OnboardingFlow({
                             above keeps working. Either way nobody has to answer
                             a question about their hardware. Not offered at all
                             once the globe key is already the one on screen. */}
-                        {!usingGlobeKey && (
+                        {!usingGlobeKey && triggerHints?.globe_key !== false && (
                           <p className="mt-3 text-[12px] leading-snug text-muted-foreground">
                             Prefer to hold one key? Press the globe key now to
                             use that instead.
@@ -2044,17 +2041,6 @@ export default function OnboardingFlow({
                             If the emoji picker opens too, set System Settings,
                             Keyboard, "Press globe key to" to "Do Nothing".
                           </p>
-                        )}
-                        {/* Until a press proves the globe key reaches Juno,
-                            there is a way out for a keyboard without one. */}
-                        {usingGlobeKey && !fnOffered && (
-                          <button
-                            type="button"
-                            onClick={() => void adoptNoFnKeys()}
-                            className="mt-1 text-[12px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                          >
-                            My keyboard has no Fn key
-                          </button>
                         )}
                         {fnSaveError && (
                           <p className="mt-1 text-[12px] text-destructive" role="alert">

@@ -159,49 +159,118 @@ impl TriggerTarget {
     }
 }
 
-/// A key, or a chord with it, that produces no ordinary key event, only a
-/// modifier flag change.
+/// A modifier-only binding: one bare modifier, or a chord of two or more held
+/// together, which produces no ordinary key event, only modifier flag changes.
+///
+/// It is a set, not a list of named cases, because the person can hold any
+/// combination: Fn, Fn and Control, Control and Option, Option and Command,
+/// Fn and Shift. The set is what a binding means, so two spellings of the same
+/// set ("Control+Fn", "fn+ctrl") are one key, and Fn is a different key from
+/// Fn and Control.
+///
+/// Left and right are not told apart, with one exception the monitor can see:
+/// the right-hand Option key on its own ([`ModifierKey::RIGHT_OPTION`]).
+///
+/// What may stand alone is deliberately short. Fn and Right Option are keys
+/// nothing else uses on their own; Control is the hold for a keyboard with no
+/// Fn key. A lone Shift, Command or left Option is part of every second
+/// shortcut, so it is not offered. Any set of two or more is.
 ///
 /// Caps Lock is deliberately absent. Checked on hardware: it emits one event
 /// per press and nothing on release, because it is a hardware toggle, so a
 /// push-to-talk bound to it would hold the microphone open until the next
 /// press. Remapping it with `hidutil` to a spare function key is the honest
 /// route, and that already works as an ordinary keyboard binding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ModifierKey {
-    /// The globe key. Reports key code 63 with bit 1 << 23 while held.
-    Fn,
-    /// The globe key and Control held together. Neither half arrives as an
-    /// ordinary key, so the plugin cannot register the pair either; the monitor
-    /// reads both halves out of the same flag word.
-    FnControl,
-    /// Control on its own, for a keyboard with no Fn key. Reports key code 59
-    /// or 62 with bit 1 << 18. A hold only counts if nothing else is pressed
-    /// while it is down, so Control+C never starts the microphone.
-    Control,
-    /// The right-hand Option key on its own, key code 61, told apart from the
-    /// left one. Same rule as [`ModifierKey::Control`]: any other key pressed
-    /// while it is down cancels the hold.
-    RightOption,
-}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModifierKey(u8);
+
+const FN_BIT: u8 = 1;
+const CONTROL_BIT: u8 = 1 << 1;
+const OPTION_BIT: u8 = 1 << 2;
+const SHIFT_BIT: u8 = 1 << 3;
+const COMMAND_BIT: u8 = 1 << 4;
+/// Only ever set together with [`OPTION_BIT`]: the right-hand Option key is an
+/// Option key.
+const RIGHT_BIT: u8 = 1 << 5;
+
+/// Each modifier in the order a chord is written, with how it is written and
+/// how it is shown.
+const PARTS: [(u8, &str); 5] = [
+    (FN_BIT, "Fn"),
+    (CONTROL_BIT, "Control"),
+    (OPTION_BIT, "Option"),
+    (SHIFT_BIT, "Shift"),
+    (COMMAND_BIT, "Command"),
+];
 
 impl ModifierKey {
-    /// What the settings window calls it.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Fn => "Fn (globe)",
-            Self::FnControl => "Fn + Control",
-            Self::Control => "Control",
-            Self::RightOption => "Right Option",
-        }
+    /// The globe key. Reports key code 63 with bit 1 << 23 while held.
+    pub const FN: Self = Self(FN_BIT);
+    /// Control on its own, for a keyboard with no Fn key.
+    pub const CONTROL: Self = Self(CONTROL_BIT);
+    /// Option, either side. Only ever part of a chord.
+    pub const OPTION: Self = Self(OPTION_BIT);
+    /// Shift, either side. Only ever part of a chord.
+    pub const SHIFT: Self = Self(SHIFT_BIT);
+    /// Command, either side. Only ever part of a chord.
+    pub const COMMAND: Self = Self(COMMAND_BIT);
+    /// The right-hand Option key on its own, key code 61, told apart from the
+    /// left one.
+    pub const RIGHT_OPTION: Self = Self(OPTION_BIT | RIGHT_BIT);
+    /// The globe key and Control, the default dictation chord.
+    pub const FN_CONTROL: Self = Self(FN_BIT | CONTROL_BIT);
+
+    /// No modifier at all.
+    pub const NONE: Self = Self(0);
+
+    /// Both sets together.
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
     }
 
-    /// Keys that are also ordinary shortcut ingredients (Control+C, Option+key)
-    /// and so can only ever be held, never tapped: a tap would fire on every
-    /// shortcut that merely contains them.
-    pub fn hold_only(self) -> bool {
-        matches!(self, Self::Control | Self::RightOption)
+    /// Every modifier in `other` is in this set too.
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// The same set with left and right no longer told apart.
+    pub const fn sideless(self) -> Self {
+        Self(self.0 & !RIGHT_BIT)
+    }
+
+    /// How many modifiers are in the set, left and right counted as one.
+    pub fn count(self) -> u32 {
+        self.sideless().0.count_ones()
+    }
+
+    /// Whether the set includes the globe key.
+    pub const fn has_fn(self) -> bool {
+        self.0 & FN_BIT != 0
+    }
+
+    /// Whether this set can be a binding: Fn, Control or Right Option alone,
+    /// or any two or more modifiers. The right-hand Option key is only told
+    /// apart on its own; inside a chord either Option counts.
+    pub fn is_bindable(self) -> bool {
+        if self == Self::FN || self == Self::CONTROL || self == Self::RIGHT_OPTION {
+            return true;
+        }
+        self.0 & RIGHT_BIT == 0 && self.count() >= 2
+    }
+
+    /// What the settings window calls it.
+    pub fn label(self) -> String {
+        if self == Self::FN {
+            return "Fn (globe)".to_string();
+        }
+        if self == Self::RIGHT_OPTION {
+            return "Right Option".to_string();
+        }
+        self.parts().join(" + ")
     }
 
     /// The shortcut string this key is recorded as.
@@ -209,61 +278,103 @@ impl ModifierKey {
     /// Fn is a key on the keyboard, so it is written down the way every other
     /// key is written down. The fact that it has to be watched differently is
     /// a detail of the watching, not of the binding.
-    pub fn shortcut(self) -> &'static str {
-        match self {
-            Self::Fn => "Fn",
-            Self::FnControl => "Fn+Control",
-            Self::Control => "Control",
-            Self::RightOption => "RightOption",
+    pub fn shortcut(self) -> String {
+        if self == Self::RIGHT_OPTION {
+            return "RightOption".to_string();
         }
+        self.parts().join("+")
+    }
+
+    fn parts(self) -> Vec<&'static str> {
+        PARTS
+            .iter()
+            .filter(|(bit, _)| self.0 & *bit != 0)
+            .map(|(_, name)| *name)
+            .collect()
+    }
+
+    /// Keys that are also ordinary shortcut ingredients (Control+C, Option+key)
+    /// and so can only ever be held, never tapped: a tap would fire on every
+    /// Control-click. A chord may be tapped, because the monitor only counts a
+    /// tap whose keys came up with nothing else pressed in between.
+    pub fn hold_only(self) -> bool {
+        self == Self::CONTROL || self == Self::RIGHT_OPTION
     }
 }
 
+impl Serialize for ModifierKey {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.shortcut())
+    }
+}
+
+impl<'de> Deserialize<'de> for ModifierKey {
+    /// The retired `modifier` binding kind wrote `fn`, `fn_control`,
+    /// `control` or `right_option`. Those, and any shortcut string a set is
+    /// written as, read back.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        let spelled = match raw.as_str() {
+            "fn_control" => "Fn+Control",
+            "right_option" => "RightOption",
+            other => other,
+        };
+        bare_modifier(spelled)
+            .ok_or_else(|| serde::de::Error::custom(format!("not a modifier key: {raw}")))
+    }
+}
+
+/// Which modifier a word of a shortcut string names, if it names one.
+///
 /// Apple has called the same physical key both Fn and Globe, and a hand-edited
 /// store or an older build may carry either.
-fn is_fn_word(word: &str) -> bool {
-    word == "fn" || word == "globe"
+fn modifier_word(word: &str) -> Option<ModifierKey> {
+    Some(match word {
+        "fn" | "globe" => ModifierKey::FN,
+        "control" | "ctrl" => ModifierKey::CONTROL,
+        "option" | "opt" | "alt" => ModifierKey::OPTION,
+        "shift" => ModifierKey::SHIFT,
+        "command" | "cmd" | "meta" | "super" => ModifierKey::COMMAND,
+        "rightoption" | "right option" | "right_option" | "rightalt" | "right alt" | "roption" => {
+            ModifierKey::RIGHT_OPTION
+        }
+        _ => return None,
+    })
 }
 
-fn is_control_word(word: &str) -> bool {
-    word == "control" || word == "ctrl"
-}
-
-fn is_right_option_word(word: &str) -> bool {
-    matches!(
-        word,
-        "rightoption" | "right option" | "right_option" | "rightalt" | "right alt" | "roption"
-    )
-}
-
-/// The bare modifier key, or chord of bare modifiers, a shortcut string names,
-/// if it names one.
+/// The bare modifier, or chord of bare modifiers, a shortcut string names, if
+/// it names one.
 ///
-/// This is the single place that decides which watcher a key goes to. A bare
-/// modifier produces no ordinary key event, so the global-shortcut plugin
-/// cannot register it and [`crate::platform::modifier_key_monitor`] takes it
-/// instead. That is a fact about how the key is watched, which is why it lives
-/// in the registration path and not in the shape of a binding.
+/// This is the single place that decides which watcher a key goes to. A
+/// modifier-only binding produces no ordinary key event, so the global-shortcut
+/// plugin cannot register it and [`crate::platform::modifier_key_monitor`]
+/// takes it instead. That is a fact about how the key is watched, which is why
+/// it lives in the registration path and not in the shape of a binding.
 ///
-/// `Fn`, `globe`, `Fn+Control`, `Control+Fn`, `Control` and `RightOption` (any
-/// case) are bare. `Fn+F5` and `Control+Space` are ordinary combos that merely
-/// mention a modifier, and the plugin keeps them.
+/// `Fn`, `globe`, `Control`, `RightOption`, and any two or more modifiers
+/// (`Fn+Control`, `Control+Option`, `Shift+Command`, any order, any case) are
+/// bare. `Fn+F5` and `Control+Space` are ordinary combos that merely mention a
+/// modifier, and the plugin keeps them. A lone Shift, Command or Option is not
+/// a binding at all (see [`ModifierKey::is_bindable`]).
 pub fn bare_modifier(shortcut: &str) -> Option<ModifierKey> {
-    let parts: Vec<String> = shortcut
+    let words: Vec<String> = shortcut
         .split('+')
         .map(|p| p.trim().to_ascii_lowercase())
         .collect();
-    match parts.as_slice() {
-        [a] if is_fn_word(a) => Some(ModifierKey::Fn),
-        [a] if is_control_word(a) => Some(ModifierKey::Control),
-        [a] if is_right_option_word(a) => Some(ModifierKey::RightOption),
-        [a, b]
-            if (is_fn_word(a) && is_control_word(b)) || (is_control_word(a) && is_fn_word(b)) =>
-        {
-            Some(ModifierKey::FnControl)
+    let mut set = ModifierKey::NONE;
+    for word in &words {
+        let key = modifier_word(word)?;
+        // The same modifier twice is a typo, not a chord.
+        if set.sideless().contains(key.sideless()) {
+            return None;
         }
-        _ => None,
+        set = set.union(key);
     }
+    // Right Option is only told apart on its own. Inside a chord it is Option.
+    if words.len() > 1 {
+        set = set.sideless();
+    }
+    set.is_bindable().then_some(set)
 }
 
 /// The physical input bound to a key/mouse gesture.
@@ -307,7 +418,7 @@ impl<'de> Deserialize<'de> for Binding {
             StoredBinding::Keyboard { shortcut } => Binding::Keyboard { shortcut },
             StoredBinding::Mouse { button } => Binding::Mouse { button },
             StoredBinding::Modifier { key } => Binding::Keyboard {
-                shortcut: key.shortcut().to_string(),
+                shortcut: key.shortcut(),
             },
         })
     }
@@ -347,7 +458,7 @@ impl Binding {
             // A bare modifier gets its spoken name, because "Fn (globe)" is
             // what a person would recognise in "that is already in use".
             Binding::Keyboard { shortcut } => bare_modifier(shortcut)
-                .map(|key| key.label().to_string())
+                .map(|key| key.label())
                 .unwrap_or_else(|| shortcut.clone()),
             Binding::Mouse { button } => match button {
                 0 => "Left Click".to_string(),
@@ -404,6 +515,17 @@ pub struct Trigger {
     /// A disabled trigger is kept in the list but not registered.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Juno moved this row off its globe-key default because no connected
+    /// keyboard has a globe key, and will move it back when one appears. Set
+    /// only by [`settle_for_keyboard`]; any binding the person records clears
+    /// it (see [`clear_fallback_on_rebind`]), so a key somebody chose is never
+    /// touched.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keyboard_fallback: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl Trigger {
@@ -552,6 +674,7 @@ pub fn trigger(gesture: Gesture, target: TriggerTarget, binding: Option<Binding>
         phrase: None,
         require_hey_prefix: false,
         enabled: true,
+        keyboard_fallback: false,
     }
 }
 
@@ -584,9 +707,8 @@ pub const NO_FN_DICTATION_SHORTCUT: &str = "Control";
 ///
 /// Both are Hold, so neither key carries a second meaning on a single tap.
 ///
-/// Nothing here guesses whether the keyboard has a globe key. There is no
-/// reliable way to know (see [`crate::commands::triggers::set_trigger_capture`]);
-/// setup asks the person to press it instead.
+/// On a Mac with no globe key connected, [`settle_for_keyboard`] moves both to
+/// keys every keyboard has, and back again when one is plugged in.
 pub fn default_triggers() -> Vec<Trigger> {
     vec![
         trigger(
@@ -606,31 +728,91 @@ pub fn default_triggers() -> Vec<Trigger> {
     ]
 }
 
-/// Switch the two default holds to keys every keyboard has: hold Right Option
-/// to talk to Juno, hold Control to dictate.
+/// Each target's globe-key default and the key it falls back to when no
+/// connected keyboard has a globe key: Right Option to talk to Juno, Control
+/// to dictate. Both are keys every keyboard has.
+const KEYBOARD_FALLBACKS: [(TriggerTarget, &str, &str); 2] = [
+    (TriggerTarget::Agent, GLOBE_SHORTCUT, NO_FN_AGENT_SHORTCUT),
+    (
+        TriggerTarget::Dictation,
+        DICTATION_SHORTCUT,
+        NO_FN_DICTATION_SHORTCUT,
+    ),
+];
+
+fn keyboard_signature(shortcut: &str) -> String {
+    Binding::Keyboard {
+        shortcut: shortcut.to_string(),
+    }
+    .signature()
+}
+
+/// Put the default holds on keys the connected keyboards actually have.
 ///
-/// There is no reliable way to know whether a keyboard has an Fn key, so the
-/// person says so and this does the rest. It rewrites the first Hold row for
-/// each target (and switches it on), and adds the row if there is none, so the
-/// result is the same two holds whatever state the list was in. Every other
-/// row is left alone. The person can always rebind afterwards.
-pub fn apply_no_fn_defaults(triggers: &mut Vec<Trigger>) {
-    for (target, shortcut) in [
-        (TriggerTarget::Agent, NO_FN_AGENT_SHORTCUT),
-        (TriggerTarget::Dictation, NO_FN_DICTATION_SHORTCUT),
-    ] {
-        let binding = Binding::Keyboard {
-            shortcut: shortcut.to_string(),
-        };
-        match triggers
-            .iter_mut()
-            .find(|t| t.gesture == Gesture::Hold && t.target == target)
-        {
-            Some(row) => {
-                row.binding = Some(binding);
-                row.enabled = true;
+/// `fn_present` is what [`crate::platform::fn_key_detection`] found: whether any
+/// connected keyboard has a globe key. Nobody is asked; the hardware says.
+///
+/// - No globe key: a Hold row still on its globe-key default moves to the
+///   fallback (Right Option to talk to Juno, Control to dictate) and is marked
+///   [`Trigger::keyboard_fallback`].
+/// - A globe key again: a marked row moves back to its default and the mark
+///   goes.
+///
+/// A row on any other key is somebody's choice and is never touched, and a
+/// move that would land on a key another enabled row already uses is not made.
+/// Returns whether anything changed. Idempotent.
+pub fn settle_for_keyboard(triggers: &mut [Trigger], fn_present: bool) -> bool {
+    // Decide every move against the list as it stands, then make them.
+    let moves: Vec<(usize, &'static str, bool)> = triggers
+        .iter()
+        .enumerate()
+        .filter_map(|(i, row)| {
+            if row.gesture != Gesture::Hold {
+                return None;
             }
-            None => triggers.push(trigger(Gesture::Hold, target, Some(binding))),
+            let (_, globe, fallback) = KEYBOARD_FALLBACKS
+                .iter()
+                .find(|(target, _, _)| *target == row.target)?;
+            let (from, to, mark) = match (fn_present, row.keyboard_fallback) {
+                (true, true) => (*fallback, *globe, false),
+                (false, false) => (*globe, *fallback, true),
+                _ => return None,
+            };
+            if row.key_signature() != Some(keyboard_signature(from)) {
+                return None;
+            }
+            let target_sig = keyboard_signature(to);
+            let taken = triggers.iter().enumerate().any(|(j, other)| {
+                j != i
+                    && other.enabled
+                    && other.key_signature().as_deref() == Some(target_sig.as_str())
+            });
+            (!taken).then_some((i, to, mark))
+        })
+        .collect();
+    for (i, to, mark) in &moves {
+        if let Some(row) = triggers.get_mut(*i) {
+            row.binding = Some(Binding::Keyboard {
+                shortcut: to.to_string(),
+            });
+            row.keyboard_fallback = *mark;
+        }
+    }
+    !moves.is_empty()
+}
+
+/// A row whose binding the person has just changed is theirs now: it loses
+/// the [`Trigger::keyboard_fallback`] mark, so [`settle_for_keyboard`] leaves
+/// it alone from here on. Rows are matched by id; a row that is new to the
+/// list cannot carry a mark Juno did not set.
+pub fn clear_fallback_on_rebind(previous: &[Trigger], next: &mut [Trigger]) {
+    for t in next.iter_mut().filter(|t| t.keyboard_fallback) {
+        let unchanged = previous
+            .iter()
+            .find(|p| p.id == t.id)
+            .is_some_and(|p| p.keyboard_fallback && p.binding == t.binding);
+        if !unchanged {
+            t.keyboard_fallback = false;
         }
     }
 }
@@ -672,6 +854,8 @@ struct StoredTrigger {
     require_hey_prefix: bool,
     #[serde(default = "default_true")]
     enabled: bool,
+    #[serde(default)]
+    keyboard_fallback: bool,
 }
 
 impl From<StoredTrigger> for Trigger {
@@ -684,6 +868,7 @@ impl From<StoredTrigger> for Trigger {
             phrase: t.phrase,
             require_hey_prefix: t.require_hey_prefix,
             enabled: t.enabled,
+            keyboard_fallback: t.keyboard_fallback,
         }
     }
 }
@@ -834,6 +1019,7 @@ pub fn migrate_from_legacy(
             phrase: Some(phrase),
             require_hey_prefix,
             enabled: true,
+            keyboard_fallback: false,
         });
     }
 
@@ -939,6 +1125,9 @@ pub struct TriggerHint {
 pub struct TriggerHints {
     pub agent: Option<TriggerHint>,
     pub dictation: Option<TriggerHint>,
+    /// Whether a connected keyboard has a globe key, so a screen does not
+    /// invite somebody to press a key they do not have.
+    pub globe_key: bool,
 }
 
 /// The order a hint prefers its gestures in.
@@ -972,6 +1161,7 @@ pub fn hints(triggers: &[Trigger]) -> TriggerHints {
     TriggerHints {
         agent: hint_for(triggers, TriggerTarget::Agent),
         dictation: hint_for(triggers, TriggerTarget::Dictation),
+        globe_key: true,
     }
 }
 
@@ -1181,6 +1371,7 @@ mod tests {
             phrase: Some(phrase.to_string()),
             require_hey_prefix: false,
             enabled,
+            keyboard_fallback: false,
         }
     }
 
@@ -1727,8 +1918,8 @@ mod tests {
         assert_eq!(
             watchers,
             vec![
-                Watcher::ModifierKey(ModifierKey::Fn),
-                Watcher::ModifierKey(ModifierKey::FnControl)
+                Watcher::ModifierKey(ModifierKey::FN),
+                Watcher::ModifierKey(ModifierKey::FN_CONTROL)
             ]
         );
     }
@@ -2139,13 +2330,13 @@ mod tests {
             watcher_for(&Binding::Keyboard {
                 shortcut: "Fn".to_string()
             }),
-            Watcher::ModifierKey(ModifierKey::Fn)
+            Watcher::ModifierKey(ModifierKey::FN)
         );
         assert_eq!(
             watcher_for(&Binding::Keyboard {
                 shortcut: "globe".to_string()
             }),
-            Watcher::ModifierKey(ModifierKey::Fn),
+            Watcher::ModifierKey(ModifierKey::FN),
             "Apple calls the same key both things"
         );
     }
@@ -2163,7 +2354,7 @@ mod tests {
                 watcher_for(&Binding::Keyboard {
                     shortcut: spelling.to_string()
                 }),
-                Watcher::ModifierKey(ModifierKey::FnControl),
+                Watcher::ModifierKey(ModifierKey::FN_CONTROL),
                 "{spelling}"
             );
         }
@@ -2176,14 +2367,14 @@ mod tests {
         }
         .describe();
         assert_eq!(label, "Fn + Control");
-        assert_eq!(ModifierKey::FnControl.shortcut(), "Fn+Control");
+        assert_eq!(ModifierKey::FN_CONTROL.shortcut(), "Fn+Control");
         assert_eq!(
-            bare_modifier(ModifierKey::FnControl.shortcut()),
-            Some(ModifierKey::FnControl)
+            bare_modifier(&ModifierKey::FN_CONTROL.shortcut()),
+            Some(ModifierKey::FN_CONTROL)
         );
         assert_eq!(
-            bare_modifier(ModifierKey::Fn.shortcut()),
-            Some(ModifierKey::Fn)
+            bare_modifier(&ModifierKey::FN.shortcut()),
+            Some(ModifierKey::FN)
         );
     }
 
@@ -2197,7 +2388,8 @@ mod tests {
         );
         for combo in [
             "Fn+F5",
-            "Fn+Option",
+            "Option",
+            "Shift",
             "Control+Space",
             "Fn+Control+Space",
             "Fn+",
@@ -2345,10 +2537,10 @@ mod tests {
     #[test]
     fn right_option_and_control_are_bare_modifiers() {
         for (spelling, key) in [
-            ("RightOption", ModifierKey::RightOption),
-            ("right option", ModifierKey::RightOption),
-            ("Control", ModifierKey::Control),
-            ("ctrl", ModifierKey::Control),
+            ("RightOption", ModifierKey::RIGHT_OPTION),
+            ("right option", ModifierKey::RIGHT_OPTION),
+            ("Control", ModifierKey::CONTROL),
+            ("ctrl", ModifierKey::CONTROL),
         ] {
             assert_eq!(bare_modifier(spelling), Some(key), "{spelling}");
             assert_eq!(
@@ -2360,12 +2552,12 @@ mod tests {
         }
         // Their own shortcut strings read back as themselves.
         assert_eq!(
-            bare_modifier(ModifierKey::RightOption.shortcut()),
-            Some(ModifierKey::RightOption)
+            bare_modifier(&ModifierKey::RIGHT_OPTION.shortcut()),
+            Some(ModifierKey::RIGHT_OPTION)
         );
         assert_eq!(
-            bare_modifier(ModifierKey::Control.shortcut()),
-            Some(ModifierKey::Control)
+            bare_modifier(&ModifierKey::CONTROL.shortcut()),
+            Some(ModifierKey::CONTROL)
         );
         // Left Option is an ordinary modifier, not a bare hold.
         assert_eq!(bare_modifier("Option"), None);
@@ -2373,42 +2565,219 @@ mod tests {
     }
 
     #[test]
-    fn the_no_fn_switch_writes_right_option_and_control() {
+    fn with_no_globe_key_the_defaults_fall_back_to_right_option_and_control() {
         let mut ts = default_triggers();
         let ids: Vec<String> = ts.iter().map(|t| t.id.clone()).collect();
-        apply_no_fn_defaults(&mut ts);
+        assert!(settle_for_keyboard(&mut ts, false));
         assert_eq!(ts.len(), 2, "rebinds the rows, adds none");
         assert_eq!(ts[0].id, ids[0]);
-        assert_eq!(ts[0].target, TriggerTarget::Agent);
-        assert_eq!(ts[0].gesture, Gesture::Hold);
         assert_eq!(keyboard_shortcut(&ts[0]), Some("RightOption"));
-        assert_eq!(ts[1].target, TriggerTarget::Dictation);
-        assert_eq!(ts[1].gesture, Gesture::Hold);
         assert_eq!(keyboard_shortcut(&ts[1]), Some("Control"));
+        assert!(ts.iter().all(|t| t.keyboard_fallback));
         assert!(validate(&ts, &["Escape".to_string()]).is_ok());
         let watchers: Vec<Watcher> = bound_keys(&ts).iter().map(watcher_for).collect();
         assert_eq!(
             watchers,
             vec![
-                Watcher::ModifierKey(ModifierKey::RightOption),
-                Watcher::ModifierKey(ModifierKey::Control)
+                Watcher::ModifierKey(ModifierKey::RIGHT_OPTION),
+                Watcher::ModifierKey(ModifierKey::CONTROL)
             ]
         );
+        // Settling again changes nothing.
+        let once = ts.clone();
+        assert!(!settle_for_keyboard(&mut ts, false));
+        assert_eq!(ts, once);
     }
 
     #[test]
-    fn the_no_fn_switch_turns_rows_on_adds_missing_ones_and_leaves_the_rest() {
-        let mut off = row(Gesture::Hold, TriggerTarget::Agent, "Fn");
-        off.enabled = false;
-        let other = row(Gesture::Tap, TriggerTarget::Agent, "Option+D");
-        let mut ts = vec![off, other.clone()];
-        apply_no_fn_defaults(&mut ts);
-        assert!(ts[0].enabled);
+    fn a_globe_key_appearing_puts_the_defaults_back() {
+        let mut ts = default_triggers();
+        settle_for_keyboard(&mut ts, false);
+        assert!(settle_for_keyboard(&mut ts, true));
+        assert_eq!(keyboard_shortcut(&ts[0]), Some("Fn"));
+        assert_eq!(keyboard_shortcut(&ts[1]), Some("Fn+Control"));
+        assert!(ts.iter().all(|t| !t.keyboard_fallback));
+        assert!(!settle_for_keyboard(&mut ts, true), "nothing left to do");
+    }
+
+    #[test]
+    fn a_globe_key_being_present_leaves_the_defaults_alone() {
+        let mut ts = default_triggers();
+        let before = ts.clone();
+        assert!(!settle_for_keyboard(&mut ts, true));
+        assert_eq!(ts, before);
+    }
+
+    #[test]
+    fn customized_triggers_are_never_moved() {
+        // Somebody chose Right Option and Control themselves. A globe key
+        // turning up must not take them away.
+        let mut chosen = vec![
+            row(Gesture::Hold, TriggerTarget::Agent, "RightOption"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "Control"),
+        ];
+        let before = chosen.clone();
+        assert!(!settle_for_keyboard(&mut chosen, true));
+        assert_eq!(chosen, before);
+
+        // And keys that are not a default stay where they are with no globe
+        // key either.
+        let mut other = vec![
+            row(Gesture::Hold, TriggerTarget::Agent, "Option+Space"),
+            row(Gesture::Tap, TriggerTarget::Dictation, "Fn"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "Control+Option"),
+        ];
+        let before = other.clone();
+        assert!(!settle_for_keyboard(&mut other, false));
+        assert_eq!(other, before);
+    }
+
+    #[test]
+    fn rebinding_a_fallback_row_makes_it_the_persons() {
+        let mut stored = default_triggers();
+        settle_for_keyboard(&mut stored, false);
+        let mut next = stored.clone();
+        next[0].binding = Some(Binding::Keyboard {
+            shortcut: "Control+Option".to_string(),
+        });
+        clear_fallback_on_rebind(&stored, &mut next);
+        assert!(!next[0].keyboard_fallback, "the person chose this key");
+        assert!(next[1].keyboard_fallback, "an untouched row keeps its mark");
+
+        // Back to the person's own choice of Right Option: still theirs.
+        next[0].binding = Some(Binding::Keyboard {
+            shortcut: "RightOption".to_string(),
+        });
+        let mut later = next.clone();
+        clear_fallback_on_rebind(&next, &mut later);
+        settle_for_keyboard(&mut later, true);
+        assert_eq!(keyboard_shortcut(&later[0]), Some("RightOption"));
+        assert_eq!(keyboard_shortcut(&later[1]), Some("Fn+Control"));
+    }
+
+    #[test]
+    fn the_fallback_never_lands_on_a_key_another_row_uses() {
+        let mut ts = default_triggers();
+        ts.push(row(Gesture::Hold, TriggerTarget::Agent, "Control"));
+        settle_for_keyboard(&mut ts, false);
         assert_eq!(keyboard_shortcut(&ts[0]), Some("RightOption"));
-        assert_eq!(ts[1], other, "an unrelated row is untouched");
-        assert_eq!(ts.len(), 3, "the missing dictation hold is added");
-        assert_eq!(keyboard_shortcut(&ts[2]), Some("Control"));
-        assert_eq!(ts[2].target, TriggerTarget::Dictation);
+        assert_eq!(
+            keyboard_shortcut(&ts[1]),
+            Some("Fn+Control"),
+            "Control is taken, so dictation stays put"
+        );
+        assert!(!ts[1].keyboard_fallback);
+        assert!(validate(&ts, &[]).is_ok());
+    }
+
+    #[test]
+    fn the_fallback_mark_round_trips_and_is_absent_when_unset() {
+        let mut ts = default_triggers();
+        let plain = serde_json::to_value(&ts).expect("serializes");
+        assert!(plain[0].get("keyboard_fallback").is_none());
+        settle_for_keyboard(&mut ts, false);
+        let json = serde_json::to_value(&ts).expect("serializes");
+        assert_eq!(load_stored(&json).expect("loads"), ts);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Modifier chords                                                  */
+    /* ---------------------------------------------------------------- */
+
+    #[test]
+    fn every_globe_chord_is_recordable_next_to_the_globe_key() {
+        // The reported defect: with Hold Fn on one row, recording Fn+Control,
+        // Fn+Option, Fn+Shift or Fn+Command on another was refused as
+        // "Fn (globe) already has Hold to talk to Juno". A chord is its own key.
+        let mut ts = vec![row(Gesture::Hold, TriggerTarget::Agent, "Fn")];
+        for chord in ["Fn+Control", "Fn+Option", "Fn+Shift", "Fn+Command"] {
+            assert_eq!(combo_conflict(&ts, chord, None, &[]), None, "{chord}");
+            ts.push(row(Gesture::Hold, TriggerTarget::Dictation, chord));
+        }
+        assert!(validate(&ts, &[]).is_ok(), "{:?}", validate(&ts, &[]));
+        assert_eq!(bound_keys(&ts).len(), 5);
+    }
+
+    #[test]
+    fn the_identical_binding_is_still_refused() {
+        let ts = vec![row(Gesture::Hold, TriggerTarget::Agent, "Fn+Option")];
+        let err = combo_conflict(&ts, "Option+Fn", None, &[]).expect("same set, other order");
+        assert!(err.contains("Fn + Option"), "{err}");
+        assert!(err.contains("Hold to talk to Juno"), "{err}");
+        let twice = vec![
+            row(Gesture::Hold, TriggerTarget::Agent, "Control+Option"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "option+ctrl"),
+        ];
+        assert!(validate(&twice, &[]).is_err());
+    }
+
+    #[test]
+    fn control_and_control_option_coexist() {
+        let ts = vec![
+            row(Gesture::Hold, TriggerTarget::Dictation, "Control"),
+            row(Gesture::Hold, TriggerTarget::Agent, "Control+Option"),
+            row(Gesture::Tap, TriggerTarget::Agent, "Option+Command"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "Control+Shift"),
+        ];
+        assert!(validate(&ts, &[]).is_ok(), "{:?}", validate(&ts, &[]));
+        assert_eq!(bound_keys(&ts).len(), 4);
+    }
+
+    #[test]
+    fn any_two_modifiers_are_a_chord_the_monitor_watches() {
+        for (spelling, shortcut, label) in [
+            ("Control+Option", "Control+Option", "Control + Option"),
+            ("alt+ctrl", "Control+Option", "Control + Option"),
+            ("Cmd+Shift", "Shift+Command", "Shift + Command"),
+            ("Option+Command", "Option+Command", "Option + Command"),
+            ("globe+shift", "Fn+Shift", "Fn + Shift"),
+            (
+                "Control+Option+Shift",
+                "Control+Option+Shift",
+                "Control + Option + Shift",
+            ),
+            ("RightOption+Control", "Control+Option", "Control + Option"),
+        ] {
+            let key = bare_modifier(spelling).unwrap_or_else(|| panic!("{spelling}"));
+            assert_eq!(key.shortcut(), shortcut, "{spelling}");
+            assert_eq!(key.label(), label, "{spelling}");
+            assert_eq!(bare_modifier(&key.shortcut()), Some(key), "{spelling}");
+            assert_eq!(
+                watcher_for(&Binding::Keyboard {
+                    shortcut: spelling.to_string()
+                }),
+                Watcher::ModifierKey(key)
+            );
+        }
+        // A lone Shift, Command or Option is part of every other shortcut.
+        for lone in ["Shift", "Command", "Option", "Control+Control", "Fn+Fn"] {
+            assert_eq!(bare_modifier(lone), None, "{lone}");
+        }
+    }
+
+    #[test]
+    fn a_chord_may_be_tapped() {
+        let ts = vec![row(Gesture::Tap, TriggerTarget::Agent, "Control+Option")];
+        assert!(validate(&ts, &[]).is_ok());
+    }
+
+    #[test]
+    fn the_retired_modifier_kind_still_reads_every_spelling() {
+        for (stored, shortcut) in [
+            ("fn", "Fn"),
+            ("fn_control", "Fn+Control"),
+            ("control", "Control"),
+            ("right_option", "RightOption"),
+        ] {
+            let json = format!(r#"{{ "kind": "modifier", "key": "{stored}" }}"#);
+            let b: Binding = serde_json::from_str(&json).expect("reads");
+            assert_eq!(
+                b,
+                Binding::Keyboard {
+                    shortcut: shortcut.to_string()
+                }
+            );
+        }
     }
 
     #[test]
