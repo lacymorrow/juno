@@ -28,7 +28,6 @@ function macList(selected: string): JunoVoiceList {
     engine: "system",
     engine_label: "Your Mac",
     note: null,
-    better_voices_available: false,
     engines: [
       { id: "system", name: "Your Mac" },
       { id: "kokoro", name: "Kokoro" },

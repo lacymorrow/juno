@@ -512,19 +512,6 @@ pub async fn open_system_preferences(preference_pane: String) -> Result<(), Stri
             "notifications" => {
                 "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
             }
-            // Not a permission: the pane that manages the voices installed on
-            // this Mac (System Settings > Accessibility > Spoken Content,
-            // whose System Voice menu holds Manage Voices). Juno cannot
-            // install a voice, but the person can, so the row that says a
-            // better voice exists gets to open the place it comes from.
-            //
-            // The Accessibility settings extension still declares
-            // `legacyBundleIdentifier = com.apple.preference.universalaccess`
-            // with `allowsXAppleSystemPreferencesURLScheme`, and still carries
-            // the `Speech` anchor, on macOS 26.6.
-            "spoken_content" => {
-                "x-apple.systempreferences:com.apple.preference.universalaccess?Speech"
-            }
             _ => return Err(format!("Unknown preference pane: {}", preference_pane)),
         };
 
