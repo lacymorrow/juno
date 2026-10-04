@@ -842,7 +842,17 @@ fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
             // The payload says how this session was triggered, so the session
             // identity can record it instead of the stop paths inferring it.
             let method = VoiceStartMethod::from_event_payload(event.payload());
+            // A held key's start carries its hold id. Settling it when the
+            // handler is done, however it ends, performs a release that
+            // arrived while the microphone was still opening (see
+            // `hold_gate`).
+            let hold = crate::hold_gate::hold_from_payload(event.payload());
             safe_spawn_async_task(move || async move {
+                let _settle = crate::hold_gate::SettleOnDrop::new(
+                    app_handle_clone.clone(),
+                    VoiceTarget::Agent,
+                    hold,
+                );
                 handle_agent_transcription_start(&app_handle_clone, method).await;
             });
         },

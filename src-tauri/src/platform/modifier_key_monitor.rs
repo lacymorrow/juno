@@ -1073,6 +1073,43 @@ mod tests {
     }
 
     #[test]
+    fn a_quick_press_leaves_nothing_held_for_the_next_hold() {
+        // The reported sequence with the default bindings (Hold Fn, Hold
+        // Fn+Control): a ~150ms press, then an ordinary hold of each.
+        let mut st = ModifierState::default();
+        st.on_flags_changed(FN, FN_HELD, &both(), 0);
+        assert_eq!(
+            st.on_flags_changed(FN, FN_RELEASED, &both(), 150),
+            vec![(ModifierKey::Fn, true), (ModifierKey::Fn, false)],
+            "the down edge is always followed by its up edge, in that order"
+        );
+        assert!(!st.has_pending());
+        assert!(st.poll(10 * D).is_empty(), "nothing is left waiting");
+
+        // A real hold of Fn starts and ends normally.
+        st.on_flags_changed(FN, FN_HELD, &both(), 1000);
+        assert_eq!(st.poll(1000 + D), vec![(ModifierKey::Fn, true)]);
+        assert_eq!(
+            st.on_flags_changed(FN, FN_RELEASED, &both(), 1800),
+            vec![(ModifierKey::Fn, false)]
+        );
+
+        // And so does a hold of the chord.
+        st.on_flags_changed(FN, FN_HELD, &both(), 2000);
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &both(), 2020),
+            vec![(ModifierKey::FnControl, true)]
+        );
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_HELD, &both(), 2600),
+            vec![(ModifierKey::FnControl, false)]
+        );
+        assert!(st
+            .on_flags_changed(FN, FN_RELEASED, &both(), 2610)
+            .is_empty());
+    }
+
+    #[test]
     fn control_joining_after_the_window_hands_the_finger_from_the_plain_key_to_the_chord() {
         let mut st = ModifierState::default();
         st.on_flags_changed(FN, FN_HELD, &both(), 0);

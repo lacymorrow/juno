@@ -105,7 +105,17 @@ fn setup_dictation_listeners(app: &AppHandle) {
             // The payload says how this session was triggered, so the session
             // identity can record it instead of the stop paths inferring it.
             let method = VoiceStartMethod::from_event_payload(event.payload());
+            // A held key's start carries its hold id. Settling it when the
+            // handler is done, however it ends, performs a release that
+            // arrived while the microphone was still opening (see
+            // `hold_gate`).
+            let hold = crate::hold_gate::hold_from_payload(event.payload());
             tauri::async_runtime::spawn(async move {
+                let _settle = crate::hold_gate::SettleOnDrop::new(
+                    app_handle.clone(),
+                    VoiceTarget::Dictation,
+                    hold,
+                );
                 handle_dictation_transcription_start(app_handle, method).await;
             });
         },
@@ -502,6 +512,30 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle, method: Voi
         .await
         {
             Ok(()) => {
+                // Was this session ended while the microphone was opening (the
+                // stop key, a tap, the bar)? Then the end found no microphone
+                // to close, and the one just opened belongs to nobody. Close
+                // it and put the app back to rest, silently, the way the agent
+                // start already does.
+                let still_ours = app_state
+                    .current_voice_session()
+                    .is_some_and(|open| open.id == session_id);
+                if !still_ours {
+                    info!(
+                        "[Dictation Mode] Voice session {} ended while it was starting; closing the microphone it opened",
+                        session_id
+                    );
+                    crate::integration::close_unowned_audio_stream(&app_handle).await;
+                    if app_state.current_voice_session().is_none() {
+                        crate::commands::dictation::end_dictation_session(
+                            &app_handle,
+                            "ended while starting",
+                        )
+                        .await;
+                    }
+                    return;
+                }
+
                 info!("[Dictation Mode] Started immediate transcription successfully");
 
                 if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, true) {
