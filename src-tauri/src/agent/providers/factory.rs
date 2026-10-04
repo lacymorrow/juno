@@ -62,6 +62,62 @@ pub struct ProviderInfo {
     pub needs_sign_in: bool,
 }
 
+/// What a person is told when the provider they are on has nothing to run
+/// with. Plain words and one thing to do, never a configuration error.
+pub(crate) const NO_PROVIDER_MESSAGE: &str =
+    "Juno has no AI to talk to yet. Sign in to Claude Code, or add an API key in Settings > Providers.";
+
+/// Which provider a query runs on.
+///
+/// The saved choice is decided here. `AI_PROVIDER` is a developer override for
+/// a machine where nobody has picked, so it never outvotes someone who chose
+/// "Use your Claude subscription" in setup: a stray variable in a `.env`
+/// would send that person to the API-key path.
+pub(crate) fn select_provider(
+    config: &ProviderConfig,
+    env_override: Option<&str>,
+) -> Result<Provider, AgentError> {
+    let id = match env_override.filter(|v| !v.is_empty()) {
+        Some(over) if !config.provider_chosen_by_user => over,
+        _ => config.active_provider.as_str(),
+    };
+    Provider::from_str(id)
+        .ok_or_else(|| AgentError::ConfigurationError(format!("Unknown provider: '{}'", id)))
+}
+
+/// Fail early, in plain words, when `provider` has no credential.
+///
+/// The Claude CLI never needs a key: its credential is the login the `claude`
+/// binary already holds, so it is never refused here. Every other provider
+/// needs a key from settings or its environment variable.
+pub(crate) fn check_credential(
+    provider: &Provider,
+    settings: &crate::settings::ProviderConfig,
+    env_key: Option<String>,
+) -> Result<(), AgentError> {
+    if *provider == Provider::ClaudeCli || crate::demo::is_demo_build() {
+        return Ok(());
+    }
+    let has = |k: &Option<String>| k.as_deref().is_some_and(|v| !v.is_empty());
+    if has(&settings.api_key) || has(&env_key) {
+        return Ok(());
+    }
+    Err(AgentError::NoProvider(NO_PROVIDER_MESSAGE.to_string()))
+}
+
+fn ensure_can_run(
+    provider: &Provider,
+    settings: &crate::settings::ProviderConfig,
+) -> Result<(), AgentError> {
+    let env_name = match provider {
+        Provider::Anthropic => Some("ANTHROPIC_API_KEY"),
+        Provider::OpenAI | Provider::Rig => Some("OPENAI_API_KEY"),
+        Provider::Gemini => Some("GEMINI_API_KEY"),
+        Provider::ClaudeCli => None,
+    };
+    check_credential(provider, settings, env_name.and_then(|n| env::var(n).ok()))
+}
+
 /// Factory for creating provider-specific AgentBrain implementations
 pub struct BrainFactory;
 
@@ -325,12 +381,9 @@ impl BrainFactory {
     ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
         let config = load_provider_config(app_handle);
 
-        // Determine active provider: AI_PROVIDER env var overrides stored config
-        let provider_id_str =
-            env::var("AI_PROVIDER").unwrap_or_else(|_| config.active_provider.clone());
-        let provider = Provider::from_str(&provider_id_str).ok_or_else(|| {
-            AgentError::ConfigurationError(format!("Unknown provider: '{}'", provider_id_str))
-        })?;
+        // The person's saved choice wins; AI_PROVIDER only steers when they
+        // never picked one.
+        let provider = select_provider(&config, env::var("AI_PROVIDER").ok().as_deref())?;
         info!("Attempting to use AI provider: {}", provider.id());
 
         let mut provider_config = config.resolve_provider(provider.clone()).ok_or_else(|| {
@@ -376,6 +429,8 @@ impl BrainFactory {
         if let Some(ref model) = provider_config.model {
             crate::utils::coordinates::set_current_model(model);
         }
+
+        ensure_can_run(&provider, &provider_config)?;
 
         match provider {
             Provider::Anthropic => {
@@ -427,11 +482,7 @@ impl BrainFactory {
     ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
         let config = load_provider_config(app_handle);
 
-        let provider_id_str =
-            env::var("AI_PROVIDER").unwrap_or_else(|_| config.active_provider.clone());
-        let provider = Provider::from_str(&provider_id_str).ok_or_else(|| {
-            AgentError::ConfigurationError(format!("Unknown provider: '{}'", provider_id_str))
-        })?;
+        let provider = select_provider(&config, env::var("AI_PROVIDER").ok().as_deref())?;
         info!(
             "Attempting to use AI provider: {} with custom system prompt",
             provider.id()
@@ -468,6 +519,8 @@ impl BrainFactory {
         if let Some(ref model) = provider_config.model {
             crate::utils::coordinates::set_current_model(model);
         }
+
+        ensure_can_run(&provider, &provider_config)?;
 
         match provider {
             Provider::Anthropic => {
@@ -737,5 +790,76 @@ impl BrainFactory {
 
         info!("🔧 Safari tools registered successfully");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod subscription_tests {
+    use super::*;
+
+    fn chose(id: &str, by_user: bool) -> ProviderConfig {
+        ProviderConfig {
+            active_provider: id.to_string(),
+            provider_chosen_by_user: by_user,
+            ..ProviderConfig::default()
+        }
+    }
+
+    fn entry(config: &ProviderConfig, p: Provider) -> crate::settings::ProviderConfig {
+        config.resolve_provider(p).expect("default entry exists")
+    }
+
+    #[test]
+    fn subscription_choice_selects_the_cli_and_needs_no_api_key() {
+        let config = chose("claude_cli", true);
+        let provider = select_provider(&config, None).unwrap();
+        assert_eq!(provider, Provider::ClaudeCli);
+        // No key in settings, none in the environment.
+        assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
+    }
+
+    #[test]
+    fn a_saved_choice_beats_the_ai_provider_variable() {
+        let config = chose("claude_cli", true);
+        assert_eq!(
+            select_provider(&config, Some("anthropic")).unwrap(),
+            Provider::ClaudeCli
+        );
+        // With nothing chosen the variable still steers, as documented.
+        let fresh = chose("anthropic", false);
+        assert_eq!(
+            select_provider(&fresh, Some("claude_cli")).unwrap(),
+            Provider::ClaudeCli
+        );
+    }
+
+    #[test]
+    fn no_credential_says_what_to_do_in_plain_words() {
+        if crate::demo::is_demo_build() {
+            return;
+        }
+        let config = chose("anthropic", false);
+        let err = check_credential(
+            &Provider::Anthropic,
+            &entry(&config, Provider::Anthropic),
+            None,
+        )
+        .unwrap_err();
+        let text = err.to_string();
+        assert_eq!(text, NO_PROVIDER_MESSAGE);
+        assert!(text.contains("Sign in to Claude Code"));
+        assert!(text.contains("Settings > Providers"));
+        assert!(!text.contains("Configuration error"));
+        assert!(!text.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn a_key_in_settings_or_environment_is_a_credential() {
+        let config = chose("anthropic", false);
+        let mut with_key = entry(&config, Provider::Anthropic);
+        with_key.api_key = Some("sk-ant-example".into());
+        assert!(check_credential(&Provider::Anthropic, &with_key, None).is_ok());
+        let bare = entry(&config, Provider::Anthropic);
+        assert!(check_credential(&Provider::Anthropic, &bare, Some("sk-ant-env".into())).is_ok());
     }
 }
