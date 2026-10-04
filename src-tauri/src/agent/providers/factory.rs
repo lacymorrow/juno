@@ -189,9 +189,8 @@ impl BrainFactory {
 
     /// Fallback method that reads from environment (used when centralized settings unavailable)
     fn get_agent_mode_fallback() -> AgentMode {
-        let mode_str = env::var("AGENT_MODE").unwrap_or_else(|_| {
-            AgentMode::default().to_string().to_string()
-        });
+        let mode_str =
+            env::var("AGENT_MODE").unwrap_or_else(|_| AgentMode::default().to_string().to_string());
         AgentMode::from_str(&mode_str).unwrap_or_default()
     }
 
