@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import {
   Select,
   SelectContent,
@@ -6,11 +5,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { useCallback, useEffect } from "react";
-import { toast } from "sonner";
-import { COMMANDS } from "@/lib/constants.generated";
+import { useEffect } from "react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { VoicePicker } from "../VoicePicker";
@@ -64,27 +60,6 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     void loadAudioDevices();
     void loadJunoVoices();
   }, [loadAudioDevices, loadJunoVoices]);
-
-  // The voices Juno can speak with are the voices macOS has installed, and
-  // the good ones are downloads the person has not made yet. Juno cannot
-  // install a voice, so a sentence about where better voices come from would
-  // be the whole answer; but the person can install one, and a condition the
-  // person can change is owed the control that changes it, not a sentence.
-  // This opens the pane that holds it. Shown only when Rust reports a better
-  // voice is available to download (`better_voices_available`), so a Mac that
-  // already has the good ones is not told there are better ones to get.
-  const openVoiceDownloads = useCallback(async () => {
-    try {
-      await invoke(COMMANDS.PERMISSIONS_OPEN_SYSTEM_PREFERENCES, {
-        preferencePane: "spoken_content",
-      });
-    } catch (error) {
-      console.error("Failed to open the voice settings pane:", error);
-      toast.error(
-        "Could not open System Settings. Look under Accessibility, then Spoken Content.",
-      );
-    }
-  }, []);
 
   const inputs = audioDevices?.inputs ?? [];
   const outputs = audioDevices?.outputs ?? [];
@@ -247,22 +222,6 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             />
           }
         />
-
-        {junoVoices?.better_voices_available && (
-          <SettingsRow
-            id="more-voices"
-            label="More voices"
-            description="Your Mac can download voices that sound much more like a person. New ones show up in this list."
-          >
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void openVoiceDownloads()}
-            >
-              Add Voices
-            </Button>
-          </SettingsRow>
-        )}
       </SettingsGroup>
 
       <TtsEngineGroup settings={settings} />

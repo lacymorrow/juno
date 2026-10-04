@@ -68,8 +68,6 @@ export interface JunoVoiceList {
 	options: JunoVoiceOption[];
 	/** One sentence when there is something to say instead of rows. */
 	note: string | null;
-	/** True when every voice this Mac has is the compact one. */
-	better_voices_available: boolean;
 	/** The engines the advanced picker offers. Silence is not one: it is a row. */
 	engines: { id: string; name: string }[];
 }
