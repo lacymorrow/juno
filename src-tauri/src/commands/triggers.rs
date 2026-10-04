@@ -61,20 +61,21 @@ pub async fn get_triggers(app_state: State<'_, AppState>) -> Result<Vec<Trigger>
 pub async fn get_trigger_hints(
     app_state: State<'_, AppState>,
 ) -> Result<triggers::TriggerHints, String> {
-    Ok(triggers::hints(&app_state.get_triggers()?))
+    let mut hints = triggers::hints(&app_state.get_triggers()?);
+    hints.globe_key = crate::platform::fn_key_detection::fn_key_present();
+    Ok(hints)
 }
 
-/// Listen for a bare modifier key so a screen can ask someone to press theirs.
+/// Listen for modifier-only bindings so a screen can ask someone to press
+/// theirs.
 ///
-/// While this is on, pressing Fn reports the key rather than starting
-/// dictation: the person is choosing a binding, not using one. The trigger
-/// editor arms it for the same reason setup does, because Fn never reaches a
-/// web page and so a key recorder in the window would sit there seeing
-/// nothing while the person pressed the key they wanted.
-///
-/// Asking beats interrogating the hardware: "does this machine have an Fn
-/// key" has no single answer once a second keyboard is plugged in, and the
-/// press proves the key actually reaches Juno, which no capability check can.
+/// While this is on, pressing Fn, or Control and Option together, reports the
+/// binding rather than starting dictation: the person is choosing a binding,
+/// not using one. It is reported once every key is up, as the largest set
+/// held together, so a chord is recorded as the chord. The trigger editor arms
+/// it because Fn never reaches a web page and a web key recorder does not
+/// record modifiers on their own, so it would sit there seeing nothing while
+/// the person pressed the keys they wanted.
 #[tauri::command]
 pub async fn set_trigger_capture(app: tauri::AppHandle, active: bool) -> Result<(), String> {
     crate::platform::modifier_key_monitor::set_capture(&app, active)
@@ -110,17 +111,30 @@ pub async fn globe_key_needs_setup() -> Result<bool, String> {
     }
 }
 
-/// This keyboard has no Fn key: hold Right Option to talk to Juno, hold
-/// Control to dictate. See [`triggers::apply_no_fn_defaults`]. Returns the
-/// saved list, or the reason it could not be saved.
-#[tauri::command]
-pub async fn use_no_fn_defaults(
-    app: AppHandle,
-    app_state: State<'_, AppState>,
-) -> Result<Vec<Trigger>, String> {
-    let mut next = app_state.get_triggers()?;
-    triggers::apply_no_fn_defaults(&mut next);
-    set_triggers(app, next, app_state).await
+/// Put the default holds on keys the connected keyboards have, after
+/// [`crate::platform::fn_key_detection`] changes its answer. See
+/// [`triggers::settle_for_keyboard`]. Nothing is said to the person: the keys
+/// on screen simply become the ones that work.
+pub(crate) async fn apply_keyboard_detection(app: AppHandle) {
+    let present = crate::platform::fn_key_detection::fn_key_present();
+    let app_state = app.state::<AppState>();
+    let mut next = match app_state.get_triggers() {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("[Triggers] Could not read triggers for the keyboard change: {e}");
+            return;
+        }
+    };
+    if !triggers::settle_for_keyboard(&mut next, present) {
+        return;
+    }
+    if let Err(e) = set_triggers(app.clone(), next, app_state).await {
+        warn!("[Triggers] Could not move the default holds for the keyboard change: {e}");
+        return;
+    }
+    if let Err(e) = app.emit(events::triggers::CHANGED, ()) {
+        warn!("[Triggers] Could not announce the keyboard change: {e}");
+    }
 }
 
 /// Open the macOS Keyboard settings pane, where "Press globe key to" lives.
@@ -193,6 +207,11 @@ pub async fn get_trigger_issues(
     let mut candidate = triggers;
     triggers::enable_newly_bound(&previous, &mut candidate);
     triggers::disable_unbound(&mut candidate);
+    triggers::clear_fallback_on_rebind(&previous, &mut candidate);
+    triggers::settle_for_keyboard(
+        &mut candidate,
+        crate::platform::fn_key_detection::fn_key_present(),
+    );
     Ok(triggers::issues(&candidate, &reserved_combos()))
 }
 
@@ -225,6 +244,15 @@ pub async fn set_triggers(
     // back claiming to be on. Both run before validate, so the returned list is
     // what the UI renders and the switch reflects what the trigger can do.
     triggers::disable_unbound(&mut normalized);
+
+    // A row the person rebinds is theirs, and Juno stops moving it. A row
+    // still on a globe-key default (a reset, a fresh list) goes to the key
+    // this Mac's keyboards actually have.
+    triggers::clear_fallback_on_rebind(&previous, &mut normalized);
+    triggers::settle_for_keyboard(
+        &mut normalized,
+        crate::platform::fn_key_detection::fn_key_present(),
+    );
 
     // Escape and Cmd+Comma are still live and still off-limits, so a trigger
     // cannot steal them. Voice activation used to be reserved here too and is

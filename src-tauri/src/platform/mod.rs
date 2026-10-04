@@ -11,6 +11,8 @@ pub mod macos;
 /// Automation (TCC AppleEvents) consent per target app, asked before macOS asks.
 pub mod automation;
 pub mod file_panels;
+/// Whether a connected keyboard has a globe (Fn) key, from IOKit HID.
+pub mod fn_key_detection;
 /// Input Monitoring (TCC ListenEvent) check + request over IOKit; stubs elsewhere.
 pub mod input_monitoring;
 pub mod modifier_key_monitor;

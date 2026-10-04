@@ -48,12 +48,6 @@ function mountBackend(list: Row[], needsSetup: boolean) {
         return Promise.resolve([]);
       case COMMANDS.TRIGGERS_GLOBE_KEY_NEEDS_SETUP:
         return Promise.resolve(needsSetup);
-      case COMMANDS.TRIGGERS_USE_NO_FN_DEFAULTS:
-        // What `triggers::apply_no_fn_defaults` writes.
-        return Promise.resolve([
-          row("a", "agent", "RightOption"),
-          row("d", "dictation", "Control"),
-        ]);
       default:
         return Promise.resolve(null);
     }
@@ -87,28 +81,39 @@ describe("the globe key note", () => {
 describe("a keyboard with no Fn key", () => {
   beforeEach(() => invoke.mockReset());
 
-  it("offers the switch, and it writes Right Option and Control", async () => {
+  it("is never a question: the screen has no such switch", async () => {
     mountBackend(FN_DEFAULTS, false);
     render(<TriggersSettings settings={settings} />);
-    (await screen.findByText("My keyboard has no Fn key")).click();
-
-    await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith(COMMANDS.TRIGGERS_USE_NO_FN_DEFAULTS),
-    );
-    expect(await screen.findByLabelText("Right Option")).toBeTruthy();
-    expect(screen.getByLabelText("Control")).toBeTruthy();
-    // Nothing left on Fn, so the offer is gone.
-    await waitFor(() => expect(screen.queryByText("My keyboard has no Fn key")).toBeNull());
+    await screen.findByLabelText("Edit binding for Hold to talk to Juno");
+    expect(screen.queryByText(/no Fn key/i)).toBeNull();
   });
 
-  it("is not offered when nothing is bound to Fn", async () => {
+  it("shows the keys the backend moved the defaults to", async () => {
+    // What `triggers::settle_for_keyboard` leaves when no globe key is
+    // connected.
     mountBackend([row("a", "agent", "RightOption"), row("d", "dictation", "Control")], false);
     render(<TriggersSettings settings={settings} />);
-    await screen.findByLabelText("Right Option");
-    expect(screen.queryByText("My keyboard has no Fn key")).toBeNull();
+    expect(await screen.findByLabelText("Right Option")).toBeTruthy();
+    expect(screen.getByLabelText("Control")).toBeTruthy();
   });
 
   it("draws Right Option as one cap", () => {
     expect(shortcutCaps("RightOption").map((c) => c.name)).toEqual(["Right Option"]);
+  });
+});
+
+describe("modifier chords", () => {
+  beforeEach(() => invoke.mockReset());
+
+  it("draws each modifier of a chord as its own cap", () => {
+    expect(shortcutCaps("Control+Option").map((c) => c.name)).toEqual(["Control", "Option"]);
+    expect(shortcutCaps("Fn+Shift").map((c) => c.name)).toEqual(["Shift", "Globe"]);
+  });
+
+  it("lists a globe chord beside the globe key", async () => {
+    mountBackend([row("a", "agent", "Fn"), row("d", "dictation", "Fn+Option")], false);
+    render(<TriggersSettings settings={settings} />);
+    expect(await screen.findByLabelText("Globe")).toBeTruthy();
+    expect(screen.getByLabelText("Option Globe")).toBeTruthy();
   });
 });

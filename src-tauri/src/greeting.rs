@@ -76,13 +76,30 @@ fn summoning_key(app: &AppHandle) -> Option<(String, String)> {
 /// an instruction and a noise.
 fn spoken(combo: &str) -> String {
     if let Some(key) = crate::triggers::bare_modifier(combo) {
-        return match key {
-            crate::triggers::ModifierKey::Fn => "the globe key".to_string(),
-            crate::triggers::ModifierKey::FnControl => {
-                "the globe key and Control together".to_string()
+        use crate::triggers::ModifierKey;
+        if key == ModifierKey::FN {
+            return "the globe key".to_string();
+        }
+        if key == ModifierKey::RIGHT_OPTION {
+            return "the right Option key".to_string();
+        }
+        // A chord: name each key, the globe key the way a person says it.
+        let names: Vec<String> = key
+            .shortcut()
+            .split('+')
+            .map(|part| {
+                if part == "Fn" {
+                    "the globe key".to_string()
+                } else {
+                    part.to_string()
+                }
+            })
+            .collect();
+        return match names.split_last() {
+            Some((last, rest)) if !rest.is_empty() => {
+                format!("{} and {last} together", rest.join(", "))
             }
-            crate::triggers::ModifierKey::Control => "Control".to_string(),
-            crate::triggers::ModifierKey::RightOption => "the right Option key".to_string(),
+            _ => names.join(" "),
         };
     }
 
@@ -211,6 +228,17 @@ mod tests {
     #[test]
     fn the_globe_control_chord_is_spoken_as_two_keys_together() {
         assert_eq!(spoken("Fn+Control"), "the globe key and Control together");
+    }
+
+    #[test]
+    fn any_modifier_chord_is_spoken_as_keys_together() {
+        assert_eq!(spoken("Control+Option"), "Control and Option together");
+        assert_eq!(
+            spoken("Control+Option+Shift"),
+            "Control, Option and Shift together"
+        );
+        assert_eq!(spoken("Control"), "Control");
+        assert_eq!(spoken("RightOption"), "the right Option key");
     }
 
     #[test]

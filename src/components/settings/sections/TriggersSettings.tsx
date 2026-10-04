@@ -63,6 +63,9 @@ interface Trigger {
   phrase: string | null;
   require_hey_prefix: boolean;
   enabled: boolean;
+  /** Set by the backend when it moved this row off the globe key because no
+   * connected keyboard has one. Sent back untouched; never shown. */
+  keyboard_fallback?: boolean;
 }
 
 /**
@@ -150,54 +153,64 @@ function mouseLabel(button: number): string {
   }
 }
 
-/**
- * Every spelling of the globe key a shortcut string may use. Apple has called
- * the same physical key both Fn and Globe; the backend accepts either.
- */
-const FN_ALIASES = ["fn", "globe"];
-
 /** The shortcut string the backend records a globe-key press as. */
 const FN_SHORTCUT = "Fn";
 
-const isFnShortcut = (shortcut: string) =>
-  FN_ALIASES.includes(shortcut.trim().toLowerCase());
+/**
+ * Each modifier a modifier-only binding can hold, in the order the backend
+ * writes them. Mirrors `ModifierKey` in Rust: Apple has called the globe key
+ * both Fn and Globe, and the backend accepts either.
+ */
+const MODIFIER_WORDS: Array<{ name: string; words: string[] }> = [
+  { name: "Fn", words: ["fn", "globe"] },
+  { name: "Control", words: ["control", "ctrl"] },
+  { name: "Option", words: ["option", "opt", "alt"] },
+  { name: "Shift", words: ["shift"] },
+  { name: "Command", words: ["command", "cmd", "meta", "super"] },
+];
 
-/** The globe key and Control held together, in either order. Mirrors Rust. */
-const isFnChordShortcut = (shortcut: string) => {
+const RIGHT_OPTION_WORDS = [
+  "rightoption",
+  "right option",
+  "right_option",
+  "rightalt",
+  "right alt",
+  "roption",
+];
+
+/**
+ * The modifiers a modifier-only shortcut names, in canonical order, or null
+ * when it names an ordinary key too. Right Option alone is ["Right Option"].
+ */
+function modifierSet(shortcut: string): string[] | null {
   const parts = shortcut.split("+").map((p) => p.trim().toLowerCase());
-  const isControl = (p: string) => p === "control" || p === "ctrl";
-  return (
-    parts.length === 2 &&
-    ((FN_ALIASES.includes(parts[0]) && isControl(parts[1])) ||
-      (isControl(parts[0]) && FN_ALIASES.includes(parts[1])))
-  );
-};
-
-/** Control on its own, a bare hold for a keyboard with no Fn key. */
-const isControlShortcut = (shortcut: string) =>
-  ["control", "ctrl"].includes(shortcut.trim().toLowerCase());
-
-/** The right-hand Option key on its own. Mirrors `is_right_option_word`. */
-const isRightOptionShortcut = (shortcut: string) =>
-  ["rightoption", "right option", "right_option", "rightalt", "right alt", "roption"].includes(
-    shortcut.trim().toLowerCase(),
-  );
+  if (parts.length === 1 && RIGHT_OPTION_WORDS.includes(parts[0])) return ["Right Option"];
+  const names: string[] = [];
+  for (const part of parts) {
+    const found = MODIFIER_WORDS.find((m) => m.words.includes(part))
+      ?? (RIGHT_OPTION_WORDS.includes(part) ? MODIFIER_WORDS[2] : undefined);
+    if (!found || names.includes(found.name)) return null;
+    names.push(found.name);
+  }
+  return MODIFIER_WORDS.map((m) => m.name).filter((n) => names.includes(n));
+}
 
 /** Whether this binding uses the globe key, which macOS has its own plans for. */
 function isFnBinding(binding: Binding | null): boolean {
   return (
     binding?.kind === "keyboard" &&
-    (isFnShortcut(binding.shortcut) || isFnChordShortcut(binding.shortcut))
+    (modifierSet(binding.shortcut)?.includes(FN_SHORTCUT) ?? false)
   );
 }
 
 function bindingLabel(binding: Binding | null): string {
   if (!binding) return "Set binding";
   if (binding.kind === "keyboard") {
-    if (isFnShortcut(binding.shortcut)) return "Fn (globe)";
-    if (isFnChordShortcut(binding.shortcut)) return "Fn + Control";
-    if (isControlShortcut(binding.shortcut)) return "Control";
-    if (isRightOptionShortcut(binding.shortcut)) return "Right Option";
+    // A modifier-only binding reads the way the backend names it in a
+    // conflict, so the row and the sentence beside it agree.
+    const set = modifierSet(binding.shortcut);
+    if (set && set.length === 1 && set[0] === FN_SHORTCUT) return "Fn (globe)";
+    if (set) return set.join(" + ");
     return binding.shortcut || "Set binding";
   }
   return mouseLabel(binding.button);
@@ -422,17 +435,12 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
     };
   }, []);
 
-  // "My keyboard has no Fn key": the backend rebinds both default holds to
-  // Right Option and Control. The person can rebind either afterwards.
-  const switchToNoFnKeys = useCallback(async () => {
-    try {
-      const saved = await invoke<Trigger[]>(COMMANDS.TRIGGERS_USE_NO_FN_DEFAULTS);
-      persistedRef.current = saved;
-      setTriggers(saved);
-    } catch (e) {
-      toast.error(errStr(e));
-    }
-  }, []);
+  // The backend moves the default holds on its own when a keyboard with or
+  // without a globe key comes or goes. Read the list again so the keys on
+  // screen are the keys that work.
+  useEventListener(EVENTS.TRIGGERS_CHANGED, () => {
+    void load();
+  });
 
   const patchTrigger = useCallback(
     (id: string, patch: Partial<Trigger>, opts: { immediate?: boolean } = {}) => {
@@ -642,18 +650,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
           otherwise, and a key that already does nothing needs no advice. */}
       {usesFn && globeNeedsSetup && <GlobeKeyNote />}
 
-      <div className="flex items-center justify-between gap-3 px-1">
-        {usesFn ? (
-          <button
-            type="button"
-            onClick={() => void switchToNoFnKeys()}
-            className="text-[12px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          >
-            My keyboard has no Fn key
-          </button>
-        ) : (
-          <span />
-        )}
+      <div className="flex items-center justify-end gap-3 px-1">
         {addMenu}
       </div>
     </div>
@@ -896,12 +893,13 @@ function TriggerRow({
                 }
                 onCancel={onCloseEditor}
               />
-              {/* The globe key is a key, so it is recorded by pressing it like
-                  any other. It just never reaches this page, so the press is
-                  reported by the backend while this editor is open. */}
+              {/* Modifier keys on their own (the globe key, Control and
+                  Option together) are keys too, recorded by pressing them.
+                  They never reach this page, so the backend reports them
+                  once they are let go, while this editor is open. */}
               <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
                 <Globe className="size-3 shrink-0" aria-hidden />
-                Or press the globe key (Fn) now to use that.
+                Or press modifier keys on their own, like Fn, or Control and Option, then let go.
               </p>
             </div>
           ) : (

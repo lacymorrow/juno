@@ -459,6 +459,10 @@ pub mod triggers {
     /// the person can choose it by pressing it rather than being told whether
     /// their keyboard has it. Payload carries the key name.
     pub const KEY_CAPTURED: &str = "trigger-key-captured";
+    /// The backend changed the trigger list on its own, because a keyboard
+    /// with or without a globe key came or went. Screens showing the list
+    /// read it again. No payload.
+    pub const CHANGED: &str = "triggers-changed";
 }
 
 /// Tool and command execution events

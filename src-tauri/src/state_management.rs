@@ -183,6 +183,11 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
     // a wake phrase worked until the app was quit and then never listened again.
     crate::commands::triggers::apply_stored_voice_triggers(&app_handle).await;
 
+    // Watch which keyboards are connected, so the default holds sit on keys
+    // the person can actually press. After the triggers are loaded, because
+    // the first answer may move them.
+    crate::platform::fn_key_detection::start(&app_handle);
+
     // Initialize dictation input monitoring system
     if let Err(e) =
         crate::dictation_monitor::init_dictation_input_monitoring(app_handle.clone()).await
