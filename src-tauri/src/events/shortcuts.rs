@@ -501,6 +501,13 @@ pub(crate) fn fire_key_edge(app: &AppHandle, binding: &Binding, pressed: bool) {
     if crate::agent_monitor::bar_voice_active() {
         if !pressed {
             let _ = app.emit(events::agent::TRANSCRIPTION_STOP, ());
+            // The key is up, so whatever hold its monitor was tracking is
+            // over too. Without this a hold that began before the bar query
+            // opened would never see its release, and the monitor would
+            // refuse every later press of that key as "already active".
+            if let Some(target) = gestures.hold {
+                hold_edges::enqueue(app, hold_edges::HoldEdge::Forget(target));
+            }
         }
         return;
     }
@@ -579,37 +586,108 @@ fn perform(app: &AppHandle, decision: recognizer::Decision) {
 }
 
 fn start_hold(app: &AppHandle, target: TriggerTarget) {
-    match target {
-        TriggerTarget::Agent => {
-            tauri::async_runtime::spawn(async move {
-                crate::agent_monitor::on_agent_input_pressed().await;
-            });
-        }
-        TriggerTarget::Dictation => {
-            let app_clone = app.clone();
-            tauri::async_runtime::spawn(async move {
-                crate::dictation_monitor::on_dictation_input_pressed(&app_clone).await;
-            });
-        }
-    }
+    hold_edges::enqueue(app, hold_edges::HoldEdge::Press(target));
 }
 
 fn end_hold(app: &AppHandle, target: TriggerTarget) {
-    let app_clone = app.clone();
-    match target {
-        TriggerTarget::Agent => {
+    hold_edges::enqueue(app, hold_edges::HoldEdge::Release(target));
+}
+
+/// # Hold edges run in the order the keys moved
+///
+/// Every press and release used to be its own spawned task. Two spawns from
+/// the event thread are not ordered: on the multi-threaded runtime the
+/// release's task can reach the input monitor's lock before the press's does.
+/// That happens exactly when the two edges arrive together, which is what a
+/// delayed modifier does when it is let go just past its window (the
+/// flags-changed event delivers the overdue down edge and the up edge in one
+/// batch). The monitor then saw the release first (nothing to end), then the
+/// press (a hold starts), and no release ever came: the session started
+/// listening on a key that was already up, and stayed there.
+///
+/// One consumer, fed in arrival order, removes the race by construction. The
+/// work it does per edge is a lock and an emit, so nothing queues behind it
+/// for long.
+mod hold_edges {
+    use super::*;
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum HoldEdge {
+        Press(TriggerTarget),
+        Release(TriggerTarget),
+        /// The Tap path for the agent, which ends in the same monitor.
+        AgentTap,
+        /// The key is up but its release was spent elsewhere: put the
+        /// monitor back to rest without acting on anything.
+        Forget(TriggerTarget),
+    }
+
+    type Queue = Option<UnboundedSender<(AppHandle, HoldEdge)>>;
+    static QUEUE: Mutex<Queue> = Mutex::new(None);
+
+    pub fn enqueue(app: &AppHandle, edge: HoldEdge) {
+        let mut guard = match QUEUE.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let alive = guard.as_ref().is_some_and(|tx| !tx.is_closed());
+        if !alive {
+            let (tx, mut rx) = unbounded_channel::<(AppHandle, HoldEdge)>();
             tauri::async_runtime::spawn(async move {
+                while let Some((app, edge)) = rx.recv().await {
+                    run(&app, edge).await;
+                }
+            });
+            *guard = Some(tx);
+        }
+        let sent = guard
+            .as_ref()
+            .is_some_and(|tx| tx.send((app.clone(), edge)).is_ok());
+        drop(guard);
+        if !sent {
+            // Never drop an edge: a lost release is the stuck state itself.
+            // Run it on its own rather than not at all.
+            error!(
+                "[GestureRecognizer] Hold edge queue unavailable; running {:?} directly",
+                edge
+            );
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move { run(&app, edge).await });
+        }
+    }
+
+    async fn run(app: &AppHandle, edge: HoldEdge) {
+        match edge {
+            HoldEdge::Press(TriggerTarget::Agent) => {
+                crate::agent_monitor::on_agent_input_pressed().await;
+            }
+            HoldEdge::Press(TriggerTarget::Dictation) => {
+                crate::dictation_monitor::on_dictation_input_pressed(app).await;
+            }
+            HoldEdge::Release(TriggerTarget::Agent) => {
                 crate::agent_monitor::on_agent_input_released_with_mode(
-                    &app_clone,
+                    app,
                     state::AgentTriggerMode::Hold,
                 )
                 .await;
-            });
-        }
-        TriggerTarget::Dictation => {
-            tauri::async_runtime::spawn(async move {
-                crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
-            });
+            }
+            HoldEdge::Release(TriggerTarget::Dictation) => {
+                crate::dictation_monitor::on_dictation_input_released(app).await;
+            }
+            HoldEdge::Forget(TriggerTarget::Agent) => {
+                crate::agent_monitor::force_reset_agent_input_state().await;
+            }
+            HoldEdge::Forget(TriggerTarget::Dictation) => {
+                crate::dictation_monitor::force_reset_dictation_input_state().await;
+            }
+            HoldEdge::AgentTap => {
+                crate::agent_monitor::on_agent_input_released_with_mode(
+                    app,
+                    state::AgentTriggerMode::Tap,
+                )
+                .await;
+            }
         }
     }
 }
@@ -617,16 +695,7 @@ fn end_hold(app: &AppHandle, target: TriggerTarget) {
 /// The Tap code path: exactly what a Tap trigger calls.
 fn run_tap_path(app: &AppHandle, target: TriggerTarget) {
     match target {
-        TriggerTarget::Agent => {
-            let app_clone = app.clone();
-            tauri::async_runtime::spawn(async move {
-                crate::agent_monitor::on_agent_input_released_with_mode(
-                    &app_clone,
-                    state::AgentTriggerMode::Tap,
-                )
-                .await;
-            });
-        }
+        TriggerTarget::Agent => hold_edges::enqueue(app, hold_edges::HoldEdge::AgentTap),
         TriggerTarget::Dictation => handle_dictation_tap_mode(app),
     }
 }

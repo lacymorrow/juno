@@ -1,5 +1,6 @@
 use crate::constants::{events, monitor_sessions};
-use crate::state::{SessionClaim, VoiceStartMethod};
+use crate::hold_gate::{self, HoldEnd, HoldId};
+use crate::state::{SessionClaim, VoiceStartMethod, VoiceTarget};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -23,6 +24,9 @@ pub struct DictationInputMonitorState {
     pub transcription_start_time: Option<Instant>, // Track when transcription actually started
     pub force_cleanup_scheduled: bool,
     pub last_cancellation_time: Option<Instant>, // Track when last cancellation occurred
+    /// The start this hold emitted, so its release can wait for it to land
+    /// (see [`crate::hold_gate`]).
+    pub hold: Option<HoldId>,
 }
 
 /// What letting go of the key meant.
@@ -48,6 +52,7 @@ impl DictationInputMonitorState {
             transcription_start_time: None,
             force_cleanup_scheduled: false,
             last_cancellation_time: None,
+            hold: None,
         }
     }
 
@@ -92,6 +97,7 @@ impl DictationInputMonitorState {
 
         // Force reset all state immediately to prevent stuck state
         self.hold_start_time = None;
+        self.hold = None;
         self.transcription_started = false;
         self.hold_threshold_reached = false;
         self.passthrough_scheduled = false;
@@ -188,12 +194,45 @@ impl DictationInputMonitorState {
     pub fn force_reset(&mut self) {
         warn!("[DictationMonitor] Force resetting all dictation input state");
         self.hold_start_time = None;
+        self.hold = None;
         self.transcription_started = false;
         self.hold_threshold_reached = false;
         self.passthrough_scheduled = false;
         self.transcription_start_time = None;
         self.force_cleanup_scheduled = false;
         self.last_cancellation_time = None; // Clear cooldown tracking on reset
+    }
+
+    /// Start transcription if the hold has lasted long enough, opening a gate
+    /// entry for it. Returns the id the start event must carry.
+    pub fn open_start(&mut self, open: impl FnOnce() -> HoldId) -> Option<HoldId> {
+        if !self.check_and_start_transcription() {
+            return None;
+        }
+        let id = open();
+        self.hold = Some(id);
+        Some(id)
+    }
+
+    /// The key came up. Returns what the release meant and whether it has to
+    /// wait for its start to land before it is acted on. `defer` is
+    /// [`hold_gate::defer`] for this target; tests pass a local gate.
+    pub fn release(
+        &mut self,
+        defer: impl FnOnce(HoldId, HoldEnd) -> bool,
+    ) -> (HoldRelease, Duration, bool) {
+        let hold = self.hold.take();
+        let (outcome, duration) = self.end_hold();
+        let end = match outcome {
+            HoldRelease::Committed => Some(HoldEnd::Commit),
+            HoldRelease::Cancelled => Some(HoldEnd::Cancel),
+            HoldRelease::Nothing => None,
+        };
+        let deferred = match (hold, end) {
+            (Some(id), Some(end)) => defer(id, end),
+            _ => false,
+        };
+        (outcome, duration, deferred)
     }
 
     /// True while the monitor is watching a held key.
@@ -230,7 +269,7 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
         let mut state = DICTATION_INPUT_STATE.lock().await;
 
         // Check if we should start transcription immediately
-        if state.check_and_start_transcription() {
+        if let Some(hold) = state.open_start(|| hold_gate::open(VoiceTarget::Dictation)) {
             // Emit event to start transcription immediately. The payload says
             // how this session is being triggered: this monitor only ever
             // watches a held key or button, so the session it opens is a
@@ -238,12 +277,18 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
             // handler to work it out.
             if let Err(e) = app_handle.emit(
                 events::dictation::TRANSCRIPTION_START,
-                serde_json::json!({ "method": VoiceStartMethod::PushToTalk.as_wire() }),
+                serde_json::json!({
+                    "method": VoiceStartMethod::PushToTalk.as_wire(),
+                    "hold": hold,
+                }),
             ) {
                 error!(
                     "[DictationMonitor] Failed to emit dictation-transcription-start: {}",
                     e
                 );
+                // No start is coming to settle it, so a release must not wait
+                // for one.
+                let _ = hold_gate::settle(VoiceTarget::Dictation, hold);
             }
         }
 
@@ -369,7 +414,18 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
 pub async fn on_dictation_input_released(app_handle: &AppHandle) -> HoldRelease {
     let mut state = DICTATION_INPUT_STATE.lock().await;
 
-    let (outcome, duration) = state.end_hold();
+    let (outcome, duration, deferred) =
+        state.release(|id, end| hold_gate::defer(VoiceTarget::Dictation, id, end));
+    if deferred {
+        // The start this hold emitted is still opening the microphone. Acting
+        // now would race it: the stop or cancel would find nothing to end, and
+        // the start would then open a microphone no release is coming for. The
+        // start handler performs this release when it lands.
+        info!(
+            "[DictationMonitor] Released ({}ms) before the session finished starting; the release waits for it",
+            duration.as_millis()
+        );
+    }
 
     match outcome {
         HoldRelease::Committed => {
@@ -385,8 +441,10 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) -> HoldRelease 
             );
 
             // Emit event to stop dictation normally
-            if let Err(e) = app_handle.emit(events::dictation::STOP, ()) {
-                error!("[DictationMonitor] Failed to emit dictation-stop: {}", e);
+            if !deferred {
+                if let Err(e) = app_handle.emit(events::dictation::STOP, ()) {
+                    error!("[DictationMonitor] Failed to emit dictation-stop: {}", e);
+                }
             }
         }
         HoldRelease::Cancelled => {
@@ -394,11 +452,13 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) -> HoldRelease 
                 "[DictationMonitor] Dictation input released before threshold ({}ms) - cancelling",
                 duration.as_millis()
             );
-            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_CANCEL, ()) {
-                error!(
-                    "[DictationMonitor] Failed to emit dictation-transcription-cancel: {}",
-                    e
-                );
+            if !deferred {
+                if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_CANCEL, ()) {
+                    error!(
+                        "[DictationMonitor] Failed to emit dictation-transcription-cancel: {}",
+                        e
+                    );
+                }
             }
         }
         HoldRelease::Nothing => {
@@ -490,6 +550,65 @@ mod tests {
             !state.start_hold(),
             "cooldown must swallow a press that lands inside COOLDOWN_AFTER_CANCEL_MS"
         );
+    }
+
+    fn cooldown_elapsed(state: &mut DictationInputMonitorState) {
+        state.last_cancellation_time = Instant::now().checked_sub(Duration::from_millis(
+            monitor_sessions::COOLDOWN_AFTER_CANCEL_MS + 10,
+        ));
+    }
+
+    #[test]
+    fn a_press_released_before_anything_starts_leaves_nothing_to_end() {
+        let mut state = DictationInputMonitorState::new();
+        let mut gate = hold_gate::StartGate::default();
+        assert!(state.start_hold());
+        // Released before the monitor's tick opened a start.
+        let (outcome, _, deferred) = state.release(|id, end| gate.defer(id, end));
+        assert_eq!(outcome, HoldRelease::Nothing);
+        assert!(!deferred);
+        assert!(!state.is_tracking_hold());
+    }
+
+    #[test]
+    fn a_release_before_the_start_lands_is_applied_when_it_lands() {
+        // The ~150ms press: the start is out, the microphone is still opening,
+        // and the key comes up.
+        let mut state = DictationInputMonitorState::new();
+        let mut gate = hold_gate::StartGate::default();
+        assert!(state.start_hold());
+        held_for_ms(&mut state, 50);
+        let hold = state
+            .open_start(|| gate.open())
+            .expect("the hold has lasted past IMMEDIATE_START_MS");
+
+        let (outcome, _, deferred) = state.release(|id, end| gate.defer(id, end));
+        assert_eq!(outcome, HoldRelease::Cancelled);
+        assert!(deferred, "the cancel must not race the start it ends");
+        assert!(
+            !state.is_tracking_hold(),
+            "the monitor itself is at rest the moment the key is up"
+        );
+
+        // The start lands and hands the release back: the session is
+        // cancelled, which closes the microphone.
+        assert_eq!(gate.settle(hold), Some(HoldEnd::Cancel));
+        assert_eq!(
+            hold_gate::release_event(VoiceTarget::Dictation, HoldEnd::Cancel),
+            events::dictation::TRANSCRIPTION_CANCEL
+        );
+
+        // And the next hold is an ordinary one.
+        cooldown_elapsed(&mut state);
+        assert!(state.start_hold(), "the next hold is not refused");
+        held_for_ms(&mut state, monitor_sessions::HOLD_DURATION_MS + 50);
+        let next = state.open_start(|| gate.open()).expect("it starts");
+        assert_ne!(next, hold);
+        assert!(state.check_and_reach_threshold());
+        assert_eq!(gate.settle(next), None, "landed with the key still down");
+        let (outcome, _, deferred) = state.release(|id, end| gate.defer(id, end));
+        assert_eq!(outcome, HoldRelease::Committed);
+        assert!(!deferred, "a landed start is stopped at once");
     }
 
     #[test]
