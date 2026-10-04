@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { APPEARANCE_CATALOG } from "@/components/bar/appearanceCatalog";
+import { ALL_APPEARANCE_ENTRIES } from "@/components/bar/appearanceCatalog";
 
 /**
  * # The Escape contract, pinned to the source
@@ -66,14 +66,14 @@ function escapeCall(source: string): string | null {
 
 describe("every bar appearance shares one Escape", () => {
   it("maps every appearance in the catalog to a component", () => {
-    const missing = APPEARANCE_CATALOG.filter(
+    const missing = ALL_APPEARANCE_ENTRIES.filter(
       (entry) => !COMPONENT_FOR_APPEARANCE[entry.value],
     ).map((entry) => entry.name);
     expect(missing).toEqual([]);
-    expect(Object.keys(COMPONENT_FOR_APPEARANCE)).toHaveLength(APPEARANCE_CATALOG.length);
+    expect(Object.keys(COMPONENT_FOR_APPEARANCE)).toHaveLength(ALL_APPEARANCE_ENTRIES.length);
   });
 
-  it.each(APPEARANCE_CATALOG.map((entry) => [entry.name, entry.value] as const))(
+  it.each(ALL_APPEARANCE_ENTRIES.map((entry) => [entry.name, entry.value] as const))(
     "%s calls the shared hook instead of hand-rolling Escape",
     (_name, value) => {
       const source = read(COMPONENT_FOR_APPEARANCE[value]);
@@ -93,7 +93,7 @@ describe("every bar appearance shares one Escape", () => {
     },
   );
 
-  it.each(APPEARANCE_CATALOG.map((entry) => [entry.name, entry.value] as const))(
+  it.each(ALL_APPEARANCE_ENTRIES.map((entry) => [entry.name, entry.value] as const))(
     "%s tells the truth about its own state",
     (_name, value) => {
       const call = escapeCall(read(COMPONENT_FOR_APPEARANCE[value]));

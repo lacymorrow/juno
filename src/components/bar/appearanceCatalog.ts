@@ -14,21 +14,21 @@ export interface AppearanceEntry {
   descriptor: string;
 }
 
-export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
+const ALL_APPEARANCES: readonly AppearanceEntry[] = [
+  {
+    value: UI.BAR_APPEARANCES_FLOATING,
+    name: "Pill",
+    descriptor: "A small pill that opens when you speak. The default.",
+  },
   {
     value: UI.BAR_APPEARANCES_PERSONA,
     name: "Avatar",
-    descriptor: "A character you talk to. It leans in, thinks, and talks back with its mouth moving. The default.",
+    descriptor: "A character you talk to. It leans in, thinks, and talks back with its mouth moving.",
   },
   {
     value: UI.BAR_APPEARANCES_DYNAMIC,
     name: "Island",
     descriptor: "One small shape that grows to hold the answer, then settles back.",
-  },
-  {
-    value: UI.BAR_APPEARANCES_FLOATING,
-    name: "Pill",
-    descriptor: "A small pill that opens when you speak.",
   },
   {
     value: UI.BAR_APPEARANCES_APP,
@@ -57,11 +57,20 @@ export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = [
   },
 ];
 
+/**
+ * What the picker and onboarding offer. Hidden looks (the Rust list
+ * `bar_appearances::HIDDEN`, the one place to bring one back) keep their code
+ * and entries above but are not shown.
+ */
+export const APPEARANCE_CATALOG: readonly AppearanceEntry[] = ALL_APPEARANCES.filter(
+  (entry) => !(UI.BAR_APPEARANCES_HIDDEN as readonly string[]).includes(entry.value),
+);
+
 /** The catalog entry for a stored value, falling back to the default look. */
 export function appearanceEntry(value: string | null | undefined): AppearanceEntry {
   return (
-    APPEARANCE_CATALOG.find((entry) => entry.value === value) ??
-    APPEARANCE_CATALOG.find((entry) => entry.value === UI.BAR_APPEARANCES_DEFAULT)!
+    ALL_APPEARANCES.find((entry) => entry.value === value) ??
+    ALL_APPEARANCES.find((entry) => entry.value === UI.BAR_APPEARANCES_DEFAULT)!
   );
 }
 
@@ -76,3 +85,6 @@ export function appearancePreviewUrl(
   if (options.reducedMotion) params.set("motion", "reduced");
   return `${APPEARANCE_PREVIEW_PATH}?${params.toString()}`;
 }
+
+/** Every look, hidden ones included, for the dev harness and tests. */
+export const ALL_APPEARANCE_ENTRIES = ALL_APPEARANCES;
