@@ -80,6 +80,49 @@ pub async fn set_trigger_capture(app: tauri::AppHandle, active: bool) -> Result<
     crate::platform::modifier_key_monitor::set_capture(&app, active)
 }
 
+/// Whether the `AppleFnUsageType` value says the globe key still opens
+/// something. `0` is "Do Nothing"; any other value, or no value at all (the
+/// macOS default, which is the emoji picker), means the person has a switch to
+/// flip. `output` is what `defaults read` printed, or `None` when it failed.
+pub(crate) fn globe_key_needs_setup_from(output: Option<&str>) -> bool {
+    output.map(str::trim) != Some("0")
+}
+
+/// Whether to show the "Press globe key to" advice at all.
+///
+/// Read from the system rather than assumed: the advice was shown on every
+/// launch, including on Macs where the key already does nothing.
+#[tauri::command]
+pub async fn globe_key_needs_setup() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("defaults")
+            .args(["read", "com.apple.HIToolbox", "AppleFnUsageType"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string());
+        Ok(globe_key_needs_setup_from(output.as_deref()))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+/// This keyboard has no Fn key: hold Right Option to talk to Juno, hold
+/// Control to dictate. See [`triggers::apply_no_fn_defaults`]. Returns the
+/// saved list, or the reason it could not be saved.
+#[tauri::command]
+pub async fn use_no_fn_defaults(
+    app: AppHandle,
+    app_state: State<'_, AppState>,
+) -> Result<Vec<Trigger>, String> {
+    let mut next = app_state.get_triggers()?;
+    triggers::apply_no_fn_defaults(&mut next);
+    set_triggers(app, next, app_state).await
+}
+
 /// Open the macOS Keyboard settings pane, where "Press globe key to" lives.
 ///
 /// macOS claims the globe key for the emoji picker by default and an app
@@ -478,4 +521,24 @@ async fn persist(app: &AppHandle, triggers: &[Trigger]) -> Result<(), String> {
     all.triggers = triggers.to_vec();
 
     settings_manager.save_all_settings(&all).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::globe_key_needs_setup_from;
+
+    #[test]
+    fn do_nothing_needs_no_setup() {
+        assert!(!globe_key_needs_setup_from(Some("0\n")));
+        assert!(!globe_key_needs_setup_from(Some(" 0 ")));
+    }
+
+    #[test]
+    fn every_other_state_needs_setup() {
+        // 1 change input source, 2 emoji, 3 dictation; missing is the default.
+        for v in ["1\n", "2\n", "3\n", "garbage"] {
+            assert!(globe_key_needs_setup_from(Some(v)), "{v}");
+        }
+        assert!(globe_key_needs_setup_from(None));
+    }
 }

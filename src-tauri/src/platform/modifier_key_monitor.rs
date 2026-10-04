@@ -1,4 +1,4 @@
-//! # Passive bare-modifier monitor (the Fn/globe key, and Fn with Control)
+//! # Passive bare-modifier monitor (Fn, Fn with Control, Control, Right Option)
 //!
 //! Fn produces no ordinary key event. It arrives as `NSEventTypeFlagsChanged`,
 //! which the tauri global-shortcut plugin cannot register and a webview never
@@ -16,6 +16,12 @@
 //! is what a hold needs. See [`ModifierState`] for how the chord and the plain
 //! globe key share a finger without both firing.
 //!
+//! Control and Right Option (key code 61, told apart from the left one) are
+//! the same kind of hold for a keyboard with no Fn key. Both are ingredients of
+//! ordinary shortcuts, so they only count as a hold after
+//! [`MODIFIER_HOLD_DELAY_MS`], and any other key going down cancels them: that
+//! is what stops Control+C from opening the microphone. See [`ModifierState`].
+//!
 //! Caps Lock is deliberately not offered. The same check showed it emits one
 //! event per press and none on release, because it is a hardware toggle: the
 //! "up" edge only arrives when you press it again. Push-to-talk on a key with
@@ -32,13 +38,6 @@
 
 use crate::triggers::ModifierKey;
 use tauri::AppHandle;
-
-/// A bare modifier key, or chord, a trigger is bound to.
-///
-/// Just the key. Which gestures it carries, and what each one does, is read
-/// from the trigger list when the edge arrives, so this observer knows nothing
-/// about either.
-pub type ModifierBinding = ModifierKey;
 
 /// The Function key's virtual key code on `NSEventTypeFlagsChanged`.
 const FN_KEY_CODE: u16 = 63;
@@ -75,52 +74,202 @@ pub fn captured_key(key_code: u16, modifier_flags: usize) -> Option<ModifierKey>
     (modifier_edge(key_code, modifier_flags) == Some(true)).then_some(ModifierKey::Fn)
 }
 
-/// What is currently held, so a chord and the plain key it contains agree on
-/// who owns the finger.
+/// How long a bare modifier must stay down before it counts as a hold.
 ///
-/// With both Hold Fn and Hold Fn+Control bound, pressing Fn then Control is one
-/// gesture, the chord, and must not also leave the plain Fn hold running:
+/// A chord is two keys that never land in the same instant, so Fn then Control
+/// is Fn alone for a few milliseconds. Starting the agent hold on that first
+/// edge flashed the agent for a chord that was never meant for it. A short
+/// wait fixes that: if Control joins inside the window only the chord starts,
+/// and if Fn comes up inside it the press was a fumble and nothing starts.
 ///
-/// - If Control is already down when Fn arrives, the chord starts and the plain
-///   key never does.
-/// - If Fn is down first, the plain key has started. When Control joins, the
-///   plain key is released (a short hold is cancelled by the hold monitor, the
-///   way any brief press is) and the chord starts.
-/// - Either way, the plain key stays quiet until Fn itself comes up, so
+/// 100 ms is the longest a finger takes to land the second key of a deliberate
+/// chord, and about the shortest a person can hold a key on purpose, so a
+/// chord never flashes and a hold never feels late. The same window is what
+/// keeps a bare Control or Right Option from firing on the front edge of an
+/// ordinary Control+C. Only a key that can be the front half of something else
+/// pays it: Fn when the chord is bound, and Control and Right Option always.
+/// Every other trigger starts on its first edge, as before.
+pub const MODIFIER_HOLD_DELAY_MS: u64 = 100;
+
+/// Right Option's virtual key code on `NSEventTypeFlagsChanged`.
+const RIGHT_OPTION_KEY_CODE: u16 = 61;
+/// `NX_DEVICERALTKEYMASK`: set while the right Option key itself is down. The
+/// shared Option bit stays set while the left one is held, so on its own it
+/// cannot tell a right press from a right release.
+const RIGHT_OPTION_DEVICE_FLAG: usize = 0x40;
+/// Right Command, left Command, left Shift, Caps Lock, left Option and right
+/// Shift: a press of any of these while a bare hold is still waiting means the
+/// key was the front of a shortcut.
+const OTHER_MODIFIER_KEY_CODES: [u16; 6] = [54, 55, 56, 57, 58, 60];
+
+/// A bare modifier a trigger is bound to, and what else its key carries.
+///
+/// Which gestures it carries, and what each one does, is read from the trigger
+/// list when the edge arrives. This only records what the state machine needs
+/// to know about timing: a key that also has a Tap row must fire on its first
+/// edge, because a short press is the whole gesture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModifierBinding {
+    pub key: ModifierKey,
+    /// The same key also carries a Tap row.
+    pub tap: bool,
+}
+
+impl ModifierBinding {
+    #[cfg(test)]
+    pub fn hold(key: ModifierKey) -> Self {
+        Self { key, tap: false }
+    }
+}
+
+/// An edge for a bound key: `(key, pressed)`.
+pub type Edge = (ModifierKey, bool);
+
+/// What is currently held, so a chord and the plain keys it contains agree on
+/// who owns the finger, and so a hold only starts once it has lasted.
+///
+/// The clock is passed in as `now_ms`, so the whole machine is pure and tests
+/// run it on a fake one. Nothing here reads time or sleeps; the caller asks
+/// [`ModifierState::poll`] when a deadline passes.
+///
+/// - A delayed key goes down as *pending* with a deadline. Letting go before
+///   the deadline drops it without a trace. [`ModifierState::poll`], or the
+///   next event, promotes it to a real hold once the deadline has passed.
+/// - With both Hold Fn and Hold Fn+Control bound, pressing Fn then Control is
+///   one gesture, the chord. Control joining inside the window means Fn never
+///   starts. Control joining after Fn has started releases Fn and starts the
+///   chord.
+/// - Either way the plain key stays quiet until it is itself released, so
 ///   letting go of Control while still on Fn does not bring the plain hold
 ///   back from the dead.
+/// - A bare Control or Right Option is cancelled by any other key going down
+///   ([`ModifierState::on_key_down`]): pending it never starts, started it is
+///   released, and either way it stays quiet until it comes up.
 #[derive(Debug, Default)]
 pub struct ModifierState {
     down: std::collections::HashSet<ModifierKey>,
-    /// Fn is down, and belongs to a chord until it is released.
-    fn_yielded: bool,
+    /// Waiting out the delay: key and the time it becomes a hold.
+    pending: std::collections::HashMap<ModifierKey, u64>,
+    /// Held, but spoken for (by a chord, or cancelled) until it is released.
+    yielded: std::collections::HashSet<ModifierKey>,
 }
 
 impl ModifierState {
+    fn tracked(&self, key: ModifierKey) -> bool {
+        self.down.contains(&key) || self.pending.contains_key(&key) || self.yielded.contains(&key)
+    }
+
+    /// Whether any key is still waiting out its delay, so the caller knows to
+    /// come back and [`poll`](Self::poll).
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    /// Promote every pending key whose deadline has passed to a hold.
+    pub fn poll(&mut self, now_ms: u64) -> Vec<Edge> {
+        let mut due: Vec<(u64, ModifierKey)> = self
+            .pending
+            .iter()
+            .filter(|(_, deadline)| **deadline <= now_ms)
+            .map(|(key, deadline)| (*deadline, *key))
+            .collect();
+        due.sort_by_key(|(deadline, key)| (*deadline, key.shortcut()));
+        let mut out = Vec::new();
+        for (_, key) in due {
+            self.pending.remove(&key);
+            self.down.insert(key);
+            out.push((key, true));
+        }
+        out
+    }
+
+    /// Start a hold now, or after the delay.
+    fn begin(&mut self, key: ModifierKey, delayed: bool, now_ms: u64, out: &mut Vec<Edge>) {
+        if self.tracked(key) {
+            return;
+        }
+        if delayed {
+            self.pending
+                .insert(key, now_ms.saturating_add(MODIFIER_HOLD_DELAY_MS));
+        } else {
+            self.down.insert(key);
+            out.push((key, true));
+        }
+    }
+
+    /// The key came up: forget it, and release it if it had started.
+    fn end(&mut self, key: ModifierKey, out: &mut Vec<Edge>) {
+        self.yielded.remove(&key);
+        self.pending.remove(&key);
+        if self.down.remove(&key) {
+            out.push((key, false));
+        }
+    }
+
+    /// Take the finger from `key` without waiting for it to come up.
+    fn yield_key(&mut self, key: ModifierKey, out: &mut Vec<Edge>) {
+        self.pending.remove(&key);
+        if self.down.remove(&key) {
+            out.push((key, false));
+        }
+        self.yielded.insert(key);
+    }
+
+    /// Any ordinary key going down. A bare Control or Right Option that is
+    /// still down was the front of a shortcut, not a hold.
+    pub fn on_key_down(&mut self, now_ms: u64) -> Vec<Edge> {
+        let mut out = self.poll(now_ms);
+        for key in [ModifierKey::Control, ModifierKey::RightOption] {
+            if self.pending.contains_key(&key) || self.down.contains(&key) {
+                self.yield_key(key, &mut out);
+            }
+        }
+        out
+    }
+
     /// Fold one `flagsChanged` event in. Returns the edges it produced, in the
-    /// order they must be delivered: `(key, pressed)`.
+    /// order they must be delivered.
     pub fn on_flags_changed(
         &mut self,
         key_code: u16,
         flags: usize,
-        bound: &[ModifierKey],
-    ) -> Vec<(ModifierKey, bool)> {
+        bound: &[ModifierBinding],
+        now_ms: u64,
+    ) -> Vec<Edge> {
+        // A deadline that passed before this event arrived has already
+        // happened: the hold started, and this event may be what ends it.
+        let mut out = self.poll(now_ms);
+
+        let is_bound = |key: ModifierKey| bound.iter().any(|b| b.key == key);
+        let has_tap = |key: ModifierKey| bound.iter().any(|b| b.key == key && b.tap);
         let fn_held = flags & FN_FLAG != 0;
         let control_held = flags & CONTROL_FLAG != 0;
-        let mut out = Vec::new();
+        let is_control_key = CONTROL_KEY_CODES.contains(&key_code);
 
-        // The chord first, so that it can take the finger from the plain key
+        // Another modifier going down while a bare Control or Right Option is
+        // still waiting means it was the front of a shortcut.
+        let own_codes_of = |key: ModifierKey| match key {
+            ModifierKey::Control => CONTROL_KEY_CODES.to_vec(),
+            ModifierKey::RightOption => vec![RIGHT_OPTION_KEY_CODE],
+            _ => Vec::new(),
+        };
+        for key in [ModifierKey::Control, ModifierKey::RightOption] {
+            let other = OTHER_MODIFIER_KEY_CODES.contains(&key_code)
+                || (key == ModifierKey::Control && key_code == RIGHT_OPTION_KEY_CODE)
+                || (key == ModifierKey::RightOption && is_control_key);
+            if other && !own_codes_of(key).contains(&key_code) && self.pending.contains_key(&key) {
+                self.yield_key(key, &mut out);
+            }
+        }
+
+        // The chord first, so that it can take the finger from the plain keys
         // within the same event.
-        if bound.contains(&ModifierKey::FnControl)
-            && (key_code == FN_KEY_CODE || CONTROL_KEY_CODES.contains(&key_code))
-        {
+        if is_bound(ModifierKey::FnControl) && (key_code == FN_KEY_CODE || is_control_key) {
             let active = fn_held && control_held;
             let was = self.down.contains(&ModifierKey::FnControl);
             if active && !was {
-                if self.down.remove(&ModifierKey::Fn) {
-                    out.push((ModifierKey::Fn, false));
-                }
-                self.fn_yielded = true;
+                self.yield_key(ModifierKey::Fn, &mut out);
+                self.yield_key(ModifierKey::Control, &mut out);
                 self.down.insert(ModifierKey::FnControl);
                 out.push((ModifierKey::FnControl, true));
             } else if !active && was {
@@ -129,23 +278,34 @@ impl ModifierState {
             }
         }
 
-        if bound.contains(&ModifierKey::Fn) {
-            if let Some(pressed) = modifier_edge(key_code, flags) {
-                if !pressed {
-                    self.fn_yielded = false;
-                    if self.down.remove(&ModifierKey::Fn) {
-                        out.push((ModifierKey::Fn, false));
-                    }
-                } else if !self.fn_yielded && self.down.insert(ModifierKey::Fn) {
-                    out.push((ModifierKey::Fn, true));
-                }
+        if key_code == FN_KEY_CODE {
+            if !fn_held {
+                // Fn up. Whatever it was doing, a short press that never made
+                // it past the window ends here without having started.
+                self.end(ModifierKey::Fn, &mut out);
+            } else if is_bound(ModifierKey::Fn) {
+                let delayed = is_bound(ModifierKey::FnControl) && !has_tap(ModifierKey::Fn);
+                self.begin(ModifierKey::Fn, delayed, now_ms, &mut out);
             }
         }
 
-        // A chord that is not bound still tracks Fn's release, so a stale
-        // yield cannot outlive the key.
-        if key_code == FN_KEY_CODE && !fn_held {
-            self.fn_yielded = false;
+        if is_control_key {
+            if !control_held {
+                self.end(ModifierKey::Control, &mut out);
+            } else if is_bound(ModifierKey::Control) && !fn_held {
+                // With Fn down this Control belongs to Fn+Control, bound or
+                // not. A bare Control hold is always delayed, so a shortcut
+                // that starts with Control has the window to say so.
+                self.begin(ModifierKey::Control, true, now_ms, &mut out);
+            }
+        }
+
+        if key_code == RIGHT_OPTION_KEY_CODE {
+            if flags & RIGHT_OPTION_DEVICE_FLAG == 0 {
+                self.end(ModifierKey::RightOption, &mut out);
+            } else if is_bound(ModifierKey::RightOption) {
+                self.begin(ModifierKey::RightOption, true, now_ms, &mut out);
+            }
         }
 
         out
@@ -166,7 +326,9 @@ const CAPTURE_LEASE: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::{captured_key, ModifierBinding, ModifierState, CAPTURE_LEASE};
+    use super::{
+        captured_key, ModifierBinding, ModifierState, CAPTURE_LEASE, MODIFIER_HOLD_DELAY_MS,
+    };
     use block::ConcreteBlock;
     use cocoa::base::{id, nil};
     use objc::{class, msg_send, sel, sel_impl};
@@ -176,8 +338,21 @@ mod imp {
     use tauri::AppHandle;
     use tracing::{debug, error, info, warn};
 
-    /// `NSEventMaskFlagsChanged`: 1 << NSEventTypeFlagsChanged(12).
-    const FLAGS_CHANGED_MASK: usize = 1 << 12;
+    /// `NSEventTypeKeyDown` and `NSEventTypeFlagsChanged`.
+    const KEY_DOWN_TYPE: usize = 10;
+    const FLAGS_CHANGED_TYPE: usize = 12;
+    /// `NSEventMask` for the two: 1 << type. Key downs are watched so a bare
+    /// Control or Right Option can tell it was the front of a shortcut.
+    const FLAGS_CHANGED_MASK: usize = (1 << FLAGS_CHANGED_TYPE) | (1 << KEY_DOWN_TYPE);
+
+    /// Milliseconds since the first call, the clock the state machine runs on.
+    fn now_ms() -> u64 {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_millis() as u64
+    }
 
     /// `global` stays `nil` until Accessibility is granted (see module docs).
     struct Monitors {
@@ -249,11 +424,36 @@ mod imp {
         }
         // SAFETY: `event` is a live NSEvent handed to us by AppKit for the
         // duration of the handler; these selectors are plain getters.
-        let (key_code, flags): (u16, usize) = unsafe {
+        let (event_type, key_code, flags): (usize, u16, usize) = unsafe {
+            let event_type: usize = msg_send![event, type];
             let key_code: u16 = msg_send![event, keyCode];
             let flags: usize = msg_send![event, modifierFlags];
-            (key_code, flags)
+            (event_type, key_code, flags)
         };
+
+        // An ordinary key going down. Setup capture has no use for it, and it
+        // only matters to a bare Control or Right Option that is waiting or
+        // held: that key was the front of a shortcut, not a hold.
+        if event_type == KEY_DOWN_TYPE {
+            if CAPTURING.load(Ordering::SeqCst) {
+                return;
+            }
+            let edges = {
+                let mut held = match HELD.lock() {
+                    Ok(g) => g,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                match held.as_mut() {
+                    Some(state) => state.on_key_down(now_ms()),
+                    None => return,
+                }
+            };
+            deliver(app, edges);
+            return;
+        }
+        if event_type != FLAGS_CHANGED_TYPE {
+            return;
+        }
 
         // Setup is asking which key to use. Report the press and act on
         // nothing: this is someone choosing a binding, not using one.
@@ -285,15 +485,23 @@ mod imp {
             Ok(g) => g.clone(),
             Err(poisoned) => poisoned.into_inner().clone(),
         };
-        let edges: Vec<(ModifierBinding, bool)> = {
+        let (edges, waiting) = {
             let mut held = match HELD.lock() {
                 Ok(g) => g,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            held.get_or_insert_with(ModifierState::default)
-                .on_flags_changed(key_code, flags, &bound)
+            let state = held.get_or_insert_with(ModifierState::default);
+            let edges = state.on_flags_changed(key_code, flags, &bound, now_ms());
+            (edges, state.has_pending())
         };
+        deliver(app, edges);
+        if waiting {
+            schedule_poll(app);
+        }
+    }
 
+    /// Hand each edge to the gesture recognizer.
+    fn deliver(app: &AppHandle, edges: Vec<(crate::triggers::ModifierKey, bool)>) {
         for (key, pressed) in edges {
             debug!(
                 "[ModifierKeyMonitor] {} {}",
@@ -308,6 +516,29 @@ mod imp {
                 pressed,
             );
         }
+    }
+
+    /// Come back when the hold delay is up and start whatever outlasted it.
+    ///
+    /// Nothing else would: a key held still sends no further events, so the
+    /// hold would never start. A key that was let go in the window is already
+    /// gone from the state, so a late wake finds nothing to do.
+    fn schedule_poll(app: &AppHandle) {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(MODIFIER_HOLD_DELAY_MS)).await;
+            let edges = {
+                let mut held = match HELD.lock() {
+                    Ok(g) => g,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                match held.as_mut() {
+                    Some(state) => state.poll(now_ms()),
+                    None => return,
+                }
+            };
+            deliver(&app, edges);
+        });
     }
 
     /// Install (or re-install) the monitors for the given bindings.
@@ -577,8 +808,6 @@ mod tests {
     const LEFT_CONTROL: u16 = 59;
     const RIGHT_CONTROL: u16 = 62;
 
-    const BOTH: [ModifierKey; 2] = [ModifierKey::Fn, ModifierKey::FnControl];
-
     #[test]
     fn the_fn_key_reports_press_and_release() {
         assert_eq!(modifier_edge(63, FN_HELD), Some(true));
@@ -621,60 +850,91 @@ mod tests {
     }
 
     /* ------------------------------------------------------------ */
-    /* The Fn + Control chord                                        */
+    /* The state machine, on a fake clock                            */
     /* ------------------------------------------------------------ */
+
+    const D: u64 = MODIFIER_HOLD_DELAY_MS;
+    const LEFT_OPTION: u16 = 58;
+    const RIGHT_OPTION: u16 = 61;
+    const SHIFT: u16 = 56;
+    /// Option's shared bit (1 << 19) with the device bit for the right key.
+    const RIGHT_OPTION_HELD: usize = 0x00080140;
+    /// The same bit with the left key's device bit.
+    const LEFT_OPTION_HELD: usize = 0x00080120;
+    /// Both Option keys down: shared bit and both device bits.
+    const BOTH_OPTIONS_HELD: usize = 0x00080160;
+    const NOTHING_HELD: usize = 0x00000100;
+
+    fn hold(keys: &[ModifierKey]) -> Vec<ModifierBinding> {
+        keys.iter().map(|k| ModifierBinding::hold(*k)).collect()
+    }
+
+    fn both() -> Vec<ModifierBinding> {
+        hold(&[ModifierKey::Fn, ModifierKey::FnControl])
+    }
+
+    #[test]
+    fn the_window_is_a_tenth_of_a_second() {
+        // Named, so the number is argued about in one place. Long enough for a
+        // chord's second key to land, short enough that a hold feels instant.
+        assert_eq!(MODIFIER_HOLD_DELAY_MS, 100);
+    }
 
     #[test]
     fn the_chord_is_down_only_while_both_keys_are_held() {
         let mut st = ModifierState::default();
-        let bound = [ModifierKey::FnControl];
+        let bound = hold(&[ModifierKey::FnControl]);
 
         // Fn alone is not the chord.
-        assert!(st.on_flags_changed(FN, FN_HELD, &bound).is_empty());
+        assert!(st.on_flags_changed(FN, FN_HELD, &bound, 0).is_empty());
         // Control joins: the chord goes down.
         assert_eq!(
-            st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &bound),
+            st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &bound, 10),
             vec![(ModifierKey::FnControl, true)]
         );
         // Control up while Fn stays: the chord is over.
         assert_eq!(
-            st.on_flags_changed(LEFT_CONTROL, FN_HELD, &bound),
+            st.on_flags_changed(LEFT_CONTROL, FN_HELD, &bound, 500),
             vec![(ModifierKey::FnControl, false)]
         );
         // Fn up afterwards says nothing more.
-        assert!(st.on_flags_changed(FN, FN_RELEASED, &bound).is_empty());
+        assert!(st.on_flags_changed(FN, FN_RELEASED, &bound, 600).is_empty());
     }
 
     #[test]
     fn the_chord_works_pressed_in_either_order_and_released_in_either_order() {
         for (first, second) in [(FN, LEFT_CONTROL), (LEFT_CONTROL, FN)] {
             let mut st = ModifierState::default();
-            let bound = [ModifierKey::FnControl];
+            let bound = hold(&[ModifierKey::FnControl]);
             let after_first = if first == FN { FN_HELD } else { CONTROL_HELD };
-            assert!(st.on_flags_changed(first, after_first, &bound).is_empty());
+            assert!(st
+                .on_flags_changed(first, after_first, &bound, 0)
+                .is_empty());
             assert_eq!(
-                st.on_flags_changed(second, FN_AND_CONTROL_HELD, &bound),
+                st.on_flags_changed(second, FN_AND_CONTROL_HELD, &bound, 10),
                 vec![(ModifierKey::FnControl, true)],
                 "pressed {first} then {second}"
             );
             // Release whichever came first.
             let remaining = if first == FN { CONTROL_HELD } else { FN_HELD };
             assert_eq!(
-                st.on_flags_changed(first, remaining, &bound),
+                st.on_flags_changed(first, remaining, &bound, 400),
                 vec![(ModifierKey::FnControl, false)],
                 "released {first} first"
             );
-            assert!(st.on_flags_changed(second, FN_RELEASED, &bound).is_empty());
+            assert!(st
+                .on_flags_changed(second, FN_RELEASED, &bound, 410)
+                .is_empty());
         }
     }
 
     #[test]
     fn the_right_control_key_makes_the_chord_too() {
         let mut st = ModifierState::default();
-        let bound = [ModifierKey::FnControl];
-        st.on_flags_changed(FN, FN_HELD, &bound);
+        let bound = hold(&[ModifierKey::FnControl]);
+        st.on_flags_changed(FN, FN_HELD, &bound, 0);
         assert_eq!(
-            st.on_flags_changed(RIGHT_CONTROL, FN_AND_CONTROL_HELD, &bound),
+            st.on_flags_changed(RIGHT_CONTROL, FN_AND_CONTROL_HELD, &bound, 10),
             vec![(ModifierKey::FnControl, true)]
         );
     }
@@ -682,16 +942,16 @@ mod tests {
     #[test]
     fn control_alone_and_an_arrow_with_the_function_bit_never_fire_the_chord() {
         let mut st = ModifierState::default();
-        let bound = [ModifierKey::FnControl];
+        let bound = hold(&[ModifierKey::FnControl]);
         assert!(st
-            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound)
+            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 0)
             .is_empty());
         assert!(st
-            .on_flags_changed(LEFT_CONTROL, FN_RELEASED, &bound)
+            .on_flags_changed(LEFT_CONTROL, FN_RELEASED, &bound, 10)
             .is_empty());
         // An arrow arrives with the Function bit and, here, Control held.
         assert!(st
-            .on_flags_changed(126, FN_AND_CONTROL_HELD, &bound)
+            .on_flags_changed(126, FN_AND_CONTROL_HELD, &bound, 20)
             .is_empty());
     }
 
@@ -699,84 +959,460 @@ mod tests {
     fn no_release_edge_arrives_for_a_chord_that_never_went_down() {
         // A stray Control release must not end a hold that never started.
         let mut st = ModifierState::default();
-        let bound = [ModifierKey::FnControl];
+        let bound = hold(&[ModifierKey::FnControl]);
         assert!(st
-            .on_flags_changed(LEFT_CONTROL, FN_RELEASED, &bound)
+            .on_flags_changed(LEFT_CONTROL, FN_RELEASED, &bound, 0)
             .is_empty());
-        assert!(st.on_flags_changed(FN, FN_RELEASED, &bound).is_empty());
+        assert!(st.on_flags_changed(FN, FN_RELEASED, &bound, 10).is_empty());
     }
 
-    #[test]
-    fn holding_fn_then_adding_control_hands_the_finger_from_the_plain_key_to_the_chord() {
-        let mut st = ModifierState::default();
-        assert_eq!(
-            st.on_flags_changed(FN, FN_HELD, &BOTH),
-            vec![(ModifierKey::Fn, true)],
-            "plain Fn starts the moment it goes down"
-        );
-        assert_eq!(
-            st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &BOTH),
-            vec![(ModifierKey::Fn, false), (ModifierKey::FnControl, true)],
-            "Control joins: plain Fn is let go, the chord starts"
-        );
-        assert_eq!(
-            st.on_flags_changed(LEFT_CONTROL, FN_HELD, &BOTH),
-            vec![(ModifierKey::FnControl, false)],
-            "Control up ends the chord and does not resurrect the plain hold"
-        );
-        assert!(
-            st.on_flags_changed(FN, FN_RELEASED, &BOTH).is_empty(),
-            "Fn up has nothing left to end"
-        );
-        // And the plain key works again on the next press.
-        assert_eq!(
-            st.on_flags_changed(FN, FN_HELD, &BOTH),
-            vec![(ModifierKey::Fn, true)]
-        );
-    }
+    /* -- Fn waits out the window when a chord is bound ----------- */
 
     #[test]
-    fn control_first_then_fn_is_the_chord_and_the_plain_key_never_starts() {
+    fn fn_then_control_inside_the_window_starts_the_chord_and_never_the_plain_hold() {
         let mut st = ModifierState::default();
-        assert!(st
-            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &BOTH)
-            .is_empty());
+        assert!(st.on_flags_changed(FN, FN_HELD, &both(), 0).is_empty());
+        assert!(st.has_pending(), "Fn is waiting, not started");
         assert_eq!(
-            st.on_flags_changed(FN, FN_AND_CONTROL_HELD, &BOTH),
+            st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &both(), D - 1),
             vec![(ModifierKey::FnControl, true)],
             "no flash of the plain hold"
         );
+        assert!(!st.has_pending(), "the chord took Fn's pending start");
+        assert!(
+            st.poll(10 * D).is_empty(),
+            "the deadline passes and Fn still does not start"
+        );
         assert_eq!(
-            st.on_flags_changed(FN, CONTROL_HELD, &BOTH),
-            vec![(ModifierKey::FnControl, false)]
+            st.on_flags_changed(LEFT_CONTROL, FN_HELD, &both(), 500),
+            vec![(ModifierKey::FnControl, false)],
+            "Control up ends the chord and does not resurrect the plain hold"
         );
         assert!(st
-            .on_flags_changed(LEFT_CONTROL, FN_RELEASED, &BOTH)
+            .on_flags_changed(FN, FN_RELEASED, &both(), 510)
             .is_empty());
     }
 
     #[test]
-    fn plain_fn_alone_still_holds_and_releases_when_only_it_is_bound() {
+    fn control_then_fn_is_the_chord_and_the_plain_key_never_starts() {
         let mut st = ModifierState::default();
-        let bound = [ModifierKey::Fn];
-        assert_eq!(
-            st.on_flags_changed(FN, FN_HELD, &bound),
-            vec![(ModifierKey::Fn, true)]
-        );
-        // Control while Fn is held means nothing to a plain-Fn binding.
         assert!(st
-            .on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &bound)
+            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &both(), 0)
             .is_empty());
         assert_eq!(
-            st.on_flags_changed(FN, CONTROL_HELD, &bound),
+            st.on_flags_changed(FN, FN_AND_CONTROL_HELD, &both(), 30),
+            vec![(ModifierKey::FnControl, true)],
+            "no flash of the plain hold"
+        );
+        assert!(st.poll(10 * D).is_empty());
+        assert_eq!(
+            st.on_flags_changed(FN, CONTROL_HELD, &both(), 400),
+            vec![(ModifierKey::FnControl, false)]
+        );
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, FN_RELEASED, &both(), 410)
+            .is_empty());
+    }
+
+    #[test]
+    fn fn_alone_past_the_window_starts_the_plain_hold() {
+        let mut st = ModifierState::default();
+        assert!(st.on_flags_changed(FN, FN_HELD, &both(), 0).is_empty());
+        assert!(st.poll(D - 1).is_empty(), "not before the window is up");
+        assert_eq!(st.poll(D), vec![(ModifierKey::Fn, true)]);
+        assert!(!st.has_pending());
+        assert_eq!(
+            st.on_flags_changed(FN, FN_RELEASED, &both(), 900),
             vec![(ModifierKey::Fn, false)]
         );
     }
 
     #[test]
-    fn repeated_flag_events_do_not_repeat_an_edge() {
+    fn fn_let_go_inside_the_window_is_a_fumble_and_starts_nothing() {
         let mut st = ModifierState::default();
-        assert_eq!(st.on_flags_changed(FN, FN_HELD, &BOTH).len(), 1);
-        assert!(st.on_flags_changed(FN, FN_HELD, &BOTH).is_empty());
+        assert!(st.on_flags_changed(FN, FN_HELD, &both(), 0).is_empty());
+        assert!(
+            st.on_flags_changed(FN, FN_RELEASED, &both(), D - 1)
+                .is_empty(),
+            "neither a down nor an up edge"
+        );
+        assert!(st.poll(10 * D).is_empty());
+        // And the next press starts the wait afresh.
+        assert!(st.on_flags_changed(FN, FN_HELD, &both(), 1000).is_empty());
+        assert_eq!(st.poll(1000 + D), vec![(ModifierKey::Fn, true)]);
+    }
+
+    #[test]
+    fn a_release_that_beats_the_timer_still_sees_the_hold_start_first() {
+        // The wake-up can run late. An event that arrives after the deadline
+        // has to find the hold already started, or the release would be
+        // dropped as a fumble and the microphone would never close.
+        let mut st = ModifierState::default();
+        st.on_flags_changed(FN, FN_HELD, &both(), 0);
+        assert_eq!(
+            st.on_flags_changed(FN, FN_RELEASED, &both(), D + 20),
+            vec![(ModifierKey::Fn, true), (ModifierKey::Fn, false)]
+        );
+    }
+
+    #[test]
+    fn control_joining_after_the_window_hands_the_finger_from_the_plain_key_to_the_chord() {
+        let mut st = ModifierState::default();
+        st.on_flags_changed(FN, FN_HELD, &both(), 0);
+        assert_eq!(st.poll(D), vec![(ModifierKey::Fn, true)]);
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &both(), 300),
+            vec![(ModifierKey::Fn, false), (ModifierKey::FnControl, true)],
+            "Control joins late: plain Fn is let go, the chord starts"
+        );
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_HELD, &both(), 600),
+            vec![(ModifierKey::FnControl, false)]
+        );
+        assert!(
+            st.poll(5000).is_empty(),
+            "Fn is still down but belongs to the chord until it is released"
+        );
+        assert!(st
+            .on_flags_changed(FN, FN_RELEASED, &both(), 700)
+            .is_empty());
+        // And the plain key works again on the next press.
+        assert!(st.on_flags_changed(FN, FN_HELD, &both(), 800).is_empty());
+        assert_eq!(st.poll(800 + D), vec![(ModifierKey::Fn, true)]);
+    }
+
+    #[test]
+    fn repeated_flag_events_do_not_repeat_an_edge_or_move_the_deadline() {
+        let mut st = ModifierState::default();
+        assert!(st.on_flags_changed(FN, FN_HELD, &both(), 0).is_empty());
+        assert!(st.on_flags_changed(FN, FN_HELD, &both(), 60).is_empty());
+        assert_eq!(
+            st.poll(D),
+            vec![(ModifierKey::Fn, true)],
+            "the first press's deadline stands"
+        );
+        assert!(st.on_flags_changed(FN, FN_HELD, &both(), 200).is_empty());
+    }
+
+    #[test]
+    fn plain_fn_starts_at_once_when_no_chord_is_bound() {
+        // The window is for a chord to land in. With no chord bound there is
+        // nothing to wait for, and Fn's latency is untouched.
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::Fn]);
+        assert_eq!(
+            st.on_flags_changed(FN, FN_HELD, &bound, 0),
+            vec![(ModifierKey::Fn, true)]
+        );
+        assert!(!st.has_pending());
+        // Control while Fn is held means nothing to a plain-Fn binding.
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &bound, 10)
+            .is_empty());
+        assert_eq!(
+            st.on_flags_changed(FN, CONTROL_HELD, &bound, 20),
+            vec![(ModifierKey::Fn, false)]
+        );
+    }
+
+    #[test]
+    fn fn_that_also_carries_a_tap_is_not_made_to_wait() {
+        // A short press is the whole of a tap, so the fumble rule would eat it.
+        let mut st = ModifierState::default();
+        let bound = vec![
+            ModifierBinding {
+                key: ModifierKey::Fn,
+                tap: true,
+            },
+            ModifierBinding::hold(ModifierKey::FnControl),
+        ];
+        assert_eq!(
+            st.on_flags_changed(FN, FN_HELD, &bound, 0),
+            vec![(ModifierKey::Fn, true)]
+        );
+        assert_eq!(
+            st.on_flags_changed(FN, FN_RELEASED, &bound, 30),
+            vec![(ModifierKey::Fn, false)]
+        );
+    }
+
+    #[test]
+    fn the_chord_itself_starts_without_waiting() {
+        // Only the front half of a chord waits. The chord is complete the
+        // moment its second key lands.
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::FnControl]);
+        st.on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 0);
+        assert_eq!(
+            st.on_flags_changed(FN, FN_AND_CONTROL_HELD, &bound, 1),
+            vec![(ModifierKey::FnControl, true)]
+        );
+    }
+
+    /* -- Bare Control ------------------------------------------- */
+
+    #[test]
+    fn a_bare_control_hold_starts_after_the_window_and_ends_on_release() {
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::Control]);
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 0)
+            .is_empty());
+        assert_eq!(st.poll(D), vec![(ModifierKey::Control, true)]);
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, NOTHING_HELD, &bound, 700),
+            vec![(ModifierKey::Control, false)]
+        );
+    }
+
+    #[test]
+    fn the_right_control_key_is_a_bare_control_hold_too() {
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::Control]);
+        st.on_flags_changed(RIGHT_CONTROL, CONTROL_HELD, &bound, 0);
+        assert_eq!(st.poll(D), vec![(ModifierKey::Control, true)]);
+    }
+
+    #[test]
+    fn a_key_pressed_while_control_is_waiting_cancels_it() {
+        // Control+C: the C lands inside the window, so Control was the front
+        // of a shortcut and the microphone never opens.
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::Control]);
+        st.on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 0);
+        assert!(st.on_key_down(D / 2).is_empty());
+        assert!(st.poll(10 * D).is_empty(), "never starts, even held on");
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, NOTHING_HELD, &bound, 800)
+            .is_empty());
+        // The next clean press is a hold again.
+        st.on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 900);
+        assert_eq!(st.poll(900 + D), vec![(ModifierKey::Control, true)]);
+    }
+
+    #[test]
+    fn a_key_pressed_while_control_is_held_ends_the_hold_and_it_stays_ended() {
+        // Control held past the window, then Control+Tab: the hold is let go
+        // rather than left holding the microphone through a shortcut.
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::Control]);
+        st.on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 0);
+        assert_eq!(st.poll(D), vec![(ModifierKey::Control, true)]);
+        assert_eq!(st.on_key_down(400), vec![(ModifierKey::Control, false)]);
+        assert!(st.poll(5000).is_empty());
+        assert!(
+            st.on_flags_changed(LEFT_CONTROL, NOTHING_HELD, &bound, 900)
+                .is_empty(),
+            "the release has nothing left to end"
+        );
+    }
+
+    #[test]
+    fn a_whole_control_shortcut_inside_the_window_fires_nothing() {
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::Control]);
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 0)
+            .is_empty());
+        assert!(st.on_key_down(20).is_empty());
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, NOTHING_HELD, &bound, 60)
+            .is_empty());
+        assert!(st.poll(10 * D).is_empty());
+    }
+
+    #[test]
+    fn another_modifier_pressed_while_control_is_waiting_cancels_it() {
+        // Control+Shift+...: the shortcut is on its way.
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::Control]);
+        st.on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 0);
+        assert!(st
+            .on_flags_changed(SHIFT, CONTROL_HELD | 0x20000, &bound, 30)
+            .is_empty());
+        assert!(st.poll(10 * D).is_empty());
+    }
+
+    #[test]
+    fn a_key_down_with_nothing_held_or_waiting_does_nothing() {
+        let mut st = ModifierState::default();
+        assert!(st.on_key_down(0).is_empty());
+    }
+
+    #[test]
+    fn a_key_down_does_not_end_a_plain_fn_hold() {
+        // Fn already carries arrows, Home and End on a laptop, and the owner's
+        // rule is about Control and Right Option, so Fn is left alone.
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::Fn]);
+        st.on_flags_changed(FN, FN_HELD, &bound, 0);
+        assert!(st.on_key_down(300).is_empty());
+        assert_eq!(
+            st.on_flags_changed(FN, FN_RELEASED, &bound, 400),
+            vec![(ModifierKey::Fn, false)]
+        );
+    }
+
+    /* -- Control and the chord share a finger ------------------- */
+
+    #[test]
+    fn hold_control_and_hold_fn_control_coexist_and_the_chord_wins_either_way() {
+        let bound = hold(&[
+            ModifierKey::Fn,
+            ModifierKey::FnControl,
+            ModifierKey::Control,
+        ]);
+
+        // Control first, then Fn inside the window: only the chord.
+        let mut st = ModifierState::default();
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 0)
+            .is_empty());
+        assert_eq!(
+            st.on_flags_changed(FN, FN_AND_CONTROL_HELD, &bound, 40),
+            vec![(ModifierKey::FnControl, true)]
+        );
+        assert!(st.poll(10 * D).is_empty(), "neither half starts alone");
+
+        // Fn first, then Control inside the window: only the chord.
+        let mut st = ModifierState::default();
+        assert!(st.on_flags_changed(FN, FN_HELD, &bound, 0).is_empty());
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &bound, 40),
+            vec![(ModifierKey::FnControl, true)]
+        );
+        assert!(st.poll(10 * D).is_empty(), "neither half starts alone");
+        // Control released first: the chord ends and Control stays quiet.
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, FN_HELD, &bound, 300),
+            vec![(ModifierKey::FnControl, false)]
+        );
+        assert!(st.poll(5000).is_empty());
+    }
+
+    #[test]
+    fn control_alone_is_still_control_when_the_chord_is_bound_too() {
+        let bound = hold(&[ModifierKey::FnControl, ModifierKey::Control]);
+        let mut st = ModifierState::default();
+        st.on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 0);
+        assert_eq!(st.poll(D), vec![(ModifierKey::Control, true)]);
+        // Fn joining late takes the finger for the chord.
+        assert_eq!(
+            st.on_flags_changed(FN, FN_AND_CONTROL_HELD, &bound, 400),
+            vec![
+                (ModifierKey::Control, false),
+                (ModifierKey::FnControl, true)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_bare_control_does_not_start_while_fn_is_down_even_with_no_chord_bound() {
+        // Fn+Control is a combination of its own, bound or not.
+        let bound = hold(&[ModifierKey::Control]);
+        let mut st = ModifierState::default();
+        st.on_flags_changed(FN, FN_HELD, &bound, 0);
+        st.on_flags_changed(LEFT_CONTROL, FN_AND_CONTROL_HELD, &bound, 10);
+        assert!(st.poll(10 * D).is_empty());
+    }
+
+    /* -- Right Option ------------------------------------------- */
+
+    #[test]
+    fn a_right_option_hold_starts_after_the_window_and_ends_on_release() {
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::RightOption]);
+        assert!(st
+            .on_flags_changed(RIGHT_OPTION, RIGHT_OPTION_HELD, &bound, 0)
+            .is_empty());
+        assert_eq!(st.poll(D), vec![(ModifierKey::RightOption, true)]);
+        assert_eq!(
+            st.on_flags_changed(RIGHT_OPTION, NOTHING_HELD, &bound, 600),
+            vec![(ModifierKey::RightOption, false)]
+        );
+    }
+
+    #[test]
+    fn the_left_option_key_is_not_right_option() {
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::RightOption]);
+        assert!(st
+            .on_flags_changed(LEFT_OPTION, LEFT_OPTION_HELD, &bound, 0)
+            .is_empty());
+        assert!(!st.has_pending());
+        assert!(st.poll(10 * D).is_empty());
+    }
+
+    #[test]
+    fn letting_go_of_right_option_while_left_option_is_down_is_a_release() {
+        // The shared Option bit is still set after the right key comes up, so
+        // the device bit is what says which key moved.
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::RightOption]);
+        st.on_flags_changed(LEFT_OPTION, LEFT_OPTION_HELD, &bound, 0);
+        st.on_flags_changed(RIGHT_OPTION, BOTH_OPTIONS_HELD, &bound, 10);
+        assert_eq!(st.poll(10 + D), vec![(ModifierKey::RightOption, true)]);
+        assert_eq!(
+            st.on_flags_changed(RIGHT_OPTION, LEFT_OPTION_HELD, &bound, 500),
+            vec![(ModifierKey::RightOption, false)]
+        );
+    }
+
+    #[test]
+    fn a_key_pressed_while_right_option_is_waiting_cancels_it() {
+        // Option+letter types a symbol; it must not open the microphone.
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::RightOption]);
+        st.on_flags_changed(RIGHT_OPTION, RIGHT_OPTION_HELD, &bound, 0);
+        assert!(st.on_key_down(30).is_empty());
+        assert!(st.poll(10 * D).is_empty());
+        assert!(st
+            .on_flags_changed(RIGHT_OPTION, NOTHING_HELD, &bound, 500)
+            .is_empty());
+    }
+
+    #[test]
+    fn a_key_pressed_while_right_option_is_held_ends_the_hold() {
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::RightOption]);
+        st.on_flags_changed(RIGHT_OPTION, RIGHT_OPTION_HELD, &bound, 0);
+        assert_eq!(st.poll(D), vec![(ModifierKey::RightOption, true)]);
+        assert_eq!(st.on_key_down(300), vec![(ModifierKey::RightOption, false)]);
+        assert!(st
+            .on_flags_changed(RIGHT_OPTION, NOTHING_HELD, &bound, 900)
+            .is_empty());
+    }
+
+    #[test]
+    fn control_and_right_option_hold_together_as_the_no_fn_pair() {
+        // The defaults for a keyboard with no Fn key: agent on Right Option,
+        // dictation on Control. They never share an edge.
+        let bound = hold(&[ModifierKey::RightOption, ModifierKey::Control]);
+        let mut st = ModifierState::default();
+        st.on_flags_changed(RIGHT_OPTION, RIGHT_OPTION_HELD, &bound, 0);
+        assert_eq!(st.poll(D), vec![(ModifierKey::RightOption, true)]);
+        assert_eq!(
+            st.on_flags_changed(RIGHT_OPTION, NOTHING_HELD, &bound, 300),
+            vec![(ModifierKey::RightOption, false)]
+        );
+        st.on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 400);
+        assert_eq!(st.poll(400 + D), vec![(ModifierKey::Control, true)]);
+        assert_eq!(
+            st.on_flags_changed(LEFT_CONTROL, NOTHING_HELD, &bound, 900),
+            vec![(ModifierKey::Control, false)]
+        );
+    }
+
+    #[test]
+    fn an_unbound_key_is_ignored() {
+        let mut st = ModifierState::default();
+        let bound = hold(&[ModifierKey::Fn]);
+        assert!(st
+            .on_flags_changed(RIGHT_OPTION, RIGHT_OPTION_HELD, &bound, 0)
+            .is_empty());
+        assert!(st
+            .on_flags_changed(LEFT_CONTROL, CONTROL_HELD, &bound, 10)
+            .is_empty());
+        assert!(!st.has_pending());
     }
 }

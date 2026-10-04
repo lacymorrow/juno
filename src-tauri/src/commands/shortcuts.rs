@@ -298,7 +298,15 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
                     None => warn!("Failed to parse trigger shortcut: {}", combo),
                 }
             }
-            crate::triggers::Watcher::ModifierKey(key) => modifier_bindings.push(key),
+            crate::triggers::Watcher::ModifierKey(key) => {
+                // A key that also carries a Tap row cannot be made to wait:
+                // a short press is the whole gesture.
+                let tap = crate::triggers::gestures_on_key(&triggers, &binding.signature())
+                    .tap
+                    .is_some();
+                modifier_bindings
+                    .push(crate::platform::modifier_key_monitor::ModifierBinding { key, tap })
+            }
             crate::triggers::Watcher::MouseButton(button) => mouse_bindings.push(button),
         }
     }

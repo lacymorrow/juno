@@ -173,6 +173,16 @@ const isFnChordShortcut = (shortcut: string) => {
   );
 };
 
+/** Control on its own, a bare hold for a keyboard with no Fn key. */
+const isControlShortcut = (shortcut: string) =>
+  ["control", "ctrl"].includes(shortcut.trim().toLowerCase());
+
+/** The right-hand Option key on its own. Mirrors `is_right_option_word`. */
+const isRightOptionShortcut = (shortcut: string) =>
+  ["rightoption", "right option", "right_option", "rightalt", "right alt", "roption"].includes(
+    shortcut.trim().toLowerCase(),
+  );
+
 /** Whether this binding uses the globe key, which macOS has its own plans for. */
 function isFnBinding(binding: Binding | null): boolean {
   return (
@@ -186,6 +196,8 @@ function bindingLabel(binding: Binding | null): string {
   if (binding.kind === "keyboard") {
     if (isFnShortcut(binding.shortcut)) return "Fn (globe)";
     if (isFnChordShortcut(binding.shortcut)) return "Fn + Control";
+    if (isControlShortcut(binding.shortcut)) return "Control";
+    if (isRightOptionShortcut(binding.shortcut)) return "Right Option";
     return binding.shortcut || "Set binding";
   }
   return mouseLabel(binding.button);
@@ -394,6 +406,34 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
     },
   );
 
+  // Whether "Press globe key to" still needs changing, asked of the system.
+  // Unknown or failed reads show nothing: advice that may not apply is worse
+  // than none.
+  const [globeNeedsSetup, setGlobeNeedsSetup] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    invoke<boolean>(COMMANDS.TRIGGERS_GLOBE_KEY_NEEDS_SETUP)
+      .then((needs) => {
+        if (!cancelled) setGlobeNeedsSetup(needs === true);
+      })
+      .catch((e) => console.debug("[Triggers] could not read the globe key setting:", e));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // "My keyboard has no Fn key": the backend rebinds both default holds to
+  // Right Option and Control. The person can rebind either afterwards.
+  const switchToNoFnKeys = useCallback(async () => {
+    try {
+      const saved = await invoke<Trigger[]>(COMMANDS.TRIGGERS_USE_NO_FN_DEFAULTS);
+      persistedRef.current = saved;
+      setTriggers(saved);
+    } catch (e) {
+      toast.error(errStr(e));
+    }
+  }, []);
+
   const patchTrigger = useCallback(
     (id: string, patch: Partial<Trigger>, opts: { immediate?: boolean } = {}) => {
       const next = triggersRef.current.map((t) =>
@@ -543,6 +583,10 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
 
   /* ------------------------------- list ---------------------------------- */
 
+  const usesFn = visibleTriggers.some(
+    (t) => t.enabled && isFnBinding(t.binding),
+  );
+
   return (
     <div className="space-y-6">
       <SettingsGroup
@@ -593,7 +637,25 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
           />
         ))}
 
-      <div className="flex items-center justify-end px-1">{addMenu}</div>
+      {/* Said once for the whole screen, and only while it is true: macOS
+          gives the globe key a job of its own unless the setting says
+          otherwise, and a key that already does nothing needs no advice. */}
+      {usesFn && globeNeedsSetup && <GlobeKeyNote />}
+
+      <div className="flex items-center justify-between gap-3 px-1">
+        {usesFn ? (
+          <button
+            type="button"
+            onClick={() => void switchToNoFnKeys()}
+            className="text-[12px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            My keyboard has no Fn key
+          </button>
+        ) : (
+          <span />
+        )}
+        {addMenu}
+      </div>
     </div>
   );
 }
@@ -875,9 +937,7 @@ function TriggerRow({
         </div>
       )}
 
-      {/* Only beside an Fn binding: macOS has already given that key a job,
-          and nothing else on this screen is affected by it. */}
-      {!isVoice && isFnBinding(trigger.binding) && <GlobeKeyNote />}
+
 
       {issue && <IssueLine message={issue} className="mt-2" />}
     </div>
@@ -921,8 +981,8 @@ function IssueLine({
 /**
  * What macOS does with the globe key before Juno gets a say.
  *
- * Shown only where it applies, next to a trigger bound to Fn, because it is
- * advice about one key and not a standing notice about triggers. The link goes
+ * Shown once per screen, and only when the system still gives the key a job:
+ * it is advice about one key, not a standing notice about each row. The link goes
  * to the Keyboard pane rather than describing a path through System Settings;
  * macOS has no deeper link than the pane, so the sentence still names the row.
  */
