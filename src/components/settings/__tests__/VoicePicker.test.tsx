@@ -10,7 +10,6 @@ function macList(selectedId = "Samantha", overrides: Partial<JunoVoiceList> = {}
     engine: "system",
     engine_label: "Your Mac",
     note: null,
-    better_voices_available: false,
     engines: [],
     options: [
       {
@@ -49,7 +48,6 @@ function kokoroList(): JunoVoiceList {
     engine: "kokoro",
     engine_label: "Kokoro",
     note: null,
-    better_voices_available: false,
     engines: [],
     options: [
       {

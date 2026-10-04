@@ -29,7 +29,6 @@ function kokoroList(): JunoVoiceList {
     engine: "kokoro",
     engine_label: "Kokoro",
     note: null,
-    better_voices_available: false,
     engines: ENGINES,
     options: [
       {
