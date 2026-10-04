@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.89] - 2026-10-04
+
+### Fixed
+
+- **menu:** Developer Tools only in a local development build (#696) (e6ca2c58)
+
 ## [0.8.88] - 2026-10-04
 
 ### Fixed
@@ -864,7 +870,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.88...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.89...HEAD
+[0.8.89]: https://github.com/lacymorrow/juno/compare/cua-v0.8.88...v0.8.89
 [0.8.88]: https://github.com/lacymorrow/juno/compare/cua-v0.8.87...v0.8.88
 [0.8.87]: https://github.com/lacymorrow/juno/compare/cua-v0.8.86...v0.8.87
 [0.8.86]: https://github.com/lacymorrow/juno/compare/cua-v0.8.85...v0.8.86
