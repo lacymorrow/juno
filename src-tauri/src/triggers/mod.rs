@@ -2335,7 +2335,7 @@ mod tests {
     /* Keyboards with no Fn key                                         */
     /* ---------------------------------------------------------------- */
 
-    fn shortcut_of(t: &Trigger) -> Option<&str> {
+    fn keyboard_shortcut(t: &Trigger) -> Option<&str> {
         match t.binding.as_ref() {
             Some(Binding::Keyboard { shortcut }) => Some(shortcut.as_str()),
             _ => None,
@@ -2381,10 +2381,10 @@ mod tests {
         assert_eq!(ts[0].id, ids[0]);
         assert_eq!(ts[0].target, TriggerTarget::Agent);
         assert_eq!(ts[0].gesture, Gesture::Hold);
-        assert_eq!(shortcut_of(&ts[0]), Some("RightOption"));
+        assert_eq!(keyboard_shortcut(&ts[0]), Some("RightOption"));
         assert_eq!(ts[1].target, TriggerTarget::Dictation);
         assert_eq!(ts[1].gesture, Gesture::Hold);
-        assert_eq!(shortcut_of(&ts[1]), Some("Control"));
+        assert_eq!(keyboard_shortcut(&ts[1]), Some("Control"));
         assert!(validate(&ts, &["Escape".to_string()]).is_ok());
         let watchers: Vec<Watcher> = bound_keys(&ts).iter().map(watcher_for).collect();
         assert_eq!(
@@ -2404,10 +2404,10 @@ mod tests {
         let mut ts = vec![off, other.clone()];
         apply_no_fn_defaults(&mut ts);
         assert!(ts[0].enabled);
-        assert_eq!(shortcut_of(&ts[0]), Some("RightOption"));
+        assert_eq!(keyboard_shortcut(&ts[0]), Some("RightOption"));
         assert_eq!(ts[1], other, "an unrelated row is untouched");
         assert_eq!(ts.len(), 3, "the missing dictation hold is added");
-        assert_eq!(shortcut_of(&ts[2]), Some("Control"));
+        assert_eq!(keyboard_shortcut(&ts[2]), Some("Control"));
         assert_eq!(ts[2].target, TriggerTarget::Dictation);
     }
 
