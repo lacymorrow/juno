@@ -7,7 +7,7 @@ use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
 
+use crate::always_listening::CaptureGuard;
 use crate::capture_failure::{self, CaptureStartFailure};
 use crate::devices;
 use crate::error::{Error, Result};
@@ -157,6 +158,15 @@ enum AudioThreadMessage {
     Discard,
 }
 
+/// Opens the dictation microphone on the audio thread and hands back whatever
+/// keeps it open. Dropping that value is what stops capture. A cpal stream is
+/// not `Send`, so it is created (and dropped) on the thread that owns it; a
+/// test hands in a token instead of a real stream.
+type CaptureOpen = Box<
+    dyn FnOnce(Sender<Vec<f32>>) -> std::result::Result<Box<dyn std::any::Any>, CaptureStartFailure>
+        + Send,
+>;
+
 pub struct VoiceController {
     engine: Option<Arc<dyn TranscriptionEngine>>,
     pub model_path: String,
@@ -172,6 +182,10 @@ pub struct VoiceController {
     /// Shared with the audio thread, which reads it on every pass, so a toggle
     /// takes effect inside a running session.
     live_partial: PartialGate,
+    /// How many dictation microphone streams are open right now. Counted by
+    /// the [`CaptureGuard`] that owns the stream on the audio thread, so "is
+    /// the mic still open after this turn ended" is a number a test can read.
+    live_captures: Arc<AtomicUsize>,
 }
 
 /// The one switch that decides whether a partial transcript may exist.
@@ -222,6 +236,7 @@ impl VoiceController {
             is_initialized: true,
             initialization_error: None,
             live_partial: PartialGate::default(),
+            live_captures: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -249,6 +264,7 @@ impl VoiceController {
             is_initialized: false,
             initialization_error: Some(error_message),
             live_partial: PartialGate::default(),
+            live_captures: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -546,14 +562,37 @@ impl VoiceController {
             );
         }
 
+        let open: CaptureOpen = Box::new(move |audio_data_tx: Sender<Vec<f32>>| {
+            let stream = devices::start_mono_stream(
+                &device,
+                &device_name,
+                &config,
+                sample_format,
+                audio_data_tx,
+            )?;
+            info!("[AudioThread] Audio stream started on {device_name}.");
+            Ok(Box::new((stream, device)) as Box<dyn std::any::Any>)
+        });
+
+        self.spawn_audio_worker(app_handle, open, actual_rate, channels)
+    }
+
+    /// Start the thread that owns the microphone. Everything after device
+    /// resolution, so a test can run it with a fake microphone.
+    fn spawn_audio_worker<R: Runtime + 'static>(
+        &mut self,
+        app_handle: &AppHandle<R>,
+        open: CaptureOpen,
+        actual_rate: u32,
+        channels: u16,
+    ) -> Result<()> {
         let (control_tx, control_rx) = channel::<AudioThreadMessage>();
         let (audio_data_tx, audio_data_rx) = channel::<Vec<f32>>();
 
         let last_buffer_arc_for_thread = Arc::clone(&self.last_processed_audio_buffer);
-        let actual_rate_for_thread = actual_rate;
         let app_handle_for_thread = app_handle.clone();
-        let channels_for_thread = channels;
         let live_partial_for_thread = self.live_partial.clone();
+        let live_captures_for_thread = Arc::clone(&self.live_captures);
 
         let engine = self
             .engine
@@ -565,25 +604,30 @@ impl VoiceController {
             Self::audio_thread_worker(
                 engine,
                 last_buffer_arc_for_thread,
-                actual_rate_for_thread,
-                channels_for_thread,
+                actual_rate,
+                channels,
                 app_handle_for_thread,
                 control_rx,
                 audio_data_tx,
                 audio_data_rx,
-                device,
-                device_name,
-                config,
-                sample_format,
+                open,
                 live_partial_for_thread,
+                live_captures_for_thread,
             );
         });
 
-        // Start the audio stream
         self.audio_thread = Some((audio_thread_handle, control_tx));
         self.is_dictating = true;
 
         Ok(())
+    }
+
+    /// How many dictation microphone streams are open right now.
+    ///
+    /// Zero whenever no dictation or spoken query is recording. Anything else
+    /// after a stop or a cancel is a hot microphone nobody asked for.
+    pub fn active_capture_handles(&self) -> usize {
+        self.live_captures.load(Ordering::SeqCst)
     }
 
     /// Stop claiming to be recording, and say why.
@@ -609,11 +653,9 @@ impl VoiceController {
         control_rx: std::sync::mpsc::Receiver<AudioThreadMessage>,
         audio_data_tx: std::sync::mpsc::Sender<Vec<f32>>,
         audio_data_rx: std::sync::mpsc::Receiver<Vec<f32>>,
-        device: cpal::Device,
-        device_name: String,
-        config: cpal::StreamConfig,
-        sample_format: SampleFormat,
+        open: CaptureOpen,
         live_partial: PartialGate,
+        live_captures: Arc<AtomicUsize>,
     ) {
         info!(
             "[AudioThread] Thread started. Engine: '{}', live_partial: {}",
@@ -637,14 +679,8 @@ impl VoiceController {
         // The one exit between here and a running microphone, and it tells the
         // person why. Before this, each of these failures logged an error and
         // returned, leaving the bar drawn as if it were recording.
-        let _stream = match devices::start_mono_stream(
-            &device,
-            &device_name,
-            &config,
-            sample_format,
-            audio_data_tx.clone(),
-        ) {
-            Ok(stream) => stream,
+        let keepalive = match open(audio_data_tx.clone()) {
+            Ok(keepalive) => keepalive,
             Err(failure) => {
                 // On macOS a refused stream is usually microphone access, and
                 // the cached answer is now stale.
@@ -653,9 +689,12 @@ impl VoiceController {
                 return;
             }
         };
+        // Held for as long as the loop runs, and dropped on every way out of
+        // this function. Dropping it stops the microphone, and the end path
+        // joins this thread, so by the time a stop or cancel returns the
+        // stream is gone.
+        let _capture = CaptureGuard::new(keepalive, live_captures);
 
-        // The downmix itself is logged once, by `start_mono_stream`.
-        info!("[AudioThread] Audio stream started on {device_name}.");
         info!("[AudioThread] Recording at {} Hz with {} channel(s), will resample to {} Hz for Whisper.",
               actual_rate, channels, WHISPER_SAMPLE_RATE);
 
@@ -971,6 +1010,26 @@ impl VoiceController {
     }
 }
 
+/// The one end path for a recording, shared by stop (finalise) and cancel
+/// (discard). Waits for the controller rather than giving up when it is busy.
+///
+/// The commands used to `try_lock` and answer `Ok(false)` when another call
+/// held the controller ("cancel will land when the lock frees"). Nothing ever
+/// landed it: every caller took `Ok` as done, retired the session, and put the
+/// bar back to rest while the audio thread kept the microphone open. With no
+/// session left to own it, no later stop or cancel reached it either, which is
+/// the stuck orange indicator. Joining the audio thread is what drops the
+/// stream, so when this returns the microphone is closed. A poisoned lock still
+/// holds the controller, so it is recovered rather than left recording.
+pub fn end_dictation_waiting(controller: &Mutex<VoiceController>, discard: bool) -> Result<bool> {
+    let mut guard = controller.lock().unwrap_or_else(|p| p.into_inner());
+    if discard {
+        guard.cancel_dictation()
+    } else {
+        guard.stop_dictation()
+    }
+}
+
 impl Drop for VoiceController {
     fn drop(&mut self) {
         if self.is_dictating {
@@ -1194,5 +1253,153 @@ mod tests {
             !off.live_partial(),
             "a flag that was never on does not turn on"
         );
+    }
+
+    // ── Every way a recording ends drops the microphone ──
+    //
+    // A fake microphone stands in for cpal: a token the audio thread holds the
+    // way it holds the real stream, counted by the same guard. "Is the mic
+    // still open" is then a number, read the moment the end path returns.
+
+    struct SilentEngine;
+    struct SilentSession;
+
+    impl TranscriptionSession for SilentSession {
+        fn transcribe_partial(
+            &mut self,
+            _audio: &[f32],
+        ) -> std::result::Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn transcribe_final(&mut self, _audio: &[f32]) -> std::result::Result<String, String> {
+            Ok(String::new())
+        }
+    }
+
+    impl TranscriptionEngine for SilentEngine {
+        fn name(&self) -> &'static str {
+            "silent"
+        }
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+        fn is_initialized(&self) -> bool {
+            true
+        }
+        fn create_session(&self) -> std::result::Result<Box<dyn TranscriptionSession>, String> {
+            Ok(Box::new(SilentSession))
+        }
+    }
+
+    type OpenResult = std::result::Result<Box<dyn std::any::Any>, CaptureStartFailure>;
+
+    fn fake_microphone() -> CaptureOpen {
+        Box::new(|tx: Sender<Vec<f32>>| -> OpenResult {
+            let _ = tx.send(vec![0.0; 1600]);
+            Ok(Box::new(tx) as Box<dyn std::any::Any>)
+        })
+    }
+
+    fn controller() -> VoiceController {
+        VoiceController::new_with_engine("test", Arc::new(SilentEngine)).expect("controller")
+    }
+
+    fn start_fake<R: Runtime + 'static>(c: &mut VoiceController, app: &AppHandle<R>) {
+        c.spawn_audio_worker(app, fake_microphone(), WHISPER_SAMPLE_RATE, 1)
+            .expect("start");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while c.active_capture_handles() != 1 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(c.active_capture_handles(), 1, "the fake microphone opened");
+    }
+
+    #[test]
+    fn send_leaves_no_microphone_open() {
+        let app = tauri::test::mock_app();
+        let mut c = controller();
+        start_fake(&mut c, app.handle());
+        assert!(c.stop_dictation().expect("stop"));
+        assert_eq!(c.active_capture_handles(), 0);
+        assert!(!c.is_dictating());
+    }
+
+    #[test]
+    fn cancel_leaves_no_microphone_open() {
+        let app = tauri::test::mock_app();
+        let mut c = controller();
+        start_fake(&mut c, app.handle());
+        assert!(c.cancel_dictation().expect("cancel"));
+        assert_eq!(c.active_capture_handles(), 0);
+        // A second end (X after Send, Escape after X) is harmless.
+        assert!(!c.cancel_dictation().expect("cancel again"));
+        assert!(!c.stop_dictation().expect("stop after cancel"));
+        assert_eq!(c.active_capture_handles(), 0);
+    }
+
+    #[test]
+    fn dropping_the_controller_leaves_no_microphone_open() {
+        let app = tauri::test::mock_app();
+        let mut c = controller();
+        start_fake(&mut c, app.handle());
+        let live = Arc::clone(&c.live_captures);
+        drop(c);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_microphone_that_never_opened_counts_nothing_and_ends_cleanly() {
+        let app = tauri::test::mock_app();
+        let mut c = controller();
+        c.spawn_audio_worker(
+            app.handle(),
+            Box::new(|_tx: Sender<Vec<f32>>| -> OpenResult {
+                Err(CaptureStartFailure::NoInputDevice)
+            }),
+            WHISPER_SAMPLE_RATE,
+            1,
+        )
+        .expect("start");
+        assert!(c.cancel_dictation().is_ok());
+        assert_eq!(c.active_capture_handles(), 0);
+        assert!(!c.is_dictating());
+    }
+
+    /// The stuck-mic bug. The plugin's stop and cancel used to `try_lock` and
+    /// return `Ok(false)` while anything else held the controller; the caller
+    /// took that as done and the microphone stayed open with no session left
+    /// to own it. The shared end path now waits, for both verbs.
+    #[test]
+    fn ending_while_the_controller_is_busy_still_closes_the_microphone() {
+        for discard in [true, false] {
+            let app = tauri::test::mock_app();
+            let mut c = controller();
+            start_fake(&mut c, app.handle());
+            let live = Arc::clone(&c.live_captures);
+            let shared = Arc::new(Mutex::new(c));
+
+            let (held_tx, held_rx) = channel::<()>();
+            let holder = {
+                let shared = Arc::clone(&shared);
+                thread::spawn(move || {
+                    let _guard = shared.lock().unwrap();
+                    held_tx.send(()).unwrap();
+                    thread::sleep(Duration::from_millis(150));
+                })
+            };
+            held_rx.recv().unwrap();
+
+            let ended = end_dictation_waiting(&shared, discard).expect("end");
+            assert!(
+                ended,
+                "the end waited for the controller instead of giving up"
+            );
+            assert_eq!(
+                live.load(Ordering::SeqCst),
+                0,
+                "no capture handle survives the end path (discard={discard})"
+            );
+            holder.join().unwrap();
+        }
     }
 }

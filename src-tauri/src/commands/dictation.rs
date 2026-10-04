@@ -12,67 +12,27 @@ use tracing::{error, info, warn};
 /// spelling and was released under another leaves the stop key armed forever.
 pub const DICTATION_ESCAPE_USER: &str = "dictation_events";
 
-/// Close the microphone, and keep asking until it is actually closed.
+/// Close the microphone.
 ///
 /// Cancel, never stop: stopping finalises the audio and emits a result, which
 /// downstream types out a sentence nobody asked to keep.
 ///
-/// The plugin's cancel takes the controller lock with `try_lock` and answers
-/// `Ok(false)` when it is busy, which is a silent no-op — and a controller
-/// left believing it is recording refuses the next `start_dictation` with
-/// "already dictating" for the rest of the run. So this asks again while the
-/// controller still says it is dictating, the same way the agent path already
-/// retries its start through the same contention. Bounded, because a lock
-/// that is still held after this is a bug to see in the log rather than a
-/// loop to sit in.
+/// One call. The plugin's cancel used to `try_lock` and answer `Ok(false)` when
+/// the controller was busy, so this asked three times and hoped. It now waits
+/// for the controller and joins the audio thread, so when it returns the
+/// capture stream has been dropped.
 async fn close_audio_session(app_handle: &AppHandle) {
-    const ATTEMPTS: u32 = 3;
-    const GAP: std::time::Duration = std::time::Duration::from_millis(50);
-
-    for attempt in 1..=ATTEMPTS {
-        let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() else {
-            return;
-        };
-        match tauri_plugin_voice_transcription::commands::get_dictation_status(controller_state)
-            .await
-        {
-            Ok(false) => return,
-            Ok(true) => {}
-            Err(e) => {
-                warn!(
-                    "[Dictation] Could not tell whether the microphone is open: {}",
-                    e
-                );
-                return;
-            }
-        }
-
-        let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() else {
-            return;
-        };
-        match tauri_plugin_voice_transcription::commands::cancel_dictation(
-            app_handle.clone(),
-            controller_state,
-        )
-        .await
-        {
-            Ok(true) => return,
-            Ok(false) => {
-                if attempt < ATTEMPTS {
-                    tokio::time::sleep(GAP).await;
-                }
-            }
-            Err(e) => {
-                warn!("[Dictation] Could not end the audio session: {}", e);
-                return;
-            }
-        }
+    let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() else {
+        return;
+    };
+    if let Err(e) = tauri_plugin_voice_transcription::commands::cancel_dictation(
+        app_handle.clone(),
+        controller_state,
+    )
+    .await
+    {
+        error!("[Dictation] Could not end the audio session: {}", e);
     }
-
-    error!(
-        "[Dictation] The voice controller would not let go of the microphone after {} attempts; the next dictation may be refused as already dictating",
-        ATTEMPTS
-    );
 }
 
 /// End the dictation session, whatever state it is in. The only way a

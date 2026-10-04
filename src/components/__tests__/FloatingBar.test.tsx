@@ -525,6 +525,44 @@ describe("FloatingBar", () => {
     expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["listening", { barState: "listening", audioLevel: 0.6 }],
+    ["dictating", { barState: "dictating", isDictationMode: true }],
+    [
+      "live words while you talk",
+      { barState: "transcribing", transcriptionText: "testing", transcriptionProvisional: true },
+    ],
+  ])("keeps Send, Type instead and Cancel in every recording state: %s", async (_name, state) => {
+    await renderBar();
+    await setBarState(state);
+
+    // The owner's report: once speech was detected the bar switched to the
+    // transcript with only a stop square, and there was no way to send with
+    // the mouse.
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Type instead" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel without sending" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop Juno" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "stop" });
+  });
+
+  it("cancels the turn, not the coordinated stop, from the X while live words arrive", async () => {
+    await renderBar();
+    await setBarState({
+      barState: "transcribing",
+      transcriptionText: "testing",
+      transcriptionProvisional: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel without sending" }));
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "cancel" });
+    expect(invoke).not.toHaveBeenCalledWith("stop_all_operations");
+  });
+
   it("lights the pill button under the forwarded cursor, even with Juno inactive", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
       this: HTMLElement,
