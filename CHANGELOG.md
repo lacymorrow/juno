@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.83] - 2026-10-04
+
+### Fixed
+
+- **onboarding:** light the globe key on the first press (#690) (57718205)
+
 ## [0.8.82] - 2026-10-04
 
 ### Added
@@ -834,7 +840,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.82...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.83...HEAD
+[0.8.83]: https://github.com/lacymorrow/juno/compare/cua-v0.8.82...v0.8.83
 [0.8.82]: https://github.com/lacymorrow/juno/compare/cua-v0.8.81...v0.8.82
 [0.8.81]: https://github.com/lacymorrow/juno/compare/cua-v0.8.80...v0.8.81
 [0.8.80]: https://github.com/lacymorrow/juno/compare/cua-v0.8.79...v0.8.80
