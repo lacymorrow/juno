@@ -749,6 +749,16 @@ pub fn resolve_voice(
 ) -> VoiceResolution {
     let stored = stored.map(str::trim).filter(|voice| !voice.is_empty());
 
+    // The Mac's own voice is `say` with no `-v`, so it exists on every Mac. A
+    // reading that failed to find the System Voice must not turn it into a
+    // different voice and write that over the store.
+    if engine.eq_ignore_ascii_case("system") && stored == Some(SYSTEM_DEFAULT_ID) {
+        return VoiceResolution {
+            voice: Some(SYSTEM_DEFAULT_ID.to_string()),
+            substituted: false,
+        };
+    }
+
     match provider_voices(engine, inventory) {
         ProviderVoices::Known(rows) => {
             // Nothing to check against. Juno cannot call the stored choice
@@ -782,6 +792,38 @@ pub fn resolve_voice(
             substituted: false,
         },
     }
+}
+
+/// [`resolve_voice`] for a stored value that may not have been a choice.
+///
+/// Builds before the Mac's own voice became the default ranked the installed
+/// voices and wrote the winner (Samantha, on a stock Mac) to the store. That
+/// is indistinguishable from a pick, so it kept winning over the Mac's own
+/// voice: the greeting, which runs before any voice reaches `AppState`, spoke
+/// in the Mac's voice while every reply spoke in Samantha. A Mac voice the
+/// person never picked, and that is just the old ranking's top row, gives way
+/// to the Mac's own voice when that is the default. A voice they did pick
+/// (`chosen`) is never touched.
+pub fn resolve_stored_voice(
+    engine: &str,
+    inventory: &VoiceInventory,
+    stored: Option<&str>,
+    chosen: bool,
+) -> VoiceResolution {
+    let trimmed = stored.map(str::trim).filter(|voice| !voice.is_empty());
+    if engine.eq_ignore_ascii_case("system") && !chosen && prefers_system_voice(inventory) {
+        if let Some(voice) = trimmed {
+            if voice != SYSTEM_DEFAULT_ID
+                && Some(voice) == best_macos_voice(&inventory.macos).as_deref()
+            {
+                return VoiceResolution {
+                    voice: Some(SYSTEM_DEFAULT_ID.to_string()),
+                    substituted: false,
+                };
+            }
+        }
+    }
+    resolve_voice(engine, inventory, stored)
 }
 
 /// The Kokoro voice that will actually load.
@@ -1314,7 +1356,12 @@ async fn resolve_and_list(
     let engine = listed_engine(&audio.tts_provider).to_string();
     let inventory = inventory_for(&engine, freshness).await;
     let stored = audio.voice_for(&engine).map(str::to_string);
-    let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
+    let resolution = resolve_stored_voice(
+        &engine,
+        &inventory,
+        stored.as_deref(),
+        audio.system_voice_chosen,
+    );
 
     if resolution.voice != stored {
         if resolution.substituted {
@@ -1392,7 +1439,12 @@ pub async fn switch_engine(
     let engine = listed_engine(&provider).to_string();
     let inventory = inventory_for(&engine, Freshness::Recent).await;
     let stored = audio.voice_for(&engine).map(str::to_string);
-    let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
+    let resolution = resolve_stored_voice(
+        &engine,
+        &inventory,
+        stored.as_deref(),
+        audio.system_voice_chosen,
+    );
     audio.set_voice_for(&engine, resolution.voice.clone());
 
     manager
@@ -1500,6 +1552,10 @@ pub async fn set_juno_voice(
     let provider_changed = !audio.tts_provider.eq_ignore_ascii_case(&engine);
     audio.tts_provider = engine.clone();
     audio.set_voice_for(&engine, chosen.clone());
+    if engine.eq_ignore_ascii_case("system") {
+        // From here the stored Mac voice is the person's, not a ranking's.
+        audio.system_voice_chosen = true;
+    }
     manager
         .set_audio_settings(&audio)
         .await
@@ -1548,7 +1604,12 @@ pub async fn preview_juno_voice(
         let engine = listed_engine(&audio.tts_provider).to_string();
         let inventory = inventory_for(&engine, Freshness::Recent).await;
         let stored = audio.voice_for(&engine).map(str::to_string);
-        let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
+        let resolution = resolve_stored_voice(
+            &engine,
+            &inventory,
+            stored.as_deref(),
+            audio.system_voice_chosen,
+        );
         let row = resolution
             .voice
             .unwrap_or_else(|| SYSTEM_DEFAULT_ID.to_string());
@@ -2271,5 +2332,72 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         );
         let args = crate::tts::system::say_arguments("hi", None, Some("AirPods Pro"));
         assert_eq!(args, vec!["-a", "AirPods Pro", "hi"]);
+    }
+
+    /// The defect: a build that ranked voices stored "Samantha" as if it were
+    /// a pick, so replies spoke in Samantha while the greeting (voice not yet
+    /// in `AppState`) spoke in the Mac's own. An unchosen auto-pick yields.
+    #[test]
+    fn an_old_auto_picked_voice_gives_way_to_the_macs_own() {
+        let inventory = with_system_voice(stock_mac(), SystemVoice::Unset);
+        let best = best_macos_voice(&inventory.macos);
+        assert_eq!(best.as_deref(), Some("Samantha"));
+        let resolution = resolve_stored_voice("system", &inventory, Some("Samantha"), false);
+        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
+        assert!(!resolution.substituted);
+    }
+
+    /// A voice the person picked is theirs, even when it is the top row.
+    #[test]
+    fn a_chosen_voice_is_never_replaced() {
+        let inventory = with_system_voice(stock_mac(), SystemVoice::Unset);
+        let resolution = resolve_stored_voice("system", &inventory, Some("Samantha"), true);
+        assert_eq!(resolution.voice.as_deref(), Some("Samantha"));
+        let other = resolve_stored_voice("system", &inventory, Some("Daniel"), false);
+        assert_eq!(other.voice.as_deref(), Some("Daniel"));
+    }
+
+    /// An unset Mac voice stays `system_default`, and a failed reading of the
+    /// System Voice cannot rewrite a stored `system_default` into a name.
+    #[test]
+    fn an_unset_mac_voice_stays_system_default() {
+        let unset = with_system_voice(stock_mac(), SystemVoice::Unset);
+        assert_eq!(
+            resolve_stored_voice("system", &unset, None, false)
+                .voice
+                .as_deref(),
+            Some(SYSTEM_DEFAULT_ID)
+        );
+        assert_eq!(
+            resolve_stored_voice("system", &unset, Some(SYSTEM_DEFAULT_ID), false)
+                .voice
+                .as_deref(),
+            Some(SYSTEM_DEFAULT_ID)
+        );
+        let misread = with_system_voice(stock_mac(), SystemVoice::Other);
+        let kept = resolve_stored_voice("system", &misread, Some(SYSTEM_DEFAULT_ID), false);
+        assert_eq!(kept.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
+        assert!(!kept.substituted);
+    }
+
+    /// The greeting and a reply both read the voice from `AppState` through
+    /// `invoke_tts_for_provider`, so what the resolution pushes there is the
+    /// one voice Juno speaks in: the Mac's own is no `-v` for both.
+    #[test]
+    fn the_greeting_and_a_reply_resolve_the_same_voice() {
+        let inventory = with_system_voice(stock_mac(), SystemVoice::Unset);
+        let state = AppState::new(None);
+        // Before anything is applied, which is when the greeting can run.
+        let greeting = state.get_system_voice().unwrap();
+        // The old stored Samantha, applied the way startup applies it.
+        let resolution = resolve_stored_voice("system", &inventory, Some("Samantha"), false);
+        push_voice_to_state(&state, "system", resolution.voice.as_deref()).unwrap();
+        let reply = state.get_system_voice().unwrap();
+        assert_eq!(greeting, None);
+        assert_eq!(reply, greeting);
+        assert_eq!(
+            crate::tts::system::say_arguments("hi", reply.as_deref(), None),
+            vec!["hi"]
+        );
     }
 }
