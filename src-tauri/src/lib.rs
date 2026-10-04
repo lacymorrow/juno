@@ -822,6 +822,7 @@ pub fn run() {
             commands::tray_commands::set_tray_icon_default,
             commands::tray_commands::set_tray_icon_agent_active,
             commands::tray_commands::set_tray_icon_dictation_active,
+            menu::tray_menu::show_bar_context_menu,
             commands::tray_commands::set_tray_icon_always_listening,
             commands::tray_commands::set_tray_icon_processing,
             commands::tray_commands::set_tray_icon_error,

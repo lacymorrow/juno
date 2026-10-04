@@ -936,6 +936,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     })();
   }, [chat.startNewChat, chat.stop]);
 
+  // "New Chat" from the tray or the bar's right-click menu: the same call the
+  // pane's + makes. While the full-size window is up it owns the conversation
+  // and answers the event itself.
+  const mainWindowOpenRef = useRef(mainWindowOpen);
+  mainWindowOpenRef.current = mainWindowOpen;
+  useEventListener(EVENTS.MENU_NEW_CHAT_REQUESTED, () => {
+    if (!mainWindowOpenRef.current) startNewChat();
+  });
+
   // External open/close of the pane: the tray "Show/Hide Chat" toggles it, so a
   // dismissed conversation can be reopened showing the retained history.
   useEffect(() => {
