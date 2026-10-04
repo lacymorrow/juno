@@ -7,6 +7,7 @@ import {
   appearanceEntry,
   appearancePreviewUrl,
 } from "@/components/bar/appearanceCatalog";
+import { preloadLooks } from "@/components/bar/lookChunks";
 
 interface AppearancePickerProps {
   value: string;
@@ -15,8 +16,8 @@ interface AppearancePickerProps {
   disabled?: boolean;
 }
 
-// If the frame has not painted by then, the preview is not coming; show the
-// words instead of a blank stage.
+// If the frame has not painted by then, the preview is not coming; the stage
+// stays a quiet blank (no words, no error).
 const PREVIEW_TIMEOUT_MS = 4000;
 
 type PreviewStatus = "loading" | "ready" | "failed";
@@ -38,6 +39,23 @@ function usePrefersReducedMotion(): boolean {
 }
 
 /**
+ * What the stage shows while a look is still loading: the exact frame, no
+ * words. A faint neutral shimmer, or nothing under reduced motion.
+ */
+export function PreviewPlaceholder({ animated }: { animated: boolean }) {
+  return (
+    <div
+      data-testid="appearance-preview-placeholder"
+      aria-hidden="true"
+      className={cn(
+        "absolute inset-0",
+        animated && "animate-pulse bg-black/[0.03] dark:bg-white/[0.04]",
+      )}
+    />
+  );
+}
+
+/**
  * Pick how the bar looks by watching it. A stage shows the chosen look going
  * through its moments (resting, listening, dictating, done); arrows and the
  * dots step through the catalog; the choice applies as you browse, so the real
@@ -46,6 +64,11 @@ function usePrefersReducedMotion(): boolean {
  */
 export function AppearancePicker({ value, onChange, disabled = false }: AppearancePickerProps) {
   const reducedMotion = usePrefersReducedMotion();
+  // Warm every look's code as soon as the picker opens, so the preview frames
+  // find it cached.
+  useEffect(() => {
+    preloadLooks();
+  }, []);
   const entry = appearanceEntry(value);
   const index = APPEARANCE_CATALOG.findIndex((e) => e.value === entry.value);
 
@@ -134,14 +157,7 @@ export function AppearancePicker({ value, onChange, disabled = false }: Appearan
             "bg-[#E9E9EB] dark:bg-[#1C1C1E]",
           )}
         >
-          {status !== "ready" && (
-            <div
-              className="absolute inset-0 flex items-center justify-center text-[12px] text-muted-foreground"
-              aria-live="polite"
-            >
-              {status === "failed" ? "Preview unavailable" : entry.name}
-            </div>
-          )}
+          {status === "loading" && <PreviewPlaceholder animated={!reducedMotion} />}
           {mounted.map((item) => {
             const current = item.value === entry.value;
             const shown = current && status === "ready";

@@ -10,38 +10,12 @@ import { IslandBar } from "@/components/bar/island/IslandBar";
 import { VoiceAIBar } from "@/components/bar/voice-ai-bar";
 import { appearanceEntry } from "./appearanceCatalog";
 // Lazy-load heavy components to avoid pulling Three.js/Rive into shared bundles
-const loadOrb = () => import("@/components/bar/elevenlabs-orb-bar");
-const loadHalo = () => import("@/components/bar/react-orb-bar");
-const loadShaderOrb = () => import("@/components/bar/shader-orb-bar");
-const loadAvatar = () => import("@/components/bar/persona-bar");
+import { loadOrb, loadHalo, loadShaderOrb, loadAvatar, warmHeavyLooks } from "@/components/bar/lookChunks";
+
 const ElevenLabsOrbBar = lazy(() => loadOrb().then((m) => ({ default: m.ElevenLabsOrbBar })));
 const ReactOrbBar = lazy(() => loadHalo().then((m) => ({ default: m.ReactOrbBar })));
 const ShaderOrbBar = lazy(() => loadShaderOrb().then((m) => ({ default: m.ShaderOrbBar })));
 const PersonaBar = lazy(() => loadAvatar().then((m) => ({ default: m.PersonaBar })));
-
-/**
- * Fetch and parse the heavy looks once the first bar has painted, so switching
- * to one later lands on warm code instead of a blank window while Three.js,
- * ogl or Rive arrive. Idle time first; a timer if the browser offers no idle callback.
- */
-function warmHeavyLooks(): () => void {
-  const warm = () => {
-    void loadOrb();
-    void loadHalo();
-    void loadShaderOrb();
-    void loadAvatar();
-  };
-  const w = window as Window & {
-    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-    cancelIdleCallback?: (id: number) => void;
-  };
-  if (typeof w.requestIdleCallback === "function") {
-    const id = w.requestIdleCallback(warm, { timeout: 3000 });
-    return () => w.cancelIdleCallback?.(id);
-  }
-  const id = window.setTimeout(warm, 1500);
-  return () => window.clearTimeout(id);
-}
 
 export function BarHost() {
   const [barConfig, setBarConfig] = useState<FloatingBarConfig | null>(null);
