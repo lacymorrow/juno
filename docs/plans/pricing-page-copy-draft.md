@@ -2,7 +2,7 @@
 
 **Primary action: buy founding license.**
 Free and Pro provide context. Founding card is the visual hero.
-Payment provider TBD (Polar vs Lemon Squeezy). Checkout link is a placeholder.
+Payment provider: Polar (decided 2026-10-04). Checkout integration from LAC-4128; placeholder until then.
 Hosted-usage allowance numbers come from the cost measurement ticket. Not invented here.
 
 ---
