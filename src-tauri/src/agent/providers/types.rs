@@ -446,10 +446,8 @@ impl Provider {
                         image_tier: ImageTier::HighResolution,
                         adaptive_thinking: true,
                         server_side_fallback: true,
-                        // The recommended default. Opus 5.5 takes this over in
-                        // the follow-up commit, now that Juno sends
-                        // `computer_toolset_20260801`.
-                        is_recommended: true,
+                        // Opus 5.5 is the recommended default for computer use.
+                        is_recommended: false,
                         router_role: None,
                     },
                     ModelDefinition {
@@ -464,7 +462,7 @@ impl Provider {
                         image_tier: ImageTier::HighResolution,
                         adaptive_thinking: true,
                         server_side_fallback: true,
-                        is_recommended: false,
+                        is_recommended: true,
                         router_role: None,
                     },
                     ModelDefinition {
@@ -844,7 +842,7 @@ impl Provider {
             .unwrap_or_else(|| {
                 // Fallback constants if no definitions exist (shouldn't happen)
                 match self {
-                    Provider::Anthropic => model_ids::CLAUDE_FABLE_5_1,
+                    Provider::Anthropic => model_ids::CLAUDE_OPUS_5_5,
                     Provider::OpenAI => model_ids::OPENAI_SOL_5_6,
                     Provider::Rig => model_ids::OPENAI_SOL_5_6,
                     Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
@@ -1120,13 +1118,12 @@ mod tests {
 
     /// And Juno's own constraint on top of that: the Anthropic default must be
     /// a model Juno can actually drive the desktop with. Opus 5.5 is the
-    /// current lineup's headline model; the follow-up commit makes it the
-    /// default now that Juno sends `computer_toolset_20260801`.
+    /// current lineup's headline model and the default for computer use.
     #[test]
     fn anthropic_default_can_drive_the_computer() {
         assert_eq!(
             Provider::Anthropic.default_model(),
-            model_ids::CLAUDE_FABLE_5_1
+            model_ids::CLAUDE_OPUS_5_5
         );
         assert!(
             Provider::Anthropic.model_supports_computer_use(Provider::Anthropic.default_model()),

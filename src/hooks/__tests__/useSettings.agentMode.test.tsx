@@ -27,13 +27,13 @@ describe("useSettings: agent mode follows the backend", () => {
   // through the backend's settings_changed broadcast.
   it("updates agentMode when another window changes it", () => {
     const { result } = renderHook(() => useSettings());
-    expect(result.current.agentMode).toBe("multi");
+    expect(result.current.agentMode).toBe("single");
 
     act(() => {
-      handlers.get("settings_changed")?.({ agent: { execution_mode: "single" } });
+      handlers.get("settings_changed")?.({ agent: { execution_mode: "multi" } });
     });
 
-    expect(result.current.agentMode).toBe("single");
+    expect(result.current.agentMode).toBe("multi");
   });
 
   it("ignores a settings_changed payload without an agent mode", () => {
@@ -43,6 +43,6 @@ describe("useSettings: agent mode follows the backend", () => {
       handlers.get("settings_changed")?.({});
     });
 
-    expect(result.current.agentMode).toBe("multi");
+    expect(result.current.agentMode).toBe("single");
   });
 });

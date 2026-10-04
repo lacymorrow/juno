@@ -40,9 +40,9 @@ pub fn invalidate_config_cache() {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub enum AgentMode {
     /// Single agent handles all tasks directly
+    #[default]
     Single,
     /// Multi-agent system with specialized agents
-    #[default]
     Multi,
 }
 
@@ -142,7 +142,7 @@ impl Default for ProviderConfig {
     fn default() -> Self {
         ProviderConfig {
             active_provider: DEFAULT_PROVIDER.id().to_string(),
-            agent_mode: AgentMode::Multi,
+            agent_mode: AgentMode::default(),
             providers: default_provider_entries(),
             provider_chosen_by_user: false,
         }

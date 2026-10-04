@@ -176,7 +176,7 @@ pub mod defaults {
     pub const ALWAYS_LISTENING_ACTIVE: bool = false;
     pub const ALWAYS_LISTENING_SENSITIVITY: f32 = 0.5;
     pub const PERFORMANCE_MONITORING_ENABLED: bool = true;
-    pub const AGENT_EXECUTION_MODE: &str = "multi";
+    pub const AGENT_EXECUTION_MODE: &str = "single";
     pub const AGENT_TRIGGER_MODE: &str = "tap";
     pub const CLOUD_ENABLED: bool = false;
     pub const AUTO_CONNECT: bool = false;
