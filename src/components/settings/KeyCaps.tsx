@@ -21,6 +21,7 @@ const MODIFIER_GLYPHS: Record<string, { glyph: string; name: string; order: numb
 const KEY_GLYPHS: Record<string, { glyph: string; name: string }> = {
   fn: { glyph: "🌐", name: "Globe" },
   globe: { glyph: "🌐", name: "Globe" },
+  rightoption: { glyph: "Right ⌥", name: "Right Option" },
   space: { glyph: "Space", name: "Space" },
   escape: { glyph: "⎋", name: "Escape" },
   esc: { glyph: "⎋", name: "Escape" },

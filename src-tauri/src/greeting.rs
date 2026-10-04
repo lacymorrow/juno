@@ -81,6 +81,8 @@ fn spoken(combo: &str) -> String {
             crate::triggers::ModifierKey::FnControl => {
                 "the globe key and Control together".to_string()
             }
+            crate::triggers::ModifierKey::Control => "Control".to_string(),
+            crate::triggers::ModifierKey::RightOption => "the right Option key".to_string(),
         };
     }
 

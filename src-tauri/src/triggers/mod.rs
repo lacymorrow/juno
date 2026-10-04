@@ -176,6 +176,14 @@ pub enum ModifierKey {
     /// ordinary key, so the plugin cannot register the pair either; the monitor
     /// reads both halves out of the same flag word.
     FnControl,
+    /// Control on its own, for a keyboard with no Fn key. Reports key code 59
+    /// or 62 with bit 1 << 18. A hold only counts if nothing else is pressed
+    /// while it is down, so Control+C never starts the microphone.
+    Control,
+    /// The right-hand Option key on its own, key code 61, told apart from the
+    /// left one. Same rule as [`ModifierKey::Control`]: any other key pressed
+    /// while it is down cancels the hold.
+    RightOption,
 }
 
 impl ModifierKey {
@@ -184,7 +192,16 @@ impl ModifierKey {
         match self {
             Self::Fn => "Fn (globe)",
             Self::FnControl => "Fn + Control",
+            Self::Control => "Control",
+            Self::RightOption => "Right Option",
         }
+    }
+
+    /// Keys that are also ordinary shortcut ingredients (Control+C, Option+key)
+    /// and so can only ever be held, never tapped: a tap would fire on every
+    /// shortcut that merely contains them.
+    pub fn hold_only(self) -> bool {
+        matches!(self, Self::Control | Self::RightOption)
     }
 
     /// The shortcut string this key is recorded as.
@@ -196,6 +213,8 @@ impl ModifierKey {
         match self {
             Self::Fn => "Fn",
             Self::FnControl => "Fn+Control",
+            Self::Control => "Control",
+            Self::RightOption => "RightOption",
         }
     }
 }
@@ -210,6 +229,13 @@ fn is_control_word(word: &str) -> bool {
     word == "control" || word == "ctrl"
 }
 
+fn is_right_option_word(word: &str) -> bool {
+    matches!(
+        word,
+        "rightoption" | "right option" | "right_option" | "rightalt" | "right alt" | "roption"
+    )
+}
+
 /// The bare modifier key, or chord of bare modifiers, a shortcut string names,
 /// if it names one.
 ///
@@ -219,8 +245,9 @@ fn is_control_word(word: &str) -> bool {
 /// instead. That is a fact about how the key is watched, which is why it lives
 /// in the registration path and not in the shape of a binding.
 ///
-/// `Fn`, `globe`, `Fn+Control` and `Control+Fn` (any case) are bare. `Fn+F5`
-/// is an ordinary combo that merely mentions the key, and the plugin keeps it.
+/// `Fn`, `globe`, `Fn+Control`, `Control+Fn`, `Control` and `RightOption` (any
+/// case) are bare. `Fn+F5` and `Control+Space` are ordinary combos that merely
+/// mention a modifier, and the plugin keeps them.
 pub fn bare_modifier(shortcut: &str) -> Option<ModifierKey> {
     let parts: Vec<String> = shortcut
         .split('+')
@@ -228,6 +255,8 @@ pub fn bare_modifier(shortcut: &str) -> Option<ModifierKey> {
         .collect();
     match parts.as_slice() {
         [a] if is_fn_word(a) => Some(ModifierKey::Fn),
+        [a] if is_control_word(a) => Some(ModifierKey::Control),
+        [a] if is_right_option_word(a) => Some(ModifierKey::RightOption),
         [a, b]
             if (is_fn_word(a) && is_control_word(b)) || (is_control_word(a) && is_fn_word(b)) =>
         {
@@ -538,6 +567,12 @@ pub const GLOBE_SHORTCUT: &str = "Fn";
 /// Control held together.
 pub const DICTATION_SHORTCUT: &str = "Fn+Control";
 
+/// What the agent hold is recorded as on a keyboard with no Fn key.
+pub const NO_FN_AGENT_SHORTCUT: &str = "RightOption";
+
+/// What the dictation hold is recorded as on a keyboard with no Fn key.
+pub const NO_FN_DICTATION_SHORTCUT: &str = "Control";
+
 /// The default trigger set for a fresh install.
 ///
 /// Two rows, because two is what a new install needs to be usable and anything
@@ -569,6 +604,35 @@ pub fn default_triggers() -> Vec<Trigger> {
             }),
         ),
     ]
+}
+
+/// Switch the two default holds to keys every keyboard has: hold Right Option
+/// to talk to Juno, hold Control to dictate.
+///
+/// There is no reliable way to know whether a keyboard has an Fn key, so the
+/// person says so and this does the rest. It rewrites the first Hold row for
+/// each target (and switches it on), and adds the row if there is none, so the
+/// result is the same two holds whatever state the list was in. Every other
+/// row is left alone. The person can always rebind afterwards.
+pub fn apply_no_fn_defaults(triggers: &mut Vec<Trigger>) {
+    for (target, shortcut) in [
+        (TriggerTarget::Agent, NO_FN_AGENT_SHORTCUT),
+        (TriggerTarget::Dictation, NO_FN_DICTATION_SHORTCUT),
+    ] {
+        let binding = Binding::Keyboard {
+            shortcut: shortcut.to_string(),
+        };
+        match triggers
+            .iter_mut()
+            .find(|t| t.gesture == Gesture::Hold && t.target == target)
+        {
+            Some(row) => {
+                row.binding = Some(binding);
+                row.enabled = true;
+            }
+            None => triggers.push(trigger(Gesture::Hold, target, Some(binding))),
+        }
+    }
 }
 
 /// Give every row a unique, non-blank id, leaving the ones it already has.
@@ -1029,6 +1093,17 @@ pub fn issues(triggers: &[Trigger], reserved: &[String]) -> Vec<TriggerIssue> {
                 message: format!("\"{label}\" is already used by another shortcut."),
             });
             continue;
+        }
+        if t.gesture == Gesture::Tap {
+            if let Watcher::ModifierKey(key) = watcher_for(binding) {
+                if key.hold_only() {
+                    out.push(TriggerIssue {
+                        trigger_id: t.id.clone(),
+                        message: format!("\"{label}\" can only be held, not tapped."),
+                    });
+                    continue;
+                }
+            }
         }
         let signature = binding.signature();
         if let Some((_, other)) = claimed.iter().find(|(sig, _)| *sig == signature) {
@@ -2254,5 +2329,131 @@ mod tests {
         assert_eq!(voice.target, TriggerTarget::Agent);
         assert_eq!(voice.phrase.as_deref(), Some("juno"));
         assert!(voice.require_hey_prefix, "every word had the prefix");
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Keyboards with no Fn key                                         */
+    /* ---------------------------------------------------------------- */
+
+    fn shortcut_of(t: &Trigger) -> Option<&str> {
+        match t.binding.as_ref() {
+            Some(Binding::Keyboard { shortcut }) => Some(shortcut.as_str()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn right_option_and_control_are_bare_modifiers() {
+        for (spelling, key) in [
+            ("RightOption", ModifierKey::RightOption),
+            ("right option", ModifierKey::RightOption),
+            ("Control", ModifierKey::Control),
+            ("ctrl", ModifierKey::Control),
+        ] {
+            assert_eq!(bare_modifier(spelling), Some(key), "{spelling}");
+            assert_eq!(
+                watcher_for(&Binding::Keyboard {
+                    shortcut: spelling.to_string()
+                }),
+                Watcher::ModifierKey(key)
+            );
+        }
+        // Their own shortcut strings read back as themselves.
+        assert_eq!(
+            bare_modifier(ModifierKey::RightOption.shortcut()),
+            Some(ModifierKey::RightOption)
+        );
+        assert_eq!(
+            bare_modifier(ModifierKey::Control.shortcut()),
+            Some(ModifierKey::Control)
+        );
+        // Left Option is an ordinary modifier, not a bare hold.
+        assert_eq!(bare_modifier("Option"), None);
+        assert_eq!(bare_modifier("Control+Space"), None);
+    }
+
+    #[test]
+    fn the_no_fn_switch_writes_right_option_and_control() {
+        let mut ts = default_triggers();
+        let ids: Vec<String> = ts.iter().map(|t| t.id.clone()).collect();
+        apply_no_fn_defaults(&mut ts);
+        assert_eq!(ts.len(), 2, "rebinds the rows, adds none");
+        assert_eq!(ts[0].id, ids[0]);
+        assert_eq!(ts[0].target, TriggerTarget::Agent);
+        assert_eq!(ts[0].gesture, Gesture::Hold);
+        assert_eq!(shortcut_of(&ts[0]), Some("RightOption"));
+        assert_eq!(ts[1].target, TriggerTarget::Dictation);
+        assert_eq!(ts[1].gesture, Gesture::Hold);
+        assert_eq!(shortcut_of(&ts[1]), Some("Control"));
+        assert!(validate(&ts, &["Escape".to_string()]).is_ok());
+        let watchers: Vec<Watcher> = bound_keys(&ts).iter().map(watcher_for).collect();
+        assert_eq!(
+            watchers,
+            vec![
+                Watcher::ModifierKey(ModifierKey::RightOption),
+                Watcher::ModifierKey(ModifierKey::Control)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_no_fn_switch_turns_rows_on_adds_missing_ones_and_leaves_the_rest() {
+        let mut off = row(Gesture::Hold, TriggerTarget::Agent, "Fn");
+        off.enabled = false;
+        let other = row(Gesture::Tap, TriggerTarget::Agent, "Option+D");
+        let mut ts = vec![off, other.clone()];
+        apply_no_fn_defaults(&mut ts);
+        assert!(ts[0].enabled);
+        assert_eq!(shortcut_of(&ts[0]), Some("RightOption"));
+        assert_eq!(ts[1], other, "an unrelated row is untouched");
+        assert_eq!(ts.len(), 3, "the missing dictation hold is added");
+        assert_eq!(shortcut_of(&ts[2]), Some("Control"));
+        assert_eq!(ts[2].target, TriggerTarget::Dictation);
+    }
+
+    #[test]
+    fn hold_control_and_hold_fn_control_do_not_collide() {
+        let ts = vec![
+            row(Gesture::Hold, TriggerTarget::Agent, "Control"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "Fn+Control"),
+            row(Gesture::Hold, TriggerTarget::Agent, "Fn"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "RightOption"),
+        ];
+        assert!(validate(&ts, &[]).is_ok());
+        let sigs: std::collections::HashSet<String> =
+            ts.iter().filter_map(|t| t.key_signature()).collect();
+        assert_eq!(sigs.len(), 4, "four different keys");
+    }
+
+    #[test]
+    fn right_option_does_not_collide_with_left_option_combos_or_a_second_use() {
+        let ts = vec![
+            row(Gesture::Hold, TriggerTarget::Agent, "RightOption"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "Option+Space"),
+        ];
+        assert!(validate(&ts, &[]).is_ok());
+
+        // But the same key twice is still one key.
+        let twice = vec![
+            row(Gesture::Hold, TriggerTarget::Agent, "RightOption"),
+            row(Gesture::Hold, TriggerTarget::Dictation, "right option"),
+        ];
+        assert!(validate(&twice, &[]).is_err());
+        assert!(combo_conflict(&ts, "RightOption", None, &[]).is_some());
+        assert!(combo_conflict(&ts, "Control", None, &[]).is_none());
+    }
+
+    #[test]
+    fn control_and_right_option_can_only_be_held() {
+        for shortcut in ["Control", "RightOption"] {
+            let ts = vec![row(Gesture::Tap, TriggerTarget::Agent, shortcut)];
+            let err = validate(&ts, &[]).unwrap_err();
+            assert!(err.contains("can only be held"), "{shortcut}: {err}");
+            let ok = vec![row(Gesture::Hold, TriggerTarget::Agent, shortcut)];
+            assert!(validate(&ok, &[]).is_ok());
+        }
+        // Fn may still be tapped.
+        let fn_tap = vec![row(Gesture::Tap, TriggerTarget::Agent, "Fn")];
+        assert!(validate(&fn_tap, &[]).is_ok());
     }
 }
