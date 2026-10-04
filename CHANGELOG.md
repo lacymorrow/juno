@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.94] - 2026-10-04
+
+### Added
+
+- **appearance:** hide Bar and Studio, make Pill the default (#703) (e272fc7f)
+
 ## [0.8.93] - 2026-10-04
 
 ### Fixed
@@ -894,7 +900,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.93...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.94...HEAD
+[0.8.94]: https://github.com/lacymorrow/juno/compare/cua-v0.8.93...v0.8.94
 [0.8.93]: https://github.com/lacymorrow/juno/compare/cua-v0.8.92...v0.8.93
 [0.8.92]: https://github.com/lacymorrow/juno/compare/cua-v0.8.91...v0.8.92
 [0.8.91]: https://github.com/lacymorrow/juno/compare/cua-v0.8.90...v0.8.91
