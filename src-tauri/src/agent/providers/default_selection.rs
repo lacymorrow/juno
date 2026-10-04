@@ -39,8 +39,6 @@
 //! arrives as plain booleans, which is what makes the rule readable and
 //! testable.
 
-use super::types::Provider;
-
 /// One CLI the rule can pick from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliCandidate {
@@ -124,6 +122,7 @@ pub fn decide(state: &SelectionState) -> Decision {
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::Provider;
     use super::*;
 
     fn claude_candidate(installed: bool, signed_in: bool) -> CliCandidate {
