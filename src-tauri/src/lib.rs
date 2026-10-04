@@ -1064,6 +1064,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             platform::apply_macos_setup(&app_handle);
 
+            // Banners while Juno is frontmost. Set early so the first
+            // notification already goes through the delegate.
+            commands::notifications::install_presenter();
+
             #[cfg(target_os = "linux")]
             platform::apply_linux_setup(&app_handle);
 

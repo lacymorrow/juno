@@ -96,15 +96,21 @@ describe("the notifications row shows what macOS allows", () => {
 
     fireEvent.click(send);
     expect(invoke).toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
-    await waitFor(() => expect(screen.getByText("Sent.")).toBeInTheDocument());
+    // The banner is the answer: no "Sent." line that could be true while
+    // nothing appeared.
+    await waitFor(() => expect(send).toBeEnabled());
+    expect(screen.queryByText("Sent.")).not.toBeInTheDocument();
   });
 
-  it("authorized: shows the reason when the backend refuses to send", async () => {
+  it("authorized: a failed send shows no error, and the row re-reads macOS", async () => {
+    let checks = 0;
     invoke.mockImplementation((command: string) => {
       if (command === COMMANDS.NOTIFICATIONS_GET_NOTIFICATION_SETTINGS)
         return Promise.resolve({ enabled: true });
-      if (command === COMMANDS.NOTIFICATIONS_CHECK_NOTIFICATION_PERMISSION)
-        return Promise.resolve(status("authorized"));
+      if (command === COMMANDS.NOTIFICATIONS_CHECK_NOTIFICATION_PERMISSION) {
+        checks += 1;
+        return Promise.resolve(status(checks === 1 ? "authorized" : "denied"));
+      }
       if (command === COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION)
         return Promise.reject("macOS would not take the notification.");
       return Promise.resolve(null);
@@ -112,8 +118,9 @@ describe("the notifications row shows what macOS allows", () => {
     render(<NotificationSettings />);
 
     fireEvent.click(await screen.findByRole("button", { name: /send one/i }));
-    await waitFor(() =>
-      expect(screen.getByText("macOS would not take the notification.")).toBeInTheDocument(),
-    );
+    await screen.findByRole("button", { name: /open system settings/i });
+    expect(
+      screen.queryByText("macOS would not take the notification."),
+    ).not.toBeInTheDocument();
   });
 });
