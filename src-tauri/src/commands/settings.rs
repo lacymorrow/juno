@@ -474,6 +474,11 @@ pub async fn reset_centralized_settings(
         tracing::warn!("[Settings] Reset could not reload the audio settings: {e}");
     }
 
+    // Same for "Show words as I speak": the reset wrote it off, but the voice
+    // controller kept the flag it was last given, so live words went on
+    // showing until the next launch.
+    crate::commands::stt::apply_persisted_live_partial(&app_handle).await;
+
     let display_name = crate::agent::providers::types::Provider::from_str(&active_provider)
         .map(|p| p.display_name().to_string());
 
