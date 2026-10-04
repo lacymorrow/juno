@@ -214,8 +214,6 @@ pub mod triggers {
     pub const SET_TRIGGER_CAPTURE: &str = "set_trigger_capture";
     /// Whether "Press globe key to" still needs changing to "Do Nothing"
     pub const GLOBE_KEY_NEEDS_SETUP: &str = "globe_key_needs_setup";
-    /// Switch the default holds to Right Option and Control (no Fn key)
-    pub const USE_NO_FN_DEFAULTS: &str = "use_no_fn_defaults";
     /// Open the macOS Keyboard pane, where "Press globe key to" lives
     pub const OPEN_KEYBOARD_SETTINGS: &str = "open_keyboard_settings";
 }

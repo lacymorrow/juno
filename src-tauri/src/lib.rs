@@ -623,7 +623,6 @@ pub fn run() {
             commands::triggers::get_trigger_issues,
             commands::triggers::open_keyboard_settings,
             commands::triggers::globe_key_needs_setup,
-            commands::triggers::use_no_fn_defaults,
             validate_keyboard_shortcut,
             commands::conversations::list_conversations,
             commands::conversations::get_current_conversation_id,
