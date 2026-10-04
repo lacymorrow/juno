@@ -20,15 +20,15 @@ import { COMMANDS } from "@/lib/constants.generated";
  * off, and a live switch only when macOS allows them. The status is read again
  * whenever the window regains focus, so coming back from System Settings
  * updates the row without a restart.
+ *
+ * The test button has no result line: the banner is the answer. A failure is
+ * logged by Rust, and the status read afterwards says what to change.
  */
 export function NotificationSettings() {
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<NotificationStatus | null>(null);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<
-    { ok: true } | { ok: false; reason: string } | null
-  >(null);
 
   const readStatus = useCallback(async () => {
     try {
@@ -78,7 +78,6 @@ export function NotificationSettings() {
   const change = async (next: boolean) => {
     const previous = enabled;
     setEnabled(next);
-    setTestResult(null);
     try {
       await invoke(COMMANDS.NOTIFICATIONS_SET_NOTIFICATIONS_ENABLED, { enabled: next });
     } catch (error) {
@@ -94,8 +93,8 @@ export function NotificationSettings() {
         await invoke<NotificationStatus>(COMMANDS.NOTIFICATIONS_REQUEST_NOTIFICATION_PERMISSION),
       );
     } catch (error) {
-      console.error("Failed to ask for notifications:", error);
-      toast.error(typeof error === "string" ? error : "Could not ask for notifications");
+      console.warn("Failed to ask for notifications:", error);
+      await readStatus();
     }
   };
 
@@ -110,19 +109,15 @@ export function NotificationSettings() {
 
   const sendTest = async () => {
     setTesting(true);
-    setTestResult(null);
     try {
       await invoke(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
-      setTestResult({ ok: true });
     } catch (error) {
-      setTestResult({
-        ok: false,
-        reason:
-          typeof error === "string" ? error : "Juno could not send a test notification.",
-      });
+      console.warn("Test notification failed:", error);
     } finally {
       setTesting(false);
     }
+    // The first send may have asked macOS; show whatever it now says.
+    await readStatus();
   };
 
   const authorization = status?.authorization ?? null;
@@ -170,13 +165,6 @@ export function NotificationSettings() {
           <SettingsRow
             label="Test"
             description="Send one now, so you know what to expect."
-            below={
-              testResult ? (
-                <p className="text-[12px] leading-snug text-muted-foreground">
-                  {testResult.ok ? "Sent." : testResult.reason}
-                </p>
-              ) : undefined
-            }
           >
             <Button
               size="sm"
