@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.99] - 2026-10-04
+
+### Fixed
+
+- **voice:** stop the microphone itself when a recording ends (#708) (6a49b3f2)
+
 ## [0.8.98] - 2026-10-04
 
 ### Fixed
@@ -924,7 +930,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.98...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.99...HEAD
+[0.8.99]: https://github.com/lacymorrow/juno/compare/cua-v0.8.98...v0.8.99
 [0.8.98]: https://github.com/lacymorrow/juno/compare/cua-v0.8.97...v0.8.98
 [0.8.97]: https://github.com/lacymorrow/juno/compare/cua-v0.8.96...v0.8.97
 [0.8.96]: https://github.com/lacymorrow/juno/compare/cua-v0.8.95...v0.8.96
