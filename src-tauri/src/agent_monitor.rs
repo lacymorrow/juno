@@ -1,5 +1,6 @@
 use crate::constants::{events, monitor_sessions};
-use crate::state::{AgentTriggerMode, AppState};
+use crate::hold_gate::{self, HoldEnd, HoldId};
+use crate::state::{AgentTriggerMode, AppState, VoiceTarget};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -69,6 +70,9 @@ pub struct AgentInputMonitorState {
     pub agent_start_time: Option<Instant>, // Track when agent actually started
     pub force_cleanup_scheduled: bool,
     pub last_cancellation_time: Option<Instant>, // Track when last cancellation occurred
+    /// The start this hold emitted, so its release can wait for it to land
+    /// (see [`crate::hold_gate`]).
+    pub hold: Option<HoldId>,
 }
 
 #[allow(clippy::new_without_default)]
@@ -81,6 +85,7 @@ impl AgentInputMonitorState {
             agent_start_time: None,
             force_cleanup_scheduled: false,
             last_cancellation_time: None,
+            hold: None,
         }
     }
 
@@ -132,6 +137,7 @@ impl AgentInputMonitorState {
 
         // Force reset all state immediately to prevent stuck state
         self.hold_start_time = None;
+        self.hold = None;
         self.agent_started = false;
         self.hold_threshold_reached = false;
         self.agent_start_time = None;
@@ -142,6 +148,41 @@ impl AgentInputMonitorState {
             duration.as_millis(), agent_was_started, threshold_was_reached
         );
         (agent_was_started, threshold_was_reached, duration)
+    }
+
+    /// Start the agent if the hold has lasted long enough, opening a gate
+    /// entry for it. Returns the id the start event must carry.
+    pub fn open_start(&mut self, open: impl FnOnce() -> HoldId) -> Option<HoldId> {
+        if !self.check_and_start_agent() {
+            return None;
+        }
+        let id = open();
+        self.hold = Some(id);
+        Some(id)
+    }
+
+    /// The key came up. Returns `(agent_started, threshold_reached, duration,
+    /// deferred)`, where `deferred` says the release has to wait for its start
+    /// to land before it is acted on. `defer` is [`hold_gate::defer`] for the
+    /// agent; tests pass a local gate.
+    pub fn release(
+        &mut self,
+        defer: impl FnOnce(HoldId, HoldEnd) -> bool,
+    ) -> (bool, bool, Duration, bool) {
+        let hold = self.hold.take();
+        let (agent_started, threshold_reached, duration) = self.end_hold();
+        let end = if threshold_reached {
+            Some(HoldEnd::Commit)
+        } else if agent_started {
+            Some(HoldEnd::Cancel)
+        } else {
+            None
+        };
+        let deferred = match (hold, end) {
+            (Some(id), Some(end)) => defer(id, end),
+            _ => false,
+        };
+        (agent_started, threshold_reached, duration, deferred)
     }
 
     /// True while the monitor is watching a held key.
@@ -223,6 +264,7 @@ impl AgentInputMonitorState {
     // Force reset all state - use when stuck
     pub fn force_reset(&mut self) {
         self.hold_start_time = None;
+        self.hold = None;
         self.agent_started = false;
         self.hold_threshold_reached = false;
         self.agent_start_time = None;
@@ -240,6 +282,7 @@ static AGENT_INPUT_STATE: tokio::sync::Mutex<AgentInputMonitorState> =
         agent_start_time: None,
         force_cleanup_scheduled: false,
         last_cancellation_time: None,
+        hold: None,
     });
 
 // Called when agent input key is pressed
@@ -276,7 +319,24 @@ pub async fn on_agent_input_released_with_mode(
 ) -> AgentRelease {
     info!("[AgentMonitor] on_agent_input_released() called");
     let mut state = AGENT_INPUT_STATE.lock().await;
-    let (agent_started, threshold_reached, duration) = state.end_hold();
+    let (agent_started, threshold_reached, duration, deferred) =
+        state.release(|id, end| hold_gate::defer(VoiceTarget::Agent, id, end));
+
+    if deferred {
+        // The start this hold emitted is still opening the microphone. Acting
+        // now would race it: the stop or cancel would find nothing to end, and
+        // the start would then open a microphone no release is coming for. The
+        // start handler performs this release when it lands.
+        info!(
+            "[AgentMonitor] Released ({}ms) before the session finished starting; the release waits for it",
+            duration.as_millis()
+        );
+        return if threshold_reached {
+            AgentRelease::Committed
+        } else {
+            AgentRelease::Cancelled
+        };
+    }
 
     if threshold_reached {
         info!("[AgentMonitor] Agent input released after threshold reached - stopping transcription to process with agent");
@@ -376,19 +436,22 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tauri::async_runtime::
             let mut state = AGENT_INPUT_STATE.lock().await;
 
             // Check if we should start agent mode
-            if state.check_and_start_agent() {
+            if let Some(hold) = state.open_start(|| hold_gate::open(VoiceTarget::Agent)) {
                 info!("[AgentMonitor] Background task detected agent should start - emitting agent-transcription-start");
                 // Emit event to start agent. This is the held-key path, so the
                 // session records push_to_talk rather than leaving the method
                 // unstated for a stop path to guess at.
                 if let Err(e) = app_handle.emit(
                     events::agent::TRANSCRIPTION_START,
-                    serde_json::json!({ "method": "push_to_talk" }),
+                    serde_json::json!({ "method": "push_to_talk", "hold": hold }),
                 ) {
                     error!(
                         "[AgentMonitor] Failed to emit agent-transcription-start: {}",
                         e
                     );
+                    // No start is coming to settle it, so a release must not
+                    // wait for one.
+                    let _ = hold_gate::settle(VoiceTarget::Agent, hold);
                 } else {
                     info!("[AgentMonitor] Successfully emitted agent-transcription-start event");
                 }
@@ -498,6 +561,49 @@ mod tests {
 
         // A press inside the cooldown window is refused.
         assert!(!state.start_hold());
+    }
+
+    #[test]
+    fn a_release_before_the_agent_start_lands_is_applied_when_it_lands() {
+        let mut state = AgentInputMonitorState::new();
+        let mut gate = hold_gate::StartGate::default();
+        assert!(state.start_hold());
+        held_for_ms(&mut state, 50);
+        let hold = state
+            .open_start(|| gate.open())
+            .expect("the hold has lasted past IMMEDIATE_START_MS");
+
+        let (started, committed, _, deferred) = state.release(|id, end| gate.defer(id, end));
+        assert!(started && !committed);
+        assert!(deferred, "the cancel must not race the start it ends");
+        assert!(!state.is_tracking_hold());
+
+        assert_eq!(gate.settle(hold), Some(HoldEnd::Cancel));
+        assert_eq!(
+            hold_gate::release_event(VoiceTarget::Agent, HoldEnd::Cancel),
+            events::agent::CANCEL
+        );
+
+        // The next hold after the cooldown starts and ends normally.
+        state.last_cancellation_time = Instant::now().checked_sub(Duration::from_millis(
+            monitor_sessions::COOLDOWN_AFTER_CANCEL_MS + 10,
+        ));
+        assert!(state.start_hold(), "the next hold is not refused");
+        held_for_ms(&mut state, monitor_sessions::HOLD_DURATION_MS + 50);
+        let next = state.open_start(|| gate.open()).expect("it starts");
+        assert!(state.check_and_reach_threshold());
+        assert_eq!(gate.settle(next), None);
+        let (_, committed, _, deferred) = state.release(|id, end| gate.defer(id, end));
+        assert!(committed);
+        assert!(!deferred, "a landed start is stopped at once");
+    }
+
+    #[test]
+    fn a_tap_mode_release_is_never_deferred() {
+        let mut state = AgentInputMonitorState::new();
+        let mut gate = hold_gate::StartGate::default();
+        let (started, committed, _, deferred) = state.release(|id, end| gate.defer(id, end));
+        assert!(!started && !committed && !deferred);
     }
 
     #[test]
