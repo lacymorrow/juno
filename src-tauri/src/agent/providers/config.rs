@@ -374,10 +374,63 @@ fn load_config_from_store_internal(
         AgentError::ConfigurationError(format!("Failed to access settings store: {}", e))
     })?;
 
-    let provider_settings: CentralizedProviderSettings = store
-        .get(store_keys::PROVIDERS)
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    let provider_settings = match store.get(store_keys::PROVIDERS) {
+        Some(v) => settings_from_value(&v),
+        None => CentralizedProviderSettings::default(),
+    };
 
     ProviderConfig::from_centralized_settings(&provider_settings)
+}
+
+/// Read saved provider settings, keeping the person's choice even when the
+/// rest of the blob no longer parses.
+///
+/// A blob that fails to deserialize used to become the all-defaults settings,
+/// which means Anthropic with no key: someone who picked "Use your Claude
+/// subscription" was silently moved to the API-key path and told to configure
+/// a key. Only the choice is salvaged; the entries fall back to defaults.
+pub(crate) fn settings_from_value(value: &serde_json::Value) -> CentralizedProviderSettings {
+    if let Ok(parsed) = serde_json::from_value::<CentralizedProviderSettings>(value.clone()) {
+        return parsed;
+    }
+    warn!("Saved provider settings did not parse; keeping the saved provider choice only");
+    let mut fallback = CentralizedProviderSettings::default();
+    if let Some(active) = value
+        .get("active_provider")
+        .and_then(|v| v.as_str())
+        .filter(|id| Provider::from_str(id).is_some())
+    {
+        fallback.active_provider = active.to_string();
+        fallback.provider_chosen_by_user = value
+            .get("provider_chosen_by_user")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+    }
+    fallback
+}
+
+#[cfg(test)]
+mod saved_choice_tests {
+    use super::*;
+
+    #[test]
+    fn an_unreadable_blob_still_keeps_the_subscription_choice() {
+        // `providers` has the wrong shape, so the whole blob fails to parse.
+        let blob = serde_json::json!({
+            "active_provider": "claude_cli",
+            "provider_chosen_by_user": true,
+            "providers": "not a list"
+        });
+        let settings = settings_from_value(&blob);
+        assert_eq!(settings.active_provider, "claude_cli");
+        assert!(settings.provider_chosen_by_user);
+    }
+
+    #[test]
+    fn an_unknown_saved_provider_falls_back_to_the_default() {
+        let blob = serde_json::json!({ "active_provider": "nope", "providers": 3 });
+        let settings = settings_from_value(&blob);
+        assert_eq!(settings.active_provider, DEFAULT_PROVIDER.id());
+        assert!(!settings.provider_chosen_by_user);
+    }
 }

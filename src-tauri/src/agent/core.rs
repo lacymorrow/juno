@@ -51,6 +51,10 @@ pub enum AgentError {
     ValidationError(String),
     #[error("Resource busy: {0}")]
     ResourceBusy(String),
+    /// No provider Juno could run on. The text is written for the person, so
+    /// it carries no prefix.
+    #[error("{0}")]
+    NoProvider(String),
 }
 
 impl From<&str> for AgentError {
