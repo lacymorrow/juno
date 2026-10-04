@@ -1,7 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UI } from "@/lib/constants.generated";
-import { APPEARANCE_CATALOG, appearanceEntry } from "../appearanceCatalog";
+import { ALL_APPEARANCE_ENTRIES, APPEARANCE_CATALOG, appearanceEntry } from "../appearanceCatalog";
 
 /**
  * Restoring the Orb renamed the look a person already had: the ElevenLabs orb
@@ -71,8 +71,19 @@ afterEach(() => {
 });
 
 describe("a stored appearance after the rename", () => {
-  it("covers every value the catalog offers, and no more", () => {
-    expect(APPEARANCE_CATALOG.map((e) => e.value)).toEqual(STORED.map((s) => s.value));
+  it("covers every value the catalog holds, and no more", () => {
+    expect(ALL_APPEARANCE_ENTRIES.map((e) => e.value).sort()).toEqual(
+      STORED.map((s) => s.value).sort(),
+    );
+  });
+
+  it("does not offer hidden looks, and resolves them to the default", () => {
+    const offered = APPEARANCE_CATALOG.map((e) => e.value) as string[];
+    for (const hidden of UI.BAR_APPEARANCES_HIDDEN) {
+      expect(offered).not.toContain(hidden);
+    }
+    expect(UI.BAR_APPEARANCES_HIDDEN).toEqual(["app", "voice_ai"]);
+    expect(offered).toHaveLength(STORED.length - UI.BAR_APPEARANCES_HIDDEN.length);
   });
 
   it("shows each one the name it is meant to have", () => {
@@ -100,8 +111,8 @@ describe("a stored appearance after the rename", () => {
   });
 
   it("never gives two looks the same value or the same name", () => {
-    const values = APPEARANCE_CATALOG.map((e) => e.value);
-    const names = APPEARANCE_CATALOG.map((e) => e.name);
+    const values = ALL_APPEARANCE_ENTRIES.map((e) => e.value);
+    const names = ALL_APPEARANCE_ENTRIES.map((e) => e.name);
     expect(new Set(values).size).toBe(values.length);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -110,11 +121,11 @@ describe("a stored appearance after the rename", () => {
     expect(appearanceEntry("halo").value).toBe(UI.BAR_APPEARANCES_DEFAULT);
     expect(appearanceEntry(null).value).toBe(UI.BAR_APPEARANCES_DEFAULT);
     await mount("react_bits_orb");
-    expect(screen.getByTestId("look").textContent).toBe("avatar");
+    expect(screen.getByTestId("look").textContent).toBe("pill");
   });
 
-  it("starts a new install on the Avatar, first in the picker", () => {
-    expect(UI.BAR_APPEARANCES_DEFAULT).toBe(UI.BAR_APPEARANCES_PERSONA);
+  it("starts a new install on the Pill, first in the picker", () => {
+    expect(UI.BAR_APPEARANCES_DEFAULT).toBe(UI.BAR_APPEARANCES_FLOATING);
     expect(APPEARANCE_CATALOG[0].value).toBe(UI.BAR_APPEARANCES_DEFAULT);
     expect(APPEARANCE_CATALOG[0].descriptor).toMatch(/The default\.$/);
   });
