@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.82] - 2026-10-04
+
+### Added
+
+- **triggers:** Fn hold window, Right Option and Control holds, no-Fn fallback (#689) (4210b1aa)
+
 ## [0.8.81] - 2026-10-03
 
 ### Fixed
@@ -828,7 +834,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.81...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.82...HEAD
+[0.8.82]: https://github.com/lacymorrow/juno/compare/cua-v0.8.81...v0.8.82
 [0.8.81]: https://github.com/lacymorrow/juno/compare/cua-v0.8.80...v0.8.81
 [0.8.80]: https://github.com/lacymorrow/juno/compare/cua-v0.8.79...v0.8.80
 [0.8.79]: https://github.com/lacymorrow/juno/compare/cua-v0.8.78...v0.8.79
