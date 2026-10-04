@@ -151,15 +151,20 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::
         .accelerator("CmdOrCtrl+0")
         .build(app)?;
 
-    let view_submenu = SubmenuBuilder::new(app, "View")
-        .item(&toggle_floating_bar_menu_item)
-        .item(&toggle_dev_panel_menu_item)
+    let mut view_builder = SubmenuBuilder::new(app, "View").item(&toggle_floating_bar_menu_item);
+    if super::SHOW_DEVELOPER_MENUS {
+        view_builder = view_builder.item(&toggle_dev_panel_menu_item);
+    }
+    view_builder = view_builder
         .separator()
         .item(&zoom_in_menu_item)
         .item(&zoom_out_menu_item)
         .item(&actual_size_menu_item)
-        .separator()
-        .item(&show_devtools_menu_item)
+        .separator();
+    if super::SHOW_DEVELOPER_MENUS {
+        view_builder = view_builder.item(&show_devtools_menu_item);
+    }
+    let view_submenu = view_builder
         .item(&show_permissions_menu_item)
         .separator()
         .item(&toggle_fullscreen_menu_item)
@@ -328,7 +333,7 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
                 );
             }
         }
-        constants::app_menu_ids::TOGGLE_DEV_PANEL => {
+        constants::app_menu_ids::TOGGLE_DEV_PANEL if super::SHOW_DEVELOPER_MENUS => {
             info!("[Menu] Toggle Dev Panel menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::TOGGLE_DEV_PANEL_REQUESTED, ())
             {
@@ -339,7 +344,7 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
                 );
             }
         }
-        constants::app_menu_ids::SHOW_DEVTOOLS => {
+        constants::app_menu_ids::SHOW_DEVTOOLS if super::SHOW_DEVELOPER_MENUS => {
             info!("[Menu] Developer Tools menu item clicked");
             if let Err(e) = app_handle.emit(constants::events::menu::DEVTOOLS_REQUESTED, ()) {
                 error!(

@@ -509,7 +509,7 @@ fn quit_label() -> String {
 /// a menu cannot say "hold Fn". Dictation has no row: it needs the target app
 /// to hold focus and only its trigger can say when to stop.
 pub fn tray_menu_spec(chat_label: &str) -> Vec<MenuEntry> {
-    vec![
+    let mut entries = vec![
         MenuEntry::Row(RowSpec {
             id: tray_menu_ids::STATUS,
             label: TrayIconState::Idle.label().to_string(),
@@ -528,16 +528,26 @@ pub fn tray_menu_spec(chat_label: &str) -> Vec<MenuEntry> {
             "Show/Hide Floating Bar",
             Some("CmdOrCtrl+B"),
         ),
-        row(
-            tray_menu_ids::DEVELOPER_TOOLS,
-            "Developer Tools",
-            Some("CmdOrCtrl+Alt+I"),
-        ),
         MenuEntry::Separator,
         row(tray_menu_ids::SETTINGS, "Settings...", Some("CmdOrCtrl+,")),
         MenuEntry::Separator,
         row(tray_menu_ids::QUIT, quit_label(), Some("CmdOrCtrl+Q")),
-    ]
+    ];
+    if super::SHOW_DEVELOPER_MENUS {
+        let at = entries
+            .iter()
+            .position(|entry| matches!(entry, MenuEntry::Row(r) if r.id == tray_menu_ids::SETTINGS))
+            .map_or(entries.len(), |i| i - 1);
+        entries.insert(
+            at,
+            row(
+                tray_menu_ids::DEVELOPER_TOOLS,
+                "Developer Tools",
+                Some("CmdOrCtrl+Alt+I"),
+            ),
+        );
+    }
+    entries
 }
 
 /// The right-click menu on the bar. Short, Mac conventions, no accelerators:
@@ -1069,7 +1079,7 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
                 );
             }
         }
-        tray_menu_ids::DEVELOPER_TOOLS => {
+        tray_menu_ids::DEVELOPER_TOOLS if super::SHOW_DEVELOPER_MENUS => {
             info!("[TrayMenu] Developer Tools menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::DEVTOOLS_REQUESTED, ()) {
                 error!(
@@ -1195,6 +1205,17 @@ pub fn refresh_tray_menu(app_handle: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    /// Developer Tools is listed exactly when this is a local development
+    /// build. A released app (no debug assertions) never shows it.
+    #[test]
+    fn developer_tools_only_in_a_development_build() {
+        let listed = tray_menu_spec("Show Chat").iter().any(
+            |entry| matches!(entry, MenuEntry::Row(r) if r.id == tray_menu_ids::DEVELOPER_TOOLS),
+        );
+        assert_eq!(listed, super::super::SHOW_DEVELOPER_MENUS);
+        assert_eq!(super::super::SHOW_DEVELOPER_MENUS, cfg!(debug_assertions));
+    }
+
     use super::*;
 
     const ALL_STATES: [TrayIconState; 7] = [
