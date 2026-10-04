@@ -295,6 +295,9 @@ pub enum Provider {
     /// Claude CLI (Claude Code) — subprocess-based provider, no API key needed.
     /// Uses the locally installed `claude` binary with the user's existing auth.
     ClaudeCli,
+    /// Codex CLI — subprocess-based provider, no API key needed.
+    /// Uses the locally installed `codex` binary with the user's ChatGPT-plan auth.
+    CodexCli,
 }
 
 impl Provider {
@@ -307,6 +310,7 @@ impl Provider {
             "rig" => Some(Provider::Rig),
             "gemini" => Some(Provider::Gemini),
             "claude_cli" | "claude-cli" | "claudecli" => Some(Provider::ClaudeCli),
+            "codex_cli" | "codex-cli" | "codexcli" => Some(Provider::CodexCli),
             _ => None,
         }
     }
@@ -319,6 +323,7 @@ impl Provider {
             Provider::Rig => "Rig AI Agent",
             Provider::Gemini => "Google Gemini",
             Provider::ClaudeCli => "Claude CLI",
+            Provider::CodexCli => "Codex CLI",
         }
     }
 
@@ -332,6 +337,9 @@ impl Provider {
             Provider::Rig => "Rig framework for building AI agents with structured outputs",
             Provider::Gemini => "Google's Gemini models for multimodal AI capabilities",
             Provider::ClaudeCli => "Use your local Claude CLI installation — no API key required",
+            Provider::CodexCli => {
+                "Use your local Codex CLI installation with your ChatGPT plan — no API key required"
+            }
         }
     }
 
@@ -759,6 +767,36 @@ impl Provider {
                     router_role: None,
                 },
             ],
+            // Codex CLI (v1): chat-only through the user's ChatGPT plan. No
+            // Anthropic tool version applies; computer-use tooling is tracked
+            // as unsupported until this provider is wired to Juno's own
+            // function tools or MCP server.
+            Provider::CodexCli => &[
+                ModelDefinition {
+                    id: "gpt-5-codex",
+                    name: "GPT-5 Codex (via CLI)",
+                    computer_use: ComputerUse::No,
+                    availability: Availability::Current,
+                    toolset_ga: false,
+                    image_tier: ImageTier::Standard,
+                    adaptive_thinking: false,
+                    server_side_fallback: false,
+                    is_recommended: true,
+                    router_role: None,
+                },
+                ModelDefinition {
+                    id: "gpt-5",
+                    name: "GPT-5 (via CLI)",
+                    computer_use: ComputerUse::No,
+                    availability: Availability::Current,
+                    toolset_ga: false,
+                    image_tier: ImageTier::Standard,
+                    adaptive_thinking: false,
+                    server_side_fallback: false,
+                    is_recommended: false,
+                    router_role: None,
+                },
+            ],
         }
     }
 
@@ -847,6 +885,7 @@ impl Provider {
                     Provider::Rig => model_ids::OPENAI_SOL_5_6,
                     Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
                     Provider::ClaudeCli => "sonnet",
+                    Provider::CodexCli => "gpt-5-codex",
                 }
             })
     }
@@ -859,6 +898,7 @@ impl Provider {
             Provider::Rig => "rig",
             Provider::Gemini => "gemini",
             Provider::ClaudeCli => "claude_cli",
+            Provider::CodexCli => "codex_cli",
         }
     }
 
@@ -1099,6 +1139,7 @@ mod tests {
             Provider::Rig,
             Provider::Gemini,
             Provider::ClaudeCli,
+            Provider::CodexCli,
         ] {
             let default = provider
                 .model_definitions()
@@ -1504,6 +1545,7 @@ mod tests {
             Provider::Gemini,
             Provider::Rig,
             Provider::ClaudeCli,
+            Provider::CodexCli,
         ] {
             for def in provider.model_definitions() {
                 assert!(
@@ -1578,6 +1620,7 @@ mod tests {
             Provider::Rig,
             Provider::Gemini,
             Provider::ClaudeCli,
+            Provider::CodexCli,
         ] {
             let recommended: Vec<_> = provider
                 .model_definitions()
@@ -1672,6 +1715,7 @@ mod tests {
             Provider::Rig,
             Provider::Gemini,
             Provider::ClaudeCli,
+            Provider::CodexCli,
         ] {
             for def in provider.model_definitions() {
                 let capable = def.computer_use.is_supported();

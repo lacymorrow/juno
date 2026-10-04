@@ -8,6 +8,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::multi_agent::MultiAgentOrchestrator;
 use crate::agent::providers::anthropic::AnthropicBrain;
 use crate::agent::providers::claude_cli::ClaudeCliBrain;
+use crate::agent::providers::codex_cli::CodexCliBrain;
 use crate::agent::providers::config::{load_provider_config, AgentMode, ProviderConfig};
 use crate::agent::providers::gemini::GeminiBrain;
 use crate::agent::providers::openai::OpenAIBrain;
@@ -277,13 +278,22 @@ impl BrainFactory {
         app_handle: Option<&tauri::AppHandle>,
     ) -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
-        let providers = vec![
+        // Codex CLI follows the capability-shaped UX described in LAC-4125:
+        // if the binary is not installed, hide the provider from the Settings
+        // list entirely. Claude CLI's existing behaviour (always listed,
+        // greyed when signed out) is left alone because its users already
+        // know it is there and the setting carries history.
+        let codex_installed = crate::agent::providers::codex_cli::is_codex_cli_available();
+        let mut providers = vec![
             Provider::Anthropic,
             Provider::OpenAI,
             Provider::Rig,
             Provider::Gemini,
             Provider::ClaudeCli,
         ];
+        if codex_installed {
+            providers.push(Provider::CodexCli);
+        }
         let config = Some(load_provider_config(app_handle));
         // One filesystem probe for the whole listing.
         let cli_installed = crate::agent::providers::claude_cli::is_claude_cli_available();
@@ -346,11 +356,25 @@ impl BrainFactory {
                         use crate::agent::providers::claude_cli::{last_known_sign_in, SignIn};
                         cli_installed && last_known_sign_in() != SignIn::SignedOut
                     }
+                    Provider::CodexCli => {
+                        // Same shape as Claude CLI, but keyed on the ChatGPT
+                        // auth mode rather than a boolean sign-in: an `apikey`
+                        // auth is still a login the CLI can use, so the UI
+                        // should not grey it out, but it is not what the
+                        // default-provider rule picks up.
+                        use crate::agent::providers::codex_cli::{last_known_auth_mode, AuthMode};
+                        codex_installed && !matches!(last_known_auth_mode(), AuthMode::SignedOut)
+                    }
                 };
                 // The one unavailability you fix in a terminal rather than by
                 // pasting a key.
-                let needs_sign_in =
-                    provider == Provider::ClaudeCli && cli_installed && !is_available;
+                let needs_sign_in = matches!(provider, Provider::ClaudeCli | Provider::CodexCli)
+                    && match provider {
+                        Provider::ClaudeCli => cli_installed,
+                        Provider::CodexCli => codex_installed,
+                        _ => false,
+                    }
+                    && !is_available;
 
                 ProviderInfo {
                     id: provider_id.to_string(),
@@ -458,6 +482,11 @@ impl BrainFactory {
                 ClaudeCliBrain::from_config(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
+            Provider::CodexCli => {
+                info!("Initializing Codex CLI brain (subprocess-based, no API key)...");
+                CodexCliBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+            }
         }
     }
 
@@ -546,6 +575,11 @@ impl BrainFactory {
             Provider::ClaudeCli => {
                 info!("Initializing Claude CLI brain with custom system prompt...");
                 ClaudeCliBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+            }
+            Provider::CodexCli => {
+                info!("Initializing Codex CLI brain with custom system prompt...");
+                CodexCliBrain::from_config(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
         }
