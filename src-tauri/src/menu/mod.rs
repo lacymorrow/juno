@@ -104,6 +104,8 @@ pub fn is_tray_menu_event(event_id: &str) -> bool {
             | constants::tray_menu_ids::DEVELOPER_TOOLS
             | constants::tray_menu_ids::SETTINGS
             | constants::tray_menu_ids::QUIT
+            | constants::tray_menu_ids::TALK
+            | constants::tray_menu_ids::CANCEL
             | constants::tray_menu_ids::SHOW_MAIN_WINDOW
             | constants::tray_menu_ids::HIDE_MAIN_WINDOW
             | constants::tray_menu_ids::SHOW_DEVTOOLS

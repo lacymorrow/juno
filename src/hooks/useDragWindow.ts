@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { COMMANDS } from "@/lib/constants.generated";
 
 import { armBarSnap, settleBarSnap, useBarDisplayFollow } from "./useBarSnapWells";
 
@@ -86,6 +88,7 @@ export interface BarDrag {
     onMouseDownCapture: (e: React.MouseEvent) => void;
     onMouseMove: (e: React.MouseEvent) => void;
     onMouseUp: () => void;
+    onContextMenu: (e: React.MouseEvent) => void;
   };
   /**
    * Call first from the root's `onClickCapture`. Returns true when it has
@@ -148,6 +151,17 @@ export function useBarDrag({
     grab.current = null;
   }, []);
 
+  // Right-click: the webview's own menu is never right on the bar, so it is
+  // suppressed and Rust pops the native one at the cursor. The drag arms on
+  // the left button only, so this cannot interfere with it.
+  const onContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    grab.current = null;
+    void invoke(COMMANDS.BAR_SHOW_CONTEXT_MENU).catch((error) =>
+      console.debug("barDrag: context menu failed:", error),
+    );
+  }, []);
+
   const swallowClickAfterDrag = useCallback((e: React.MouseEvent) => {
     if (!dragged.current) return false;
     dragged.current = false;
@@ -169,7 +183,7 @@ export function useBarDrag({
   useBarDisplayFollow(displayFollowPaused);
 
   return {
-    dragProps: { onMouseDownCapture, onMouseMove, onMouseUp },
+    dragProps: { onMouseDownCapture, onMouseMove, onMouseUp, onContextMenu },
     swallowClickAfterDrag,
   };
 }
