@@ -1667,10 +1667,10 @@ async fn get_selected_text_safe(app_state: Option<&crate::state::AppState>) -> O
             return Some(selected_text);
         }
 
-        // Fall back to clipboard trick approach as mentioned in web search results
-        if let Some(selected_text) = get_selected_text_via_clipboard_trick(state).await {
-            return Some(selected_text);
-        }
+        // Accessibility only. Juno used to fall back to pressing Cmd+C in the
+        // person's app and reading the clipboard, but a synthetic Cmd+C sent
+        // while a trigger key is held can land as a plain "c" typed into
+        // whatever has focus. Reading context must never type anything.
 
         log::debug!("No selected text found via any method");
         Some("".to_string()) // Return empty string as fallback
@@ -1810,73 +1810,6 @@ fn extract_text_from_range(range_str: &str, full_text: &str) -> Option<String> {
         }
     }
     None
-}
-
-/// Fall back to clipboard trick approach (as mentioned in web search results)
-async fn get_selected_text_via_clipboard_trick(
-    app_state: &crate::state::AppState,
-) -> Option<String> {
-    // Save current clipboard content
-    let original_clipboard = app_state.desktop.get_clipboard_content().ok();
-
-    // Try to copy selected text using Cmd+C
-    match app_state.desktop.get_desktop() {
-        Ok(desktop) => {
-            // Send Cmd+C to copy selected text
-            if let Err(e) = desktop.press_key("c", Some("cmd")) {
-                log::debug!("Failed to press Cmd+C: {}", e);
-                return None;
-            }
-
-            // Small delay to allow copy operation to complete
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            // Get clipboard content
-            let copied_text = match app_state.desktop.get_clipboard_content() {
-                Ok(content) => {
-                    // Check if clipboard content changed (indicating something was copied)
-                    if original_clipboard.as_ref() != Some(&content) && !content.trim().is_empty() {
-                        Some(content)
-                    } else {
-                        None
-                    }
-                }
-                Err(e) => {
-                    log::debug!("Failed to get clipboard content: {}", e);
-                    None
-                }
-            };
-
-            // Restore original clipboard content if we have it
-            if let Some(original) = original_clipboard {
-                if let Err(e) = app_state.desktop.set_clipboard_content(&original) {
-                    log::debug!("Failed to restore clipboard content: {}", e);
-                }
-            }
-
-            if let Some(text) = copied_text {
-                const MAX_SELECTED_TEXT_LENGTH: usize = 300;
-                let result = if text.len() > MAX_SELECTED_TEXT_LENGTH {
-                    format!(
-                        "{}... (truncated from {} chars)",
-                        strings::truncate_chars(&text, MAX_SELECTED_TEXT_LENGTH),
-                        text.len()
-                    )
-                } else {
-                    text
-                };
-                log::debug!("Found selected text via clipboard trick: {}", result);
-                Some(result)
-            } else {
-                log::debug!("No selected text found via clipboard trick");
-                None
-            }
-        }
-        Err(e) => {
-            log::debug!("Desktop not available for clipboard trick: {}", e);
-            None
-        }
-    }
 }
 
 /// Safely get hardware information for context
