@@ -162,13 +162,13 @@ fn default_capture_opener() -> CaptureOpener {
 /// it keeps is what `active_capture_handles` reports, so "is the mic still
 /// open after I turned this off" is a number a test can read rather than an
 /// orange dot somebody has to look at.
-struct CaptureGuard {
+pub(crate) struct CaptureGuard {
     keepalive: Option<Box<dyn std::any::Any>>,
     live: Arc<AtomicUsize>,
 }
 
 impl CaptureGuard {
-    fn new(keepalive: Box<dyn std::any::Any>, live: Arc<AtomicUsize>) -> Self {
+    pub(crate) fn new(keepalive: Box<dyn std::any::Any>, live: Arc<AtomicUsize>) -> Self {
         live.fetch_add(1, Ordering::SeqCst);
         Self {
             keepalive: Some(keepalive),

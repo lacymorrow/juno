@@ -180,6 +180,20 @@ describe("PersonaBar", () => {
     expect(yours.getAttribute("data-edge")).toBe("listen");
   });
 
+  it.each([
+    [UI.BAR_STATES_LISTENING, {}],
+    [UI.BAR_STATES_TRANSCRIBING, { transcriptionText: "testing", transcriptionProvisional: true }],
+  ])("offers Send, Type instead and Cancel in your bubble while a turn records (%s)", async (state, extra) => {
+    render(<PersonaBar />);
+    await settle();
+    await send(state, extra);
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Type instead" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel without sending" }));
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "cancel" });
+  });
+
   it("tints your bubble green while dictating", async () => {
     render(<PersonaBar />);
     await send(UI.BAR_STATES_DICTATING, { transcriptionText: "Dear Maya" });
