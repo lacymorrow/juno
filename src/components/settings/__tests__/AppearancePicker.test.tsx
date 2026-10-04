@@ -63,3 +63,20 @@ describe("AppearancePicker", () => {
     expect(onChange).toHaveBeenLastCalledWith(APPEARANCE_CATALOG[APPEARANCE_CATALOG.length - 1].value);
   });
 });
+
+describe("AppearancePicker loading state", () => {
+  it("renders no appearance name or error text while a look is loading or failed", () => {
+    vi.useFakeTimers();
+    const entry = APPEARANCE_CATALOG[0];
+    const { container } = render(<AppearancePicker value={entry.value} onChange={() => {}} />);
+    const stage = () => container.querySelector("div.relative.h-\\[150px\\]") as HTMLElement;
+    expect(stage().querySelector('[data-testid="appearance-preview-placeholder"]')).not.toBeNull();
+    expect(stage().textContent).toBe("");
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(stage().textContent).toBe("");
+    expect(stage().textContent).not.toContain("Preview unavailable");
+    vi.useRealTimers();
+  });
+});
