@@ -8,7 +8,13 @@ use tauri::AppHandle;
 use tracing::info;
 
 pub mod app_menu;
+
 pub mod tray_menu;
+
+/// Developer Tools and the developer panel exist only in a local development
+/// build (`tauri dev`, debug assertions on). A released app never lists them
+/// and never acts on their ids.
+pub const SHOW_DEVELOPER_MENUS: bool = cfg!(debug_assertions);
 
 // Re-export public functions
 pub use app_menu::*;
