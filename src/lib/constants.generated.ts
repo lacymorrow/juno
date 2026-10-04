@@ -643,6 +643,8 @@ export const COMMANDS = {
   TRIGGERS_GET_TRIGGER_HINTS: 'get_trigger_hints',
   TRIGGERS_GET_TRIGGER_ISSUES: 'get_trigger_issues',
   TRIGGERS_SET_TRIGGER_CAPTURE: 'set_trigger_capture',
+  TRIGGERS_GLOBE_KEY_NEEDS_SETUP: 'globe_key_needs_setup',
+  TRIGGERS_USE_NO_FN_DEFAULTS: 'use_no_fn_defaults',
   TRIGGERS_OPEN_KEYBOARD_SETTINGS: 'open_keyboard_settings',
   INPUT_CONTROL_RESPOND_TO_REQUEST: 'respond_to_input_control',
   INPUT_CONTROL_GET_MOUSE_CONTROL: 'get_mouse_control',

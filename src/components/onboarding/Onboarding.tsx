@@ -812,6 +812,9 @@ export default function OnboardingFlow({
   // and a press proves the key reaches Juno, which no capability check can.
   const [fnOffered, setFnOffered] = useState(false);
   const [fnSaveError, setFnSaveError] = useState<string | null>(null);
+  // Whether "Press globe key to" still gives the key a job. Asked of the
+  // system, so the advice shows only when it is true.
+  const [globeNeedsSetup, setGlobeNeedsSetup] = useState(false);
   // The microphone prompt is raised automatically once, right after a
   // successful auto-grant run — one Allow click finishes everything.
   const micAutoPromptedRef = useRef(false);
@@ -1031,6 +1034,29 @@ export default function OnboardingFlow({
       console.error("[Onboarding] could not switch to the globe key:", error);
       if (mountedRef.current) {
         setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
+      }
+    }
+  }, [refreshTriggerHints]);
+
+  useEffect(() => {
+    invoke<boolean>(COMMANDS.TRIGGERS_GLOBE_KEY_NEEDS_SETUP)
+      .then((needs) => {
+        if (mountedRef.current) setGlobeNeedsSetup(needs === true);
+      })
+      .catch((e) => console.debug("[Onboarding] could not read the globe key setting:", e));
+  }, []);
+
+  // "My keyboard has no Fn key": hold Right Option to talk to Juno and hold
+  // Control to dictate. The backend writes both rows; Settings can rebind them.
+  const adoptNoFnKeys = useCallback(async () => {
+    setFnSaveError(null);
+    try {
+      await invoke(COMMANDS.TRIGGERS_USE_NO_FN_DEFAULTS);
+      await refreshTriggerHints();
+    } catch (error) {
+      console.error("[Onboarding] could not switch to the no-Fn keys:", error);
+      if (mountedRef.current) {
+        setFnSaveError("Could not switch keys. You can set them in Settings.");
       }
     }
   }, [refreshTriggerHints]);
@@ -1985,11 +2011,22 @@ export default function OnboardingFlow({
                             gives the globe key its own job by default, so
                             without this the emoji picker opens every time you
                             talk to Juno and the key looks broken. */}
-                        {usingGlobeKey && (
+                        {usingGlobeKey && globeNeedsSetup && (
                           <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
                             If the emoji picker opens too, set System Settings,
                             Keyboard, "Press globe key to" to "Do Nothing".
                           </p>
+                        )}
+                        {/* Until a press proves the globe key reaches Juno,
+                            there is a way out for a keyboard without one. */}
+                        {usingGlobeKey && !fnOffered && (
+                          <button
+                            type="button"
+                            onClick={() => void adoptNoFnKeys()}
+                            className="mt-1 text-[12px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                          >
+                            My keyboard has no Fn key
+                          </button>
                         )}
                         {fnSaveError && (
                           <p className="mt-1 text-[12px] text-destructive" role="alert">
