@@ -263,6 +263,13 @@ pub struct AudioSettings {
     /// voice the Mac is already set to use.
     #[serde(default)]
     pub system_voice: Option<String>,
+    /// True once the person has picked a Mac voice in the Audio pane. Until
+    /// then `system_voice` is only something Juno wrote down after ranking the
+    /// installed voices (a build before the Mac's own voice became the default
+    /// stored "Samantha" for everyone), so it is not a choice and the Mac's own
+    /// voice replaces it. See `tts::voices::resolve_stored_voice`.
+    #[serde(default)]
+    pub system_voice_chosen: bool,
     #[serde(default = "AudioSettings::default_kokoro_voice")]
     pub kokoro_voice: String,
     #[serde(default)]
@@ -626,6 +633,7 @@ impl Default for AudioSettings {
             input_device: None,
             output_device: None,
             system_voice: None,
+            system_voice_chosen: false,
             kokoro_voice: Self::default_kokoro_voice(),
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: Self::default_chatterbox_exaggeration(),
