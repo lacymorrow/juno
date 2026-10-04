@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.92] - 2026-10-04
+
+### Fixed
+
+- **providers:** read provider settings field by field (#701) (006062e0)
+
 ## [0.8.91] - 2026-10-04
 
 ### Fixed
@@ -882,7 +888,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.91...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.92...HEAD
+[0.8.92]: https://github.com/lacymorrow/juno/compare/cua-v0.8.91...v0.8.92
 [0.8.91]: https://github.com/lacymorrow/juno/compare/cua-v0.8.90...v0.8.91
 [0.8.90]: https://github.com/lacymorrow/juno/compare/cua-v0.8.89...v0.8.90
 [0.8.89]: https://github.com/lacymorrow/juno/compare/cua-v0.8.88...v0.8.89
