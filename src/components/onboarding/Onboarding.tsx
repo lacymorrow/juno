@@ -55,14 +55,6 @@ interface PermissionStatus {
 // A second hand-maintained copy of this drifted once already: it was missing
 // `everything_granted`, which is exactly the field that decides whether this
 // step still has anything to show.
-/** Only the parts of a Trigger this screen round-trips; the rest is preserved. */
-interface TriggerShape {
-  gesture: string;
-  target: string;
-  binding: unknown;
-  [key: string]: unknown;
-}
-
 interface PermissionsState {
   accessibility: PermissionStatus;
   screen_recording: PermissionStatus;
@@ -447,21 +439,14 @@ const getOnboardingSteps = (
  */
 const ESCAPE_CAPS: KeyCap[] = shortcutCaps("Escape");
 
-/** The shortcut string the globe key is recorded as, mirroring Rust. */
-const GLOBE_SHORTCUT = "Fn";
-
 /**
- * When the key caps should light for a captured globe-key press.
- *
- * `"now"` when the globe key is already the one drawn: the press is the
- * answer, so light it on key-down. Otherwise the caps change to the globe key
- * once it is adopted, so light them then, not before and not on a failure.
+ * Whether a shortcut string includes the globe key (`"Fn"`, `"Fn+Control"`).
+ * Only used to decide whether the "Press globe key to" advice is relevant.
  */
-export function globePressTiming(hints: TriggerHints | null): "now" | "after-adopt" {
-  const shown = (hints?.agent?.shortcut ?? hints?.dictation?.shortcut ?? "")
-    .trim()
-    .toLowerCase();
-  return shown === GLOBE_SHORTCUT.toLowerCase() ? "now" : "after-adopt";
+export function usesGlobeKey(shortcut: string | null | undefined): boolean {
+  return (shortcut ?? "")
+    .split("+")
+    .some((part) => part.trim().toLowerCase() === "fn");
 }
 
 /** One target's key, as the backend derives it from the trigger list. */
@@ -503,6 +488,32 @@ export function summonDemo(hints: TriggerHints | null): {
   const caps = shortcutCaps(hint.shortcut);
   if (caps.length === 0) return null;
   return { caps, sentence: hint.sentence };
+}
+
+/**
+ * Which backend event means "the key the demo shows was pressed".
+ *
+ * The demo draws the agent trigger, or the dictation trigger when nothing is
+ * bound to the agent (see {@link summonDemo}), so it listens for that same
+ * target and no other. Rust emits these from every source (a modifier set, a
+ * normal shortcut, the globe key), so whatever the person's trigger is, its
+ * press arrives here. Nothing is written: the demo only watches.
+ */
+export function demoPressEvent(hints: TriggerHints | null): string | null {
+  if (hints?.agent && hints.agent.shortcut.trim()) return EVENTS.SHORTCUTS_AGENT_MODE;
+  if (hints?.dictation && hints.dictation.shortcut.trim()) {
+    return EVENTS.SHORTCUTS_DICTATION_INPUT;
+  }
+  return null;
+}
+
+/** Whether an event from the backend is a press of the demo's key. */
+export function isDemoPress(
+  hints: TriggerHints | null,
+  event: string,
+  payload: { state?: string } | null | undefined
+): boolean {
+  return payload?.state === "pressed" && demoPressEvent(hints) === event;
 }
 
 /**
@@ -822,12 +833,6 @@ export default function OnboardingFlow({
   // run dismisses with Later so setup can continue. Nobody ever mentioned it
   // again, so Screen Recording looked switched on and behaved switched off.
   const [awaitingRelaunch, setAwaitingRelaunch] = useState<string[]>([]);
-  // Whether this keyboard actually has the globe key, learned by someone
-  // pressing it rather than by interrogating the hardware. "Does this machine
-  // have an Fn key" has no single answer once a second keyboard is plugged in,
-  // and a press proves the key reaches Juno, which no capability check can.
-  const [fnOffered, setFnOffered] = useState(false);
-  const [fnSaveError, setFnSaveError] = useState<string | null>(null);
   // Whether "Press globe key to" still gives the key a job. Asked of the
   // system, so the advice shows only when it is true.
   const [globeNeedsSetup, setGlobeNeedsSetup] = useState(false);
@@ -904,10 +909,20 @@ export default function OnboardingFlow({
   // The backend always emits these events even during onboarding (visual feedback
   // mode), so the final screen's keycaps can light up when the user tries the
   // shortcut. We use useEventListener (the project's canonical Tauri event hook).
+  // The demo accepts the press of whichever key it draws, whatever it is.
   useEventListener<{ state: string; shortcut: string }>(
     EVENTS.SHORTCUTS_AGENT_MODE,
     (payload) => {
-      if (payload.state === "pressed" && !shortcutPressed) {
+      if (isDemoPress(triggerHints, EVENTS.SHORTCUTS_AGENT_MODE, payload)) {
+        setShortcutPressed(true);
+      }
+    }
+  );
+
+  useEventListener<{ state: string; shortcut: string }>(
+    EVENTS.SHORTCUTS_DICTATION_INPUT,
+    (payload) => {
+      if (isDemoPress(triggerHints, EVENTS.SHORTCUTS_DICTATION_INPUT, payload)) {
         setShortcutPressed(true);
       }
     }
@@ -985,77 +1000,6 @@ export default function OnboardingFlow({
     }
   }, []);
 
-  const adoptFnAsTalkKey = useCallback(async (): Promise<boolean> => {
-    setFnSaveError(null);
-    try {
-      const triggers = await invoke<TriggerShape[]>(COMMANDS.TRIGGERS_GET_TRIGGERS);
-      // The globe key is a keyboard key, so it is a keyboard binding whose
-      // shortcut string is "Fn". Which watcher can see it is the backend's
-      // problem, not a second kind of binding.
-      const fnBinding = { kind: "keyboard" as const, shortcut: "Fn" as const };
-      // The row this screen is about: holding a key to talk to Juno. That is
-      // the agent, which is also where the factory default puts the globe key,
-      // so adopting it here lands on the same row rather than a second one.
-      const isTalkTrigger = (trigger: TriggerShape) =>
-        trigger.gesture === "hold" && trigger.target === "agent";
-      // Also switched on, because a trigger that is off is never registered:
-      // pressing the key to adopt it and then finding it does nothing is worse
-      // than not offering it at all.
-      let next: TriggerShape[] = triggers.map((trigger) =>
-        isTalkTrigger(trigger)
-          ? { ...trigger, binding: fnBinding, enabled: true }
-          : trigger
-      );
-      // Nothing to hold means nothing to hold a key for. A store with no
-      // hold-to-talk row (it was deleted, or changed to another gesture) used
-      // to accept this silently and the screen said the globe key was in use
-      // while nothing was bound to it.
-      if (!next.some(isTalkTrigger)) {
-        next = [
-          ...next,
-          {
-            gesture: "hold",
-            target: "agent",
-            binding: fnBinding,
-            phrase: null,
-            require_hey_prefix: false,
-            enabled: true,
-          },
-        ];
-      }
-      const saved = await invoke<TriggerShape[]>(COMMANDS.TRIGGERS_SET_TRIGGERS, {
-        triggers: next,
-      });
-      // Believe the list that came back, not the one we sent: the backend
-      // normalizes and can reject.
-      const adopted = saved.some((trigger) => {
-        if (!isTalkTrigger(trigger)) return false;
-        const binding = trigger.binding as
-          | { kind?: string; shortcut?: string }
-          | null;
-        return (
-          binding?.kind === "keyboard" &&
-          binding.shortcut?.trim().toLowerCase() === "fn"
-        );
-      });
-      if (!mountedRef.current) return false;
-      if (adopted) {
-        setFnOffered(true);
-        // The caps on screen name a key; a rebind has to move them.
-        await refreshTriggerHints();
-      } else {
-        setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
-      }
-      return adopted;
-    } catch (error) {
-      console.error("[Onboarding] could not switch to the globe key:", error);
-      if (mountedRef.current) {
-        setFnSaveError("Could not switch to the globe key. You can set it in Settings.");
-      }
-      return false;
-    }
-  }, [refreshTriggerHints]);
-
   useEffect(() => {
     invoke<boolean>(COMMANDS.TRIGGERS_GLOBE_KEY_NEEDS_SETUP)
       .then((needs) => {
@@ -1069,25 +1013,6 @@ export default function OnboardingFlow({
   // here, so the caps on screen are always the keys that work.
   useEventListener(EVENTS.TRIGGERS_CHANGED, () => {
     void refreshTriggerHints();
-  });
-
-  // The last screen holds capture open, so the monitor swallows the globe key
-  // and reports it here instead of firing the trigger. That report is the only
-  // signal the first press ever produces, so it has to light the key too: the
-  // first press used to adopt the key silently and only the second one, which
-  // fires the trigger, lit it.
-  //
-  // The backend reports a binding once its keys are let go, written the way
-  // a binding is stored, so the globe key on its own arrives as "Fn".
-  useEventListener<{ key?: string; shortcut?: string }>(EVENTS.TRIGGERS_KEY_CAPTURED, (payload) => {
-    if (payload?.shortcut !== GLOBE_SHORTCUT) return;
-    const timing = globePressTiming(triggerHints);
-    if (timing === "now") setShortcutPressed(true);
-    void adoptFnAsTalkKey().then((adopted) => {
-      if (adopted && timing === "after-adopt" && mountedRef.current) {
-        setShortcutPressed(true);
-      }
-    });
   });
 
   const refreshRelaunchPending = useCallback(async () => {
@@ -1825,29 +1750,6 @@ export default function OnboardingFlow({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleNext]);
 
-  // Listen for the globe key only while the last screen is up, and stop as
-  // soon as it is not. Outside this moment a press means "talk to Juno", not
-  // "choose a key", and the monitor must not swallow that.
-  //
-  // This sits above the `isComplete` early return on purpose. Below it, the
-  // hook disappeared from the render on the one transition that matters,
-  // every exit from the last screen sets `isComplete` first, so React threw on
-  // the changed hook count instead of running this cleanup. Capture stayed on
-  // in the backend and the globe key did nothing, anywhere, until Juno was
-  // quit. `isComplete` is a dependency rather than an early bail so finishing
-  // withdraws the request the same way leaving the step does.
-  const onFinalStep = currentStep === onboardingSteps.length - 1;
-  const wantsCapture = onFinalStep && !isComplete;
-  useEffect(() => {
-    if (!wantsCapture) return;
-    void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: true }).catch((error) =>
-      console.debug("[Onboarding] could not listen for the globe key:", error)
-    );
-    return () => {
-      void invoke(COMMANDS.TRIGGERS_SET_TRIGGER_CAPTURE, { active: false }).catch(() => {});
-    };
-  }, [wantsCapture]);
-
   if (isComplete) {
     return null;
   }
@@ -1882,13 +1784,10 @@ export default function OnboardingFlow({
   const step =
     onboardingSteps[currentStep] ?? onboardingSteps[onboardingSteps.length - 1];
 
-  // The key the last screen teaches, and whether it is already the globe key.
+  // The key the last screen teaches, and whether it involves the globe key.
   // Both derived from the registry, so changing a trigger changes the screen.
   const demo = summonDemo(triggerHints);
-  const usingGlobeKey =
-    fnOffered ||
-    (triggerHints?.agent?.shortcut ?? "").trim().toLowerCase() ===
-      GLOBE_SHORTCUT.toLowerCase();
+  const usingGlobeKey = usesGlobeKey((triggerHints?.agent ?? triggerHints?.dictation)?.shortcut);
 
   // Checklist position.
   const permSubFlowComplete = permIndex >= PERMISSION_FLOW.length;
@@ -2020,18 +1919,6 @@ export default function OnboardingFlow({
                             whenever you like.
                           </p>
                         )}
-                        {/* Offered by invitation rather than by detection: if
-                            this keyboard has a globe key, pressing it proves
-                            it, and if it does not, nothing happens and the key
-                            above keeps working. Either way nobody has to answer
-                            a question about their hardware. Not offered at all
-                            once the globe key is already the one on screen. */}
-                        {!usingGlobeKey && triggerHints?.globe_key !== false && (
-                          <p className="mt-3 text-[12px] leading-snug text-muted-foreground">
-                            Prefer to hold one key? Press the globe key now to
-                            use that instead.
-                          </p>
-                        )}
                         {/* Said once it is actually in use, not before: macOS
                             gives the globe key its own job by default, so
                             without this the emoji picker opens every time you
@@ -2040,11 +1927,6 @@ export default function OnboardingFlow({
                           <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
                             If the emoji picker opens too, set System Settings,
                             Keyboard, "Press globe key to" to "Do Nothing".
-                          </p>
-                        )}
-                        {fnSaveError && (
-                          <p className="mt-1 text-[12px] text-destructive" role="alert">
-                            {fnSaveError}
                           </p>
                         )}
                       </motion.div>
