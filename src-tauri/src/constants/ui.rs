@@ -61,11 +61,50 @@ pub mod bar_appearances {
     pub const SHADER_ORB: &str = "shader_orb";
     pub const PERSONA: &str = "persona";
 
-    /// The look a new install (and a settings reset) starts on: the Avatar,
-    /// a small character whose mouth moves while Juno speaks. The others stay
-    /// in the picker. Every fallback in Rust and the frontend reads this,
-    /// never a literal.
-    pub const DEFAULT: &str = PERSONA;
+    /// The look a new install (and a settings reset) starts on: the Pill, a
+    /// small pill that opens when you speak. The others stay in the picker
+    /// unless listed in `HIDDEN`. Every fallback in Rust and the frontend
+    /// reads this, never a literal.
+    pub const DEFAULT: &str = FLOATING;
+
+    /// Looks kept in the code but not offered anywhere a person chooses, and
+    /// not kept if already saved: `resolve` turns them into `DEFAULT`. Bringing
+    /// one back is deleting it from this list. Bar and Studio are not finished.
+    pub const HIDDEN: &[&str] = &[APP, VOICE_AI];
+
+    /// True when this look is not offered to a person.
+    pub fn is_hidden(id: &str) -> bool {
+        HIDDEN.contains(&id)
+    }
+
+    /// The look to show for a saved value: a hidden one becomes `DEFAULT`,
+    /// silently. Anything else passes through unchanged.
+    pub fn resolve(id: &str) -> &str {
+        if is_hidden(id) {
+            DEFAULT
+        } else {
+            id
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn hidden_looks_are_not_offered_and_resolve_to_the_default() {
+            assert_eq!(DEFAULT, FLOATING);
+            for id in [APP, VOICE_AI] {
+                assert!(is_hidden(id), "{id} should be hidden");
+                assert_eq!(resolve(id), DEFAULT);
+            }
+            for id in [FLOATING, DYNAMIC, ORB, REACT_ORB, SHADER_ORB, PERSONA] {
+                assert!(!is_hidden(id), "{id} should be offered");
+                assert_eq!(resolve(id), id);
+            }
+            assert!(!is_hidden(DEFAULT));
+        }
+    }
 }
 
 /// UI state constants for bar state management

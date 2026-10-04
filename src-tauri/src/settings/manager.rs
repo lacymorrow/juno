@@ -531,7 +531,12 @@ impl SettingsManager {
         &self,
         store: &tauri_plugin_store::Store<tauri::Wry>,
     ) -> Result<FloatingBarSettings, String> {
-        Ok(read_section(store, store_keys::FLOATING_BAR))
+        let mut bar: FloatingBarSettings = read_section(store, store_keys::FLOATING_BAR);
+        // A look that is hidden from the picker shows as the default, silently.
+        if crate::constants::ui::bar_appearances::is_hidden(&bar.bar_appearance) {
+            bar.bar_appearance = crate::constants::ui::bar_appearances::DEFAULT.to_string();
+        }
+        Ok(bar)
     }
 
     fn get_agent_settings_from_store(
