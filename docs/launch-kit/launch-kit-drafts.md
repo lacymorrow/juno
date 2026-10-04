@@ -6,6 +6,9 @@ No launch date set. Depends on step 1 (demo clip) and step 2 (download path QA p
 Note: humanizer skill was not available in this session. Humanizer rules applied manually
 from ~/.agents/skills/humanizer/SKILL.md. Herald should re-run through humanizer before publishing.
 
+Pricing: LAC-4126 adds a pricing page. Once the founding presale checkout is live,
+replace `{{PRICING_URL}}` placeholders below with the real URL.
+
 ---
 
 ## 1. X Launch Thread (@junebug_ai, 5 posts)
@@ -42,7 +45,7 @@ If you have Claude Max or Pro, you already paid for this.
 
 Juno runs through the Claude CLI. Sign in once, the agent works on your Mac at zero additional cost.
 
-Direct API keys work too.
+Direct API keys work too. {{PRICING_URL}}
 
 ### Post 5 (CTA)
 
@@ -81,7 +84,7 @@ Tech stack:
 - tokio + async Rust for the concurrency layer
 - Multi-agent orchestration with memory isolation between specialists
 
-macOS 14+. Free. Source: https://github.com/lacymorrow/juno
+macOS 14+. Free. Pricing and founding presale: {{PRICING_URL}}. Source: https://github.com/lacymorrow/juno
 
 Happy to answer questions about the accessibility API work or the architecture.
 
@@ -101,7 +104,7 @@ What sets it apart from cloud-based computer use: Juno runs natively on macOS an
 
 Before every click, Juno checks the macOS accessibility tree at the target coordinate. If it finds a button, it clicks the element semantically instead of guessing at pixels. This is AX-grounded clicking, and it is the reason coordinate-based targeting drift does not bite here.
 
-Voice input runs locally through Whisper. No audio leaves your machine. If you have a Claude Max or Pro subscription, you do not need a separate API key.
+Voice input runs locally through Whisper. No audio leaves your machine. If you have a Claude Max or Pro subscription, you do not need a separate API key. Pricing: {{PRICING_URL}}
 
 Built with Tauri v2 (Rust + React). Open source.
 
@@ -124,6 +127,6 @@ Juno fixes this with AX-grounded clicking. Before every click, we hit-test the m
 
 Your cursor stays yours. Background mode is on by default. Juno acts through accessibility APIs, not your physical mouse. You can keep working while it runs.
 
-40k+ lines of Rust, open source. Built on Tauri v2 with whisper.cpp for voice and ScreenCaptureKit for screenshots. Free if you already have Claude Max or Pro.
+40k+ lines of Rust, open source. Built on Tauri v2 with whisper.cpp for voice and ScreenCaptureKit for screenshots. Free if you already have Claude Max or Pro. Pricing and founding presale: {{PRICING_URL}}
 
 github.com/lacymorrow/juno
