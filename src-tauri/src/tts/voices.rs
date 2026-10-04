@@ -275,7 +275,10 @@ pub fn classify_system_voice(id: Option<&str>, name: Option<&str>) -> SystemVoic
 pub fn prefers_system_voice(inventory: &VoiceInventory) -> bool {
     match inventory.system_voice {
         SystemVoice::Siri => true,
-        SystemVoice::Unset => only_compact_voices(&inventory.macos),
+        // Nothing recorded means the person never changed it, so it is the
+        // voice macOS ships as its default, which on current macOS is a Siri
+        // voice. That beats any downloaded voice the person never picked.
+        SystemVoice::Unset => true,
         SystemVoice::Other => false,
     }
 }
@@ -2236,17 +2239,16 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         assert_eq!(list.options[1].name, "Your Mac's voice");
     }
 
-    /// A downloaded voice still wins over an unknown system voice, and the
-    /// Mac's own voice stays in the list as a way back.
+    /// A downloaded voice does not beat the Mac's own voice when the person
+    /// never chose one: the untouched default is Siri on current macOS. The
+    /// downloaded voices stay in the list to pick.
     #[test]
-    fn an_unset_system_voice_yields_to_a_downloaded_one() {
+    fn an_unset_system_voice_beats_a_downloaded_one() {
         let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Unset);
         let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some("Ava (Premium)"));
+        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
         let list = voice_list("system", &inventory, &resolution);
-        let last = list.options.last().unwrap();
-        assert_eq!(last.id, SYSTEM_DEFAULT_ID);
-        assert!(!last.selected);
+        assert!(list.options.iter().any(|o| o.id == "Ava (Premium)"));
     }
 
     /// A named, non-Siri system voice changes nothing about the ranking.
