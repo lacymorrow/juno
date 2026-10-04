@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.93] - 2026-10-04
+
+### Fixed
+
+- **triggers:** a quick hold can no longer leave Juno stuck listening (#702) (168c2172)
+
 ## [0.8.92] - 2026-10-04
 
 ### Fixed
@@ -888,7 +894,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.92...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.93...HEAD
+[0.8.93]: https://github.com/lacymorrow/juno/compare/cua-v0.8.92...v0.8.93
 [0.8.92]: https://github.com/lacymorrow/juno/compare/cua-v0.8.91...v0.8.92
 [0.8.91]: https://github.com/lacymorrow/juno/compare/cua-v0.8.90...v0.8.91
 [0.8.90]: https://github.com/lacymorrow/juno/compare/cua-v0.8.89...v0.8.90
