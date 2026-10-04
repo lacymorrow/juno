@@ -46,26 +46,47 @@ pub async fn on_first_run(app: &AppHandle) {
     speak(app, introduction(app)).await;
 }
 
-/// The line she opens with, naming the key that was actually bound.
+/// The line she opens with, naming the trigger that is actually in effect.
 fn introduction(app: &AppHandle) -> String {
-    let Some((gesture, key)) = summoning_key(app) else {
-        return INTRO_UNBOUND.to_string();
-    };
-    format!("Hi, I'm Juno. {gesture} {key} whenever you want to talk to me.")
+    match app.state::<crate::state::AppState>().get_triggers() {
+        Ok(triggers) => introduction_for(&triggers),
+        Err(_) => INTRO_UNBOUND.to_string(),
+    }
 }
 
-/// The gesture and key worth naming, spoken rather than spelled.
+/// [`introduction`] for a given trigger list, so the wording is testable.
 ///
 /// Read from the same hint onboarding draws, so the voice and the screen name
 /// the same key. Talking to Juno comes first because that is literally what
-/// the line describes; dictation is the fallback. A mouse button and a wake
-/// phrase are skipped by the hint, because "hold Mouse Button 4" is not a
-/// sentence anybody wants read aloud.
-fn summoning_key(app: &AppHandle) -> Option<(String, String)> {
-    let triggers = app.state::<crate::state::AppState>().get_triggers().ok()?;
-    let hint = crate::triggers::hint_for(&triggers, TriggerTarget::Agent)
-        .or_else(|| crate::triggers::hint_for(&triggers, TriggerTarget::Dictation))?;
-    Some((hint.gesture, spoken(&hint.shortcut)))
+/// the line describes: her Hold trigger, or whatever other keyboard trigger
+/// she has when there is no Hold. Dictation is the fallback. A mouse button
+/// and a wake phrase are skipped by the hint, because "hold Mouse Button 4" is
+/// not a sentence anybody wants read aloud.
+fn introduction_for(triggers: &[crate::triggers::Trigger]) -> String {
+    let (purpose, hint) =
+        if let Some(hint) = crate::triggers::hint_for(triggers, TriggerTarget::Agent) {
+            ("To talk to me", hint)
+        } else if let Some(hint) = crate::triggers::hint_for(triggers, TriggerTarget::Dictation) {
+            ("To dictate", hint)
+        } else {
+            return INTRO_UNBOUND.to_string();
+        };
+    format!(
+        "Hi, I'm Juno. {purpose}, {} {}.",
+        hint.gesture.to_lowercase(),
+        spoken(&hint.shortcut)
+    )
+}
+
+/// Join key names the way a person says them: "A", "A and B together",
+/// "A, B and C together".
+fn together(names: Vec<String>) -> String {
+    match names.split_last() {
+        Some((last, rest)) if !rest.is_empty() => {
+            format!("{} and {last} together", rest.join(", "))
+        }
+        _ => names.join(" "),
+    }
 }
 
 /// Turn a combo into something a voice can read.
@@ -81,41 +102,40 @@ fn spoken(combo: &str) -> String {
             return "the globe key".to_string();
         }
         if key == ModifierKey::RIGHT_OPTION {
-            return "the right Option key".to_string();
+            return "Right Option".to_string();
         }
         // A chord: name each key, the globe key the way a person says it.
-        let names: Vec<String> = key
-            .shortcut()
-            .split('+')
-            .map(|part| {
-                if part == "Fn" {
-                    "the globe key".to_string()
-                } else {
-                    part.to_string()
-                }
-            })
-            .collect();
-        return match names.split_last() {
-            Some((last, rest)) if !rest.is_empty() => {
-                format!("{} and {last} together", rest.join(", "))
-            }
-            _ => names.join(" "),
-        };
+        return together(
+            key.shortcut()
+                .split('+')
+                .map(|part| {
+                    if part == "Fn" {
+                        "the globe key".to_string()
+                    } else {
+                        part.to_string()
+                    }
+                })
+                .collect(),
+        );
     }
 
-    combo
-        .split('+')
-        .map(|part| match part.trim().to_lowercase().as_str() {
-            "cmd" | "command" | "meta" | "super" => "Command",
-            "opt" | "option" | "alt" => "Option",
-            "ctrl" | "control" => "Control",
-            "shift" => "Shift",
-            "space" => "Space",
-            "comma" => "Comma",
-            _ => part.trim(),
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    together(
+        combo
+            .split('+')
+            .map(|part| {
+                match part.trim().to_lowercase().as_str() {
+                    "cmd" | "command" | "meta" | "super" => "Command",
+                    "opt" | "option" | "alt" => "Option",
+                    "ctrl" | "control" => "Control",
+                    "shift" => "Shift",
+                    "space" => "Space",
+                    "comma" => "Comma",
+                    _ => part.trim(),
+                }
+                .to_string()
+            })
+            .collect(),
+    )
 }
 
 /// Speak a line, unless this launch is one where speaking would be rude.
@@ -210,18 +230,74 @@ fn uptime() -> Option<std::time::Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::triggers::{default_triggers, Binding, Gesture, Trigger};
+
+    fn agent(gesture: Gesture, shortcut: &str) -> Vec<Trigger> {
+        let mut ts = default_triggers();
+        ts.retain(|t| t.target != TriggerTarget::Agent);
+        let mut t = default_triggers().remove(0);
+        t.gesture = gesture;
+        t.binding = Some(Binding::Keyboard {
+            shortcut: shortcut.to_string(),
+        });
+        ts.push(t);
+        ts
+    }
+
+    #[test]
+    fn the_line_names_the_default_globe_key() {
+        assert_eq!(
+            introduction_for(&default_triggers()),
+            "Hi, I'm Juno. To talk to me, hold the globe key."
+        );
+    }
+
+    #[test]
+    fn the_line_names_right_option() {
+        assert_eq!(
+            introduction_for(&agent(Gesture::Hold, "RightOption")),
+            "Hi, I'm Juno. To talk to me, hold Right Option."
+        );
+    }
+
+    #[test]
+    fn the_line_names_a_modifier_chord() {
+        assert_eq!(
+            introduction_for(&agent(Gesture::Hold, "Control+Option")),
+            "Hi, I'm Juno. To talk to me, hold Control and Option together."
+        );
+    }
+
+    #[test]
+    fn the_line_names_a_normal_shortcut() {
+        assert_eq!(
+            introduction_for(&agent(Gesture::Hold, "Alt+Space")),
+            "Hi, I'm Juno. To talk to me, hold Option and Space together."
+        );
+    }
+
+    #[test]
+    fn with_no_hold_the_line_names_whatever_trigger_there_is() {
+        assert_eq!(
+            introduction_for(&agent(Gesture::Tap, "RightOption")),
+            "Hi, I'm Juno. To talk to me, tap Right Option."
+        );
+    }
+
+    #[test]
+    fn with_no_key_at_all_the_line_says_where_she_lives() {
+        assert_eq!(introduction_for(&[]), INTRO_UNBOUND);
+    }
 
     #[test]
     fn a_combo_is_spoken_not_spelled() {
-        assert_eq!(spoken("Option+Space"), "Option Space");
-        assert_eq!(spoken("Cmd+Shift+D"), "Command Shift D");
-        assert_eq!(spoken("alt+space"), "Option Space");
+        assert_eq!(spoken("Option+Space"), "Option and Space together");
+        assert_eq!(spoken("Cmd+Shift+D"), "Command, Shift and D together");
+        assert_eq!(spoken("alt+space"), "Option and Space together");
     }
 
     #[test]
     fn the_globe_key_has_a_name_people_use() {
-        // "Fn (globe)" is a label for a settings row, not something to read
-        // aloud, and "Fn" on its own gets read as a word.
         assert_eq!(spoken("Fn"), "the globe key");
     }
 
@@ -238,7 +314,7 @@ mod tests {
             "Control, Option and Shift together"
         );
         assert_eq!(spoken("Control"), "Control");
-        assert_eq!(spoken("RightOption"), "the right Option key");
+        assert_eq!(spoken("RightOption"), "Right Option");
     }
 
     #[test]
