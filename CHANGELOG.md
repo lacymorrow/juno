@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.91] - 2026-10-04
+
+### Fixed
+
+- **settings:** a settings file can no longer be damaged (#700) (b9020a85)
+
 ## [0.8.90] - 2026-10-04
 
 ### Fixed
@@ -876,7 +882,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.90...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.91...HEAD
+[0.8.91]: https://github.com/lacymorrow/juno/compare/cua-v0.8.90...v0.8.91
 [0.8.90]: https://github.com/lacymorrow/juno/compare/cua-v0.8.89...v0.8.90
 [0.8.89]: https://github.com/lacymorrow/juno/compare/cua-v0.8.88...v0.8.89
 [0.8.88]: https://github.com/lacymorrow/juno/compare/cua-v0.8.87...v0.8.88
