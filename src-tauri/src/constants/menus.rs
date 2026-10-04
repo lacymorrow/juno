@@ -19,6 +19,10 @@ pub mod tray_menu_ids {
     pub const DEVELOPER_TOOLS: &str = "developer-tools";
     /// Disabled first row showing the state word
     pub const STATUS: &str = "tray-status";
+    /// Start talking to Juno (same action as the bar's mic)
+    pub const TALK: &str = "tray-talk";
+    /// Cancel the current turn
+    pub const CANCEL: &str = "tray-cancel";
 }
 
 pub mod app_menu_ids {

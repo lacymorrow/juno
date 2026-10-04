@@ -714,6 +714,7 @@ export const COMMANDS = {
   BAR_UI_GET_BAR_CONFIG: 'ui_get_bar_config',
   BAR_UI_SET_BAR_CONFIG: 'ui_set_bar_config',
   BAR_UI_HANDLE_INTERACTION: 'ui_handle_interaction',
+  BAR_SHOW_CONTEXT_MENU: 'show_bar_context_menu',
   CONVERSATIONS_LIST_CONVERSATIONS: 'list_conversations',
   CONVERSATIONS_LOAD_CONVERSATION: 'load_conversation',
   CONVERSATIONS_NEW_CONVERSATION: 'new_conversation',

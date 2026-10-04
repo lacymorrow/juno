@@ -350,6 +350,7 @@ pub mod bar {
     pub const UI_GET_BAR_CONFIG: &str = "ui_get_bar_config";
     pub const UI_SET_BAR_CONFIG: &str = "ui_set_bar_config";
     pub const UI_HANDLE_INTERACTION: &str = "ui_handle_interaction";
+    pub const SHOW_CONTEXT_MENU: &str = "show_bar_context_menu";
 }
 
 /// Conversation history, import and export

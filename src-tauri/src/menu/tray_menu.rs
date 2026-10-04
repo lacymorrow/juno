@@ -473,6 +473,123 @@ fn get_keyboard_shortcuts(
         .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "keyboard shortcuts", e).into())
 }
 
+/// One row of a native menu, described as data so the lists can be tested
+/// without an app handle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowSpec {
+    pub id: &'static str,
+    pub label: String,
+    /// Only ever an accelerator the app menu really binds. A trigger such as
+    /// "hold Fn" cannot be an NSMenu accelerator, so those rows show none.
+    pub accelerator: Option<&'static str>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MenuEntry {
+    Separator,
+    Row(RowSpec),
+}
+
+fn row(id: &'static str, label: impl Into<String>, accelerator: Option<&'static str>) -> MenuEntry {
+    MenuEntry::Row(RowSpec {
+        id,
+        label: label.into(),
+        accelerator,
+        enabled: true,
+    })
+}
+
+fn quit_label() -> String {
+    format!("Quit {}", crate::demo::display_name())
+}
+
+/// The tray menu. "Talk to Juno" and "Cancel" are real actions with no
+/// accelerator, because triggers are gestures now (see `triggers/mod.rs`) and
+/// a menu cannot say "hold Fn". Dictation has no row: it needs the target app
+/// to hold focus and only its trigger can say when to stop.
+pub fn tray_menu_spec(chat_label: &str) -> Vec<MenuEntry> {
+    vec![
+        MenuEntry::Row(RowSpec {
+            id: tray_menu_ids::STATUS,
+            label: TrayIconState::Idle.label().to_string(),
+            accelerator: None,
+            enabled: false,
+        }),
+        MenuEntry::Separator,
+        row(tray_menu_ids::SHOW_HIDE, chat_label, None),
+        row(tray_menu_ids::NEW_CHAT, "New Chat", Some("CmdOrCtrl+N")),
+        MenuEntry::Separator,
+        row(tray_menu_ids::TALK, "Talk to Juno", None),
+        row(tray_menu_ids::CANCEL, "Cancel", None),
+        MenuEntry::Separator,
+        row(
+            tray_menu_ids::SHOW_HIDE_FLOATING_BAR,
+            "Show/Hide Floating Bar",
+            Some("CmdOrCtrl+B"),
+        ),
+        row(
+            tray_menu_ids::DEVELOPER_TOOLS,
+            "Developer Tools",
+            Some("CmdOrCtrl+Alt+I"),
+        ),
+        MenuEntry::Separator,
+        row(tray_menu_ids::SETTINGS, "Settings...", Some("CmdOrCtrl+,")),
+        MenuEntry::Separator,
+        row(tray_menu_ids::QUIT, quit_label(), Some("CmdOrCtrl+Q")),
+    ]
+}
+
+/// The right-click menu on the bar. Short, Mac conventions, no accelerators:
+/// it is a context menu, and the chat row only says what it will do.
+pub fn bar_context_menu_spec(chat_label: &str) -> Vec<MenuEntry> {
+    vec![
+        row(tray_menu_ids::SHOW_HIDE, chat_label, None),
+        row(tray_menu_ids::NEW_CHAT, "New Chat", None),
+        row(tray_menu_ids::SETTINGS, "Settings\u{2026}", None),
+        MenuEntry::Separator,
+        row(tray_menu_ids::QUIT, quit_label(), None),
+    ]
+}
+
+type BuiltMenu = (
+    tauri::menu::Menu<tauri::Wry>,
+    Vec<(String, MenuItem<tauri::Wry>)>,
+);
+
+/// Build a native menu from a spec. Returns the menu and every item by id.
+fn build_menu_from_spec(
+    app: &AppHandle,
+    spec: &[MenuEntry],
+) -> Result<BuiltMenu, Box<dyn std::error::Error>> {
+    let mut builder = MenuBuilder::new(app);
+    let mut items = Vec::new();
+    for entry in spec {
+        match entry {
+            MenuEntry::Separator => builder = builder.separator(),
+            MenuEntry::Row(r) => {
+                let mut item = MenuItemBuilder::new(&r.label).id(r.id).enabled(r.enabled);
+                if let Some(accel) = r.accelerator {
+                    item = item.accelerator(accel);
+                }
+                let item = item.build(app)?;
+                builder = builder.item(&item);
+                items.push((r.id.to_string(), item));
+            }
+        }
+    }
+    Ok((builder.build()?, items))
+}
+
+/// Pop the bar's right-click menu at the cursor. One command for every bar
+/// appearance, called from `useBarDrag`.
+#[tauri::command]
+pub fn show_bar_context_menu(app: AppHandle, window: tauri::Window) -> Result<(), String> {
+    let spec = bar_context_menu_spec(chat_toggle_label(active_chat_surface(&app)));
+    let (menu, _items) = build_menu_from_spec(&app, &spec).map_err(|e| e.to_string())?;
+    window.popup_menu(&menu).map_err(|e| e.to_string())
+}
+
 /// Create a state-aware tray menu with keyboard shortcuts
 pub fn create_state_aware_tray_menu(
     app: &AppHandle,
@@ -493,79 +610,17 @@ pub fn create_state_aware_tray_menu(
         }
     };
 
-    // First row: the state word. Disabled, so it reads as status, not an action.
-    let status_item = MenuItemBuilder::new(TrayIconState::Idle.label())
-        .id(tray_menu_ids::STATUS)
-        .enabled(false)
-        .build(app)?;
-
-    // The chat row says what it will do to whichever surface is active, so it
-    // is built with the answer for right now and kept up to date from there.
-    let show_hide_item = MenuItemBuilder::new(chat_toggle_label(active_chat_surface(app)))
-        .id(tray_menu_ids::SHOW_HIDE)
-        .build(app)?;
-
-    let new_chat_item = MenuItemBuilder::new("New Chat")
-        .id(tray_menu_ids::NEW_CHAT)
-        .accelerator("CmdOrCtrl+N")
-        .build(app)?;
-
-    let show_hide_floating_item = MenuItemBuilder::new("Show/Hide Floating Bar")
-        .id(tray_menu_ids::SHOW_HIDE_FLOATING_BAR)
-        .accelerator("CmdOrCtrl+B")
-        .build(app)?;
-
-    let dev_tools_item = MenuItemBuilder::new("Developer Tools")
-        .id(tray_menu_ids::DEVELOPER_TOOLS)
-        .accelerator("CmdOrCtrl+Alt+I")
-        .build(app)?;
-
-    // Voice control information items (non-clickable)
-    let agent_mode_info = MenuItemBuilder::new("Agent Mode")
-        .id("agent_mode_info")
-        .accelerator("Alt+D")
-        .enabled(false)
-        .build(app)?;
-
-    let dictation_mode_info = MenuItemBuilder::new("Dictation Mode")
-        .id("dictation_mode_info")
-        .enabled(false)
-        .build(app)?;
-
-    let stop_task_info = MenuItemBuilder::new("Stop Current Task")
-        .id("stop_task_info")
-        .accelerator("Escape")
-        .enabled(false)
-        .build(app)?;
-
-    let settings_item = MenuItemBuilder::new("Settings...")
-        .id(tray_menu_ids::SETTINGS)
-        .accelerator("CmdOrCtrl+,")
-        .build(app)?;
-
-    let quit_item = MenuItemBuilder::new(format!("Quit {}", crate::demo::display_name()))
-        .id(tray_menu_ids::QUIT)
-        .accelerator("CmdOrCtrl+Q")
-        .build(app)?;
-
-    // Build the complete tray menu
-    let tray_menu = MenuBuilder::new(app)
-        .item(&status_item)
-        .separator()
-        .item(&show_hide_item)
-        .item(&new_chat_item)
-        .separator()
-        .item(&show_hide_floating_item)
-        .item(&dev_tools_item)
-        .separator()
-        .item(&agent_mode_info)
-        .item(&dictation_mode_info)
-        .item(&stop_task_info)
-        .separator()
-        .item(&settings_item)
-        .separator()
-        .item(&quit_item)
-        .build()?;
+    let spec = tray_menu_spec(chat_toggle_label(active_chat_surface(app)));
+    let (tray_menu, items) = build_menu_from_spec(app, &spec)?;
+    let take = |id: &str| -> Result<MenuItem<tauri::Wry>, Box<dyn std::error::Error>> {
+        items
+            .iter()
+            .find(|(item_id, _)| item_id == id)
+            .map(|(_, item)| item.clone())
+            .ok_or_else(|| format!("tray menu row {id} missing").into())
+    };
+    let status_item = take(tray_menu_ids::STATUS)?;
+    let show_hide_item = take(tray_menu_ids::SHOW_HIDE)?;
 
     info!("✅ State-aware tray menu created successfully");
     Ok(TrayMenu {
@@ -983,6 +1038,19 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
         }
         tray_menu_ids::NEW_CHAT => {
             info!("[TrayMenu] New Chat menu item clicked");
+            // The main window's listener (App) and the pill's both start a
+            // fresh chat on this event, the same call the pane's + makes. The
+            // bar's other looks have no listener, so the backend conversation
+            // is rotated here too; rotating twice is harmless.
+            {
+                let app_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle.state::<AppState>();
+                    if let Err(e) = crate::commands::conversations::new_conversation(state).await {
+                        warn!("[TrayMenu] could not start a new conversation: {e}");
+                    }
+                });
+            }
             if let Err(e) = app_handle.emit(events::menu::NEW_CHAT_REQUESTED, ()) {
                 error!(
                     "{} {}",
@@ -1024,6 +1092,26 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
                         prefixes::TRAY_MENU,
                         format_error(templates::FAILED_TO_PROCESS, "settings window open", e)
                     );
+                }
+            });
+        }
+        tray_menu_ids::TALK => {
+            info!("[TrayMenu] Talk to Juno menu item clicked");
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = crate::agent_monitor::agent_voice(app_handle, "start".into()).await
+                {
+                    error!("{} could not start talking: {e}", prefixes::TRAY_MENU);
+                }
+            });
+        }
+        tray_menu_ids::CANCEL => {
+            info!("[TrayMenu] Cancel menu item clicked");
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = crate::agent_monitor::agent_voice(app_handle, "cancel".into()).await
+                {
+                    error!("{} could not cancel: {e}", prefixes::TRAY_MENU);
                 }
             });
         }
@@ -1269,6 +1357,69 @@ mod tests {
         assert_eq!(payload_is_active("null"), None);
         assert_eq!(payload_is_active(""), None);
         assert_eq!(payload_is_active("\"true\""), None);
+    }
+
+    fn rows(spec: &[MenuEntry]) -> Vec<&RowSpec> {
+        spec.iter()
+            .filter_map(|e| match e {
+                MenuEntry::Row(r) => Some(r),
+                MenuEntry::Separator => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn no_menu_row_carries_a_stale_accelerator() {
+        for spec in [
+            tray_menu_spec("Show/Hide Chat"),
+            bar_context_menu_spec("Show/Hide Chat"),
+        ] {
+            for r in rows(&spec) {
+                if let Some(accel) = r.accelerator {
+                    // Only app-menu bindings; never a trigger-looking key.
+                    assert!(
+                        [
+                            "CmdOrCtrl+N",
+                            "CmdOrCtrl+B",
+                            "CmdOrCtrl+Alt+I",
+                            "CmdOrCtrl+,",
+                            "CmdOrCtrl+Q"
+                        ]
+                        .contains(&accel),
+                        "{} shows {accel}",
+                        r.label
+                    );
+                }
+            }
+        }
+        let tray = tray_menu_spec("Show/Hide Chat");
+        for id in [tray_menu_ids::TALK, tray_menu_ids::CANCEL] {
+            let r = rows(&tray).into_iter().find(|r| r.id == id).unwrap();
+            assert!(r.accelerator.is_none() && r.enabled);
+        }
+        assert!(rows(&tray).iter().all(|r| r.label != "Dictation Mode"));
+    }
+
+    #[test]
+    fn bar_context_menu_lists_chat_new_settings_and_quit() {
+        let spec = bar_context_menu_spec("Hide Chat");
+        let ids: Vec<_> = rows(&spec).iter().map(|r| r.id).collect();
+        assert_eq!(
+            ids,
+            [
+                tray_menu_ids::SHOW_HIDE,
+                tray_menu_ids::NEW_CHAT,
+                tray_menu_ids::SETTINGS,
+                tray_menu_ids::QUIT
+            ]
+        );
+        assert!(rows(&spec).iter().all(|r| r.accelerator.is_none()));
+        assert!(rows(&spec).last().unwrap().label.starts_with("Quit "));
+        assert_eq!(spec[spec.len() - 2], MenuEntry::Separator);
+        // Every row id routes to the tray handler.
+        for r in rows(&spec) {
+            assert!(crate::menu::is_tray_menu_event(r.id));
+        }
     }
 
     #[test]

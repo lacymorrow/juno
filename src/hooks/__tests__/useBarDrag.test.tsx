@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBarDrag } from "../useDragWindow";
 import { resetBarSnapState } from "../useBarSnapWells";
 import { resetDockSlots } from "@/lib/barDock";
+import { COMMANDS } from "@/lib/constants.generated";
 
 // ── Tauri stand-ins ──────────────────────────────────────────────────
 // Deliberately the same fake desktop FloatingBar.test uses: one 1000×800
@@ -251,5 +252,26 @@ describe("a look wider than the Pill", () => {
     // spanX = (1000−16) − 900 − 16 = 68, so the columns are 16 / 50 / 84.
     // (80,700) is nearest the right column and the bottom row: 84 / 718.
     expect(last).toMatchObject({ x: 84, y: 718 });
+  });
+});
+
+describe("the bar's right-click menu", () => {
+  it("asks Rust for the native menu once, suppresses the webview menu, and starts no drag", async () => {
+    await renderBar();
+    const root = screen.getByTestId("bar-root");
+
+    const notPrevented = fireEvent.contextMenu(root, { button: 2, clientX: 40, clientY: 20 });
+    fireEvent.mouseMove(root, { clientX: 300, clientY: 20 });
+
+    expect(notPrevented).toBe(false);
+    const menuCalls = invoke.mock.calls.filter((c) => c[0] === COMMANDS.BAR_SHOW_CONTEXT_MENU);
+    expect(menuCalls).toHaveLength(1);
+    expect(startDragging).not.toHaveBeenCalled();
+  });
+
+  it("does not open the menu on a left-button press", async () => {
+    await renderBar();
+    fireEvent.mouseDown(screen.getByTestId("bar-root"), { button: 0, clientX: 10, clientY: 10 });
+    expect(invoke.mock.calls.some((c) => c[0] === COMMANDS.BAR_SHOW_CONTEXT_MENU)).toBe(false);
   });
 });
