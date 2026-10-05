@@ -183,7 +183,7 @@ fn start(app_handle: &AppHandle, secs: u64) -> Reply {
         let message = format!("Your {} timer is done.", spoken_duration(secs));
         log::info!("local_intents: timer {} finished ({}s)", id, secs);
         crate::commands::notifications::notify(&app, "Timer done", &message);
-        crate::agent::tool_logger::process_tts_content_immediately(app, message);
+        crate::tts::enqueue_speech_always(message, app);
     });
     let stored = with_timers(|timers| {
         timers.push(RunningTimer {
