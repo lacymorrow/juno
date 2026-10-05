@@ -39,6 +39,7 @@ pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription
 pub mod export; // A response as a document: copy, share sheet, Save as Markdown/HTML
+pub mod file_log; // The log on disk: ~/Library/Logs/Juno, one file per day, a week kept
 pub mod greeting; // The one line Juno says when she starts
 pub mod hold_gate; // A hold released before its voice session finished starting
 pub mod input_control; // Background operation and consent for taking the physical cursor
