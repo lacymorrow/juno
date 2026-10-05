@@ -44,6 +44,16 @@ pub trait TranscriptionSession: Send {
     /// High-quality final transcription for the full session audio (BeamSearch
     /// quality for Whisper; full-batch ONNX pass for Parakeet).
     fn transcribe_final(&mut self, audio: &[f32]) -> Result<String, String>;
+
+    /// Final-quality transcription of one segment of a longer utterance, cut
+    /// at a pause (see [`crate::streaming_commit`]). `context` is the text
+    /// already transcribed before this segment; an engine that can condition
+    /// on prior text (Whisper's initial prompt) should, so the seams read
+    /// like one decode. The default ignores it.
+    fn transcribe_final_segment(&mut self, audio: &[f32], context: &str) -> Result<String, String> {
+        let _ = context;
+        self.transcribe_final(audio)
+    }
 }
 
 /// Pluggable STT engine. Shared across controllers via `Arc<dyn TranscriptionEngine>`.
