@@ -22,6 +22,7 @@ pub mod error;
 pub mod mic_permissions;
 pub mod parakeet_model;
 pub mod shared_whisper;
+pub mod streaming_commit;
 pub mod utils;
 pub mod wake_word;
 
