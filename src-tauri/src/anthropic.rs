@@ -610,6 +610,9 @@ async fn execute_agent_internal(
     // Generate a unique execution ID for this agent run
     let execution_id = uuid::Uuid::new_v4().to_string();
 
+    // Whatever the previous turn had left to say is not wanted by this one.
+    crate::tts::begin_turn();
+
     // Mark agent execution as started with max iterations (both modes use 15).
     //
     // This goes through the state transition rather than setting the flag

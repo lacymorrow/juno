@@ -13,6 +13,11 @@
 //! text. Once the name resolves the markup goes out and the chat renders it
 //! (or a placeholder while its attributes are still streaming).
 //!
+//! Inside an open `<TTS>` block the spoken text is released one sentence at a
+//! time, as soon as the sentence boundary arrives, so the person hears Juno
+//! start answering while the rest of the reply is still being written. See
+//! [`split_ready_sentences`] for the boundary rules.
+//!
 //! Two entry points:
 //! - [`TtsTagStream`] for streaming providers. Feed chunks as they arrive; tags
 //!   split across chunk boundaries are held back until they resolve.
@@ -47,10 +52,120 @@ fn is_unresolved_component_fragment(rest: &str) -> bool {
     }
 }
 
+/// A spoken chunk shorter than this is merged into the sentence after it, so
+/// "Sure. Opening it now." goes out as one breath instead of two clipped ones.
+const MIN_SPOKEN_CHUNK_CHARS: usize = 20;
+
+/// Words that end in a period without ending the sentence. Compared lowercase,
+/// without the final period. Initials and dotted forms like `U.S` are handled
+/// by [`is_abbreviation`] itself.
+const ABBREVIATIONS: &[&str] = &[
+    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "e.g", "i.e", "inc", "ltd", "approx",
+    "dept", "fig", "vol", "mt", "gen", "sen", "rep", "capt", "col", "lt", "sgt",
+];
+
+/// True when `before` (the text ahead of a `.`) ends in a token that is an
+/// abbreviation, an initial ("J."), or a dotted form ("U.S.").
+fn is_abbreviation(before: &str) -> bool {
+    let token = before
+        .rsplit(char::is_whitespace)
+        .next()
+        .unwrap_or("")
+        .trim_start_matches(|c: char| {
+            matches!(c, '(' | '[' | '"' | '\'' | '\u{201c}' | '\u{2018}')
+        });
+    if token.is_empty() {
+        return false;
+    }
+    let lower = token.to_lowercase();
+    if ABBREVIATIONS.contains(&lower.as_str()) {
+        return true;
+    }
+    // A lone capital letter is an initial.
+    let mut chars = token.chars();
+    if let (Some(c), None) = (chars.next(), chars.next()) {
+        return c.is_alphabetic() && c.is_uppercase();
+    }
+    // "U.S", "a.m", "p.m": every dot-separated piece is one letter.
+    token.contains('.')
+        && token
+            .split('.')
+            .all(|piece| piece.chars().count() == 1 && piece.chars().all(char::is_alphabetic))
+}
+
+/// Pull every finished sentence off the front of `text`.
+///
+/// Returns the sentences (trimmed) and the byte offset where the unfinished
+/// remainder starts. A sentence ends at `.`, `!` or `?` (closing quotes and
+/// brackets allowed after it) that is followed by whitespace; punctuation at
+/// the very end of `text` waits, because the next character decides whether it
+/// is a boundary. Not boundaries: ellipses, abbreviations and initials, and
+/// decimals like `3.5` (no whitespace follows the point). A sentence under
+/// `min_chars` is held and merged into the one after it.
+///
+/// The result depends only on the text, never on how it was chunked, so the
+/// streaming path and the whole-string path always agree.
+pub fn split_ready_sentences(text: &str, min_chars: usize) -> (Vec<String>, usize) {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let is_end = |c: char| matches!(c, '.' | '!' | '?' | '\u{2026}');
+    let is_closer = |c: char| matches!(c, '"' | '\'' | '\u{201d}' | '\u{2019}' | ')' | ']');
+    let mut sentences = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < chars.len() {
+        if !is_end(chars[i].1) {
+            i += 1;
+            continue;
+        }
+        let mut run_end = i;
+        while run_end + 1 < chars.len() && is_end(chars[run_end + 1].1) {
+            run_end += 1;
+        }
+        let mut close = run_end;
+        while close + 1 < chars.len() && is_closer(chars[close + 1].1) {
+            close += 1;
+        }
+        if close + 1 >= chars.len() {
+            // Punctuation at the very end: wait for the next character.
+            break;
+        }
+        if !chars[close + 1].1.is_whitespace() {
+            i = close + 1;
+            continue;
+        }
+        let run = &chars[i..=run_end];
+        let ellipsis = run.iter().filter(|(_, c)| *c == '.').count() >= 2
+            || run.iter().any(|(_, c)| *c == '\u{2026}');
+        let abbreviation =
+            run.len() == 1 && run[0].1 == '.' && is_abbreviation(&text[start..run[0].0]);
+        if !ellipsis && !abbreviation {
+            let end = chars[close].0 + chars[close].1.len_utf8();
+            let candidate = text[start..end].trim();
+            if candidate.chars().count() >= min_chars {
+                sentences.push(candidate.to_string());
+                let mut next = close + 1;
+                while next < chars.len() && chars[next].1.is_whitespace() {
+                    next += 1;
+                }
+                start = if next < chars.len() {
+                    chars[next].0
+                } else {
+                    text.len()
+                };
+                i = next;
+                continue;
+            }
+        }
+        i = close + 1;
+    }
+    (sentences, start)
+}
+
 /// Incremental `<TTS>` parser for streamed text.
 ///
 /// `push` returns the display text that is safe to show now plus every
-/// complete spoken block that closed inside this chunk. Characters that could
+/// spoken chunk that completed inside this chunk: each finished sentence of an
+/// open `<TTS>` block, and the rest of the block when it closes. Characters that could
 /// be the start of a tag are kept in the buffer until the next chunk (or
 /// `finish`) decides what they are.
 #[derive(Debug, Default)]
@@ -66,6 +181,25 @@ pub struct TtsTagStream {
 impl TtsTagStream {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Move every finished sentence out of the open block's text.
+    fn release_sentences(&mut self, out: &mut Vec<String>) {
+        let (sentences, consumed) = split_ready_sentences(&self.spoken, MIN_SPOKEN_CHUNK_CHARS);
+        if consumed > 0 {
+            self.spoken.drain(..consumed);
+        }
+        out.extend(sentences);
+    }
+
+    /// Release what is left of a block that just closed (or ran out).
+    fn release_remainder(&mut self, out: &mut Vec<String>) {
+        self.release_sentences(out);
+        let rest = std::mem::take(&mut self.spoken);
+        let rest = rest.trim();
+        if !rest.is_empty() {
+            out.push(rest.to_string());
+        }
     }
 
     /// Feed one chunk. Returns `(display_text, spoken_blocks)`.
@@ -86,11 +220,7 @@ impl TtsTagStream {
 
             if self.in_tag {
                 if rest.starts_with(CLOSE_TAG) {
-                    if !self.spoken.trim().is_empty() {
-                        spoken_blocks.push(std::mem::take(&mut self.spoken));
-                    } else {
-                        self.spoken.clear();
-                    }
+                    self.release_remainder(&mut spoken_blocks);
                     self.in_tag = false;
                     consumed += CLOSE_TAG.len();
                     continue;
@@ -130,6 +260,9 @@ impl TtsTagStream {
         }
 
         self.buffer.drain(..consumed);
+        if self.in_tag {
+            self.release_sentences(&mut spoken_blocks);
+        }
         (display, spoken_blocks)
     }
 
@@ -145,10 +278,7 @@ impl TtsTagStream {
         let tail = std::mem::take(&mut self.buffer);
         if self.in_tag {
             self.spoken.push_str(&tail);
-            if !self.spoken.trim().is_empty() {
-                spoken_blocks.push(std::mem::take(&mut self.spoken));
-            }
-            self.spoken.clear();
+            self.release_remainder(&mut spoken_blocks);
             self.in_tag = false;
         } else {
             display.push_str(&tail);
@@ -457,5 +587,147 @@ mod tests {
         assert_eq!(d1, "日本 ☕ ");
         let (d2, _) = s.push("therCard />");
         assert_eq!(d2, "<WeatherCard />");
+    }
+    fn stream_all(chunks: &[&str]) -> (String, Vec<String>) {
+        let mut s = TtsTagStream::new();
+        let mut display = String::new();
+        let mut spoken = Vec::new();
+        for chunk in chunks {
+            let (d, t) = s.push(chunk);
+            display.push_str(&d);
+            spoken.extend(t);
+        }
+        let (d, t) = s.finish();
+        display.push_str(&d);
+        spoken.extend(t);
+        (display, spoken)
+    }
+
+    #[test]
+    fn first_sentence_is_released_before_the_block_closes() {
+        let mut s = TtsTagStream::new();
+        let (_, t1) = s.push("<TTS>Sure, I can open that for you. Let me ");
+        assert_eq!(t1, vec!["Sure, I can open that for you."]);
+        let (_, t2) = s.push("find the right window now.");
+        assert!(t2.is_empty());
+        let (_, t3) = s.push("</TTS>");
+        assert_eq!(t3, vec!["Let me find the right window now."]);
+    }
+
+    #[test]
+    fn terminator_at_the_end_of_a_chunk_waits_for_the_next_character() {
+        let mut s = TtsTagStream::new();
+        let (_, t1) = s.push("<TTS>This is the first sentence.");
+        assert!(t1.is_empty());
+        let (_, t2) = s.push(" And");
+        assert_eq!(t2, vec!["This is the first sentence."]);
+    }
+
+    #[test]
+    fn sentence_split_mid_word_across_chunks() {
+        let (_, spoken) = stream_all(&[
+            "<TTS>The weather in Char",
+            "lotte is sunny today.",
+            " Expect a high of sev",
+            "enty degrees.</TTS>",
+        ]);
+        assert_eq!(
+            spoken,
+            vec![
+                "The weather in Charlotte is sunny today.",
+                "Expect a high of seventy degrees."
+            ]
+        );
+    }
+
+    #[test]
+    fn sentences_split_across_tag_boundaries() {
+        let (display, spoken) = stream_all(&[
+            "<TTS>Opening the spreadsheet now. Gi",
+            "ve me a second.</TT",
+            "S>\nHere it is.\n<TT",
+            "S>All done, anything else?</TTS>",
+        ]);
+        assert_eq!(
+            spoken,
+            vec![
+                "Opening the spreadsheet now.",
+                "Give me a second.",
+                "All done, anything else?"
+            ]
+        );
+        assert_eq!(display, "\nHere it is.\n");
+    }
+
+    #[test]
+    fn one_character_at_a_time_matches_whole_string() {
+        let input = "<TTS>Okay, checking the calendar. You are free at 3.5 hours out! Dr. Smith e.g. is late.</TTS>tail";
+        let chars: Vec<String> = input.chars().map(|c| c.to_string()).collect();
+        let refs: Vec<&str> = chars.iter().map(String::as_str).collect();
+        let (display, streamed) = stream_all(&refs);
+        let (whole_display, whole) = split_tts_tags(input);
+        assert_eq!(streamed, whole);
+        assert_eq!(display, whole_display);
+        assert_eq!(display, "tail");
+    }
+
+    #[test]
+    fn short_sentences_merge_into_the_next_one() {
+        let (_, spoken) = stream_all(&["<TTS>Sure. Opening it now. Back in a moment.</TTS>"]);
+        assert_eq!(spoken, vec!["Sure. Opening it now.", "Back in a moment."]);
+    }
+
+    #[test]
+    fn a_short_trailing_sentence_still_speaks_on_close() {
+        let (_, spoken) = stream_all(&["<TTS>I finished the whole report for you. Done.</TTS>"]);
+        assert_eq!(
+            spoken,
+            vec!["I finished the whole report for you.", "Done."]
+        );
+    }
+
+    #[test]
+    fn abbreviations_decimals_and_ellipses_do_not_split() {
+        let (_, spoken) = stream_all(&[
+            "<TTS>Dr. Jones lives in the U.S. and pays 3.5 percent, e.g. in tax. Well... maybe not today.</TTS>",
+        ]);
+        assert_eq!(
+            spoken,
+            vec![
+                "Dr. Jones lives in the U.S. and pays 3.5 percent, e.g. in tax.",
+                "Well... maybe not today."
+            ]
+        );
+    }
+
+    #[test]
+    fn question_and_exclamation_split_and_quotes_stay_attached() {
+        let (_, spoken) = stream_all(&[
+            "<TTS>Did you say \"open the door\"? Great, I will do it right away!</TTS>",
+        ]);
+        assert_eq!(
+            spoken,
+            vec![
+                "Did you say \"open the door\"?",
+                "Great, I will do it right away!"
+            ]
+        );
+    }
+
+    #[test]
+    fn split_ready_sentences_reports_the_remainder() {
+        let (sentences, rest) = split_ready_sentences("First sentence here. Second one is ", 20);
+        assert_eq!(sentences, vec!["First sentence here."]);
+        assert_eq!(rest, "First sentence here. ".len());
+    }
+
+    #[test]
+    fn unterminated_block_flushes_remaining_sentences_on_finish() {
+        let (_, spoken) =
+            stream_all(&["<TTS>Here is the first part. And the second that never clo"]);
+        assert_eq!(
+            spoken,
+            vec!["Here is the first part.", "And the second that never clo"]
+        );
     }
 }
