@@ -25,8 +25,8 @@
 
 6. Pre-warm and hold the microphone: resolve the device at startup, keep the cpal stream open for a few seconds after each dictation into a ring buffer, and feed the pre-roll into the session so the hold-threshold window loses no speech (`controller.rs start_dictation`).
 7. Trigger the mic on the press event itself; keep the 300 ms hold-cancel logic (`events/shortcuts.rs`, `dictation_monitor.rs`).
-8. Streaming commit instead of re-decode on release: Parakeet TDT via `parakeet-rs`, or a growing-window decode with text-stability commit for Whisper (`controller.rs process_partial_transcription`).
-9. RMS speech gate before the final decode; stock-phrase hallucination filter gated on `no_speech_prob`.
+8. ~~Streaming commit instead of re-decode on release.~~ Done in `perf/stt-final-without-redecode` (`streaming_commit.rs`): segments cut at pauses (>= 400 ms, >= 3 s since the last cut) are decoded at final quality on a background worker during the hold; release decodes only the tail. No pause, or a failed segment, falls back to the whole-utterance decode. Works for both engines. Still open: Parakeet TDT native streaming, and text-stability commits for people who never pause.
+9. ~~RMS speech gate before the final decode~~ (done with 8: near-silent segments and tails are not decoded). Still open: stock-phrase hallucination filter gated on `no_speech_prob`.
 10. Optional: capture app/AX context in parallel with recording and run a cleanup pass (opt-in, "preserve exact wording" bypass).
 
 ## Measuring

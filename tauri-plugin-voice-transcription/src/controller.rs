@@ -19,6 +19,7 @@ use crate::always_listening::CaptureGuard;
 use crate::capture_failure::{self, CaptureStartFailure};
 use crate::devices;
 use crate::error::{Error, Result};
+use crate::streaming_commit::{self, CommitPlanner, SegmentCommitter};
 use crate::utils::downmix_i16_to_mono;
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
@@ -91,6 +92,39 @@ fn resample_for_partial(audio: &[f32], from_rate: u32) -> Vec<f32> {
         out.push(span.iter().sum::<f32>() / span.len() as f32);
     }
     out
+}
+
+/// Bring captured audio to 16 kHz for a **final-quality** decode: the whole
+/// utterance, a committed segment, or the tail after the last segment. One
+/// sinc resampler sized to exactly this buffer (see `resample_for_partial`
+/// for why a fixed-chunk one must never be reused). Segments are cut inside
+/// pauses, so the resampler's edge effects at a cut fall on silence.
+pub(crate) fn resample_for_final(
+    raw: &[f32],
+    actual_rate: u32,
+) -> std::result::Result<Vec<f32>, String> {
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    if actual_rate == WHISPER_SAMPLE_RATE {
+        return Ok(raw.to_vec());
+    }
+    let mut resampler = SincFixedIn::new(
+        WHISPER_SAMPLE_RATE as f64 / actual_rate as f64,
+        2.0,
+        sinc_resampling_params(),
+        raw.len(),
+        1,
+    )
+    .map_err(|e| format!("Failed to create final resampler: {:?}", e))?;
+    let waves_in = vec![raw.to_vec()];
+    let mut waves = resampler
+        .process(&waves_in, None)
+        .map_err(|e| format!("Error during final resampling: {:?}", e))?;
+    if waves.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(waves.remove(0))
 }
 
 /// How often the live-partial window is re-decoded, at most.
@@ -689,6 +723,8 @@ impl VoiceController {
                     actual_rate,
                     &app_handle,
                     &last_buffer_arc,
+                    None,
+                    0,
                 );
                 return;
             }
@@ -703,6 +739,13 @@ impl VoiceController {
             }
             Err(TryRecvError::Empty) => {}
         }
+
+        // Decodes pause-delimited segments at final quality while the person is
+        // still talking, so the release only waits for the tail. Declared before
+        // the capture guard so that on a cancel the microphone is released
+        // first and the worker (at most one segment in flight) is joined after.
+        let mut planner = CommitPlanner::new(actual_rate);
+        let committer = SegmentCommitter::spawn(engine.clone(), actual_rate, resample_for_final);
 
         // The one exit between here and a running microphone, and it tells the
         // person why. Before this, each of these failures logged an error and
@@ -755,12 +798,15 @@ impl VoiceController {
                     );
 
                     // Process final audio
+                    let committed = planner.committed_samples();
                     Self::process_final_audio(
                         session.as_mut(),
                         &raw_full_session_audio,
                         actual_rate,
                         &app_handle,
                         &last_buffer_arc,
+                        Some(committer),
+                        committed,
                     );
 
                     // Reset waveform to baseline when recording ends
@@ -796,6 +842,12 @@ impl VoiceController {
             // Process audio data
             if let Ok(audio_chunk) = audio_data_rx.recv_timeout(Duration::from_millis(100)) {
                 raw_full_session_audio.extend_from_slice(&audio_chunk);
+                planner.push(&audio_chunk);
+                if let Some(segment) = planner.next_commit() {
+                    if let Some(raw) = raw_full_session_audio.get(segment) {
+                        committer.submit(raw.to_vec());
+                    }
+                }
                 // Read live, every pass: the setting can change mid-session.
                 let live = live_partial.is_open();
                 if live {
@@ -866,95 +918,25 @@ impl VoiceController {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_final_audio<R: Runtime>(
         session: &mut dyn TranscriptionSession,
         raw_full_session_audio: &[f32],
         actual_rate: u32,
         app_handle: &AppHandle<R>,
         last_buffer_arc: &Arc<Mutex<Option<Vec<f32>>>>,
+        committer: Option<SegmentCommitter>,
+        committed_samples: usize,
     ) {
+        let released = Instant::now();
+
         // Store raw audio for potential playback
         if let Ok(mut buffer_guard) = last_buffer_arc.lock() {
             *buffer_guard = Some(raw_full_session_audio.to_vec());
         }
 
-        // Prepare audio for final transcription
-        let audio_for_transcription = if actual_rate != WHISPER_SAMPLE_RATE {
-            if !raw_full_session_audio.is_empty() {
-                let params = SincInterpolationParameters {
-                    sinc_len: 256,
-                    f_cutoff: 0.95,
-                    interpolation: SincInterpolationType::Linear,
-                    oversampling_factor: 256,
-                    window: WindowFunction::BlackmanHarris2,
-                };
-
-                let mut final_resampler = match SincFixedIn::new(
-                    WHISPER_SAMPLE_RATE as f64 / actual_rate as f64,
-                    2.0,
-                    params,
-                    raw_full_session_audio.len(),
-                    1,
-                ) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::error!("Failed to create final resampler: {:?}", e);
-                        return;
-                    }
-                };
-
-                let waves_in = vec![raw_full_session_audio.to_vec()];
-                match final_resampler.process(&waves_in, None) {
-                    Ok(mut resampled_waves) => {
-                        if resampled_waves.is_empty() || resampled_waves[0].is_empty() {
-                            Vec::new()
-                        } else {
-                            resampled_waves.remove(0)
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("Error during final resampling: {:?}", e);
-                        Vec::new()
-                    }
-                }
-            } else {
-                Vec::new()
-            }
-        } else {
-            raw_full_session_audio.to_vec()
-        };
-
-        // Perform final transcription
-        if !audio_for_transcription.is_empty() {
-            info!("[AudioThread] Performing final transcription on {} samples ({:.2} seconds at 16kHz)",
-                  audio_for_transcription.len(),
-                  audio_for_transcription.len() as f32 / WHISPER_SAMPLE_RATE as f32);
-
-            match session.transcribe_final(&audio_for_transcription) {
-                Ok(transcription_text) => {
-                    info!(
-                        "[AudioThread] Final transcription result: '{}'",
-                        transcription_text
-                    );
-                    let _ = app_handle.emit(
-                        constants::voice_transcription::FINAL_RESULT,
-                        serde_json::json!({ "text": transcription_text }),
-                    );
-                    let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
-                }
-                Err(e) => {
-                    tracing::error!("Final transcription failed: {}", e);
-                    let _ = app_handle.emit(
-                        constants::voice_transcription::ERROR,
-                        serde_json::json!({
-                            "type": "transcription_failed",
-                            "message": format!("Final transcription failed: {}", e)
-                        }),
-                    );
-                    let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
-                }
-            }
-        } else {
+        if raw_full_session_audio.is_empty() {
+            drop(committer);
             // An empty transcript is still this session's transcript, and it
             // has to be emitted.
             //
@@ -976,6 +958,102 @@ impl VoiceController {
                 serde_json::json!({ "text": "" }),
             );
             let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+            return;
+        }
+
+        let result = Self::final_transcript(
+            session,
+            raw_full_session_audio,
+            actual_rate,
+            committer,
+            committed_samples,
+        );
+        info!(
+            "[AudioThread] Release to final text: {} ms ({:.2}s of audio)",
+            released.elapsed().as_millis(),
+            raw_full_session_audio.len() as f32 / actual_rate.max(1) as f32
+        );
+
+        match result {
+            Ok(transcription_text) => {
+                info!(
+                    "[AudioThread] Final transcription result: '{}'",
+                    transcription_text
+                );
+                let _ = app_handle.emit(
+                    constants::voice_transcription::FINAL_RESULT,
+                    serde_json::json!({ "text": transcription_text }),
+                );
+                let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+            }
+            Err(e) => {
+                tracing::error!("Final transcription failed: {}", e);
+                let _ = app_handle.emit(
+                    constants::voice_transcription::ERROR,
+                    serde_json::json!({
+                        "type": "transcription_failed",
+                        "message": format!("Final transcription failed: {}", e)
+                    }),
+                );
+                let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+            }
+        }
+    }
+
+    /// The transcript for a finished recording.
+    ///
+    /// With committed segments (see [`crate::streaming_commit`]): waits for
+    /// every outstanding segment decode, then decodes only the audio after
+    /// the last cut, with the committed text as context, and joins. Without
+    /// them, or if any segment failed, decodes the whole recording exactly
+    /// as before. Either way near-silent audio is not decoded at all.
+    fn final_transcript(
+        session: &mut dyn TranscriptionSession,
+        raw: &[f32],
+        actual_rate: u32,
+        committer: Option<SegmentCommitter>,
+        committed_samples: usize,
+    ) -> std::result::Result<String, String> {
+        let tail_raw = raw
+            .get(committed_samples..)
+            .filter(|_| committed_samples > 0);
+        let committed = match (committer, tail_raw) {
+            // Joins the worker: no segment decode outlives this line.
+            (Some(c), Some(tail)) => c.finish().map(|texts| (texts, tail)),
+            (Some(c), None) => {
+                drop(c);
+                None
+            }
+            (None, _) => None,
+        };
+
+        match committed {
+            Some((texts, tail_raw)) => {
+                let tail = resample_for_final(tail_raw, actual_rate)?;
+                info!(
+                    "[AudioThread] Streaming commit: {} segment(s) ready, decoding a {:.2}s tail",
+                    texts.len(),
+                    tail.len() as f32 / WHISPER_SAMPLE_RATE as f32
+                );
+                let tail_text = streaming_commit::decode_segment(session, &tail, &texts)?;
+                let mut parts = texts;
+                parts.push(tail_text);
+                Ok(streaming_commit::join_segments(&parts))
+            }
+            None => {
+                if committed_samples > 0 {
+                    tracing::warn!(
+                        "[AudioThread] A committed segment failed; decoding the whole recording"
+                    );
+                }
+                let audio = resample_for_final(raw, actual_rate)?;
+                info!(
+                    "[AudioThread] Performing final transcription on {} samples ({:.2} seconds at 16kHz)",
+                    audio.len(),
+                    audio.len() as f32 / WHISPER_SAMPLE_RATE as f32
+                );
+                streaming_commit::decode_segment(session, &audio, &[])
+            }
         }
     }
 

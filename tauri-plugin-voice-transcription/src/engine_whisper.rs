@@ -120,18 +120,29 @@ impl TranscriptionSession for WhisperSession {
     }
 
     fn transcribe_final(&mut self, audio: &[f32]) -> Result<String, String> {
+        self.transcribe_final_segment(audio, "")
+    }
+
+    fn transcribe_final_segment(&mut self, audio: &[f32], context: &str) -> Result<String, String> {
         if audio.is_empty() {
             return Ok(String::new());
         }
 
-        // The final pass decodes the whole utterance once the key is released, so it sits
-        // directly on the hotkey-to-text latency. Beam 2 keeps most of the accuracy of
-        // beam 5 at a fraction of the decoder cost.
+        // The final pass sits directly on the hotkey-to-text latency. Beam 2 keeps most of
+        // the accuracy of beam 5 at a fraction of the decoder cost.
         let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch {
             beam_size: 2,
             patience: 1.0,
         });
         apply_common_params(&mut params);
+        // A segment cut from a longer utterance is conditioned on the text before it, the
+        // way whisper.cpp conditions each 30 s window on the previous one, so casing and
+        // punctuation carry across the seam. whisper-rs leaks the prompt's CString (a few
+        // hundred bytes per segment); it also panics on NUL, which `prompt_tail` strips.
+        let context = context.replace('\0', "");
+        if !context.trim().is_empty() {
+            params.set_initial_prompt(context.trim());
+        }
 
         let text = Self::run_params(&self.ctx, params, audio)?;
         Ok(filter_transcription_text(&text))
