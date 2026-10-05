@@ -34,11 +34,23 @@ static TTS_MUTEX: Mutex<()> = Mutex::const_new(());
 ///
 /// Pure bookkeeping, so the ordering and cancel rules are unit-tested without
 /// an audio device.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SpeechQueue {
     items: VecDeque<String>,
     /// A worker owns the queue and will keep popping until it is empty.
     running: bool,
+    /// Bumped by every stop and every new turn. A chunk is only ever queued
+    /// under the generation it was produced in.
+    generation: u64,
+    /// False from a stop until the next turn begins. A cancelled turn keeps
+    /// streaming for a moment; its sentences must never reach the speaker.
+    turn_open: bool,
+}
+
+impl Default for SpeechQueue {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SpeechQueue {
@@ -46,7 +58,35 @@ impl SpeechQueue {
         Self {
             items: VecDeque::new(),
             running: false,
+            generation: 0,
+            turn_open: true,
         }
+    }
+
+    /// Add a chunk of the current turn's reply. `None` when the turn was
+    /// stopped: the chunk is from a cancelled turn and is dropped.
+    fn push_turn(&mut self, text: String) -> Option<bool> {
+        if !self.turn_open {
+            return None;
+        }
+        Some(self.push(text))
+    }
+
+    /// Escape or any stop: drop what is queued and refuse the rest of the
+    /// turn that was running.
+    fn stop(&mut self) -> u64 {
+        self.items.clear();
+        self.generation += 1;
+        self.turn_open = false;
+        self.generation
+    }
+
+    /// A new turn: drop what is left of the last one and accept chunks again.
+    fn begin_turn(&mut self) -> u64 {
+        self.items.clear();
+        self.generation += 1;
+        self.turn_open = true;
+        self.generation
     }
 
     /// Add a chunk. True when the caller must start the worker.
@@ -74,12 +114,6 @@ impl SpeechQueue {
     /// The next chunk, if one is already waiting. Does not end the run.
     fn try_pop(&mut self) -> Option<String> {
         self.items.pop_front()
-    }
-
-    /// Drop everything not yet started. The chunk being spoken is stopped by
-    /// the stop flag; the worker leaves on its own when it finds this empty.
-    fn clear(&mut self) {
-        self.items.clear();
     }
 
     /// Drop everything and release the worker slot (the worker is leaving).
@@ -528,11 +562,17 @@ pub fn stop_speech() {
     // flag in the same lock when it takes a chunk, so a chunk is either
     // already in flight (and killed by the flag) or still queued (and cleared
     // here). Neither survives an Escape.
-    with_queue(|queue| {
-        queue.clear();
+    let generation = with_queue(|queue| {
+        let generation = queue.stop();
         TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
+        generation
     });
+    debug!("[TTS] Speech generation is now {} (stopped)", generation);
+    kill_audio_processes();
+}
 
+/// SIGTERM every audio process Juno spawned. Does not touch the queue.
+fn kill_audio_processes() {
     let pids_to_kill: Vec<u32> = match audio_pid_registry().lock() {
         Ok(pids) => pids.clone(),
         Err(e) => {
@@ -859,6 +899,16 @@ pub async fn invoke_tts(
 ///
 /// Returns immediately; the order of calls is the order of speech.
 pub fn enqueue_speech(text: String, app_handle: AppHandle) {
+    enqueue(text, app_handle, true);
+}
+
+/// Like [`enqueue_speech`] for speech that belongs to no turn (a finished
+/// timer): an earlier Escape does not silence it.
+pub fn enqueue_speech_always(text: String, app_handle: AppHandle) {
+    enqueue(text, app_handle, false);
+}
+
+fn enqueue(text: String, app_handle: AppHandle, part_of_turn: bool) {
     let spawn_worker = {
         let Some(state) = app_handle.try_state::<AppState>() else {
             warn!("AppState not available for TTS processing, skipping");
@@ -880,7 +930,20 @@ pub fn enqueue_speech(text: String, app_handle: AppHandle) {
             info!("TTS content was filtered out, nothing to queue");
             return;
         }
-        with_queue(|queue| queue.push(filtered))
+        let queued = with_queue(|queue| {
+            if part_of_turn {
+                queue.push_turn(filtered)
+            } else {
+                Some(queue.push(filtered))
+            }
+        });
+        match queued {
+            Some(spawn) => spawn,
+            None => {
+                info!("[TTS] Dropping speech from a stopped turn");
+                return;
+            }
+        }
     };
 
     SPEECH_NOTIFY.notify_one();
@@ -894,9 +957,19 @@ pub fn enqueue_speech(text: String, app_handle: AppHandle) {
 /// A new turn begins: whatever the last one had left to say is not wanted.
 /// Silent when nothing is speaking.
 pub fn begin_turn() {
-    if is_tts_playing() || with_queue(|queue| queue.is_busy()) {
+    // Queue, latch and stop flag change under one lock, as in `stop_speech`.
+    let (speaking, generation) = with_queue(|queue| {
+        let speaking = is_tts_playing() || queue.is_busy();
+        let generation = queue.begin_turn();
+        if speaking {
+            TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
+        }
+        (speaking, generation)
+    });
+    debug!("[TTS] Speech generation is now {} (new turn)", generation);
+    if speaking {
         info!("[TTS] New turn: dropping the previous turn's speech");
-        stop_speech();
+        kill_audio_processes();
     }
 }
 
@@ -1694,7 +1767,7 @@ mod tests {
         queue.push("pending one".to_string());
         queue.push("pending two".to_string());
         assert_eq!(queue.pop_or_finish().as_deref(), Some("playing"));
-        queue.clear();
+        queue.stop();
         assert!(
             queue.is_busy(),
             "the worker is still finishing the chunk in flight"
@@ -1741,5 +1814,48 @@ mod tests {
             assert!(is_status_result(status));
         }
         assert!(!is_status_result("UklGRiQAAABXQVZFZm10IBAAAAABAAEA+/8="));
+    }
+    #[test]
+    fn chunks_from_a_stopped_turn_are_dropped() {
+        let mut queue = SpeechQueue::new();
+        assert_eq!(queue.push_turn("first".to_string()), Some(true));
+        queue.stop();
+        assert_eq!(queue.try_pop(), None, "stop cleared what was queued");
+        assert_eq!(
+            queue.push_turn("still streaming from the cancelled turn".to_string()),
+            None
+        );
+        assert_eq!(queue.try_pop(), None);
+    }
+
+    #[test]
+    fn a_new_turn_speaks_after_a_stop() {
+        let mut queue = SpeechQueue::new();
+        queue.stop();
+        assert_eq!(queue.push_turn("old".to_string()), None);
+        let before = queue.generation;
+        queue.begin_turn();
+        assert!(queue.generation > before);
+        assert_eq!(queue.push_turn("new".to_string()), Some(true));
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn begin_turn_drops_the_previous_turns_pending_speech() {
+        let mut queue = SpeechQueue::new();
+        queue.push_turn("old one".to_string());
+        queue.push_turn("old two".to_string());
+        queue.begin_turn();
+        assert_eq!(queue.push_turn("new".to_string()), Some(false));
+        assert_eq!(queue.try_pop().as_deref(), Some("new"));
+        assert_eq!(queue.try_pop(), None);
+    }
+
+    #[test]
+    fn speech_outside_a_turn_ignores_the_stop_latch() {
+        let mut queue = SpeechQueue::new();
+        queue.stop();
+        assert!(queue.push("timer done".to_string()));
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("timer done"));
     }
 }

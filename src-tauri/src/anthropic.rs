@@ -412,6 +412,10 @@ pub async fn submit_query(
     if !crate::cli::headless::is_headless_mode() {
         announce_query_submission(&app_handle, trimmed_query).await;
 
+        // A new query opens a new turn for speech, so a local intent's answer
+        // is not mistaken for the tail of a turn that was stopped.
+        crate::tts::begin_turn();
+
         // --- Local intents: deterministic requests answered in-process ---
         // Bare playback commands ("pause Spotify", "what's playing?") resolve to
         // one AppleScript call plus the pre-built live `<NowPlayingCard>`. The
