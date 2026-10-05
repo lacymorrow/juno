@@ -9,25 +9,33 @@ pub mod model_ids {
     // table at <https://platform.claude.com/docs/en/about-claude/models/overview>.
     pub const CLAUDE_FABLE_5_1: &str = "claude-fable-5-1";
     pub const CLAUDE_OPUS_5_5: &str = "claude-opus-5-5";
-    pub const CLAUDE_SONNET_5: &str = "claude-sonnet-5";
+    pub const CLAUDE_SONNET_5_5: &str = "claude-sonnet-5-5";
     pub const CLAUDE_HAIKU_4_5: &str = "claude-haiku-4-5-20251001";
 
     // Anthropic Claude Models — "Legacy models (still available)" on that same
-    // page: Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5,
-    // Sonnet 4.6, Sonnet 4.5. Still callable, so they stay selectable, but
-    // only under advanced settings.
+    // page: Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5, Sonnet 5,
+    // Sonnet 4.6. Still callable, so they stay selectable, but only under
+    // advanced settings. (Sonnet 5 moved here from the current lineup when
+    // Sonnet 5.5 launched; 2026-10-05 weekly check, LAC-4142.)
     //
     // NOTE: Only models the Anthropic API still serves belong here. Opus 4.1
     // (retired 2026-08-05), Opus 4, and Sonnet 4 (both retired 2026-06-15) were
     // removed — requests to retired models return 404. Verify against the live
     // deprecations page before adding an ID back:
     // https://platform.claude.com/docs/en/about-claude/model-deprecations
+    //
+    // Sonnet 4.5 stays only because the deprecations page still lists it as
+    // SERVED, but it was DEPRECATED 2026-09-30 and retires 2026-11-30, and the
+    // models-overview page has already dropped it from "Legacy models (still
+    // available)". Remove it from this catalog once that page lists it as
+    // Retired (verify live, do not guess the date).
     pub const CLAUDE_FABLE_5: &str = "claude-fable-5";
     pub const CLAUDE_OPUS_5: &str = "claude-opus-5";
     pub const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
     pub const CLAUDE_OPUS_4_7: &str = "claude-opus-4-7";
     pub const CLAUDE_OPUS_4_6: &str = "claude-opus-4-6";
     pub const CLAUDE_OPUS_4_5: &str = "claude-opus-4-5-20251101";
+    pub const CLAUDE_SONNET_5: &str = "claude-sonnet-5";
     pub const CLAUDE_SONNET_4_6: &str = "claude-sonnet-4-6";
     pub const CLAUDE_SONNET_4_5: &str = "claude-sonnet-4-5-20250929";
 
@@ -133,10 +141,10 @@ impl ComputerUse {
 /// This tracks the provider's own lifecycle label, not any tool version.
 /// For Anthropic that is the split on
 /// <https://platform.claude.com/docs/en/about-claude/models/overview>: the
-/// "Compare models" table is `Current` (Fable 5.1, Opus 5.5, Sonnet 5,
+/// "Compare models" table is `Current` (Fable 5.1, Opus 5.5, Sonnet 5.5,
 /// Haiku 4.5) and everything under "Legacy models (still available)" is
 /// `Legacy` (Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5,
-/// Sonnet 4.6, Sonnet 4.5).
+/// Sonnet 5, Sonnet 4.6).
 ///
 /// `Legacy` models stay callable and stay selectable, but the picker hides
 /// them unless advanced settings are on — except for the active model, which
@@ -466,15 +474,28 @@ impl Provider {
                         router_role: None,
                     },
                     ModelDefinition {
-                        id: model_ids::CLAUDE_SONNET_5,
-                        name: "Claude Sonnet 5",
-                        computer_use: CU_20251124,
+                        id: model_ids::CLAUDE_SONNET_5_5,
+                        name: "Claude Sonnet 5.5",
+                        // Toolset-only on the Claude API, exactly like Opus 5.5:
+                        // "Claude 5.5 and later models support computer use only
+                        // through the computer_toolset_20260801 toolset and
+                        // return an error for the earlier computer_20251124 tool
+                        // version." Sending the legacy tool here would 400.
+                        computer_use: CU_TOOLSET,
                         availability: Availability::Current,
                         toolset_ga: true,
                         image_tier: ImageTier::HighResolution,
                         adaptive_thinking: true,
-                        server_side_fallback: false,
+                        // Now listed among the models with safety classifiers on
+                        // the refusals-and-fallback page, unlike Sonnet 5.
+                        server_side_fallback: true,
                         is_recommended: false,
+                        // The router's Chat model must be current and able to
+                        // drive the computer; Sonnet 5.5 is the current Sonnet,
+                        // so the role moves here from the now-legacy Sonnet 5. It
+                        // pays the toolset's ~2x input overhead on tool turns —
+                        // accepted, because the role requires a current model and
+                        // Sonnet 5.5 is the only current non-Opus/non-Haiku one.
                         router_role: Some(RouterRole::Chat),
                     },
                     // Haiku 4.5 is in the current lineup even though it drives
@@ -553,6 +574,23 @@ impl Provider {
                         availability: Availability::Legacy,
                         toolset_ga: false,
                         image_tier: ImageTier::Standard,
+                        adaptive_thinking: true,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    // Sonnet 5 moved to legacy when Sonnet 5.5 launched
+                    // (2026-10-05 weekly check). Its tool version is unchanged:
+                    // it still accepts the cheaper computer_20251124, so that is
+                    // what Juno sends — the 5.5 "toolset-only" rule does not
+                    // apply to it. It is toolset-GA but not fallback-capable.
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_SONNET_5,
+                        name: "Claude Sonnet 5",
+                        computer_use: CU_20251124,
+                        availability: Availability::Legacy,
+                        toolset_ga: true,
+                        image_tier: ImageTier::HighResolution,
                         adaptive_thinking: true,
                         server_side_fallback: false,
                         is_recommended: false,
@@ -1057,7 +1095,8 @@ mod tests {
             model_ids::CLAUDE_SONNET_5,
         );
         // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
-        // what Juno sends. Only Opus 5.5 takes the toolset.
+        // what Juno sends. Only the 5.5 models (Opus 5.5, Sonnet 5.5) take the
+        // toolset, because they accept no earlier tool type.
         assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
@@ -1076,7 +1115,8 @@ mod tests {
             model_ids::CLAUDE_OPUS_5,
         );
         // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
-        // what Juno sends. Only Opus 5.5 takes the toolset.
+        // what Juno sends. Only the 5.5 models (Opus 5.5, Sonnet 5.5) take the
+        // toolset, because they accept no earlier tool type.
         assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
@@ -1184,6 +1224,57 @@ mod tests {
         );
     }
 
+    /// Claude Sonnet 5.5 is the second toolset-only model: "Claude 5.5 and
+    /// later models support computer use only through the
+    /// computer_toolset_20260801 toolset and return an error for the earlier
+    /// computer_20251124 tool version" (computer-use-tool docs, 2026-10-05).
+    /// It must behave exactly like Opus 5.5 on the wire, and unlike Sonnet 5,
+    /// it is fallback-capable.
+    #[test]
+    fn sonnet_5_5_drives_the_computer_through_the_toolset() {
+        let def = Provider::Anthropic
+            .model_definitions()
+            .iter()
+            .find(|def| def.id == model_ids::CLAUDE_SONNET_5_5)
+            .expect("Claude Sonnet 5.5 must be in the catalog");
+
+        assert_eq!(def.availability, Availability::Current);
+        assert!(def.toolset_ga);
+        assert_eq!(
+            def.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
+        );
+        assert!(def.uses_computer_toolset());
+        assert!(def.adaptive_thinking);
+        assert!(def.server_side_fallback);
+        assert_eq!(def.image_tier, ImageTier::HighResolution);
+
+        assert!(Provider::Anthropic.model_supports_computer_use(model_ids::CLAUDE_SONNET_5_5));
+        assert!(Provider::Anthropic.uses_computer_toolset(model_ids::CLAUDE_SONNET_5_5));
+        assert_eq!(
+            Provider::Anthropic.computer_toolset_name(model_ids::CLAUDE_SONNET_5_5),
+            Some("computer")
+        );
+        // GA: no computer-use beta flag.
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_SONNET_5_5),
+            None
+        );
+        assert_eq!(
+            Provider::Anthropic.resolve_tool_type(
+                "computer",
+                "computer_20251124",
+                model_ids::CLAUDE_SONNET_5_5
+            ),
+            "computer_toolset_20260801",
+            "the legacy type it would otherwise send is exactly what it 400s on"
+        );
+        assert_eq!(
+            Provider::Anthropic.computer_use_refusal(model_ids::CLAUDE_SONNET_5_5),
+            None
+        );
+    }
+
     #[test]
     fn test_resolve_tool_type_fable_5_1_remaps() {
         let computer = Provider::Anthropic.resolve_tool_type(
@@ -1192,7 +1283,8 @@ mod tests {
             model_ids::CLAUDE_FABLE_5_1,
         );
         // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
-        // what Juno sends. Only Opus 5.5 takes the toolset.
+        // what Juno sends. Only the 5.5 models (Opus 5.5, Sonnet 5.5) take the
+        // toolset, because they accept no earlier tool type.
         assert_eq!(computer, "computer_20251124");
         assert_eq!(
             Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_FABLE_5_1),
@@ -1204,24 +1296,28 @@ mod tests {
     fn test_adaptive_thinking_and_fallback_capabilities() {
         assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_FABLE_5_1));
         assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_OPUS_5_5));
+        assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_SONNET_5_5));
         assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_OPUS_5));
         assert!(!Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_HAIKU_4_5));
         assert!(!Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_OPUS_4_5));
 
-        // "Claude Fable 5.1, Claude Fable 5, Claude Opus 5.5, and Claude
-        // Opus 5 include safety classifiers that can decline a request."
+        // "Claude Fable 5.1, Claude Fable 5, Claude Opus 5.5, Claude Opus 5,
+        // and Claude Sonnet 5.5 include safety classifiers that can decline a
+        // request."
         // <https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback>
         for id in [
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_FABLE_5,
             model_ids::CLAUDE_OPUS_5_5,
             model_ids::CLAUDE_OPUS_5,
+            model_ids::CLAUDE_SONNET_5_5,
         ] {
             assert!(
                 Provider::Anthropic.supports_server_side_fallbacks(id),
                 "{id}"
             );
         }
+        // Sonnet 5 is NOT in that list — only Sonnet 5.5 gained the classifier.
         for id in [model_ids::CLAUDE_SONNET_5, model_ids::CLAUDE_OPUS_4_8] {
             assert!(
                 !Provider::Anthropic.supports_server_side_fallbacks(id),
@@ -1239,7 +1335,8 @@ mod tests {
             model_ids::CLAUDE_FABLE_5,
         );
         // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
-        // what Juno sends. Only Opus 5.5 takes the toolset.
+        // what Juno sends. Only the 5.5 models (Opus 5.5, Sonnet 5.5) take the
+        // toolset, because they accept no earlier tool type.
         assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
@@ -1275,7 +1372,7 @@ mod tests {
         let current_lineup = [
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_OPUS_5_5,
-            model_ids::CLAUDE_SONNET_5,
+            model_ids::CLAUDE_SONNET_5_5,
             model_ids::CLAUDE_HAIKU_4_5,
         ];
 
@@ -1285,11 +1382,15 @@ mod tests {
 
         // The models Juno actually SENDS the toolset to: the ones that accept
         // no earlier tool type, so the toolset's ~2x input-token overhead buys
-        // the only working path. Verified against the live API 2026-09-22 —
-        // every other toolset-GA model below returned HTTP 200 for
-        // `computer_20251124`, and only Opus 5.5 returned
-        // "does not support tool types: computer_20251124".
-        let toolset_only = [model_ids::CLAUDE_OPUS_5_5];
+        // the only working path. The computer-use-tool page (verified live
+        // 2026-10-05) states "Claude 5.5 and later models support computer use
+        // only through the computer_toolset_20260801 toolset and return an
+        // error for the earlier computer_20251124 tool version", which is both
+        // Opus 5.5 and Sonnet 5.5. Opus 5.5 was additionally wire-verified
+        // 2026-09-22 (it returned "does not support tool types:
+        // computer_20251124"); every other toolset-GA model returned HTTP 200
+        // for the legacy tool.
+        let toolset_only = [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5];
 
         // `supportedModels` for computer_toolset_20260801, intersected with
         // what Juno offers — the documented capability, which is broader than
@@ -1298,6 +1399,7 @@ mod tests {
         let toolset_ga = [
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
             model_ids::CLAUDE_SONNET_5,
             model_ids::CLAUDE_FABLE_5,
             model_ids::CLAUDE_OPUS_5,
@@ -1309,6 +1411,7 @@ mod tests {
         let high_res = [
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
             model_ids::CLAUDE_SONNET_5,
             model_ids::CLAUDE_FABLE_5,
             model_ids::CLAUDE_OPUS_5,
@@ -1391,6 +1494,12 @@ mod tests {
         for (model, expected_type, expected_flag) in [
             (
                 model_ids::CLAUDE_OPUS_5_5,
+                "computer_toolset_20260801",
+                None,
+            ),
+            // Claude 5.5 and later are toolset-only on the Claude API.
+            (
+                model_ids::CLAUDE_SONNET_5_5,
                 "computer_toolset_20260801",
                 None,
             ),
