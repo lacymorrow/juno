@@ -1569,6 +1569,7 @@ pub fn emit_streaming_text_chunk(
 /// - Proper cleanup only after audio actually finishes
 pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: String) {
     info!("Processing TTS content immediately: '{}'", tts_content);
+    crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
 
     // CRITICAL FIX: Use a single background task to prevent audio overlap
     // invoke_tts now properly waits for actual audio completion before cleanup
@@ -1604,6 +1605,7 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
                     }
                     "TTS_DISABLED_BY_SETTING" => {
                         info!("🔇 TTS is disabled by user setting");
+                        crate::turn_timing::finish(None, "tts_off");
                     }
                     "TTS_CONTENT_FILTERED" => {
                         info!("🧹 TTS content was filtered out (code/unwanted content)");
@@ -1613,6 +1615,7 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
                     }
                     "TTS_SOUND_DISABLED" => {
                         info!("🔇 Sound is disabled in settings");
+                        crate::turn_timing::finish(None, "sound_off");
                     }
                     _ => {
                         // Unexpected status - this shouldn't happen with the current architecture

@@ -1289,6 +1289,15 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
         }
     }
 
+    // Start the per-turn stage clock at the release itself. If the turn never
+    // reaches audio (TTS off, an error, nothing said) it is logged anyway
+    // once it has had long enough to.
+    let timing_turn = crate::turn_timing::begin(ptt_release_time);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(crate::turn_timing::TURN_TIMEOUT).await;
+        crate::turn_timing::finish(Some(timing_turn), "timeout");
+    });
+
     // Any way this session ends (bar Stop, the agent or dictation shortcut,
     // a hotkey release) lands here — clear the bar-voice flag and show a
     // processing state immediately while STT finalizes and the agent starts.
@@ -1314,6 +1323,10 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                 controller_state,
             )
             .await;
+            match stt_result {
+                Ok(_) => crate::turn_timing::mark(crate::turn_timing::Stage::TranscriptFinal),
+                Err(_) => crate::turn_timing::finish(Some(timing_turn), "stt_failed"),
+            }
 
             // Collect screenshot result (it runs concurrently so it should already be done).
             let screenshot_elapsed = ptt_release_time.elapsed().as_millis();
