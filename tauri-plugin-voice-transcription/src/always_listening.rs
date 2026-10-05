@@ -533,10 +533,9 @@ impl AlwaysListeningController {
 
                     // Emit audio level for waveform visualization while a mic
                     // session has monitoring on, throttled like the dictation
-                    // thread. Same scaling as controller.rs: typical speech
-                    // RMS 0.02–0.1 maps to ~0.2–1.0 display range.
+                    // thread, on the same meter curve.
                     if audio_level_monitoring && last_level_emit.elapsed() >= level_emit_interval {
-                        let level = (volume * 10.0_f32).min(1.0_f32);
+                        let level = crate::controller::meter_level(volume);
                         let _ = app_handle.emit(
                             crate::constants::voice_transcription::AUDIO_LEVEL,
                             serde_json::json!({ "level": level }),
