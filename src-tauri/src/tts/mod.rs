@@ -918,6 +918,8 @@ fn enqueue(text: String, app_handle: AppHandle, part_of_turn: bool) {
             Ok(provider) if !provider.is_empty() && !provider.eq_ignore_ascii_case("off") => {}
             Ok(provider) => {
                 info!("TTS is set to '{}'. Not queueing speech.", provider);
+                crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+                crate::turn_timing::finish(None, "tts_off");
                 return;
             }
             Err(e) => {
@@ -938,7 +940,15 @@ fn enqueue(text: String, app_handle: AppHandle, part_of_turn: bool) {
             }
         });
         match queued {
-            Some(spawn) => spawn,
+            Some(spawn) => {
+                // First chunk of the turn reaching the queue; the tracker
+                // keeps only the first mark.
+                crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+                if let Ok(provider) = state.get_tts_provider() {
+                    crate::turn_timing::note_tts_engine(&provider);
+                }
+                spawn
+            }
             None => {
                 info!("[TTS] Dropping speech from a stopped turn");
                 return;
@@ -1089,6 +1099,12 @@ async fn drain_speech_queue(app_handle: AppHandle) {
                 }
             }
             Ok("TTS_DISABLED_BY_SETTING") | Ok("TTS_SOUND_DISABLED") => {
+                let outcome = if matches!(result.as_deref(), Ok("TTS_SOUND_DISABLED")) {
+                    "sound_off"
+                } else {
+                    "tts_off"
+                };
+                crate::turn_timing::finish(None, outcome);
                 if let Some((_, handle)) = prefetched.take() {
                     handle.abort();
                 }
