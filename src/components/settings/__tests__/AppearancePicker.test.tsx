@@ -7,7 +7,7 @@ function frames() {
   return Array.from(document.querySelectorAll("iframe")).map((f) => ({
     appearance: new URL(f.getAttribute("src") ?? "", "http://x").searchParams.get("appearance"),
     current: f.getAttribute("data-current") === "true",
-    hidden: f.className.includes("invisible"),
+    hidden: f.className.includes("opacity-0"),
   }));
 }
 
@@ -65,12 +65,27 @@ describe("AppearancePicker", () => {
 });
 
 describe("AppearancePicker loading state", () => {
+  it("fades the outgoing look out instead of hiding it at once", () => {
+    const { rerender } = render(
+      <AppearancePicker value={APPEARANCE_CATALOG[1].value} onChange={() => {}} />,
+    );
+    ready(APPEARANCE_CATALOG[1].value);
+    rerender(<AppearancePicker value={APPEARANCE_CATALOG[2].value} onChange={() => {}} />);
+    const outgoing = document.querySelector(
+      `iframe[src*="appearance=${APPEARANCE_CATALOG[1].value}"]`,
+    ) as HTMLIFrameElement;
+    expect(outgoing.className).toContain("opacity-0");
+    expect(outgoing.className).toContain("transition-opacity");
+    expect(outgoing.className).not.toContain("invisible");
+  });
+
   it("renders no appearance name or error text while a look is loading or failed", () => {
     vi.useFakeTimers();
     const entry = APPEARANCE_CATALOG[0];
     const { container } = render(<AppearancePicker value={entry.value} onChange={() => {}} />);
     const stage = () => container.querySelector("div.relative.h-\\[150px\\]") as HTMLElement;
-    expect(stage().querySelector('[data-testid="appearance-preview-placeholder"]')).not.toBeNull();
+    // No shimmer or placeholder: the stage is its plain ground until the look fades in.
+    expect(stage().querySelector('[data-testid="appearance-preview-placeholder"]')).toBeNull();
     expect(stage().textContent).toBe("");
     act(() => {
       vi.advanceTimersByTime(5000);
