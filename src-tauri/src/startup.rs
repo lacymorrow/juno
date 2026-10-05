@@ -10,7 +10,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tracing::{debug, error, info, warn};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use crate::{agent, cli, commands, state};
 
@@ -44,12 +44,26 @@ pub fn init_tracing() {
         }
     }
 
-    fmt()
-        .with_env_filter(filter)
+    let stdout_layer = fmt::layer()
         .with_target(false) // Hide target module names for cleaner output
         .with_thread_ids(false) // Hide thread IDs for cleaner output
         .with_ansi(true) // Enable colors for better readability
-        .compact() // Use compact format instead of full
+        .compact(); // Use compact format instead of full
+
+    // The same lines, uncolored, in ~/Library/Logs/Juno. A Dock launch has no stdout.
+    let file_layer = crate::file_log::DailyLog::open().map(|log| {
+        fmt::layer()
+            .with_writer(log)
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_ansi(false)
+            .compact()
+    });
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(stdout_layer)
+        .with(file_layer)
         .init();
 }
 

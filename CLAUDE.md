@@ -27,6 +27,9 @@ gh pr checks --watch             # fmt + clippy + cargo test run on the PR
 bun run build                    # Frontend build (tsc + vite)
 bun run test                     # Vitest
 
+# Logs: stdout, and ~/Library/Logs/Juno/juno-YYYY-MM-DD.log (a week kept)
+grep TurnTiming ~/Library/Logs/Juno/juno-$(date +%F).log
+
 # Debug mode with self-awareness tools
 RUST_LOG=debug bun run tauri dev
 
