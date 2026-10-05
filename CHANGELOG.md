@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.103] - 2026-10-05
+
+### Changed
+
+- **dictation:** streaming commit, decode only the tail on release (#714) (7600cb74)
+- **voice:** per-turn stage timing, persistent Claude session on by default (#715) (f5b4ce12)
+
 ## [0.8.100] - 2026-10-04
 
 ### Fixed
@@ -936,7 +943,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.100...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.103...HEAD
+[0.8.103]: https://github.com/lacymorrow/juno/compare/cua-v0.8.102...v0.8.103
 [0.8.100]: https://github.com/lacymorrow/juno/compare/cua-v0.8.99...v0.8.100
 [0.8.99]: https://github.com/lacymorrow/juno/compare/cua-v0.8.98...v0.8.99
 [0.8.98]: https://github.com/lacymorrow/juno/compare/cua-v0.8.97...v0.8.98
