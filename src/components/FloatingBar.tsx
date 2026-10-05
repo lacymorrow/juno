@@ -28,7 +28,7 @@ import {
   getCurrentWindow,
 } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ArrowUp, Ear, EarOff, MessageSquare, Mic, Square, Type, X } from "lucide-react";
+import { ArrowUp, Ear, EarOff, Maximize2, Mic, Square, Type, X } from "lucide-react";
 import { VoiceTurnControls } from "@/components/bar/VoiceTurnControls";
 import { cancelVoiceTurn, isRecordingTurn, sendVoiceTurn } from "@/lib/voiceTurn";
 import { useReducedMotion } from "motion/react";
@@ -1878,7 +1878,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               data-phover={hoveredButton === "chat" ? "" : undefined}
               className={cn(pillButton, hoveredButton === "chat" && "bg-white/[0.12] text-white")}
             >
-              <MessageSquare className="size-3.5" />
+              <Maximize2 className="size-3.5" />
             </button>
             {/* The wake phrase, when there is one. A microphone that is open
                 all day is worth being able to close for a while without going
