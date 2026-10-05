@@ -36,8 +36,9 @@ pub mod store_keys {
     pub const SHOW_TRAY_ICON: &str = "show_tray_icon";
     pub const SHOW_GLOW_BORDER: &str = "show_glow_border";
     pub const CLI: &str = "cli";
-    /// Experimental. Reuse one long-lived `claude` process per conversation instead
-    /// of spawning one per query. Off unless explicitly set.
+    /// Reuse one long-lived `claude` process per conversation instead of spawning
+    /// one per query. On unless explicitly set to false; see
+    /// `defaults::CLI_PERSISTENT_SESSION_ENABLED`.
     /// See docs/plans/cli-persistent-session-spike.md
     pub const CLI_PERSISTENT_SESSION_ENABLED: &str = "cli_persistent_session_enabled";
     /// Ask before Juno sends (LAC-4058). Default on. Routes the Claude CLI's
@@ -163,6 +164,11 @@ pub mod validation {
 pub mod defaults {
     pub const TTS_PROVIDER: &str = "system";
     pub const SOUND_ENABLED: bool = true;
+    /// The persistent Claude CLI session is on for anyone who has not turned it
+    /// off. It saves 1.6-3.1s of process start on every follow-up, which is most
+    /// of the gap between a key release and the first spoken word on this
+    /// provider. An explicit `false` in the store still wins.
+    pub const CLI_PERSISTENT_SESSION_ENABLED: bool = true;
     pub const DICTATION_CLIPBOARD_ENABLED: bool = true;
     /// Paste stays the default while clipboard-free proves itself in the field.
     /// Literal (not a re-export of `dictation_insertion_modes::PASTE`) because

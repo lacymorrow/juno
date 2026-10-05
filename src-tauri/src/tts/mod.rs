@@ -28,7 +28,11 @@ fn audio_pid_registry() -> &'static StdMutex<Vec<u32>> {
     JUNO_AUDIO_PIDS.get_or_init(|| StdMutex::new(Vec::new()))
 }
 
+/// Every process that plays Juno's speech (`afplay`, `aplay`, `say`) passes
+/// through here the moment it is spawned, which makes it the one place that
+/// knows audio has started.
 pub(crate) fn register_audio_pid(pid: u32) {
+    crate::turn_timing::mark(crate::turn_timing::Stage::FirstAudio);
     match audio_pid_registry().lock() {
         Ok(mut pids) => {
             pids.push(pid);
@@ -703,6 +707,8 @@ pub async fn invoke_tts(
     let provider = state
         .get_tts_provider()
         .map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
+    crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+    crate::turn_timing::note_tts_engine(&provider);
 
     if provider.is_empty() || provider.to_lowercase() == "off" {
         let short_text = text.chars().take(30).collect::<String>();

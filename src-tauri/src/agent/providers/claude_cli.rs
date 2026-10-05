@@ -128,7 +128,7 @@ const CLI_TIMEOUT: Duration = Duration::from_secs(300);
 /// Older `claude` builds do not know this flag and exit non-zero on it, which
 /// is why `run_streaming` retries once without it — Juno users install the
 /// CLI themselves, so there is no floor version to assume.
-const PARTIAL_MESSAGES_FLAG: &str = "--include-partial-messages";
+pub(super) const PARTIAL_MESSAGES_FLAG: &str = "--include-partial-messages";
 
 /// Start building a `claude` invocation, rooted at the user's home directory.
 ///
@@ -653,7 +653,7 @@ impl ClaudeCliBrain {
         // restart. Without an app handle there is no sheet to route to.
         let ask_before_send = app_handle.as_ref().is_some_and(cli_approval::is_enabled);
 
-        // Experimental (off by default): run this turn in one long-lived process
+        // On unless the person turned it off: run this turn in one long-lived process
         // kept alive for the conversation, instead of spawning a fresh one here.
         // Worth ~1.6-3.1s per follow-up — see docs/plans/cli-persistent-session-spike.md.
         //
@@ -675,6 +675,8 @@ impl ClaudeCliBrain {
                 let request = claude_cli_session::TurnRequest {
                     binary: &self.binary_path,
                     model: &self.model,
+                    effort: &self.effort,
+                    include_partial_messages: !PARTIAL_MESSAGES_UNSUPPORTED.load(Ordering::Relaxed),
                     system_prompt: self.system_prompt.as_deref(),
                     mcp_config: mcp_config.as_deref(),
                     mcp_guidance: MCP_TOOL_GUIDANCE,
@@ -779,6 +781,8 @@ impl ClaudeCliBrain {
                     .spawn()
             };
 
+            crate::turn_timing::note_llm("claude_cli/oneshot", &self.model);
+            crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
             let mut child = match spawn(&args) {
                 Ok(child) => child,
                 // A session id we stored can stop being resumable: the CLI
@@ -1110,36 +1114,10 @@ impl ClaudeCliBrain {
                         // is over, so whatever indicator it raised comes down
                         // — otherwise a finished tool spins forever.
                         "user" => {
-                            if let Some(content) = parsed
-                                .get("message")
-                                .and_then(|m| m.get("content"))
-                                .and_then(|c| c.as_array())
-                            {
-                                for block in content {
-                                    if block.get("type").and_then(|v| v.as_str())
-                                        != Some("tool_result")
-                                    {
-                                        continue;
-                                    }
-                                    let tool_use_id = block
-                                        .get("tool_use_id")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let label = pending_tools
-                                        .remove(tool_use_id)
-                                        .unwrap_or_else(|| "tool".to_string());
-                                    if let Some(ref handle) = app_handle {
-                                        crate::agent::tool_logger::emit_tool_pending_cleared(
-                                            handle,
-                                            msg_id,
-                                            tool_use_id,
-                                            &label,
-                                        );
-                                    }
-                                }
-                            }
+                            clear_finished_tools(&parsed, app_handle, msg_id, &mut pending_tools);
                         }
                         "assistant" => {
+                            crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
                             // Fallback path. Kept for CLI builds that do not
                             // support --include-partial-messages, where this
                             // whole-message diff is the only source of text.
@@ -1287,7 +1265,7 @@ impl ClaudeCliBrain {
     /// The inner event mirrors the Anthropic streaming API exactly, so the
     /// shapes here are the same ones `anthropic.rs` parses.
     #[allow(clippy::too_many_arguments)]
-    fn handle_stream_event(
+    pub(super) fn handle_stream_event(
         event: &Value,
         app_handle: &Option<tauri::AppHandle>,
         msg_id: &str,
@@ -1385,6 +1363,7 @@ impl ClaudeCliBrain {
                 }
             }
             "content_block_delta" => {
+                crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
                 let delta = match event.get("delta") {
                     Some(delta) => delta,
                     None => return,
@@ -1495,7 +1474,7 @@ impl ClaudeCliBrain {
     /// around this would silently break voice output: `TtsTagStream` is a
     /// running parser, and text that skips it takes its `<TTS>` tags along
     /// into the visible answer.
-    fn emit_display_text(
+    pub(super) fn emit_display_text(
         app_handle: &Option<tauri::AppHandle>,
         msg_id: &str,
         delta: &str,
@@ -1641,7 +1620,7 @@ impl Drop for StreamSurface {
 /// closing, so the kind has to be remembered from its `content_block_start`.
 /// Plain text blocks are not tracked: their deltas go straight to the UI and
 /// there is nothing to close.
-enum StreamBlock {
+pub(super) enum StreamBlock {
     Thinking {
         /// The reasoning surface this block is streaming into. Always its own
         /// id, never the run's `msg_id`.
@@ -1667,7 +1646,7 @@ enum StreamBlock {
 ///
 /// Called when a message ends and when the stream does: a thinking block the
 /// CLI never stopped would otherwise sit spinning in the UI for good.
-fn close_open_thinking(
+pub(super) fn close_open_thinking(
     app_handle: &Option<tauri::AppHandle>,
     blocks: &mut std::collections::HashMap<u64, StreamBlock>,
 ) {
@@ -1681,9 +1660,49 @@ fn close_open_thinking(
     }
 }
 
+/// Take down the indicator of every tool whose result is in this `user` frame.
+///
+/// Tool results come back as a `user` turn. The action is over, so whatever
+/// indicator it raised comes down, otherwise a finished tool spins forever.
+/// Shared with the persistent-session reader, which sees the same frames.
+pub(super) fn clear_finished_tools(
+    frame: &Value,
+    app_handle: &Option<tauri::AppHandle>,
+    msg_id: &str,
+    pending_tools: &mut std::collections::HashMap<String, String>,
+) {
+    let Some(content) = frame
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return;
+    };
+    for block in content {
+        if block.get("type").and_then(|v| v.as_str()) != Some("tool_result") {
+            continue;
+        }
+        let tool_use_id = block
+            .get("tool_use_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let label = pending_tools
+            .remove(tool_use_id)
+            .unwrap_or_else(|| "tool".to_string());
+        if let Some(handle) = app_handle {
+            crate::agent::tool_logger::emit_tool_pending_cleared(
+                handle,
+                msg_id,
+                tool_use_id,
+                &label,
+            );
+        }
+    }
+}
+
 /// Take down every pending-tool indicator that never got a result — a
 /// cancelled run, a tool that errored, a stream that simply ended.
-fn clear_pending_tools(
+pub(super) fn clear_pending_tools(
     app_handle: &Option<tauri::AppHandle>,
     msg_id: &str,
     pending_tools: &mut std::collections::HashMap<String, String>,
