@@ -35,6 +35,24 @@ fn calculate_rms_volume(samples: &[f32]) -> f32 {
     (sum_sq / samples.len() as f32).sqrt()
 }
 
+/// Quietest level the bar meters show: below this is room noise.
+const METER_FLOOR_DB: f32 = -55.0;
+/// Level at which the meters are full: a raised voice, not a shout.
+const METER_CEILING_DB: f32 = -20.0;
+
+/// Map an RMS volume to the 0..1 level the bar meters draw.
+///
+/// Loudness is logarithmic, so the meter is too: a linear scale left quiet
+/// speech on the first bar and only shouting reached the top. Quiet speech
+/// (about -45 dBFS) lands near a third, a normal voice past half.
+pub(crate) fn meter_level(rms: f32) -> f32 {
+    if !rms.is_finite() || rms <= 0.0 {
+        return 0.0;
+    }
+    let db = 20.0 * rms.log10();
+    ((db - METER_FLOOR_DB) / (METER_CEILING_DB - METER_FLOOR_DB)).clamp(0.0, 1.0)
+}
+
 /// Create standard sinc interpolation parameters for audio resampling.
 fn sinc_resampling_params() -> SincInterpolationParameters {
     SincInterpolationParameters {
@@ -856,9 +874,7 @@ impl VoiceController {
 
                 // Emit audio level at ~70ms intervals for waveform visualization
                 if last_level_emit.elapsed() >= level_emit_interval {
-                    let rms = calculate_rms_volume(&audio_chunk);
-                    // Scale: typical speech RMS 0.02–0.1 maps to ~0.2–1.0 display range
-                    let level = (rms * 10.0_f32).min(1.0_f32);
+                    let level = meter_level(calculate_rms_volume(&audio_chunk));
                     let _ = app_handle.emit(
                         constants::voice_transcription::AUDIO_LEVEL,
                         serde_json::json!({ "level": level }),
@@ -1160,6 +1176,20 @@ unsafe impl Send for VoiceController {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Quiet speech must move the meter well past its first bar; silence and
+    /// garbage stay at zero, and a loud voice tops out without overflowing.
+    #[test]
+    fn meter_level_lifts_quiet_speech() {
+        assert_eq!(meter_level(0.0), 0.0);
+        assert_eq!(meter_level(f32::NAN), 0.0);
+        assert_eq!(meter_level(0.001), 0.0); // -60 dBFS: room noise
+        let quiet = meter_level(0.005); // about -46 dBFS
+        assert!(quiet > 0.2 && quiet < 0.4, "quiet speech at {quiet}");
+        let normal = meter_level(0.03); // about -30 dBFS
+        assert!(normal > 0.6, "normal speech at {normal}");
+        assert_eq!(meter_level(0.5), 1.0);
+    }
 
     // The bug these pin: the old partial path shared a `SincFixedIn` built for
     // 1024-frame chunks, which silently used only the first 1024 frames of
