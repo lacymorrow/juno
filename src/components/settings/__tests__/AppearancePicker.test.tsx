@@ -26,6 +26,7 @@ describe("AppearancePicker", () => {
   it("keeps the previous and next looks mounted, hidden, so stepping is instant", () => {
     const onChange = vi.fn();
     render(<AppearancePicker value={APPEARANCE_CATALOG[1].value} onChange={onChange} />);
+    ready(APPEARANCE_CATALOG[1].value);
     const mounted = frames();
     expect(mounted.map((f) => f.appearance)).toEqual([
       APPEARANCE_CATALOG[0].value,
