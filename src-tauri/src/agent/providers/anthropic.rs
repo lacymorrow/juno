@@ -1085,6 +1085,7 @@ impl AnthropicBrain {
                             }
                         }
                         "content_block_delta" => {
+                            crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
                             if let Some(delta) = event_data.get("delta") {
                                 if let Some(delta_type) = delta.get("type").and_then(|t| t.as_str())
                                 {
@@ -2181,6 +2182,8 @@ impl AgentBrain for AnthropicBrain {
             Self::sanitize_request_for_logging(&request_payload)
         );
 
+        crate::turn_timing::note_llm("anthropic", &self.model);
+        crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
         let response = self
             .client
             .post(ANTHROPIC_API_URL)

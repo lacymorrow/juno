@@ -110,8 +110,8 @@ export default function AdvancedSettings({
   const [backgroundLoading, setBackgroundLoading] = useState(true);
   const [backgroundError, setBackgroundError] = useState(false);
 
-  // Beta: one long-lived Claude CLI process per conversation.
-  const [persistentSession, setPersistentSession] = useState(false);
+  // One long-lived Claude CLI process per conversation. On by default.
+  const [persistentSession, setPersistentSession] = useState(true);
   const [persistentSessionLoading, setPersistentSessionLoading] = useState(true);
 
   // Beta: smart routing. Default off.
@@ -164,7 +164,7 @@ export default function AdvancedSettings({
     };
   }, []);
 
-  // Load the beta persistent-session flag on mount.
+  // Load the persistent-session flag on mount.
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -172,7 +172,7 @@ export default function AdvancedSettings({
         const enabled = await invoke<boolean>(
           COMMANDS.SETTINGS_GET_CLI_PERSISTENT_SESSION_ENABLED,
         );
-        if (mounted) setPersistentSession(enabled === true);
+        if (mounted) setPersistentSession(enabled !== false);
       } catch (error) {
         console.error("Failed to load the persistent session flag:", error);
       } finally {
@@ -377,10 +377,7 @@ export default function AdvancedSettings({
         </SettingsRow>
       </SettingsGroup>
 
-      <SettingsGroup
-        title="Beta"
-        footer="Beta features are still being proven out. They can be turned off here at any time."
-      >
+      <SettingsGroup title="Claude CLI">
         <SettingsRow
           htmlFor="cli-persistent-session"
           label="Persistent Claude session"
@@ -393,6 +390,12 @@ export default function AdvancedSettings({
             disabled={persistentSessionLoading}
           />
         </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Beta"
+        footer="Beta features are still being proven out. They can be turned off here at any time."
+      >
         <SettingsRow
           htmlFor="smart-routing"
           label="Smart routing"

@@ -37,7 +37,7 @@ function mockBackend(overrides: Record<string, unknown> = {}) {
       return { background_mode: true, mouse_control: "ask", dock_icon_visible: true };
     }
     if (command === COMMANDS.SETTINGS_GET_CLI_PERSISTENT_SESSION_ENABLED) {
-      return overrides.persistent ?? false;
+      return overrides.persistent ?? true;
     }
     return undefined;
   });
@@ -70,24 +70,27 @@ beforeEach(() => {
   mockBackend();
 });
 
-describe("Persistent Claude session (beta) toggle", () => {
-  it("is off unless the backend says otherwise", async () => {
+describe("Persistent Claude session toggle", () => {
+  it("is on by default", async () => {
     await mount();
-    expect(screen.getByLabelText(/Persistent Claude session/)).not.toBeChecked();
+    expect(screen.getByLabelText(/Persistent Claude session/)).toBeChecked();
   });
 
-  it("shows the backend's value when the flag is on", async () => {
-    mockBackend({ persistent: true });
+  it("shows the backend's value when someone turned it off", async () => {
+    mockBackend({ persistent: false });
     await mount();
     await waitFor(() =>
-      expect(screen.getByLabelText(/Persistent Claude session/)).toBeChecked(),
+      expect(screen.getByLabelText(/Persistent Claude session/)).not.toBeChecked(),
     );
   });
 
-  it("tells the person it is beta and what the trade is", async () => {
+  it("is not filed under beta, and says what the trade is", async () => {
     await mount();
-    // "Beta" lives on the group heading, not repeated in the row subtext.
-    expect(screen.getByText("Beta")).toBeInTheDocument();
+    const row = screen.getByLabelText(/Persistent Claude session/);
+    expect(screen.getByText("Claude CLI")).toBeInTheDocument();
+    expect(row.closest("section")?.textContent ?? "").not.toMatch(
+      /Beta features/,
+    );
     const description = screen.getByText(/keeps one Claude CLI process/i);
     expect(description).toHaveTextContent(/1\.6–3\.1s faster/);
     expect(description).toHaveTextContent(/stall|hang/i);
@@ -100,7 +103,7 @@ describe("Persistent Claude session (beta) toggle", () => {
 
     expect(invokeMock).toHaveBeenCalledWith(
       COMMANDS.SETTINGS_SET_CLI_PERSISTENT_SESSION_ENABLED,
-      { enabled: true },
+      { enabled: false },
     );
   });
 
@@ -110,7 +113,7 @@ describe("Persistent Claude session (beta) toggle", () => {
         return { background_mode: true, mouse_control: "ask", dock_icon_visible: true };
       }
       if (command === COMMANDS.SETTINGS_GET_CLI_PERSISTENT_SESSION_ENABLED) {
-        return false;
+        return true;
       }
       throw new Error("not registered yet");
     });
@@ -119,11 +122,11 @@ describe("Persistent Claude session (beta) toggle", () => {
     await click(screen.getByLabelText(/Persistent Claude session/));
 
     // The toast is the last step of the rollback, so waiting on it (rather
-    // than on the unchecked state, which is also the *initial* state) proves
+    // than on the checked state, which is also the *initial* state) proves
     // the optimistic update was actually reverted and not merely never drawn.
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Could not change that setting"),
     );
-    expect(screen.getByLabelText(/Persistent Claude session/)).not.toBeChecked();
+    expect(screen.getByLabelText(/Persistent Claude session/)).toBeChecked();
   });
 });

@@ -60,6 +60,7 @@ pub mod tools;
 pub mod trash; // Deleting is recoverable: the shell session deletes to the Trash
 pub mod triggers; // Unified activation model (methods x targets)
 pub mod tts;
+pub mod turn_timing; // One log line per voice turn: where the time between key release and first sound went
 pub mod updater; // Auto-update: which feed, when to look, what to do with it
 pub mod utils;
 pub mod window_management; // Window operations, state management, and positioning
