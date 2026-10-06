@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.108] - 2026-10-06
+
+### Fixed
+
+- **bar:** Pill draws in one steady window per well, so nothing jumps (#719) (f49c49d0)
+
 ## [0.8.107] - 2026-10-06
 
 ### Fixed
@@ -961,7 +967,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.107...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.108...HEAD
+[0.8.108]: https://github.com/lacymorrow/juno/compare/cua-v0.8.107...v0.8.108
 [0.8.107]: https://github.com/lacymorrow/juno/compare/cua-v0.8.106...v0.8.107
 [0.8.106]: https://github.com/lacymorrow/juno/compare/cua-v0.8.105...v0.8.106
 [0.8.104]: https://github.com/lacymorrow/juno/compare/cua-v0.8.103...v0.8.104
