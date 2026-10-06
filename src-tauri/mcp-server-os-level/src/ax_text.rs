@@ -252,11 +252,7 @@ mod macos_impl {
         let attr = CFString::new(name);
         let mut settable: u8 = 0;
         let err = unsafe {
-            AXUIElementIsAttributeSettable(
-                element,
-                attr.as_concrete_TypeRef(),
-                &mut settable,
-            )
+            AXUIElementIsAttributeSettable(element, attr.as_concrete_TypeRef(), &mut settable)
         };
         err == 0 && settable != 0
     }

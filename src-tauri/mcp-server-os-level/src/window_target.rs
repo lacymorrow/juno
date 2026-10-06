@@ -109,7 +109,7 @@ pub fn select_window<'a>(
     selector: &WindowSelector,
     own_pid: i32,
 ) -> Result<&'a WindowRecord, String> {
-    let candidates = records
+    let mut candidates = records
         .iter()
         .filter(|w| w.pid != own_pid && w.is_user_layer());
     match selector {
