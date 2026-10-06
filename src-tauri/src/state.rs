@@ -756,12 +756,22 @@ impl AppState {
     /// start that clobbers the session holding it leaves a live recording with
     /// nobody to stop it. The caller treats a refusal as "already listening"
     /// and does nothing at all.
+    ///
+    /// An opened session also holds Juno's speech silent until it ends, so
+    /// her own voice is not recorded into what the person is saying (see
+    /// [`crate::tts::hold_for_capture`]). Tied to the registry rather than to
+    /// each start and stop path because every session ends through a claim
+    /// or a transcript below, and so every ending releases her.
     pub fn begin_voice_session(
         &self,
         target: VoiceTarget,
         method: VoiceStartMethod,
     ) -> Result<VoiceSession, StartRefused> {
-        self.voice_sessions().begin(target, method)
+        let opened = self.voice_sessions().begin(target, method);
+        if opened.is_ok() {
+            crate::tts::hold_for_capture();
+        }
+        opened
     }
 
     /// The session that is open now, if any.
@@ -771,18 +781,31 @@ impl AppState {
 
     /// Claim a session in order to finalise it. The transcript that follows
     /// belongs to the returned session.
+    ///
+    /// Juno stays held through the commit: the microphone is still taking
+    /// the last of the audio until the engine stops, and resuming here would
+    /// put her first words onto the end of the transcript. She is released
+    /// when the transcript arrives, or by the discard a failed finalise ends in.
     pub fn claim_voice_commit(&self, claim: SessionClaim) -> Result<VoiceSession, ClaimRejection> {
         self.voice_sessions().claim_commit(claim)
     }
 
     /// Claim a session in order to throw it away. Nothing is typed or sent.
     pub fn claim_voice_discard(&self, claim: SessionClaim) -> Result<VoiceSession, ClaimRejection> {
-        self.voice_sessions().claim_discard(claim)
+        let claimed = self.voice_sessions().claim_discard(claim);
+        if claimed.is_ok() {
+            crate::tts::release_after_capture();
+        }
+        claimed
     }
 
     /// Hand the arriving transcript to the session that owns it.
     pub fn take_voice_transcript_owner(&self) -> Option<VoiceSession> {
-        self.voice_sessions().take_transcript_owner()
+        let owner = self.voice_sessions().take_transcript_owner();
+        if owner.is_some() {
+            crate::tts::release_after_capture();
+        }
+        owner
     }
 
     pub fn set_dictation_active(&self, active: bool) -> Result<(), String> {
