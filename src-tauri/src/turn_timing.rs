@@ -431,7 +431,8 @@ mod tests {
         let t0 = Instant::now();
         let mut tracker = Tracker::default();
         tracker.begin(8, t0);
-        tracker.begin(9, t0);
+        // A real second press, past the duplicate-release window.
+        tracker.begin(9, t0 + ms(1000));
         assert!(tracker.finish(Some(8), "timeout").is_none());
         assert!(tracker.finish(Some(9), "timeout").is_some());
     }
