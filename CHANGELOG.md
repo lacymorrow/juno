@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.107] - 2026-10-06
+
+### Fixed
+
+- **onboarding:** teach the trigger, stop live work on restart, keep setup in front (#718) (57e5d16e)
+
 ## [0.8.106] - 2026-10-06
 
 ### Added
@@ -955,7 +961,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.106...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.107...HEAD
+[0.8.107]: https://github.com/lacymorrow/juno/compare/cua-v0.8.106...v0.8.107
 [0.8.106]: https://github.com/lacymorrow/juno/compare/cua-v0.8.105...v0.8.106
 [0.8.104]: https://github.com/lacymorrow/juno/compare/cua-v0.8.103...v0.8.104
 [0.8.103]: https://github.com/lacymorrow/juno/compare/cua-v0.8.102...v0.8.103
