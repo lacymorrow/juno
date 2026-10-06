@@ -10,7 +10,7 @@ use crate::state::AppState;
 use regex::Regex;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex};
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
@@ -147,11 +147,114 @@ fn is_status_result(result: &str) -> bool {
     result.starts_with("TTS_")
 }
 
-// Global registry of PIDs for Juno-spawned audio processes (not system-wide killall)
-static JUNO_AUDIO_PIDS: OnceLock<StdMutex<Vec<u32>>> = OnceLock::new();
+/// The processes playing Juno's speech, and whether she is being held silent.
+///
+/// # Juno does not talk into an open microphone
+///
+/// The echo guard (#567) mutes only the wake-phrase engine while Juno speaks.
+/// A dictation or a spoken query records through a different capture, which
+/// nothing muted, so dictating while Juno was answering typed her own words
+/// into the person's document. While a voice session is open her playback is
+/// held: every player is stopped with `SIGSTOP`, a player spawned meanwhile is
+/// stopped the moment it registers, and `SIGCONT` resumes all of them, mid
+/// word, when the session ends. Nothing is lost and nothing is re-rendered.
+///
+/// Pausing beats acoustic echo cancellation here because every player is a
+/// child process Juno owns: no audio-unit rewrite, no change to capture
+/// quality, and the cost is one signal per player. What it cannot stop is
+/// audio already inside the output buffer when the signal lands (tens of
+/// milliseconds), which is still well inside the time the microphone takes
+/// to open after the key goes down.
+///
+/// The hold is only ever changed under this lock, together with the pid
+/// list, so a player cannot register between "held" and "stop everything"
+/// and slip through, nor be stopped after the release that should free it.
+#[derive(Debug, Default)]
+struct AudioProcesses {
+    pids: Vec<u32>,
+    /// When the hold began, while Juno is being held silent.
+    held_since: Option<std::time::Instant>,
+}
 
-fn audio_pid_registry() -> &'static StdMutex<Vec<u32>> {
-    JUNO_AUDIO_PIDS.get_or_init(|| StdMutex::new(Vec::new()))
+/// A hold older than this is a leak, not a dictation: some session ended
+/// without releasing it. Every real session is far shorter (a held key is
+/// force-stopped at 30 seconds), and a Juno that never speaks again is a
+/// worse failure than one that talks over a very long dictation.
+const STALE_HOLD: std::time::Duration = std::time::Duration::from_secs(300);
+
+impl AudioProcesses {
+    const fn new() -> Self {
+        Self {
+            pids: Vec::new(),
+            held_since: None,
+        }
+    }
+
+    /// A player started. `true`: stop it now, Juno is being held silent.
+    fn register(&mut self, pid: u32) -> bool {
+        self.pids.push(pid);
+        self.held_since.is_some()
+    }
+
+    fn unregister(&mut self, pid: u32) {
+        self.pids.retain(|&p| p != pid);
+    }
+
+    /// Hold Juno silent. Returns the players to stop; empty when already held.
+    fn hold(&mut self, now: std::time::Instant) -> Vec<u32> {
+        if self.held_since.is_some() {
+            return Vec::new();
+        }
+        self.held_since = Some(now);
+        self.pids.clone()
+    }
+
+    /// Let her speak again. Returns the players to resume; empty when she was
+    /// not held.
+    fn release(&mut self) -> Vec<u32> {
+        if self.held_since.take().is_none() {
+            return Vec::new();
+        }
+        self.pids.clone()
+    }
+
+    /// Release a hold that has outlived any real session. Returns the players
+    /// to resume, as [`AudioProcesses::release`] does.
+    fn release_if_stale(&mut self, now: std::time::Instant) -> Vec<u32> {
+        match self.held_since {
+            Some(since) if now.saturating_duration_since(since) >= STALE_HOLD => self.release(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+// Global registry of PIDs for Juno-spawned audio processes (not system-wide killall)
+static JUNO_AUDIO: StdMutex<AudioProcesses> = StdMutex::new(AudioProcesses::new());
+
+fn audio_processes() -> std::sync::MutexGuard<'static, AudioProcesses> {
+    JUNO_AUDIO
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Send `signal` to each of Juno's players. Unix only; a no-op elsewhere.
+fn signal_players(pids: &[u32], signal: i32) {
+    #[cfg(unix)]
+    for &pid in pids {
+        // SAFETY: plain syscall on a pid Juno spawned; failure (ESRCH, the
+        // player already exited) is harmless and only logged.
+        let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
+        if result != 0 {
+            debug!(
+                "[TTS] kill({}, {}) failed: {}",
+                pid,
+                signal,
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (pids, signal);
 }
 
 /// Every process that plays Juno's speech (`afplay`, `aplay`, `say`) passes
@@ -159,25 +262,49 @@ fn audio_pid_registry() -> &'static StdMutex<Vec<u32>> {
 /// knows audio has started.
 pub(crate) fn register_audio_pid(pid: u32) {
     crate::turn_timing::mark(crate::turn_timing::Stage::FirstAudio);
-    match audio_pid_registry().lock() {
-        Ok(mut pids) => {
-            pids.push(pid);
-        }
-        Err(e) => {
-            warn!("[TTS] Failed to register audio PID {}: {}", pid, e);
-        }
+    let mut processes = audio_processes();
+    let stale = processes.release_if_stale(std::time::Instant::now());
+    if !stale.is_empty() {
+        warn!("[TTS] A capture hold outlived its session; letting Juno speak again");
+        #[cfg(unix)]
+        signal_players(&stale, libc::SIGCONT);
+    }
+    if processes.register(pid) {
+        #[cfg(unix)]
+        signal_players(&[pid], libc::SIGSTOP);
     }
 }
 
 pub(crate) fn unregister_audio_pid(pid: u32) {
-    match audio_pid_registry().lock() {
-        Ok(mut pids) => {
-            pids.retain(|&p| p != pid);
-        }
-        Err(e) => {
-            warn!("[TTS] Failed to unregister audio PID {}: {}", pid, e);
-        }
+    audio_processes().unregister(pid);
+}
+
+/// A microphone opened for a voice session: hold Juno silent until it closes.
+/// Idempotent. Paired with [`release_after_capture`] by the voice session
+/// registry, so every way a session ends releases it.
+pub fn hold_for_capture() {
+    let mut processes = audio_processes();
+    let pids = processes.hold(std::time::Instant::now());
+    if !pids.is_empty() {
+        info!(
+            "[TTS] Holding {} player(s) while the microphone is open",
+            pids.len()
+        );
     }
+    #[cfg(unix)]
+    signal_players(&pids, libc::SIGSTOP);
+}
+
+/// The voice session ended: Juno carries on from where she stopped.
+/// Idempotent.
+pub fn release_after_capture() {
+    let mut processes = audio_processes();
+    let pids = processes.release();
+    if !pids.is_empty() {
+        info!("[TTS] Resuming {} held player(s)", pids.len());
+    }
+    #[cfg(unix)]
+    signal_players(&pids, libc::SIGCONT);
 }
 
 // Structure to track audio playback completion with error propagation
@@ -573,13 +700,7 @@ pub fn stop_speech() {
 
 /// SIGTERM every audio process Juno spawned. Does not touch the queue.
 fn kill_audio_processes() {
-    let pids_to_kill: Vec<u32> = match audio_pid_registry().lock() {
-        Ok(pids) => pids.clone(),
-        Err(e) => {
-            warn!("[TTS] Failed to read audio PID registry: {}", e);
-            vec![]
-        }
-    };
+    let pids_to_kill: Vec<u32> = audio_processes().pids.clone();
 
     if pids_to_kill.is_empty() {
         debug!("[TTS] No Juno-owned audio processes to stop");
@@ -605,6 +726,11 @@ fn kill_audio_processes() {
                 std::io::Error::last_os_error()
             );
         }
+        // A player held by `hold_for_capture` is stopped, and a stopped
+        // process does not act on SIGTERM until it is continued: without
+        // this, Escape during a dictation would leave the killed sentence
+        // waiting to finish the moment the hold was released.
+        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT) };
     }
 }
 
@@ -1605,6 +1731,60 @@ pub async fn set_supertonic_settings_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn holding_stops_every_player_once_and_releasing_resumes_them() {
+        let now = std::time::Instant::now();
+        let mut audio = AudioProcesses::new();
+        assert!(!audio.register(11), "nothing held: the player runs");
+        assert_eq!(audio.hold(now), vec![11]);
+        assert!(audio.hold(now).is_empty(), "a second hold signals nothing");
+        assert_eq!(audio.release(), vec![11]);
+        assert!(
+            audio.release().is_empty(),
+            "a second release signals nothing"
+        );
+    }
+
+    #[test]
+    fn a_player_started_while_held_is_stopped_at_once_and_resumed_with_the_rest() {
+        // The next sentence of the answer starts while the person is still
+        // dictating. It must not play into the open microphone.
+        let mut audio = AudioProcesses::new();
+        assert!(audio.hold(std::time::Instant::now()).is_empty());
+        assert!(audio.register(21), "held: stop it the moment it registers");
+        assert_eq!(audio.release(), vec![21]);
+        assert!(!audio.register(22), "released: the next player runs");
+    }
+
+    #[test]
+    fn a_finished_player_is_not_resumed() {
+        let mut audio = AudioProcesses::new();
+        audio.register(31);
+        audio.register(32);
+        audio.hold(std::time::Instant::now());
+        audio.unregister(31);
+        assert_eq!(audio.release(), vec![32]);
+    }
+
+    #[test]
+    fn a_leaked_hold_cannot_silence_juno_for_good() {
+        let start = std::time::Instant::now();
+        let mut audio = AudioProcesses::new();
+        audio.register(41);
+        audio.hold(start);
+        assert!(
+            audio
+                .release_if_stale(start + std::time::Duration::from_secs(30))
+                .is_empty(),
+            "a dictation-length hold is honoured"
+        );
+        assert_eq!(audio.release_if_stale(start + STALE_HOLD), vec![41]);
+        assert!(
+            !audio.register(42),
+            "after the stale release the next player runs"
+        );
+    }
 
     #[test]
     fn test_filter_code_blocks() {
