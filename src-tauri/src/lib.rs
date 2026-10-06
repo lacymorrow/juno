@@ -1164,7 +1164,9 @@ pub fn run() {
                         ..
                     } => {
                         // macOS: User clicked the dock icon — show the main window
-                        if !has_visible_windows {
+                        if !has_visible_windows
+                            && !window_management::onboarding_is_open(app_handle)
+                        {
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.unminimize();
@@ -1237,6 +1239,9 @@ pub fn run() {
                             // (e.g., user clicks the red X instead of completing/skipping)
                             let app_handle = app_handle.clone();
                             tauri::async_runtime::spawn(async move {
+                                // The red X skips close_onboarding_window, so
+                                // what setup put away comes back from here too.
+                                window_management::restore_after_onboarding(&app_handle).await;
                                 if let Err(e) =
                                     commands::set_onboarding_active(app_handle, false).await
                                 {

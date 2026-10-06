@@ -165,6 +165,12 @@ static AUTO_GRANT_RUNNING: LazyLock<AtomicBool> = LazyLock::new(|| AtomicBool::n
 static AUTO_GRANT_CANCEL: LazyLock<Mutex<Option<CancellationToken>>> =
     LazyLock::new(|| Mutex::new(None));
 
+/// Whether a run is driving System Settings right now. Onboarding stays where
+/// it is while one is: the run brings it back itself when it is done.
+pub fn auto_grant_running() -> bool {
+    AUTO_GRANT_RUNNING.load(Ordering::SeqCst)
+}
+
 /// One progress tick of the auto-grant run. `permission_type` is `None` for
 /// run-level stages (`done`, `cancelled`).
 #[derive(Debug, Clone, Serialize)]

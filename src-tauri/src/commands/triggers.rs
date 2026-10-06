@@ -32,11 +32,22 @@ fn voice_triggers_allowed() -> bool {
     VOICE_TRIGGERS_ALLOWED.load(Ordering::SeqCst)
 }
 
+/// Whether a wake phrase may hold the microphone open right now: allowed by
+/// the gate above, and not during setup. A wake phrase is a trigger like any
+/// other, and nothing a trigger starts may run while onboarding is open.
+fn voice_may_arm(app_state: &AppState) -> bool {
+    voice_gate_open(voice_triggers_allowed(), app_state.is_onboarding_active())
+}
+
+fn voice_gate_open(allowed: bool, onboarding_active: bool) -> bool {
+    allowed && !onboarding_active
+}
+
 /// The wake phrases the engine should be armed with right now: the stored
 /// triggers, through the launch gate. Empty means the microphone stays shut.
 pub(crate) fn armed_phrases_now(app: &AppHandle) -> Vec<String> {
     match app.state::<AppState>().get_triggers() {
-        Ok(t) => triggers::armed_voice_phrases(&t, voice_triggers_allowed()),
+        Ok(t) => triggers::armed_voice_phrases(&t, voice_may_arm(&app.state::<AppState>())),
         Err(e) => {
             warn!("[Triggers] Could not read triggers: {e}");
             Vec::new()
@@ -382,7 +393,7 @@ async fn sync_voice_listener(
     app_state: &State<'_, AppState>,
     triggers: &[Trigger],
 ) {
-    let voice_phrases = triggers::armed_voice_phrases(triggers, voice_triggers_allowed());
+    let voice_phrases = triggers::armed_voice_phrases(triggers, voice_may_arm(app_state));
 
     if voice_phrases.is_empty() {
         if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
@@ -553,7 +564,17 @@ async fn persist(app: &AppHandle, triggers: &[Trigger]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::globe_key_needs_setup_from;
+    use super::{globe_key_needs_setup_from, voice_gate_open};
+
+    #[test]
+    fn a_wake_phrase_never_arms_during_onboarding() {
+        // Every other trigger is held back while setup is open; the wake
+        // phrase used to be the one that was not.
+        assert!(voice_gate_open(true, false));
+        assert!(!voice_gate_open(true, true));
+        assert!(!voice_gate_open(false, false));
+        assert!(!voice_gate_open(false, true));
+    }
 
     #[test]
     fn do_nothing_needs_no_setup() {

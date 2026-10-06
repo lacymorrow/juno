@@ -491,7 +491,16 @@ pub(crate) fn fire_key_edge(app: &AppHandle, binding: &Binding, pressed: bool) {
     emit_key_feedback(app, gestures, pressed);
 
     // During onboarding, activation is suppressed. Feedback above still fires.
+    // A press is the person reaching for Juno, and during setup the Juno they
+    // can reach is the setup window, which may have fallen behind another app.
     if app_state.is_onboarding_active() {
+        if pressed {
+            // Off the input thread: presenting a window activates the app.
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::window_management::bring_onboarding_forward(&app);
+            });
+        }
         return;
     }
 

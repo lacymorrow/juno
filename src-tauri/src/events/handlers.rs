@@ -38,6 +38,11 @@ fn setup_menu_event_listeners(app: &AppHandle) {
 
 async fn handle_toggle_floating_bar(app_handle: AppHandle) {
     let label = constants::ui::window_labels::FLOATING_BAR;
+    // The bar waits for setup to finish; see `open_onboarding_window`.
+    if crate::window_management::onboarding_is_open(&app_handle) {
+        crate::window_management::bring_onboarding_forward(&app_handle);
+        return;
+    }
     if WindowManager::is_window_visible(&app_handle, label) {
         if let Err(e) = WindowManager::hide_window(&app_handle, label).await {
             error!("[Menu] Failed to hide floating bar: {}", e);
