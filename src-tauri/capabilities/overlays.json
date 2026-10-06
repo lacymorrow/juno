@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlays",
+  "description": "Click-through overlays: the agent cursor, the snap wells and the listening glow. Without this they cannot hear a single event.",
+  "windows": [
+    "desktop-cursor-overlay",
+    "snap-wells-overlay",
+    "listening-overlay"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-set-ignore-cursor-events",
+    "core:window:allow-show",
+    "core:window:allow-hide"
+  ]
+}

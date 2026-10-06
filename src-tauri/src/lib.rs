@@ -33,6 +33,7 @@ pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
 pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
+pub mod cursor_overlay; // Juno's cursor on screen: glow behind the real one, or a ghost in the background
 pub mod cursor_scale_migration; // Undo a pointer an older build left enlarged
 pub mod demo; // Golden demo builds that carry their own Anthropic key
 pub mod dictation_monitor; // Module for intelligent dictation input handling

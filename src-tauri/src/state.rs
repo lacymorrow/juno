@@ -130,6 +130,17 @@ pub struct AgentCursorState {
     pub state: String,
     /// CSS color string for this agent's cursor sprite
     pub color: String,
+    /// True when the action moved the person's real cursor: the overlay draws
+    /// a glow behind it. False when Juno worked in the background: the overlay
+    /// draws a ghost cursor at the point instead.
+    #[serde(default)]
+    pub foreground: bool,
+    /// Top left of the display the overlay window covers, in the same global
+    /// points as `x` and `y`; the page subtracts it to draw.
+    #[serde(default)]
+    pub origin_x: f64,
+    #[serde(default)]
+    pub origin_y: f64,
 }
 
 /// Risk level for tool approval requests
