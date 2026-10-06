@@ -271,10 +271,7 @@ mod macos_impl {
     fn ax_get_window_fn() -> Option<AXGetWindowFn> {
         static FN: OnceLock<Option<AXGetWindowFn>> = OnceLock::new();
         *FN.get_or_init(|| unsafe {
-            let sym = libc::dlsym(
-                libc::RTLD_DEFAULT,
-                b"_AXUIElementGetWindow\0".as_ptr() as *const libc::c_char,
-            );
+            let sym = libc::dlsym(libc::RTLD_DEFAULT, c"_AXUIElementGetWindow".as_ptr());
             if sym.is_null() {
                 None
             } else {
