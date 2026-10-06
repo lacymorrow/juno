@@ -8,6 +8,7 @@ import {
   getDockSlot,
   type WindowAnchorX,
 } from "@/lib/barDock";
+import { frameEpoch } from "@/lib/steadyFrame";
 
 /** Which horizontal edge of the window stays put across a resize. */
 export type { WindowAnchorX };
@@ -59,10 +60,13 @@ export interface WindowSizeConfig {
 
 // Last applied size per window, so a resize to the size the window already
 // has is skipped. `growUp` is part of it: a same-size resize that flips the
-// growth direction moves the window and must go through.
+// growth direction moves the window and must go through. So is the steady-frame
+// epoch: a steady look (the Pill) sets the frame without coming through here,
+// and the next look to mount must not skip its first resize as a no-op against
+// a size the window no longer has.
 const lastSizeByLabel: Map<
   string,
-  { width: number; height: number; growUp: boolean }
+  { width: number; height: number; growUp: boolean; epoch: number }
 > = new Map();
 
 // Resizes are serialised per window. Each one reads the live frame and then
@@ -268,7 +272,8 @@ export function useWindowSize(windowLabel: string) {
             prev &&
             prev.width === resolved.width &&
             prev.height === resolved.height &&
-            prev.growUp === growUp
+            prev.growUp === growUp &&
+            prev.epoch === frameEpoch(windowLabel)
           ) {
             return; // no-op
           }
@@ -280,6 +285,7 @@ export function useWindowSize(windowLabel: string) {
               width: resolved.width,
               height: resolved.height,
               growUp,
+              epoch: frameEpoch(windowLabel),
             });
           }
         } catch (error) {

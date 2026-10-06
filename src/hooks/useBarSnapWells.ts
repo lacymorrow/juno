@@ -36,6 +36,7 @@ import {
   nearestWell,
   wellForSlot,
   type MonitorRect,
+  type Well,
   type WellSlot,
 } from "@/lib/snapWells";
 import {
@@ -44,6 +45,13 @@ import {
   setDockSlot,
   subscribeDockSlot,
 } from "@/lib/barDock";
+import {
+  getSteady,
+  steadyLayout,
+  swapSteadyLayout,
+  type SteadyLayout,
+  type SteadySpec,
+} from "@/lib/steadyFrame";
 import { useEventListener } from "./useEventListener";
 
 /** Settle animation: min/max duration, and the travel below which it's skipped. */
@@ -131,6 +139,42 @@ export async function animateWindowTo(
   });
 }
 
+/**
+ * Put a steady-frame window where its layout says, in one native transaction.
+ * The size is the look's largest footprint and never changes per state; only
+ * the position moves, and only when the well does.
+ */
+export async function applySteadyFrame(layout: SteadyLayout): Promise<void> {
+  await invoke(COMMANDS.BAR_SET_BAR_FRAME, {
+    x: layout.origin.x,
+    y: layout.origin.y,
+    width: layout.size.width,
+    height: layout.size.height,
+  });
+}
+
+/**
+ * The steady layout for `well` on its display, or null when the display is
+ * gone. Wells for a steady look are computed for its resting footprint.
+ */
+function steadyLayoutFor(
+  well: Well,
+  rects: MonitorRect[],
+  spec: SteadySpec,
+): SteadyLayout | null {
+  const mon = rects[well.monitorIndex];
+  return mon ? steadyLayout(well, mon, spec) : null;
+}
+
+/** Wells for a steady look: computed for the resting footprint, not the window. */
+export function steadyWells(rects: MonitorRect[], spec: SteadySpec): Well[] {
+  return computeWells(rects, {
+    windowWidth: spec.rest.width,
+    windowHeight: spec.rest.height,
+    includeCenter: true,
+  });
+}
+
 // ── The drag/settle controller ────────────────────────────────────────────
 //
 // Module state, not refs: there is one bar window, the gesture is one at a
@@ -168,7 +212,21 @@ export async function armBarSnap(grabOffset: { x: number; y: number }): Promise<
   if (overlayShown) return;
   overlayShown = true;
   try {
-    const logical = await logicalWindowSize(getCurrentWindow());
+    const win = getCurrentWindow();
+    // A steady look's window is mostly empty room; the wells, the prediction
+    // and the ring are all about its resting footprint (the anchor rect), so
+    // the grab is re-expressed from that footprint's top-left.
+    const steady = getSteady(win.label);
+    if (steady?.layout) {
+      await emit(EVENTS.SNAP_WELLS_SHOW, {
+        windowWidth: steady.spec.rest.width,
+        windowHeight: steady.spec.rest.height,
+        grabOffsetX: grabOffset.x - steady.layout.anchor.x,
+        grabOffsetY: grabOffset.y - steady.layout.anchor.y,
+      });
+      return;
+    }
+    const logical = await logicalWindowSize(win);
     await emit(EVENTS.SNAP_WELLS_SHOW, {
       ...logical,
       grabOffsetX: grabOffset.x,
@@ -199,6 +257,12 @@ export async function settleBarSnap(): Promise<void> {
   snapArmed = false;
   try {
     const win = getCurrentWindow();
+    const steady = getSteady(win.label);
+    if (steady?.layout) {
+      snapAnimating = true;
+      await settleSteady(win, steady.spec, steady.layout);
+      return;
+    }
     const [pos, logical, monitors] = await Promise.all([
       win.outerPosition(),
       logicalWindowSize(win),
@@ -220,6 +284,44 @@ export async function settleBarSnap(): Promise<void> {
     console.debug("barSnap: settle into well failed:", error);
   } finally {
     snapAnimating = false;
+  }
+}
+
+/**
+ * The settle for a steady look. The window glides, drawing unchanged, until
+ * the resting footprint sits on the nearest well; then, only if the new well
+ * grows the other way, the frame and the drawing swap behind a brief hide
+ * (`swapSteadyLayout`). The well's own position never changes in that swap,
+ * so the bar lands exactly where the glide put it.
+ */
+async function settleSteady(win: AppWindow, spec: SteadySpec, layout: SteadyLayout) {
+  const [pos, sf, monitors] = await Promise.all([
+    win.outerPosition(),
+    win.scaleFactor(),
+    availableMonitors(),
+  ]);
+  if (!monitors.length) return;
+  const rects = toMonitorRects(monitors);
+  const offset = {
+    x: Math.round(layout.anchor.x * sf),
+    y: Math.round(layout.anchor.y * sf),
+  };
+  const anchorNow = { x: pos.x + offset.x, y: pos.y + offset.y };
+  const target = nearestWell(anchorNow, steadyWells(rects, spec));
+  if (!target) return;
+  const next = steadyLayoutFor(target, rects, spec);
+  if (!next) return;
+  await animateWindowTo(
+    win,
+    { x: pos.x, y: pos.y },
+    { x: target.x - offset.x, y: target.y - offset.y },
+  );
+  await swapSteadyLayout(win.label, next, applySteadyFrame);
+  setDockSlot(win.label, { fx: target.fx, fy: target.fy });
+  try {
+    await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y });
+  } catch (error) {
+    console.debug("barSnap: persist well failed:", error);
   }
 }
 
@@ -263,6 +365,28 @@ export function useBarDisplayFollow(paused = false): void {
       const win = getCurrentWindow();
       const slot = getDockSlot(win.label);
       if (!slot) return;
+      const steady = getSteady(win.label);
+      if (steady?.layout) {
+        try {
+          const mons = await availableMonitors();
+          if (!mons.length) return;
+          const rects = toMonitorRects(mons);
+          const targetIdx = monitorIndexAt(rects, x, y);
+          if (targetIdx < 0 || targetIdx === steady.layout.monitorIndex) return;
+          const target = wellForSlot(slot, targetIdx, steadyWells(rects, steady.spec));
+          if (!target) return;
+          const next = steadyLayoutFor(target, rects, steady.spec);
+          if (!next) return;
+          await swapSteadyLayout(win.label, next, applySteadyFrame);
+          setDockSlot(win.label, { fx: target.fx, fy: target.fy });
+          await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y }).catch(
+            () => {},
+          );
+        } catch (error) {
+          console.debug("barSnap: cursor-follow move failed:", error);
+        }
+        return;
+      }
       try {
         const [logical, pos, mons] = await Promise.all([
           logicalWindowSize(win),

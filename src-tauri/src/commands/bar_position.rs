@@ -193,3 +193,31 @@ pub async fn set_bar_frame(
         Ok(())
     }
 }
+
+/// Tell the backend what a steady bar look is drawing, so the transparent rest
+/// of its window lets clicks through.
+///
+/// `regions` are rectangles in logical pixels from the window's top-left.
+/// `None` means the mounted look is not a steady one: click-through is turned
+/// off and the window takes every mouse event again, as it always did. See
+/// `platform::bar_hit_test`.
+#[command]
+pub async fn set_bar_hit_regions(
+    app_handle: AppHandle,
+    regions: Option<Vec<crate::platform::bar_hit_test::HitRect>>,
+) -> Result<(), String> {
+    let active = regions.is_some();
+    crate::platform::bar_hit_test::set_regions(regions);
+    if active {
+        crate::platform::bar_hit_test::start(app_handle);
+        return Ok(());
+    }
+    if let Some(window) =
+        app_handle.get_webview_window(crate::constants::ui::window_labels::FLOATING_BAR)
+    {
+        window
+            .set_ignore_cursor_events(false)
+            .map_err(|e| format!("Failed to restore the bar's mouse events: {}", e))?;
+    }
+    Ok(())
+}

@@ -10,6 +10,8 @@ pub mod macos;
 
 /// Automation (TCC AppleEvents) consent per target app, asked before macOS asks.
 pub mod automation;
+/// Click-through for a steady bar window: hit-test the cursor against what the page draws.
+pub mod bar_hit_test;
 pub mod file_panels;
 /// Whether a connected keyboard has a globe (Fn) key, from IOKit HID.
 pub mod fn_key_detection;
