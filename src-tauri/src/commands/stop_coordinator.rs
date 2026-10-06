@@ -213,6 +213,9 @@ impl StopCoordinator {
         if let Some(tts_op_id) = self.try_register_operation("tts_stop").await {
             info!("[StopCoordinator] Stopping TTS");
             crate::tts::stop_speech();
+            // Every voice session ends below, and with it any hold on Juno's
+            // voice. Released here too so a stop never leaves her held.
+            crate::tts::release_after_capture();
 
             // Emit TTS stop event once
             self.emit_tts_stop_event(app_handle);

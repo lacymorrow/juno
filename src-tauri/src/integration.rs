@@ -863,7 +863,7 @@ fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
                     VoiceTarget::Agent,
                     hold,
                 );
-                handle_agent_transcription_start(&app_handle_clone, method).await;
+                handle_agent_transcription_start(&app_handle_clone, method, hold).await;
             });
         },
     );
@@ -926,7 +926,11 @@ fn setup_agent_stop_all_listener(app_handle: &AppHandle) {
 ///
 /// Retries up to 3 times with a short delay to handle transient lock contention
 /// (e.g., when stop_dictation from a prior operation is still releasing the lock).
-async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceStartMethod) {
+async fn handle_agent_transcription_start(
+    app_handle: &AppHandle,
+    method: VoiceStartMethod,
+    hold: Option<crate::hold_gate::HoldId>,
+) {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY_MS: u64 = 150;
 
@@ -951,6 +955,10 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
             // anyway. The controls that really do mean "end this" are the bar's
             // stop and cancel, and they claim the session they end.
             info!("[Agent Mode] Ignoring an agent start: {}", refused.reason());
+            // A dictation holds the microphone, so this key's release must
+            // not reach it: a tap would cancel the dictation, a hold would
+            // commit it early. See `StartGate::disown`.
+            crate::hold_gate::disown_if_crossed(VoiceTarget::Agent, refused.standing.target, hold);
             // The bar-voice latch says "a bar-initiated agent query is open".
             // If what is standing is a dictation session it is not one, and
             // leaving the latch set would make the next activation edge end a

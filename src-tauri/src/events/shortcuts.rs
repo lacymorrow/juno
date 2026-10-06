@@ -156,6 +156,12 @@ pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
 
     let app_handle_clone = app.clone();
     tauri::async_runtime::spawn(async move {
+        // A dictation open on top of a running agent is the layer Escape
+        // takes off first; the run keeps going (see `escape_scope`).
+        if crate::commands::dictation::escape_spent_on_dictation(&app_handle_clone).await {
+            return;
+        }
+
         // When nothing is actually running, Escape has no work to cancel — treat
         // it as "close the chat pane" instead, so the global monitor lets Escape
         // dismiss the pane even when the bar is not focused. The pane arms this

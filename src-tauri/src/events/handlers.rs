@@ -121,7 +121,7 @@ fn setup_dictation_listeners(app: &AppHandle) {
                     VoiceTarget::Dictation,
                     hold,
                 );
-                handle_dictation_transcription_start(app_handle, method).await;
+                handle_dictation_transcription_start(app_handle, method, hold).await;
             });
         },
     );
@@ -444,7 +444,11 @@ async fn handle_voice_transcription_error(app_handle: AppHandle) {
     }
 }
 
-async fn handle_dictation_transcription_start(app_handle: AppHandle, method: VoiceStartMethod) {
+async fn handle_dictation_transcription_start(
+    app_handle: AppHandle,
+    method: VoiceStartMethod,
+    hold: Option<crate::hold_gate::HoldId>,
+) {
     let app_state = app_handle.state::<state::AppState>();
 
     // Give the session an identity before anything opens the microphone. Every
@@ -462,6 +466,13 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle, method: Voi
             info!(
                 "[Dictation Mode] Ignoring a dictation start: {}",
                 refused.reason()
+            );
+            // An agent voice turn holds the microphone; this key's release
+            // must not commit or cancel it. See `StartGate::disown`.
+            crate::hold_gate::disown_if_crossed(
+                VoiceTarget::Dictation,
+                refused.standing.target,
+                hold,
             );
             return;
         }
