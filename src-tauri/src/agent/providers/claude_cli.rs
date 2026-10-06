@@ -360,6 +360,125 @@ fn write_mcp_config(endpoint: &juno_mcp::Endpoint) -> Result<PathBuf, AgentError
     Ok(path)
 }
 
+/// The per-run inputs a `claude` spawn needs beyond the brain itself: the
+/// `--mcp-config` file and the approval posture.
+///
+/// Shared by every turn and by the warm spare, so the spare is born with the
+/// same MCP config path and permission flags the turn that adopts it would use.
+async fn turn_environment(app_handle: Option<&tauri::AppHandle>) -> (Option<PathBuf>, bool) {
+    // Hand the CLI Juno's own computer tool. Done per run rather than when
+    // the brain is built, because the server lives in the running app and
+    // the brain is constructed without an app handle (and rebuilt on every
+    // query). Without a handle there is no desktop to drive anyway, which
+    // is the headless and test case, so the CLI simply runs toolless.
+    let mcp_config = match app_handle {
+        Some(handle) => match juno_mcp::ensure_running(handle).await {
+            Ok(endpoint) => write_mcp_config(&endpoint)
+                .map_err(|e| warn!("Juno's tool server is up but its config is not: {e}"))
+                .ok(),
+            Err(e) => {
+                // Non-fatal, and deliberately loud: the CLI still answers,
+                // it just cannot touch the desktop.
+                warn!("Could not offer Juno's computer tool to the CLI: {e}");
+                None
+            }
+        },
+        None => None,
+    };
+
+    // Per-send approval (LAC-4058): with the setting on, the CLI's
+    // permission prompts route into Juno's approval sheet instead of
+    // being skipped. Read per run, so flipping the setting needs no
+    // restart. Without an app handle there is no sheet to route to.
+    let ask_before_send = app_handle.is_some_and(cli_approval::is_enabled);
+
+    (mcp_config, ask_before_send)
+}
+
+/// How long settings must sit still before the warm spare is re-primed, so a
+/// burst of saves from the Settings window replaces the spare once, not per save.
+const SPARE_SETTINGS_DEBOUNCE: Duration = Duration::from_millis(1500);
+
+/// Start keeping a warm spare: prime one now if the CLI is the active provider,
+/// and re-prime (or stop it) whenever provider settings change.
+///
+/// Call once, off the launch path. Never blocks: the work runs on spawned tasks.
+pub fn start_warm_spare(app: tauri::AppHandle) {
+    use std::sync::atomic::AtomicU64;
+    use tauri::Listener;
+
+    let generation = std::sync::Arc::new(AtomicU64::new(0));
+    let listener_app = app.clone();
+    app.listen_any(
+        crate::constants::settings::events::PROVIDER_SETTINGS_CHANGED,
+        move |_| {
+            let mine = generation.fetch_add(1, Ordering::Relaxed) + 1;
+            let generation = std::sync::Arc::clone(&generation);
+            let app = listener_app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(SPARE_SETTINGS_DEBOUNCE).await;
+                if generation.load(Ordering::Relaxed) == mine {
+                    prewarm_persistent_session(app).await;
+                }
+            });
+        },
+    );
+
+    tauri::async_runtime::spawn(prewarm_persistent_session(app));
+}
+
+/// Prime the warm spare for the configured Claude CLI provider, or stop it when
+/// there should not be one.
+///
+/// A spare is only started when the CLI is the active provider, persistent
+/// sessions are on, the CLI is signed in, and a previous turn has left behind the
+/// system prompt Juno runs it with. Without that prompt the spare could not match
+/// the first turn, so none is started and the first conversation starts cold.
+pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
+    use crate::agent::providers::factory::BrainFactory;
+    use crate::agent::providers::types::Provider;
+
+    if !claude_cli_session::is_enabled(&app) {
+        claude_cli_session::stop_spare();
+        return;
+    }
+    let on_cli = matches!(
+        BrainFactory::active_provider_and_model(Some(&app)),
+        Some((Provider::ClaudeCli, _))
+    );
+    if !on_cli {
+        claude_cli_session::stop_spare();
+        return;
+    }
+    let Some(system_prompt) = claude_cli_session::remembered_system_prompt(&app) else {
+        debug!("[CliSession] No turn has run yet; no warm spare until one has");
+        return;
+    };
+
+    let config = crate::agent::providers::config::load_provider_config(Some(&app));
+    let Some(mut provider_config) = config.resolve_provider(Provider::ClaudeCli) else {
+        return;
+    };
+    // The prompt the last turn ran with, which is what the next turn will run
+    // with unless something changed. If it did, adoption sees the mismatch and
+    // the turn starts cold, as it would have anyway.
+    provider_config.system_prompt = Some(system_prompt);
+    let brain = match ClaudeCliBrain::from_config(&provider_config) {
+        Ok(brain) => brain,
+        Err(e) => {
+            debug!("[CliSession] No warm spare: {e}");
+            return;
+        }
+    };
+    if let Err(e) = check_auth_status(&brain.binary_path).await {
+        debug!("[CliSession] No warm spare, the CLI is not ready: {e}");
+        return;
+    }
+
+    let (mcp_config, ask_before_send) = turn_environment(Some(&app)).await;
+    claude_cli_session::prime_spare(&app, brain.launch_config(mcp_config, ask_before_send));
+}
+
 /// System-prompt guidance appended when Juno's tool server is wired in.
 /// Without this, models tend to fall back to `cliclick`/`screencapture` via
 /// Bash even when MCP computer-use tools are available (LAC-3692).
@@ -506,6 +625,26 @@ impl ClaudeCliBrain {
         })
     }
 
+    /// What a persistent process for this brain is born with. One function, so a
+    /// turn and the warm spare primed for it cannot disagree about any of it.
+    fn launch_config(
+        &self,
+        mcp_config: Option<PathBuf>,
+        ask_before_send: bool,
+    ) -> claude_cli_session::LaunchConfig {
+        claude_cli_session::LaunchConfig {
+            binary: self.binary_path.clone(),
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            include_partial_messages: !PARTIAL_MESSAGES_UNSUPPORTED.load(Ordering::Relaxed),
+            system_prompt: self.system_prompt.clone(),
+            mcp_config,
+            mcp_guidance: MCP_TOOL_GUIDANCE,
+            load_account_mcp: self.load_account_mcp,
+            ask_before_send,
+        }
+    }
+
     /// Build the subprocess command arguments.
     ///
     /// `resume` continues an existing CLI session rather than starting a new
@@ -627,31 +766,7 @@ impl ClaudeCliBrain {
         let conversation = conversation_id_for(&app_handle).await;
         let resume = conversation.as_deref().and_then(resume_id_for);
 
-        // Hand the CLI Juno's own computer tool. Done per run rather than when
-        // the brain is built, because the server lives in the running app and
-        // the brain is constructed without an app handle (and rebuilt on every
-        // query). Without a handle there is no desktop to drive anyway, which
-        // is the headless and test case, so the CLI simply runs toolless.
-        let mcp_config = match app_handle.as_ref() {
-            Some(handle) => match juno_mcp::ensure_running(handle).await {
-                Ok(endpoint) => write_mcp_config(&endpoint)
-                    .map_err(|e| warn!("Juno's tool server is up but its config is not: {e}"))
-                    .ok(),
-                Err(e) => {
-                    // Non-fatal, and deliberately loud: the CLI still answers,
-                    // it just cannot touch the desktop.
-                    warn!("Could not offer Juno's computer tool to the CLI: {e}");
-                    None
-                }
-            },
-            None => None,
-        };
-
-        // Per-send approval (LAC-4058): with the setting on, the CLI's
-        // permission prompts route into Juno's approval sheet instead of
-        // being skipped. Read per run, so flipping the setting needs no
-        // restart. Without an app handle there is no sheet to route to.
-        let ask_before_send = app_handle.as_ref().is_some_and(cli_approval::is_enabled);
+        let (mcp_config, ask_before_send) = turn_environment(app_handle.as_ref()).await;
 
         // On unless the person turned it off: run this turn in one long-lived process
         // kept alive for the conversation, instead of spawning a fresh one here.
@@ -672,15 +787,9 @@ impl ClaudeCliBrain {
                     None => (uuid::Uuid::new_v4().to_string(), true),
                 };
 
+                let launch = self.launch_config(mcp_config.clone(), ask_before_send);
                 let request = claude_cli_session::TurnRequest {
-                    binary: &self.binary_path,
-                    model: &self.model,
-                    effort: &self.effort,
-                    include_partial_messages: !PARTIAL_MESSAGES_UNSUPPORTED.load(Ordering::Relaxed),
-                    system_prompt: self.system_prompt.as_deref(),
-                    mcp_config: mcp_config.as_deref(),
-                    mcp_guidance: MCP_TOOL_GUIDANCE,
-                    load_account_mcp: self.load_account_mcp,
+                    launch: &launch,
                     conversation_id,
                     session_id: &session_id,
                     session_is_new,
@@ -688,12 +797,15 @@ impl ClaudeCliBrain {
                     app_handle: handle,
                     message_id: message_id.clone(),
                     cancel_rx: cancel_rx.clone(),
-                    ask_before_send,
                 };
 
-                match claude_cli_session::run_turn(request).await {
+                // The session the turn actually ran in, which is not `session_id`
+                // when a new conversation adopted the warm spare. That is the id
+                // the next message has to resume.
+                let turn = claude_cli_session::run_turn(request).await;
+                match turn.outcome {
                     Ok(claude_cli_session::TurnOutcome::Completed(text)) => {
-                        remember_session(conversation_id, &session_id);
+                        remember_session(conversation_id, &turn.session_id);
                         return Ok(text);
                     }
                     Ok(claude_cli_session::TurnOutcome::Unavailable) => {
@@ -702,7 +814,7 @@ impl ClaudeCliBrain {
                     Err(e) => {
                         // The turn actually started and then failed. Re-running it on
                         // the one-shot path would bill the user twice for one message.
-                        remember_session(conversation_id, &session_id);
+                        remember_session(conversation_id, &turn.session_id);
                         return Err(e);
                     }
                 }

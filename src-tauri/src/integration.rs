@@ -1293,11 +1293,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
     // does nothing at all: this is the push-to-talk resurrection, where a key
     // released after its session had been cancelled emitted a stop that
     // finalised and resubmitted it.
-    match app_state.claim_voice_commit(SessionClaim::Current) {
-        Ok(session) => info!(
-            "[Agent Mode] Committing voice session {}",
-            session.describe()
-        ),
+    let committed = match app_state.claim_voice_commit(SessionClaim::Current) {
+        Ok(session) => {
+            info!(
+                "[Agent Mode] Committing voice session {}",
+                session.describe()
+            );
+            session.id
+        }
         Err(rejection) => {
             info!("[Agent Mode] Nothing to stop: {}", rejection.reason());
             // The bar flag is cleared even so: it is a UI latch, not the
@@ -1305,12 +1308,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             crate::agent_monitor::set_bar_voice_active(false);
             return;
         }
-    }
+    };
 
     // Start the per-turn stage clock at the release itself. If the turn never
     // reaches audio (TTS off, an error, nothing said) it is logged anyway
     // once it has had long enough to.
-    let timing_turn = crate::turn_timing::begin(ptt_release_time);
+    // Keyed by the voice session, so the same release reported twice is one
+    // turn rather than a phantom `superseded` line.
+    let timing_turn = crate::turn_timing::begin(ptt_release_time, Some(committed));
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(crate::turn_timing::TURN_TIMEOUT).await;
         crate::turn_timing::finish(Some(timing_turn), "timeout");
