@@ -428,9 +428,10 @@ mod tests {
 
     #[test]
     fn the_primary_cursor_wears_the_chosen_color() {
-        // The first session slot, the legacy palette and the Claude CLI pink
-        // all become the setting.
-        for identity in [agent_session_colors::SLOT_0, "#8B5CF6", "#FF2D55", ""] {
+        // The first session slot, the Claude CLI pink and no color at all
+        // become the setting. The old per-query violet is not listed: it is
+        // also parallel slot 4's color, and that slot keeps its own.
+        for identity in [agent_session_colors::SLOT_0, "#FF2D55", ""] {
             assert_eq!(
                 cursor_color(identity, agent_cursor_colors::GREEN),
                 agent_cursor_colors::GREEN_HEX
