@@ -185,6 +185,12 @@ pub fn announce_reopen_attempt(app: &AppHandle, count: usize) {
 pub fn handle_reopen(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        // During setup Juno is in the Dock on purpose, and the click means
+        // "take me back to setup", not "where did Juno go".
+        if crate::window_management::onboarding_is_open(&app) {
+            crate::window_management::bring_onboarding_forward(&app);
+            return;
+        }
         let visible = read_dock_icon_visible(&app).await;
         // With a Dock icon there is nothing to explain: the window came
         // forward, which is exactly what the click asked for.

@@ -507,13 +507,26 @@ export function demoPressEvent(hints: TriggerHints | null): string | null {
   return null;
 }
 
-/** Whether an event from the backend is a press of the demo's key. */
+/** The one step that teaches the trigger. Presses anywhere else do not count. */
+export const TRIGGER_LESSON_STEP_ID = "complete";
+
+/**
+ * Whether an event from the backend is a press of the demo's key, made on the
+ * step that teaches it. A press on an earlier step used to light the demo in
+ * advance, so the final screen skipped straight to Escape and the person was
+ * never shown their key.
+ */
 export function isDemoPress(
   hints: TriggerHints | null,
   event: string,
-  payload: { state?: string } | null | undefined
+  payload: { state?: string } | null | undefined,
+  stepId: string | undefined
 ): boolean {
-  return payload?.state === "pressed" && demoPressEvent(hints) === event;
+  return (
+    stepId === TRIGGER_LESSON_STEP_ID &&
+    payload?.state === "pressed" &&
+    demoPressEvent(hints) === event
+  );
 }
 
 /**
@@ -747,6 +760,9 @@ export default function OnboardingFlow({
   // is gated on either.
   const [shortcutPressed, setShortcutPressed] = useState(false);
   const [escapePressed, setEscapePressed] = useState(false);
+  // The step on screen, read by the press listeners below so only a press on
+  // the lesson step counts (see `isDemoPress`).
+  const stepIdRef = useRef<string | undefined>(undefined);
   const [completeDemoStage, setCompleteDemoStage] = useState<"shortcut" | "escape">("shortcut");
   const [_backendShortcutsWorking, setBackendShortcutsWorking] =
     useState(false);
@@ -913,7 +929,7 @@ export default function OnboardingFlow({
   useEventListener<{ state: string; shortcut: string }>(
     EVENTS.SHORTCUTS_AGENT_MODE,
     (payload) => {
-      if (isDemoPress(triggerHints, EVENTS.SHORTCUTS_AGENT_MODE, payload)) {
+      if (isDemoPress(triggerHints, EVENTS.SHORTCUTS_AGENT_MODE, payload, stepIdRef.current)) {
         setShortcutPressed(true);
       }
     }
@@ -922,7 +938,7 @@ export default function OnboardingFlow({
   useEventListener<{ state: string; shortcut: string }>(
     EVENTS.SHORTCUTS_DICTATION_INPUT,
     (payload) => {
-      if (isDemoPress(triggerHints, EVENTS.SHORTCUTS_DICTATION_INPUT, payload)) {
+      if (isDemoPress(triggerHints, EVENTS.SHORTCUTS_DICTATION_INPUT, payload, stepIdRef.current)) {
         setShortcutPressed(true);
       }
     }
@@ -931,7 +947,12 @@ export default function OnboardingFlow({
   useEventListener<{ state: string; shortcut: string }>(
     EVENTS.SHORTCUTS_ESCAPE_KEY,
     (payload) => {
-      if (payload.state === "pressed" && !escapePressed) {
+      if (
+        payload.state === "pressed" &&
+        !escapePressed &&
+        stepIdRef.current === TRIGGER_LESSON_STEP_ID &&
+        completeDemoStage === "escape"
+      ) {
         setEscapePressed(true);
       }
     }
@@ -1326,6 +1347,9 @@ export default function OnboardingFlow({
   }, []);
 
   const stepId = onboardingSteps[currentStep]?.id;
+  useEffect(() => {
+    stepIdRef.current = stepId;
+  }, [stepId]);
 
   // ── Analytics: onboarding_phase_entered on step change ───────────────────────
   // Use the step ID (not the index) so phase names are stable when the step

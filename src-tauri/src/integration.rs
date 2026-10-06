@@ -518,6 +518,16 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
         let matched_phrase: String =
             serde_json::from_str(event.payload()).unwrap_or_default();
 
+        // A phrase heard in the moment before setup disarmed the engine still
+        // starts nothing: no trigger acts while onboarding is open.
+        if app_handle_for_wake_word
+            .state::<state::AppState>()
+            .is_onboarding_active()
+        {
+            info!("[AlwaysListening] Wake phrase ignored during onboarding");
+            return;
+        }
+
         let app_handle_clone = app_handle_for_wake_word.clone();
         safe_spawn_async_task(move || async move {
             // A gentle chime the moment the wake phrase lands, so Juno answers

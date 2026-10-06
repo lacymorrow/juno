@@ -1107,6 +1107,11 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
         }
         tray_menu_ids::TALK => {
             info!("[TrayMenu] Talk to Juno menu item clicked");
+            // Nothing listens during setup, the same as a trigger press.
+            if crate::window_management::onboarding_is_open(&app_handle) {
+                crate::window_management::bring_onboarding_forward(&app_handle);
+                return;
+            }
             let app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = crate::agent_monitor::agent_voice(app_handle, "start".into()).await
