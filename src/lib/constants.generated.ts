@@ -710,6 +710,7 @@ export const COMMANDS = {
   BAR_GET_BAR_POSITION: 'get_bar_position',
   BAR_SET_BAR_POSITION: 'set_bar_position',
   BAR_SET_BAR_FRAME: 'set_bar_frame',
+  BAR_SET_BAR_HIT_REGIONS: 'set_bar_hit_regions',
   BAR_SHOW_BAR_WHEN_READY: 'show_bar_when_ready',
   BAR_SET_BAR_PANE_OPEN: 'set_bar_pane_open',
   BAR_UI_GET_BAR_CONFIG: 'ui_get_bar_config',

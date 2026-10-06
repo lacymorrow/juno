@@ -548,6 +548,12 @@ pub mod mouse_tracking {
             };
 
             if let Some(window_label) = window_label {
+                // A steady bar window is mostly transparent; while it has hit
+                // regions, enter and leave mean the drawn content, and
+                // `bar_hit_test` reports them instead of this whole-window area.
+                if crate::platform::bar_hit_test::owns_hover(&window_label) {
+                    return;
+                }
                 if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit(events::system::MOUSE_ENTERED_WINDOW, ()); // Emit specific event
                     debug!(
@@ -660,6 +666,12 @@ pub mod mouse_tracking {
             };
 
             if let Some(window_label) = window_label {
+                // A steady bar window is mostly transparent; while it has hit
+                // regions, enter and leave mean the drawn content, and
+                // `bar_hit_test` reports them instead of this whole-window area.
+                if crate::platform::bar_hit_test::owns_hover(&window_label) {
+                    return;
+                }
                 if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit(events::system::MOUSE_LEFT_WINDOW, ()); // Emit specific event
                     debug!(
