@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.112] - 2026-10-06
+
+### Changed
+
+- **cli:** warm spare claude process so a new conversation's first turn starts warm (#723) (7937aa41)
+
 ## [0.8.111] - 2026-10-06
 
 ### Added
@@ -985,7 +991,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.111...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.112...HEAD
+[0.8.112]: https://github.com/lacymorrow/juno/compare/cua-v0.8.111...v0.8.112
 [0.8.111]: https://github.com/lacymorrow/juno/compare/cua-v0.8.110...v0.8.111
 [0.8.110]: https://github.com/lacymorrow/juno/compare/cua-v0.8.109...v0.8.110
 [0.8.109]: https://github.com/lacymorrow/juno/compare/cua-v0.8.108...v0.8.109
