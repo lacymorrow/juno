@@ -293,6 +293,20 @@ pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
         );
     }
 
+    // Put down whatever Juno was doing. After the flag above, so no trigger
+    // starts anything mid-stop and the stop's last step (re-arming the wake
+    // phrase) sees setup and leaves it off.
+    stop_live_work_for_onboarding(&app).await;
+
+    // The stop releases every stop-key user, setup's own included. Take it
+    // back, so Escape still lights up on the last screen.
+    if let Err(e) = set_onboarding_active(app.clone(), true).await {
+        error!(
+            "[Onboarding] Failed to re-hold the stop key after restart: {}",
+            e
+        );
+    }
+
     // Open the onboarding window
     if let Err(e) = crate::window_management::open_onboarding_window(app.clone()).await {
         warn!("Failed to open onboarding window: {}", e);
@@ -301,6 +315,28 @@ pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
 
     info!("Onboarding flow restarted successfully");
     Ok(())
+}
+
+/// Stop everything live before setup takes the screen.
+///
+/// Restart used to reset settings and open the window over a Juno that was
+/// still mid-turn, listening or speaking. This is the same stop Escape runs
+/// (`events::shortcuts::handle_stop_key_event`): cancel the agent turn, stop
+/// TTS, dictation and the wake-phrase engine (which releases the microphone
+/// through the voice controller's own stop), reset the trigger monitors, then
+/// put the bar to rest. Unlike Escape it does not first ask whether anything
+/// is running: a restart always ends at idle.
+async fn stop_live_work_for_onboarding(app: &AppHandle) {
+    let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
+    if let Err(e) = coordinator
+        .stop_all_operations(app, "Onboarding restarted")
+        .await
+    {
+        error!("[Onboarding] Stop before restart failed: {}", e);
+    }
+    if let Some(manager) = crate::commands::ui_commands::get_ui_manager().await {
+        manager.lock().await.escape_to_idle().await;
+    }
 }
 
 /// Get detailed onboarding information
@@ -381,9 +417,11 @@ pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), S
     // Update the flag — shortcut handlers check this to suppress actions during onboarding
     app_state.set_onboarding_active(active);
 
-    // Hold/release the stop-key observer on state transitions
+    // Hold the stop-key observer while active, release it on the way out.
+    // Registering is idempotent, so an already-active setup may hold it again
+    // (restart does, after its stop released every user).
     let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    if active && !was_active {
+    if active {
         if let Err(e) = coordinator.register_escape_user(&app, "onboarding").await {
             error!("[Onboarding] Failed to start escape key monitor: {}", e);
         }
@@ -391,6 +429,12 @@ pub async fn set_onboarding_active(app: AppHandle, active: bool) -> Result<(), S
         if let Err(e) = coordinator.unregister_escape_user(&app, "onboarding").await {
             error!("[Onboarding] Failed to stop escape key monitor: {}", e);
         }
+    }
+
+    // The wake phrase follows the flag: off while setup is open, back to the
+    // stored triggers when it closes.
+    if active != was_active {
+        crate::commands::triggers::reapply_voice_triggers(&app).await;
     }
 
     info!(
@@ -614,4 +658,60 @@ pub async fn save_user_role(app: AppHandle, role: String) -> Result<(), String> 
         .set_onboarding_settings(&onboarding_settings)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    /// The text of the function that starts at `signature` in this file.
+    fn body_of<'a>(source: &'a str, signature: &str) -> &'a str {
+        let start = source
+            .find(signature)
+            .unwrap_or_else(|| panic!("{signature} not found"));
+        let rest = &source[start..];
+        let end = rest.find("\n}\n").unwrap_or(rest.len());
+        &rest[..end]
+    }
+
+    /// Restart must route through the stop Escape uses, after the onboarding
+    /// flag and before the window. A restart that only reset settings left a
+    /// turn running and the microphone open behind setup. Pinned on the source,
+    /// because the guarantee is "this call is made" and no runtime check
+    /// without a running app can show that.
+    #[test]
+    fn restart_stops_live_work_before_setup_opens() {
+        let source = include_str!("onboarding.rs");
+        let restart = body_of(source, "pub async fn restart_onboarding(");
+        let flag = restart
+            .find("set_onboarding_active(")
+            .expect("restart sets the onboarding flag");
+        let stop = restart
+            .find("stop_live_work_for_onboarding(&app)")
+            .expect("restart must stop live work");
+        let open = restart
+            .find("open_onboarding_window(")
+            .expect("restart opens the window");
+        let held_again = restart
+            .rfind("set_onboarding_active(")
+            .expect("restart sets the onboarding flag");
+        assert!(
+            flag < stop,
+            "stop after the flag, so the wake phrase stays off"
+        );
+        assert!(
+            stop < held_again,
+            "the stop releases the stop key; setup must take it back"
+        );
+        assert!(held_again < open, "all of it before setup is on screen");
+
+        let teardown = body_of(source, "async fn stop_live_work_for_onboarding(");
+        assert!(
+            teardown.contains("get_stop_coordinator()")
+                && teardown.contains("stop_all_operations("),
+            "the stop must be the coordinated stop Escape runs, not a new teardown"
+        );
+        assert!(
+            teardown.contains("escape_to_idle()"),
+            "the bar must end at rest"
+        );
+    }
 }

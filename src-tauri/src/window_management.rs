@@ -114,6 +114,13 @@ pub fn active_chat_surface(app: &AppHandle) -> ChatSurface {
 /// starts tracking a menu, because what counts is which window was in front of
 /// the person when they reached for the menu bar.
 pub async fn toggle_chat_surface(app: &AppHandle, surface: ChatSurface) {
+    // During setup the only Juno to get back to is the setup window. Showing
+    // the bar here would put it over onboarding, waiting on keys that do
+    // nothing until setup ends.
+    if onboarding_is_open(app) {
+        bring_onboarding_forward(app);
+        return;
+    }
     match surface {
         // In front of the person and asked about: put it away. This goes
         // through the same command the bar's own reopen uses, so the bar hears
@@ -412,20 +419,36 @@ pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
 
 /// Open the native onboarding window.
 ///
-/// The floating bar is always on top, so during setup it sits over the
-/// onboarding window and covers the copy. It also has nothing to offer someone
-/// who has not finished setting up, so it waits until they have.
+/// Setup gets the screen to itself. Every Juno window that floats above other
+/// apps (the bar in whatever look it wears, the floating panel, the cursor,
+/// snap-well and listening overlays) and the full-size chat window are put
+/// away, because each of them looks like a working Juno while every trigger is
+/// held back, and the bar is always on top so it also covers the copy. Settings
+/// is closed: the person left it to come here, and a settings window kept from
+/// before would come back showing permissions as they were before setup.
+///
+/// Onboarding is deliberately not always on top: it would cover System
+/// Settings while the person is granting a permission there. Instead Juno joins
+/// the Dock and Cmd+Tab while setup is open, so it can always be found, and
+/// [`bring_onboarding_forward`] returns it to the front at the moments the
+/// person is coming back to it.
 #[tauri::command]
 pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
-    let bar_was_visible = WindowManager::is_window_visible(&app, window_labels::FLOATING_BAR);
-    if bar_was_visible {
-        mark_bar_withheld_for_onboarding();
-        if let Err(e) = WindowManager::hide_window(&app, window_labels::FLOATING_BAR).await {
-            // Not worth failing setup over; the bar merely sits in the way.
-            warn!("Could not hide the floating bar for onboarding: {}", e);
-        }
+    // First, before anything is on screen: the bar's own show paths check this,
+    // and the window below takes a moment to build.
+    ONBOARDING_ISOLATED.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    put_away_for_onboarding(&app).await;
+    if let Err(e) = close_settings_window(app.clone()).await {
+        warn!("Could not close settings for onboarding: {}", e);
     }
-    WindowManager::create_or_show_window(&app, window_labels::ONBOARDING).await?;
+    show_in_dock_for_onboarding(&app).await;
+
+    if let Err(e) = WindowManager::create_or_show_window(&app, window_labels::ONBOARDING).await {
+        // No setup on screen means nothing may stay put away for it.
+        restore_after_onboarding(&app).await;
+        return Err(e);
+    }
     // The bar is hidden outright for onboarding, above. This covers the race
     // where the startup timer puts it back on screen anyway: hidden or not, it
     // is not allowed to be on top of the setup window.
@@ -433,29 +456,28 @@ pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Close the native onboarding window, putting the bar back if we took it away.
+/// Close the native onboarding window, putting back what opening it took away.
 #[tauri::command]
 pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
     let result = WindowManager::close_window(&app, window_labels::ONBOARDING).await;
     crate::bar_stacking::note_window_gone(&app, window_labels::ONBOARDING);
-    if BAR_HIDDEN_FOR_ONBOARDING.swap(false, std::sync::atomic::Ordering::SeqCst) {
-        if let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) {
-            if let Err(e) = bar.show() {
-                warn!("Could not restore the floating bar after onboarding: {}", e);
-            }
-        }
-    }
+    restore_after_onboarding(&app).await;
     result
 }
 
-/// Whether onboarding is holding the floating bar back, so closing it only
-/// restores a bar that was actually going to be there.
-static BAR_HIDDEN_FOR_ONBOARDING: std::sync::atomic::AtomicBool =
+/// Whether onboarding has the screen, from the moment it starts opening until
+/// it is closed or destroyed.
+static ONBOARDING_ISOLATED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-/// True while the setup assistant is on screen.
+/// The windows onboarding put away, so closing it only restores windows that
+/// were actually going to be there.
+static HIDDEN_FOR_ONBOARDING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// True while the setup assistant is on screen, or on its way.
 pub fn onboarding_is_open(app: &AppHandle) -> bool {
-    WindowManager::is_window_visible(app, window_labels::ONBOARDING)
+    ONBOARDING_ISOLATED.load(std::sync::atomic::Ordering::SeqCst)
+        || WindowManager::is_window_visible(app, window_labels::ONBOARDING)
 }
 
 /// Record that the bar is being held back for onboarding, so it is put on
@@ -466,7 +488,117 @@ pub fn onboarding_is_open(app: &AppHandle) -> bool {
 /// afterwards and puts it straight back over the setup window. So the show path
 /// checks too, and both routes mark it withheld.
 pub fn mark_bar_withheld_for_onboarding() {
-    BAR_HIDDEN_FOR_ONBOARDING.store(true, std::sync::atomic::Ordering::SeqCst);
+    remember_hidden_for_onboarding(window_labels::FLOATING_BAR);
+}
+
+fn remember_hidden_for_onboarding(label: &str) {
+    let mut hidden = match HIDDEN_FOR_ONBOARDING.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if !hidden.iter().any(|l| l == label) {
+        hidden.push(label.to_string());
+    }
+}
+
+/// Whether a declared window is put away while onboarding is open: everything
+/// that floats over other apps, and the chat window. Never onboarding itself.
+fn hidden_while_onboarding(window: &DeclaredWindowConfig) -> bool {
+    window.label != window_labels::ONBOARDING
+        && (window.always_on_top || window.label == window_labels::MAIN)
+}
+
+/// Hide every visible Juno window onboarding should not share the screen with.
+async fn put_away_for_onboarding(app: &AppHandle) {
+    let labels: Vec<String> = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .filter(|declared| hidden_while_onboarding(declared))
+        .map(|declared| declared.label.clone())
+        .collect();
+    for label in &labels {
+        let label = label.as_str();
+        if !WindowManager::is_window_visible(app, label) {
+            continue;
+        }
+        remember_hidden_for_onboarding(label);
+        if let Err(e) = WindowManager::hide_window(app, label).await {
+            // Not worth failing setup over; the window merely sits in the way.
+            warn!("Could not hide {} for onboarding: {}", label, e);
+            continue;
+        }
+        if label == window_labels::MAIN {
+            announce_main_window(app, false);
+        }
+    }
+}
+
+/// Put back what [`open_onboarding_window`] took away. Safe to call twice: the
+/// close command and the window's destruction both land here.
+pub async fn restore_after_onboarding(app: &AppHandle) {
+    if ONBOARDING_ISOLATED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        restore_dock_after_onboarding(app).await;
+    }
+    let hidden = {
+        let mut guard = match HIDDEN_FOR_ONBOARDING.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        std::mem::take(&mut *guard)
+    };
+    for label in hidden {
+        if label == window_labels::MAIN {
+            if let Err(e) = open_main_window(app.clone()).await {
+                warn!("Could not restore the chat window after onboarding: {}", e);
+            }
+            continue;
+        }
+        // Shown, never focused: these are overlays, and focusing one would
+        // pull the person out of whatever they are doing.
+        if let Some(window) = app.get_webview_window(&label) {
+            if let Err(e) = window.show() {
+                warn!("Could not restore {} after onboarding: {}", label, e);
+            }
+        }
+    }
+}
+
+/// Put Juno in the Dock and Cmd+Tab while setup is open, if the person keeps
+/// it out of them. A window that is not always on top can end up behind System
+/// Settings, and a menu-bar-only app has no other way back to it.
+async fn show_in_dock_for_onboarding(app: &AppHandle) {
+    if !crate::commands::dock_icon::read_dock_icon_visible(app).await {
+        crate::commands::dock_icon::apply_dock_icon_policy(app, true);
+    }
+}
+
+/// Return the Dock icon to the person's own preference once setup is gone.
+async fn restore_dock_after_onboarding(app: &AppHandle) {
+    if !crate::commands::dock_icon::read_dock_icon_visible(app).await {
+        crate::commands::dock_icon::apply_dock_icon_policy(app, false);
+    }
+}
+
+/// Bring the setup window to the front and give it the keyboard.
+///
+/// Called when the person is evidently coming back to setup: a permission
+/// they went to System Settings for has just been granted, they pressed their
+/// trigger, or they clicked Juno in the menu bar. Does nothing when setup is
+/// not on screen, and nothing while auto-grant is driving System Settings,
+/// which brings the window back itself when it is done.
+pub fn bring_onboarding_forward(app: &AppHandle) {
+    if !WindowManager::is_window_visible(app, window_labels::ONBOARDING)
+        || crate::commands::auto_grant::auto_grant_running()
+    {
+        return;
+    }
+    if let Some(window) = app.get_webview_window(window_labels::ONBOARDING) {
+        if let Err(e) = present_window(&window) {
+            warn!("Could not bring onboarding to the front: {}", e);
+        }
+    }
 }
 
 /// Open the full-size chat window, and get the bar out of its way.
@@ -639,5 +771,47 @@ mod tests {
                 window.label
             );
         }
+    }
+
+    #[test]
+    fn onboarding_puts_away_every_window_that_floats_and_the_chat() {
+        // Lacy saw Juno on screen during setup, looking alive while every
+        // trigger was held back. Anything always on top is a candidate, so the
+        // rule is read off the declared config rather than a list of labels
+        // that a new overlay could be missing from.
+        let windows = declared_windows();
+        for window in &windows {
+            let hidden = hidden_while_onboarding(window);
+            if window.label == window_labels::ONBOARDING {
+                assert!(!hidden, "onboarding must never put itself away");
+            } else if window.always_on_top || window.label == window_labels::MAIN {
+                assert!(hidden, "'{}' would stay on screen over setup", window.label);
+            } else {
+                assert!(!hidden, "'{}' is not an overlay", window.label);
+            }
+        }
+        for label in [
+            window_labels::FLOATING_BAR,
+            window_labels::FLOATING_PANEL,
+            window_labels::MAIN,
+            DESKTOP_CURSOR_OVERLAY_LABEL,
+        ] {
+            let window = find_declared_window(&windows, label).expect("declared");
+            assert!(
+                hidden_while_onboarding(window),
+                "'{}' escaped the hide",
+                label
+            );
+        }
+    }
+
+    #[test]
+    fn onboarding_is_not_always_on_top() {
+        // It would cover System Settings while a permission is being granted.
+        // Juno joins the Dock instead, and comes forward when spoken to.
+        let windows = declared_windows();
+        let onboarding = find_declared_window(&windows, window_labels::ONBOARDING)
+            .expect("onboarding window should be declared");
+        assert!(!onboarding.always_on_top);
     }
 }
