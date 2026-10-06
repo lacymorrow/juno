@@ -9,7 +9,6 @@ use crate::utils::permission_validator::{validate_permission, RequiredPermission
 // Removed unused import - BashResult is handled differently now
 // Keep the tool versioning from errors branch (enhanced functionality)
 use super::tool_versioning::{ApiVersion, ToolVersionConfig, ToolVersionManager};
-use crate::state::AgentCursorState;
 use crate::utils::coordinate_validation::{
     validate_coordinate_pair, validate_coordinate_parameter, CoordinateValidationError,
 };
@@ -61,24 +60,12 @@ static LAST_UI_ACTION_MS: AtomicU64 = AtomicU64::new(0);
 /// Monotonic counter for assigning unique cursor IDs to concurrent agent instances.
 static NEXT_AGENT_CURSOR_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Agent cursor color palette — each slot is used round-robin for up to 8 concurrent agents.
-const AGENT_CURSOR_COLORS: &[&str] = &[
-    "#8B5CF6", // violet  (matches default Juno cursor)
-    "#10B981", // emerald
-    "#F59E0B", // amber
-    "#EF4444", // red
-    "#3B82F6", // blue
-    "#EC4899", // pink
-    "#14B8A6", // teal
-    "#F97316", // orange
-];
-
 /// Identity of the parallel agent session that owns a tool registration
 /// (LAC-1432). When present, the agent's overlay cursor is keyed by the
 /// session id and drawn in the session's identity color, and physical
 /// input is attributed to the session in the input arbiter. When absent
-/// (legacy callers), a process-unique `agent-N` cursor id and the legacy
-/// palette are used instead.
+/// (legacy callers), a process-unique `agent-N` cursor id and the primary
+/// cursor color are used instead.
 #[derive(Clone, Debug)]
 pub struct SessionToolContext {
     pub session_id: String,
@@ -112,128 +99,30 @@ pub async fn run_computer_action(
 
     let result = execute_computer_tool(app_handle, input.clone(), session_id).await;
 
-    // Emit cursor position for the agent overlay (non-blocking).
-    if result.is_ok() {
-        let action = input["action"].as_str().unwrap_or("");
+    // Put Juno's cursor where the action landed. A screenshot or a keystroke
+    // has no point, so the cursor is left where it is rather than moved to
+    // nowhere.
+    if let Ok(response) = &result {
         if let Some((raw_x, raw_y)) = extract_coordinate(&input) {
-            use crate::utils::coordinates;
             let (sx, sy) = coordinates::transform_to_screen_coordinates(raw_x, raw_y);
-            let cursor_state = match action {
-                "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" => {
-                    "clicking"
-                }
-                "mouse_move" => "moving",
-                _ => "idle",
-            };
-            emit_agent_cursor_update(app_handle, cursor_id, sx, sy, cursor_state, cursor_color);
+            let background = crate::input_control::background_mode_enabled(app_handle).await;
+            crate::cursor_overlay::take(
+                app_handle,
+                crate::cursor_overlay::CursorAction {
+                    agent_id: cursor_id,
+                    identity_color: cursor_color,
+                    x: sx,
+                    y: sy,
+                    action: input["action"].as_str().unwrap_or(""),
+                    foreground: crate::cursor_overlay::takes_real_cursor(response, background),
+                    transient: session_id.is_none(),
+                },
+            )
+            .await;
         }
-        // A screenshot has no coordinate, so the cursor is left where it is
-        // rather than moved to nowhere.
     }
 
     result
-}
-
-/// Emit a cursor position update for a named agent. No-op if the app_handle cannot emit.
-fn emit_agent_cursor_update(
-    app_handle: &tauri::AppHandle,
-    agent_id: &str,
-    x: f64,
-    y: f64,
-    cursor_state: &str,
-    color: &str,
-) {
-    let state_manager = app_handle.state::<AppState>();
-    let cursor = AgentCursorState {
-        agent_id: agent_id.to_string(),
-        x,
-        y,
-        state: cursor_state.to_string(),
-        color: color.to_string(),
-    };
-    state_manager.update_agent_cursor(cursor.clone());
-
-    // Put the overlay on screen. It is declared hidden and nothing ever showed
-    // it, so every cursor update so far has been drawn into a window nobody
-    // was looking at: the pointer moved on its own with nothing to say why.
-    show_cursor_overlay(app_handle);
-
-    // Someone is driving another application, so the floating bar is where the
-    // work shows and the only place it can be stopped. It stays on top for the
-    // duration, even over Juno's own chat window. Cheap to repeat: an unchanged
-    // fact costs nothing.
-    crate::bar_stacking::note_agent_driving(app_handle, true);
-
-    if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_UPDATE, &cursor) {
-        tracing::debug!("agent cursor update emit failed: {}", e);
-    }
-}
-
-/// Bring up the click-through overlay that draws agent cursors.
-///
-/// Cheap to call repeatedly: an already-visible window is left alone, so this
-/// sits on the hot path of every mouse action without costing anything after
-/// the first one.
-fn show_cursor_overlay(app_handle: &tauri::AppHandle) {
-    use tauri::Manager;
-    if let Some(window) =
-        app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL)
-    {
-        if window.is_visible().unwrap_or(false) {
-            return;
-        }
-        if let Err(e) = window.show() {
-            tracing::warn!("Could not show the cursor overlay: {}", e);
-        }
-        return;
-    }
-
-    // Not built yet (it is declared in tauri.conf.json, but a window can be
-    // destroyed). Building is async, so it is spawned rather than awaited on
-    // the action path.
-    let app = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) = crate::window_management::open_desktop_cursor_overlay(app).await {
-            tracing::warn!("Could not open the cursor overlay: {}", e);
-        }
-    });
-}
-
-/// Emit cursor removal for a named agent (call on agent completion or cancellation).
-///
-/// Called from `SessionHandle::drop` so every session end path — complete,
-/// cancel, error, panic unwind — clears the session's overlay cursor.
-pub(crate) fn emit_agent_cursor_remove(app_handle: &tauri::AppHandle, agent_id: &str) {
-    if let Some(state_manager) = app_handle.try_state::<AppState>() {
-        state_manager.remove_agent_cursor(agent_id);
-    }
-    let payload = serde_json::json!({ "agent_id": agent_id });
-    if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_REMOVE, &payload) {
-        tracing::debug!("agent cursor remove emit failed: {}", e);
-    }
-
-    // Once nobody is driving, take the overlay away. It is click-through and
-    // transparent, so leaving it up harms nothing, but a window that is only
-    // ever shown is a window that is eventually blamed for something.
-    let nobody_left = app_handle
-        .try_state::<AppState>()
-        .map(|state| state.agent_cursors_is_empty())
-        .unwrap_or(true);
-    if nobody_left {
-        // Nobody is driving any more, so the bar goes back to whatever the rest
-        // of the situation asks for: on top if the person is working elsewhere,
-        // behind a Juno window they are reading.
-        crate::bar_stacking::note_agent_driving(app_handle, false);
-
-        use tauri::Manager;
-        if let Some(window) =
-            app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL)
-        {
-            if let Err(e) = window.hide() {
-                tracing::debug!("Could not hide the cursor overlay: {}", e);
-            }
-        }
-    }
 }
 
 /// Extract [x, y] from a computer tool input's "coordinate" field.
@@ -3595,17 +3484,16 @@ pub async fn register_anthropic_computer_use_tools_with_version(
     );
 
     // Cursor identity: prefer the parallel-session identity (session id +
-    // palette color) so overlay cursors match the roster UI. Legacy callers
-    // without a session get a process-unique `agent-N` id and the legacy
-    // palette, exactly as before.
+    // palette color) so overlay cursors match the roster UI. Callers without
+    // a session get a process-unique `agent-N` id and the primary slot, which
+    // `cursor_overlay::cursor_color` draws in the color chosen in Settings.
     let (agent_cursor_id, agent_cursor_color, session_id) = match session {
         Some(ctx) => (ctx.session_id.clone(), ctx.color, Some(ctx.session_id)),
         None => {
             let cursor_slot = NEXT_AGENT_CURSOR_ID.fetch_add(1, Ordering::Relaxed);
             (
                 format!("agent-{}", cursor_slot),
-                AGENT_CURSOR_COLORS[(cursor_slot as usize - 1) % AGENT_CURSOR_COLORS.len()]
-                    .to_string(),
+                crate::constants::ui::agent_session_colors::SLOT_0.to_string(),
                 None,
             )
         }

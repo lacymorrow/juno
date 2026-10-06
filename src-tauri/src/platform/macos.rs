@@ -370,57 +370,61 @@ fn setup_main_window(app_handle: &AppHandle) {
 }
 
 /// Setup macOS-specific behavior for the desktop cursor overlay window.
+#[cfg(target_os = "macos")]
+fn setup_desktop_cursor_overlay_window(app_handle: &AppHandle) {
+    match app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL) {
+        Some(window) => style_cursor_overlay(app_handle, &window),
+        None => info!(
+            "desktop-cursor-overlay not found during macOS setup; it is styled when first shown."
+        ),
+    }
+}
+
+/// Make the cursor overlay a window that can be seen wherever Juno acts.
 ///
-/// This window shows the AI agent's cursor position during computer-use tasks.
 /// It must be:
 ///   - At NSScreenSaverWindowLevel (1000) so it appears above all app content
 ///   - Fully click-through (ignoresMouseEvents) so it never blocks user input
 ///   - Non-activating: must not steal focus from the user's active application
 ///   - Persistent across spaces and full-screen apps
+///
+/// Called at setup and again on every show, because a window rebuilt from its
+/// config comes back at the floating level with none of this, which put it
+/// under every full-screen app.
 #[cfg(target_os = "macos")]
-fn setup_desktop_cursor_overlay_window(app_handle: &AppHandle) {
-    if let Some(window) = app_handle.get_webview_window("desktop-cursor-overlay") {
-        info!("Found desktop-cursor-overlay for macOS setup.");
-
-        match window.ns_window() {
-            Ok(ns_window_ptr) => {
-                let ns_window = ns_window_ptr as cocoa_id;
-                unsafe {
-                    // NSScreenSaverWindowLevel (1000) — above all app content including full-screen
-                    ns_window.setLevel_(1000);
-
-                    // Fully click-through: agent cursor must never intercept user input
-                    #[allow(unexpected_cfgs)]
-                    let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
-
-                    // Visible across all spaces and above full-screen apps
-                    ns_window.setCollectionBehavior_(
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle
-                    );
-
-                    // Stay visible when user switches to another app
-                    ns_window.setHidesOnDeactivate_(NO);
-
-                    ns_window.setOpaque_(NO);
-                    ns_window.setHasShadow_(NO);
-
-                    info!("macOS Setup: Desktop cursor overlay configured at screen-saver level, fully click-through.");
-                }
-            }
-            Err(e) => {
-                error!(
-                    "Error getting NSWindow for styling desktop-cursor-overlay: {}",
-                    e
-                );
-            }
+pub fn style_cursor_overlay(app_handle: &AppHandle, window: &tauri::WebviewWindow) {
+    let ns_window_addr = match window.ns_window() {
+        Ok(ptr) => ptr as usize,
+        Err(e) => {
+            error!(
+                "Error getting NSWindow for styling desktop-cursor-overlay: {}",
+                e
+            );
+            return;
         }
-    } else {
-        // Window is pre-created as visible:false in tauri.conf.json, so this should not happen
-        // at app startup. Log as info (not error) since it may not be created yet in all builds.
-        info!("desktop-cursor-overlay not found during macOS setup — will be configured on first open.");
+    };
+    // AppKit, so the main thread. The address crosses the hop because the
+    // raw pointer is not Send.
+    if let Err(e) = app_handle.run_on_main_thread(move || unsafe {
+        let ns_window = ns_window_addr as cocoa_id;
+        // NSScreenSaverWindowLevel (1000): above all app content, full-screen included.
+        ns_window.setLevel_(1000);
+        // Fully click-through: the agent cursor must never intercept input.
+        #[allow(unexpected_cfgs)]
+        let _: () = msg_send![ns_window, setIgnoresMouseEvents: YES];
+        // On every Space, and allowed over a full-screen app.
+        ns_window.setCollectionBehavior_(
+            NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle,
+        );
+        // Stay visible when the person switches to another app.
+        ns_window.setHidesOnDeactivate_(NO);
+        ns_window.setOpaque_(NO);
+        ns_window.setHasShadow_(NO);
+    }) {
+        warn!("Could not style the cursor overlay: {}", e);
     }
 }
 

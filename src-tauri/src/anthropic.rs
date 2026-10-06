@@ -149,6 +149,10 @@ impl AgentExecutionQueue {
         // Guard automatically cleans up on drop
         drop(guard);
 
+        // A run with no session leaves its cursor behind; let go of it now
+        // that the run is over, so the ghost fades instead of lingering.
+        crate::cursor_overlay::release_transient(&query.app_handle);
+
         // Handle execution result
         match result {
             Ok(()) => {

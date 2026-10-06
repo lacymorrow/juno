@@ -26,6 +26,8 @@ pub mod stop_key_monitor; // Passive mouse-button trigger observer
 /// Recognising Juno's own synthesized keyboard events (macOS only).
 #[cfg(target_os = "macos")]
 pub mod synthetic_events;
+/// The system cursor's shape, for the agent cursor glow (macOS; no-op elsewhere).
+pub mod system_cursor;
 
 #[cfg(target_os = "windows")]
 pub mod windows;

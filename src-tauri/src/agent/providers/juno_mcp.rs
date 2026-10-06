@@ -54,14 +54,11 @@ const PROTOCOL_VERSION: &str = "2025-06-18";
 /// One identity, because the CLI is one agent however many turns it takes.
 const CLI_CURSOR_ID: &str = "claude-cli";
 
-/// macOS `systemPink`.
-///
-/// Asked for by name: the pointer should say, while it is moving on its own,
-/// that something other than your hand is moving it. Pink because nothing else
-/// in Juno is pink, so it cannot be mistaken for ordinary chrome, and this
-/// particular pink because it is an Apple system colour rather than an invented
-/// one.
-const CLI_CURSOR_COLOR: &str = "#FF2D55";
+/// The primary cursor slot: the CLI is one agent, so its cursor wears the
+/// color chosen in Settings, Appearance, like any single run (see
+/// `cursor_overlay::cursor_color`). This used to be a fixed systemPink; pink
+/// is now one of the choices.
+const CLI_CURSOR_COLOR: &str = crate::constants::ui::agent_session_colors::SLOT_0;
 
 /// Where the server is listening, and the token that gets you in.
 #[derive(Clone, Debug)]

@@ -110,6 +110,11 @@ pub struct FloatingBarSettings {
     /// hides it in every state. On by default; older stores lack the key.
     #[serde(default = "defaults::show_glow_border")]
     pub show_glow_border: bool,
+    /// The color of the glow around Juno's cursor: one of
+    /// `ui::agent_cursor_colors::ALL`. Older stores lack the key and get blue;
+    /// an unknown value is read as blue (see `agent_cursor_colors::resolve`).
+    #[serde(default = "defaults::agent_cursor_color")]
+    pub agent_cursor_color: String,
 }
 
 /// Agent behavior and execution settings
@@ -576,6 +581,7 @@ impl Default for FloatingBarSettings {
             bar_appearance: ui::bar_appearances::DEFAULT.to_string(),
             follow_cursor_display: defaults::follow_cursor_display(),
             show_glow_border: defaults::show_glow_border(),
+            agent_cursor_color: defaults::agent_cursor_color(),
         }
     }
 }
