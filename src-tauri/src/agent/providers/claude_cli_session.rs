@@ -54,11 +54,30 @@
 //! - `inbox`, the receiving half, behind the session's only `TokioMutex`. Locking it
 //!   both serializes turns and hands the turn its frames, so there is no second lock
 //!   to acquire and no ordering to get wrong.
+//!
+//! ## The warm spare
+//!
+//! A persistent process removes the boot cost from every turn but the first one of
+//! a conversation, which still pays it in full: measured at 4.9 s from spawn to first
+//! token, against 1.5 s for a warm follow-up. So one extra process is kept booted
+//! and idle, pinned to a fresh `--session-id` and bound to no conversation. The first
+//! turn of a new conversation adopts it instead of spawning, and a replacement is
+//! started in the background.
+//!
+//! - It is spawned with exactly the [`LaunchConfig`] a turn would use, learned from
+//!   the last turn (and, across launches, from the system prompt remembered in
+//!   `cli_session.json`). Adoption compares fingerprints; a spare that does not
+//!   match is killed and the turn starts cold, exactly as it did before the spare.
+//! - It receives nothing on stdin until adopted, so it can never run a turn.
+//! - It lives outside the conversation registry: the idle reaper never reaps it and
+//!   it never evicts a conversation. At most `MAX_LIVE_SESSIONS + 1` processes.
+//! - A spare that fails to spawn, or exits on its own, backs off and is given up on
+//!   after [`MAX_SPARE_FAILURES`] until the configuration changes.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -118,6 +137,22 @@ const UNSOLICITED_TURN_ENV: [(&str, &str); 2] = [
 /// them from the session (verified against `claude` 2.1.289).
 const WAKE_TOOLS: &str = "ScheduleWakeup,Monitor";
 
+/// How long after a turn starts before a replacement spare is spawned.
+///
+/// Long enough that its Node boot does not compete for CPU with the adopted
+/// process's first token, short enough that the next new conversation finds it.
+const SPARE_REFILL_DELAY: Duration = Duration::from_secs(3);
+
+/// Spare spawn failures (a spawn error, or a spare that exited on its own) in a
+/// row before Juno stops trying until the configuration changes.
+pub const MAX_SPARE_FAILURES: u32 = 3;
+
+/// Store file holding the system prompt the last turn ran with, so a spare can
+/// be started at launch with the prompt the first turn will use. Separate from
+/// the settings store: it is a cache, not a setting.
+const SPARE_STORE_FILE: &str = "cli_session.json";
+const SPARE_PROMPT_KEY: &str = "spare_system_prompt";
+
 /// What a turn produced, or that there was no persistent session to run it in.
 pub enum TurnOutcome {
     /// The turn ran to completion in the persistent process. Display text, tags stripped.
@@ -128,26 +163,37 @@ pub enum TurnOutcome {
     Unavailable,
 }
 
-/// Everything a turn needs. Borrowed, because the caller owns all of it already.
-pub struct TurnRequest<'a> {
-    pub binary: &'a Path,
-    pub model: &'a str,
+/// Everything a `claude` process is born with except the session it is pinned
+/// to. A live process cannot be talked out of any of it, so it is also what a
+/// process is fingerprinted by ([`signature_of`]).
+#[derive(Clone, Debug)]
+pub struct LaunchConfig {
+    pub binary: PathBuf,
+    pub model: String,
     /// The CLI's `--effort`, resolved the same way the one-shot path does.
-    pub effort: &'a str,
+    pub effort: String,
     /// Ask for raw streaming events, so text reaches the screen and the TTS
     /// splitter a few words at a time instead of one whole block at a time.
     /// False only for a `claude` build the one-shot path has already seen
     /// reject the flag.
     pub include_partial_messages: bool,
-    pub system_prompt: Option<&'a str>,
-    pub mcp_config: Option<&'a Path>,
+    pub system_prompt: Option<String>,
+    pub mcp_config: Option<PathBuf>,
     /// Extra system-prompt guidance, appended only when `mcp_config` is present.
-    pub mcp_guidance: &'a str,
+    pub mcp_guidance: &'static str,
     /// Whether the CLI may load the MCP servers on the person's own Claude
     /// account. When false, `spawn_args` passes `--strict-mcp-config` so only
     /// what `mcp_config` names loads. Spawn-time: part of the session
     /// signature, so flipping the setting replaces the process (LAC-4056).
     pub load_account_mcp: bool,
+    /// Per-send approval (LAC-4058): route the CLI's permission prompts into
+    /// Juno's approval sheet instead of skipping permissions.
+    pub ask_before_send: bool,
+}
+
+/// Everything a turn needs. Borrowed, because the caller owns all of it already.
+pub struct TurnRequest<'a> {
+    pub launch: &'a LaunchConfig,
     pub conversation_id: &'a str,
     /// The CLI session this conversation runs in.
     pub session_id: &'a str,
@@ -160,9 +206,15 @@ pub struct TurnRequest<'a> {
     pub app_handle: &'a tauri::AppHandle,
     pub message_id: Option<String>,
     pub cancel_rx: Option<crate::state::CancelReceiver>,
-    /// Per-send approval (LAC-4058): route the CLI's permission prompts into
-    /// Juno's approval sheet instead of skipping permissions.
-    pub ask_before_send: bool,
+}
+
+/// What [`run_turn`] did, and in which CLI session.
+pub struct TurnResult {
+    /// The session the turn ran in. Usually the request's, but a new conversation
+    /// that adopted the warm spare runs in the spare's session, and the caller must
+    /// remember *this* id for the next message to resume.
+    pub session_id: String,
+    pub outcome: Result<TurnOutcome, AgentError>,
 }
 
 /// Is the persistent-session path turned on?
@@ -219,7 +271,12 @@ pub async fn set_cli_persistent_session_enabled(
         .save()
         .map_err(|e| format!("Failed to save settings store: {e}"))?;
 
-    if !enabled {
+    if enabled {
+        resume_spares();
+        tauri::async_runtime::spawn(super::claude_cli::prewarm_persistent_session(
+            app_handle.clone(),
+        ));
+    } else {
         shutdown_all().await;
     }
     info!(
@@ -296,6 +353,9 @@ fn sessions() -> &'static Registry {
 /// `kill_on_drop` covers a drop on a live runtime; it does not cover the app being
 /// torn down around these processes, which is what this is for.
 pub async fn shutdown_all() {
+    // First, so a refill already scheduled cannot start a spare behind us.
+    SPARE_HALTED.store(true, Ordering::Relaxed);
+    stop_spare();
     let mut map = sessions().lock().await;
     for (conversation, session) in map.drain() {
         debug!("[CliSession] Shutting down session for conversation {conversation}");
@@ -315,6 +375,9 @@ fn ensure_reaper() {
             loop {
                 tokio::time::sleep(REAP_INTERVAL).await;
                 reap_idle().await;
+                // Also the spare's health check: one that exited on its own is
+                // counted and, within the backoff, replaced.
+                refill_spare_from_last();
             }
         });
     }
@@ -338,6 +401,268 @@ async fn evict(conversation_id: &str) {
     let mut map = sessions().lock().await;
     if let Some(session) = map.remove(conversation_id) {
         session.kill();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The warm spare (see the module docs)
+// ---------------------------------------------------------------------------
+
+/// The one idle process kept booted for the next new conversation, and what is
+/// needed to keep one there.
+///
+/// Behind a `std` mutex: nothing here awaits, and the spawn itself happens with
+/// the lock released.
+#[derive(Default)]
+struct SpareState {
+    slot: Option<Arc<CliSession>>,
+    /// What the next spare is spawned with: the most recent turn's configuration,
+    /// or the one primed at launch.
+    config: Option<LaunchConfig>,
+    /// For the reaper's refill, which has no turn to borrow a handle from.
+    app: Option<tauri::AppHandle>,
+    /// Spawn failures and spares that exited on their own, in a row.
+    failures: u32,
+    retry_after: Option<Instant>,
+    /// A spawn is in flight with the lock released.
+    spawning: bool,
+}
+
+impl SpareState {
+    /// Hand the spare to a turn, if it is alive and was born with `signature`.
+    ///
+    /// A dead spare counts as a failure; a mismatched one is killed and is not a
+    /// failure (the settings moved, the process did nothing wrong). Either way
+    /// the turn starts cold, exactly as it did before there was a spare.
+    fn take(&mut self, signature: &str) -> Option<Arc<CliSession>> {
+        let spare = self.slot.take()?;
+        if spare.is_dead() {
+            warn!("[CliSession] Warm spare had exited; starting this conversation cold");
+            spare.kill();
+            self.record_failure(Instant::now());
+            return None;
+        }
+        if spare.signature != signature {
+            info!("[CliSession] Warm spare was started with other settings; starting cold and replacing it");
+            spare.kill();
+            return None;
+        }
+        self.failures = 0;
+        self.retry_after = None;
+        Some(spare)
+    }
+
+    fn record_failure(&mut self, now: Instant) {
+        self.failures = self.failures.saturating_add(1);
+        self.retry_after = spare_retry_delay(self.failures).map(|delay| now + delay);
+        if self.failures >= MAX_SPARE_FAILURES {
+            warn!(
+                "[CliSession] Warm spare failed {} times in a row; not starting another until the settings change",
+                self.failures
+            );
+        }
+    }
+
+    /// Whether a spawn may start now.
+    fn may_spawn(&self, now: Instant) -> bool {
+        !self.spawning
+            && self.failures < MAX_SPARE_FAILURES
+            && self.retry_after.is_none_or(|at| now >= at)
+    }
+}
+
+/// How long to wait before the next spare after `failures` in a row, or `None`
+/// once Juno should stop trying. Never a tight loop: the reaper is the only
+/// thing that retries on its own, once a minute.
+fn spare_retry_delay(failures: u32) -> Option<Duration> {
+    match failures {
+        0 => Some(Duration::ZERO),
+        1 => Some(Duration::from_secs(30)),
+        2 => Some(Duration::from_secs(120)),
+        _ => None,
+    }
+}
+
+static SPARE: OnceLock<std::sync::Mutex<SpareState>> = OnceLock::new();
+
+/// Set by [`shutdown_all`] (exit, or the setting turned off) so a refill already
+/// scheduled cannot start a process after everything was killed. Cleared only
+/// by turning the setting back on.
+static SPARE_HALTED: AtomicBool = AtomicBool::new(false);
+
+fn spare_state() -> std::sync::MutexGuard<'static, SpareState> {
+    // The state is plain data; a panic elsewhere while holding it is no reason
+    // to stop keeping a spare.
+    SPARE
+        .get_or_init(|| std::sync::Mutex::new(SpareState::default()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Take the spare for a turn whose process will be born with `signature`.
+fn take_spare(signature: &str) -> Option<Arc<CliSession>> {
+    spare_state().take(signature)
+}
+
+/// Kill the spare and forget its configuration, so nothing refills it until a
+/// Claude CLI turn (or a launch-time prime) supplies a configuration again.
+/// For a provider switch away from the CLI, and for shutdown.
+pub fn stop_spare() {
+    let mut state = spare_state();
+    state.config = None;
+    if let Some(spare) = state.slot.take() {
+        info!("[CliSession] Stopping warm spare {}", spare.session_id);
+        spare.kill();
+    }
+}
+
+/// Allow spares again after [`shutdown_all`]. For the setting being turned on.
+pub fn resume_spares() {
+    SPARE_HALTED.store(false, Ordering::Relaxed);
+}
+
+/// Make sure a spare matching `config` exists, spawning one if needed. For
+/// launch and for settings changes; turns refill through [`schedule_spare`].
+pub fn prime_spare(app: &tauri::AppHandle, config: LaunchConfig) {
+    ensure_reaper();
+    fill_spare(app, config);
+}
+
+/// [`fill_spare`] after `delay`, off the caller's path.
+fn schedule_spare(app: &tauri::AppHandle, config: LaunchConfig, delay: Duration) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(delay).await;
+        fill_spare(&app, config);
+    });
+}
+
+/// The reaper's refill: replace a spare that died, using the last configuration.
+fn refill_spare_from_last() {
+    let (app, config) = {
+        let state = spare_state();
+        (state.app.clone(), state.config.clone())
+    };
+    if let (Some(app), Some(config)) = (app, config) {
+        fill_spare(&app, config);
+    }
+}
+
+/// Bring the spare in line with `config`: keep a matching live one, replace a
+/// mismatched or dead one, and spawn when there is none, within the backoff.
+fn fill_spare(app: &tauri::AppHandle, config: LaunchConfig) {
+    if SPARE_HALTED.load(Ordering::Relaxed) || !is_enabled(app) {
+        return;
+    }
+    let signature = signature_of(&config);
+    let now = Instant::now();
+
+    // `Some(persist_prompt)` when a spawn should start, with the lock released.
+    let spawn = {
+        let mut state = spare_state();
+        state.app = Some(app.clone());
+
+        let previous = state.config.as_ref();
+        let config_changed = previous.map(signature_of).as_deref() != Some(signature.as_str());
+        let prompt_changed =
+            previous.map(|c| c.system_prompt.as_deref()) != Some(config.system_prompt.as_deref());
+        if config_changed {
+            // New settings get a fresh set of attempts.
+            state.failures = 0;
+            state.retry_after = None;
+            state.config = Some(config.clone());
+        }
+
+        if let Some(spare) = state.slot.take() {
+            if spare.is_dead() {
+                warn!(
+                    "[CliSession] Warm spare {} exited on its own",
+                    spare.session_id
+                );
+                spare.kill();
+                state.record_failure(now);
+            } else if spare.signature != signature {
+                info!("[CliSession] Settings changed; replacing the warm spare");
+                spare.kill();
+            } else {
+                state.slot = Some(spare);
+            }
+        }
+
+        if state.slot.is_some() || !state.may_spawn(now) {
+            None
+        } else {
+            state.spawning = true;
+            Some(prompt_changed)
+        }
+    };
+
+    let Some(persist_prompt) = spawn else {
+        return;
+    };
+    if persist_prompt {
+        remember_system_prompt(app, config.system_prompt.as_deref());
+    }
+
+    // Lock released: spawning forks a process.
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let spawned = spawn_session(
+        &config,
+        &session_id,
+        true,
+        "the warm spare",
+        signature.clone(),
+    );
+
+    let mut state = spare_state();
+    state.spawning = false;
+    match spawned {
+        Ok(session) => {
+            let still_wanted = !SPARE_HALTED.load(Ordering::Relaxed)
+                && state.slot.is_none()
+                && state.config.as_ref().map(signature_of).as_deref() == Some(signature.as_str());
+            if still_wanted {
+                state.slot = Some(Arc::new(session));
+            } else {
+                // Shut down, superseded by newer settings, or raced: not needed.
+                session.kill();
+            }
+        }
+        Err(e) => {
+            warn!("[CliSession] Could not start a warm spare: {e}");
+            state.record_failure(now);
+        }
+    }
+}
+
+/// The system prompt the last turn ran with, saved so a spare can be started at
+/// launch before any turn has run. `None` before the first turn ever.
+pub fn remembered_system_prompt(app: &tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_store::StoreExt;
+    app.store(SPARE_STORE_FILE)
+        .ok()?
+        .get(SPARE_PROMPT_KEY)?
+        .as_str()
+        .map(str::to_string)
+}
+
+fn remember_system_prompt(app: &tauri::AppHandle, prompt: Option<&str>) {
+    use tauri_plugin_store::StoreExt;
+    let store = match app.store(SPARE_STORE_FILE) {
+        Ok(store) => store,
+        Err(e) => {
+            debug!("[CliSession] Could not open {SPARE_STORE_FILE}: {e}");
+            return;
+        }
+    };
+    match prompt {
+        Some(prompt) => store.set(SPARE_PROMPT_KEY, Value::String(prompt.to_string())),
+        None => {
+            store.delete(SPARE_PROMPT_KEY);
+        }
+    }
+    if let Err(e) = store.save() {
+        debug!("[CliSession] Could not save {SPARE_STORE_FILE}: {e}");
     }
 }
 
@@ -367,31 +692,56 @@ fn signature_parts(
     )
 }
 
-fn signature_of(req: &TurnRequest<'_>) -> String {
-    // Effort and the partial-messages flag are spawn-time too. Appended rather
-    // than threaded through `signature_parts`, whose shape the tests pin.
+fn signature_of(launch: &LaunchConfig) -> String {
+    // Effort, the partial-messages flag, the binary and the MCP guidance are
+    // spawn-time too. Appended rather than threaded through `signature_parts`,
+    // whose shape the tests pin.
     format!(
-        "{}\u{1f}{}\u{1f}{}",
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
         signature_parts(
-            req.model,
-            req.system_prompt,
-            req.mcp_config,
-            req.load_account_mcp,
-            req.ask_before_send,
+            &launch.model,
+            launch.system_prompt.as_deref(),
+            launch.mcp_config.as_deref(),
+            launch.load_account_mcp,
+            launch.ask_before_send,
         ),
-        req.effort,
-        req.include_partial_messages
+        launch.effort,
+        launch.include_partial_messages,
+        launch.binary.to_string_lossy(),
+        launch.mcp_guidance
     )
 }
 
-/// The session for this conversation, spawning one if needed, and whether it was
-/// already running (warm) rather than started for this turn.
+/// Where the process a turn runs in came from. Logged per turn, so cold, spare
+/// and warm first-token times are never averaged together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Origin {
+    /// Already running for this conversation.
+    Warm,
+    /// The warm spare, adopted by this conversation's first turn.
+    Spare,
+    /// Spawned for this turn.
+    Cold,
+}
+
+impl Origin {
+    fn timing_label(self) -> &'static str {
+        match self {
+            Origin::Warm => "claude_cli/persistent-warm",
+            Origin::Spare => "claude_cli/persistent-spare",
+            Origin::Cold => "claude_cli/persistent-cold",
+        }
+    }
+}
+
+/// The session for this conversation, spawning or adopting one if needed, and
+/// where it came from.
 ///
 /// Returns `None` when a persistent session could not be had, which is never fatal:
 /// the caller falls back to the one-shot path.
-async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, bool)> {
+async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, Origin)> {
     ensure_reaper();
-    let signature = signature_of(req);
+    let signature = signature_of(req.launch);
 
     // Check-then-spawn, with the registry lock released across the spawn. The lock
     // is reacquired and rechecked afterwards so two turns racing on a cold
@@ -403,7 +753,7 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, bool)> {
                 && existing.session_id == req.session_id
                 && !existing.is_dead();
             if usable {
-                return Some((Arc::clone(existing), true));
+                return Some((Arc::clone(existing), Origin::Warm));
             }
         }
     }
@@ -411,11 +761,39 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, bool)> {
     // Whatever was there is stale, dead, or configured differently.
     evict(req.conversation_id).await;
 
-    let spawned = match spawn_session(req, signature.clone()) {
-        Ok(session) => Arc::new(session),
-        Err(e) => {
-            warn!("[CliSession] Could not start a persistent Claude CLI session: {e}");
-            return None;
+    // A conversation with no CLI session yet can run in the warm spare: it was
+    // pinned to a fresh id that nothing else has used. One with history cannot,
+    // because it has to `--resume` its own id.
+    let adopted = if req.session_is_new {
+        take_spare(&signature)
+    } else {
+        None
+    };
+
+    let (spawned, origin) = match adopted {
+        Some(spare) => {
+            info!(
+                "[CliSession] Adopted warm spare {} for conversation {}",
+                spare.session_id, req.conversation_id
+            );
+            spare.touch();
+            (spare, Origin::Spare)
+        }
+        None => {
+            let label = format!("conversation {}", req.conversation_id);
+            match spawn_session(
+                req.launch,
+                req.session_id,
+                req.session_is_new,
+                &label,
+                signature.clone(),
+            ) {
+                Ok(session) => (Arc::new(session), Origin::Cold),
+                Err(e) => {
+                    warn!("[CliSession] Could not start a persistent Claude CLI session: {e}");
+                    return None;
+                }
+            }
         }
     };
 
@@ -424,7 +802,7 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, bool)> {
         if existing.signature == signature && !existing.is_dead() {
             // Another turn won the race. Ours is surplus.
             spawned.kill();
-            return Some((Arc::clone(existing), false));
+            return Some((Arc::clone(existing), Origin::Cold));
         }
     }
 
@@ -444,21 +822,29 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, bool)> {
     }
 
     map.insert(req.conversation_id.to_string(), Arc::clone(&spawned));
-    Some((spawned, false))
+    Some((spawned, origin))
 }
 
 /// Spawn the process and the two tasks that own its pipes.
-fn spawn_session(req: &TurnRequest<'_>, signature: String) -> Result<CliSession, AgentError> {
-    let args = spawn_args(req);
+///
+/// `owner` is only for the log line: a conversation, or the warm spare.
+fn spawn_session(
+    launch: &LaunchConfig,
+    session_id: &str,
+    session_is_new: bool,
+    owner: &str,
+    signature: String,
+) -> Result<CliSession, AgentError> {
+    let args = spawn_args(launch, session_id, session_is_new);
     info!(
-        "[CliSession] Starting persistent Claude CLI session {} ({}) for conversation {}",
-        req.session_id,
-        if req.session_is_new { "new" } else { "resumed" },
-        req.conversation_id
+        "[CliSession] Starting persistent Claude CLI session {} ({}) for {}",
+        session_id,
+        if session_is_new { "new" } else { "resumed" },
+        owner
     );
     debug!("[CliSession] args: {}", args.join(" "));
 
-    let mut child = claude_command(req.binary)
+    let mut child = claude_command(&launch.binary)
         .args(&args)
         // A process that outlives its turn can be woken by its own background
         // work: a finished background Bash task or subagent, a cron job, a
@@ -549,7 +935,7 @@ fn spawn_session(req: &TurnRequest<'_>, signature: String) -> Result<CliSession,
     }
 
     Ok(CliSession {
-        session_id: req.session_id.to_string(),
+        session_id: session_id.to_string(),
         signature,
         to_child,
         inbox: TokioMutex::new(frames_rx),
@@ -560,7 +946,7 @@ fn spawn_session(req: &TurnRequest<'_>, signature: String) -> Result<CliSession,
 
 /// The spawn arguments. Deliberately close to the one-shot path's `build_args`. The
 /// only real differences are the stdin input format and how the session is named.
-fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
+fn spawn_args(launch: &LaunchConfig, session_id: &str, session_is_new: bool) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         // Messages arrive on stdin for the life of the process rather than as a
@@ -570,11 +956,11 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--model".to_string(),
-        req.model.to_string(),
+        launch.model.clone(),
         // Same per-turn effort as the one-shot path. Without it a persistent
         // turn would run at the CLI's own default instead of Juno's.
         "--effort".to_string(),
-        req.effort.to_string(),
+        launch.effort.clone(),
         "--disallowedTools".to_string(),
         WAKE_TOOLS.to_string(),
     ];
@@ -582,7 +968,7 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
     // Raw streaming events, as on the one-shot path. Without them a persistent
     // turn delivers each text block whole, once the model has finished it, so
     // speech cannot start until the whole first block exists.
-    if req.include_partial_messages {
+    if launch.include_partial_messages {
         args.push(super::claude_cli::PARTIAL_MESSAGES_FLAG.to_string());
     }
 
@@ -592,15 +978,15 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
     // Same extra case as `build_args`: with no MCP server there is nothing
     // to answer a permission prompt, so connectors must not load into a
     // spawn that falls back to --dangerously-skip-permissions.
-    if !req.load_account_mcp || (req.ask_before_send && req.mcp_config.is_none()) {
+    if !launch.load_account_mcp || (launch.ask_before_send && launch.mcp_config.is_none()) {
         args.push("--strict-mcp-config".to_string());
     }
 
     // Permission posture (LAC-4058): same rule as the one-shot path's
     // `build_args`, through the same seam.
     args.extend(super::cli_approval::permission_args(
-        req.ask_before_send,
-        req.mcp_config.is_some(),
+        launch.ask_before_send,
+        launch.mcp_config.is_some(),
     ));
 
     // A fresh id is pinned; one that already exists must be resumed. Getting this
@@ -609,23 +995,23 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
     // transcript to disk, so the one-shot path can `--resume` this exact id if the
     // process dies. `--no-session-persistence` would remove that safety net and must
     // never be passed here.
-    if req.session_is_new {
+    if session_is_new {
         args.push("--session-id".to_string());
     } else {
         args.push("--resume".to_string());
     }
-    args.push(req.session_id.to_string());
+    args.push(session_id.to_string());
 
-    if let Some(mcp_path) = req.mcp_config {
+    if let Some(mcp_path) = launch.mcp_config.as_ref() {
         args.push("--mcp-config".to_string());
         args.push(mcp_path.to_string_lossy().into_owned());
         args.push("--append-system-prompt".to_string());
-        args.push(req.mcp_guidance.to_string());
+        args.push(launch.mcp_guidance.to_string());
     }
 
-    if let Some(prompt) = req.system_prompt {
+    if let Some(prompt) = launch.system_prompt.as_ref() {
         args.push("--system-prompt".to_string());
-        args.push(prompt.to_string());
+        args.push(prompt.clone());
     }
 
     args
@@ -636,11 +1022,31 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
 /// Emits the same Tauri streaming events as the one-shot path. Returns
 /// [`TurnOutcome::Unavailable`], having emitted nothing, whenever a persistent
 /// session could not be used — the caller then runs the turn the old way.
-pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
-    let Some((session, warm)) = acquire(&req).await else {
-        return Ok(TurnOutcome::Unavailable);
-    };
+pub async fn run_turn(req: TurnRequest<'_>) -> TurnResult {
+    let acquired = acquire(&req).await;
 
+    // Keep a spare ready for the next new conversation, whatever happened here:
+    // this turn's configuration is the best guess at the next one's.
+    schedule_spare(req.app_handle, req.launch.clone(), SPARE_REFILL_DELAY);
+
+    let Some((session, origin)) = acquired else {
+        return TurnResult {
+            session_id: req.session_id.to_string(),
+            outcome: Ok(TurnOutcome::Unavailable),
+        };
+    };
+    TurnResult {
+        session_id: session.session_id.clone(),
+        outcome: run_in_session(&req, session, origin).await,
+    }
+}
+
+/// [`run_turn`], once there is a process to run it in.
+async fn run_in_session(
+    req: &TurnRequest<'_>,
+    session: Arc<CliSession>,
+    origin: Origin,
+) -> Result<TurnOutcome, AgentError> {
     // Locking the inbox is what serializes turns: one at a time per process, which
     // is also the only order the CLI itself will run them in.
     let mut inbox = session.inbox.lock().await;
@@ -689,17 +1095,10 @@ pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
     session.touch();
     // A cold process pays its whole boot before the first token; a warm one
     // does not. The timing line says which, so the two are never averaged.
-    crate::turn_timing::note_llm(
-        if warm {
-            "claude_cli/persistent-warm"
-        } else {
-            "claude_cli/persistent-cold"
-        },
-        req.model,
-    );
+    crate::turn_timing::note_llm(origin.timing_label(), &req.launch.model);
     crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
 
-    let outcome = stream_turn(&session, &mut inbox, &req, &command_uuid).await;
+    let outcome = stream_turn(&session, &mut inbox, req, &command_uuid).await;
     session.touch();
     drop(inbox);
 
@@ -1232,6 +1631,178 @@ mod tests {
                 true
             )
         );
+    }
+
+    fn launch(model: &str) -> LaunchConfig {
+        LaunchConfig {
+            binary: PathBuf::from("/usr/local/bin/claude"),
+            model: model.to_string(),
+            effort: "high".to_string(),
+            include_partial_messages: true,
+            system_prompt: Some("be Juno".to_string()),
+            mcp_config: Some(PathBuf::from("/tmp/juno-mcp-1.json")),
+            mcp_guidance: "use the computer tool",
+            load_account_mcp: true,
+            ask_before_send: true,
+        }
+    }
+
+    /// A session around a real child process, alive (`sleep`) or already
+    /// exited (`true`, reaped), without any pipes behind it.
+    async fn fake_session(signature: &str, exited: bool) -> Arc<CliSession> {
+        let mut command = if exited {
+            tokio::process::Command::new("/usr/bin/true")
+        } else {
+            let mut sleep = tokio::process::Command::new("/bin/sleep");
+            sleep.arg("30");
+            sleep
+        };
+        let mut child = command
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn test child");
+        if exited {
+            child.wait().await.expect("reap test child");
+        }
+        let (to_child, _outbox) = mpsc::unbounded_channel();
+        let (_frames, inbox) = mpsc::unbounded_channel();
+        Arc::new(CliSession {
+            session_id: "spare-session".to_string(),
+            signature: signature.to_string(),
+            to_child,
+            inbox: TokioMutex::new(inbox),
+            child: std::sync::Mutex::new(child),
+            last_used: AtomicU64::new(now_secs()),
+        })
+    }
+
+    #[test]
+    fn the_fingerprint_covers_everything_a_process_is_born_with() {
+        let base = launch("sonnet");
+        assert_eq!(signature_of(&base), signature_of(&base.clone()));
+        let variants = [
+            LaunchConfig {
+                model: "opus".to_string(),
+                ..base.clone()
+            },
+            LaunchConfig {
+                effort: "low".to_string(),
+                ..base.clone()
+            },
+            LaunchConfig {
+                include_partial_messages: false,
+                ..base.clone()
+            },
+            LaunchConfig {
+                system_prompt: Some("other".to_string()),
+                ..base.clone()
+            },
+            LaunchConfig {
+                mcp_config: None,
+                ..base.clone()
+            },
+            LaunchConfig {
+                load_account_mcp: false,
+                ..base.clone()
+            },
+            LaunchConfig {
+                ask_before_send: false,
+                ..base.clone()
+            },
+            LaunchConfig {
+                binary: PathBuf::from("/opt/homebrew/bin/claude"),
+                ..base.clone()
+            },
+        ];
+        for variant in variants {
+            assert_ne!(signature_of(&base), signature_of(&variant), "{variant:?}");
+        }
+    }
+
+    #[test]
+    fn a_spare_is_pinned_to_a_fresh_session_and_born_like_a_turn() {
+        let config = launch("sonnet");
+        let spare = spawn_args(&config, "fresh-id", true);
+        // Adoptable by any new conversation: a fresh id, never a resume.
+        let pin = spare
+            .iter()
+            .position(|a| a == "--session-id")
+            .expect("pinned with --session-id");
+        assert_eq!(spare[pin + 1], "fresh-id");
+        assert!(!spare.iter().any(|a| a == "--resume"));
+        // Born with the turn's prompt, MCP wiring and wake-tool lockout.
+        for flag in ["--mcp-config", "--append-system-prompt", "--system-prompt"] {
+            assert!(spare.iter().any(|a| a == flag), "missing {flag}");
+        }
+        assert!(spare
+            .windows(2)
+            .any(|w| w[0] == "--disallowedTools" && w[1] == WAKE_TOOLS));
+    }
+
+    #[test]
+    fn spare_retries_back_off_and_then_stop() {
+        assert_eq!(spare_retry_delay(0), Some(Duration::ZERO));
+        let first = spare_retry_delay(1).expect("retries after one failure");
+        let second = spare_retry_delay(2).expect("retries after two failures");
+        assert!(first > Duration::ZERO && second > first);
+        assert_eq!(spare_retry_delay(MAX_SPARE_FAILURES), None);
+        assert_eq!(spare_retry_delay(MAX_SPARE_FAILURES + 5), None);
+
+        let now = Instant::now();
+        let mut state = SpareState::default();
+        assert!(state.may_spawn(now));
+        state.record_failure(now);
+        assert!(!state.may_spawn(now), "no immediate retry after a failure");
+        assert!(state.may_spawn(now + first));
+        for _ in 1..MAX_SPARE_FAILURES {
+            state.record_failure(now);
+        }
+        assert!(!state.may_spawn(now + Duration::from_secs(3600)), "gave up");
+        state.spawning = true;
+        state.failures = 0;
+        state.retry_after = None;
+        assert!(!state.may_spawn(now), "one spawn in flight at a time");
+    }
+
+    #[tokio::test]
+    async fn only_a_live_matching_spare_is_adopted() {
+        let config = launch("sonnet");
+        let signature = signature_of(&config);
+
+        // Live and matching: adopted, and adoption clears the failure count.
+        let mut state = SpareState {
+            slot: Some(fake_session(&signature, false).await),
+            failures: 2,
+            ..SpareState::default()
+        };
+        let adopted = state.take(&signature).expect("adopted");
+        assert_eq!(adopted.session_id, "spare-session");
+        assert!(state.slot.is_none());
+        assert_eq!(state.failures, 0);
+        adopted.kill();
+        // Nothing left to adopt.
+        assert!(state.take(&signature).is_none());
+
+        // Configured differently: not adopted, killed, and not a failure.
+        let other = fake_session(&signature_of(&launch("opus")), false).await;
+        state.slot = Some(Arc::clone(&other));
+        assert!(state.take(&signature).is_none());
+        assert!(state.slot.is_none());
+        assert_eq!(state.failures, 0);
+
+        // Exited on its own: not adopted, and counted.
+        state.slot = Some(fake_session(&signature, true).await);
+        assert!(state.take(&signature).is_none());
+        assert_eq!(state.failures, 1);
+        assert!(state.retry_after.is_some());
+    }
+
+    #[test]
+    fn spare_turns_are_labelled_apart_from_cold_and_warm() {
+        let labels = [Origin::Warm, Origin::Spare, Origin::Cold].map(Origin::timing_label);
+        assert_eq!(labels[1], "claude_cli/persistent-spare");
+        assert_ne!(labels[0], labels[1]);
+        assert_ne!(labels[1], labels[2]);
     }
 
     #[test]
