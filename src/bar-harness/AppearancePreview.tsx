@@ -30,14 +30,37 @@
  * being re-centred on every resize), and `dock=low` to park the fake window
  * in the bottom half of the display before the bar mounts (looks that grow
  * upward when docked low can then be seen doing so).
+ *
+ * A look on the steady frame (the Pill, see `lib/steadyFrame.ts`) never
+ * resizes its window, so the preview frames the strip the look grows within
+ * rather than the window: the strip is centred and fitted, and the shape grows
+ * from its docked edge inside it, as on hardware. The Pill is docked in a
+ * centre well here, so it grows evenly from the middle of the tile.
  */
 
-import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { emit } from "@tauri-apps/api/event";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import { BarHost } from "@/components/bar/BarHost";
 import { appearanceEntry } from "@/components/bar/appearanceCatalog";
-import { harness, installBarHarnessTauri, setPreviewAppearance, setPreviewTheme } from "./barHarnessTauri";
+import { contentRect, getSteady, subscribeSteady } from "@/lib/steadyFrame";
+import {
+  BAR_WINDOW_LABEL,
+  harness,
+  installBarHarnessTauri,
+  setPreviewAppearance,
+  setPreviewTheme,
+} from "./barHarnessTauri";
 
 // The sentence the preview "dictates". Short enough to fit every look, long
 // enough to show words arriving.
@@ -645,6 +668,16 @@ export default function AppearancePreview() {
       const { monitor, frame } = harness.snapshot();
       harness.setFrame({ y: Math.round(monitor.height * 0.8) - frame.height });
     }
+    // The Pill places itself from the well it was left in; leave it in a
+    // centre one (top, or bottom with `dock=low`) so the tile shows it growing
+    // evenly from the middle.
+    if (appearance === UI.BAR_APPEARANCES_FLOATING) {
+      const { monitor } = harness.snapshot();
+      harness.setSavedPosition({
+        x: Math.round(monitor.width / 2),
+        y: dockLow ? monitor.height : 0,
+      });
+    }
     document.documentElement.style.background = background ?? "transparent";
     document.body.style.background = background ?? "transparent";
     setReady(true);
@@ -772,6 +805,9 @@ export default function AppearancePreview() {
 
   const { frame, driven } = useHarnessWindow();
   const { ref: naturalRef, size: natural } = useNaturalSize();
+  const subscribeLook = useCallback((fn: () => void) => subscribeSteady(BAR_WINDOW_LABEL, fn), []);
+  const readLook = useCallback(() => getSteady(BAR_WINDOW_LABEL), []);
+  const steady = useSyncExternalStore(subscribeLook, readLook, readLook);
 
   // Tell the framing window once the bar has painted at a real size. Two
   // frames later, not at once: a WebGL canvas has a size before it has drawn
@@ -805,7 +841,7 @@ export default function AppearancePreview() {
   const box = driven ? { width: frame.width, height: frame.height } : natural;
   // Pinned to the frame, the window is never shrunk to fit: a scaled box
   // would move its anchor, which is the very thing `pin=frame` shows.
-  const scale =
+  let scale =
     !pinFrame && box.width > 0 && box.height > 0
       ? Math.min(1, viewport.w / box.width, viewport.h / box.height)
       : 1;
@@ -816,7 +852,17 @@ export default function AppearancePreview() {
   // that the box follows the x/y the bar asked for, so the window moves on the
   // stage exactly as the OS would move it.
   const originRef = useRef<{ dx: number; dy: number } | null>(null);
-  if (pinFrame && driven) {
+  // A steady look: frame the strip it grows within, never the window, which is
+  // sized for its largest state and mostly transparent. The strip is fixed, so
+  // nothing here moves when the look changes state.
+  const stage =
+    driven && steady?.layout ? contentRect(steady.layout, steady.spec.stage) : null;
+  if (stage) {
+    const fit = Math.min(1, viewport.w / stage.width, viewport.h / stage.height);
+    scale = fit;
+    left = (viewport.w - stage.width * fit) / 2 - stage.x * fit;
+    top = (viewport.h - stage.height * fit) / 2 - stage.y * fit;
+  } else if (pinFrame && driven) {
     if (!originRef.current) {
       const seatTop = dockLow ? viewport.h * 0.82 - box.height : viewport.h * 0.18;
       originRef.current = { dx: left - frame.x, dy: seatTop - frame.y };

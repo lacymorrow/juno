@@ -71,6 +71,11 @@ interface HarnessState {
    * (the app bar, the orbs) are laid out at their natural size instead.
    */
   driven: boolean;
+  /**
+   * What `get_bar_position` answers: the well the bar was "left in" last
+   * launch. Null is a fresh install, which lands top-right.
+   */
+  savedPosition: { x: number; y: number } | null;
 }
 
 // One monitor at the origin. Physical == logical at scaleFactor 1, which keeps
@@ -83,6 +88,7 @@ const DEFAULT_STATE: HarnessState = {
   cursor: { x: -1000, y: -1000 },
   freezeAutoResize: false,
   driven: false,
+  savedPosition: null,
 };
 
 let state: HarnessState = DEFAULT_STATE;
@@ -135,6 +141,9 @@ export const harness = {
   },
   setFreezeAutoResize(freeze: boolean): void {
     commit({ ...state, freezeAutoResize: freeze });
+  },
+  setSavedPosition(position: { x: number; y: number } | null): void {
+    commit({ ...state, savedPosition: position });
   },
   reset(): void {
     commit(DEFAULT_STATE);
@@ -257,7 +266,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     case COMMANDS.STT_MODELS_GET_LIVE_PARTIAL_TRANSCRIPTION:
       return true;
     case COMMANDS.BAR_GET_BAR_POSITION:
-      return null;
+      return state.savedPosition;
     case COMMANDS.TRIGGERS_GET_TRIGGERS:
       return [];
     case COMMANDS.AGENT_SESSIONS_LIST_AGENT_SESSIONS:
