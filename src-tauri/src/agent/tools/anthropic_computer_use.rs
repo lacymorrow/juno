@@ -13,6 +13,7 @@ use crate::state::AgentCursorState;
 use crate::utils::coordinate_validation::{
     validate_coordinate_pair, validate_coordinate_parameter, CoordinateValidationError,
 };
+use computer_use_ai_sdk::window_target::PinnedWindow;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -887,6 +888,25 @@ fn is_interactive_ax_role(role: &str) -> bool {
     )
 }
 
+/// The process and window a click at a screen point is for: the named window
+/// when there is one, otherwise the topmost window under the point that is not
+/// Juno's own.
+fn click_target(x: f64, y: f64, window_pin: Option<PinnedWindow>) -> Option<(i32, Option<u32>)> {
+    if let Some(pin) = window_pin {
+        return Some((pin.pid, Some(pin.window_id)));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        computer_use_ai_sdk::platforms::macos::display::get_window_at_screen_point(x, y)
+            .map(|(pid, id)| (pid, Some(id)))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (x, y);
+        None
+    }
+}
+
 /// Attempt an AX-grounded click at the given screen coordinates.
 ///
 /// Performs a fast native hit-test (~1-5ms) via `AXUIElementCopyElementAtPosition`.
@@ -901,19 +921,39 @@ fn try_ax_grounded_click(
     screen_x: f64,
     screen_y: f64,
     kind: AxClickKind,
+    window_pin: Option<PinnedWindow>,
 ) -> AxGroundingResult {
     let state = app_handle.state::<AppState>();
-
-    let element = match state.desktop.element_at_position(screen_x, screen_y) {
-        Some(el) => el,
-        None => {
-            return AxGroundingResult {
-                used_ax_click: false,
-                role: None,
-                label: None,
-            };
-        }
+    let not_used = AxGroundingResult {
+        used_ax_click: false,
+        role: None,
+        label: None,
     };
+
+    // Hit-test inside the app the click is for, not the frontmost app. The
+    // frontmost app is the person's (or Juno itself) and in background mode is
+    // by design not the target, so a frontmost-app hit-test pressed buttons in
+    // the wrong app whenever its window happened to cover the point.
+    let Some((target_pid, _)) = click_target(screen_x, screen_y, window_pin) else {
+        return not_used;
+    };
+    let Some(element) = state
+        .desktop
+        .element_at_position_in_app(target_pid, screen_x, screen_y)
+    else {
+        return not_used;
+    };
+    let owner = computer_use_ai_sdk::ax_text::element_owner(&element);
+    let own_pid = std::process::id() as i32;
+    if !ax_click_element_ok(target_pid, window_pin.map(|p| p.window_id), owner, own_pid) {
+        tracing::debug!(
+            "AX grounding: element owner {:?} is not the click target (pid {}, window {:?}); skipping AXPress",
+            owner,
+            target_pid,
+            window_pin.map(|p| p.window_id)
+        );
+        return not_used;
+    }
 
     let attrs = element.attributes();
     let role = attrs.role.clone();
@@ -943,6 +983,9 @@ fn try_ax_grounded_click(
 
     match result {
         Ok(()) => {
+            // Keystrokes that follow carry no coordinate, so remember where this
+            // click went; otherwise a later `type` has no target in background mode.
+            computer_use_ai_sdk::background::remember_target_window(target_pid, owner.1);
             info!(
                 "✨ AX grounded click ({:?}): {} '{}' at ({:.0}, {:.0})",
                 kind,
@@ -972,40 +1015,6 @@ fn try_ax_grounded_click(
                 role: Some(role),
                 label,
             }
-        }
-    }
-}
-
-/// Try to type text directly into the currently focused AX element.
-///
-/// Fetches the system-wide focused element and calls `type_text()` on it, which
-/// first tries `kAXValueAttribute` (no cursor, no clipboard) and falls back to
-/// clipboard paste if that fails. Returns true if AX typing succeeded.
-///
-/// On any failure (no permissions, no focused element, element rejects AXValue),
-/// returns false so the caller can fall back to global keyboard simulation.
-fn try_ax_type_focused(app_handle: &tauri::AppHandle, text: &str) -> bool {
-    let state = app_handle.state::<AppState>();
-    match state.desktop.focused_element() {
-        Ok(element) => match element.type_text(text) {
-            Ok(()) => {
-                info!(
-                    "✨ AX type: {} chars typed into focused element via AXValue",
-                    text.chars().count()
-                );
-                true
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "AX type failed on focused element: {} — falling back to global keyboard",
-                    e
-                );
-                false
-            }
-        },
-        Err(e) => {
-            tracing::debug!("Could not get focused element for AX type: {}", e);
-            false
         }
     }
 }
@@ -1051,11 +1060,19 @@ async fn run_background_first<F>(
     app_handle: &tauri::AppHandle,
     action: &str,
     target_app: Option<&str>,
+    window_pin: Option<PinnedWindow>,
     attempt: F,
 ) -> Result<computer_use_ai_sdk::InputOutcome, String>
 where
     F: Fn(bool) -> Result<Option<computer_use_ai_sdk::InputOutcome>, String>,
 {
+    // The pin is thread-local and the attempt runs synchronously, so pinning
+    // around each call (never across an await) routes exactly that attempt.
+    let attempt = |allow_physical: bool| {
+        let _pin = computer_use_ai_sdk::window_target::pin(window_pin);
+        attempt(allow_physical)
+    };
+
     use crate::input_control::{commands::describe_request, request_physical_cursor};
 
     // Every input step funnels through here, so this is the one place that has
@@ -1113,7 +1130,221 @@ where
 fn with_input_tier(mut response: Value, outcome: &computer_use_ai_sdk::InputOutcome) -> Value {
     response["input_tier"] = json!(outcome.tier.as_str());
     response["input_method"] = json!(outcome.method);
+    // True when the step took the person's own pointer or keyboard focus, so it
+    // could not be done in the background. Always present, so it is visible.
+    response["foreground"] = json!(outcome.tier.takes_physical_cursor());
     response
+}
+
+/// Add who an input step reached to a tool response.
+fn with_target(mut response: Value, target: &computer_use_ai_sdk::ax_text::TargetInfo) -> Value {
+    response["target"] = json!({
+        "app": target.app,
+        "bundle_id": target.bundle_id,
+        "pid": target.pid,
+        "window_id": target.window_id,
+        "window_title": target.window_title,
+    });
+    response
+}
+
+/// The window an input action named with its optional `window` parameter.
+#[derive(Debug, Clone)]
+struct NamedWindow {
+    pid: i32,
+    id: u32,
+}
+
+/// Resolve the optional `window` parameter to an on-screen window.
+///
+/// Absent means no window was named and nothing changes. A window that cannot
+/// be found is an error the agent sees, never a silent fall back to "whatever
+/// is on top", which is the failure the parameter exists to prevent.
+fn resolve_named_window(input: &Value) -> Result<Option<NamedWindow>, String> {
+    let Some(selector) = computer_use_ai_sdk::window_target::WindowSelector::from_input(input)?
+    else {
+        return Ok(None);
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let records = computer_use_ai_sdk::platforms::macos::display::list_window_records();
+        let own_pid = std::process::id() as i32;
+        let window =
+            computer_use_ai_sdk::window_target::select_window(&records, &selector, own_pid)?;
+        Ok(Some(NamedWindow {
+            pid: window.pid,
+            id: window.id,
+        }))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = selector;
+        Err("Window targeting is only available on macOS".to_string())
+    }
+}
+
+/// Which app (and window) a `type` should land in, before anything is written.
+///
+/// Background mode: the named window, else the app and window the agent last
+/// acted on. Foreground mode: the frontmost app, since that is where the
+/// person's keyboard goes. Never Juno: an agent typing into Juno's own chat is
+/// the bug this exists to rule out.
+fn typing_target(
+    named: Option<&NamedWindow>,
+    background: bool,
+    remembered: Option<computer_use_ai_sdk::background::InputTarget>,
+    frontmost_pid: Option<i32>,
+    own_pid: i32,
+) -> Option<computer_use_ai_sdk::ax_text::TypeTarget> {
+    use computer_use_ai_sdk::ax_text::TypeTarget;
+    let target = match named {
+        Some(w) => Some(TypeTarget {
+            pid: w.pid,
+            window_id: Some(w.id),
+        }),
+        None if background => remembered.map(|t| TypeTarget {
+            pid: t.pid,
+            window_id: t.window_id,
+        }),
+        None => frontmost_pid.map(|pid| TypeTarget {
+            pid,
+            window_id: None,
+        }),
+    };
+    target.filter(|t| t.pid > 0 && t.pid != own_pid)
+}
+
+/// Who a keyboard step reached, read back after it ran: the window-aware
+/// background target for a process-targeted step, the frontmost app for a
+/// foreground one.
+fn keyboard_reach(
+    outcome: &computer_use_ai_sdk::InputOutcome,
+    window_pin: Option<PinnedWindow>,
+) -> (Option<i32>, Option<u32>) {
+    use computer_use_ai_sdk::InputTier;
+    match outcome.tier {
+        InputTier::ProcessTargeted | InputTier::Accessibility => {
+            let _pin = computer_use_ai_sdk::window_target::pin(window_pin);
+            computer_use_ai_sdk::background::input_target()
+                .map(|t| (Some(t.pid), t.window_id))
+                .unwrap_or((None, None))
+        }
+        InputTier::PhysicalCursor => (frontmost_app_pid(), None),
+    }
+}
+
+/// The pid of the app the person is using, by NSWorkspace's reckoning.
+#[cfg(target_os = "macos")]
+fn frontmost_app_pid() -> Option<i32> {
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let shared_workspace: *mut objc::runtime::Object =
+            msg_send![class!(NSWorkspace), sharedWorkspace];
+        if shared_workspace.is_null() {
+            return None;
+        }
+        let frontmost_app: *mut objc::runtime::Object =
+            msg_send![shared_workspace, frontmostApplication];
+        if frontmost_app.is_null() {
+            return None;
+        }
+        let pid: i32 = msg_send![frontmost_app, processIdentifier];
+        (pid > 0).then_some(pid)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn frontmost_app_pid() -> Option<i32> {
+    None
+}
+
+/// Why keyboard input must not be sent, if it must not.
+///
+/// Keystrokes land in the background target when there is one, otherwise in
+/// the frontmost app. Two outcomes are refused rather than sent: landing in
+/// Juno itself (Return in Juno's chat sends a message the person never wrote),
+/// and landing somewhere other than the window the agent named.
+///
+/// A modified shortcut (cmd+space, ctrl+tab) is exempt from the Juno check:
+/// the system acts on those whichever app is in front.
+fn keyboard_landing_refusal(
+    named: Option<&NamedWindow>,
+    background_target: Option<computer_use_ai_sdk::background::InputTarget>,
+    frontmost_pid: Option<i32>,
+    own_pid: i32,
+    system_shortcut: bool,
+) -> Option<String> {
+    let landing = background_target.map(|t| t.pid).or(frontmost_pid);
+    if landing == Some(own_pid) && !system_shortcut {
+        return Some(
+            "Keyboard input would go to Juno itself. Click into the app you want first, \
+             or pass 'window' to name it."
+                .to_string(),
+        );
+    }
+    if let Some(named) = named {
+        if landing.is_some() && landing != Some(named.pid) {
+            return Some(format!(
+                "Window {} cannot receive keystrokes in the foreground without being brought \
+                 forward; turn on background mode or click into it first.",
+                named.id
+            ));
+        }
+    }
+    None
+}
+
+/// `keyboard_landing_refusal` against the live state.
+fn keyboard_refusal_now(
+    named: Option<&NamedWindow>,
+    window_pin: Option<PinnedWindow>,
+    system_shortcut: bool,
+) -> Option<String> {
+    let background_target = {
+        let _pin = computer_use_ai_sdk::window_target::pin(window_pin);
+        computer_use_ai_sdk::background::input_target()
+    };
+    keyboard_landing_refusal(
+        named,
+        background_target,
+        frontmost_app_pid(),
+        std::process::id() as i32,
+        system_shortcut,
+    )
+}
+
+/// A key combination with a command, control or option modifier.
+fn is_modified_shortcut(key: &str) -> bool {
+    let lower = key.to_lowercase();
+    let parts: Vec<&str> = lower.split('+').map(str::trim).collect();
+    parts.len() > 1
+        && parts[..parts.len() - 1].iter().any(|p| {
+            matches!(
+                *p,
+                "cmd" | "command" | "super" | "meta" | "ctrl" | "control" | "alt" | "option"
+            )
+        })
+}
+
+/// Whether an AX-grounded click may act on the element a hit-test found.
+///
+/// The element must belong to the app the click is for, never to Juno, and,
+/// when a window was named, to that window.
+fn ax_click_element_ok(
+    target_pid: i32,
+    named_window: Option<u32>,
+    element_owner: (Option<i32>, Option<u32>),
+    own_pid: i32,
+) -> bool {
+    let (pid, window) = element_owner;
+    if pid != Some(target_pid) || target_pid == own_pid {
+        return false;
+    }
+    match named_window {
+        Some(expected) => window == Some(expected),
+        None => true,
+    }
 }
 
 /// Show the on-screen click marker for an action that no longer routes through
@@ -1804,6 +2035,22 @@ pub async fn execute_computer_tool(
     //    BEFORE the action fires. Fires only for coordinate-based actions.
     emit_computer_use_preview(app_handle, action, &input);
 
+    // 5. Optional `window`: pin input to one window so stacking cannot redirect
+    //    it. Accepted the same way on both request shapes: the toolset's member
+    //    input reaches here unchanged, so this one read covers both.
+    let named_window = if is_ui_modifying_action(action) {
+        match resolve_named_window(&input) {
+            Ok(window) => window,
+            Err(message) => return Ok(create_anthropic_error_response(message)),
+        }
+    } else {
+        None
+    };
+    let window_pin = named_window.as_ref().map(|w| PinnedWindow {
+        pid: w.pid,
+        window_id: w.id,
+    });
+
     // Execute action
     let execution_start = std::time::Instant::now();
     let result = match action {
@@ -1888,7 +2135,13 @@ pub async fn execute_computer_tool(
                     // If it succeeds we skip the coordinate click. Modifier keys force coordinate
                     // path because AXPress doesn't accept modifiers.
                     let ax_result = if modifier.is_none() {
-                        try_ax_grounded_click(app_handle, screen_x, screen_y, AxClickKind::Left)
+                        try_ax_grounded_click(
+                            app_handle,
+                            screen_x,
+                            screen_y,
+                            AxClickKind::Left,
+                            window_pin,
+                        )
                     } else {
                         AxGroundingResult {
                             used_ax_click: false,
@@ -1915,6 +2168,7 @@ pub async fn execute_computer_tool(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
+                                window_pin,
                                 |allow_physical| {
                                     state_manager.desktop.left_click_no_warp(
                                         screen_x,
@@ -1953,7 +2207,13 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     let ax_result = if modifier.is_none() {
-                        try_ax_grounded_click(app_handle, screen_x, screen_y, AxClickKind::Right)
+                        try_ax_grounded_click(
+                            app_handle,
+                            screen_x,
+                            screen_y,
+                            AxClickKind::Right,
+                            window_pin,
+                        )
                     } else {
                         AxGroundingResult {
                             used_ax_click: false,
@@ -1977,6 +2237,7 @@ pub async fn execute_computer_tool(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
+                                window_pin,
                                 |allow_physical| {
                                     state_manager.desktop.right_click_no_warp(
                                         screen_x,
@@ -2019,6 +2280,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.middle_click_no_warp(
                                     screen_x,
@@ -2045,7 +2307,13 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     let ax_result = if modifier.is_none() {
-                        try_ax_grounded_click(app_handle, screen_x, screen_y, AxClickKind::Double)
+                        try_ax_grounded_click(
+                            app_handle,
+                            screen_x,
+                            screen_y,
+                            AxClickKind::Double,
+                            window_pin,
+                        )
                     } else {
                         AxGroundingResult {
                             used_ax_click: false,
@@ -2069,6 +2337,7 @@ pub async fn execute_computer_tool(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
+                                window_pin,
                                 |allow_physical| {
                                     state_manager.desktop.double_click_no_warp(
                                         screen_x,
@@ -2112,6 +2381,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.triple_click_no_warp(
                                     screen_x,
@@ -2195,6 +2465,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.left_click_drag_no_warp(
                                     screen_start_x,
@@ -2230,7 +2501,8 @@ pub async fn execute_computer_tool(
                         Ok(json!({
                             "success": true,
                             "input_tier": computer_use_ai_sdk::InputTier::Accessibility.as_str(),
-                            "virtual_cursor_only": true
+                            "virtual_cursor_only": true,
+                            "foreground": false
                         }))
                     } else {
                         handle_anthropic_result!(crate::commands::mouse::mouse_move(
@@ -2263,6 +2535,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.left_mouse_down_no_warp(
                                     screen_x,
@@ -2292,6 +2565,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.left_mouse_up_no_warp(
                                     screen_x,
@@ -2343,6 +2617,13 @@ pub async fn execute_computer_tool(
                         }
                     };
 
+                    if let Some(refusal) = keyboard_refusal_now(
+                        named_window.as_ref(),
+                        window_pin,
+                        is_modified_shortcut(key),
+                    ) {
+                        return Ok(create_anthropic_error_response(refusal));
+                    }
                     emit_key_visualization(app_handle, key, None);
 
                     // Keyboard events posted to a process are only routed there
@@ -2355,6 +2636,7 @@ pub async fn execute_computer_tool(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
+                                window_pin,
                                 |allow_physical| {
                                     state_manager.desktop.press_key_no_warp(
                                         key,
@@ -2378,7 +2660,13 @@ pub async fn execute_computer_tool(
                         }
                     };
 
-                    Ok(with_input_tier(json!({ "success": true }), &outcome))
+                    let reached = keyboard_reach(&outcome, window_pin);
+                    let target =
+                        computer_use_ai_sdk::ax_text::describe_target(reached.0, reached.1);
+                    Ok(with_target(
+                        with_input_tier(json!({ "success": true }), &outcome),
+                        &target,
+                    ))
                 }
                 "hold_key" => {
                     // Support both 'key' and 'text' parameters for backward compatibility
@@ -2399,6 +2687,13 @@ pub async fn execute_computer_tool(
                         Err(message) => return Ok(create_anthropic_error_response(message)),
                     };
 
+                    if let Some(refusal) = keyboard_refusal_now(
+                        named_window.as_ref(),
+                        window_pin,
+                        is_modified_shortcut(key),
+                    ) {
+                        return Ok(create_anthropic_error_response(refusal));
+                    }
                     emit_key_visualization(
                         app_handle,
                         &format!("Hold: {}", key),
@@ -2409,6 +2704,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.hold_key_no_warp(
                                     key,
@@ -2420,7 +2716,13 @@ pub async fn execute_computer_tool(
                         .await
                     );
 
-                    Ok(with_input_tier(json!({ "success": true }), &outcome))
+                    let reached = keyboard_reach(&outcome, window_pin);
+                    let target =
+                        computer_use_ai_sdk::ax_text::describe_target(reached.0, reached.1);
+                    Ok(with_target(
+                        with_input_tier(json!({ "success": true }), &outcome),
+                        &target,
+                    ))
                 }
                 "type" => {
                     let text = match input["text"].as_str() {
@@ -2432,52 +2734,109 @@ pub async fn execute_computer_tool(
                         }
                     };
 
-                    // Try AX-based typing first: finds the focused element and sets AXValue
-                    // directly (no cursor movement, no clipboard). Falls back to global
-                    // keyboard simulation (clipboard paste) when AX isn't supported.
-                    let typed_via_ax = try_ax_type_focused(app_handle, text);
-                    let mut outcome = None;
-                    if !typed_via_ax {
-                        // Fallback is clipboard + Cmd+V. In background mode the
-                        // paste is posted to the process the agent is working on
-                        // after pointing input focus at it without raising it, so
-                        // it cannot land in whatever app the user is looking at.
-                        //
-                        // As with the click fallbacks: the 300 ms action-cooldown
-                        // floor already ran at the top of this function and does
-                        // NOT stack with the 500 ms cooldown here. The AX typing
-                        // path above takes neither.
-                        let _guard = state_manager.input_arbiter().acquire(session_id).await;
-                        let preview: String = text
-                            .chars()
-                            .take(
-                                crate::constants::ui::text_display::MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH,
+                    // Accessibility first, but only into the target app's own
+                    // focused field, only after it is checked against the target
+                    // process and window, and only counted when the text reads
+                    // back. See `computer_use_ai_sdk::ax_text` for why the old
+                    // system-wide-focus write reported success into Juno's chat.
+                    let background = computer_use_ai_sdk::background::is_background_mode();
+                    let remembered = {
+                        let _pin = computer_use_ai_sdk::window_target::pin(window_pin);
+                        computer_use_ai_sdk::background::input_target()
+                    };
+                    let ax_target = typing_target(
+                        named_window.as_ref(),
+                        background,
+                        remembered,
+                        frontmost_app_pid(),
+                        std::process::id() as i32,
+                    );
+                    let ax_attempt = match &ax_target {
+                        Some(target) => computer_use_ai_sdk::ax_text::type_verified(target, text),
+                        None => Err(computer_use_ai_sdk::ax_text::AxTypeSkip::NoTarget),
+                    };
+                    let (ax_report, ax_skipped) = match ax_attempt {
+                        Ok(report) => (Some(report), None),
+                        Err(skip) => {
+                            tracing::info!(
+                                "AX type skipped ({}): {:?}; using the process-targeted paste",
+                                skip.label(),
+                                skip
+                            );
+                            (None, Some(skip.label()))
+                        }
+                    };
+
+                    let (outcome, reached) = match &ax_report {
+                        Some(report) => {
+                            info!(
+                                "✨ AX type: {} chars verified in PID {} window {:?}",
+                                text.chars().count(),
+                                report.pid,
+                                report.window_id
+                            );
+                            // A following `key` (Return, say) must reach the same
+                            // window without being told again.
+                            computer_use_ai_sdk::background::remember_target_window(
+                                report.pid,
+                                report.window_id,
+                            );
+                            (
+                                computer_use_ai_sdk::InputOutcome::accessibility(report.method),
+                                (Some(report.pid), report.window_id),
                             )
-                            .collect();
-                        emit_key_visualization(app_handle, &format!("Type: {}", preview), None);
-                        outcome = Some(handle_anthropic_result!(
-                            run_background_first(
-                                app_handle,
-                                action,
-                                target_app.as_deref(),
-                                |allow_physical| {
-                                    state_manager
-                                        .desktop
-                                        .type_text_no_warp(text, allow_physical)
-                                },
-                            )
-                            .await
-                        ));
-                    }
+                        }
+                        None => {
+                            if let Some(refusal) =
+                                keyboard_refusal_now(named_window.as_ref(), window_pin, false)
+                            {
+                                return Ok(create_anthropic_error_response(refusal));
+                            }
+                            // Clipboard + Cmd+V posted to the target process, after
+                            // pointing input focus at it without raising it and
+                            // making the target window key inside its app.
+                            //
+                            // As with the click fallbacks: the 300 ms action-cooldown
+                            // floor already ran at the top of this function and does
+                            // NOT stack with the 500 ms cooldown here.
+                            let _guard = state_manager.input_arbiter().acquire(session_id).await;
+                            let preview: String = text
+                                .chars()
+                                .take(
+                                    crate::constants::ui::text_display::MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH,
+                                )
+                                .collect();
+                            emit_key_visualization(app_handle, &format!("Type: {}", preview), None);
+                            let outcome = handle_anthropic_result!(
+                                run_background_first(
+                                    app_handle,
+                                    action,
+                                    target_app.as_deref(),
+                                    window_pin,
+                                    |allow_physical| {
+                                        state_manager
+                                            .desktop
+                                            .type_text_no_warp(text, allow_physical)
+                                    },
+                                )
+                                .await
+                            );
+                            let reach = keyboard_reach(&outcome, window_pin);
+                            (outcome, reach)
+                        }
+                    };
 
                     let mut response = json!({
                         "success": true,
-                        "ax_grounded": typed_via_ax
+                        "ax_grounded": ax_report.is_some(),
                     });
-                    if let Some(outcome) = &outcome {
-                        response = with_input_tier(response, outcome);
+                    if let Some(reason) = ax_skipped {
+                        response["ax_skipped"] = json!(reason);
                     }
-                    Ok(response)
+                    response = with_input_tier(response, &outcome);
+                    let target =
+                        computer_use_ai_sdk::ax_text::describe_target(reached.0, reached.1);
+                    Ok(with_target(response, &target))
                 }
                 _ => unreachable!("Keyboard action already matched in outer pattern"),
             }
@@ -2526,6 +2885,7 @@ pub async fn execute_computer_tool(
                     app_handle,
                     action,
                     target_app.as_deref(),
+                    window_pin,
                     |allow_physical| {
                         state_manager.desktop.scroll_no_warp(
                             screen_x,
@@ -3086,6 +3446,10 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                     "type": "array",
                     "description": "The [x0, y0, x1, y1] bounding box for zoom action. Coordinates define the top-left and bottom-right corners of the region to inspect at full resolution.",
                     "items": {"type": "integer"}
+                },
+                "window": {
+                    "type": ["integer", "string"],
+                    "description": "Optional, for clicks, scrolls, key and type: the window to act on, by window id or title. Use it when several windows overlap, so the input reaches that window even when another is on top. Results report the window each action reached."
                 }
             },
             "required": ["action"]
@@ -3839,5 +4203,297 @@ mod descriptive_name_tests {
             get_descriptive_tool_name("hold_key", &json!({ "key": "shift", "duration_ms": 2 })),
             "computer/hold_key(shift, 2ms)"
         );
+    }
+}
+
+#[cfg(test)]
+mod input_targeting_tests {
+    use super::*;
+    use computer_use_ai_sdk::background::InputTarget;
+
+    const JUNO: i32 = 10;
+    const GHOSTTY: i32 = 20;
+    const EDITOR: i32 = 30;
+
+    /// This file's source, for tests that pin a check to the code it guards.
+    const SOURCE: &str = include_str!("anthropic_computer_use.rs");
+
+    /// The text of the `"type" => { ... }` keyboard arm.
+    fn type_arm() -> &'static str {
+        let start = SOURCE
+            .find("                \"type\" => {\n                    let text")
+            .expect("type arm present");
+        let rest = &SOURCE[start..];
+        let end = rest
+            .find("_ => unreachable!(\"Keyboard action already matched")
+            .expect("end of keyboard match");
+        &rest[..end]
+    }
+
+    #[test]
+    fn background_typing_targets_the_app_the_agent_acted_on_not_the_front_app() {
+        let target = typing_target(
+            None,
+            true,
+            Some(InputTarget {
+                pid: GHOSTTY,
+                window_id: Some(5),
+            }),
+            Some(JUNO),
+            JUNO,
+        );
+        assert_eq!(
+            target.map(|t| (t.pid, t.window_id)),
+            Some((GHOSTTY, Some(5)))
+        );
+    }
+
+    #[test]
+    fn a_named_window_wins_over_the_remembered_target() {
+        let named = NamedWindow { pid: EDITOR, id: 9 };
+        let target = typing_target(
+            Some(&named),
+            true,
+            Some(InputTarget {
+                pid: GHOSTTY,
+                window_id: Some(5),
+            }),
+            None,
+            JUNO,
+        );
+        assert_eq!(
+            target.map(|t| (t.pid, t.window_id)),
+            Some((EDITOR, Some(9)))
+        );
+    }
+
+    #[test]
+    fn juno_is_never_a_typing_target() {
+        // Foreground mode with Juno frontmost: the observed failure.
+        assert_eq!(typing_target(None, false, None, Some(JUNO), JUNO), None);
+        assert_eq!(
+            typing_target(
+                None,
+                true,
+                Some(InputTarget {
+                    pid: JUNO,
+                    window_id: None
+                }),
+                None,
+                JUNO
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn background_typing_with_nothing_targeted_has_no_ax_target() {
+        // Must not fall back to the frontmost app: that one is the person's.
+        assert_eq!(typing_target(None, true, None, Some(EDITOR), JUNO), None);
+    }
+
+    #[test]
+    fn ax_clicks_only_act_on_the_target_apps_element() {
+        assert!(ax_click_element_ok(
+            GHOSTTY,
+            None,
+            (Some(GHOSTTY), Some(3)),
+            JUNO
+        ));
+        assert!(!ax_click_element_ok(
+            GHOSTTY,
+            None,
+            (Some(JUNO), None),
+            JUNO
+        ));
+        assert!(!ax_click_element_ok(GHOSTTY, None, (None, None), JUNO));
+        assert!(!ax_click_element_ok(JUNO, None, (Some(JUNO), None), JUNO));
+        // A named window must match exactly; unknown is a mismatch.
+        assert!(ax_click_element_ok(
+            GHOSTTY,
+            Some(3),
+            (Some(GHOSTTY), Some(3)),
+            JUNO
+        ));
+        assert!(!ax_click_element_ok(
+            GHOSTTY,
+            Some(3),
+            (Some(GHOSTTY), Some(4)),
+            JUNO
+        ));
+        assert!(!ax_click_element_ok(
+            GHOSTTY,
+            Some(3),
+            (Some(GHOSTTY), None),
+            JUNO
+        ));
+    }
+
+    #[test]
+    fn foreground_flag_follows_the_tier() {
+        let bg = with_input_tier(
+            json!({}),
+            &computer_use_ai_sdk::InputOutcome::process_targeted("SkyLight/SLEventPostToPid"),
+        );
+        assert_eq!(bg["foreground"], json!(false));
+        assert_eq!(bg["input_tier"], json!("process_targeted"));
+        let fg = with_input_tier(
+            json!({}),
+            &computer_use_ai_sdk::InputOutcome::physical_cursor("HID"),
+        );
+        assert_eq!(fg["foreground"], json!(true));
+    }
+
+    #[test]
+    fn results_name_the_target_window() {
+        let response = with_target(
+            json!({ "success": true }),
+            &computer_use_ai_sdk::ax_text::TargetInfo {
+                app: Some("TextEdit".into()),
+                bundle_id: Some("com.apple.TextEdit".into()),
+                pid: Some(EDITOR),
+                window_id: Some(9),
+                window_title: Some("Untitled".into()),
+            },
+        );
+        assert_eq!(response["target"]["pid"], json!(EDITOR));
+        assert_eq!(response["target"]["window_id"], json!(9));
+        assert_eq!(response["target"]["window_title"], json!("Untitled"));
+        assert_eq!(response["target"]["app"], json!("TextEdit"));
+    }
+
+    #[test]
+    fn a_missing_window_param_changes_nothing() {
+        assert!(
+            resolve_named_window(&json!({ "action": "type", "text": "x" }))
+                .expect("no window is fine")
+                .is_none()
+        );
+        assert!(resolve_named_window(&json!({ "window": true })).is_err());
+    }
+
+    #[test]
+    fn the_window_param_survives_toolset_routing() {
+        let (name, input) = route_toolset_call(
+            "type",
+            Some(crate::constants::api::computer_use_api_types::COMPUTER_TOOLSET_NAME),
+            &json!({ "text": "ls", "window": "zsh: logs" }),
+        )
+        .expect("type is a toolset member");
+        assert_eq!(name, "computer");
+        assert_eq!(input["action"], json!("type"));
+        assert_eq!(input["window"], json!("zsh: logs"));
+    }
+
+    #[test]
+    fn the_legacy_schema_offers_window_as_optional() {
+        let tools = create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124));
+        let computer = tools
+            .iter()
+            .find(|t| t.name == "computer")
+            .expect("computer tool");
+        assert!(computer.input_schema["properties"]["window"].is_object());
+        assert_eq!(computer.input_schema["required"], json!(["action"]));
+    }
+
+    #[test]
+    fn plain_keys_and_typing_never_land_in_juno() {
+        // Juno frontmost, nothing targeted: Return would send Juno's chat.
+        assert!(keyboard_landing_refusal(None, None, Some(JUNO), JUNO, false).is_some());
+        // A background target elsewhere: fine even with Juno in front.
+        let elsewhere = Some(InputTarget {
+            pid: GHOSTTY,
+            window_id: None,
+        });
+        assert!(keyboard_landing_refusal(None, elsewhere, Some(JUNO), JUNO, false).is_none());
+        // System shortcuts work whoever is in front.
+        assert!(keyboard_landing_refusal(None, None, Some(JUNO), JUNO, true).is_none());
+    }
+
+    #[test]
+    fn keys_for_a_named_window_never_land_elsewhere() {
+        let named = NamedWindow { pid: EDITOR, id: 9 };
+        // Foreground mode: keys go to the frontmost app, not the named one.
+        assert!(keyboard_landing_refusal(Some(&named), None, Some(GHOSTTY), JUNO, false).is_some());
+        let pinned = Some(InputTarget {
+            pid: EDITOR,
+            window_id: Some(9),
+        });
+        assert!(
+            keyboard_landing_refusal(Some(&named), pinned, Some(GHOSTTY), JUNO, false).is_none()
+        );
+    }
+
+    #[test]
+    fn modified_shortcuts_are_recognised() {
+        assert!(is_modified_shortcut("cmd+space"));
+        assert!(is_modified_shortcut("ctrl+shift+tab"));
+        assert!(is_modified_shortcut("cmd+-"));
+        assert!(!is_modified_shortcut("Return"));
+        assert!(!is_modified_shortcut("shift+a"));
+        assert!(!is_modified_shortcut("+"));
+    }
+
+    #[test]
+    fn every_keyboard_arm_checks_where_keys_will_land() {
+        let start = SOURCE
+            .find("        \"key\" | \"hold_key\" | \"type\" => {")
+            .expect("keyboard arm");
+        let rest = &SOURCE[start..];
+        let arm = &rest[..rest.find("        \"scroll\" => {").unwrap_or(rest.len())];
+        assert_eq!(arm.matches("keyboard_refusal_now(").count(), 3);
+    }
+
+    // --- the links that must not be cut (dead-control class) ---
+
+    #[test]
+    fn typing_never_writes_to_the_system_wide_focused_element() {
+        let arm = type_arm();
+        assert!(
+            !arm.contains("focused_element()"),
+            "the type action must not use the system-wide focused element"
+        );
+        assert!(
+            arm.contains("ax_text::type_verified("),
+            "the AX path must go through the checked, read-back write"
+        );
+    }
+
+    #[test]
+    fn ax_typing_success_comes_only_from_a_verified_report() {
+        let arm = type_arm();
+        assert!(arm.contains("\"ax_grounded\": ax_report.is_some()"));
+        assert!(arm.contains("Ok(report) => (Some(report), None)"));
+    }
+
+    #[test]
+    fn every_type_result_carries_tier_method_and_target() {
+        let arm = type_arm();
+        assert!(arm.contains("with_input_tier(response, &outcome)"));
+        assert!(arm.contains("with_target(response, &target)"));
+    }
+
+    #[test]
+    fn every_background_attempt_is_pinned_to_the_named_window() {
+        let definition = SOURCE
+            .find("async fn run_background_first<F>(")
+            .expect("definition");
+        let body = &SOURCE[definition..];
+        let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+        assert!(body.contains("window_target::pin(window_pin)"));
+
+        let calls: Vec<usize> = SOURCE
+            .match_indices("run_background_first(\n")
+            .map(|(i, _)| i)
+            .collect();
+        assert!(calls.len() >= 12, "found {} call sites", calls.len());
+        for i in calls {
+            let head: String = SOURCE[i..].chars().take(300).collect();
+            assert!(
+                head.contains("window_pin,"),
+                "a run_background_first call does not pass window_pin: {}",
+                head
+            );
+        }
     }
 }

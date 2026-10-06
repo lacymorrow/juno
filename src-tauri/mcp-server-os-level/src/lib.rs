@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use tracing::{error, info};
 
 // Make element module public
+pub mod ax_text;
 pub mod background;
 pub mod element;
 mod errors;
@@ -27,6 +28,7 @@ pub mod platforms;
 mod selector;
 #[cfg(test)]
 mod tests;
+pub mod window_target;
 
 // Now UIElement is publicly accessible via computer_use_ai_sdk::element::UIElement
 // We still re-export it for convenience
@@ -429,6 +431,11 @@ impl Desktop {
     /// Uses native platform hit-testing (~1-5ms on macOS).
     pub fn element_at_position(&self, x: f64, y: f64) -> Option<UIElement> {
         self.engine.element_at_position(x, y)
+    }
+
+    /// Hit-test inside the windows of application `pid`.
+    pub fn element_at_position_in_app(&self, pid: i32, x: f64, y: f64) -> Option<UIElement> {
+        self.engine.element_at_position_in_app(pid, x, y)
     }
 
     /// Get the currently focused element

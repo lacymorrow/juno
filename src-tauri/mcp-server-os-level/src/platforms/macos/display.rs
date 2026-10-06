@@ -419,29 +419,30 @@ pub fn list_visible_windows() -> Result<Vec<VisibleWindowInfo>, AutomationError>
     Ok(windows)
 }
 
-/// Find the PID of the process owning the frontmost visible window at the given
-/// screen coordinates. Uses `CGWindowListCopyWindowInfo` (front-to-back order).
+/// Every on-screen window with its id, owner pid, title, bounds and layer,
+/// front-to-back. The raw material for targeting a specific window.
 ///
-/// Returns `None` if no user-space window covers the point, or if the call fails
-/// (e.g., screen recording permission not granted).
-pub(crate) fn get_pid_at_screen_point(x: f64, y: f64) -> Option<i32> {
+/// Titles need Screen Recording permission; without it they are `None` and only
+/// id selection works. Returns an empty list when the call fails.
+pub fn list_window_records() -> Vec<crate::window_target::WindowRecord> {
     use core_foundation::base::TCFType;
     use core_foundation::string::CFString;
     use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex};
     use core_foundation_sys::base::{CFIndex, CFRelease};
     use core_foundation_sys::dictionary::{CFDictionaryGetValue, CFDictionaryRef};
+    use core_foundation_sys::string::CFStringRef;
     use std::os::raw::c_void;
 
     let option = CG_WINDOW_LIST_OPTION_ON_SCREEN_ONLY | CG_WINDOW_LIST_EXCLUDE_DESKTOP_ELEMENTS;
     let array_ref = unsafe { CGWindowListCopyWindowInfo(option, 0) };
     if array_ref.is_null() {
-        return None;
+        return Vec::new();
     }
 
     let count = unsafe { CFArrayGetCount(array_ref) };
-    let mut found_pid: Option<i32> = None;
+    let mut records = Vec::with_capacity(count.max(0) as usize);
 
-    'search: for i in 0..count {
+    for i in 0..count {
         unsafe {
             let item = CFArrayGetValueAtIndex(array_ref, i as CFIndex);
             if item.is_null() {
@@ -449,16 +450,27 @@ pub(crate) fn get_pid_at_screen_point(x: f64, y: f64) -> Option<i32> {
             }
             let dict = item as CFDictionaryRef;
 
-            // Skip system layers (menu bar, Dock, desktop)
-            let layer = match dict_get_i32(dict, "kCGWindowLayer") {
-                Some(l) => l,
-                None => continue,
-            };
-            if !(-1..20).contains(&layer) {
+            let (Some(layer), Some(pid), Some(number)) = (
+                dict_get_i32(dict, "kCGWindowLayer"),
+                dict_get_i32(dict, "kCGWindowOwnerPID"),
+                dict_get_i32(dict, "kCGWindowNumber"),
+            ) else {
                 continue;
-            }
+            };
+            let Ok(id) = u32::try_from(number) else {
+                continue;
+            };
 
-            // Read window bounds
+            let owner_key = CFString::new("kCGWindowOwnerName");
+            let owner_ptr =
+                CFDictionaryGetValue(dict, owner_key.as_concrete_TypeRef() as *const c_void);
+            let owner = cfstring_to_rust(owner_ptr as CFStringRef).unwrap_or_default();
+
+            let name_key = CFString::new("kCGWindowName");
+            let name_ptr =
+                CFDictionaryGetValue(dict, name_key.as_concrete_TypeRef() as *const c_void);
+            let title = cfstring_to_rust(name_ptr as CFStringRef);
+
             let bounds_key = CFString::new("kCGWindowBounds");
             let bounds_ptr =
                 CFDictionaryGetValue(dict, bounds_key.as_concrete_TypeRef() as *const c_void);
@@ -466,22 +478,38 @@ pub(crate) fn get_pid_at_screen_point(x: f64, y: f64) -> Option<i32> {
                 continue;
             }
             let bd = bounds_ptr as CFDictionaryRef;
-            let wx = dict_get_f64(bd, "X").unwrap_or(0.0);
-            let wy = dict_get_f64(bd, "Y").unwrap_or(0.0);
-            let ww = dict_get_f64(bd, "Width").unwrap_or(0.0);
-            let wh = dict_get_f64(bd, "Height").unwrap_or(0.0);
+            let bounds = (
+                dict_get_f64(bd, "X").unwrap_or(0.0),
+                dict_get_f64(bd, "Y").unwrap_or(0.0),
+                dict_get_f64(bd, "Width").unwrap_or(0.0),
+                dict_get_f64(bd, "Height").unwrap_or(0.0),
+            );
 
-            if x >= wx && x < wx + ww && y >= wy && y < wy + wh {
-                if let Some(pid) = dict_get_i32(dict, "kCGWindowOwnerPID") {
-                    found_pid = Some(pid);
-                    break 'search;
-                }
-            }
+            records.push(crate::window_target::WindowRecord {
+                id,
+                pid,
+                owner,
+                title,
+                bounds,
+                layer,
+            });
         }
     }
 
+    // CGWindowListCopyWindowInfo uses Create Rule, so the caller releases it
     unsafe { CFRelease(array_ref as *const c_void) };
-    found_pid
+    records
+}
+
+/// The window (and its owner) that a click at the given screen point is for.
+///
+/// Front-to-back over the on-screen windows, skipping system layers and Juno's
+/// own windows: its full-screen overlays are click-through for a real pointer
+/// but still listed, so including them sent process-targeted clicks to Juno.
+pub fn get_window_at_screen_point(x: f64, y: f64) -> Option<(i32, u32)> {
+    let records = list_window_records();
+    let own_pid = std::process::id() as i32;
+    crate::window_target::window_at_point(&records, x, y, own_pid).map(|w| (w.pid, w.id))
 }
 
 // ── end visible window listing ──────────────────────────────────────────────
