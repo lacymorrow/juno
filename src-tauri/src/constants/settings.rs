@@ -35,6 +35,7 @@ pub mod store_keys {
     pub const DOCK_ICON_VISIBLE: &str = "dock_icon_visible";
     pub const SHOW_TRAY_ICON: &str = "show_tray_icon";
     pub const SHOW_GLOW_BORDER: &str = "show_glow_border";
+    pub const AGENT_CURSOR_COLOR: &str = "agent_cursor_color";
     pub const CLI: &str = "cli";
     /// Reuse one long-lived `claude` process per conversation instead of spawning
     /// one per query. On unless explicitly set to false; see
@@ -297,6 +298,11 @@ pub mod defaults {
     pub const SHOW_GLOW_BORDER: bool = true;
     pub fn show_glow_border() -> bool {
         SHOW_GLOW_BORDER
+    }
+    /// The glow around Juno's cursor starts in system blue. Older stores lack
+    /// the key and get it too.
+    pub fn agent_cursor_color() -> String {
+        crate::constants::ui::agent_cursor_colors::DEFAULT.to_string()
     }
 
     // Default keyboard shortcuts (cross-platform)

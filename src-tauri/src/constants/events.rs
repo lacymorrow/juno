@@ -202,6 +202,10 @@ pub mod ui {
     pub const AGENT_CURSOR_UPDATE: &str = "agent-cursor-update";
     /// Payload: { agent_id }
     pub const AGENT_CURSOR_REMOVE: &str = "agent-cursor-remove";
+    /// The shape of the system cursor, sent only when it changes, so the
+    /// overlay can draw a glow in the cursor's own outline.
+    /// Payload: { image, hotspot_x, hotspot_y, width, height }
+    pub const AGENT_CURSOR_SHAPE: &str = "agent-cursor-shape";
 
     // Element management events
     pub const ELEMENT_CREATED: &str = "ui-element-created";

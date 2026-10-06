@@ -600,7 +600,7 @@ impl SessionHandle {
 /// clearing that id here guarantees the overlay cursor disappears on every
 /// session end path — complete, cancel, or error.
 fn cleanup_session_cursor(app_handle: &AppHandle, session_id: &str) {
-    crate::agent::tools::anthropic_computer_use::emit_agent_cursor_remove(app_handle, session_id);
+    crate::cursor_overlay::release(app_handle, session_id);
 }
 
 impl Drop for SessionHandle {
