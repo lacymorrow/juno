@@ -320,6 +320,10 @@ async fn handle_agent_mode_result(
                     .unwrap_or(false)
                 {
                     info!("[Event] Empty transcription, not waking the agent");
+                    // Close the voice turn now. Left open, it lingered until the
+                    // next release and was logged then as `superseded`, which
+                    // read as one release counted twice.
+                    crate::turn_timing::finish(None, "empty_transcript");
                     return;
                 }
 

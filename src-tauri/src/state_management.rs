@@ -325,6 +325,10 @@ async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String
         warn!("Could not settle the default provider: {}", e);
     }
 
+    // With the provider settled, keep a booted `claude` process ready for the
+    // next new conversation when the CLI is the provider. Spawned, never awaited.
+    crate::agent::providers::claude_cli::start_warm_spare(app_handle.clone());
+
     if let Err(e) =
         crate::commands::onboarding::initialize_onboarding_system(app_handle.clone()).await
     {

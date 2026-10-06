@@ -31,6 +31,10 @@ pub const TARGET: &str = "juno::turn_timing";
 /// incomplete. Long enough for a tool-heavy turn to finish speaking.
 pub const TURN_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// A second release this soon after the open turn's, before that turn reached
+/// any stage, is the same key release reported twice, not a new turn.
+pub const DUPLICATE_RELEASE_WINDOW: Duration = Duration::from_millis(50);
+
 /// The stages of a voice turn after the key release, in the order they
 /// normally happen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +86,8 @@ impl Stage {
 #[derive(Debug)]
 pub struct TurnTimer {
     id: u64,
+    /// The voice session whose release opened this turn, when known.
+    voice_session: Option<u64>,
     released: Instant,
     marks: [Option<Duration>; 5],
     provider: Option<String>,
@@ -93,6 +99,7 @@ impl TurnTimer {
     pub fn new(id: u64, released: Instant) -> Self {
         Self {
             id,
+            voice_session: None,
             released,
             marks: [None; 5],
             provider: None,
@@ -119,6 +126,21 @@ impl TurnTimer {
 
     pub fn offset(&self, stage: Stage) -> Option<Duration> {
         self.marks[stage.index()]
+    }
+
+    /// Whether a release at `released` for `voice_session` is this turn's own
+    /// release reported a second time.
+    ///
+    /// Same voice session: one session is one release, however many paths
+    /// report it. No session to compare: a release within
+    /// [`DUPLICATE_RELEASE_WINDOW`] of this one, before anything has happened,
+    /// is the same press.
+    fn is_same_release(&self, released: Instant, voice_session: Option<u64>) -> bool {
+        if let (Some(open), Some(new)) = (self.voice_session, voice_session) {
+            return open == new;
+        }
+        let untouched = self.marks.iter().all(Option::is_none);
+        untouched && released.saturating_duration_since(self.released) < DUPLICATE_RELEASE_WINDOW
     }
 
     /// Which model answered. First wins, like the stages.
@@ -156,6 +178,17 @@ impl TurnTimer {
     }
 }
 
+/// What [`Tracker::begin`] did with a release.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Begin {
+    /// A new turn, `id`, is open. Carries the line of the turn it superseded,
+    /// if any.
+    Opened { id: u64, previous: Option<String> },
+    /// The release was the open turn's own, reported again. Nothing changed;
+    /// carries the open turn's id.
+    Duplicate(u64),
+}
+
 /// The open turn, if any, and the rules for when it is logged. Separate from
 /// the global so tests can drive it without sharing state between threads.
 #[derive(Debug, Default)]
@@ -167,9 +200,33 @@ impl Tracker {
     /// Open a turn. A turn still open is closed out as `superseded` and its
     /// line returned, so it is never silently lost.
     pub fn begin(&mut self, id: u64, released: Instant) -> Option<String> {
+        match self.begin_release(|| id, released, None) {
+            Begin::Opened { previous, .. } => previous,
+            Begin::Duplicate(_) => None,
+        }
+    }
+
+    /// [`begin`](Self::begin) for a release from `voice_session`. A second
+    /// report of the open turn's own release is a no-op rather than a new turn
+    /// that logs the real one as `superseded`. `next_id` is only called when a
+    /// turn actually opens.
+    pub fn begin_release(
+        &mut self,
+        next_id: impl FnOnce() -> u64,
+        released: Instant,
+        voice_session: Option<u64>,
+    ) -> Begin {
+        if let Some(open) = self.current.as_ref() {
+            if open.is_same_release(released, voice_session) {
+                return Begin::Duplicate(open.id());
+            }
+        }
         let previous = self.current.take().map(|t| t.line("superseded"));
-        self.current = Some(TurnTimer::new(id, released));
-        previous
+        let id = next_id();
+        let mut timer = TurnTimer::new(id, released);
+        timer.voice_session = voice_session;
+        self.current = Some(timer);
+        Begin::Opened { id, previous }
     }
 
     /// Record a stage. Returns the finished line when the stage is first
@@ -228,11 +285,25 @@ fn emit(line: Option<String>) {
 
 /// Open a voice turn at the moment the hold key was released. Returns the
 /// turn id, for [`finish`].
-pub fn begin(released: Instant) -> u64 {
-    let id = NEXT_TURN.fetch_add(1, Ordering::Relaxed);
-    let previous = with_tracker(|t| t.begin(id, released));
-    emit(previous);
-    id
+///
+/// `voice_session` is the session the release committed. A second report of
+/// the same release (same session, or within [`DUPLICATE_RELEASE_WINDOW`]
+/// with nothing recorded yet) returns the open turn's id and changes nothing.
+pub fn begin(released: Instant, voice_session: Option<u64>) -> u64 {
+    let begun = with_tracker(|t| {
+        t.begin_release(
+            || NEXT_TURN.fetch_add(1, Ordering::Relaxed),
+            released,
+            voice_session,
+        )
+    });
+    match begun {
+        Begin::Opened { id, previous } => {
+            emit(previous);
+            id
+        }
+        Begin::Duplicate(id) => id,
+    }
 }
 
 /// Record that the open turn reached `stage` now. A no-op with no open turn.
@@ -363,6 +434,78 @@ mod tests {
         tracker.begin(9, t0);
         assert!(tracker.finish(Some(8), "timeout").is_none());
         assert!(tracker.finish(Some(9), "timeout").is_some());
+    }
+
+    #[test]
+    fn the_same_release_reported_twice_is_one_turn() {
+        // 2026-10-06 log: one key release reached `begin` from two paths and
+        // the second logged the real turn as `superseded` at the same instant.
+        let t0 = Instant::now();
+        let mut tracker = Tracker::default();
+        let mut ids = 10..;
+        let mut next = || ids.next().unwrap_or_default();
+        assert_eq!(
+            tracker.begin_release(&mut next, t0, Some(5)),
+            Begin::Opened {
+                id: 10,
+                previous: None
+            }
+        );
+        // Same voice session, any time later: a no-op.
+        assert_eq!(
+            tracker.begin_release(&mut next, t0 + ms(400), Some(5)),
+            Begin::Duplicate(10)
+        );
+        // The open turn kept its clock and its id.
+        tracker.mark_at(Stage::TranscriptFinal, t0 + ms(300));
+        let line = tracker.finish(None, "done").expect("still open");
+        assert!(line.starts_with("turn=10 "));
+        assert!(line.contains("transcript_final=300"));
+    }
+
+    #[test]
+    fn a_double_report_with_no_session_is_caught_by_time() {
+        let t0 = Instant::now();
+        let mut tracker = Tracker::default();
+        tracker.begin(1, t0);
+        // Within the window and nothing recorded yet: the same release.
+        assert_eq!(
+            tracker.begin_release(|| 2, t0 + ms(10), None),
+            Begin::Duplicate(1)
+        );
+        // Once a stage has been reached, a release is a new turn.
+        tracker.mark_at(Stage::TranscriptFinal, t0 + ms(20));
+        match tracker.begin_release(|| 3, t0 + ms(30), None) {
+            Begin::Opened {
+                previous: Some(previous),
+                ..
+            } => assert!(previous.starts_with("turn=1 ")),
+            other => panic!("expected a new turn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_new_voice_session_is_a_new_turn_however_soon() {
+        let t0 = Instant::now();
+        let mut tracker = Tracker::default();
+        tracker.begin_release(|| 1, t0, Some(4));
+        match tracker.begin_release(|| 2, t0 + ms(5), Some(5)) {
+            Begin::Opened {
+                previous: Some(previous),
+                ..
+            } => {
+                assert!(previous.starts_with("turn=1 outcome=superseded"))
+            }
+            other => panic!("expected a new turn, got {other:?}"),
+        }
+        // And a release outside the window with no session is new too.
+        match tracker.begin_release(|| 3, t0 + ms(500), None) {
+            Begin::Opened {
+                previous: Some(previous),
+                ..
+            } => assert!(previous.starts_with("turn=2 ")),
+            other => panic!("expected a new turn, got {other:?}"),
+        }
     }
 
     #[test]
