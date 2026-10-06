@@ -1,6 +1,6 @@
 use super::constants::*;
 use super::display::{
-    adjust_coordinates_for_display, get_displays_debug_info, get_pid_at_screen_point,
+    adjust_coordinates_for_display, get_displays_debug_info, get_window_at_screen_point,
 };
 use super::element::MacOSUIElement;
 use super::ffi;
@@ -129,13 +129,10 @@ pub(crate) fn click_auto(element: &MacOSUIElement) -> Result<ClickResult, Automa
             // (with the Chromium activation primer) instead of the HID tap, which
             // leaves the user's cursor and frontmost app alone.
             if background::is_background_mode() {
-                match click_element_no_warp(element) {
-                    Ok(result) => return Ok(result),
-                    Err(e) => debug!(
-                        "browser detected, no-warp click unavailable ({:?}), using mouse simulation",
-                        e
-                    ),
-                }
+                // No HID fallback here: it would move the user's pointer and
+                // bring the browser forward. The caller owns the consented
+                // physical path and reaches it on this error.
+                return click_element_no_warp(element);
             }
             debug!("browser detected, using mouse simulation directly");
             return click_mouse_simulation(element);
@@ -149,7 +146,22 @@ pub(crate) fn click_auto(element: &MacOSUIElement) -> Result<ClickResult, Automa
         Ok(result) => return Ok(result),
         Err(e) => debug!("AXClick failed: {:?}, trying alternative methods", e),
     }
+    if !may_simulate_mouse(background::is_background_mode()) {
+        return Err(AutomationError::PlatformError(
+            "Element accepts no accessibility click, and background mode forbids a pointer click"
+                .to_string(),
+        ));
+    }
     click_mouse_simulation(element)
+}
+
+/// Whether an element click may fall back to a real (HID) pointer click.
+///
+/// `click_mouse_simulation` moves the user's cursor and activates the clicked
+/// app with no consent prompt, so background mode never reaches it from here:
+/// the computer tool's own no-warp and consented physical paths take over.
+pub(crate) fn may_simulate_mouse(background_mode: bool) -> bool {
+    !background_mode
 }
 
 pub(crate) fn click_press(element: &MacOSUIElement) -> Result<ClickResult, AutomationError> {
@@ -272,7 +284,7 @@ pub(crate) fn click_element_no_warp(
     let center_x = x + width / 2.0;
     let center_y = y + height / 2.0;
 
-    let pid_override = element_pid(element);
+    let pid_override = element_pid(element).map(|pid| (pid, None));
     let outcome = left_click_no_warp_inner(
         center_x,
         center_y,
@@ -990,7 +1002,10 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
     };
 
     if let Some(pid) = target_pid {
-        let _focus = prepare_background_keyboard_target(pid);
+        let _focus = prepare_background_keyboard_target(background::InputTarget {
+            pid,
+            window_id: None,
+        });
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, true)?;
         thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, false)?;
@@ -1061,7 +1076,7 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
 /// restore (dictation's "leave the transcript on the clipboard").
 pub(crate) fn paste_text(
     text: &str,
-    target_pid: Option<i32>,
+    target: Option<background::InputTarget>,
     retain_clipboard: bool,
 ) -> Result<(), AutomationError> {
     debug!("Typing text via clipboard paste: {}", text);
@@ -1079,10 +1094,11 @@ pub(crate) fn paste_text(
     let key_code_v = super::text_insertion::cmd_v_keycode();
     let cmd_flag = MODIFIER_COMMAND;
 
-    if let Some(pid) = target_pid {
+    if let Some(target) = target {
+        let pid = target.pid;
         // The write already round-tripped through the pasteboard server, and a
         // PID-targeted paste cannot race the user's typing, so no settle delay.
-        let _focus = prepare_background_keyboard_target(pid);
+        let _focus = prepare_background_keyboard_target(target);
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, true)?;
         thread::sleep(Duration::from_millis(PASTE_KEY_GAP_MS));
         post_key_event_with_flags_to_pid(pid, key_code_v, cmd_flag, false)?;
@@ -1144,10 +1160,12 @@ pub(crate) fn type_text_no_warp(
     text: &str,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    if let Some(pid) = background::target_pid() {
+    if let Some(target) = background::input_target() {
         // `paste_text` holds the input-focus guard for the duration of the
-        // paste, so focus is handed back here without a second guard.
-        paste_text(text, Some(pid), false)?;
+        // paste, so focus is handed back here without a second guard. The
+        // guard also makes the target window key inside its app, because a
+        // paste posted to a process lands in that process's key window.
+        paste_text(text, Some(target), false)?;
         return Ok(Some(InputOutcome::process_targeted(post_method_label())));
     }
 
@@ -2234,6 +2252,18 @@ pub(crate) fn post_mouse_event_to_pid(
     button: CGMouseButton,
     modifiers: Option<CGEventFlags>,
 ) -> Result<(), AutomationError> {
+    post_mouse_event_to_window(pid, None, event_type, position, button, modifiers)
+}
+
+/// As `post_mouse_event_to_pid`, addressed to one of the process's windows.
+pub(crate) fn post_mouse_event_to_window(
+    pid: i32,
+    window_id: Option<u32>,
+    event_type: CGEventType,
+    position: CGPoint,
+    button: CGMouseButton,
+    modifiers: Option<CGEventFlags>,
+) -> Result<(), AutomationError> {
     let source = get_pooled_event_source().map_err(|e| {
         AutomationError::PlatformError(format!(
             "Failed to create event source for PID-targeted click: {}",
@@ -2250,6 +2280,7 @@ pub(crate) fn post_mouse_event_to_pid(
     if let Some(flags) = modifiers {
         event.set_flags(flags);
     }
+    stamp_window(&event, window_id);
 
     post_cg_event_to_pid(pid, &event);
     Ok(())
@@ -2417,11 +2448,44 @@ pub(crate) fn ensure_remote_ax_observation(pid: i32) {
 /// A no-op when background mode is off, so turning the setting off leaves every
 /// input path behaving exactly as it did before background mode existed.
 pub(crate) fn note_background_target(pid: i32) {
+    note_background_target_window(pid, None);
+}
+
+/// As `note_background_target`, also remembering which of the app's windows
+/// was reached, so later keystrokes can be routed to that window.
+pub(crate) fn note_background_target_window(pid: i32, window_id: Option<u32>) {
     if !background::is_background_mode() {
         return;
     }
     ensure_remote_ax_observation(pid);
-    background::remember_target_pid(pid);
+    background::remember_target_window(pid, window_id);
+}
+
+/// Where a coordinate event at `(x, y)` should be posted: the window pinned
+/// for this action when there is one (background mode only), otherwise the
+/// topmost non-Juno window under the point.
+pub(crate) fn resolve_click_target(x: f64, y: f64) -> Option<(i32, Option<u32>)> {
+    if background::is_background_mode() {
+        if let Some(pinned) = crate::window_target::pinned() {
+            return Some((pinned.pid, Some(pinned.window_id)));
+        }
+    }
+    get_window_at_screen_point(x, y).map(|(pid, id)| (pid, Some(id)))
+}
+
+/// CGEvent fields 91 and 92 (`kCGMouseEventWindowUnderMousePointer` and
+/// `...ThatCanHandleThisEvent`). AppKit dispatches a posted mouse event to the
+/// window these name, so stamping them makes a click reach a specific window of
+/// a background app even when another of its windows is on top at that point.
+const MOUSE_EVENT_WINDOW_UNDER_POINTER: u32 = 91;
+const MOUSE_EVENT_WINDOW_THAT_CAN_HANDLE: u32 = 92;
+
+/// Address a mouse event to one window. A no-op without a window id.
+pub(crate) fn stamp_window(event: &CGEvent, window_id: Option<u32>) {
+    if let Some(id) = window_id {
+        event.set_integer_value_field(MOUSE_EVENT_WINDOW_UNDER_POINTER, i64::from(id));
+        event.set_integer_value_field(MOUSE_EVENT_WINDOW_THAT_CAN_HANDLE, i64::from(id));
+    }
 }
 
 /// The process the user is looking at right now, by NSWorkspace's reckoning.
@@ -2546,9 +2610,55 @@ impl Drop for BackgroundKeyboardFocus {
 ///
 /// Hold the returned guard for exactly as long as the keystrokes are being
 /// posted; dropping it gives the user their keyboard back.
-pub(crate) fn prepare_background_keyboard_target(pid: i32) -> BackgroundKeyboardFocus {
-    note_background_target(pid);
-    BackgroundKeyboardFocus::take(pid)
+pub(crate) fn prepare_background_keyboard_target(
+    target: background::InputTarget,
+) -> BackgroundKeyboardFocus {
+    note_background_target_window(target.pid, target.window_id);
+    let focus = BackgroundKeyboardFocus::take(target.pid);
+    // Keyboard events reach a process's key window, so a known target window is
+    // made key inside its app first. This does not raise it or activate the app.
+    if let Some(window_id) = target.window_id {
+        if !make_key_window_without_raise(target.pid, window_id) {
+            debug!(
+                "Could not make window {} key in PID {}; keys go to its current key window",
+                window_id, target.pid
+            );
+        }
+    }
+    focus
+}
+
+/// The 0xf8-byte event record SkyLight takes to make a window key inside its
+/// process without ordering it front. Layout as used by yabai's
+/// `window_manager_make_key_window`: `kind` 0x01 then 0x02 are posted in turn.
+pub(crate) fn key_window_event_record(window_id: u32, kind: u8) -> [u8; 0xf8] {
+    let mut bytes = [0u8; 0xf8];
+    bytes[0x04] = 0xf8;
+    bytes[0x08] = kind;
+    bytes[0x3a] = 0x10;
+    bytes[0x20..0x30].fill(0xff);
+    bytes[0x3c..0x40].copy_from_slice(&window_id.to_ne_bytes());
+    bytes
+}
+
+/// Make `window_id` the key window of `pid` without raising it or activating
+/// the app, so posted keystrokes land in that window and not in whichever of the
+/// app's windows happened to be key. Returns false when SkyLight is unavailable.
+pub(crate) fn make_key_window_without_raise(pid: i32, window_id: u32) -> bool {
+    let Some(slps_fn) = get_slps_post_event_record_to() else {
+        return false;
+    };
+    let mut psn = ffi::ProcessSerialNumber::default();
+    if unsafe { ffi::GetProcessForPID(pid, &mut psn) } != 0 {
+        return false;
+    }
+    let mut ok = true;
+    for kind in [0x01u8, 0x02u8] {
+        let mut record = key_window_event_record(window_id, kind);
+        let result = unsafe { slps_fn(&mut psn, record.as_mut_ptr() as *mut c_void) };
+        ok &= result == 0;
+    }
+    ok
 }
 
 // ── No-warp input ────────────────────────────────────────────────────────────
@@ -2646,7 +2756,7 @@ pub(crate) fn triple_click_no_warp(
 
 /// Shared body for double and triple clicks.
 ///
-/// The PID is resolved once and threaded through every step: `get_pid_at_screen_point`
+/// The target is resolved once and threaded through every step: `resolve_click_target`
 /// calls `CGWindowListCopyWindowInfo`, an expensive syscall that must not run per click.
 fn repeated_click_no_warp(
     x: f64,
@@ -2655,7 +2765,7 @@ fn repeated_click_no_warp(
     clicks: i64,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    let pid = get_pid_at_screen_point(x, y);
+    let target = resolve_click_target(x, y);
     let mut last = None;
     for click_state in 1..=clicks {
         if click_state > 1 {
@@ -2669,7 +2779,7 @@ fn repeated_click_no_warp(
             CGMouseButton::Left,
             modifiers,
             click_state,
-            pid,
+            target,
             allow_physical,
         )? {
             Some(outcome) => last = Some(outcome),
@@ -2723,9 +2833,11 @@ fn single_mouse_event_no_warp(
     allow_physical: bool,
     physical: &dyn Fn() -> Result<(), AutomationError>,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    if let Some(pid) = get_pid_at_screen_point(x, y) {
-        note_background_target(pid);
-        if post_mouse_event_to_pid(pid, event_type, CGPoint::new(x, y), button, None).is_ok() {
+    if let Some((pid, window_id)) = resolve_click_target(x, y) {
+        note_background_target_window(pid, window_id);
+        if post_mouse_event_to_window(pid, window_id, event_type, CGPoint::new(x, y), button, None)
+            .is_ok()
+        {
             return Ok(Some(InputOutcome::process_targeted(post_method_label())));
         }
         debug!(
@@ -2762,12 +2874,13 @@ pub(crate) fn left_click_drag_no_warp(
     end_y: f64,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    if let Some(pid) = get_pid_at_screen_point(start_x, start_y) {
-        note_background_target(pid);
+    if let Some((pid, window_id)) = resolve_click_target(start_x, start_y) {
+        note_background_target_window(pid, window_id);
         let start = CGPoint::new(start_x, start_y);
         let end = CGPoint::new(end_x, end_y);
-        let posted = post_mouse_event_to_pid(
+        let posted = post_mouse_event_to_window(
             pid,
+            window_id,
             CGEventType::LeftMouseDown,
             start,
             CGMouseButton::Left,
@@ -2775,8 +2888,9 @@ pub(crate) fn left_click_drag_no_warp(
         )
         .and_then(|_| {
             thread::sleep(Duration::from_millis(DRAG_HOLD_DELAY_MS));
-            post_mouse_event_to_pid(
+            post_mouse_event_to_window(
                 pid,
+                window_id,
                 CGEventType::LeftMouseDragged,
                 end,
                 CGMouseButton::Left,
@@ -2785,8 +2899,9 @@ pub(crate) fn left_click_drag_no_warp(
         })
         .and_then(|_| {
             thread::sleep(Duration::from_millis(DRAG_HOLD_DELAY_MS));
-            post_mouse_event_to_pid(
+            post_mouse_event_to_window(
                 pid,
+                window_id,
                 CGEventType::LeftMouseUp,
                 end,
                 CGMouseButton::Left,
@@ -2823,11 +2938,12 @@ pub(crate) fn scroll_no_warp(
     modifiers: Option<CGEventFlags>,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    if let Some(pid) = get_pid_at_screen_point(x, y) {
-        note_background_target(pid);
+    if let Some((pid, window_id)) = resolve_click_target(x, y) {
+        note_background_target_window(pid, window_id);
         match build_scroll_event(direction, amount, modifiers) {
             Ok(event) => {
                 set_event_location(&event, CGPoint::new(x, y));
+                stamp_window(&event, window_id);
                 post_cg_event_to_pid(pid, &event);
                 return Ok(Some(InputOutcome::process_targeted(post_method_label())));
             }
@@ -2882,15 +2998,16 @@ pub(crate) fn hold_key_no_warp(
     duration_ms: Option<u64>,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    let Some(pid) = background::target_pid() else {
+    let Some(target) = background::input_target() else {
         if !allow_physical {
             return Ok(None);
         }
         hold_key(keycode, flags, duration_ms)?;
         return Ok(Some(InputOutcome::physical_cursor("HID")));
     };
+    let pid = target.pid;
 
-    let _focus = prepare_background_keyboard_target(pid);
+    let _focus = prepare_background_keyboard_target(target);
     post_key_event_with_flags_to_pid(pid, keycode, flags, true)?;
     if let Some(ms) = duration_ms {
         thread::sleep(Duration::from_millis(ms));
@@ -2905,7 +3022,7 @@ pub(crate) fn release_key_no_warp(
     flags: CGEventFlags,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    let Some(pid) = background::target_pid() else {
+    let Some(target) = background::input_target() else {
         if !allow_physical {
             return Ok(None);
         }
@@ -2925,7 +3042,8 @@ pub(crate) fn release_key_no_warp(
         return Ok(Some(InputOutcome::physical_cursor("HID")));
     };
 
-    let _focus = prepare_background_keyboard_target(pid);
+    let pid = target.pid;
+    let _focus = prepare_background_keyboard_target(target);
     post_key_event_with_flags_to_pid(pid, keycode, flags, false)?;
     Ok(Some(InputOutcome::process_targeted(post_method_label())))
 }
@@ -2937,8 +3055,9 @@ fn key_event_no_warp(
     allow_physical: bool,
     physical: &dyn Fn() -> Result<(), AutomationError>,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    if let Some(pid) = background::target_pid() {
-        let _focus = prepare_background_keyboard_target(pid);
+    if let Some(target) = background::input_target() {
+        let pid = target.pid;
+        let _focus = prepare_background_keyboard_target(target);
         let posted = post_key_event_with_flags_to_pid(pid, keycode, flags, true).and_then(|_| {
             thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
             post_key_event_with_flags_to_pid(pid, keycode, flags, false)
@@ -3024,19 +3143,19 @@ fn left_click_no_warp_inner(
     button: CGMouseButton,
     modifiers: Option<CGEventFlags>,
     click_state: i64,
-    pid_override: Option<i32>,
+    target_override: Option<(i32, Option<u32>)>,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
     let point = CGPoint::new(x, y);
 
-    // Use pre-resolved PID when provided (e.g. from double_click_no_warp) to avoid
-    // calling CGWindowListCopyWindowInfo twice for the same target coordinate.
-    if let Some(pid) = pid_override.or_else(|| get_pid_at_screen_point(x, y)) {
+    // Use pre-resolved target when provided (e.g. from double_click_no_warp) to
+    // avoid calling CGWindowListCopyWindowInfo twice for the same coordinate.
+    if let Some((pid, window_id)) = target_override.or_else(|| resolve_click_target(x, y)) {
         debug!(
-            "No-warp click: targeting PID {} at ({:.0}, {:.0})",
-            pid, x, y
+            "No-warp click: targeting PID {} window {:?} at ({:.0}, {:.0})",
+            pid, window_id, x, y
         );
-        note_background_target(pid);
+        note_background_target_window(pid, window_id);
 
         // Chromium primer: a decoy mouse-down/up at (-1, -1) advances Chromium's
         // internal user-activation gate without hitting any real UI element.
@@ -3085,6 +3204,8 @@ fn left_click_no_warp_inner(
                 down.set_flags(flags);
                 up.set_flags(flags);
             }
+            stamp_window(&down, window_id);
+            stamp_window(&up, window_id);
             if click_state > 1 {
                 down.set_integer_value_field(
                     core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE,
@@ -3142,7 +3263,124 @@ fn left_click_no_warp_inner(
 
 #[cfg(test)]
 mod tests {
-    use super::{focus_to_restore, wait, MAX_WAIT_DURATION_MS};
+    use super::{
+        focus_to_restore, key_window_event_record, may_simulate_mouse, wait, MAX_WAIT_DURATION_MS,
+    };
+
+    /// This file's source, for tests that pin a check to the code it guards.
+    const SOURCE: &str = include_str!("interaction.rs");
+
+    /// The body of `fn name`, from its signature to the next top-level `fn`.
+    fn fn_body(name: &str) -> &'static str {
+        let start = SOURCE
+            .find(&format!("fn {}(", name))
+            .unwrap_or_else(|| panic!("fn {} not found", name));
+        let rest = &SOURCE[start..];
+        let end = rest[1..]
+            .find("\npub(crate) fn ")
+            .into_iter()
+            .chain(rest[1..].find("\nfn "))
+            .min()
+            .map(|i| i + 1)
+            .unwrap_or(rest.len());
+        &rest[..end]
+    }
+
+    // --- background mode never reaches the HID pointer from an element click ---
+
+    #[test]
+    fn element_clicks_may_use_the_pointer_only_outside_background_mode() {
+        assert!(!may_simulate_mouse(true));
+        assert!(may_simulate_mouse(false));
+    }
+
+    #[test]
+    fn click_auto_consults_the_background_gate_before_simulating_the_mouse() {
+        let body = fn_body("click_auto");
+        let gate = body
+            .find("may_simulate_mouse(")
+            .expect("click_auto must consult may_simulate_mouse");
+        let last_sim = body
+            .rfind("click_mouse_simulation(element)")
+            .expect("click_auto still has its foreground fallback");
+        assert!(
+            gate < last_sim,
+            "the background gate must sit in front of the pointer fallback"
+        );
+        // The browser branch must hand background clicks to the no-warp path,
+        // never fall through to the pointer.
+        let browser = body
+            .find("return click_element_no_warp(element);")
+            .expect("browser clicks in background mode go to the no-warp path");
+        assert!(browser < gate);
+    }
+
+    // --- keystrokes reach the intended window ---
+
+    #[test]
+    fn the_key_window_record_carries_the_window_id_and_kind() {
+        let record = key_window_event_record(0x1234_5678, 0x01);
+        assert_eq!(record.len(), 0xf8);
+        assert_eq!(record[0x04], 0xf8);
+        assert_eq!(record[0x08], 0x01);
+        assert_eq!(record[0x3a], 0x10);
+        assert!(record[0x20..0x30].iter().all(|b| *b == 0xff));
+        assert_eq!(
+            u32::from_ne_bytes([record[0x3c], record[0x3d], record[0x3e], record[0x3f]]),
+            0x1234_5678
+        );
+        assert_eq!(key_window_event_record(1, 0x02)[0x08], 0x02);
+    }
+
+    #[test]
+    fn keyboard_focus_makes_the_target_window_key() {
+        let body = fn_body("prepare_background_keyboard_target");
+        assert!(body.contains("make_key_window_without_raise(target.pid, window_id)"));
+    }
+
+    #[test]
+    fn every_keyboard_path_routes_through_the_window_aware_target() {
+        for name in [
+            "type_text_no_warp",
+            "hold_key_no_warp",
+            "release_key_no_warp",
+            "key_event_no_warp",
+        ] {
+            let body = fn_body(name);
+            assert!(
+                body.contains("background::input_target()"),
+                "{} must use input_target(), which carries the window",
+                name
+            );
+            assert!(
+                !body.contains("background::target_pid()"),
+                "{} must not drop the window by using target_pid()",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn every_coordinate_path_resolves_and_stamps_the_window() {
+        for name in [
+            "left_click_no_warp_inner",
+            "single_mouse_event_no_warp",
+            "left_click_drag_no_warp",
+            "scroll_no_warp",
+        ] {
+            let body = fn_body(name);
+            assert!(
+                body.contains("resolve_click_target("),
+                "{} must resolve its target through resolve_click_target",
+                name
+            );
+            assert!(
+                body.contains("stamp_window(") || body.contains("post_mouse_event_to_window("),
+                "{} must address its events to the resolved window",
+                name
+            );
+        }
+    }
 
     const USER_APP: i32 = 101;
     const AGENT_TARGET: i32 = 202;
