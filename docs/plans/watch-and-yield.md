@@ -1,7 +1,7 @@
 # Watch and yield: Juno notices what the person does
 
 **Status:** Plan only. Nothing built.
-**DRI:** Lacy decides the open questions at the bottom. The Juno lead session owns the build once they are answered.
+**DRI:** The Juno lead session owns the build. Every question is decided below; Lacy can overturn any of them.
 **Builds on:** `docs/plans/ambient-awareness.md` (PR #659, open), which designs the wake-up path for chess, and PR #670 (merged), which made the existing screen and file monitors honest, bounded and stoppable. Read #659 first. This plan does not repeat it; it adds the half #659 left as a follow-up and changes one thing about how its watch decides to wake.
 
 ## The one-line problem
@@ -12,7 +12,7 @@ Juno cannot tell when the person does something, so it cannot take its turn when
 
 Lacy, 2026-10-07:
 
-> "I'd really like Juno to be able to play chess. It's still not following up and monitoring what the user does and reacting based on it. [...] It could react when the user does stuff so that it doesn't get mixed up. Like if it's trying to control a program and the program keeps getting closed or changed. It can see that the user is using it and relinquish control or stop doing what it's doing."
+> "I'd really like Juno to be able to play chess. It's still not following up and monitoring what the user does and reacting based on it. [...] It could react when the user does stuff so that it doesn't get mixed up. Like if it's trying to control a program and the program keeps getting closed or changed. It can see that the user is using it and relinquish control or stop doing what it's doing. [...] It needs to feel natural, like Jarvis. [Juno does] its own thing, [knows] when to watch, [knows] when not to watch."
 
 That is two behaviours, and they are the same missing sense:
 
@@ -21,11 +21,13 @@ That is two behaviours, and they are the same missing sense:
 
 Both rest on one signal: **what the person just did, told apart from what Juno just did.**
 
+And one rule governs both: **the person never manages it.** There is no watch mode, no setting, no "start watching" or "stop watching", no "take control" button. Juno decides when to watch, what to watch, when to stop, and when to step back, the way it already decides when to take a screenshot. That is what makes it feel like Jarvis rather than a tool with a watch feature.
+
 ## The ten seconds
 
-**Yield.** Juno is filling a form in TextEdit. The person grabs the mouse and clicks somewhere. Juno's glow fades from the cursor inside a quarter of a second, no further click lands, and Juno says, once: "You've got it. Say keep going when you want me back." The bar shows the task as paused, not failed. "Keep going" picks up from the same conversation, after a fresh look at the screen.
+**Yield.** Juno is filling a form in TextEdit. The person grabs the mouse and clicks somewhere. Juno's glow fades from the cursor inside a quarter of a second, no further click lands, and Juno says, once and quietly: "All yours." The bar shows the task as paused, not failed. "Keep going" picks up from the same conversation, after a fresh look at the screen.
 
-**Wake.** The person says "let's play chess". Juno opens a board, plays white, and says "your move". The bar reads Watching. The person drags a pawn, lets go, and about a second later Juno moves. Nobody speaks between moves. While the person's hand is on the mouse Juno never moves a piece, even if it has decided on one.
+**Wake.** The person says "let's play chess". Juno opens a board, plays white, and says "your move". Nobody told it to watch; the bar just reads Watching. The person drags a pawn, lets go, and about a second later Juno moves. Nobody speaks between moves. While the person's hand is on the mouse Juno never moves a piece, even if it has decided on one.
 
 ## What already exists
 
@@ -42,6 +44,26 @@ Both rest on one signal: **what the person just did, told apart from what Juno j
 | DOM-digest page watch for chess | `docs/plans/ambient-awareness.md` | Designed, not built. |
 
 ## The design
+
+### 0. Knows when to watch, knows when not to
+
+**When Juno watches.** At the end of any turn whose next step belongs to someone else, the model ends by watching for it instead of finishing or asking to be told. One sentence in the system prompt (`src/agent/prompts/templates.rs`) carries the rule: "When your task continues only after something you don't control happens, such as the person's move, a download finishing, or a reply arriving in a window you are using, watch for it and stop. Never ask the person to tell you when." The watch tools are #659's `watch_page` and #670's `set_screen_monitor`. Chess is an example, not a special case: no chess code anywhere.
+
+**What it watches.** Only the window the task is about. Never the whole screen, never another app, never anything no task needs. A Juno with nothing to do observes nothing: the sense below is installed only while a run or a watch holds it.
+
+**When it stops, without being told.**
+
+| What happened | Juno |
+|---|---|
+| The woken turn sees the task is done: checkmate, the file arrived | Finishes normally, says so once |
+| The person closes the watched window or quits its app | Ends the watch silently. Closing it was the answer. |
+| No input in the watched window for 30 minutes while the person works elsewhere or is away | Lets the watch lapse silently |
+| #659's ceiling: two hours or its wake count | Lapses silently. A backstop nobody should reach. |
+| Escape, or "stop" | Stops, as today |
+
+Talking to Juno about something else does not end a watch. The watch belongs to its own session and ends when its own reason does.
+
+**What it never does.** Ask "should I keep watching?", announce that it is watching, or watch something no task asked about. The only sign is the bar's quiet `watching` state.
 
 ### 1. One sense: `platform/user_activity.rs`
 
@@ -77,7 +99,7 @@ A run that will send input takes an **`InputLease`** from the sense when it star
 | Either | Quits the target app, or closes the target window | Yields, and never reopens it in this run. |
 | Either | Escape | Stops, as today. Escape is a stop, not a yield. |
 
-**Yield is not a failure, and it reads differently from a stop.** The run ends with a short spoken line, "You've got it. Say keep going when you want me back.", and the bar returns to its resting state without an error. The conversation is kept (`AdvancedMemoryManager` is shared across turns), so "keep going" continues the same task. The first thing the resumed turn does is take a fresh screenshot, which the system prompt tells it after a yield, because everything it knew about the screen is stale.
+**Yield is not a failure, and it reads differently from a stop.** The run ends with "All yours.", spoken once and quietly, and the bar returns to its resting state without an error. The person caused the yield and needs no explanation; a silent pause would look like a hang. The conversation is kept (`AdvancedMemoryManager` is shared across turns), so "keep going" continues the same task. The first thing the resumed turn does is take a fresh screenshot, which the system prompt tells it after a yield, because everything it knew about the screen is stale.
 
 **No automatic resume for an ordinary task.** Juno cannot know the person is finished: they may be halfway through something of their own. Resuming is one spoken phrase away and that is the right cost. A watch (below) is the one place Juno resumes on its own, because there the person's turn ending is the whole point.
 
@@ -106,7 +128,7 @@ AX-path actions (the ones that press a control through accessibility rather than
 ## What the person sees
 
 - **The cursor glow** (#722) is the lease made visible. It appears when Juno takes the pointer and fades the moment Juno yields. No new UI.
-- **One spoken line per yield**, and only one. If the person grabs the mouse three times in a minute they hear it once; after that the bar alone shows it.
+- **One spoken line per yield**, "All yours.", and only one. If the person grabs the mouse three times in a minute they hear it once; after that the bar alone shows it.
 - **The bar** shows `watching` while a watch is armed and nothing is running. That state is #659's open question 1 and it is asked again below.
 - **No dialog, no notification, no toast** for a yield. The person caused it and already knows.
 
@@ -131,12 +153,17 @@ Each one ships alone and is useful alone.
 - **A CGEventTap that intercepts the person's input.** A passive monitor sees enough. A tap that can swallow events is a much bigger trust surface for no gain here.
 - **Automatic resume after the person goes idle, for ordinary tasks.** Explained above. Kept only for watches.
 - **A "Take control" button.** The mouse is the button. The person should never have to find a control to get their own computer back.
+- **A watch setting, a watch mode, a "watch this" or "stop watching" command, and any prompt asking whether to keep watching.** Juno decides; see section 0. The person's only controls are the ones they already have: their hands, their voice, Escape.
+- **A yield line that explains how to resume.** "Keep going" works because it is what a person says anyway; telling them so every time is noise.
 - **Asking the model whether to yield.** A model call costs seconds, and the person's hand is already on the mouse. The decision is a table in Rust.
 - **Watching by screenshot plus a model call per tick.** As in #659: a tick never costs a model call.
 
-## Open questions for Lacy
+## Decisions
 
-1. **Background mode: should the person typing anywhere at all pause Juno, or only in the window Juno is using?** Recommendation: only in Juno's window. Pausing on any keystroke would make background mode useless, which defeats #547 and #721.
-2. **After a yield, should Juno say its line out loud, or only show it in the chat?** Recommendation: say it once, quietly. The person's eyes are on their own work, and a silent pause looks like a hang.
-3. **The bar's `watching` state** (#659 question 1). Recommendation: yes. A bar that looks idle while Juno is waiting for your move is wrong.
-4. **Order.** Recommendation: slice 1 first. It fixes a defect every task has today; chess is a feature on top of it.
+Recorded so nobody re-asks them. Lacy can overturn any.
+
+1. **Background mode: typing anywhere does not pause Juno; only input in the window Juno is using does.** Pausing on any keystroke would make background mode useless, which defeats #547 and #721.
+2. **A yield is spoken, once and quietly: "All yours."** The person's eyes are on their own work, and a silent pause looks like a hang.
+3. **The bar gets a `watching` state** (#659 question 1). A bar that looks idle while Juno waits for your move is wrong.
+4. **Juno arms and ends watches on its own** (section 0). No setting, no command.
+5. **Slice 1 ships first.** It fixes a defect every task has today; chess is a feature on top of it.
