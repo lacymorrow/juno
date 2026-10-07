@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.115] - 2026-10-07
+
+### Fixed
+
+- **bar:** drag the Pill anywhere; wells right on a second display (#727) (ff06555b)
+
 ## [0.8.114] - 2026-10-07
 
 ### Changed
@@ -1003,7 +1009,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.114...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.115...HEAD
+[0.8.115]: https://github.com/lacymorrow/juno/compare/cua-v0.8.114...v0.8.115
 [0.8.114]: https://github.com/lacymorrow/juno/compare/cua-v0.8.113...v0.8.114
 [0.8.113]: https://github.com/lacymorrow/juno/compare/cua-v0.8.112...v0.8.113
 [0.8.112]: https://github.com/lacymorrow/juno/compare/cua-v0.8.111...v0.8.112
