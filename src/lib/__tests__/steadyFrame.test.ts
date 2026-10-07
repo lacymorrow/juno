@@ -12,10 +12,12 @@ import {
   type PillFrame,
 } from "@/components/FloatingBar";
 import { computeWells, type MonitorRect } from "../snapWells";
+import { monitorsInPoints, type TauriMonitorLike } from "../desktopPoints";
 import {
   anchorScreenOrigin,
   contentPlacement,
   contentRect,
+  dragLayout,
   dockedEdges,
   getSteady,
   registerSteady,
@@ -28,10 +30,13 @@ import {
   type SteadyLayout,
 } from "../steadyFrame";
 
-// Desks the bar actually meets: a Retina laptop, an external display left of
-// it and one above it (negative global coordinates), a scaled 1.5x display,
-// an ultrawide with five stops, and a short display that forces the clamp.
-const DESKS: Record<string, MonitorRect[]> = {
+// Desks the bar actually meets, as Tauri reports them (each monitor's points
+// times its own scale): a Retina laptop, an external display left of it and
+// one above it (negative global coordinates), a scaled 1.5x display, an
+// ultrawide with five stops, a short display that forces the clamp, and a 2x
+// laptop with a 1x display beside it. The geometry runs on them converted to
+// global points, exactly as the bar does.
+const TAURI_DESKS: Record<string, TauriMonitorLike[]> = {
   retinaLaptop: [{ position: { x: 0, y: 0 }, size: { width: 2880, height: 1800 }, scaleFactor: 2 }],
   dualLeftAndAbove: [
     { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 },
@@ -41,7 +46,14 @@ const DESKS: Record<string, MonitorRect[]> = {
   scaled: [{ position: { x: 0, y: 0 }, size: { width: 2880, height: 1620 }, scaleFactor: 1.5 }],
   ultrawide: [{ position: { x: 1440, y: 0 }, size: { width: 3440, height: 1440 }, scaleFactor: 1 }],
   short: [{ position: { x: 0, y: 0 }, size: { width: 1280, height: 720 }, scaleFactor: 1 }],
+  mixedDensity: [
+    { position: { x: 0, y: 0 }, size: { width: 3024, height: 1964 }, scaleFactor: 2 },
+    { position: { x: 1512, y: 0 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 },
+  ],
 };
+const DESKS: Record<string, MonitorRect[]> = Object.fromEntries(
+  Object.entries(TAURI_DESKS).map(([k, v]) => [k, monitorsInPoints(v)]),
+);
 
 /** Every frame the pill can draw: each layout, with and without each extra. */
 function allFrames(): PillFrame[] {
@@ -136,12 +148,11 @@ describe("the Pill's steady frame", () => {
 
   it("keeps the window on its display, inside the wells' inset area", () => {
     for (const { name, layout, mon } of layouts) {
-      const sf = layout.scaleFactor;
       const w = toScreen(layout, { x: 0, y: 0, ...layout.size });
-      expect(w.x, name).toBeGreaterThanOrEqual(mon.position.x + 16 * sf);
-      expect(w.y, name).toBeGreaterThanOrEqual(mon.position.y + 36 * sf);
-      expect(w.x + w.width, name).toBeLessThanOrEqual(mon.position.x + mon.size.width - 16 * sf);
-      expect(w.y + w.height, name).toBeLessThanOrEqual(mon.position.y + mon.size.height - 16 * sf);
+      expect(w.x, name).toBeGreaterThanOrEqual(mon.position.x + 16);
+      expect(w.y, name).toBeGreaterThanOrEqual(mon.position.y + 36);
+      expect(w.x + w.width, name).toBeLessThanOrEqual(mon.position.x + mon.size.width - 16);
+      expect(w.y + w.height, name).toBeLessThanOrEqual(mon.position.y + mon.size.height - 16);
     }
   });
 
@@ -234,5 +245,26 @@ describe("swapSteadyLayout", () => {
       }),
     ).rejects.toThrow("window gone");
     expect(getSteady("bar")!.hidden).toBe(false);
+  });
+});
+
+describe("the drag layout", () => {
+  it("centres the resting footprint without moving it on screen, on every desk and well", () => {
+    for (const { name, layout, well } of allLayouts()) {
+      const drag = dragLayout(layout);
+      expect(anchorScreenOrigin(drag), name).toEqual({ x: well.x, y: well.y });
+      expect(drag.size, name).toEqual(layout.size);
+      // Centred: the shape's centre is the window's centre, to the point.
+      const cx = drag.anchor.x + drag.anchor.width / 2 - drag.size.width / 2;
+      const cy = drag.anchor.y + drag.anchor.height / 2 - drag.size.height / 2;
+      expect(Math.abs(cx), name).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(cy), name).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("is a different drawing from every docked layout, so the drop swaps hidden", () => {
+    for (const { name, layout } of allLayouts()) {
+      expect(sameDrawing(dragLayout(layout), layout), name).toBe(false);
+    }
   });
 });

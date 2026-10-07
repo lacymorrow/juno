@@ -217,26 +217,24 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
 /// Setup macOS-specific styling and behavior for the floating panel window
 /// Atomically move + resize the floating bar in a single `NSWindow setFrame:`.
 ///
-/// Tauri exposes `set_position` and `set_size` separately; issuing both for a
-/// compact<->hover transition let the WindowServer composite them in different
-/// frames, so for one frame the window showed its new width still anchored at
-/// the old top-left and the centered pill/dot jumped ~half the width delta
-/// before snapping back. One `setFrame:display:animate:NO` changes origin and
-/// size in a single transaction, so no intermediate frame can exist.
+/// Tauri exposes `set_position` and `set_size` separately; issuing both let
+/// the WindowServer composite them in different frames, so for one frame the
+/// window showed its new size still at the old top-left. One
+/// `setFrame:display:animate:NO` changes origin and size in one transaction.
 ///
-/// The Cocoa frame is derived as a delta from the window's *current* frame
-/// rather than by an absolute top-left->bottom-left flip. That cancels the
-/// primary-screen height and any multi-monitor origin, and is exact as long as
-/// the window stays on one display (constant scale factor) across the resize,
-/// which a same-spot compact<->hover transition always does.
-///
-/// `x_phys`/`y_phys` are the target top-left in Tauri physical pixels;
-/// `w_pt`/`h_pt` are the target size in logical points.
+/// `x`/`y` (top-left) and `w_pt`/`h_pt` are global desktop points, top-left
+/// origin at the primary display. Cocoa's frame is the same space with y
+/// pointing up from the primary display's bottom edge, so the conversion is
+/// one flip against the primary display's height (`NSScreen.screens[0]`, the
+/// screen at the origin). That is exact on every display; the delta this used
+/// to apply to physical pixels was scaled by the display the window was
+/// leaving, which put a frame aimed at a second display of another density
+/// in the wrong place.
 #[cfg(target_os = "macos")]
 pub fn set_bar_frame_atomic(
     app_handle: &AppHandle,
-    x_phys: f64,
-    y_phys: f64,
+    x: f64,
+    y: f64,
     w_pt: f64,
     h_pt: f64,
 ) -> Result<(), String> {
@@ -244,23 +242,21 @@ pub fn set_bar_frame_atomic(
     let window = app_handle
         .get_webview_window(label)
         .ok_or("floating-bar window not found")?;
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let cur = window.outer_position().map_err(|e| e.to_string())?;
     let ns_window = window.ns_window().map_err(|e| e.to_string())? as cocoa_id;
 
-    // SAFETY: `frame`/`setFrame:` are standard NSWindow selectors; ns_window is
-    // a live window handle from Tauri. Called on whatever thread invokes the
-    // command; NSWindow's frame setters are main-thread-only, so callers route
-    // this through a command that Tauri dispatches on the main thread.
+    // SAFETY: `screens`, `objectAtIndex:`, `frame` and `setFrame:` are standard
+    // AppKit selectors on live objects; ns_window is the bar's window handle
+    // from Tauri. The command dispatches this to the main thread.
     unsafe {
-        let frame: NSRect = msg_send![ns_window, frame];
-        let dx_pt = (x_phys - cur.x as f64) / scale;
-        let dy_top_pt = (y_phys - cur.y as f64) / scale; // + = window moved down
-        let cur_top_y = frame.origin.y + frame.size.height; // Cocoa top edge (y-up)
-        let new_origin_x = frame.origin.x + dx_pt;
-        let new_origin_y = cur_top_y - dy_top_pt - h_pt; // keep top-left fixed
+        let screens: cocoa_id = msg_send![class!(NSScreen), screens];
+        let count: usize = msg_send![screens, count];
+        if count == 0 {
+            return Err("No screens to place the bar on".to_string());
+        }
+        let primary: cocoa_id = msg_send![screens, objectAtIndex: 0usize];
+        let primary_frame: NSRect = msg_send![primary, frame];
         let new_frame = NSRect::new(
-            NSPoint::new(new_origin_x, new_origin_y),
+            NSPoint::new(x, primary_frame.size.height - y - h_pt),
             NSSize::new(w_pt, h_pt),
         );
         let _: () = msg_send![ns_window, setFrame: new_frame display: YES animate: NO];
