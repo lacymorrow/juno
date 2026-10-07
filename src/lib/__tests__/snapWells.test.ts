@@ -8,6 +8,7 @@ import {
   SLOT,
   type MonitorRect,
 } from "../snapWells";
+import { monitorsInPoints } from "../desktopPoints";
 
 const oneMonitor: MonitorRect[] = [
   { position: { x: 0, y: 0 }, size: { width: 1000, height: 800 }, scaleFactor: 1 },
@@ -52,16 +53,14 @@ describe("computeWells", () => {
     expect(topCenter.y).toBe(36);
   });
 
-  it("scales margins and the window footprint by each monitor's scaleFactor", () => {
-    const retina: MonitorRect[] = [
+  it("works in points: a Retina display's density changes nothing", () => {
+    // A 2x laptop is 1000x800 points; Tauri's 2000x1600 is converted at the edge.
+    const retina = monitorsInPoints([
       { position: { x: 0, y: 0 }, size: { width: 2000, height: 1600 }, scaleFactor: 2 },
-    ];
+    ]);
     const wells = computeWells(retina, { windowWidth: 100, windowHeight: 60, margin: 16 });
-    const tl = wellForSlot(SLOT.topLeft, 0, wells)!;
-    expect(tl.x).toBe(32); // 16 logical × 2
-    expect(tl).toMatchObject({ width: 200, height: 120 }); // logical × 2
-    // right edge: 2000 - 32 - 200 = 1768 ; bottom: 1600 - 32 - 120 = 1448
-    expect(wellForSlot(SLOT.bottomRight, 0, wells)).toMatchObject({ x: 1768, y: 1448 });
+    expect(wellForSlot(SLOT.topLeft, 0, wells)).toMatchObject({ x: 16, y: 36, width: 100 });
+    expect(wellForSlot(SLOT.bottomRight, 0, wells)).toMatchObject({ x: 884, y: 724 });
   });
 
   it("gives a wide display five stops across and a laptop three", () => {
@@ -73,10 +72,10 @@ describe("computeWells", () => {
     ];
     const wells = computeWells(ultrawide, { windowWidth: 100, windowHeight: 60 });
     expect(wells).toHaveLength(5 * 3 - 1);
-    // A 2× 27" reports 5120 physical, 2560 logical: five stops too.
-    const big: MonitorRect[] = [
+    // A 2x 27" reports 5120 physical, 2560 points: five stops too.
+    const big = monitorsInPoints([
       { position: { x: 0, y: 0 }, size: { width: 5120, height: 2880 }, scaleFactor: 2 },
-    ];
+    ]);
     expect(computeWells(big, { windowWidth: 100, windowHeight: 60 })).toHaveLength(15 - 1);
     // Portrait: five stops down, three across.
     const portrait: MonitorRect[] = [
@@ -159,5 +158,48 @@ describe("easeOutCubic", () => {
     expect(easeOutCubic(0)).toBe(0);
     expect(easeOutCubic(1)).toBe(1);
     expect(easeOutCubic(0.5)).toBeGreaterThan(0.5); // past halfway by the midpoint
+  });
+});
+
+describe("two displays at different densities", () => {
+  // A 2x laptop as primary (1512x982 points), as Tauri reports it, with a 1x
+  // 1920x1080 display placed right of, left of, or above it.
+  const laptop = { position: { x: 0, y: 0 }, size: { width: 3024, height: 1964 }, scaleFactor: 2 };
+  const arrangements = {
+    right: { position: { x: 1512, y: 0 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 },
+    left: { position: { x: -1920, y: -50 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 },
+    above: { position: { x: -200, y: -1080 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 },
+  };
+
+  for (const [where, external] of Object.entries(arrangements)) {
+    it(`keeps every well on its own display with the external ${where}`, () => {
+      const rects = monitorsInPoints([laptop, external]);
+      const wells = computeWells(rects, { windowWidth: 88, windowHeight: 76, includeCenter: true });
+      expect(wells).toHaveLength(18);
+      for (const w of wells) {
+        const m = rects[w.monitorIndex];
+        expect(w.x).toBeGreaterThanOrEqual(m.position.x + 16);
+        expect(w.y).toBeGreaterThanOrEqual(m.position.y + 36);
+        expect(w.x + w.width).toBeLessThanOrEqual(m.position.x + m.size.width - 16);
+        expect(w.y + w.height).toBeLessThanOrEqual(m.position.y + m.size.height - 16);
+      }
+    });
+
+    it(`reaches the top row of either display with the external ${where}`, () => {
+      const rects = monitorsInPoints([laptop, external]);
+      const wells = computeWells(rects, { windowWidth: 88, windowHeight: 76, includeCenter: true });
+      for (const idx of [0, 1]) {
+        const top = wellForSlot({ fx: 0.5, fy: 0 }, idx, wells)!;
+        // A footprint carried to just under that display's top edge lands there.
+        const aim = { x: top.x + 3, y: rects[idx].position.y + 20 };
+        expect(nearestWell(aim, wells)).toBe(top);
+      }
+    });
+  }
+
+  it("does not overlap the displays the way Tauri's raw numbers do", () => {
+    // Raw, the 1x display at 1512 sits inside the laptop's 0..3024 span.
+    const rects = monitorsInPoints([laptop, arrangements.right]);
+    expect(rects[0].position.x + rects[0].size.width).toBe(rects[1].position.x);
   });
 });

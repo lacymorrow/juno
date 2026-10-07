@@ -798,6 +798,9 @@ pub fn run() {
             commands::bar_position::set_bar_position,
             commands::bar_position::set_bar_frame,
             commands::bar_position::set_bar_hit_regions,
+            commands::bar_position::bar_drag_follow,
+            commands::bar_position::bar_drag_stop,
+            commands::bar_position::ensure_snap_wells_overlays,
             commands::bar_position::show_bar_when_ready,
             // Auto-update commands (the whole bridge; policy lives in `updater`)
             commands::updates::get_update_status,

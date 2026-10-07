@@ -178,9 +178,11 @@ async function edgeStableResize(appWindow: Window, next: WindowSizeConfig) {
   // window showed its new width still anchored at the old top-left and the
   // centered pill/dot visibly jumped before snapping back. One transaction
   // removes that seam. (Off macOS the command falls back to separate setters.)
+  // The command takes global points; this window's physical numbers are its
+  // points times its own display's factor, so dividing by it is exact.
   await invoke(COMMANDS.BAR_SET_BAR_FRAME, {
-    x: clamped.x,
-    y: clamped.y,
+    x: clamped.x / scaleFactor,
+    y: clamped.y / scaleFactor,
     width: next.width,
     height: next.height,
   });

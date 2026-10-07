@@ -87,6 +87,12 @@ vi.mock("@tauri-apps/api/window", () => ({
     scaleFactor: async () => 1,
   }),
   availableMonitors: async () => monitors.value,
+  LogicalPosition: class {
+    constructor(
+      public x: number,
+      public y: number,
+    ) {}
+  },
   PhysicalPosition: class {
     x: number;
     y: number;
@@ -171,8 +177,8 @@ function pillCentre() {
   const l = getSteady("floating-bar")?.layout;
   if (!l) return { x: 150, y: 130 };
   return {
-    x: l.origin.x + (l.anchor.x + l.anchor.width / 2) * l.scaleFactor,
-    y: l.origin.y + (l.anchor.y + l.anchor.height / 2) * l.scaleFactor,
+    x: l.origin.x + l.anchor.x + l.anchor.width / 2,
+    y: l.origin.y + l.anchor.y + l.anchor.height / 2,
   };
 }
 

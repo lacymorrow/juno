@@ -188,10 +188,12 @@ export const EVENTS = {
   BAR_TOGGLE_PANE: 'bar-toggle-pane',
   BAR_DISMISS_PANE: 'bar-dismiss-pane',
   BAR_CURSOR_DISPLAY_CHANGED: 'bar-cursor-display-changed',
+  BAR_DRAG_ENDED: 'bar-drag-ended',
   BAR_MAIN_WINDOW_OPENED: 'bar-main-window-opened',
   BAR_MAIN_WINDOW_CLOSED: 'bar-main-window-closed',
   SNAP_WELLS_SHOW: 'snap-wells-show',
   SNAP_WELLS_HIDE: 'snap-wells-hide',
+  SNAP_WELLS_READY: 'snap-wells-overlay-ready',
   TRIGGERS_KEY_CAPTURED: 'trigger-key-captured',
   TRIGGERS_CHANGED: 'triggers-changed',
   TOOLS_USAGE: 'tool-usage',
@@ -403,6 +405,7 @@ export const UI = {
   WINDOW_LABELS_APP_BAR: 'app-bar',
   WINDOW_LABELS_VOICE_BAR: 'voice-bar',
   WINDOW_LABELS_DYNAMIC_BAR: 'dynamic-bar',
+  WINDOW_LABELS_SNAP_WELLS_OVERLAY: 'snap-wells-overlay',
   AGENT_SESSION_COLORS_SLOT_0: '#3B82F6',
   AGENT_SESSION_COLORS_SLOT_1: '#10B981',
   AGENT_SESSION_COLORS_SLOT_2: '#F59E0B',
@@ -724,6 +727,9 @@ export const COMMANDS = {
   BAR_SET_BAR_POSITION: 'set_bar_position',
   BAR_SET_BAR_FRAME: 'set_bar_frame',
   BAR_SET_BAR_HIT_REGIONS: 'set_bar_hit_regions',
+  BAR_DRAG_FOLLOW: 'bar_drag_follow',
+  BAR_DRAG_STOP: 'bar_drag_stop',
+  BAR_ENSURE_SNAP_WELLS_OVERLAYS: 'ensure_snap_wells_overlays',
   BAR_SHOW_BAR_WHEN_READY: 'show_bar_when_ready',
   BAR_SET_BAR_PANE_OPEN: 'set_bar_pane_open',
   BAR_UI_GET_BAR_CONFIG: 'ui_get_bar_config',
@@ -1528,6 +1534,7 @@ export const WINDOW_LABELS = {
   APP_BAR: 'app-bar',
   VOICE_BAR: 'voice-bar',
   DYNAMIC_BAR: 'dynamic-bar',
+  SNAP_WELLS_OVERLAY: 'snap-wells-overlay',
 } as const;
 
 // Frontend-specific constants (not duplicated from Rust)
