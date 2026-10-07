@@ -251,11 +251,11 @@ export default function BarStateHarness() {
     void emit(EVENTS.AGENT_SESSIONS_UPDATED, sessions);
   }, [rosterCount]);
 
-  // Wells for the current window footprint, in physical px (the bar's units).
+  // Wells for the current window footprint, in points (the bar's units).
   const wells = useMemo<Well[]>(() => {
     const rect: MonitorRect = {
       position: { x: 0, y: 0 },
-      size: { width: monitor.width, height: monitor.height },
+      size: { width: monitor.width / scale, height: monitor.height / scale },
       scaleFactor: scale,
     };
     return computeWells([rect], {
@@ -274,16 +274,16 @@ export default function BarStateHarness() {
   const placeAtWell = useCallback((w: Well) => {
     const root = document.querySelector<HTMLElement>(".jbh-window > div");
     if (!root) {
-      harness.setFrame({ x: w.x, y: w.y });
+      harness.setFrame({ x: w.x * scale, y: w.y * scale });
       return;
     }
     const mouse = (type: string, x: number, y: number) =>
       new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
     root.dispatchEvent(mouse("mousedown", 4, 4));
     root.dispatchEvent(mouse("mousemove", 40, 30));
-    harness.setFrame({ x: w.x, y: w.y });
+    harness.setFrame({ x: w.x * scale, y: w.y * scale });
     window.dispatchEvent(mouse("mouseup", 40, 30));
-  }, []);
+  }, [scale]);
 
   // Logical geometry for the on-screen render.
   const screenW = monitor.width / scale;
@@ -487,8 +487,8 @@ export default function BarStateHarness() {
                 key={`m-${w.fx}-${w.fy}`}
                 className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-1 ring-white/50"
                 style={{
-                  left: (w.x + w.width / 2) / scale,
-                  top: (w.y + w.height / 2) / scale,
+                  left: w.x + w.width / 2,
+                  top: w.y + w.height / 2,
                   background: "rgba(255,255,255,0.35)",
                 }}
                 title={slotName(w.fx, w.fy)}

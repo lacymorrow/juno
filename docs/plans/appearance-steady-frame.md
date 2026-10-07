@@ -44,7 +44,7 @@ Notch and island apps (NotchNook, Boring Notch, Alcove) and Wispr Flow's pill al
 ### Wells, drag, display hop (`src/hooks/useBarSnapWells.ts`)
 
 - A steady look registers its spec in the steady store (`registerSteady`). Wells for it are computed for `spec.rest`, never for the window.
-- Drag: the OS drags the big window. The drop overlay gets the resting footprint and the grab offset re-expressed from the anchor rect, so the ring and the landing agree.
+- Drag: Rust drags the big window (`platform/bar_drag.rs`), not the OS, because the OS drag keeps the window's top below the menu bar and a pill docked low could not reach the top half. The drawing is re-laid out with the footprint centred (`dragLayout`) behind the same two-frame hide, so on a desk with separate Spaces the window changes display with the pill. The drop overlay (one window per display) gets the resting footprint and the grab offset re-expressed from the anchor rect, so the ring and the landing agree. All of it is in global desktop points (`src/lib/desktopPoints.ts`).
 - Settle: the window glides, drawing unchanged, until the anchor sits on the nearest well. If the new well grows the same way, the frame just moves. If it grows the other way, `swapSteadyLayout` sets the new frame and the new drawing behind a two-frame hide, then fades the shape back in 150ms (instantly under Reduce Motion). The well itself never moves in that swap.
 - Display hop: the same swap, onto the same slot on the new display.
 

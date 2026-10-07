@@ -13,19 +13,24 @@
  * slot on another display is the same place, "bottom-left corner with the
  * padding", whatever that display's size, aspect ratio or pixel density.
  *
- * Everything here is pure and works in **physical** pixels for positions,
- * matching Tauri's `outerPosition()` / monitor geometry / `PhysicalPosition`,
- * so it is unit tested without a running window. The window size and the
- * margins are given in **logical** pixels and scaled per monitor by its
- * `scaleFactor`: a window keeps its logical size when it moves between a
- * Retina and a 1× display, so its physical footprint changes, and a well
- * computed with the wrong footprint pushes the bar off the far edge.
+ * Everything here is pure and works in **global desktop points**: the one
+ * coordinate space macOS lays every display out in, top-left origin at the
+ * primary display, y down, the same unit CSS pixels and NSScreen frames use.
+ * It is the only space that is consistent across displays. Tauri's "physical"
+ * positions are not: each monitor's origin is its point origin multiplied by
+ * its OWN scale factor, the cursor is multiplied by the PRIMARY display's, and
+ * a window's by the display it is on. With a 1x display beside a 2x Retina
+ * those disagree by a factor of two, which is what scattered the wells on a
+ * second display. `src/lib/desktopPoints.ts` converts Tauri's numbers into
+ * points at the edge; nothing past it sees a physical pixel.
  */
 
+/** A display's frame in global desktop points. */
 export interface MonitorRect {
   position: { x: number; y: number };
   size: { width: number; height: number };
-  scaleFactor: number;
+  /** The display's backing scale. Informational: the geometry never uses it. */
+  scaleFactor?: number;
 }
 
 /** Where a well sits on its display: fraction along each axis, 0..1. */
@@ -35,22 +40,22 @@ export interface WellSlot {
 }
 
 export interface Well extends WellSlot {
-  /** Target for the window's top-left, in physical pixels. */
+  /** Target for the window's top-left, in global points. */
   x: number;
   y: number;
-  /** The window's footprint on this well's display, in physical pixels. */
+  /** The window's footprint, in points. */
   width: number;
   height: number;
   monitorIndex: number;
 }
 
 export interface WellOptions {
-  /** Current window size, in logical pixels. */
+  /** Current window size, in points. */
   windowWidth: number;
   windowHeight: number;
-  /** Inset from the left/right/bottom edges, in logical pixels. */
+  /** Inset from the left/right/bottom edges, in points. */
   margin?: number;
-  /** Inset from the top edge, in logical pixels: clears the menu bar. */
+  /** Inset from the top edge, in points: clears the menu bar. */
   topInset?: number;
   /** Include the dead-centre well (a bar mid-screen); off by default. */
   includeCenter?: boolean;
@@ -66,7 +71,7 @@ export const SLOT = {
 } as const satisfies Record<string, WellSlot>;
 
 /**
- * A display this wide (or tall), in logical pixels, gets five stops along
+ * A display this wide (or tall), in points, gets five stops along
  * that axis instead of three. 1440 and 1920 wide screens stay at three;
  * 2560 (an ultrawide, a 27" at 2× "looks like" 2560) gets five.
  */
@@ -80,7 +85,7 @@ export function axisStops(logicalSpan: number): number[] {
 
 /**
  * The wells for every monitor, as top-left targets for a window of the given
- * logical size. When the window is larger than a monitor's inset area (a wide
+ * size, all in points. When the window is larger than a monitor's inset area (a wide
  * pane on a small screen), the corresponding axis collapses to the inset origin.
  */
 export function computeWells(
@@ -96,23 +101,20 @@ export function computeWells(
   const wells: Well[] = [];
 
   monitors.forEach((m, monitorIndex) => {
-    const sf = m.scaleFactor || 1;
-    const marginP = margin * sf;
-    const topInsetP = topInset * sf;
-    const width = Math.round(windowWidth * sf);
-    const height = Math.round(windowHeight * sf);
+    const width = windowWidth;
+    const height = windowHeight;
 
-    const left = m.position.x + marginP;
-    const right = m.position.x + m.size.width - marginP;
-    const top = m.position.y + topInsetP;
-    const bottom = m.position.y + m.size.height - marginP;
+    const left = m.position.x + margin;
+    const right = m.position.x + m.size.width - margin;
+    const top = m.position.y + topInset;
+    const bottom = m.position.y + m.size.height - margin;
 
     // Range available for the window's top-left within the inset area.
     const spanX = Math.max(0, right - width - left);
     const spanY = Math.max(0, bottom - height - top);
 
-    const xs = axisStops(m.size.width / sf);
-    const ys = axisStops(m.size.height / sf);
+    const xs = axisStops(m.size.width);
+    const ys = axisStops(m.size.height);
 
     for (const fy of ys) {
       for (const fx of xs) {

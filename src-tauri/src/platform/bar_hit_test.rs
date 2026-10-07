@@ -20,7 +20,14 @@
 //!
 //! The poll is the same shape as `cursor_follow`: Tauri's own cursor read, no
 //! unsafe Cocoa, no accessibility permission. It idles on an atomic check
-//! whenever no look has registered regions.
+//! whenever no look has registered regions. Cursor and window are compared in
+//! global points (`platform::desktop_points`): tao scales the cursor by the
+//! primary display and the window by its own, so on a 1x display beside a 2x
+//! one the raw numbers disagreed and the bar would not take clicks there.
+//!
+//! While a driven drag is in flight (`platform::bar_drag`) the cursor is on
+//! the shape by definition, so it counts as inside and the window keeps the
+//! mouse until the drop.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -128,20 +135,15 @@ pub fn start(app: AppHandle) {
             if !window.is_visible().unwrap_or(false) {
                 continue;
             }
-            let (Ok(cursor), Ok(origin), Ok(scale)) = (
-                app.cursor_position(),
-                window.outer_position(),
-                window.scale_factor(),
+            let (Some(cursor), Some(origin)) = (
+                crate::platform::desktop_points::cursor_points(&app),
+                crate::platform::desktop_points::window_origin_points(&window),
             ) else {
                 continue;
             };
 
-            let inside = cursor_in_regions(
-                (cursor.x, cursor.y),
-                (origin.x as f64, origin.y as f64),
-                scale,
-                &regions,
-            );
+            let inside = crate::platform::bar_drag::is_dragging()
+                || cursor_in_regions(cursor, origin, 1.0, &regions);
             if last_inside == Some(inside) {
                 continue;
             }

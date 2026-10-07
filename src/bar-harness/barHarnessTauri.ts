@@ -178,6 +178,14 @@ function unwrapValue(value: unknown): Record<string, number> | null {
   return inner;
 }
 
+/** Whether a `set_position` value is a `LogicalPosition`. */
+function isLogical(value: unknown): boolean {
+  if (value == null || typeof value !== "object") return false;
+  const raw = value as { toJSON?: () => unknown };
+  const json = (typeof raw.toJSON === "function" ? raw.toJSON() : value) as Record<string, unknown>;
+  return "Logical" in json;
+}
+
 /**
  * The IPC handler. Window-geometry reads come from the store; the bar's own
  * frame writes go back into it (unless frozen); every other command resolves
@@ -212,7 +220,10 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     case "plugin:window|set_position": {
       const p = unwrapValue(args.value);
       if (p && typeof p.x === "number" && typeof p.y === "number") {
-        harness.setFrame({ x: Math.round(p.x), y: Math.round(p.y) });
+        // The store holds physical px; a logical move is in points.
+        const logical = isLogical(args.value);
+        const sf = logical ? state.monitor.scaleFactor : 1;
+        harness.setFrame({ x: Math.round(p.x * sf), y: Math.round(p.y * sf) });
       }
       return null;
     }
@@ -231,11 +242,11 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     // --- the bar's own frame command (resize + reposition in one shot) ---
     case COMMANDS.BAR_SET_BAR_FRAME: {
       const sf = state.monitor.scaleFactor;
-      // width/height arrive logical; x/y arrive physical. Normalize to the
-      // physical frame the store holds.
+      // Everything arrives in points. Normalize to the physical frame the
+      // store holds.
       const requested: HarnessFrame = {
-        x: Math.round(Number(args.x)),
-        y: Math.round(Number(args.y)),
+        x: Math.round(Number(args.x) * sf),
+        y: Math.round(Number(args.y) * sf),
         width: Math.round(Number(args.width) * sf),
         height: Math.round(Number(args.height) * sf),
       };
@@ -267,6 +278,9 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
       return true;
     case COMMANDS.BAR_GET_BAR_POSITION:
       return state.savedPosition;
+    // No Rust here to drive a drag; the bar falls back to the OS drag.
+    case COMMANDS.BAR_DRAG_FOLLOW:
+      throw new Error("no driven drag in the harness");
     case COMMANDS.TRIGGERS_GET_TRIGGERS:
       return [];
     case COMMANDS.AGENT_SESSIONS_LIST_AGENT_SESSIONS:

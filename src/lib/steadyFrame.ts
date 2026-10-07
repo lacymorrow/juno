@@ -30,8 +30,7 @@
  * never by the anchor itself: the anchor rect is always the well.
  *
  * Everything here is pure except the small per-label store at the bottom.
- * Positions are physical pixels (Tauri's units), sizes logical, as in
- * `snapWells.ts`.
+ * Everything is in global desktop points, as in `snapWells.ts`.
  */
 
 import type { MonitorRect, Well, WellSlot } from "./snapWells";
@@ -68,9 +67,9 @@ export interface SteadySpec {
 export interface SteadyLayout {
   slot: WellSlot;
   monitorIndex: number;
-  /** The window's top-left, physical pixels. */
+  /** The window's top-left, global points. */
   origin: { x: number; y: number };
-  /** The window's size, logical pixels: `spec.max`, never changed per state. */
+  /** The window's size, points: `spec.max`, never changed per state. */
   size: Size;
   /** The resting footprint inside the window. On screen it is exactly the well. */
   anchor: Rect;
@@ -78,8 +77,6 @@ export interface SteadyLayout {
   anchorX: WindowAnchorX;
   /** Content grows up from the anchor's bottom edge instead of down from its top. */
   growUp: boolean;
-  /** Scale factor of the display this layout was computed for. */
-  scaleFactor: number;
 }
 
 /** Inset of the area a steady window is kept inside. Matches `computeWells`. */
@@ -102,7 +99,6 @@ export function steadyLayout(
   spec: SteadySpec,
   { margin = 16, topInset = 36 }: SteadyInsets = {},
 ): SteadyLayout {
-  const sf = monitor.scaleFactor || 1;
   const slot = { fx: well.fx, fy: well.fy };
   const anchorX = dockAnchorX(slot);
   const growUp = dockGrowsUp(slot);
@@ -114,34 +110,61 @@ export function steadyLayout(
   const W = spec.max.width + ((spec.max.width - rw) % 2);
   const H = spec.max.height;
 
-  // Ideal offset of the resting footprint inside the window, logical.
+  // Ideal offset of the resting footprint inside the window.
   const idealX = anchorX === "start" ? 0 : anchorX === "end" ? W - rw : Math.floor((W - rw) / 2);
   const idealY = growUp ? H - rh : 0;
 
-  // The window's ideal top-left (physical), then clamped inside the inset area.
-  const minX = monitor.position.x + Math.round(margin * sf);
-  const maxX = monitor.position.x + monitor.size.width - Math.round(margin * sf) - Math.round(W * sf);
-  const minY = monitor.position.y + Math.round(topInset * sf);
-  const maxY = monitor.position.y + monitor.size.height - Math.round(margin * sf) - Math.round(H * sf);
+  // The window's ideal top-left, then clamped inside the inset area.
+  const minX = monitor.position.x + margin;
+  const maxX = monitor.position.x + monitor.size.width - margin - W;
+  const minY = monitor.position.y + topInset;
+  const maxY = monitor.position.y + monitor.size.height - margin - H;
   const clamp = (v: number, lo: number, hi: number) => (hi < lo ? lo : Math.min(hi, Math.max(lo, v)));
 
-  // Clamping works in whole logical pixels so the anchor offset stays an
-  // integer: the anchor is where the well is, and the window moves around it.
-  const ox = clamp(well.x - Math.round(idealX * sf), minX, maxX);
-  const oy = clamp(well.y - Math.round(idealY * sf), minY, maxY);
-  const ax = Math.round((well.x - ox) / sf);
-  const ay = Math.round((well.y - oy) / sf);
-  const origin = { x: well.x - Math.round(ax * sf), y: well.y - Math.round(ay * sf) };
+  // The clamp is absorbed by the anchor offset, never by the anchor: the
+  // anchor is where the well is, and the window moves around it.
+  const ox = clamp(well.x - idealX, minX, maxX);
+  const oy = clamp(well.y - idealY, minY, maxY);
+  const ax = well.x - ox;
+  const ay = well.y - oy;
 
   return {
     slot,
     monitorIndex: well.monitorIndex,
-    origin,
+    origin: { x: ox, y: oy },
     size: { width: W, height: H },
     anchor: { x: ax, y: ay, width: rw, height: rh },
     anchorX,
     growUp,
-    scaleFactor: sf,
+  };
+}
+
+/**
+ * The layout a steady look is dragged in: the same window, with the resting
+ * footprint in its centre, placed so the footprint stays exactly where it is
+ * on screen.
+ *
+ * Why centred. With "Displays have separate Spaces" (the macOS default) a
+ * window that straddles two displays is drawn only on the display holding
+ * most of it. The docked layout puts the shape at one edge of a window far
+ * larger than it, so carried across a display edge shape-first it would be
+ * on the new display while most of its window is still on the old one, and
+ * would vanish for hundreds of points of travel. Centred, the window changes
+ * display when the shape's own centre does.
+ */
+export function dragLayout(layout: SteadyLayout): SteadyLayout {
+  const { size, anchor } = layout;
+  const ax = Math.floor((size.width - anchor.width) / 2);
+  const ay = Math.floor((size.height - anchor.height) / 2);
+  return {
+    ...layout,
+    origin: {
+      x: layout.origin.x + anchor.x - ax,
+      y: layout.origin.y + anchor.y - ay,
+    },
+    anchor: { ...anchor, x: ax, y: ay },
+    anchorX: "center",
+    growUp: false,
   };
 }
 
@@ -198,14 +221,13 @@ export function roomForContent(layout: SteadyLayout): number {
     : layout.size.height - layout.anchor.y;
 }
 
-/** A logical rect in the window, as a physical rect on screen. */
+/** A rect in the window, as a rect on screen (both in points). */
 export function toScreen(layout: SteadyLayout, r: Rect): Rect {
-  const sf = layout.scaleFactor;
   return {
-    x: layout.origin.x + r.x * sf,
-    y: layout.origin.y + r.y * sf,
-    width: r.width * sf,
-    height: r.height * sf,
+    x: layout.origin.x + r.x,
+    y: layout.origin.y + r.y,
+    width: r.width,
+    height: r.height,
   };
 }
 
@@ -224,10 +246,9 @@ export function dockedEdges(layout: SteadyLayout, size: Size): { x: number; y: n
 
 /** The resting footprint's top-left on screen: the well this layout belongs to. */
 export function anchorScreenOrigin(layout: SteadyLayout): { x: number; y: number } {
-  const sf = layout.scaleFactor;
   return {
-    x: layout.origin.x + Math.round(layout.anchor.x * sf),
-    y: layout.origin.y + Math.round(layout.anchor.y * sf),
+    x: layout.origin.x + layout.anchor.x,
+    y: layout.origin.y + layout.anchor.y,
   };
 }
 
@@ -242,8 +263,7 @@ export function sameLayout(a: SteadyLayout | null, b: SteadyLayout | null): bool
     a.anchor.x === b.anchor.x &&
     a.anchor.y === b.anchor.y &&
     a.anchorX === b.anchorX &&
-    a.growUp === b.growUp &&
-    a.scaleFactor === b.scaleFactor
+    a.growUp === b.growUp
   );
 }
 
@@ -255,8 +275,7 @@ export function sameDrawing(a: SteadyLayout, b: SteadyLayout): boolean {
     a.anchor.x === b.anchor.x &&
     a.anchor.y === b.anchor.y &&
     a.anchorX === b.anchorX &&
-    a.growUp === b.growUp &&
-    a.scaleFactor === b.scaleFactor
+    a.growUp === b.growUp
   );
 }
 

@@ -59,7 +59,13 @@ import {
   type SteadyLayout,
   type SteadySpec,
 } from "@/lib/steadyFrame";
-import { applySteadyFrame, steadyWells, toMonitorRects } from "@/hooks/useBarSnapWells";
+import {
+  applySteadyFrame,
+  steadyWells,
+  toMonitorRects,
+  windowOrigin,
+} from "@/hooks/useBarSnapWells";
+import { cursorInPoints } from "@/lib/desktopPoints";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { AgentRosterStrip } from "./AgentRosterStrip";
 import { BarChatPane } from "./bar/BarChatPane";
@@ -185,9 +191,12 @@ export const BLUR_SETTLE_MS = 80;
 async function cursorInsideContent(content: Rect | null): Promise<boolean> {
   if (!content) return false;
   const w = getCurrentWindow();
-  const [c, p, sf] = await Promise.all([cursorPosition(), w.outerPosition(), w.scaleFactor()]);
-  const x = (c.x - p.x) / sf;
-  const y = (c.y - p.y) / sf;
+  // In global points: the cursor and the window are scaled by different
+  // displays' factors in Tauri's raw numbers (see `src/lib/desktopPoints.ts`).
+  const [c, p, mons] = await Promise.all([cursorPosition(), windowOrigin(w), availableMonitors()]);
+  const cursor = cursorInPoints(c, mons);
+  const x = cursor.x - p.x;
+  const y = cursor.y - p.y;
   return (
     x >= content.x &&
     x < content.x + content.width &&
@@ -1562,7 +1571,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       try {
         const saved = await invoke<{ x: number; y: number } | null>(COMMANDS.BAR_GET_BAR_POSITION);
         const [pos, mons] = await Promise.all([
-          getCurrentWindow().outerPosition(),
+          windowOrigin(getCurrentWindow()),
           availableMonitors(),
         ]);
         if (cancelled || !mons.length) return;
@@ -1576,7 +1585,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         let target: Well | null = saved ? nearestWell(saved, wells) : null;
         if (!target) {
           // The monitor the window was created on, or the first one.
-          const mon = Math.max(0, monitorIndexAt(mons, pos.x, pos.y));
+          const mon = Math.max(0, monitorIndexAt(rects, pos.x, pos.y));
           target = wellForSlot(SLOT.topRight, mon, wells) ?? wells[0];
         }
         if (cancelled || !target) return;

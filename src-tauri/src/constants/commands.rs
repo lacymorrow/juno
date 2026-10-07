@@ -344,6 +344,9 @@ pub mod bar {
     pub const SET_BAR_POSITION: &str = "set_bar_position";
     pub const SET_BAR_FRAME: &str = "set_bar_frame";
     pub const SET_BAR_HIT_REGIONS: &str = "set_bar_hit_regions";
+    pub const DRAG_FOLLOW: &str = "bar_drag_follow";
+    pub const DRAG_STOP: &str = "bar_drag_stop";
+    pub const ENSURE_SNAP_WELLS_OVERLAYS: &str = "ensure_snap_wells_overlays";
     pub const SHOW_BAR_WHEN_READY: &str = "show_bar_when_ready";
     pub const SET_BAR_PANE_OPEN: &str = "set_bar_pane_open";
     pub const UI_GET_BAR_CONFIG: &str = "ui_get_bar_config";

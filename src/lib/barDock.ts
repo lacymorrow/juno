@@ -19,7 +19,7 @@
  * without a running window.
  */
 
-import type { MonitorRect, Well, WellSlot } from "./snapWells";
+import type { Well, WellSlot } from "./snapWells";
 
 /** Which horizontal edge of the window stays put across a resize. */
 export type WindowAnchorX = "start" | "center" | "end";
@@ -63,9 +63,10 @@ export function distinctWells(wells: Well[]): Well[] {
 }
 
 /**
- * Which monitor a physical point is on, or -1 when it is on none of them (the
- * gap between two displays of different heights is a real place a window's
- * corner can sit). Callers decide what "none" means for them.
+ * Which monitor a point is on, or -1 when it is on none of them (the gap
+ * between two displays of different heights is a real place a window's
+ * corner can sit). Callers decide what "none" means for them. Point and
+ * monitors must be in the same space: global points everywhere in the bar.
  */
 export function monitorIndexAt(
   mons: Array<{ position: { x: number; y: number }; size: { width: number; height: number } }>,
@@ -82,13 +83,12 @@ export function monitorIndexAt(
 }
 
 /**
- * Where the dragged window's top-left is, worked out from the cursor.
+ * Where the dragged footprint's top-left is, worked out from the cursor.
  *
- * During an OS window drag the window keeps the grab point under the cursor,
- * so its top-left is the cursor minus the offset the press landed at inside
- * the window. The cursor arrives in physical pixels and the grab offset is in
- * logical ones (it came from a DOM `clientX`/`clientY`), so the offset is
- * scaled by the factor of whichever display the cursor is on.
+ * During a drag the bar keeps the grab point under the cursor, so the
+ * footprint's top-left is the cursor minus the offset the press landed at
+ * inside it. Both are in points (the offset came from a DOM `clientX`), so
+ * this holds on every display whatever its pixel density.
  *
  * This is what makes the drop indicator agree with where the bar lands: the
  * overlay used to compare the bare cursor against each well's centre, while
@@ -100,14 +100,8 @@ export function monitorIndexAt(
 export function predictedWindowOrigin(
   cursor: { x: number; y: number },
   grabOffset: { x: number; y: number },
-  monitors: MonitorRect[],
 ): { x: number; y: number } {
-  const idx = monitorIndexAt(monitors, cursor.x, cursor.y);
-  const sf = (idx >= 0 ? monitors[idx]?.scaleFactor : monitors[0]?.scaleFactor) || 1;
-  return {
-    x: cursor.x - grabOffset.x * sf,
-    y: cursor.y - grabOffset.y * sf,
-  };
+  return { x: cursor.x - grabOffset.x, y: cursor.y - grabOffset.y };
 }
 
 // ── The dock slot store ───────────────────────────────────────────────────

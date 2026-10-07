@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { COMMANDS } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 
-import { armBarSnap, settleBarSnap, useBarDisplayFollow } from "./useBarSnapWells";
+import {
+  answerOverlayReady,
+  settleBarSnap,
+  startBarDrag,
+  useBarDisplayFollow,
+} from "./useBarSnapWells";
+import { useEventListener } from "./useEventListener";
 
 /**
  * Interactive element selectors that should NOT trigger window dragging on a
@@ -102,8 +108,10 @@ export interface BarDrag {
  * The one drag gesture for the bar window: drag from anywhere, land in a well.
  *
  * A mousedown anywhere except text entry arms a drag; moving past the
- * threshold hands the gesture to the OS window drag and swallows the click
- * that would otherwise fire on release. A press and release without movement
+ * threshold starts the drag and swallows the click that would otherwise fire
+ * on release. A steady look (the Pill) is moved by Rust, which is not held
+ * below the menu bar the way the OS drag is; every other look uses the OS
+ * window drag (see `startBarDrag`). A press and release without movement
  * is an ordinary click on whatever was pressed.
  *
  * On release the window glides into the nearest gravity well. That part is
@@ -139,10 +147,7 @@ export function useBarDrag({
       grab.current = null;
       dragged.current = true;
       e.preventDefault();
-      void armBarSnap(start);
-      getCurrentWindow()
-        .startDragging()
-        .catch((error) => console.debug("barDrag: startDragging failed:", error));
+      startBarDrag(start);
     },
     [threshold],
   );
@@ -179,6 +184,13 @@ export function useBarDrag({
     window.addEventListener("mouseup", onUp, true);
     return () => window.removeEventListener("mouseup", onUp, true);
   }, []);
+
+  // A drag Rust drives ends when the button comes up, wherever it comes up.
+  // Rust says so, which covers a mouseup the page never saw.
+  useEventListener(EVENTS.BAR_DRAG_ENDED, () => void settleBarSnap());
+  // A display's overlay is built on its first drag and asks what to draw once
+  // it is listening.
+  useEventListener(EVENTS.SNAP_WELLS_READY, () => answerOverlayReady());
 
   useBarDisplayFollow(displayFollowPaused);
 

@@ -57,6 +57,12 @@ vi.mock("@tauri-apps/api/window", () => ({
   cursorPosition: async () => {
     throw new Error("no cursor in this harness");
   },
+  LogicalPosition: class {
+    constructor(
+      public x: number,
+      public y: number,
+    ) {}
+  },
   PhysicalPosition: class {
     x: number;
     y: number;

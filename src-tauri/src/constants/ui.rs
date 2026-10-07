@@ -11,6 +11,9 @@ pub mod window_labels {
     pub const APP_BAR: &str = "app-bar";
     pub const VOICE_BAR: &str = "voice-bar";
     pub const DYNAMIC_BAR: &str = "dynamic-bar";
+    /// The snap-well drop indicator for the first display. Every other display
+    /// gets its own copy, labelled with this plus a dash and the display index.
+    pub const SNAP_WELLS_OVERLAY: &str = "snap-wells-overlay";
 }
 
 /// Agent session identity colors (LAC-1432 / LAC-2830 spec section 2).

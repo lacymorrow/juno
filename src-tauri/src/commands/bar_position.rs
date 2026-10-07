@@ -2,18 +2,23 @@
 //!
 //! A tiny pair of commands that remember where the floating bar last settled
 //! (the snapped well), so it reopens there on the next launch instead of the
-//! default spot. Physical pixels, stored in a small dedicated store file so it
-//! never interferes with the centralized settings serialization.
+//! default spot. Global desktop points (see `platform::desktop_points`),
+//! stored in a small dedicated store file so it never interferes with the
+//! centralized settings serialization.
 
 use log::warn;
 use serde::{Deserialize, Serialize};
-use tauri::{command, AppHandle, Manager, PhysicalPosition};
+use tauri::{command, AppHandle, LogicalPosition, Manager};
 use tauri_plugin_store::StoreExt;
 
 const BAR_POSITION_STORE_FILE: &str = crate::constants::settings::store_files::BAR_POSITION;
-const BAR_POSITION_KEY: &str = "last_well";
+/// Points, not the physical pixels the old `last_well` key held. Physical
+/// pixels meant a different thing on each display of a mixed-density desk, so
+/// the old value is ignored rather than converted: it may not be on the
+/// display it names, and the bar re-defaults to the top-right well once.
+const BAR_POSITION_KEY: &str = "last_well_points";
 
-/// The bar's last settled top-left, in physical pixels.
+/// The bar's last settled top-left, in global desktop points.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BarPosition {
     pub x: i32,
@@ -81,26 +86,21 @@ pub fn restore_bar_position(app_handle: &AppHandle) {
     else {
         return;
     };
-    let Ok(monitors) = window.available_monitors() else {
-        return;
-    };
-    let on_screen = monitors.iter().any(|m| {
-        let p = m.position();
-        let s = m.size();
-        saved.x >= p.x
-            && saved.x < p.x + s.width as i32
-            && saved.y >= p.y
-            && saved.y < p.y + s.height as i32
-    });
+    let monitors = crate::platform::desktop_points::monitors_in_points(&window);
+    let on_screen = crate::platform::desktop_points::monitor_index_at(
+        &monitors,
+        (saved.x as f64, saved.y as f64),
+    )
+    .is_some();
     if !on_screen {
         return;
     }
-    if let Err(e) = window.set_position(PhysicalPosition::new(saved.x, saved.y)) {
+    if let Err(e) = window.set_position(LogicalPosition::new(saved.x, saved.y)) {
         warn!("Could not restore the floating bar's last position: {}", e);
     }
 }
 
-/// Remember the bar's landing position (physical px) for the next launch.
+/// Remember the bar's landing position (global points) for the next launch.
 #[command]
 pub async fn set_bar_position(app_handle: AppHandle, x: i32, y: i32) -> Result<(), String> {
     let store = app_handle
@@ -151,11 +151,16 @@ pub async fn show_bar_when_ready(app_handle: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to show the floating bar: {}", e))
 }
 
-/// Move + resize the floating bar atomically so a compact<->hover transition
-/// cannot show an intermediate frame (which made the centered dot jump). On
-/// macOS this is a single `NSWindow setFrame:`, dispatched to the main thread;
-/// elsewhere it falls back to separate position/size calls. `x`/`y` are the
-/// target top-left in physical pixels; `width`/`height` are logical points.
+/// Move + resize the floating bar atomically so a frame change cannot show an
+/// intermediate frame. On macOS this is a single `NSWindow setFrame:`,
+/// dispatched to the main thread; elsewhere it falls back to separate
+/// position/size calls.
+///
+/// Everything is in global desktop points: `x`/`y` the target top-left,
+/// `width`/`height` the size. Points are the one space that is the same on
+/// every display, so a frame aimed at a well on a second display of another
+/// density lands there (the old physical-pixel delta was scaled by the
+/// display the window was leaving).
 #[command]
 pub async fn set_bar_frame(
     app_handle: AppHandle,
@@ -167,7 +172,7 @@ pub async fn set_bar_frame(
     #[cfg(target_os = "macos")]
     {
         let app = app_handle.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         app_handle
             .run_on_main_thread(move || {
                 let _ = tx.send(crate::platform::macos::set_bar_frame_atomic(
@@ -175,22 +180,88 @@ pub async fn set_bar_frame(
                 ));
             })
             .map_err(|e| e.to_string())?;
-        rx.recv()
+        rx.await
             .map_err(|e| format!("set_bar_frame main-thread call dropped: {}", e))?
     }
     #[cfg(not(target_os = "macos"))]
     {
-        use tauri::{LogicalSize, Manager, PhysicalPosition};
+        use tauri::LogicalSize;
         let window = app_handle
             .get_webview_window(crate::constants::ui::window_labels::FLOATING_BAR)
             .ok_or("floating-bar window not found")?;
         window
-            .set_position(PhysicalPosition::new(x, y))
+            .set_position(LogicalPosition::new(x, y))
             .map_err(|e| e.to_string())?;
         window
             .set_size(LogicalSize::new(width, height))
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+}
+
+/// A press on the bar has become a drag: move the window under the cursor
+/// until the button comes up (see `platform::bar_drag`). `grab_x`/`grab_y`
+/// are where the press sits inside the window, in points from its top-left.
+/// Called again mid-drag it only changes that offset. Errors off macOS, where
+/// the page falls back to the OS window drag.
+#[command]
+pub async fn bar_drag_follow(
+    app_handle: AppHandle,
+    grab_x: f64,
+    grab_y: f64,
+) -> Result<(), String> {
+    crate::platform::bar_drag::follow(app_handle, (grab_x, grab_y))
+}
+
+/// End a driven bar drag from the page's side (it is settling).
+#[command]
+pub async fn bar_drag_stop(app_handle: AppHandle) -> Result<(), String> {
+    crate::platform::bar_drag::stop(app_handle).await
+}
+
+/// Make sure every display has its own snap-well overlay window.
+///
+/// With "Displays have separate Spaces" (the macOS default) a window is drawn
+/// on one display only, so the single overlay that used to span every monitor
+/// showed the wells on one display and none on the others. The first overlay
+/// is declared in `tauri.conf.json`; display `i > 0` gets a copy of that
+/// declaration labelled `snap-wells-overlay-i`, built the first time a drag
+/// needs it. Returns how many displays there are. A copy that cannot be built
+/// is logged and skipped: the other displays still get their wells.
+#[command]
+pub async fn ensure_snap_wells_overlays(app_handle: AppHandle) -> Result<usize, String> {
+    let base_label = crate::constants::ui::window_labels::SNAP_WELLS_OVERLAY;
+    let displays = app_handle
+        .available_monitors()
+        .map_err(|e| format!("Could not list displays: {e}"))?
+        .len();
+    let base = crate::window_management::declared_window_config(&app_handle, base_label)
+        .ok_or("The snap-wells overlay is not declared in tauri.conf.json")?;
+    for index in 1..displays {
+        let label = overlay_label(index);
+        if app_handle.get_webview_window(&label).is_some() {
+            continue;
+        }
+        let mut config = base.clone();
+        config.label = label.clone();
+        config.visible = false;
+        let built = tauri::WebviewWindowBuilder::from_config(&app_handle, &config)
+            .and_then(|builder| builder.build());
+        if let Err(e) = built {
+            warn!("Could not build the snap-wells overlay '{}': {}", label, e);
+        }
+    }
+    Ok(displays.max(1))
+}
+
+/// The overlay window for display `index`: the declared label for the first,
+/// the label plus `-index` for the rest. The page reads its display back from it.
+pub fn overlay_label(index: usize) -> String {
+    let base = crate::constants::ui::window_labels::SNAP_WELLS_OVERLAY;
+    if index == 0 {
+        base.to_string()
+    } else {
+        format!("{base}-{index}")
     }
 }
 
@@ -220,4 +291,15 @@ pub async fn set_bar_hit_regions(
             .map_err(|e| format!("Failed to restore the bar's mouse events: {}", e))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_first_display_keeps_the_declared_overlay() {
+        assert_eq!(overlay_label(0), "snap-wells-overlay");
+        assert_eq!(overlay_label(2), "snap-wells-overlay-2");
+    }
 }

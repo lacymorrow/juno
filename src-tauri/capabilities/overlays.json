@@ -5,6 +5,7 @@
   "windows": [
     "desktop-cursor-overlay",
     "snap-wells-overlay",
+    "snap-wells-overlay-*",
     "listening-overlay"
   ],
   "permissions": [

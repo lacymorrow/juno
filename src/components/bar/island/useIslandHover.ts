@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
+import { availableMonitors, cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
+import { cursorInPoints, windowOriginInPoints } from "@/lib/desktopPoints";
 import { EVENTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
 
@@ -14,11 +15,25 @@ export const LEAVE_VERIFY_MS = 120;
 /** Attribute that names a hover control, so the forwarded cursor can light it. */
 export const ISLAND_BUTTON_ATTR = "data-island-button";
 
-/** Is the cursor over this window right now? */
+/**
+ * Is the cursor over this window right now? Compared in global points: Tauri
+ * scales the cursor by the primary display and the window by its own, which
+ * disagree on a second display of another density.
+ */
 async function cursorInsideWindow(): Promise<boolean> {
   const w = getCurrentWindow();
-  const [c, p, s] = await Promise.all([cursorPosition(), w.outerPosition(), w.outerSize()]);
-  return c.x >= p.x && c.x < p.x + s.width && c.y >= p.y && c.y < p.y + s.height;
+  const [raw, pos, size, sf, mons] = await Promise.all([
+    cursorPosition(),
+    w.outerPosition(),
+    w.outerSize(),
+    w.scaleFactor(),
+    availableMonitors(),
+  ]);
+  const c = cursorInPoints(raw, mons);
+  const p = windowOriginInPoints(pos, sf);
+  const width = size.width / (sf || 1);
+  const height = size.height / (sf || 1);
+  return c.x >= p.x && c.x < p.x + width && c.y >= p.y && c.y < p.y + height;
 }
 
 export interface IslandHover {
