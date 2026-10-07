@@ -375,6 +375,10 @@ pub async fn submit_query(
         return Ok(());
     }
 
+    // Time a typed query like a voice turn, from the submit. A spoken query
+    // arrives here too, and the voice turn already open keeps it.
+    crate::turn_timing::begin_typed();
+
     // --- Answer a pending per-send approval (LAC-4058) by voice (LAC-4066) ---
     // Every query source funnels through here, including the push-to-talk /
     // hotkey and cloud-voice transcripts. While a connector send is waiting on

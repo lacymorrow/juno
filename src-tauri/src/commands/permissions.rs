@@ -102,7 +102,7 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
         }
     }
 
-    info!("Checking macOS permissions status using native APIs (no password prompts)");
+    debug!("Checking macOS permissions status using native APIs (no password prompts)");
 
     let app_name = app.package_info().name.clone();
 
@@ -132,7 +132,7 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
         app_name,
     };
 
-    info!("Native permissions checked - no password prompts required");
+    debug!("Native permissions checked - no password prompts required");
     debug!("Permissions state: {:?}", permissions_state);
 
     // Store result in cache for subsequent calls within the TTL window.
