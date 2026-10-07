@@ -1,4 +1,4 @@
-//! Where the time goes in one voice turn.
+//! Where the time goes in one turn, spoken or typed.
 //!
 //! The goal this exists for: the person lets go of the hold key and hears Juno
 //! start answering in under a second. Nobody can work toward that without
@@ -6,10 +6,14 @@
 //! millisecond offsets from the key release:
 //!
 //! ```text
-//! [TurnTiming] turn=7 outcome=first_audio released=0 transcript_final=412 llm_request_sent=455 llm_first_token=1210 first_tts_text=1388 first_audio=1702 provider=claude_cli/persistent-warm model=sonnet tts=kokoro
+//! [TurnTiming] turn=7 outcome=first_audio released=0 transcript_final=412 llm_request_sent=455 llm_first_token=1210 first_tts_text=1388 first_audio=1702 provider=claude_cli/persistent-warm model=sonnet tts=kokoro source=voice
 //! ```
 //!
 //! A stage the turn never reached prints as `-`. Grep `[TurnTiming]` in the log.
+//!
+//! A typed query opens a turn too ([`begin_typed`]), timed from the submit, so
+//! `released=0` is the moment it was sent and `transcript_final` is `-`.
+//! `source=` tells the two apart.
 //!
 //! The tracker is deliberately passive. A turn opens on a hold-key release
 //! ([`begin`]), each stage records the first time it is reached ([`mark`]), and
@@ -34,6 +38,9 @@ pub const TURN_TIMEOUT: Duration = Duration::from_secs(120);
 /// A second release this soon after the open turn's, before that turn reached
 /// any stage, is the same key release reported twice, not a new turn.
 pub const DUPLICATE_RELEASE_WINDOW: Duration = Duration::from_millis(50);
+
+const SOURCE_VOICE: &str = "voice";
+const SOURCE_TYPED: &str = "typed";
 
 /// The stages of a voice turn after the key release, in the order they
 /// normally happen.
@@ -93,6 +100,8 @@ pub struct TurnTimer {
     provider: Option<String>,
     model: Option<String>,
     tts_engine: Option<String>,
+    /// `voice` for a hold-key release, `typed` for a query sent from the composer.
+    source: &'static str,
 }
 
 impl TurnTimer {
@@ -105,6 +114,7 @@ impl TurnTimer {
             provider: None,
             model: None,
             tts_engine: None,
+            source: SOURCE_VOICE,
         }
     }
 
@@ -169,10 +179,11 @@ impl TurnTimer {
         }
         let field = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".to_string());
         out.push_str(&format!(
-            " provider={} model={} tts={}",
+            " provider={} model={} tts={} source={}",
             field(&self.provider),
             field(&self.model),
-            field(&self.tts_engine)
+            field(&self.tts_engine),
+            self.source
         ));
         out
     }
@@ -227,6 +238,23 @@ impl Tracker {
         timer.voice_session = voice_session;
         self.current = Some(timer);
         Begin::Opened { id, previous }
+    }
+
+    /// Open a turn for a typed query submitted at `at`. Every query, spoken or
+    /// typed, reaches the submit path, so a voice turn still waiting for its
+    /// first request owns this submit: `None`, nothing changed.
+    pub fn begin_typed(&mut self, next_id: impl FnOnce() -> u64, at: Instant) -> Option<Begin> {
+        if let Some(open) = self.current.as_ref() {
+            if open.source == SOURCE_VOICE && open.offset(Stage::LlmRequestSent).is_none() {
+                return None;
+            }
+        }
+        let previous = self.current.take().map(|t| t.line("superseded"));
+        let id = next_id();
+        let mut timer = TurnTimer::new(id, at);
+        timer.source = SOURCE_TYPED;
+        self.current = Some(timer);
+        Some(Begin::Opened { id, previous })
     }
 
     /// Record a stage. Returns the finished line when the stage is first
@@ -306,6 +334,21 @@ pub fn begin(released: Instant, voice_session: Option<u64>) -> u64 {
     }
 }
 
+/// Open a turn for a typed query sent now, closed by audio or after
+/// [`TURN_TIMEOUT`]. A no-op when the submit belongs to an open voice turn.
+pub fn begin_typed() {
+    let opened = with_tracker(|t| {
+        t.begin_typed(|| NEXT_TURN.fetch_add(1, Ordering::Relaxed), Instant::now())
+    });
+    if let Some(Begin::Opened { id, previous }) = opened {
+        emit(previous);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(TURN_TIMEOUT).await;
+            finish(Some(id), "timeout");
+        });
+    }
+}
+
 /// Record that the open turn reached `stage` now. A no-op with no open turn.
 pub fn mark(stage: Stage) {
     let now = Instant::now();
@@ -364,7 +407,7 @@ mod tests {
             line,
             "turn=1 outcome=first_audio released=0 transcript_final=400 llm_request_sent=450 \
              llm_first_token=1200 first_tts_text=1380 first_audio=1700 \
-             provider=claude_cli/persistent-warm model=sonnet tts=kokoro"
+             provider=claude_cli/persistent-warm model=sonnet tts=kokoro source=voice"
         );
         // Emitted once: the turn is gone, later marks do nothing.
         assert!(tracker.mark_at(Stage::FirstAudio, t0 + ms(2000)).is_none());
@@ -396,7 +439,7 @@ mod tests {
         assert_eq!(
             line,
             "turn=2 outcome=timeout released=0 transcript_final=300 llm_request_sent=- \
-             llm_first_token=- first_tts_text=- first_audio=- provider=- model=- tts=-"
+             llm_first_token=- first_tts_text=- first_audio=- provider=- model=- tts=- source=voice"
         );
     }
 
@@ -435,6 +478,42 @@ mod tests {
         tracker.begin(9, t0 + ms(1000));
         assert!(tracker.finish(Some(8), "timeout").is_none());
         assert!(tracker.finish(Some(9), "timeout").is_some());
+    }
+
+    #[test]
+    fn a_voice_turn_owns_its_own_submit() {
+        let t0 = Instant::now();
+        let mut tracker = Tracker::default();
+        tracker.begin(1, t0);
+        tracker.mark_at(Stage::TranscriptFinal, t0 + ms(300));
+        // The transcript reaches the submit path: not a second turn.
+        assert!(tracker.begin_typed(|| 2, t0 + ms(310)).is_none());
+        tracker.mark_at(Stage::LlmRequestSent, t0 + ms(320));
+        // Once the voice turn has sent its request, a submit is a new typed turn.
+        match tracker.begin_typed(|| 3, t0 + ms(5000)) {
+            Some(Begin::Opened { id, previous }) => {
+                assert_eq!(id, 3);
+                assert!(previous.unwrap_or_default().contains("source=voice"));
+            }
+            other => panic!("expected a typed turn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_typed_turn_is_timed_from_the_submit() {
+        let t0 = Instant::now();
+        let mut tracker = Tracker::default();
+        assert!(tracker.begin_typed(|| 4, t0).is_some());
+        tracker.mark_at(Stage::LlmRequestSent, t0 + ms(20));
+        tracker.mark_at(Stage::LlmFirstToken, t0 + ms(900));
+        let line = tracker
+            .mark_at(Stage::FirstAudio, t0 + ms(1200))
+            .unwrap_or_default();
+        assert!(
+            line.contains("transcript_final=- llm_request_sent=20"),
+            "{line}"
+        );
+        assert!(line.ends_with("source=typed"), "{line}");
     }
 
     #[test]
