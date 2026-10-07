@@ -25,6 +25,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import {
   availableMonitors,
+  cursorPosition,
   getCurrentWindow,
   PhysicalPosition,
 } from "@tauri-apps/api/window";
@@ -42,6 +43,7 @@ import {
 import {
   getDockSlot,
   monitorIndexAt,
+  predictedWindowOrigin,
   setDockSlot,
   subscribeDockSlot,
 } from "@/lib/barDock";
@@ -187,12 +189,37 @@ let snapAnimating = false;
 // Whether the drop indicator overlay is showing, so it is hidden exactly once
 // on release regardless of which settle path fires first.
 let overlayShown = false;
+// Where the press landed, in logical px from the footprint's top-left (the
+// steady anchor, or the window itself). The settle reads the landing from the
+// cursor with it, exactly as the drop indicator does.
+let footprintGrab: { x: number; y: number } | null = null;
 
 /** Forget the in-flight gesture. For tests, which share one module instance. */
 export function resetBarSnapState(): void {
   snapArmed = false;
   snapAnimating = false;
   overlayShown = false;
+  footprintGrab = null;
+}
+
+/**
+ * Where the footprint's top-left would be if the window had followed the
+ * cursor exactly, in physical px. This, not the window's own position, picks
+ * the well: macOS keeps a window's top edge below the menu bar during a drag,
+ * and a steady window is far taller than the Pill inside it, so its position
+ * alone could never reach the top row of wells. Null when the cursor cannot
+ * be read; the caller falls back to the window position.
+ */
+async function releasedFootprintOrigin(
+  rects: MonitorRect[],
+): Promise<{ x: number; y: number } | null> {
+  if (!footprintGrab) return null;
+  try {
+    const c = await cursorPosition();
+    return predictedWindowOrigin({ x: c.x, y: c.y }, footprintGrab, rects);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -210,6 +237,7 @@ export async function armBarSnap(grabOffset: { x: number; y: number }): Promise<
   if (!isBarWindow()) return;
   snapArmed = true;
   if (overlayShown) return;
+  footprintGrab = grabOffset;
   overlayShown = true;
   try {
     const win = getCurrentWindow();
@@ -218,11 +246,15 @@ export async function armBarSnap(grabOffset: { x: number; y: number }): Promise<
     // the grab is re-expressed from that footprint's top-left.
     const steady = getSteady(win.label);
     if (steady?.layout) {
+      footprintGrab = {
+        x: grabOffset.x - steady.layout.anchor.x,
+        y: grabOffset.y - steady.layout.anchor.y,
+      };
       await emit(EVENTS.SNAP_WELLS_SHOW, {
         windowWidth: steady.spec.rest.width,
         windowHeight: steady.spec.rest.height,
-        grabOffsetX: grabOffset.x - steady.layout.anchor.x,
-        grabOffsetY: grabOffset.y - steady.layout.anchor.y,
+        grabOffsetX: footprintGrab.x,
+        grabOffsetY: footprintGrab.y,
       });
       return;
     }
@@ -269,8 +301,10 @@ export async function settleBarSnap(): Promise<void> {
       availableMonitors(),
     ]);
     if (!monitors.length) return;
-    const wells = computeWells(toMonitorRects(monitors), { ...logical, includeCenter: true });
-    const target = nearestWell({ x: pos.x, y: pos.y }, wells);
+    const rects = toMonitorRects(monitors);
+    const wells = computeWells(rects, { ...logical, includeCenter: true });
+    const aim = (await releasedFootprintOrigin(rects)) ?? { x: pos.x, y: pos.y };
+    const target = nearestWell(aim, wells);
     if (!target) return;
     snapAnimating = true;
     await animateWindowTo(win, { x: pos.x, y: pos.y }, { x: target.x, y: target.y });
@@ -284,6 +318,7 @@ export async function settleBarSnap(): Promise<void> {
     console.debug("barSnap: settle into well failed:", error);
   } finally {
     snapAnimating = false;
+    footprintGrab = null;
   }
 }
 
@@ -306,7 +341,10 @@ async function settleSteady(win: AppWindow, spec: SteadySpec, layout: SteadyLayo
     x: Math.round(layout.anchor.x * sf),
     y: Math.round(layout.anchor.y * sf),
   };
-  const anchorNow = { x: pos.x + offset.x, y: pos.y + offset.y };
+  const anchorNow = (await releasedFootprintOrigin(rects)) ?? {
+    x: pos.x + offset.x,
+    y: pos.y + offset.y,
+  };
   const target = nearestWell(anchorNow, steadyWells(rects, spec));
   if (!target) return;
   const next = steadyLayoutFor(target, rects, spec);

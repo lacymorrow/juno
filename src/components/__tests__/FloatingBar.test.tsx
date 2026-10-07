@@ -1042,6 +1042,10 @@ describe("FloatingBar steady frame", () => {
     fireEvent.mouseMove(mic, { clientX: 30, clientY: 20 });
     outerPos.x = x;
     outerPos.y = y;
+    // Released with the cursor where it grabbed the window; the settle reads
+    // the landing from the cursor.
+    cursor.x = x + 10;
+    cursor.y = y + 10;
     fireEvent.mouseUp(window);
     await act(async () => {
       await new Promise((r) => setTimeout(r, 500));

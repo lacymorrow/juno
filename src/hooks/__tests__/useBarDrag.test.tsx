@@ -52,7 +52,11 @@ vi.mock("@tauri-apps/api/window", () => ({
     scaleFactor: async () => 1,
   }),
   availableMonitors: async () => monitors.value,
-  cursorPosition: async () => ({ x: 0, y: 0 }),
+  // Unreadable here, so the settle falls back to the window's position, which
+  // these tests drive. The cursor path is covered in useBarSnapWells.test.ts.
+  cursorPosition: async () => {
+    throw new Error("no cursor in this harness");
+  },
   PhysicalPosition: class {
     x: number;
     y: number;
