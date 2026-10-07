@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.113] - 2026-10-07
+
+### Fixed
+
+- **bar:** drops land in the well the cursor points at, top row included (#726) (caa73bf9)
+
 ## [0.8.112] - 2026-10-06
 
 ### Changed
@@ -991,7 +997,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.112...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.113...HEAD
+[0.8.113]: https://github.com/lacymorrow/juno/compare/cua-v0.8.112...v0.8.113
 [0.8.112]: https://github.com/lacymorrow/juno/compare/cua-v0.8.111...v0.8.112
 [0.8.111]: https://github.com/lacymorrow/juno/compare/cua-v0.8.110...v0.8.111
 [0.8.110]: https://github.com/lacymorrow/juno/compare/cua-v0.8.109...v0.8.110
