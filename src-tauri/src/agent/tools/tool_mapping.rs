@@ -141,6 +141,20 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     // Additional basic tools that are actually registered
     map.insert("read_file", ToolCategory::Basic);
 
+    // Mac app tools (Reminders, Calendar, Contacts)
+    for name in [
+        tool_names::REMINDERS_LIST,
+        tool_names::REMINDERS_CREATE,
+        tool_names::REMINDERS_COMPLETE,
+        tool_names::CALENDAR_EVENTS,
+        tool_names::CALENDAR_CREATE_EVENT,
+        tool_names::CALENDAR_MOVE_EVENT,
+        tool_names::CALENDAR_DELETE_EVENT,
+        tool_names::CONTACTS_FIND,
+    ] {
+        map.insert(name, ToolCategory::MacApps);
+    }
+
     // Timer tools
     map.insert(tool_names::TIMER_CREATE, ToolCategory::Timer);
     map.insert(tool_names::TIMER_START, ToolCategory::Timer);

@@ -977,6 +977,7 @@ impl ToolMetadata {
                     ("🔧", "Basic operation", "standard", Some("short"))
                 }
             }
+            ToolCategory::MacApps => ("📅", "Using a Mac app", "standard", Some("short")),
             ToolCategory::MCP => ("🔌", "External tool", "standard", Some("medium")),
         };
 

@@ -162,6 +162,7 @@ Before opening any application, **check the Running Applications and Visible Win
 **When to use**: ALWAYS TRY FIRST for macOS automation
 **Capabilities**:
 - AppleScript via `osascript` - Control apps, windows, system settings directly
+- Reminders, Calendar and Contacts: use the `reminders_`, `calendar_` and `contacts_` tools. A Mac app tool beats a Composio or MCP tool for the same thing. When one returns a `card`, finish with that tag exactly as given.
 - Keyboard shortcuts - Cmd+Space (Spotlight), Cmd+Tab (switch apps), app-specific shortcuts
 - System commands - `open -a AppName`, `defaults write`, system utilities
 - Direct app control - No need for clicking or screenshots

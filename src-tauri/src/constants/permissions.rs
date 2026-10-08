@@ -69,4 +69,10 @@ pub mod urls {
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
     pub const INPUT_MONITORING_PANEL: &str =
         "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
+    pub const REMINDERS_PANEL: &str =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders";
+    pub const CALENDARS_PANEL: &str =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars";
+    pub const CONTACTS_PANEL: &str =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts";
 }

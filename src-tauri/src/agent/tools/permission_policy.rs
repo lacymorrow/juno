@@ -253,6 +253,19 @@ pub fn describe_action(tool_name: &str, tool_input: &Value) -> String {
             _ => "Use the page".to_string(),
         },
 
+        // Reminders and Calendar. A title is what the person recognises.
+        "reminders_create" => match field("title") {
+            Some(title) => format!("Add a reminder: {}", clip(title, 80)),
+            None => "Add a reminder".to_string(),
+        },
+        "reminders_complete" => "Mark a reminder done".to_string(),
+        "calendar_create_event" => match field("title") {
+            Some(title) => format!("Add to your calendar: {}", clip(title, 80)),
+            None => "Add an event to your calendar".to_string(),
+        },
+        "calendar_move_event" => "Move an event on your calendar".to_string(),
+        "calendar_delete_event" => "Delete an event from your calendar".to_string(),
+
         "create_scheduled_automation" => {
             "Set up a task that runs on its own later, without you here".to_string()
         }
