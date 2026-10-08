@@ -126,12 +126,6 @@ fn run_loop(app: AppHandle, generation: u64) -> Result<(), String> {
             return Err(format!("No native window for the bar drag: {e}"));
         }
     };
-    // AppKit's class machinery and the window belong to the main thread, and
-    // ticks are queued there too, so this lands before the first move.
-    if let Err(e) = app.run_on_main_thread(move || allow_above_menu_bar(ns_window)) {
-        log::warn!("[BarDrag] could not lift the menu bar limit: {e}");
-    }
-    log::info!("[BarDrag] driving the bar drag");
 
     tauri::async_runtime::spawn(async move {
         loop {
@@ -180,75 +174,6 @@ fn run_loop(app: AppHandle, generation: u64) -> Result<(), String> {
         }
     });
     Ok(())
-}
-
-/// Prefix of the runtime subclass that lets the bar window sit anywhere.
-#[cfg(target_os = "macos")]
-const UNCONSTRAINED_CLASS_PREFIX: &str = "JunoUnconstrainedBar_";
-
-/// Let the bar window be placed above the menu bar.
-///
-/// AppKit runs every frame change through `constrainFrameRect:toScreen:`,
-/// which keeps a window's top edge below the menu bar, and that applies to
-/// `setFrameTopLeftPoint:` as well as to the OS drag. A steady window is far
-/// taller than the pill inside it, so the pill stopped about halfway up the
-/// screen. The usual fix (Electron's `enableLargerThanScreen` does the same)
-/// is to override that method to return the frame unchanged. It is done by
-/// giving only the bar's NSWindow a runtime subclass, so every other Juno
-/// window keeps AppKit's normal behaviour. Idempotent.
-#[cfg(target_os = "macos")]
-#[allow(unexpected_cfgs)]
-fn allow_above_menu_bar(ns_window_addr: usize) {
-    use cocoa::base::id as cocoa_id;
-    use cocoa::foundation::NSRect;
-    use objc::declare::ClassDecl;
-    use objc::runtime::{Class, Object, Sel};
-    use objc::{sel, sel_impl};
-
-    extern "C" fn unconstrained_frame(
-        _this: &Object,
-        _sel: Sel,
-        frame: NSRect,
-        _screen: cocoa_id,
-    ) -> NSRect {
-        frame
-    }
-
-    extern "C" {
-        fn object_getClass(obj: *const Object) -> *const Class;
-        fn object_setClass(obj: *mut Object, cls: *const Class) -> *const Class;
-    }
-
-    // SAFETY: a live NSWindow pointer for the bar window, which lives for the
-    // app's lifetime; main thread only (`run_loop` dispatches this with
-    // `run_on_main_thread`). The subclass adds one
-    // method and no ivars, so swapping the isa pointer is layout compatible.
-    unsafe {
-        let ns_window = ns_window_addr as *mut Object;
-        let Some(current) = object_getClass(ns_window).as_ref() else {
-            return;
-        };
-        let name = current.name();
-        if name.starts_with(UNCONSTRAINED_CLASS_PREFIX) {
-            return;
-        }
-        let sub_name = format!("{UNCONSTRAINED_CLASS_PREFIX}{name}");
-        let sub = match Class::get(&sub_name) {
-            Some(class) => class,
-            None => {
-                let Some(mut decl) = ClassDecl::new(&sub_name, current) else {
-                    log::warn!("[BarDrag] could not declare {sub_name}");
-                    return;
-                };
-                decl.add_method(
-                    sel!(constrainFrameRect:toScreen:),
-                    unconstrained_frame as extern "C" fn(&Object, Sel, NSRect, cocoa_id) -> NSRect,
-                );
-                decl.register()
-            }
-        };
-        object_setClass(ns_window, sub);
-    }
 }
 
 /// One frame of the drag, on the main thread. Returns whether the button is
