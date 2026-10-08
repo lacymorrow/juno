@@ -34,6 +34,14 @@ export interface TauriMonitorLike {
   position: { x: number; y: number };
   size: { width: number; height: number };
   scaleFactor?: number;
+  /**
+   * The part of the display not taken by the menu bar or the Dock
+   * (`NSScreen.visibleFrame`), scaled the same way as `position`/`size`.
+   */
+  workArea?: {
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+  };
 }
 
 function factor(sf: number | undefined): number {
@@ -44,11 +52,22 @@ function factor(sf: number | undefined): number {
 export function monitorsInPoints(mons: TauriMonitorLike[]): MonitorRect[] {
   return mons.map((m) => {
     const sf = factor(m.scaleFactor);
-    return {
+    const rect: MonitorRect = {
       position: { x: Math.round(m.position.x / sf), y: Math.round(m.position.y / sf) },
       size: { width: Math.round(m.size.width / sf), height: Math.round(m.size.height / sf) },
       scaleFactor: sf,
     };
+    // tao builds the work area from the monitor's own point origin plus the
+    // visible frame's insets, then multiplies by the monitor's own factor, so
+    // dividing by that factor gives it back in global points.
+    const wa = m.workArea;
+    if (wa && wa.size.width > 0 && wa.size.height > 0) {
+      rect.workArea = {
+        position: { x: Math.round(wa.position.x / sf), y: Math.round(wa.position.y / sf) },
+        size: { width: Math.round(wa.size.width / sf), height: Math.round(wa.size.height / sf) },
+      };
+    }
+    return rect;
   });
 }
 
