@@ -175,6 +175,24 @@ export function dragLayout(layout: SteadyLayout, footprint: Size): SteadyLayout 
 }
 
 /**
+ * Where the press sits inside the drag window (`dragLayout(layout,
+ * footprint)`), given where it landed inside the steady window. The drag
+ * window starts at the footprint's top-left, so it is the same spot on the
+ * shape, re-measured from there. The drag window is placed so this point is
+ * under the cursor (`originUnderCursor`), which keeps the spot the user
+ * grabbed under the cursor for the whole drag, whatever the well (which edge
+ * the footprint is pinned to) and whatever the state (how big it is).
+ */
+export function grabInDragWindow(
+  layout: SteadyLayout,
+  footprint: Size,
+  grab: { x: number; y: number },
+): { x: number; y: number } {
+  const drawn = contentRect(layout, footprint);
+  return { x: grab.x - drawn.x, y: grab.y - drawn.y };
+}
+
+/**
  * Where a block of content of `size` sits inside the window: pinned to the
  * anchor's docked edges, growing away from them. This is the whole rule the
  * render follows, so it is what the tests pin.
@@ -403,6 +421,13 @@ export function afterPaint(): Promise<void> {
 // before it.
 const swapTails = new Map<string, Promise<void>>();
 
+/**
+ * Puts a layout's frame on the window. It may return the layout as actually
+ * placed (the drag window is placed by the cursor, not by `layout.origin`);
+ * that is what the store then holds.
+ */
+export type ApplyFrame = (layout: SteadyLayout) => Promise<SteadyLayout | void>;
+
 /** Resolves once every swap already asked for on `label` has finished. */
 export function steadySwapsSettled(label: string): Promise<void> {
   return swapTails.get(label) ?? Promise.resolve();
@@ -428,7 +453,7 @@ export function steadySwapsSettled(label: string): Promise<void> {
 export function swapSteadyLayout(
   label: string,
   next: SteadyLayout,
-  applyFrame: (layout: SteadyLayout) => Promise<void>,
+  applyFrame: ApplyFrame,
 ): Promise<void> {
   const run = steadySwapsSettled(label).then(() => runSwap(label, next, applyFrame));
   // The queue carries on past a failed swap; the caller still sees the error.
@@ -443,19 +468,17 @@ export function swapSteadyLayout(
 async function runSwap(
   label: string,
   next: SteadyLayout,
-  applyFrame: (layout: SteadyLayout) => Promise<void>,
+  applyFrame: ApplyFrame,
 ): Promise<void> {
   const prev = getSteady(label)?.layout ?? null;
   if (prev && sameDrawing(prev, next)) {
-    await applyFrame(next);
-    setSteadyLayout(label, next);
+    setSteadyLayout(label, (await applyFrame(next)) || next);
     return;
   }
   setSteadyHidden(label, true);
   try {
     await afterPaint();
-    await applyFrame(next);
-    setSteadyLayout(label, next);
+    setSteadyLayout(label, (await applyFrame(next)) || next);
     await afterPaint();
   } finally {
     setSteadyHidden(label, false);
