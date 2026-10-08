@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.130] - 2026-10-08
+
+### Fixed
+
+- **bar:** startup fallback stands down while the reveal is bringing the bar on (#753) (3dae441e)
+
 ## [0.8.129] - 2026-10-08
 
 ### Fixed
@@ -1091,7 +1097,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.129...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.130...HEAD
+[0.8.130]: https://github.com/lacymorrow/juno/compare/cua-v0.8.129...v0.8.130
 [0.8.129]: https://github.com/lacymorrow/juno/compare/cua-v0.8.128...v0.8.129
 [0.8.128]: https://github.com/lacymorrow/juno/compare/cua-v0.8.127...v0.8.128
 [0.8.127]: https://github.com/lacymorrow/juno/compare/cua-v0.8.126...v0.8.127
