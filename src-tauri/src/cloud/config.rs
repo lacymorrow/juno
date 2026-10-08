@@ -232,7 +232,14 @@ impl CloudConfig {
     pub async fn test_connection(&self) -> Result<(), CloudError> {
         let health_url = self.get_health_url();
 
-        match reqwest::get(&health_url).await {
+        // Bounded: a bare `reqwest::get` waits on the OS connect timeout,
+        // which can be minutes with Wi-Fi gone.
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| CloudError::ConfigError(format!("HTTP client: {}", e)))?;
+        match client.get(&health_url).send().await {
             Ok(response) => {
                 if response.status().is_success() {
                     info!("✅ Backend health check passed: {}", health_url);

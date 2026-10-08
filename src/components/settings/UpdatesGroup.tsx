@@ -64,7 +64,12 @@ export function UpdatesGroup() {
         await checkNow();
       }
     } catch (error) {
-      toast.error(`${error}`);
+      console.error("Update action failed:", error);
+      toast.error(
+        ready
+          ? "Couldn't restart. Quit Juno and open it again."
+          : "Couldn't check for updates right now. Juno will try again later.",
+      );
     }
   };
 
