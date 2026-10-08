@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.118] - 2026-10-08
+
+### Added
+
+- **providers:** Codex CLI provider + ChatGPT login detection (#698) (8f339041)
+
 ## [0.8.117] - 2026-10-08
 
 ### Changed
@@ -1021,7 +1027,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.117...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.118...HEAD
+[0.8.118]: https://github.com/lacymorrow/juno/compare/cua-v0.8.117...v0.8.118
 [0.8.117]: https://github.com/lacymorrow/juno/compare/cua-v0.8.116...v0.8.117
 [0.8.116]: https://github.com/lacymorrow/juno/compare/cua-v0.8.115...v0.8.116
 [0.8.115]: https://github.com/lacymorrow/juno/compare/cua-v0.8.114...v0.8.115
