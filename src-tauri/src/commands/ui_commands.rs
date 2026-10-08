@@ -1644,15 +1644,29 @@ pub async fn bar_escape_to_idle(app_handle: &AppHandle, reason: &str) {
 
 // === FLOATING BAR CONFIGURATION COMMANDS ===
 
+/// The bar's config straight from settings, without the UI manager.
+///
+/// The bar's page now loads before the UI manager has finished initializing
+/// (it is built first, and nothing heavy is in front of it), so a read that
+/// needed the manager could fail and draw the default look over a saved one.
+/// Unreadable settings give the defaults, as the manager's own load does.
+pub fn bar_config_now(app_handle: &AppHandle) -> FloatingBarConfig {
+    crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .and_then(|manager| manager.floating_bar_settings_now())
+        .map(|settings| UIManager::convert_settings_to_config(&settings))
+        .unwrap_or_default()
+}
+
 #[tauri::command]
-pub async fn ui_get_bar_config() -> Result<FloatingBarConfig, String> {
+pub async fn ui_get_bar_config(app_handle: AppHandle) -> Result<FloatingBarConfig, String> {
     debug!("Getting floating bar configuration");
 
     if let Some(manager) = get_ui_manager().await {
         let manager = manager.lock().await;
         Ok(manager.bar_config.clone())
     } else {
-        Err("UI Manager not initialized".to_string())
+        // Not up yet at launch: the settings are the same source it loads from.
+        Ok(bar_config_now(&app_handle))
     }
 }
 

@@ -4,7 +4,7 @@ import { stopTTS } from "@/lib/ttsService";
 import type { ChatMessage } from "@/types/chat";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
-import { hasMixedContent } from "@/components/ui/mixed-content-renderer";
+import { hasMixedContent } from "@/lib/mixedContent";
 
 /** Index of the last element matching `predicate`, or -1. */
 function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {

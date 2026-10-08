@@ -32,7 +32,7 @@ pub const DESKTOP_CURSOR_OVERLAY_LABEL: &str = "desktop-cursor-overlay";
 /// losing its transparency and therefore its vibrant sidebar the first time
 /// somebody closed it with the red X. Two descriptions of one window was the
 /// defect; there is now one.
-fn find_declared_window<'a>(
+pub(crate) fn find_declared_window<'a>(
     windows: &'a [DeclaredWindowConfig],
     label: &str,
 ) -> Option<&'a DeclaredWindowConfig> {

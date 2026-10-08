@@ -52,11 +52,14 @@ pub mod path_gate; // The one place that answers "may this path be touched, for 
 pub mod permission_gate; // Asking for a macOS permission at the moment it is needed
 pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
+pub mod readiness; // What is still warming up after launch, for the bar's status dot
 pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
 pub mod settings; // Centralized settings management with reactive updates
 pub mod shell_command; // The one place that parses a shell command string
 pub mod shortcuts; // Shortcut string parsing utilities
 pub mod startup; // Application startup, initialization, and bootstrapping
+pub mod startup_timing; // [Startup] log lines: milliseconds to each launch milestone
+pub mod startup_windows; // Which windows are built at launch, in what order, and the rest after
 pub mod state;
 pub mod state_management; // Application state management, initialization, and monitoring
 pub mod testing; // Test harness and mock implementations for headless integration tests
@@ -283,6 +286,7 @@ pub fn install_crypto_provider() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    startup_timing::begin();
     // Must precede any HTTP client construction anywhere in the process.
     install_crypto_provider();
 
@@ -475,6 +479,7 @@ pub fn run() {
             crate::demo::get_demo_info,
             crate::build_info::get_build_info,
             crate::connectivity::get_connectivity,
+            crate::readiness::get_startup_readiness,
             update_provider_model,
             update_provider_max_tokens,
             update_provider_temperature,
@@ -903,8 +908,30 @@ pub fn run() {
             open_config_file,
             get_config_directory_path,
         ])
+        // The bar's page finished loading: a launch milestone, and the moment
+        // its first paint becomes possible.
+        .on_page_load(|webview, payload| {
+            if webview.label() == constants::window_labels::FLOATING_BAR
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+            {
+                startup_timing::mark_once("bar page loaded");
+            }
+        })
         .setup(|app| {
             let app_handle = app.handle().clone();
+            startup_timing::mark("setup start");
+
+            // What is still loading after the bar is up. Before the bar exists,
+            // so its first read is already the truth.
+            readiness::start(&app_handle);
+
+            // The bar first, alone: every other declared window waits until it
+            // is on screen (`startup_windows`). Each window is named for a demo
+            // build as it is built.
+            if let Err(e) = startup_windows::create_bar(&app_handle) {
+                tracing::error!("Could not build the floating bar: {}", e);
+            }
+
             // Juno's speaking level goes to every window from here on.
             tts::speech_level::bind(app_handle.clone());
             // The Mac's voice, kept loaded in-process so a sentence starts in
@@ -913,18 +940,6 @@ pub fn run() {
             // The launch greeting, rendered in parallel with the rest of
             // startup so it plays the moment the bar appears.
             greeting::refresh_cache(&app_handle);
-
-            // A demo build names the windows declared in tauri.conf.json
-            // "Juno Demo". Windows opened later are renamed as they are built.
-            if crate::demo::is_demo_build() {
-                for window in app_handle.webview_windows().values() {
-                    if let Ok(title) = window.title() {
-                        if let Err(e) = window.set_title(&crate::demo::window_title(&title)) {
-                            warn!("Failed to rename {} window for the demo: {}", window.label(), e);
-                        }
-                    }
-                }
-            }
 
             // --- Initialize Settings Manager ---
             let settings_manager = match SettingsManager::new(app_handle.clone()) {
@@ -1084,6 +1099,13 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             platform::apply_macos_setup(&app_handle);
 
+            // The smoke window, loaded now beside the bar instead of when the
+            // bar asks to be shown, so the reveal starts the moment it does.
+            intro::preload(&app_handle);
+            // The other windows, after the bar is up, or by this timer if it
+            // never comes up.
+            startup_windows::schedule_fallback(&app_handle);
+
             // Banners while Juno is frontmost. Set early so the first
             // notification already goes through the delegate.
             commands::notifications::install_presenter();
@@ -1170,6 +1192,21 @@ pub fn run() {
 
             Ok(())
         });
+
+    // The bar's web process died (a crash, or macOS reclaiming memory). Load
+    // the page again, and put the bar up now rather than waiting out the
+    // startup fallback: a bar that is coming back beats no bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(|webview| {
+        if webview.label() != constants::window_labels::FLOATING_BAR {
+            return;
+        }
+        warn!("[Startup] The floating bar's web process ended; reloading it");
+        if let Err(e) = webview.reload() {
+            warn!("Could not reload the floating bar: {}", e);
+        }
+        intro::show_bar_with_reveal(webview.app_handle());
+    });
 
     // Build the app, then run with event callback for dock click (RunEvent::Reopen) support
     match builder.build(get_tauri_context()) {

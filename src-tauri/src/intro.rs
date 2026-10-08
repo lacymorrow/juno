@@ -29,6 +29,13 @@
 //! gives nothing in particular and the smoke sits all round. One shader, one
 //! parameter.
 //!
+//! At launch the window is not built for the occasion but preloaded, hidden,
+//! beside the bar ([`preload`]): its page has loaded and is waiting in
+//! [`intro_ready`] by the time the bar asks to be shown, so the smoke starts
+//! the moment the bar's frame is set instead of after a second page load
+//! (about 0.45 s in the logs). Later reveals (setup closing, a replay) build
+//! the window as before.
+//!
 //! Tweakables: the constants at the top of this file (timing and the window)
 //! and the `LOOK` block in `src/components/intro/introModel.ts` (density,
 //! size, colour). See `docs/plans/intro-reveal.md`.
@@ -84,6 +91,16 @@ const DEAD_ZONE: f64 = 0.15;
 /// How long to wait for the frontend to say it is drawing before giving up
 /// and showing the bar the plain way.
 const READY_WAIT: Duration = Duration::from_millis(1500);
+
+/// A preloaded intro window nobody used by now is destroyed: the bar came up
+/// some other way (setup was on screen, say), and the window should cost
+/// nothing for the rest of the session.
+const PRELOAD_LIFETIME: Duration = Duration::from_secs(20);
+
+/// How long the intro page waits in [`intro_ready`] for a reveal to start.
+/// Longer than [`PRELOAD_LIFETIME`], so a preloaded page is never told "no"
+/// while its window is still wanted.
+const PAGE_WAIT: Duration = Duration::from_secs(30);
 
 /// How long to wait, at most, for a steady look to report what it is drawing
 /// before measuring. At launch the page asks to be shown the moment its frame
@@ -274,6 +291,12 @@ pub async fn greeting_beat(timeout: Duration) -> bool {
     tokio::time::timeout(timeout, notified).await.is_ok()
 }
 
+/// A reveal posted its plan: wakes an intro page waiting in [`intro_ready`].
+static PLAN_POSTED: Notify = Notify::const_new();
+
+/// An intro window built ahead, hidden, and not yet used by a reveal.
+static PRELOADED: AtomicBool = AtomicBool::new(false);
+
 /// Reveals run one at a time. A request while one is in flight is dropped:
 /// the running reveal is already bringing the bar on.
 static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
@@ -310,6 +333,17 @@ pub fn show_bar_with_reveal(app: &AppHandle) {
             debug!("[Intro] No reveal ({}); showing the bar plainly", reason);
             show_bar_plainly(&app);
             give_greeting_beat();
+            // A reveal that gave up early may hold a window it never used
+            // (the preloaded one, say). Nothing else can be using it: reveals
+            // run one at a time.
+            if let Some(window) = app.get_webview_window(window_labels::INTRO) {
+                if let Err(e) = window.destroy() {
+                    warn!("[Intro] Could not destroy the unused intro window: {}", e);
+                }
+            }
+            if let Ok(mut run) = RUN.lock() {
+                *run = None;
+            }
         }
         IN_FLIGHT.store(false, Ordering::SeqCst);
     });
@@ -317,10 +351,95 @@ pub fn show_bar_with_reveal(app: &AppHandle) {
 
 fn show_bar_plainly(app: &AppHandle) {
     if let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) {
-        if let Err(e) = bar.show() {
-            warn!("[Intro] Could not show the floating bar: {}", e);
+        match bar.show() {
+            Ok(()) => {
+                crate::startup_timing::mark_once("bar shown");
+                // The bar is up: now the windows that waited for it.
+                crate::startup_windows::bar_is_up(app);
+            }
+            Err(e) => warn!("[Intro] Could not show the floating bar: {}", e),
         }
     }
+}
+
+/// Build the launch reveal's window now, hidden, so its page loads alongside
+/// the bar's. Placed at the bar's provisional spot; [`reveal`] moves it to the
+/// real one. Called from setup, after the bar is built and its stored position
+/// applied.
+pub fn preload(app: &AppHandle) {
+    if app.get_webview_window(window_labels::INTRO).is_some() {
+        return;
+    }
+    let origin = app
+        .get_webview_window(window_labels::FLOATING_BAR)
+        .and_then(|bar| desktop_points::window_origin_points(&bar))
+        .unwrap_or((0.0, 0.0));
+    match build_window(
+        app,
+        Rect {
+            x: origin.0,
+            y: origin.1,
+            w: WINDOW_WIDTH,
+            h: WINDOW_HEIGHT,
+        },
+    ) {
+        Ok(_) => {
+            PRELOADED.store(true, Ordering::SeqCst);
+            crate::startup_timing::mark("smoke window preloaded");
+        }
+        Err(e) => {
+            debug!(
+                "[Intro] Could not preload the intro window ({}); it is built on demand",
+                e
+            );
+            return;
+        }
+    }
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(PRELOAD_LIFETIME).await;
+        if PRELOADED.swap(false, Ordering::SeqCst) {
+            if let Some(window) = app.get_webview_window(window_labels::INTRO) {
+                debug!("[Intro] The preloaded intro window went unused; destroying it");
+                if let Err(e) = window.destroy() {
+                    warn!("[Intro] Could not destroy the unused intro window: {}", e);
+                }
+            }
+        }
+    });
+}
+
+/// The intro window: transparent, click-through, never focused, hidden until
+/// the reveal shows it. Always [`WINDOW_WIDTH`] by [`WINDOW_HEIGHT`], so a
+/// preloaded page's viewport is already the one it will draw in.
+fn build_window(app: &AppHandle, rect: Rect) -> Result<tauri::WebviewWindow, String> {
+    // Built here rather than declared in tauri.conf.json, because a declared
+    // window stays alive for the whole session and this one is wanted for
+    // under three seconds of it.
+    let window =
+        WebviewWindowBuilder::new(app, window_labels::INTRO, WebviewUrl::App("/intro".into()))
+            .title("Juno")
+            .inner_size(rect.w, rect.h)
+            .position(rect.x, rect.y)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .resizable(false)
+            .skip_taskbar(true)
+            .shadow(false)
+            .focused(false)
+            .visible(false)
+            .build()
+            .map_err(|e| e.to_string())?;
+    // Pure picture: a click on the smoke goes to whatever is under it.
+    if let Err(e) = window.set_ignore_cursor_events(true) {
+        warn!(
+            "[Intro] Could not make the intro window click-through: {}",
+            e
+        );
+    }
+    Ok(window)
 }
 
 /// Build the intro window around the bar's spot, run the clock, and put the
@@ -334,7 +453,9 @@ async fn reveal(app: &AppHandle) -> Result<(), String> {
     let bar = app
         .get_webview_window(window_labels::FLOATING_BAR)
         .ok_or("no floating bar")?;
-    if app.get_webview_window(window_labels::INTRO).is_some() {
+    // The preloaded window, if launch built one and nothing has used it.
+    let preloaded = PRELOADED.swap(false, Ordering::SeqCst);
+    if !preloaded && app.get_webview_window(window_labels::INTRO).is_some() {
         return Err("the last intro window is still going away".into());
     }
 
@@ -378,31 +499,19 @@ async fn reveal(app: &AppHandle) -> Result<(), String> {
         .unwrap_or_else(|| fallback_pill(origin, bar_size));
     let (rect, plan) = place(pill, screen);
 
-    // Built here rather than declared in tauri.conf.json, because a declared
-    // window stays alive for the whole session and this one is wanted for
-    // under three seconds of it.
-    let window =
-        WebviewWindowBuilder::new(app, window_labels::INTRO, WebviewUrl::App("/intro".into()))
-            .title("Juno")
-            .inner_size(rect.w, rect.h)
-            .position(rect.x, rect.y)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .resizable(false)
-            .skip_taskbar(true)
-            .shadow(false)
-            .focused(false)
-            .visible(false)
-            .build()
-            .map_err(|e| e.to_string())?;
-    // Pure picture: a click on the smoke goes to whatever is under it.
-    if let Err(e) = window.set_ignore_cursor_events(true) {
-        warn!(
-            "[Intro] Could not make the intro window click-through: {}",
-            e
-        );
-    }
+    let window = match app
+        .get_webview_window(window_labels::INTRO)
+        .filter(|_| preloaded)
+    {
+        Some(window) => {
+            // Same size it was built at; only the spot changes.
+            window
+                .set_position(tauri::LogicalPosition::new(rect.x, rect.y))
+                .map_err(|e| e.to_string())?;
+            window
+        }
+        None => build_window(app, rect)?,
+    };
 
     let ready = Arc::new(Notify::new());
     {
@@ -412,12 +521,15 @@ async fn reveal(app: &AppHandle) -> Result<(), String> {
             ready: Arc::clone(&ready),
         });
     }
+    // A preloaded page is already waiting for exactly this.
+    PLAN_POSTED.notify_waiters();
 
     let drawing = tokio::time::timeout(READY_WAIT, ready.notified())
         .await
         .is_ok();
     if drawing {
         info!("[Intro] Revealing the bar");
+        crate::startup_timing::mark_once("smoke shown");
         if let Err(e) = window.show() {
             warn!("[Intro] Could not show the intro window: {}", e);
         }
@@ -453,12 +565,35 @@ async fn reveal(app: &AppHandle) -> Result<(), String> {
 
 /// The intro window is loaded and about to draw: hand it the plan and start
 /// the clock. Called once per reveal, by the intro window.
+///
+/// A page that loads before its reveal (the preloaded one, at launch) waits
+/// here until the reveal posts its plan, up to [`PAGE_WAIT`].
 #[tauri::command]
 pub async fn intro_ready() -> Result<IntroPlan, String> {
+    let deadline = tokio::time::Instant::now() + PAGE_WAIT;
+    loop {
+        // Registered before the check, so a plan posted in between is not
+        // missed.
+        let posted = PLAN_POSTED.notified();
+        tokio::pin!(posted);
+        let _ = posted.as_mut().enable();
+        if let Some(plan) = take_plan()? {
+            return Ok(plan);
+        }
+        if tokio::time::timeout_at(deadline, posted).await.is_err() {
+            return Err("no reveal is running".into());
+        }
+    }
+}
+
+/// The plan of the reveal in flight, starting its clock; `None` when no reveal
+/// has posted one yet.
+fn take_plan() -> Result<Option<IntroPlan>, String> {
     let run = RUN.lock().map_err(|_| "intro state poisoned")?;
-    let run = run.as_ref().ok_or("no reveal is running")?;
-    run.ready.notify_one();
-    Ok(run.plan.clone())
+    Ok(run.as_ref().map(|run| {
+        run.ready.notify_one();
+        run.plan.clone()
+    }))
 }
 
 /// Run the reveal again on the bar that is already on screen. A developer

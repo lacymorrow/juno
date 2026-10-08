@@ -106,6 +106,34 @@ pub async fn get_initialization_status(
     Ok(status)
 }
 
+/// How long a recording started at launch waits for the speech engine before
+/// it gives up and reports the engine missing, as it always did.
+const ENGINE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+const ENGINE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Wait while the launch-time engine load is still running and the controller
+/// has no engine yet. Returns at once in every other case: an engine that is
+/// ready, or a load that already ended without one. No lock is held across a
+/// sleep.
+async fn wait_for_engine(controller: &Arc<Mutex<VoiceController>>) {
+    let deadline = std::time::Instant::now() + ENGINE_WAIT;
+    let mut said = false;
+    while crate::engine_loading() && std::time::Instant::now() < deadline {
+        let ready = controller
+            .try_lock()
+            .map(|c| c.is_initialized())
+            .unwrap_or(false);
+        if ready {
+            return;
+        }
+        if !said {
+            info!("[Plugin] Speech engine still loading; the recording waits for it");
+            said = true;
+        }
+        tokio::time::sleep(ENGINE_POLL).await;
+    }
+}
+
 #[tauri::command]
 pub async fn start_dictation<R: tauri::Runtime + 'static>(
     app: AppHandle<R>,
@@ -123,6 +151,10 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
             return Err(Error::PermissionError(e));
         }
     }
+
+    // The engine loads in the background at launch, off the path to the
+    // first pixel. A recording asked for in that window waits for it.
+    wait_for_engine(&controller).await;
 
     // Check initialization status before proceeding
     check_voice_controller_availability(&app)?;
@@ -263,6 +295,9 @@ pub async fn toggle_dictation<R: tauri::Runtime + 'static>(
     controller: State<'_, Arc<Mutex<VoiceController>>>,
 ) -> Result<bool, Error> {
     info!("[Plugin] toggle_dictation command called");
+
+    // A toggle at launch may land before the engine has loaded.
+    wait_for_engine(&controller).await;
 
     // Enhanced check that verifies both state management and initialization status
     check_voice_controller_availability(&app)?;
