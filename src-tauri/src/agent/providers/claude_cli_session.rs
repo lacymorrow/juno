@@ -1423,6 +1423,15 @@ impl TurnRenderer {
                 // Char offsets, never byte offsets: slicing bytes panics on
                 // multi-byte UTF-8.
                 let delta: String = text.chars().skip(self.previous_chars).collect();
+                if self.previous_chars == 0 {
+                    ClaudeCliBrain::separate_text_block(
+                        &self.app,
+                        &self.msg_id,
+                        &mut self.tts,
+                        &mut self.accumulated,
+                        &mut self.spoken,
+                    );
+                }
                 self.previous_chars = chars;
                 ClaudeCliBrain::emit_display_text(
                     &self.app,
