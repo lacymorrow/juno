@@ -13,6 +13,7 @@ import OnboardingWindow from "./OnboardingWindow";
 import { DesktopCursorOverlay } from "./components/DesktopCursorOverlay";
 import { SnapWellsOverlay } from "./components/SnapWellsOverlay";
 import { ListeningGlow } from "./components/ListeningGlow";
+import { IntroReveal } from "./components/intro/IntroReveal";
 import { BarHost } from "./components/bar/BarHost";
 
 // Diagnostic bench for the floating bar. Lazily loaded so its Tauri stand-in is
@@ -69,6 +70,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
             <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
             <Route path="/snap-wells-overlay" element={<SnapWellsOverlay />} />
             <Route path="/listening-overlay" element={<ListeningGlow />} />
+            <Route path="/intro" element={<IntroReveal />} />
             <Route
               path="/__bar-preview"
               element={
