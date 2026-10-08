@@ -78,6 +78,53 @@ Embedding or rule routers: claims range from under 4 ms to 100 ms for local rout
 - OpenAI has not published a time-to-first-audio number for gpt-live-1. An Eden AI table says about 900 ms (model unspecified, unverified).
 - Implication: even the best realtime voice path lands around 0.5 to 0.8 s. Option 2 above (local filler) and option 3 (fast first sentence) reach the same range without moving the backend off Claude CLI.
 
+## Decision layer: what it could do in Juno
+
+Added 2026-10-08 after review. A decision model (Jev, the Decisions API, or a local equivalent below) answers fixed multiple-choice, yes/no and score questions with a probability per answer. It writes no text, so it cannot speak and cannot pull values ("10 minutes", "Safari") out of a sentence. It is a switchboard, not an assistant. Act only above a threshold (start at 0.9) and fall through to Claude otherwise, so a miss costs a few seconds, never a wrong action.
+
+| Use | Question shape | Existing hook |
+|---|---|---|
+| Model tier: cheap vs Opus | Choice: chat / tools / computer-use / escalate | `router.rs` `Route` enum |
+| Chat-only vs full tools | Same question; chat turns skip the tool and MCP prompt | `Route::forces_single_agent` |
+| Open Juno or Mac settings directly | Choice over a fixed list of destinations plus "none" | `local_intents/` (widens its strict grammars) |
+| Pick an answer component | Choice over a fixed component catalog plus "none" | new; see below |
+| Mid-run input: stop, add to task, new request, not for Juno | Choice | `input_arbiter.rs` |
+| Play the "one sec" filler | Score: will this turn use tools | option 2 above |
+| Sending or spending needs a confirm | Yes/no, advisory only | permission rules stay the real gate |
+| Has the person finished talking (Say mode) | Yes/no on partial transcripts | partial Whisper passes |
+| Save to memory, start a new conversation | Yes/no, background, latency irrelevant | memory injection |
+
+Answer components: for common requests ("play music", "set a timer", "what's the weather") the model picks one entry from a pre-built catalog (now playing, timer, weather, calendar day, ...) and Juno renders it at once, while Claude or a local intent fills or confirms the data. The catalog is fixed, so nothing the person said becomes UI code. Slot values the component needs (duration, song, city) come from the existing grammars or a small extractor (GLiNER class), not from the decision model.
+
+Two constraints decide whether these pay off:
+
+1. Changing the model today replaces the Claude CLI process. The model is part of the process signature in `claude_cli_session.rs`, so a per-turn model pick costs a 4 to 6 s cold start. Before building the tier or chat-only routes, check whether the CLI's stream-json control channel can switch model (and thinking budget) in a live process, as the Agent SDK's `setModel` suggests. Settings, components, the filler and the arbiter do not depend on this.
+2. Never run it serially before Claude. Run it on the partial transcripts Whisper already produces while the person is still talking, so the answer is ready at key release; or start it alongside Claude and cancel Claude when a local action wins (a decision lands about a second before Claude's first token).
+
+## Open and self-hosted alternatives
+
+Jev is closed: weights, architecture and training data are not public. Open options, roughly in order of fit for a bundled macOS app:
+
+- Embeddings plus trained heads (SetFit style). A small sentence-embedding model (all-MiniLM-L6-v2 about 23 MB int8, bge-small, or a Model2Vec static model at 8 to 30 MB) plus one logistic head per question, trained on Juno's own labelled utterances. Output is a calibrated probability per option, the same shape as Jev. Expected single-digit ms on CPU; not measured here. Juno already links ONNX Runtime on aarch64 through `parakeet-rs`, so the runtime cost is near zero; x86_64 would need its own path or a pure-Rust embedder. Weakness: out-of-distribution phrasing, handled by the threshold and the "none" option. This is the recommended local path.
+- Laya: a non-autoregressive decision model on ModernBERT-large that scores state, question and options in one forward pass. Closest open match to Jev's output. ModernBERT-large is about 400M parameters, so roughly 400 MB int8: heavy for the bundle, fine as an optional download. Reported weak on large option sets. Single-source, not tested.
+- Kev and jevlike (one roundup, unverified): Kev is said to be LoRA adapters plus a pointer head on Qwen 3.5 0.8B to 9B that serves TypeSafe's own API contract, so the official SDK works by changing the base URL; jevlike is a trainer for an option-attention head. If Kev is real, it is the easiest way to test the same code path against Jev and a local model.
+- GLiClass (Knowledgator, Apache-2.0): zero-shot classification in one pass, small model 144M parameters, ModernBERT variants. No published ONNX latency; label count grows the input, so measure with the real option lists.
+- Small LLM with constrained output: read the option-token log probabilities from Qwen3 0.6B or Gemma 3 270M through llama.cpp. Flexible and zero-shot, but prefill on every turn costs tens to hundreds of ms and 200 to 500 MB. Use only if the embedding heads fail.
+- Apple Foundation Models: on-device, nothing to bundle, guided generation. Apple Intelligence Macs only, and latency on macOS 27 is unverified (see On-device). Worth one measurement, not a dependency.
+
+Suggested path: label about 300 real utterances from the logs and conversation history against the questions above, then train embedding heads and score them on the same set as Jev. If local accuracy is within a few points, ship local (free, private, no network) and keep Jev as a fallback for the long tail.
+
+## Test plan: Jev, Decisions API, realtime voice
+
+One harness, `scripts/decision-bench/` (not built), replays a fixed labelled set so every candidate is scored on the same inputs.
+
+1. Data: the labelled set above, taken from `[TurnTiming]` logs and conversation history, with near-miss negatives for every settings destination and component.
+2. Decision candidates: Jev (OpenRouter key), local embedding heads, Kev if it exists, the Decisions API once a key gets past the 403. Record per call accuracy, calibration (does 0.9 mean 90%), and P50/P95 latency measured from the Mac.
+3. Realtime voice: gpt-realtime and gpt-live-1, on the same 20 recorded utterances, measuring last speech frame to first audio, with tool use off and then on. This scores them as a first-sentence voice, not a replacement for Claude CLI.
+4. Pass bar: decision P95 under 350 ms remote or 20 ms local, at least 95% accuracy above the threshold, zero wrong local actions on the near-miss set. Voice: first audio under 800 ms median.
+
+Needs: an OpenRouter key, an OpenAI key with Decisions access when it opens, and Lacy's privacy call on sending transcripts to each vendor.
+
 ## Sources
 
 - Jev overview and comparison with Decisions API: https://www.firecrawl.dev/blog/openai-decisions-api-vs-jev
@@ -98,3 +145,5 @@ Embedding or rule routers: claims range from under 4 ms to 100 ms for local rout
 - Agora GPT-Live latency: https://prod.agora.io/en/blog/openai-didnt-publish-gpt-lives-latency-so-we-measured-it
 - GPT-Live-1 launch summary: https://aiweekly.co/alerts/openai-launches-gpt-live-1-in-the-api-at-005minute-cuts-turn-taking-latency-to
 - Embedding router latency: https://dailyaiworld.com/blogs/semantic-router-ai-agents-2026 and https://tianpan.co/blog/2026/04/16/intent-classification-agent-routers
+- Open Jev alternatives: https://pinggy.io/blog/best_open_source_jev_alternatives_self_hosted_decision_models/ and https://www.datacamp.com/blog/top-open-source-jev-alternatives
+- GLiClass: https://huggingface.co/knowledgator/gliclass-small-v1.0-lw and https://pypi.org/project/gliclass
