@@ -1541,6 +1541,12 @@ pub fn emit_streaming_text_chunk(
         emit_cursor_point(app_handle, tag);
     }
 
+    // Keep what the person was shown or told, so a turn cut short can still
+    // be saved to the conversation history.
+    if let Some(id) = message_id.as_deref() {
+        crate::conversation_history::record_streamed(id, &cleaned_text, tts_content.as_deref());
+    }
+
     let event_data = serde_json::json!({
         "chunk": cleaned_text,
         "message_id": message_id,
