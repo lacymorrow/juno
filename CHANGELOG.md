@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.126] - 2026-10-08
+
+### Added
+
+- **bar:** outline the bar window in debug mode (#743) (1490534d)
+
 ## [0.8.125] - 2026-10-08
 
 ### Added
@@ -1063,7 +1069,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.125...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.126...HEAD
+[0.8.126]: https://github.com/lacymorrow/juno/compare/cua-v0.8.125...v0.8.126
 [0.8.125]: https://github.com/lacymorrow/juno/compare/cua-v0.8.124...v0.8.125
 [0.8.123]: https://github.com/lacymorrow/juno/compare/cua-v0.8.122...v0.8.123
 [0.8.122]: https://github.com/lacymorrow/juno/compare/cua-v0.8.121...v0.8.122
