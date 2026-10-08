@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use tracing::{error, info};
 
 // Make element module public
+pub mod ax_elements;
 pub mod ax_text;
 pub mod background;
 pub mod element;

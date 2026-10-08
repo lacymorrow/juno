@@ -679,6 +679,77 @@ fn capture_via_screencapturekit(
         ))
 }
 
+/// One window, captured on its own at one pixel per point, with its frame in
+/// screen points at the moment of capture.
+///
+/// ScreenCaptureKit renders the window itself rather than cropping the
+/// display, so a window that is behind others still comes out whole. That is
+/// what lets an agent work in a window the person is not looking at. A
+/// minimized window is not on screen and cannot be captured.
+#[cfg(feature = "screencapturekit-backend")]
+pub fn capture_window_buffer(
+    window_id: u32,
+) -> Result<(ImageBuffer<Rgba<u8>, Vec<u8>>, (f64, f64, f64, f64)), AutomationError> {
+    use screencapturekit::screenshot_manager::SCScreenshotManager;
+    use screencapturekit::shareable_content::SCShareableContent;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+
+    let content = SCShareableContent::get().map_err(|e| {
+        AutomationError::PlatformError(format!("SCShareableContent::get failed: {}", e))
+    })?;
+    let windows = content.windows();
+    let window = windows
+        .iter()
+        .find(|w| w.window_id() == window_id)
+        .ok_or_else(|| {
+            AutomationError::PlatformError(format!(
+                "Window {} is not on screen (it may be minimized or closed)",
+                window_id
+            ))
+        })?;
+    let frame = window.frame();
+    if frame.width < 1.0 || frame.height < 1.0 {
+        return Err(AutomationError::PlatformError(format!(
+            "Window {} has no area to capture",
+            window_id
+        )));
+    }
+
+    let filter = SCContentFilter::create().with_window(window).build();
+    let config = SCStreamConfiguration::new()
+        .with_width(frame.width.round() as u32)
+        .with_height(frame.height.round() as u32)
+        .with_scales_to_fit(true)
+        .with_shows_cursor(false)
+        .with_ignores_shadows_single_window(true);
+
+    let image = SCScreenshotManager::capture_image(&filter, &config)
+        .map_err(|e| AutomationError::PlatformError(format!("Window capture failed: {}", e)))?;
+    let width = image.width() as u32;
+    let height = image.height() as u32;
+    let rgba = image.rgba_data().map_err(|e| {
+        AutomationError::PlatformError(format!("Failed to read the window image: {}", e))
+    })?;
+    let buffer = ImageBuffer::from_raw(width, height, rgba).ok_or_else(|| {
+        AutomationError::PlatformError(format!(
+            "Window image has the wrong size for {}x{}",
+            width, height
+        ))
+    })?;
+    Ok((buffer, (frame.x, frame.y, frame.width, frame.height)))
+}
+
+#[cfg(not(feature = "screencapturekit-backend"))]
+pub fn capture_window_buffer(
+    window_id: u32,
+) -> Result<(ImageBuffer<Rgba<u8>, Vec<u8>>, (f64, f64, f64, f64)), AutomationError> {
+    Err(AutomationError::PlatformError(format!(
+        "Capturing window {} on its own needs ScreenCaptureKit",
+        window_id
+    )))
+}
+
 /// Captures a screenshot of the specified display and returns it as an ImageBuffer.
 ///
 /// Uses ScreenCaptureKit (macOS 14.0+) when available for better performance,

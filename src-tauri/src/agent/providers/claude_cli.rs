@@ -484,10 +484,16 @@ pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
 /// Bash even when MCP computer-use tools are available (LAC-3692).
 pub(super) const MCP_TOOL_GUIDANCE: &str =
     "You have a desktop automation tool from the \"juno\" MCP \
-server: `computer`, which takes screenshots and moves, clicks, types, scrolls and presses keys. \
-For ANY desktop or GUI automation use it. Do NOT use shell commands like cliclick, \
-screencapture, or osascript for desktop automation: they bypass Juno, so the pointer moves with \
-nothing on screen saying that Juno is the one moving it.";
+server: `computer`. For ANY desktop or GUI automation use it. Do NOT use shell commands like \
+cliclick, screencapture, or osascript for desktop automation: they bypass Juno, so the pointer \
+moves with nothing on screen saying that Juno is the one moving it. \
+Work through accessibility first: list a window's controls with {\"action\": \"elements\", \
+\"window\": \"<app or window title>\"} and press them by id ({\"action\": \"left_click\", \
+\"element\": \"e7\"}); read results from the listed values. Name the window on every action. \
+Only fall back to screenshots and coordinates when a window lists no controls, and then take \
+the screenshot with 'window' so it shows just that window. The person keeps using their \
+computer while you work: never bring a window to the front or click into their apps to get \
+something done.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.
