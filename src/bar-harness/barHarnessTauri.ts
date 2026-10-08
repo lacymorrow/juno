@@ -282,6 +282,13 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
       return state.savedPosition;
     case COMMANDS.TRIGGERS_GET_TRIGGERS:
       return [];
+    case COMMANDS.TRIGGERS_GET_TRIGGER_HINTS:
+      return {
+        agent: { shortcut: "Control+Option", gesture: "Hold", sentence: "Hold to talk to Juno" },
+        dictation: null,
+      };
+    case COMMANDS.APP_GET_CONNECTIVITY:
+      return { status: "connected", label: "Connected to Claude", provider: "Claude" };
     case COMMANDS.AGENT_SESSIONS_LIST_AGENT_SESSIONS:
       return [];
     case COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS:
