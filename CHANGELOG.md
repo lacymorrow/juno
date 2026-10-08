@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.122] - 2026-10-08
+
+### Added
+
+- **providers:** warm codex app-server session for ChatGPT-plan voice (#731) (41935d78)
+
 ## [0.8.121] - 2026-10-08
 
 ### Added
@@ -1045,7 +1051,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.121...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.122...HEAD
+[0.8.122]: https://github.com/lacymorrow/juno/compare/cua-v0.8.121...v0.8.122
 [0.8.121]: https://github.com/lacymorrow/juno/compare/cua-v0.8.120...v0.8.121
 [0.8.120]: https://github.com/lacymorrow/juno/compare/cua-v0.8.119...v0.8.120
 [0.8.119]: https://github.com/lacymorrow/juno/compare/cua-v0.8.118...v0.8.119
