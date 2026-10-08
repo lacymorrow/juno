@@ -401,6 +401,36 @@ export function useBackendEvents({
 		}
 	);
 
+	// A request needed an app that is not connected (LAC-4210). The backend
+	// already swapped the vendor error for one sentence of model guidance;
+	// this renders the other half, a card with one Connect button. The last
+	// user message is captured now so the card can retry it after consent.
+	useEventListener<{ toolkit_slug: string; app_name: string }>(
+		EVENTS.INTEGRATIONS_CONNECT_REQUIRED,
+		(payload) => {
+			if (!payload?.toolkit_slug) return;
+			setConversationWithPruning((prev) => {
+				// One card per app per ask: a batch that fails twice must not
+				// stack two identical buttons.
+				const alreadyShowing = prev.some(
+					(msg) =>
+						msg.connect_app?.toolkit_slug === payload.toolkit_slug &&
+						!msg.success
+				);
+				if (alreadyShowing) return prev;
+				const lastUser = findLastIndex(prev, (msg) => msg.role === "user");
+				return insertBeforeOpenAssistant(prev, {
+					role: "system",
+					notice: true,
+					content: `${payload.app_name} is not connected.`,
+					connect_app: payload,
+					retry_query: lastUser === -1 ? undefined : prev[lastUser].content,
+					timestamp: Date.now(),
+				});
+			});
+		}
+	);
+
 	// Listen for tool-approval-resolved: settle the row however the question ended.
 	//
 	// Before this event the backend denied a timed-out approval and told the
