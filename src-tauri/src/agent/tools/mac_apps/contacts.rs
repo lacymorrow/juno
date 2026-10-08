@@ -63,7 +63,10 @@ pub fn display_name(given: &str, family: &str, nickname: &str, organization: &st
     let full = format!("{} {}", given.trim(), family.trim())
         .trim()
         .to_string();
-    [full.as_str(), nickname.trim(), organization.trim()]
+    if !full.is_empty() {
+        return full;
+    }
+    [nickname.trim(), organization.trim()]
         .into_iter()
         .find(|s| !s.is_empty())
         .unwrap_or_default()
