@@ -18,16 +18,22 @@
 //! No regions means the look is not a steady one: the window takes every
 //! mouse event, as it always did, and the tracking area owns hover again.
 //!
-//! The poll is the same shape as `cursor_follow`: Tauri's own cursor read, no
-//! unsafe Cocoa, no accessibility permission. It idles on an atomic check
-//! whenever no look has registered regions. Cursor and window are compared in
-//! global points (`platform::desktop_points`): tao scales the cursor by the
-//! primary display and the window by its own, so on a 1x display beside a 2x
-//! one the raw numbers disagreed and the bar would not take clicks there.
+//! The poll runs on its own OS thread, never on a tokio worker: the window
+//! reads it makes (`is_visible`, `outer_position`, `scale_factor`) each wait
+//! for a main-thread round trip, and a tokio worker parked on those every 16 ms
+//! competed with everything else on the runtime. The cursor and the mouse
+//! button come from Quartz (`CGEventGetLocation`, `CGEventSourceButtonState`),
+//! which answer from any thread with no main-thread hop and no permission. It
+//! idles on an atomic check whenever no look has registered regions. Cursor and
+//! window are compared in global points (`platform::desktop_points`): tao
+//! scales the cursor by the primary display and the window by its own, so on a
+//! 1x display beside a 2x one the raw numbers disagreed and the bar would not
+//! take clicks there.
 //!
-//! While a driven drag is in flight (`platform::bar_drag`) the cursor is on
-//! the shape by definition, so it counts as inside and the window keeps the
-//! mouse until the drop.
+//! A press that lands on the content keeps the window until the button comes
+//! up ([`hit_state`]), so a drag, a text selection or a cursor that briefly
+//! outruns the window during the OS drag never flips the bar to click-through
+//! or announces a leave mid-gesture.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -103,7 +109,7 @@ pub fn set_regions(regions: Option<Vec<HitRect>>) {
         Ok(mut guard) => *guard = regions,
         Err(poisoned) => *poisoned.into_inner() = regions,
     }
-    ACTIVE.store(active, Ordering::Relaxed);
+    ACTIVE.store(active, Ordering::SeqCst);
 }
 
 fn current_regions() -> Option<Vec<HitRect>> {
@@ -113,55 +119,122 @@ fn current_regions() -> Option<Vec<HitRect>> {
     }
 }
 
-/// Start the single poll task. Safe to call more than once.
+/// What the cursor counts as this tick.
+///
+/// Inside the regions is inside. A press that began inside also stays inside
+/// until the button comes up: the person is holding the bar, wherever the
+/// cursor has got to.
+pub fn hit_state(prev: Option<bool>, in_regions: bool, button_down: bool) -> bool {
+    in_regions || (button_down && prev == Some(true))
+}
+
+/// Whether the left mouse button is down right now. Quartz, any thread.
+#[cfg(target_os = "macos")]
+pub fn left_button_down() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventSourceButtonState(state_id: i32, button: u32) -> bool;
+    }
+    // kCGEventSourceStateCombinedSessionState = 0, kCGMouseButtonLeft = 0.
+    // SAFETY: a pure query of the window server's button state; no pointers.
+    unsafe { CGEventSourceButtonState(0, 0) }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn left_button_down() -> bool {
+    false
+}
+
+/// The cursor in global points. On macOS straight from Quartz, which is
+/// already in global points (top-left of the primary display, y down) and
+/// needs no main-thread round trip.
+#[cfg(target_os = "macos")]
+fn cursor_points(_app: &AppHandle) -> Option<(f64, f64)> {
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
+    let event = CGEvent::new(source).ok()?;
+    let p = event.location();
+    Some((p.x, p.y))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn cursor_points(app: &AppHandle) -> Option<(f64, f64)> {
+    crate::platform::desktop_points::cursor_points(app)
+}
+
+/// Start the single poll thread. Safe to call more than once.
 pub fn start(app: AppHandle) {
     if TASK_STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
-    tauri::async_runtime::spawn(async move {
-        // What the cursor was last seen as, so only a change touches the window.
-        let mut last_inside: Option<bool> = None;
-        loop {
-            tokio::time::sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
+    let spawned = std::thread::Builder::new()
+        .name("bar-hit-test".to_string())
+        .spawn(move || poll(app));
+    if let Err(e) = spawned {
+        TASK_STARTED.store(false, Ordering::SeqCst);
+        log::warn!("[BarHitTest] could not start the hit-test thread: {e}");
+    }
+}
 
-            let Some(regions) = current_regions() else {
-                last_inside = None;
-                continue;
-            };
-            let Some(window) = app.get_webview_window(constants::ui::window_labels::FLOATING_BAR)
-            else {
-                continue;
-            };
-            if !window.is_visible().unwrap_or(false) {
-                continue;
-            }
-            let (Some(cursor), Some(origin)) = (
-                crate::platform::desktop_points::cursor_points(&app),
-                crate::platform::desktop_points::window_origin_points(&window),
-            ) else {
-                continue;
-            };
+fn poll(app: AppHandle) {
+    // What the cursor was last seen as, so only a change touches the window.
+    let mut last_inside: Option<bool> = None;
+    loop {
+        std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
 
-            let inside = crate::platform::bar_drag::is_dragging()
-                || cursor_in_regions(cursor, origin, 1.0, &regions);
-            if last_inside == Some(inside) {
-                continue;
-            }
-            if let Err(e) = window.set_ignore_cursor_events(!inside) {
-                log::warn!("[BarHitTest] could not set click-through: {e}");
-                continue;
-            }
-            if let Some(entered) = hover_transition(last_inside, inside) {
-                let event = if entered {
-                    constants::events::system::MOUSE_ENTERED_WINDOW
-                } else {
-                    constants::events::system::MOUSE_LEFT_WINDOW
-                };
-                let _ = window.emit(event, ());
-            }
-            last_inside = Some(inside);
+        let Some(regions) = current_regions() else {
+            last_inside = None;
+            continue;
+        };
+        let Some(window) = app.get_webview_window(constants::ui::window_labels::FLOATING_BAR)
+        else {
+            continue;
+        };
+        if !window.is_visible().unwrap_or(false) {
+            continue;
         }
-    });
+        let (Some(cursor), Some(origin)) = (
+            cursor_points(&app),
+            crate::platform::desktop_points::window_origin_points(&window),
+        ) else {
+            continue;
+        };
+
+        let inside = hit_state(
+            last_inside,
+            cursor_in_regions(cursor, origin, 1.0, &regions),
+            left_button_down(),
+        );
+        if last_inside == Some(inside) {
+            continue;
+        }
+        if let Err(e) = window.set_ignore_cursor_events(!inside) {
+            log::warn!("[BarHitTest] could not set click-through: {e}");
+            continue;
+        }
+        // The look may have gone away between reading the regions and the
+        // write above (the Pill unmounting when the look changes). Its
+        // `set_bar_hit_regions(None)` already turned click-through off, and a
+        // stale `true` written after it would leave the bar ignoring the mouse
+        // for good, because the next tick sees no regions and does nothing.
+        // Whatever the order, the last write is then `false`.
+        if !ACTIVE.load(Ordering::SeqCst) {
+            let _ = window.set_ignore_cursor_events(false);
+            last_inside = None;
+            continue;
+        }
+        if let Some(entered) = hover_transition(last_inside, inside) {
+            let event = if entered {
+                constants::events::system::MOUSE_ENTERED_WINDOW
+            } else {
+                constants::events::system::MOUSE_LEFT_WINDOW
+            };
+            let _ = window.emit(event, ());
+        }
+        last_inside = Some(inside);
+    }
 }
 
 #[cfg(test)]
@@ -280,5 +353,23 @@ mod tests {
         assert_eq!(hover_transition(Some(true), false), Some(false));
         assert_eq!(hover_transition(Some(true), true), None);
         assert_eq!(hover_transition(Some(false), false), None);
+    }
+
+    #[test]
+    fn a_press_on_the_content_holds_the_window_until_release() {
+        // Held, and the cursor has outrun the window: still the bar's.
+        assert!(hit_state(Some(true), false, true));
+        // Released outside: click-through again.
+        assert!(!hit_state(Some(true), false, false));
+    }
+
+    #[test]
+    fn a_press_that_began_elsewhere_is_not_captured() {
+        // Dragging something in another app across the bar's empty room.
+        assert!(!hit_state(Some(false), false, true));
+        assert!(!hit_state(None, false, true));
+        // Over the content is inside whatever the button is doing.
+        assert!(hit_state(Some(false), true, true));
+        assert!(hit_state(None, true, false));
     }
 }

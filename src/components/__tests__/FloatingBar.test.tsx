@@ -1123,14 +1123,21 @@ describe("FloatingBar steady frame", () => {
     expect(invoke).toHaveBeenCalledWith("set_bar_hit_regions", { regions: null });
   });
 
-  it("opens the pane upward at a bottom well, and swaps the frame once, on the drop", async () => {
+  it("opens the pane upward at a bottom well, and swaps the frame once each way, on the drag", async () => {
     await renderBar();
     await waitFor(() => expect(frames()).toHaveLength(1));
     await dropAt(850, 700);
-    await waitFor(() => expect(frames()).toHaveLength(2));
+    await waitFor(() => expect(frames()).toHaveLength(3));
+    // The drag shrinks the window to the pill it is drawing, at the pill's
+    // own place: it starts at the top-right well, pinned at its right edge.
+    const shrunk = frames()[1] as { x: number; y: number; width: number; height: number };
+    expect(shrunk.width).toBeLessThan(452);
+    expect(shrunk.height).toBeLessThan(574);
+    expect(shrunk.x + shrunk.width).toBe(532 + 452);
+    expect(shrunk.y).toBe(36);
     // Bottom-right well for the resting footprint: (896, 708). The window
     // now extends up and left from it, so its bottom-right is the well's.
-    expect(frames()[1]).toEqual({ x: 532, y: 210, width: 452, height: 574 });
+    expect(frames()[2]).toEqual({ x: 532, y: 210, width: 452, height: 574 });
     expect(column()).toHaveStyle({ right: "0px", bottom: "0px" });
     // Visible again once the swap has reached the screen.
     await waitFor(() => expect(column()).toHaveClass("opacity-100"));
@@ -1141,7 +1148,7 @@ describe("FloatingBar steady frame", () => {
       el.getAttribute("data-testid"),
     );
     expect(order.indexOf("bar-chat-pane")).toBeLessThan(order.indexOf("floating-bar"));
-    expect(frames()).toHaveLength(2);
+    expect(frames()).toHaveLength(3);
     expect(lastResize()).toMatchObject({ width: 451, height: 444 });
     // Bottom edge of what is drawn: the window's bottom, which is the well's.
     const r = lastRegions() as Array<{ y: number; height: number }>;

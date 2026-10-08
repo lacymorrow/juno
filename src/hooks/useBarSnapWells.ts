@@ -13,8 +13,10 @@
  * the drag hook it would call anyway.
  *
  * The Rust/React line: React decides which well (pure maths over monitor
- * rects in global points), Rust performs the moves, and drives the drag of a
- * steady look itself (`platform/bar_drag.rs`).
+ * rects in global points), Rust performs the moves, and the OS performs the
+ * drag. A steady look is dragged as a window the size of its own shape
+ * (`dragLayout`), so the OS's menu bar rule holds the shape, not a window far
+ * taller than it.
  *
  * Only the bar window snaps. `useDragWindow` also drags the floating panels,
  * which have no wells and must keep dragging without them, so every entry
@@ -59,6 +61,7 @@ import {
   dragLayout,
   getSteady,
   steadyLayout,
+  steadySwapsSettled,
   swapSteadyLayout,
   type SteadyLayout,
   type SteadySpec,
@@ -193,11 +196,14 @@ let lastShowPayload: Record<string, number> | null = null;
 // anchor, or the window itself). The settle reads the landing from the
 // cursor with it, exactly as the drop indicator does.
 let footprintGrab: { x: number; y: number } | null = null;
-// Rust is moving the window (`bar_drag_follow`), so the settle must stop it.
-let drivenDrag = false;
-// The drag's start-up (the re-layout for the drag) while it is in flight. The
-// settle waits for it so the two never interleave.
-let dragStarting: Promise<void> | null = null;
+// Whether the button that started the drag is still believed held. The
+// shrink at drag start hands the window to the OS only while it is.
+let dragHeld = false;
+// Watches the button while a drag is armed, so a drag whose mouseup the page
+// never saw (the OS drag swallows events) still settles.
+let releaseWatch: ReturnType<typeof setInterval> | null = null;
+/** How often the release watch asks Rust whether the button is still down. */
+export const RELEASE_WATCH_MS = 150;
 
 /** Forget the in-flight gesture. For tests, which share one module instance. */
 export function resetBarSnapState(): void {
@@ -206,8 +212,32 @@ export function resetBarSnapState(): void {
   overlayShown = false;
   lastShowPayload = null;
   footprintGrab = null;
-  drivenDrag = false;
-  dragStarting = null;
+  dragHeld = false;
+  stopReleaseWatch();
+}
+
+function stopReleaseWatch(): void {
+  if (releaseWatch) {
+    clearInterval(releaseWatch);
+    releaseWatch = null;
+  }
+}
+
+/**
+ * Settle once Rust says the button is up. The window mouseup is the normal
+ * trigger; this covers the release the page never hears. Where Rust cannot
+ * tell (not macOS) the watch stops at the first error and the mouseup is all
+ * there is, as before.
+ */
+function startReleaseWatch(): void {
+  stopReleaseWatch();
+  releaseWatch = setInterval(() => {
+    void invoke<boolean>(COMMANDS.BAR_POINTER_HELD)
+      .then((held) => {
+        if (held === false) void settleBarSnap();
+      })
+      .catch(() => stopReleaseWatch());
+  }, RELEASE_WATCH_MS);
 }
 
 /** The cursor in global points, or null when it cannot be read. */
@@ -245,7 +275,8 @@ async function releasedFootprintOrigin(
 export async function armBarSnap(grabOffset: { x: number; y: number }): Promise<void> {
   if (!isBarWindow()) return;
   snapArmed = true;
-  if (overlayShown) return;
+  // Shown again even if the last drag never said it had ended: the overlay
+  // may have hidden itself since, and a show is idempotent.
   footprintGrab = grabOffset;
   overlayShown = true;
   // One overlay per display. Building a missing one is slow and must not hold
@@ -287,54 +318,45 @@ export function answerOverlayReady(): void {
 }
 
 /**
- * A press on the bar has become a drag. Arms the snap and moves the window.
+ * A press on the bar has become a drag. Arms the snap and hands the window to
+ * the OS drag.
  *
- * A steady look is dragged by Rust (`bar_drag_follow`), not by the OS. The OS
- * drag keeps a window's top edge below the menu bar, and a steady window is
- * far taller than the shape in it, so a pill docked low could not be carried
- * above the middle of the screen. Rust moves the window itself, unconstrained,
- * so the shape follows the cursor anywhere. The drawing is then re-laid out
- * with the shape centred in its window (`dragLayout`), so that crossing onto
- * another display the window changes display with the shape rather than
- * hundreds of points later. Every other look, and any platform where the
- * driven drag is unavailable, uses the OS drag as before.
+ * A steady look's window is far larger than its shape, and macOS keeps a
+ * floating window's top edge below the menu bar during the OS drag, so a pill
+ * docked low used to stop halfway up the screen. So first the window becomes
+ * the shape (`dragLayout`): the same hidden swap a drop uses, with the pill
+ * staying exactly where it is on screen. Then the OS drags it, and the menu
+ * bar rule now holds the pill's own top edge, which is right. On release the
+ * small window glides into the well and the settle swaps the steady layout
+ * back. Every other look drags its window as it is.
  */
 export function startBarDrag(grabOffset: { x: number; y: number }): void {
   void armBarSnap(grabOffset);
   const win = getCurrentWindow();
   const osDrag = () =>
     win.startDragging().catch((error) => console.debug("barDrag: startDragging failed:", error));
-  const layout = isBarWindow() ? getSteady(win.label)?.layout : null;
-  if (!layout) {
+  if (isBarWindow()) {
+    dragHeld = true;
+    startReleaseWatch();
+  }
+  const steady = isBarWindow() ? getSteady(win.label) : null;
+  const layout = steady?.layout;
+  if (!steady || !layout) {
     void osDrag();
     return;
   }
-  dragStarting = (async () => {
-    try {
-      await invoke(COMMANDS.BAR_DRAG_FOLLOW, { grabX: grabOffset.x, grabY: grabOffset.y });
-      drivenDrag = true;
-    } catch {
-      await osDrag();
-      return;
-    }
-    const drag = dragLayout(layout);
-    const grabInDrag = {
-      x: drag.anchor.x + grabOffset.x - layout.anchor.x,
-      y: drag.anchor.y + grabOffset.y - layout.anchor.y,
-    };
-    try {
-      // The window size does not change, only where the shape sits in it, so
-      // "applying the frame" is moving the grab: Rust's next tick puts the
-      // window where the centred drawing keeps the shape under the cursor.
-      await swapSteadyLayout(win.label, drag, () =>
-        invoke(COMMANDS.BAR_DRAG_FOLLOW, { grabX: grabInDrag.x, grabY: grabInDrag.y }).then(
-          () => {},
-        ),
-      );
-    } catch (error) {
-      console.debug("barDrag: drag layout failed:", error);
-    }
-  })();
+  const footprint = steady.footprint ?? steady.spec.rest;
+  const drag = dragLayout(layout, footprint);
+  swapSteadyLayout(win.label, drag, async (next) => {
+    await applySteadyFrame(next);
+    // The window is the shape now, still hidden for a frame. Released
+    // already (a flick) means there is nothing left to drag; the settle,
+    // queued behind this swap, glides it home.
+    if (dragHeld) void osDrag();
+  }).catch((error) => {
+    console.debug("barDrag: drag layout failed:", error);
+    if (dragHeld) void osDrag();
+  });
 }
 
 /**
@@ -350,19 +372,16 @@ export async function settleBarSnap(): Promise<void> {
     lastShowPayload = null;
     void emit(EVENTS.SNAP_WELLS_HIDE);
   }
+  dragHeld = false;
+  stopReleaseWatch();
   if (!snapArmed || snapAnimating) return;
   snapArmed = false;
   snapAnimating = true;
   try {
-    if (dragStarting) {
-      await dragStarting;
-      dragStarting = null;
-    }
-    if (drivenDrag) {
-      drivenDrag = false;
-      await invoke(COMMANDS.BAR_DRAG_STOP).catch(() => {});
-    }
     const win = getCurrentWindow();
+    // The shrink at drag start may still be in flight on a quick flick; the
+    // settle reads the layout it leaves behind.
+    await steadySwapsSettled(win.label);
     const steady = getSteady(win.label);
     if (steady?.layout) {
       await settleSteady(win, steady.spec, steady.layout);
@@ -395,11 +414,13 @@ export async function settleBarSnap(): Promise<void> {
 }
 
 /**
- * The settle for a steady look. The window glides, drawing unchanged, until
- * the resting footprint sits on the nearest well; then, if the well's layout
- * draws differently (the drag layout always does), the frame and the drawing
- * swap behind a brief hide (`swapSteadyLayout`). The well's own position
- * never changes in that swap, so the bar lands exactly where the glide put it.
+ * The settle for a steady look. The window (the shape-sized drag window, after
+ * a drag) glides, drawing unchanged, until the resting footprint sits on the
+ * nearest well; then, if the well's layout draws differently (after a drag it
+ * always does, the window grows back to the steady size), the frame and the
+ * drawing swap behind a brief hide (`swapSteadyLayout`). The well's own
+ * position never changes in that swap, so the bar lands exactly where the
+ * glide put it.
  */
 async function settleSteady(win: AppWindow, spec: SteadySpec, layout: SteadyLayout) {
   const [origin, monitors] = await Promise.all([windowOrigin(win), availableMonitors()]);

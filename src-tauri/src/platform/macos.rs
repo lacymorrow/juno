@@ -142,6 +142,58 @@ pub fn apply_bar_stacking(
 ) {
 }
 
+/// Order the floating bar directly above another of Juno's windows, when both
+/// are on screen at the same level. Ordering only: the level is untouched, so
+/// nothing changes for any other app, and a bar that has stepped down to the
+/// normal level (see [`crate::bar_stacking`]) is left exactly where it is.
+///
+/// The drop overlay is the caller. It shares the bar's floating level, and
+/// showing it orders it to the front of that level, so without this its dim
+/// could be drawn over the very pill being dragged.
+#[cfg(target_os = "macos")]
+pub fn order_bar_above(app_handle: &AppHandle, other_label: &str) {
+    let Some(bar) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) else {
+        return;
+    };
+    let Some(other) = app_handle.get_webview_window(other_label) else {
+        return;
+    };
+    let (Ok(bar_ptr), Ok(other_ptr)) = (bar.ns_window(), other.ns_window()) else {
+        return;
+    };
+    let bar_addr = bar_ptr as usize;
+    let other_addr = other_ptr as usize;
+    // SAFETY: live NSWindow pointers handed out by Tauri for two windows that
+    // live for the app's lifetime; standard NSWindow selectors; main thread.
+    if let Err(e) = app_handle.run_on_main_thread(move || unsafe {
+        let bar = bar_addr as cocoa_id;
+        let other = other_addr as cocoa_id;
+        #[allow(unexpected_cfgs)]
+        let bar_visible: BOOL = msg_send![bar, isVisible];
+        #[allow(unexpected_cfgs)]
+        let other_visible: BOOL = msg_send![other, isVisible];
+        if bar_visible == NO || other_visible == NO {
+            return;
+        }
+        #[allow(unexpected_cfgs)]
+        let bar_level: i64 = msg_send![bar, level];
+        #[allow(unexpected_cfgs)]
+        let other_level: i64 = msg_send![other, level];
+        if bar_level != other_level {
+            return;
+        }
+        #[allow(unexpected_cfgs)]
+        let other_number: i64 = msg_send![other, windowNumber];
+        #[allow(unexpected_cfgs)]
+        let _: () = msg_send![bar, orderWindow: NS_WINDOW_ABOVE relativeTo: other_number];
+    }) {
+        warn!(
+            "Could not order the floating bar above '{}': {}",
+            other_label, e
+        );
+    }
+}
+
 /// Setup macOS-specific styling and behavior for the floating bar window
 #[cfg(target_os = "macos")]
 fn setup_floating_bar_window(app_handle: &AppHandle) {

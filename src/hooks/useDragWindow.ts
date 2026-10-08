@@ -109,10 +109,11 @@ export interface BarDrag {
  *
  * A mousedown anywhere except text entry arms a drag; moving past the
  * threshold starts the drag and swallows the click that would otherwise fire
- * on release. A steady look (the Pill) is moved by Rust, which is not held
- * below the menu bar the way the OS drag is; every other look uses the OS
- * window drag (see `startBarDrag`). A press and release without movement
- * is an ordinary click on whatever was pressed.
+ * on release. Every look is moved by the OS window drag; a steady look (the
+ * Pill) first shrinks its window to the shape it is drawing, so the OS's
+ * menu bar rule holds the pill and not its empty room (see `startBarDrag`).
+ * A press and release without movement is an ordinary click on whatever was
+ * pressed.
  *
  * On release the window glides into the nearest gravity well. That part is
  * gated on the window's label inside `armBarSnap`/`settleBarSnap`, so this
@@ -178,16 +179,13 @@ export function useBarDrag({
   // A drag that ends off the bar (a fast flick, a release outside the window)
   // never fires a click, so a window-level mouseup is the reliable settle
   // trigger. The settle itself is idempotent: whichever path fires first
-  // disarms the other.
+  // disarms the other. A release the page never hears is caught by the
+  // release watch in `startBarDrag`.
   useEffect(() => {
     const onUp = () => void settleBarSnap();
     window.addEventListener("mouseup", onUp, true);
     return () => window.removeEventListener("mouseup", onUp, true);
   }, []);
-
-  // A drag Rust drives ends when the button comes up, wherever it comes up.
-  // Rust says so, which covers a mouseup the page never saw.
-  useEventListener(EVENTS.BAR_DRAG_ENDED, () => void settleBarSnap());
   // A display's overlay is built on its first drag and asks what to draw once
   // it is listening.
   useEventListener(EVENTS.SNAP_WELLS_READY, () => answerOverlayReady());

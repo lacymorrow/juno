@@ -155,12 +155,14 @@ function monitorObject() {
   const { width, height, scaleFactor } = state.monitor;
   const position = { x: 0, y: 0 };
   const size = { width, height };
+  // A standard 24 point menu bar and no Dock, scaled like the rest (physical).
+  const menuBar = Math.round(24 * scaleFactor);
   return {
     name: "Harness Display",
     scaleFactor,
     position,
     size,
-    workArea: { position, size },
+    workArea: { position: { x: 0, y: menuBar }, size: { width, height: height - menuBar } },
   };
 }
 
@@ -278,9 +280,6 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
       return true;
     case COMMANDS.BAR_GET_BAR_POSITION:
       return state.savedPosition;
-    // No Rust here to drive a drag; the bar falls back to the OS drag.
-    case COMMANDS.BAR_DRAG_FOLLOW:
-      throw new Error("no driven drag in the harness");
     case COMMANDS.TRIGGERS_GET_TRIGGERS:
       return [];
     case COMMANDS.AGENT_SESSIONS_LIST_AGENT_SESSIONS:

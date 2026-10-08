@@ -33,7 +33,7 @@
  * Everything is in global desktop points, as in `snapWells.ts`.
  */
 
-import type { MonitorRect, Well, WellSlot } from "./snapWells";
+import { screenInsets, type MonitorRect, type Well, type WellSlot } from "./snapWells";
 import { dockAnchorX, dockGrowsUp, type WindowAnchorX } from "./barDock";
 
 /** A size in logical pixels. */
@@ -79,7 +79,10 @@ export interface SteadyLayout {
   growUp: boolean;
 }
 
-/** Inset of the area a steady window is kept inside. Matches `computeWells`. */
+/**
+ * Inset of the area a steady window is kept inside, when the display reports
+ * no work area. Matches `computeWells`; both go through `screenInsets`.
+ */
 export interface SteadyInsets {
   margin?: number;
   topInset?: number;
@@ -97,7 +100,7 @@ export function steadyLayout(
   well: Well,
   monitor: MonitorRect,
   spec: SteadySpec,
-  { margin = 16, topInset = 36 }: SteadyInsets = {},
+  insets: SteadyInsets = {},
 ): SteadyLayout {
   const slot = { fx: well.fx, fy: well.fy };
   const anchorX = dockAnchorX(slot);
@@ -114,11 +117,14 @@ export function steadyLayout(
   const idealX = anchorX === "start" ? 0 : anchorX === "end" ? W - rw : Math.floor((W - rw) / 2);
   const idealY = growUp ? H - rh : 0;
 
-  // The window's ideal top-left, then clamped inside the inset area.
-  const minX = monitor.position.x + margin;
-  const maxX = monitor.position.x + monitor.size.width - margin - W;
-  const minY = monitor.position.y + topInset;
-  const maxY = monitor.position.y + monitor.size.height - margin - H;
+  // The window's ideal top-left, then clamped inside the inset area: the
+  // display's real work area, so the top edge sits under this display's own
+  // menu bar and the window stays clear of the Dock.
+  const inset = screenInsets(monitor, insets);
+  const minX = monitor.position.x + inset.left;
+  const maxX = monitor.position.x + monitor.size.width - inset.right - W;
+  const minY = monitor.position.y + inset.top;
+  const maxY = monitor.position.y + monitor.size.height - inset.bottom - H;
   const clamp = (v: number, lo: number, hi: number) => (hi < lo ? lo : Math.min(hi, Math.max(lo, v)));
 
   // The clamp is absorbed by the anchor offset, never by the anchor: the
@@ -140,31 +146,31 @@ export function steadyLayout(
 }
 
 /**
- * The layout a steady look is dragged in: the same window, with the resting
- * footprint in its centre, placed so the footprint stays exactly where it is
- * on screen.
+ * The layout a steady look is dragged in: the window becomes exactly what is
+ * drawn. Drag the shape, not the stage.
  *
- * Why centred. With "Displays have separate Spaces" (the macOS default) a
- * window that straddles two displays is drawn only on the display holding
- * most of it. The docked layout puts the shape at one edge of a window far
- * larger than it, so carried across a display edge shape-first it would be
- * on the new display while most of its window is still on the old one, and
- * would vanish for hundreds of points of travel. Centred, the window changes
- * display when the shape's own centre does.
+ * Why. macOS keeps a floating window's top edge below the menu bar on every
+ * frame change, the OS drag included (AppKit 10.9 extended
+ * `constrainFrameRect:toScreen:` to borderless windows below
+ * `NSMainMenuWindowLevel`). The steady window is far taller than the pill, so
+ * a pill docked low stopped halfway up the screen. A window that is only the
+ * footprint is held exactly where the pill should be held: its top just
+ * under the menu bar, which is where the top wells are. It also changes
+ * display with the shape, because it is the shape.
+ *
+ * `footprint` is what the look is drawing at drag start. Everything that
+ * says how the look draws (the docked column, the growth direction) is kept,
+ * so nothing inside the shape moves; the anchor (the resting footprint) keeps
+ * its place on screen, so the wells, the grab and the settle all still refer
+ * to it; and the window is placed so the footprint is at its top-left.
  */
-export function dragLayout(layout: SteadyLayout): SteadyLayout {
-  const { size, anchor } = layout;
-  const ax = Math.floor((size.width - anchor.width) / 2);
-  const ay = Math.floor((size.height - anchor.height) / 2);
+export function dragLayout(layout: SteadyLayout, footprint: Size): SteadyLayout {
+  const drawn = contentRect(layout, footprint);
   return {
     ...layout,
-    origin: {
-      x: layout.origin.x + anchor.x - ax,
-      y: layout.origin.y + anchor.y - ay,
-    },
-    anchor: { ...anchor, x: ax, y: ay },
-    anchorX: "center",
-    growUp: false,
+    origin: { x: layout.origin.x + drawn.x, y: layout.origin.y + drawn.y },
+    size: { width: footprint.width, height: footprint.height },
+    anchor: { ...layout.anchor, x: layout.anchor.x - drawn.x, y: layout.anchor.y - drawn.y },
   };
 }
 
@@ -291,6 +297,11 @@ interface SteadyEntry {
   spec: SteadySpec;
   layout: SteadyLayout | null;
   hidden: boolean;
+  /**
+   * What the look is drawing right now, in points. The drag shrinks the
+   * window to it. Not a render input, so setting it notifies nobody.
+   */
+  footprint: Size | null;
 }
 
 const entries = new Map<string, SteadyEntry>();
@@ -317,7 +328,15 @@ function notify(label: string): void {
 
 /** A look opts in. Null opts out (the look unmounted). */
 export function registerSteady(label: string, spec: SteadySpec | null): void {
-  if (spec) entries.set(label, { spec, layout: entries.get(label)?.layout ?? null, hidden: false });
+  if (spec) {
+    const prev = entries.get(label);
+    entries.set(label, {
+      spec,
+      layout: prev?.layout ?? null,
+      hidden: false,
+      footprint: prev?.footprint ?? null,
+    });
+  }
   else entries.delete(label);
   notify(label);
 }
@@ -332,6 +351,13 @@ export function setSteadyLayout(label: string, layout: SteadyLayout): void {
   if (!e) return;
   entries.set(label, { ...e, layout });
   notify(label);
+}
+
+/** Record what the look is drawing. Read at drag start; renders nothing. */
+export function setSteadyFootprint(label: string, footprint: Size): void {
+  const e = entries.get(label);
+  if (!e) return;
+  e.footprint = { width: footprint.width, height: footprint.height };
 }
 
 export function setSteadyHidden(label: string, hidden: boolean): void {
@@ -356,6 +382,7 @@ export function subscribeSteady(label: string, fn: () => void): () => void {
 /** Forget everything. For tests. */
 export function resetSteady(): void {
   entries.clear();
+  swapTails.clear();
 }
 
 /** Two animation frames: long enough for a committed style to reach the screen. */
@@ -369,19 +396,51 @@ export function afterPaint(): Promise<void> {
   });
 }
 
+// One swap at a time per window. Two used to interleave (a display hop in
+// flight when a drag started): `hidden` is one flag, so the first swap's
+// `finally` showed the shape while the second was still mid-flight, and for a
+// frame the wrong layout was on screen. Each swap now waits for the one
+// before it.
+const swapTails = new Map<string, Promise<void>>();
+
+/** Resolves once every swap already asked for on `label` has finished. */
+export function steadySwapsSettled(label: string): Promise<void> {
+  return swapTails.get(label) ?? Promise.resolve();
+}
+
 /**
  * Move a steady window to a new layout.
  *
  * When only the position changes (same well side, another display spot) the
  * frame moves and the drawing is untouched: nothing can jump. When the drawing
  * changes too (the bar landed on the other side or half of the display, so it
- * now grows the other way) the frame and the page cannot be changed in the
- * same display frame, which is the very seam the steady frame exists to avoid.
- * That swap is done hidden: the content is made invisible, the frame and the
- * drawing change, and it comes back once both have reached the screen. It
- * happens only on a drop or a display hop, never on a state change.
+ * now grows the other way, or the drag shrinks the window to the shape) the
+ * frame and the page cannot be changed in the same display frame, which is the
+ * very seam the steady frame exists to avoid. That swap is done hidden: the
+ * content is made invisible, the frame and the drawing change, and it comes
+ * back once both have reached the screen. It happens only on a drag, a drop or
+ * a display hop, never on a state change.
+ *
+ * Swaps on one window run one after another, never interleaved, and the
+ * "same drawing" check is made against the layout in force when this swap's
+ * turn comes, not when it was asked for.
  */
-export async function swapSteadyLayout(
+export function swapSteadyLayout(
+  label: string,
+  next: SteadyLayout,
+  applyFrame: (layout: SteadyLayout) => Promise<void>,
+): Promise<void> {
+  const run = steadySwapsSettled(label).then(() => runSwap(label, next, applyFrame));
+  // The queue carries on past a failed swap; the caller still sees the error.
+  const tail = run.catch(() => {});
+  swapTails.set(label, tail);
+  void tail.then(() => {
+    if (swapTails.get(label) === tail) swapTails.delete(label);
+  });
+  return run;
+}
+
+async function runSwap(
   label: string,
   next: SteadyLayout,
   applyFrame: (layout: SteadyLayout) => Promise<void>,

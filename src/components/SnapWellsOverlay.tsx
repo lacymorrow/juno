@@ -35,6 +35,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import {
   getCurrentWindow,
@@ -58,14 +59,19 @@ import {
   wellsForDisplay,
   type OverlayRect,
 } from "@/lib/snapWellsOverlay";
-import { EVENTS } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 
 // Corner radius of each hole / ring, in CSS px. Roughly matches the bar pill.
 const HOLE_RADIUS = 14;
 // Dim strength of the screen outside the wells.
 const DIM = "rgba(0, 0, 0, 0.30)";
 // If no hide arrives (a dropped event, a crash mid-drag), hide defensively.
-const AUTO_HIDE_MS = 8000;
+// It is re-armed for as long as the button is held, so a long drag keeps its
+// wells however long it takes; it only fires once nobody is holding anything
+// (or where the button cannot be read).
+export const AUTO_HIDE_MS = 8000;
+// How often the overlay asks whether the drag's button is still held.
+export const HELD_CHECK_MS = 500;
 // How often we re-check the cursor to brighten the nearest well.
 const HIGHLIGHT_POLL_MS = 80;
 
@@ -117,11 +123,16 @@ export const SnapWellsOverlay = () => {
   const grabOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const autoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const heldTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopHighlightPoll = useCallback(() => {
     if (pollTimer.current) {
       clearInterval(pollTimer.current);
       pollTimer.current = null;
+    }
+    if (heldTimer.current) {
+      clearInterval(heldTimer.current);
+      heldTimer.current = null;
     }
   }, []);
 
@@ -223,10 +234,34 @@ export const SnapWellsOverlay = () => {
 
         await win.show();
 
+        // Showing put this overlay in front of everything at its level, the
+        // bar included; put the bar back on top so the dim never covers the
+        // pill being dragged.
+        void invoke(COMMANDS.BAR_ORDER_ABOVE_SNAP_WELLS).catch((err) =>
+          console.debug("[SnapWells] could not keep the bar above:", err),
+        );
+
         // (Re)arm the defensive auto-hide and the nearest-well poll.
-        if (autoHideTimer.current) clearTimeout(autoHideTimer.current);
-        autoHideTimer.current = setTimeout(() => void hide(), AUTO_HIDE_MS);
+        const armAutoHide = () => {
+          if (autoHideTimer.current) clearTimeout(autoHideTimer.current);
+          autoHideTimer.current = setTimeout(() => void hide(), AUTO_HIDE_MS);
+        };
+        armAutoHide();
         startHighlightPoll();
+        // A drag held past the auto-hide keeps its wells: while the button is
+        // down the timer is pushed back. Once it is up the drag is over,
+        // whether or not the bar's hide reached us.
+        heldTimer.current = setInterval(() => {
+          void invoke<boolean>(COMMANDS.BAR_POINTER_HELD)
+            .then((held) => {
+              if (held === true) armAutoHide();
+              else if (held === false) void hide();
+            })
+            .catch(() => {
+              if (heldTimer.current) clearInterval(heldTimer.current);
+              heldTimer.current = null;
+            });
+        }, HELD_CHECK_MS);
       } catch (err) {
         console.error("[SnapWells] show failed:", err);
       }

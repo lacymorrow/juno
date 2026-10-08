@@ -515,6 +515,26 @@ Regression tests come free: Rust's test harness runs every test on a spawned
 thread, so calling the function from a test is already off-main. Before the
 fix, the test binary dies and reports nothing.
 
+### macOS: never re-class a tao window
+
+The floating bar is a tao `TaoWindow` that WebKit has already wrapped in a KVO
+subclass. #728 swapped its isa to a runtime subclass to lift the menu bar
+constraint and crashed Juno on the first drag (`EXC_BAD_ACCESS at 0x8` in
+`-[NSObject superclass]`). Rules, from `docs/plans/appearance-steady-frame.md`
+("Never"):
+
+- Never `object_setClass` a tao or wry object. tao calls `super` through
+  `[self superclass]`, so the class hierarchy must stay exactly what it built.
+- Never subclass a class whose name starts with `NSKVONotifying_`.
+- The menu bar constraint (`constrainFrameRect:toScreen:`) applies to
+  borderless windows at any level from `NSNormalWindowLevel` up to, not
+  including, `NSMainMenuWindowLevel`, on the OS drag and on every `setFrame`.
+  The bar (level 3) is constrained. Size the window to what has to reach the
+  top (the bar drags as a window the size of its shape) rather than fight it.
+- A method that must change on a tao window goes on tao's class with
+  `class_addMethod` (after checking it is not already implemented), with the
+  super class named statically (`class!(NSWindow)`).
+
 ### Memory Management
 - Clone memory managers safely using Arc-based patterns
 - Use `SimpleMemoryManager::new()` for specialists
