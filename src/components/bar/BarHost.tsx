@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { UI, EVENTS, TIMEOUTS, COMMANDS } from "@/lib/constants.generated";
 import type { FloatingBarConfig } from "@/types/bar-config";
+import { useEventListener } from "@/hooks/useEventListener";
 
 import { FloatingBar } from "@/components/FloatingBar";
 import { AppBar } from "@/components/bar/app-bar";
@@ -122,5 +123,49 @@ export function BarHost() {
   // window for a component that is about to be replaced.
   if (!loaded) return null;
 
-  return <Component />;
+  return (
+    <>
+      <Component />
+      <DebugWindowOutline />
+    </>
+  );
+}
+
+/**
+ * In debug mode, a 1px black line around the bar window's own edge, so every
+ * native resize and every transition is visible against the desktop. Not in a
+ * preview frame: the settings picker's previews are not the window.
+ */
+function DebugWindowOutline() {
+  const [on, setOn] = useState(false);
+
+  const inPreview = window.self !== window.top;
+
+  useEffect(() => {
+    if (inPreview) return;
+    let mounted = true;
+    invoke<boolean>(COMMANDS.CORE_GET_DEBUG_MODE)
+      .then((enabled) => { if (mounted) setOn(enabled === true); })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, [inPreview]);
+
+  useEventListener<boolean>(EVENTS.BAR_DEBUG_MODE_CHANGED, (enabled) => {
+    if (!inPreview) setOn(enabled === true);
+  });
+
+  if (!on) return null;
+  return (
+    <div
+      data-testid="debug-window-outline"
+      aria-hidden
+      style={{
+        position: "fixed",
+        inset: 0,
+        border: "1px solid #000",
+        pointerEvents: "none",
+        zIndex: 2147483647,
+      }}
+    />
+  );
 }
