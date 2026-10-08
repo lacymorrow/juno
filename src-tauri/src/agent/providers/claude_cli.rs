@@ -1609,6 +1609,27 @@ impl ClaudeCliBrain {
         spoken_blocks.extend(tts_blocks);
     }
 
+    /// End-of-stream companion to [`Self::emit_display_text`]: flush what the
+    /// `<TTS>` parser is still holding (a partial tag becomes display text, an
+    /// unterminated block is still spoken). Used by the Codex CLI provider.
+    pub(super) fn flush_display_text(
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        accumulated_text: &mut String,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        let (tail_display, tail_spoken) = tts_stream.finish();
+        if tail_display.is_empty() && tail_spoken.is_empty() {
+            return;
+        }
+        accumulated_text.push_str(&tail_display);
+        if let Some(handle) = app_handle {
+            Self::emit_chunk_with_tts(handle, tail_display, msg_id, &tail_spoken);
+        }
+        spoken_blocks.extend(tail_spoken);
+    }
+
     /// Emit one display chunk plus every spoken block. The first block rides on
     /// the text chunk; extra blocks go out as TTS-only chunks, matching the
     /// Anthropic provider's event shape.

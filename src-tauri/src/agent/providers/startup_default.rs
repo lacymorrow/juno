@@ -15,8 +15,9 @@
 use tracing::{info, warn};
 
 use super::claude_cli;
+use super::codex_cli;
 use super::config::ProviderConfig;
-use super::default_selection::{decide, Decision, SelectionState};
+use super::default_selection::{decide, CliCandidate, Decision, SelectionState};
 use super::types::Provider;
 use crate::settings::manager::SettingsManager;
 
@@ -31,8 +32,8 @@ fn env_key_for(provider: &Provider) -> Option<&'static str> {
         // Rig borrows OpenAI's key, which `resolve_provider` already reflects.
         Provider::Rig => Some("OPENAI_API_KEY"),
         Provider::Gemini => Some("GEMINI_API_KEY"),
-        // The CLI has no key by design; its credential is its login.
-        Provider::ClaudeCli => None,
+        // The CLIs have no key by design; their credential is their login.
+        Provider::ClaudeCli | Provider::CodexCli => None,
     }
 }
 
@@ -69,24 +70,44 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
         .await
         .map_err(|e| format!("Could not read provider settings: {e}"))?;
 
-    // Cheapest question first: with no `claude` binary there is nothing to ask
-    // and, in the common case of someone who has never installed Claude Code,
-    // no subprocess is spawned at all.
-    let installed = claude_cli::is_claude_cli_available();
-    let status = if installed {
+    // Cheapest question first: with no CLI binary there is nothing to ask
+    // and, in the common case of someone who has installed neither, no
+    // subprocess or filesystem read is spawned at all.
+    let claude_installed = claude_cli::is_claude_cli_available();
+    let claude_status = if claude_installed {
         claude_cli::cli_status().await
     } else {
         claude_cli::CliStatus::default()
     };
 
+    let codex_installed = codex_cli::is_codex_cli_available();
+    let codex_status = if codex_installed {
+        codex_cli::cli_status().await
+    } else {
+        codex_cli::CliStatus::default()
+    };
+
+    // Preference order lives here: Claude, then Codex, then (future) trial
+    // credits. The rule walks the list first-usable-wins, so this is the one
+    // place to touch when a provider is added or re-ordered.
+    let cli_candidates = vec![
+        CliCandidate {
+            provider_id: Provider::ClaudeCli.id(),
+            installed: claude_status.installed,
+            signed_in: claude_status.is_signed_in(),
+        },
+        CliCandidate {
+            provider_id: Provider::CodexCli.id(),
+            installed: codex_status.installed,
+            signed_in: codex_status.is_signed_in(),
+        },
+    ];
+
     let state = SelectionState {
         active_provider: config.active_provider.clone(),
         chosen_by_user: config.provider_chosen_by_user,
         active_has_credential: active_has_credential(&config),
-        cli_installed: status.installed,
-        // Proof, not the benefit of the doubt: this decision moves
-        // somebody onto a provider they never asked for.
-        cli_signed_in: status.is_signed_in(),
+        cli_candidates,
     };
 
     match decide(&state) {
@@ -106,10 +127,19 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
                 .await
                 .map_err(|e| format!("Could not save the provider choice: {e}"))?;
 
-            match status.email {
-                Some(email) if provider_id == Provider::ClaudeCli.id() => info!(
-                    "[Providers] No API key configured and the Claude CLI is signed in as {email} — using it"
-                ),
+            match provider_id {
+                id if id == Provider::ClaudeCli.id() => match claude_status.email {
+                    Some(email) => info!(
+                        "[Providers] No API key configured and the Claude CLI is signed in as {email} — using it"
+                    ),
+                    None => info!("[Providers] Active provider is now '{provider_id}'"),
+                },
+                id if id == Provider::CodexCli.id() => match codex_status.email {
+                    Some(email) => info!(
+                        "[Providers] No API key configured and the Codex CLI is signed in with ChatGPT as {email}, using it"
+                    ),
+                    None => info!("[Providers] Active provider is now '{provider_id}'"),
+                },
                 _ => info!("[Providers] Active provider is now '{provider_id}'"),
             }
             Ok(provider_id.to_string())
@@ -197,19 +227,21 @@ mod tests {
     }
 
     #[test]
-    fn the_cli_entry_never_looks_for_a_key() {
-        // Its credential is the login, so an absent key must not read as
+    fn the_cli_entries_never_look_for_a_key() {
+        // Their credential is the login, so an absent key must not read as
         // "unusable" and bounce someone straight back off it.
         assert_eq!(env_key_for(&Provider::ClaudeCli), None);
+        assert_eq!(env_key_for(&Provider::CodexCli), None);
     }
 
     #[test]
-    fn both_providers_the_rule_can_name_have_settings_entries() {
+    fn every_provider_the_rule_can_name_has_a_settings_entry() {
         // `apply` refuses to switch to a provider with no entry, so a rule
         // that named a missing one would silently do nothing.
         let config = ProviderConfig::default();
         let ids: Vec<&str> = config.providers.iter().map(|p| p.id.as_str()).collect();
         assert!(ids.contains(&Provider::ClaudeCli.id()));
+        assert!(ids.contains(&Provider::CodexCli.id()));
         assert!(ids.contains(&super::super::config::DEFAULT_PROVIDER.id()));
     }
 }

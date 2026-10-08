@@ -295,8 +295,15 @@ pub(crate) async fn check_api_keys_available(app_handle: tauri::AppHandle) -> Re
         info!("No API keys, but the Claude CLI is signed in");
         return Ok(true);
     }
+    if crate::agent::providers::codex_cli::cli_status()
+        .await
+        .is_signed_in()
+    {
+        info!("No API keys, but the Codex CLI is signed in with ChatGPT");
+        return Ok(true);
+    }
 
-    info!("No API keys found in store or environment, and no signed-in Claude CLI");
+    info!("No API keys found in store or environment, and no signed-in CLI");
     Ok(false)
 }
 
