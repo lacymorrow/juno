@@ -1,10 +1,11 @@
-import type { ResponseExportInput } from "@/types/chat";
+import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useConversation } from "@/hooks/useConversation";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import type { BackendStatus } from "@/components/ExamplePrompts";
-import { COMMANDS } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
+import { useEventListener } from "@/hooks/useEventListener";
 
 const noop = () => {};
 
@@ -79,6 +80,14 @@ export function useBarConversation() {
       );
     },
     [conversation.setConversationWithPruning],
+  );
+
+  // A conversation was loaded (from History, or by clicking the bar after
+  // Claude ran a turn of its own in it): the backend hands over its snapshot,
+  // so the pane shows the same conversation the main window does.
+  useEventListener<{ messages: ChatMessage[] }>(
+    EVENTS.MESSAGES_CONVERSATION_LOADED,
+    (payload) => conversation.updateConversation(payload?.messages ?? []),
   );
 
   // Same command the main window's stop button uses; the backend fans the
