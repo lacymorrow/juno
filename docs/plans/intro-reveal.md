@@ -17,6 +17,7 @@ Juno launches (or setup ends). Where the bar is about to be, smoke gathers out o
 - The Pavel Dobryakov fluid simulation and its wrappers (`webgl-fluid`, `WebGL-Fluid-Enhanced`): 1,600 lines built around mouse splats, bloom and sunrays, neon dye. Cannot be choreographed; the look is what Juno's design rules call AI slop.
 - Any tint on the smoke. It is grey, two greys: light and dark together, so it reads over any desktop without a theme check.
 - The lit rim around the pill. On the real 56x16 pill it read as a solid white ring, jarring and out of place (Lacy, 2026-10-08). The smoke is the whole picture.
+- The hole the smoke left for the bar. The shader hollowed out the rectangle the backend measured, and that rectangle is the Pill's hit footprint, 88x76 with its margin, not the 56x16 shape: an empty rounded box around the pill "like an invisible force field" (Lacy, 2026-10-08). Now nothing in the shader knows the bar's shape. The smoke is densest at the centre, the bar is drawn over it, and the last wisp goes at the centre.
 - A declared window in `tauri.conf.json`. A declared window is built on every launch; this one is wanted once, so it is built for the occasion and closed.
 - Nine per-well variants. The shape of the cloud is one parameter, the inward vector.
 - A crossfade of the bar itself. The bar is a separate window and is shown with a plain `show()` as before; the smoke is dense around it at that moment, which is what hides the cut.
@@ -52,7 +53,7 @@ If the page never asks (no WebGL, a failed load), the bar is shown at 1.5 s and 
 
 ## Two tones
 
-The smoke does not read the theme. Slow noise blotches decide which parts of the cloud are light (near white) and which are dark (charcoal), and the detail noise sampled a little toward the upper left lights each billow from that side (`relief`). Over a dark window the light parts carry the picture; over a light desktop the dark parts do. One shader, no `prefers-color-scheme`.
+The smoke does not read the theme, because the theme is no guide to what is behind the bar: a light window sits on a dark desktop and the other way round. Mid-sized noise blotches decide which patches of the cloud are near white and which near black, so both are in every frame side by side, and the haze sampled a little toward the upper left lights each billow from that side (`relief`). Over a dark window the light patches carry the picture; over a light one the dark patches do. One shader, no `prefers-color-scheme`.
 
 ## The inward vector
 
@@ -62,7 +63,7 @@ The shader uses it twice. Smoke is faded to nothing on the edge-facing side of t
 
 ## The pill's shape
 
-The Pill is a steady look: one window far bigger than the shape it draws. The window's centre is no guide to the pill. The look already reports its drawn rectangles to Rust for click-through (`set_bar_hit_regions`), and at rest that is the pill alone, so the reveal reads the same table (`drawn_bounds`). With nothing reported, a 56x16 pill centred in the bar window is assumed (`fallback_pill`).
+The Pill is a steady look: one window far bigger than the shape it draws. The window's centre is no guide to the pill. The look already reports its footprint to Rust for click-through (`set_bar_hit_regions`), and at rest that is the pill plus the margin around it (88x76 for a 56x16 pill), so the reveal reads the same table (`drawn_bounds`) and trusts its centre, which is the pill's centre. The shader uses nothing but that centre. With nothing reported, a 56x16 pill centred in the bar window is assumed (`fallback_pill`).
 
 ## Tweakables
 
@@ -71,7 +72,7 @@ Two blocks, each a handful of numbers with a comment per line.
 | Where | What |
 |---|---|
 | `src-tauri/src/intro.rs` | `DURATION_MS` (2600), `BAR_AT_MS` (1000), `WINDOW_WIDTH` / `WINDOW_HEIGHT` (560x360), `PILL_INSET_X` / `PILL_INSET_Y` (70 / 40), `DEAD_ZONE` (0.15), `READY_WAIT` (1.5 s) |
-| `src/components/intro/introModel.ts` `LOOK` | `reach` (0.55, how far the cloud spreads), `density` (0.7), `churn` (1, speed), `dark` and `light` (the two tones), `lightness` (0.55, how much of the cloud is light), `relief` (0.6, how strongly billows are lit from the upper left) |
+| `src/components/intro/introModel.ts` `LOOK` | `reach` (0.55, how far the cloud spreads), `density` (0.85), `churn` (1, speed), `dark` and `light` (the two tones, near black and near white), `lightness` (0.5, how much of the cloud is light), `relief` (0.6, how strongly billows are lit from the upper left) |
 
 Dev Tools has a **Replay intro** button (`replay_intro`) that hides the bar and runs the reveal on it again, so a change can be looked at without relaunching.
 

@@ -16,8 +16,10 @@
 export interface IntroPlan {
   duration_ms: number;
   bar_at_ms: number;
-  /** The pill's centre, size and corner radius: whatever shape the bar is
-   *  actually drawing, measured by the backend. */
+  /** The bar's drawn footprint, measured by the backend: its centre, size
+   *  and corner radius. Only the centre is drawn from. The Pill reports its
+   *  hit footprint, which is the shape plus the margin around it, so the
+   *  size is no guide to the pill's edge; the centre is the pill's centre. */
   pill_x: number;
   pill_y: number;
   pill_w: number;
@@ -37,16 +39,17 @@ export const LOOK = {
    *  of the window's short side. */
   reach: 0.55,
   /** Overall opacity of the smoke, 0..1. */
-  density: 0.8,
+  density: 0.85,
   /** How fast the smoke churns. 1 is the shipped speed. */
   churn: 1,
-  /** The two tones of the cloud. Both are always there: the light parts read
-   *  over a dark desktop and the dark parts over a light one, so the smoke
-   *  never has to know which it is on. */
-  dark: [0.30, 0.31, 0.34] as const,
-  light: [0.90, 0.90, 0.92] as const,
-  /** How much of the cloud is light rather than dark, 0..1. */
-  lightness: 0.55,
+  /** The two tones of the cloud, near black and near white. Both are in
+   *  every frame, side by side: the light parts read over a dark window and
+   *  the dark parts over a light one, whatever the theme, so the smoke never
+   *  has to know what it is on. */
+  dark: [0.06, 0.06, 0.08] as const,
+  light: [0.97, 0.97, 0.98] as const,
+  /** How much of the cloud is light rather than dark, 0..1. 0.5 is even. */
+  lightness: 0.5,
   /** How strongly each billow is lit from the upper left, 0..1. 0 is flat. */
   relief: 0.6,
 } as const;
@@ -64,8 +67,6 @@ export interface IntroUniforms {
   uTime: number;
   uT: number;
   uPill: [number, number];
-  uHalf: [number, number];
-  uRadius: number;
   uInward: [number, number];
   uDark: [number, number, number];
   uLight: [number, number, number];
@@ -97,8 +98,6 @@ export const uniformsFor = (plan: IntroPlan, viewport: Viewport, dpr: number): I
   uTime: 0,
   uT: 0,
   uPill: [plan.pill_x * dpr, (viewport.height - plan.pill_y) * dpr],
-  uHalf: [(plan.pill_w / 2) * dpr, (plan.pill_h / 2) * dpr],
-  uRadius: plan.pill_radius * dpr,
   uInward: [plan.inward_x, -plan.inward_y],
   uDark: [LOOK.dark[0], LOOK.dark[1], LOOK.dark[2]],
   uLight: [LOOK.light[0], LOOK.light[1], LOOK.light[2]],
@@ -123,11 +122,12 @@ export const VERT = /* glsl */ `
 `;
 
 /**
- * One pass. Domain-warped fractal noise, pulled in toward the pill as the
- * sequence advances, dissolved by threshold at the end, and kept off the
- * edge-facing side of the window so it never meets an edge. The cloud is two
- * tones, light and dark together, each billow lit from the upper left.
- * Output is premultiplied.
+ * One pass. Domain-warped fractal noise centred under the bar, densest at
+ * the centre with no hole in it, drawn in toward that centre as the sequence
+ * advances and dissolved from the outside in, so the last of it goes where
+ * the bar is. Kept off the edge-facing side of the window so it never meets
+ * an edge. The cloud is two tones, near black and near white together, each
+ * billow lit from the upper left. Output is premultiplied.
  */
 export const FRAG = /* glsl */ `
   precision highp float;
@@ -135,8 +135,6 @@ export const FRAG = /* glsl */ `
   uniform float uTime;
   uniform float uT;
   uniform vec2 uPill;
-  uniform vec2 uHalf;
-  uniform float uRadius;
   uniform vec2 uInward;
   uniform vec3 uDark;
   uniform vec3 uLight;
@@ -172,25 +170,21 @@ export const FRAG = /* glsl */ `
     }
     return v;
   }
-  float sdRound(vec2 p, vec2 b, float r) {
-    vec2 q = abs(p) - b + r;
-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
-  }
-
   void main() {
     float scale = 1.0 / min(uRes.x, uRes.y);
-    vec2 p = gl_FragCoord.xy - uPill;
-    float d = sdRound(p, uHalf, uRadius) * scale;
-    vec2 uv = p * scale;
+    // Everything is measured from the centre of the bar, in units of the
+    // window's short side.
+    vec2 uv = (gl_FragCoord.xy - uPill) * scale;
+    float dc = length(uv);
 
     float bloom  = smoothstep(0.00, 0.32, uT);
     float gather = smoothstep(0.30, 0.68, uT);
     float clear  = smoothstep(0.62, 1.00, uT);
 
-    // The cloud: blooms out, is drawn in, breaks up.
-    float R = mix(0.08, uReach, bloom) * (1.0 - 0.70 * gather);
+    // The cloud: blooms out from the centre, is drawn back in, breaks up.
+    float R = mix(0.06, uReach, bloom) * (1.0 - 0.70 * gather);
     float tm = uTime * 2.2 * uChurn;
-    // Drawn in by scaling the field toward the pill, not by shifting it:
+    // Drawn in by scaling the field toward the centre, not by shifting it:
     // a shift piles the pattern into bands around the centre.
     vec2 q = uv * (1.0 + gather * 0.9) - uInward * (tm * 0.03);
     float w = fbm(q * 2.0 + tm * 0.12);
@@ -200,12 +194,13 @@ export const FRAG = /* glsl */ `
     float haze = fbm(qh);
     float fine = fbm(q * 7.0 + vec2(-w * 0.8, w * 0.6) + tm * 0.15);
 
-    // Never on the edge-facing side: that is where the screen ends. With no
-    // inward vector (mid-screen) this is 1 everywhere and the cloud is round.
-    float sideWidth = max(uHalf.y * 1.6, 0.03 / scale);
-    float side = 1.0 - smoothstep(0.0, sideWidth, dot(p, -uInward));
-    // And a soft fade inside every window edge, short on the edge-facing
-    // side (the pill is close to it) and long elsewhere.
+    // Never far onto the edge-facing side: that is where the screen ends.
+    // The cloud still reaches a little past the centre that way, so it sits
+    // on the bar and not below it. With no inward vector (mid-screen) this
+    // is 1 everywhere and the cloud is round.
+    float side = 1.0 - smoothstep(0.04, 0.10, dot(uv, -uInward));
+    // And a soft fade short of every window edge, short on the edge-facing
+    // side (the bar is close to it) and long elsewhere.
     vec2 e = gl_FragCoord.xy / uRes;
     float mL = mix(0.25, 0.06, max(uInward.x, 0.0));
     float mR = mix(0.25, 0.06, max(-uInward.x, 0.0));
@@ -214,24 +209,29 @@ export const FRAG = /* glsl */ `
     float edge = smoothstep(0.0, mL, e.x) * smoothstep(0.0, mR, 1.0 - e.x)
                * smoothstep(0.0, mB, e.y) * smoothstep(0.0, mT, 1.0 - e.y) * side;
 
-    float env = 1.0 - smoothstep(R * 0.10, R, max(d, 0.0));
-    float th = mix(0.46, 0.26, bloom) + clear * 0.62;
+    // Densest at the centre, with no gap there: the bar is drawn over
+    // the smoke, so the smoke runs right under it.
+    float env = 1.0 - smoothstep(0.0, R, dc);
+    // The threshold rises with distance as it clears, so the outside of the
+    // cloud breaks up first and the last wisp goes at the centre.
+    float th = mix(0.46, 0.26, bloom) + clear * (0.62 + dc * 2.0);
     float wisps = smoothstep(th, th + 0.34, n);
     float body = smoothstep(th, th + 0.50, haze) * 0.7;
     float detail = smoothstep(th + 0.12, th + 0.40, fine) * 0.25;
-    float dens = (wisps + body + detail) * env * edge;
-    // The pill pushes the smoke out as it forms.
-    float inside = 1.0 - smoothstep(-0.004, 0.0, d);
-    dens *= 1.0 - inside * gather;
+    float core = (1.0 - smoothstep(0.0, R * 0.35, dc)) * 0.5 * (1.0 - clear);
+    float dens = (wisps + body + detail + core) * env * edge;
     float a = clamp(dens * uGain * (1.0 - clear * 0.6), 0.0, 1.0);
 
-    // Tone. Light and dark smoke in one cloud, so it reads over any desktop.
-    // Slow blotches decide which is which, and the detail noise sampled a
-    // little toward the upper left gives every billow a lit side.
-    float tone = fbm(q * 1.5 + vec2(w * 0.7, -w * 0.4) + tm * 0.05);
+    // Tone. Near-black and near-white smoke in one cloud, patch by patch, so
+    // both are in every frame and it reads over any window. Mid-sized
+    // blotches decide which is which, and the haze sampled a little toward
+    // the upper left gives every billow a lit side.
+    float tone = fbm(q * 2.2 + vec2(w * 0.7, -w * 0.4) + tm * 0.05);
     float towardLight = fbm(qh + vec2(-0.12, 0.12));
     float relief = clamp((towardLight - haze) * 6.0, -1.0, 1.0) * uRelief;
-    float shade = smoothstep(0.30, 0.75, tone + (uLightness - 0.5) * 0.4) + relief * 0.45;
+    // The split sits where this noise actually centres (it runs low), so
+    // 0.5 lightness is an even share of each tone.
+    float shade = smoothstep(0.26, 0.48, tone + (uLightness - 0.5) * 0.4) + relief * 0.35;
     vec3 col = mix(uDark, uLight, clamp(shade, 0.0, 1.0));
 
     gl_FragColor = vec4(col * a, a);
