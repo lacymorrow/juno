@@ -69,6 +69,34 @@ export interface FlameWrapInstance {
   destroy: () => void;
 }
 
+type Box = Pick<DOMRect, "left" | "right" | "top" | "bottom" | "width" | "height">;
+
+/**
+ * Where the wrapped box sits inside the output canvas, in the canvas's own
+ * CSS pixels (centre measured from the bottom, as the shader wants).
+ * getBoundingClientRect reports on-screen pixels, which a CSS transform on an
+ * ancestor scales (the appearance picker shows the bar at `scale(<1)`), while
+ * the canvas is sized from clientWidth, which a transform does not touch.
+ * Dividing by the ratio of the two puts both in the same units; without it the
+ * outline is drawn shrunk and pulled toward the canvas's bottom-left corner.
+ */
+export function boxInCanvasPx(
+  outRect: Box,
+  boxRect: Box,
+  layoutWidth: number,
+  layoutHeight: number,
+): { cx: number; cy: number; hx: number; hy: number } | null {
+  if (outRect.width <= 0 || outRect.height <= 0 || boxRect.width <= 0) return null;
+  const sx = layoutWidth > 0 ? outRect.width / layoutWidth : 1;
+  const sy = layoutHeight > 0 ? outRect.height / layoutHeight : 1;
+  return {
+    cx: ((boxRect.left + boxRect.right) / 2 - outRect.left) / sx,
+    cy: (outRect.bottom - (boxRect.top + boxRect.bottom) / 2) / sy,
+    hx: boxRect.width / 2 / sx,
+    hy: boxRect.height / 2 / sy,
+  };
+}
+
 const DEFAULTS: Required<FlameWrapOptions> = {
   color: [0.31, 0.54, 1],
   intensity: 0.5,
@@ -530,14 +558,13 @@ export function createFlameWrap(
       output.height = height;
     }
     const box = htmlInCanvas ? source : content;
-    const outRect = output.getBoundingClientRect();
-    const boxRect = box.getBoundingClientRect();
-    if (outRect.width > 0 && boxRect.width > 0) {
-      rect.cx = (boxRect.left + boxRect.right) / 2 - outRect.left;
-      rect.cy = outRect.bottom - (boxRect.top + boxRect.bottom) / 2;
-      rect.hx = boxRect.width / 2;
-      rect.hy = boxRect.height / 2;
-    }
+    const measured = boxInCanvasPx(
+      output.getBoundingClientRect(),
+      box.getBoundingClientRect(),
+      output.clientWidth,
+      output.clientHeight,
+    );
+    if (measured) Object.assign(rect, measured);
     if (htmlInCanvas) {
       const cssWidth = Math.max(1, Math.round(source.clientWidth));
       const cssHeight = Math.max(1, Math.round(source.clientHeight));
