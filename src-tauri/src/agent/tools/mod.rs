@@ -35,6 +35,7 @@ pub mod display_info_tools; // Screen resolution and display information tools
 pub mod enhanced_coding_tools;
 pub mod enhanced_visual_reasoning;
 pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
+pub mod mac_apps; // Reminders, Calendar and Contacts through EventKit and Contacts
 pub mod mcp_integration;
 pub mod path_security; // Shared canonicalization + workspace-boundary enforcement for file tools
 pub mod permission_policy; // The one decision: does this action need asking, and what do we call it
