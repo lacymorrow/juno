@@ -924,7 +924,24 @@ export function ChatMessageComponent({
         ) : msg.role === "assistant" && msg.content ? (
           <MessageResponse>{msg.content}</MessageResponse>
         ) : msg.role === "user" ? (
-          <span>{msg.content}</span>
+          <>
+            {/* What they attached, above what they typed — the bubble shows
+                the whole message, so a pasted photo is visibly on its way
+                rather than invisible to the person who sent it. */}
+            {msg.images && msg.images.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {msg.images.map((src, i) => (
+                  <img
+                    key={`${msg.messageId || index}-img-${i}`}
+                    src={src}
+                    alt="Attached image"
+                    className="max-h-32 max-w-48 rounded-lg object-cover"
+                  />
+                ))}
+              </div>
+            )}
+            {msg.content && <span>{msg.content}</span>}
+          </>
         ) : (
           msg.content
         )}

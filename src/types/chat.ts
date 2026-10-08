@@ -25,6 +25,12 @@ export type ChatMessage = {
    * and share "Setup complete. Welcome to Juno!".
    */
   notice?: boolean;
+  /**
+   * Pictures the person attached to this message, as data URLs. Shown as
+   * thumbnails in their own bubble so an attachment is visibly part of what
+   * they sent.
+   */
+  images?: string[];
   screenshot_base64?: string;
   tool_name?: string;
   tool_args?: any;

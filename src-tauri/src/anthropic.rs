@@ -418,7 +418,7 @@ pub async fn submit_query(
     // scheduled automation): chat windows append the user message and enter
     // their processing state, and the floating bar shows "submitting".
     if !crate::cli::headless::is_headless_mode() {
-        announce_query_submission(&app_handle, trimmed_query).await;
+        announce_query_submission(&app_handle, trimmed_query, images.as_deref()).await;
 
         // A new query opens a new turn for speech, so a local intent's answer
         // is not mistaken for the tail of a turn that was stopped.
@@ -500,12 +500,22 @@ pub async fn submit_query(
 /// Emits `user-message-submitted` so every chat surface appends the message and
 /// enters its processing state, and moves the floating bar into `Submitting`.
 /// Only `submit_query` calls this, so every query source shares one announcement.
-async fn announce_query_submission(app_handle: &tauri::AppHandle, query: &str) {
+async fn announce_query_submission(
+    app_handle: &tauri::AppHandle,
+    query: &str,
+    images: Option<&[String]>,
+) {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
-    let payload = serde_json::json!({ "content": query, "timestamp": timestamp });
+    // The attached pictures ride along as data URLs so the person's own
+    // bubble can show what they sent, not just their words.
+    let payload = serde_json::json!({
+        "content": query,
+        "timestamp": timestamp,
+        "images": images,
+    });
     if let Err(e) = app_handle.emit(events::messages::USER_MESSAGE_SUBMITTED, payload) {
         warn!("Failed to emit user-message-submitted event: {}", e);
     }
