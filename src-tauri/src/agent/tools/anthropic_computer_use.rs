@@ -1178,34 +1178,36 @@ async fn run_element_action(
             let state_manager = app_handle.state::<AppState>();
             let _guard = state_manager.input_arbiter().acquire(session_id).await;
             let target_app = get_frontmost_app_name();
-            let outcome = handle_anthropic_result!(
-                run_background_first(
-                    app_handle,
-                    action,
-                    target_app.as_deref(),
-                    Some(pin),
-                    |allow_physical| match action {
-                        "right_click" => state_manager.desktop.right_click_no_warp(
-                            center_x,
-                            center_y,
-                            allow_physical
-                        ),
-                        "double_click" => state_manager.desktop.double_click_no_warp(
-                            center_x,
-                            center_y,
-                            None,
-                            allow_physical,
-                        ),
-                        _ => state_manager.desktop.left_click_no_warp(
-                            center_x,
-                            center_y,
-                            None,
-                            allow_physical,
-                        ),
-                    },
-                )
-                .await
-            );
+            let outcome = match run_background_first(
+                app_handle,
+                action,
+                target_app.as_deref(),
+                Some(pin),
+                |allow_physical| match action {
+                    "right_click" => state_manager.desktop.right_click_no_warp(
+                        center_x,
+                        center_y,
+                        allow_physical,
+                    ),
+                    "double_click" => state_manager.desktop.double_click_no_warp(
+                        center_x,
+                        center_y,
+                        None,
+                        allow_physical,
+                    ),
+                    _ => state_manager.desktop.left_click_no_warp(
+                        center_x,
+                        center_y,
+                        None,
+                        allow_physical,
+                    ),
+                },
+            )
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(message) => return Ok(create_anthropic_error_response(message)),
+            };
             with_input_tier(json!({ "success": true }), &outcome)
         }
     };

@@ -679,6 +679,9 @@ fn capture_via_screencapturekit(
         ))
 }
 
+/// A window's pixels and its frame (x, y, width, height) in screen points.
+pub type WindowCapture = (ImageBuffer<Rgba<u8>, Vec<u8>>, (f64, f64, f64, f64));
+
 /// One window, captured on its own at one pixel per point, with its frame in
 /// screen points at the moment of capture.
 ///
@@ -687,9 +690,7 @@ fn capture_via_screencapturekit(
 /// what lets an agent work in a window the person is not looking at. A
 /// minimized window is not on screen and cannot be captured.
 #[cfg(feature = "screencapturekit-backend")]
-pub fn capture_window_buffer(
-    window_id: u32,
-) -> Result<(ImageBuffer<Rgba<u8>, Vec<u8>>, (f64, f64, f64, f64)), AutomationError> {
+pub fn capture_window_buffer(window_id: u32) -> Result<WindowCapture, AutomationError> {
     use screencapturekit::screenshot_manager::SCScreenshotManager;
     use screencapturekit::shareable_content::SCShareableContent;
     use screencapturekit::stream::configuration::SCStreamConfiguration;
@@ -741,9 +742,7 @@ pub fn capture_window_buffer(
 }
 
 #[cfg(not(feature = "screencapturekit-backend"))]
-pub fn capture_window_buffer(
-    window_id: u32,
-) -> Result<(ImageBuffer<Rgba<u8>, Vec<u8>>, (f64, f64, f64, f64)), AutomationError> {
+pub fn capture_window_buffer(window_id: u32) -> Result<WindowCapture, AutomationError> {
     Err(AutomationError::PlatformError(format!(
         "Capturing window {} on its own needs ScreenCaptureKit",
         window_id
