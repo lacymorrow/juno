@@ -286,7 +286,7 @@ impl SessionFailure {
     fn from_rpc(e: RpcError) -> Self {
         // Method not found, invalid params, invalid request: the server does
         // not know the protocol Juno speaks, and will not learn it by retrying.
-        if matches!(e.code, -32601 | -32602 | -32600) {
+        if matches!(e.code, -32602..=-32600) {
             Self::Incompatible(format!("{} ({})", e.message, e.code))
         } else {
             Self::Rpc(format!("{} ({})", e.message, e.code))
