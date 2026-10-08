@@ -731,6 +731,7 @@ pub fn run() {
             anthropic::handle_tts_completion,
             // Window Management Commands
             window_management::open_settings_window,
+            agent::local_intents::settings_follow::run_reply_chip,
             window_management::close_settings_window,
             window_management::open_main_window,
             window_management::close_main_window,
