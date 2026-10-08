@@ -47,7 +47,7 @@ pub const ALLOWED_TOOLS: &str = "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSear
      TodoWrite,Task,mcp__juno__computer,mcp__juno__settings";
 
 /// How long the sheet waits for an answer before denying.
-const APPROVAL_TIMEOUT_SECS: u64 = 60;
+pub const APPROVAL_TIMEOUT_SECS: u64 = 60;
 
 /// After a denial, an identical ask inside this window is denied without a
 /// new sheet, the way `permission_gate.rs` stops a tool loop from nagging.
@@ -235,7 +235,9 @@ fn names_a_gated_act(tool: &str) -> bool {
 /// fix for that is a structural spend signal, not a longer verb list.
 pub fn verdict_for(tool_name: &str) -> Verdict {
     // Juno's own server: the computer tool is in `--allowedTools`, but a
-    // call that lands here anyway is Juno driving its own desktop.
+    // call that lands here anyway is Juno driving its own desktop. The Mac app
+    // tools are not waved through by this: `juno_mcp` runs Juno's own
+    // permission gate on them before they execute.
     if tool_name.starts_with("mcp__juno__") {
         return Verdict::Allow;
     }
@@ -364,47 +366,16 @@ fn describe(tool_name: &str, input: &Value) -> String {
     line
 }
 
-/// Handle a `tools/call` for `approve`: decide, maybe show the sheet, wait,
-/// and answer in the CLI's permission-prompt shape.
-pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value {
-    let tool_name = arguments
-        .get("tool_name")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let input = arguments.get("input").cloned().unwrap_or_else(|| json!({}));
-
-    if tool_name.is_empty() {
-        return deny_result("Malformed permission request: no tool_name.");
-    }
-
-    // Off means off: the old behaviour, everything runs.
-    if !is_enabled(app) {
-        return allow_result(&input);
-    }
-
-    if verdict_for(tool_name) == Verdict::Allow {
-        return allow_result(&input);
-    }
-
-    // A tool loop retrying a fresh denial gets the same answer without a
-    // new sheet (same idea as permission_gate's ask rate limit).
-    if recently_denied(tool_name, Instant::now()) {
-        return deny_result(
-            "This was declined moments ago and was not sent. Do not retry; \
-             tell the person it was not sent, and that they can ask again if they change their mind.",
-        );
-    }
-
-    let description = describe(tool_name, &input);
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let request = ToolApprovalRequest::new(
-        request_id.clone(),
-        tool_name.to_string(),
-        input.clone(),
-        description.clone(),
-    )
-    .with_risk(RiskLevel::High)
-    .with_timeout(APPROVAL_TIMEOUT_SECS);
+/// Show the approval sheet for one request, wait, and return the answer.
+///
+/// `Some(true)` approved, `Some(false)` declined, `None` no answer before the
+/// request's timeout. This is the one sheet both CLI gates use: `approve`
+/// (the CLI's permission prompt) and the gate in front of Juno's own Mac app
+/// tools on the MCP server (`juno_mcp`), which the CLI never prompts for.
+pub async fn ask_person(app: &tauri::AppHandle, request: ToolApprovalRequest) -> Option<bool> {
+    let request_id = request.tool_id.clone();
+    let description = request.description.clone();
+    let timeout_secs = request.timeout_seconds;
 
     let app_state = app.state::<AppState>();
     app_state.add_pending_tool_approval(request.clone()).await;
@@ -439,7 +410,7 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
     }
 
     // Poll at 50 ms, the same cadence as the in-process approval wait.
-    let mut remaining = (APPROVAL_TIMEOUT_SECS * 1000 / 50) as i64;
+    let mut remaining = (timeout_secs * 1000 / 50) as i64;
     let mut decision: Option<bool> = None;
     while remaining > 0 {
         if let Some(answer) = app_state.get_tool_approval_status(&request_id).await {
@@ -450,6 +421,51 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
         remaining -= 1;
     }
     app_state.remove_tool_approval(&request_id).await;
+    decision
+}
+
+/// Handle a `tools/call` for `approve`: decide, maybe show the sheet, wait,
+/// and answer in the CLI's permission-prompt shape.
+pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value {
+    let tool_name = arguments
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let input = arguments.get("input").cloned().unwrap_or_else(|| json!({}));
+
+    if tool_name.is_empty() {
+        return deny_result("Malformed permission request: no tool_name.");
+    }
+
+    // Off means off: the old behaviour, everything runs.
+    if !is_enabled(app) {
+        return allow_result(&input);
+    }
+
+    if verdict_for(tool_name) == Verdict::Allow {
+        return allow_result(&input);
+    }
+
+    // A tool loop retrying a fresh denial gets the same answer without a
+    // new sheet (same idea as permission_gate's ask rate limit).
+    if recently_denied(tool_name, Instant::now()) {
+        return deny_result(
+            "This was declined moments ago and was not sent. Do not retry; \
+             tell the person it was not sent, and that they can ask again if they change their mind.",
+        );
+    }
+
+    let description = describe(tool_name, &input);
+    let request = ToolApprovalRequest::new(
+        uuid::Uuid::new_v4().to_string(),
+        tool_name.to_string(),
+        input.clone(),
+        description.clone(),
+    )
+    .with_risk(RiskLevel::High)
+    .with_timeout(APPROVAL_TIMEOUT_SECS);
+
+    let decision = ask_person(app, request).await;
 
     match decision {
         Some(true) => {
