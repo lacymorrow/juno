@@ -1,6 +1,7 @@
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
 use crate::utils::filter_transcription_text;
 use std::sync::Arc;
+use std::time::Instant;
 use whisper_rs::{FullParams, WhisperContext};
 
 /// STT engine backed by whisper-rs (ggml). Wraps a shared `Arc<WhisperContext>`
@@ -79,14 +80,32 @@ impl WhisperSession {
         ctx: &WhisperContext,
         params: FullParams,
         audio: &[f32],
+        final_pass: bool,
     ) -> Result<String, String> {
+        let started = Instant::now();
         let mut state = ctx
             .create_state()
             .map_err(|e| format!("Failed to create WhisperState: {:?}", e))?;
+        let state_ready = started.elapsed();
 
         state
             .full(params, audio)
             .map_err(|e| format!("Whisper transcription failed: {:?}", e))?;
+
+        // Splits a slow release into state setup and the decode itself, so it is
+        // clear which one to fix.
+        let line = format!(
+            "[Whisper] {} decode of {:.2}s: state {} ms, decode {} ms",
+            if final_pass { "final" } else { "partial" },
+            audio.len() as f32 / 16_000.0,
+            state_ready.as_millis(),
+            (started.elapsed() - state_ready).as_millis()
+        );
+        if final_pass {
+            tracing::info!("{line}");
+        } else {
+            tracing::debug!("{line}");
+        }
 
         let n = state.full_n_segments().unwrap_or(0);
         let mut text = String::new();
@@ -111,7 +130,7 @@ impl TranscriptionSession for WhisperSession {
         params.set_single_segment(true);
         params.set_no_context(true);
 
-        let text = Self::run_params(&self.ctx, params, audio)?;
+        let text = Self::run_params(&self.ctx, params, audio, false)?;
         if text.is_empty() {
             Ok(None)
         } else {
@@ -144,7 +163,7 @@ impl TranscriptionSession for WhisperSession {
             params.set_initial_prompt(context.trim());
         }
 
-        let text = Self::run_params(&self.ctx, params, audio)?;
+        let text = Self::run_params(&self.ctx, params, audio, true)?;
         Ok(filter_transcription_text(&text))
     }
 }
