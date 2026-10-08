@@ -40,7 +40,7 @@ const INTRO_UNBOUND: &str = "Hi, I'm Juno. I'm in your menu bar whenever you nee
 const BAR_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
 
 /// Render the launch line ahead, in the engine, voice and rate in force, so
-/// it plays the moment the bar appears. Called at launch, in parallel with
+/// it plays the moment the reveal starts. Called at launch, in parallel with
 /// startup, and after any change of engine, voice or rate.
 pub fn refresh_cache(app: &AppHandle) {
     crate::tts::prerender::refresh_in_background(app, HELLO);

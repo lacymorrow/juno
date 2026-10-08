@@ -10,9 +10,9 @@
 //! Now, every time the bar comes onto the screen at launch (and when setup
 //! ends, which is the first such time), a transparent click-through window
 //! opens around the spot where the bar is about to land. Smoke gathers there,
-//! the bar is shown underneath it while it is dense, the smoke clears, and the
-//! greeting lands on a pill the eye is already on: the reveal wakes it at
-//! [`GREETING_AT_MS`], and the line was rendered while Juno started, so it
+//! the bar is shown underneath it while it is dense, and the smoke clears. The
+//! greeting starts with the smoke, the first thing on screen: the reveal wakes
+//! it at [`GREETING_AT_MS`], and the line was rendered while Juno started, so it
 //! plays at once. The window is built for the occasion and destroyed
 //! when the sequence ends, so it costs nothing for the rest of the session.
 //!
@@ -53,12 +53,14 @@ pub const DURATION_MS: u64 = 2600;
 /// here, so the bar's own hard cut is hidden inside it.
 pub const BAR_AT_MS: u64 = 1000;
 
-/// When the greeting speaks, inside the sequence: the moment the bar appears.
-/// Tweakable; a compile-time check keeps it inside the sequence.
-pub const GREETING_AT_MS: u64 = BAR_AT_MS;
+/// When the greeting speaks, inside the sequence: the moment the smoke starts,
+/// the first thing on screen. Voice and picture arrive together, and the line
+/// is still going when the bar steps out of the smoke. Tweakable; a
+/// compile-time check keeps it inside the sequence.
+pub const GREETING_AT_MS: u64 = 0;
 
-// The beat falls inside the sequence, after the bar is shown.
-const _: () = assert!(GREETING_AT_MS >= BAR_AT_MS && GREETING_AT_MS < DURATION_MS);
+// The beat falls inside the sequence.
+const _: () = assert!(GREETING_AT_MS < DURATION_MS);
 
 /// A beat this recent still counts for a greeting that starts waiting after
 /// it: `on_launch` and the reveal race, and either may come first.
@@ -419,6 +421,12 @@ async fn reveal(app: &AppHandle) -> Result<(), String> {
         if let Err(e) = window.show() {
             warn!("[Intro] Could not show the intro window: {}", e);
         }
+        // The greeting lands on the reveal's beat, timed from the smoke, not
+        // on whenever something next notices the bar is visible.
+        tauri::async_runtime::spawn(async {
+            tokio::time::sleep(Duration::from_millis(GREETING_AT_MS)).await;
+            give_greeting_beat();
+        });
         tokio::time::sleep(Duration::from_millis(BAR_AT_MS)).await;
     } else {
         debug!("[Intro] The intro window never reported in; showing the bar plainly");
@@ -427,15 +435,7 @@ async fn reveal(app: &AppHandle) -> Result<(), String> {
     show_bar_plainly(app);
 
     if drawing {
-        // The greeting lands on the reveal's beat, not on whenever something
-        // next notices the bar is visible.
-        let to_beat = GREETING_AT_MS.saturating_sub(BAR_AT_MS);
-        tokio::time::sleep(Duration::from_millis(to_beat)).await;
-        give_greeting_beat();
-        tokio::time::sleep(Duration::from_millis(
-            DURATION_MS.saturating_sub(BAR_AT_MS + to_beat),
-        ))
-        .await;
+        tokio::time::sleep(Duration::from_millis(DURATION_MS.saturating_sub(BAR_AT_MS))).await;
     } else {
         give_greeting_beat();
     }
