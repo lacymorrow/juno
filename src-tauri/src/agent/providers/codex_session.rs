@@ -304,6 +304,23 @@ impl SessionFailure {
     }
 }
 
+/// What to do when `turn/start` did not come back with a turn id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StartFailurePlan {
+    /// The server said no, or is already gone: no turn is running.
+    FallBack,
+    /// No answer: the turn may be running anyway. Kill the process so it
+    /// cannot finish (or drive the desktop) behind the fallback's back.
+    KillThenFallBack,
+}
+
+pub(crate) fn plan_for_start_failure(failure: &SessionFailure) -> StartFailurePlan {
+    match failure {
+        SessionFailure::Timeout => StartFailurePlan::KillThenFallBack,
+        _ => StartFailurePlan::FallBack,
+    }
+}
+
 /// Whether the persistent path is worth trying. The fallback decision.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Health {
@@ -392,6 +409,12 @@ impl AppServer {
         let (tx, rx) = oneshot::channel();
         if let Ok(mut pending) = self.pending.lock() {
             pending.insert(id, tx);
+        }
+        // The reader may have died, and cleared `pending`, between the check
+        // above and the insert. Then nothing would ever answer.
+        if self.is_dead() {
+            self.forget(id);
+            return Err(SessionFailure::Died);
         }
         if self
             .to_child
@@ -568,6 +591,8 @@ async fn start_thread(server: &AppServer, config: &ThreadConfig) -> Result<Strin
 // ---------------------------------------------------------------------------
 
 struct Spare {
+    /// The process the thread lives in. A thread id means nothing to any other.
+    server: Arc<AppServer>,
     thread_id: String,
     instructions: String,
 }
@@ -585,6 +610,15 @@ struct Registry {
 }
 
 static REGISTRY: OnceLock<std::sync::Mutex<Registry>> = OnceLock::new();
+
+/// The newest turn asked for. A turn that is no longer the newest stops: it
+/// does not start if it has not, and interrupts itself if it has. This covers
+/// the gap before `active_turn` is known, which `turn/interrupt` cannot reach.
+static LATEST_TURN: AtomicU64 = AtomicU64::new(0);
+
+fn superseded(ticket: u64) -> bool {
+    LATEST_TURN.load(Ordering::SeqCst) != ticket
+}
 
 fn registry() -> std::sync::MutexGuard<'static, Registry> {
     REGISTRY
@@ -694,14 +728,19 @@ async fn acquire_thread(
     }
 
     let (thread_id, origin) = match spare {
-        Some(spare) if spare.instructions == config.instructions => {
+        Some(spare)
+            if spare.instructions == config.instructions
+                && std::ptr::eq(Arc::as_ptr(&spare.server), server) =>
+        {
             info!("[CodexSession] Adopted warm thread");
             (spare.thread_id, Origin::Spare)
         }
         other => {
             if let Some(stale) = other {
-                debug!("[CodexSession] Warm thread was born with other instructions; dropping it");
-                server
+                debug!("[CodexSession] Warm thread does not fit this turn; dropping it");
+                // Told to the process that owns it, which may not be `server`.
+                stale
+                    .server
                     .send_and_forget("thread/unsubscribe", json!({ "threadId": stale.thread_id }));
             }
             (start_thread(server, config).await?, Origin::Cold)
@@ -765,18 +804,34 @@ async fn fill_spare(launch: Launch, config: ThreadConfig) {
 
     match result {
         Ok((server, thread_id)) => {
-            let replaced = {
+            let (stored, replaced) = {
                 let mut r = registry();
                 r.spare_pending = false;
-                r.spare.replace(Spare {
-                    thread_id,
-                    instructions: config.instructions,
-                })
+                // The process may have been replaced while the thread started.
+                let current = r
+                    .server
+                    .as_ref()
+                    .is_some_and(|live| Arc::ptr_eq(live, &server));
+                if current {
+                    let replaced = r.spare.replace(Spare {
+                        server: Arc::clone(&server),
+                        thread_id: thread_id.clone(),
+                        instructions: config.instructions,
+                    });
+                    (true, replaced)
+                } else {
+                    (false, None)
+                }
             };
             if let Some(old) = replaced {
-                server.send_and_forget("thread/unsubscribe", json!({ "threadId": old.thread_id }));
+                old.server
+                    .send_and_forget("thread/unsubscribe", json!({ "threadId": old.thread_id }));
             }
-            debug!("[CodexSession] Warm thread ready");
+            if stored {
+                debug!("[CodexSession] Warm thread ready");
+            } else {
+                server.send_and_forget("thread/unsubscribe", json!({ "threadId": thread_id }));
+            }
         }
         Err(failure) => {
             registry().spare_pending = false;
@@ -905,6 +960,7 @@ pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
     if !registry().health.usable() {
         return Ok(TurnOutcome::Unavailable);
     }
+    let ticket = LATEST_TURN.fetch_add(1, Ordering::SeqCst) + 1;
     interrupt_active_turn();
 
     let server = match get_server(&req.launch).await {
@@ -925,6 +981,11 @@ pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
     remember_instructions(req.app_handle, &req.thread.instructions);
 
     let mut events = server.events.lock().await;
+    if superseded(ticket) {
+        // A newer turn came in while this one waited. It never started, and
+        // must not fall back either: the person has moved on.
+        return Err(AgentError::Terminated);
+    }
     // Whatever arrived while no turn was listening belongs to nobody.
     while events.try_recv().is_ok() {}
 
@@ -954,10 +1015,21 @@ pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
         }
         Err(failure) => {
             record_failure(&failure);
+            if plan_for_start_failure(&failure) == StartFailurePlan::KillThenFallBack {
+                server.kill();
+            }
             return Ok(TurnOutcome::Unavailable);
         }
     };
     registry().active_turn = Some((thread_id.clone(), turn_id.clone()));
+    if superseded(ticket) {
+        // A newer turn arrived while this one was starting, before it could
+        // be found to interrupt.
+        server.send_and_forget(
+            "turn/interrupt",
+            json!({ "threadId": thread_id, "turnId": turn_id }),
+        );
+    }
 
     let outcome = stream_turn(&server, &mut events, &req, &thread_id, &turn_id).await;
     drop(events);
@@ -1043,7 +1115,14 @@ async fn stream_turn(
         };
 
         match step {
-            Step::Cancel => continue, // the check at the top acts on it
+            Step::Cancel => {
+                // Acted on here, not re-read at the top: a quick true-then-false
+                // would read as "not cancelled" and the stop would be lost.
+                // The flag only moves while a run is being cancelled.
+                info!("[CodexSession] Cancelled; interrupting the turn");
+                interrupt(server);
+                interrupted_at = Some(tokio::time::Instant::now());
+            }
             Step::CancelClosed => {
                 // The sender is gone; it will never cancel again.
                 cancel_rx = never_cancels.clone();
@@ -1069,10 +1148,10 @@ async fn stream_turn(
                     surface.close("Cancelled".to_string());
                     return Err(AgentError::Terminated);
                 }
-                if !surface.opened {
-                    record_failure(&SessionFailure::Died);
-                    return Ok(TurnOutcome::Unavailable);
-                }
+                // The turn had started, so it may have been billed or moved
+                // the pointer (tool calls send no text). Running it again
+                // through `codex exec` could do both twice. Never fall back.
+                record_failure(&SessionFailure::Died);
                 surface.close(text.clone());
                 return Err(AgentError::LlmError(
                     "Codex stopped before finishing its answer".to_string(),
@@ -1363,6 +1442,32 @@ mod tests {
             }),
             SessionFailure::Rpc("busy (-32000)".to_string())
         );
+    }
+
+    #[test]
+    fn an_unanswered_turn_start_kills_the_process_before_falling_back() {
+        // A timeout may mean the turn is running; a fallback beside it would
+        // answer twice. An explicit refusal or a dead process means it is not.
+        assert_eq!(
+            plan_for_start_failure(&SessionFailure::Timeout),
+            StartFailurePlan::KillThenFallBack
+        );
+        for failure in [
+            SessionFailure::Died,
+            SessionFailure::Rpc("busy (-32000)".to_string()),
+            SessionFailure::Incompatible("unknown method (-32601)".to_string()),
+        ] {
+            assert_eq!(plan_for_start_failure(&failure), StartFailurePlan::FallBack);
+        }
+    }
+
+    #[test]
+    fn only_the_newest_turn_is_not_superseded() {
+        let mine = LATEST_TURN.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(!superseded(mine));
+        let newer = LATEST_TURN.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(superseded(mine));
+        assert!(!superseded(newer));
     }
 
     #[test]
