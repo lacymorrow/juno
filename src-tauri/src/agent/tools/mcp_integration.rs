@@ -98,22 +98,6 @@ fn parse_sse_response(body: &str, request_id: Option<u64>) -> Result<Value, Stri
     })
 }
 
-/// Undo [`MCPServerConnection::parse_tool_definition`]'s name prefix before
-/// the name goes back over the wire. The un-marked `{server}_` form is still
-/// accepted for calls routed from definitions cached before the `mcp_`
-/// marker existed.
-fn strip_registration_prefix<'a>(tool_name: &'a str, server_name: &str) -> &'a str {
-    let marked = format!(
-        "{}{}_",
-        crate::agent::tools::risk_classifier::MCP_TOOL_NAME_PREFIX,
-        server_name
-    );
-    tool_name
-        .strip_prefix(&marked)
-        .or_else(|| tool_name.strip_prefix(&format!("{server_name}_")))
-        .unwrap_or(tool_name)
-}
-
 /// Configuration for an external MCP server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MCPServerConfig {
@@ -725,16 +709,8 @@ impl MCPServerConnection {
             .unwrap_or(&json!({"type": "object", "properties": {}}))
             .clone();
 
-        // Prefix with `mcp_{server}_`: the server part avoids conflicts, and
-        // the `mcp_` marker is what lets the risk classifier see that this
-        // name came off the network — external tools must never fall through
-        // to RiskLevel::Low (risk_classifier::MCP_TOOL_NAME_PREFIX, LAC-4210).
-        let prefixed_name = format!(
-            "{}{}_{}",
-            crate::agent::tools::risk_classifier::MCP_TOOL_NAME_PREFIX,
-            self.config.name,
-            name
-        );
+        // Prefix tool name with server name to avoid conflicts
+        let prefixed_name = format!("{}_{}", self.config.name, name);
 
         Ok(ToolDefinition {
             name: prefixed_name,
@@ -752,9 +728,10 @@ impl MCPServerConnection {
         input: Value,
         call_id: String,
     ) -> Result<ToolResult, String> {
-        // Remove the registration prefix from the tool name (and the older
-        // un-marked prefix, for calls routed from stale definitions).
-        let original_tool_name = strip_registration_prefix(tool_name, &self.config.name);
+        // Remove the server prefix from the tool name
+        let original_tool_name = tool_name
+            .strip_prefix(&format!("{}_", self.config.name))
+            .unwrap_or(tool_name);
 
         let request = json!({
             "jsonrpc": "2.0",
@@ -1632,7 +1609,10 @@ impl MCPServerConnection {
         // Create batch request items
         let mut batch_items = Vec::new();
         for tool_call in &tool_calls {
-            let original_tool_name = strip_registration_prefix(&tool_call.name, &self.config.name);
+            let original_tool_name = tool_call
+                .name
+                .strip_prefix(&format!("{}_", self.config.name))
+                .unwrap_or(&tool_call.name);
 
             batch_items.push(json!({
                 "jsonrpc": "2.0",
@@ -1900,14 +1880,11 @@ mod tests {
         )
     }
 
-    /// The contract with the risk classifier: every tool an MCP server
-    /// registers carries the external marker, so nothing a server names can
-    /// fall through `classify_risk` to Low. If the prefix format changes,
-    /// this fails before the gate silently stops seeing connector tools.
+    /// The registered name is the server prefix plus the server's own name,
+    /// and execution strips exactly that prefix on the way back out, so the
+    /// name Composio sees is the name it published.
     #[test]
-    fn every_registered_mcp_tool_carries_the_external_marker() {
-        use crate::agent::tools::risk_classifier;
-
+    fn tool_names_round_trip_through_the_registration_prefix() {
         let connection = MCPServerConnection::new(http_config());
         let tool_def = connection
             .parse_tool_definition(&json!({
@@ -1917,23 +1894,10 @@ mod tests {
             }))
             .expect("tool definition parses");
 
-        assert_eq!(tool_def.name, "mcp_composio_COMPOSIO_MULTI_EXECUTE_TOOL");
-        assert!(risk_classifier::is_external_mcp_tool(&tool_def.name));
-        assert_ne!(
-            risk_classifier::classify_risk(&tool_def.name, &json!({})),
-            crate::state::RiskLevel::Low,
-            "a connector tool defaulted to Low, which is the LAC-4210 hole"
-        );
-
-        // And the name is undone exactly on the way back out.
+        assert_eq!(tool_def.name, "composio_COMPOSIO_MULTI_EXECUTE_TOOL");
         assert_eq!(
-            strip_registration_prefix(&tool_def.name, "composio"),
-            "COMPOSIO_MULTI_EXECUTE_TOOL"
-        );
-        // Names routed from definitions cached before the marker existed.
-        assert_eq!(
-            strip_registration_prefix("composio_COMPOSIO_SEARCH_TOOLS", "composio"),
-            "COMPOSIO_SEARCH_TOOLS"
+            tool_def.name.strip_prefix("composio_"),
+            Some("COMPOSIO_MULTI_EXECUTE_TOOL")
         );
     }
 

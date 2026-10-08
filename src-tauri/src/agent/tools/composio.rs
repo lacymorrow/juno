@@ -2,12 +2,17 @@
 //!
 //! Composio Connect is attached as a single remote MCP server
 //! (`connect.composio.dev/mcp`, streamable HTTP, MCP OAuth). Everything else
-//! in Juno stays generic: the transport is `mcp_integration`, the OAuth
-//! client is `mcp_oauth`, and the approval gate classifies by slug verb. What
-//! lives here is only what is Composio-shaped — the server config, the two
-//! blocked remote-shell tools, reading a "this app is not connected" signal
-//! out of a tool result, and driving the per-app connect flow against the
-//! `COMPOSIO_MANAGE_CONNECTIONS` meta-tool.
+//! in Juno stays generic: the transport is `mcp_integration` and the OAuth
+//! client is `mcp_oauth`. What lives here is only what is Composio-shaped —
+//! the server config, the two blocked remote-shell tools, reading a "this app
+//! is not connected" signal out of a tool result, and driving the per-app
+//! connect flow against the `COMPOSIO_MANAGE_CONNECTIONS` meta-tool.
+//!
+//! The approval gate is deliberately NOT here, and not anywhere, for Phase 1
+//! (Lacy 2026-10-08): Composio tools fall through to the risk classifier's
+//! existing Low default, which means a send can run unasked in the default
+//! mode. Known and accepted, contained by the Advanced beta toggle; the gate
+//! is a follow-up before any public release.
 //!
 //! The agent never runs OAuth and never drives a connect flow. On missing
 //! auth it gets one sentence telling it a Connect button is on screen; the
@@ -17,10 +22,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::mcp_integration::MCPServerConfig;
-use super::risk_classifier;
 
 /// The server name, which also fixes the registered tool prefix
-/// (`mcp_composio_*`).
+/// (`composio_*`, from `mcp_integration::parse_tool_definition`).
 pub const SERVER_NAME: &str = "composio";
 /// The one endpoint. Verified streamable HTTP with MCP OAuth on 2026-10-08.
 pub const MCP_URL: &str = "https://connect.composio.dev/mcp";
@@ -31,12 +35,7 @@ pub const BLOCKED_TOOLS: &[&str] = &["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMO
 
 /// The registered (prefixed) name of a Composio meta-tool.
 pub fn registered_tool_name(tool: &str) -> String {
-    format!(
-        "{}{}_{}",
-        risk_classifier::MCP_TOOL_NAME_PREFIX,
-        SERVER_NAME,
-        tool
-    )
+    format!("{SERVER_NAME}_{tool}")
 }
 
 /// The MCP server config the Advanced toggle installs. `approved` is true
@@ -75,10 +74,79 @@ pub fn toolkit_from_slug(slug: &str) -> Option<String> {
     slug.split('_').next().map(|t| t.to_lowercase())
 }
 
-/// The display name for a lowercase toolkit slug.
+/// The display name for a lowercase toolkit slug, in the words a person uses
+/// for the app. An unknown toolkit still gets a readable word (title-cased)
+/// rather than its slug.
 pub fn toolkit_display(toolkit_slug: &str) -> String {
-    risk_classifier::toolkit_display_name(&toolkit_slug.to_uppercase())
-        .unwrap_or_else(|| toolkit_slug.to_string())
+    match toolkit_slug {
+        "gmail" => "Gmail".to_string(),
+        "googlecalendar" => "Google Calendar".to_string(),
+        "googledrive" => "Google Drive".to_string(),
+        "googledocs" => "Google Docs".to_string(),
+        "googlesheets" => "Google Sheets".to_string(),
+        "slack" => "Slack".to_string(),
+        "notion" => "Notion".to_string(),
+        "linear" => "Linear".to_string(),
+        "github" => "GitHub".to_string(),
+        "stripe" => "Stripe".to_string(),
+        other => {
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        }
+    }
+}
+
+/// Whether a string is a Composio action slug: `TOOLKIT_VERB_OBJECT`, all
+/// uppercase, at least two `_`-separated tokens (`GMAIL_SEND_EMAIL`).
+fn is_action_slug(candidate: &str) -> bool {
+    let tokens: Vec<&str> = candidate.split('_').collect();
+    tokens.len() >= 2
+        && tokens.iter().all(|token| {
+            !token.is_empty()
+                && token
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        })
+        && candidate.chars().any(|c| c.is_ascii_uppercase())
+}
+
+/// Every action slug in a meta-tool call's arguments. Schema-free walk over
+/// slug-valued fields, because the meta-tool's argument shape is Composio's
+/// to change: today it is `{"tools": [{"tool_slug": ...}]}`, and a drift
+/// should degrade to "no slug found", never to a wrong app on the card.
+fn attempted_slugs(input: &Value) -> Vec<String> {
+    const SLUG_KEYS: &[&str] = &["tool_slug", "slug", "tool", "tool_name", "action", "name"];
+
+    fn walk(value: &Value, out: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                for key in SLUG_KEYS {
+                    if let Some(Value::String(candidate)) = map.get(*key) {
+                        if is_action_slug(candidate) {
+                            out.push(candidate.clone());
+                            break;
+                        }
+                    }
+                }
+                for child in map.values() {
+                    walk(child, out);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    walk(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut slugs = Vec::new();
+    walk(input, &mut slugs);
+    slugs
 }
 
 /// Whether a Composio tool result says an app connection is missing or
@@ -108,9 +176,9 @@ pub fn connection_needed(tool_input: &Value, output: &Value) -> Option<ConnectRe
     }
 
     // The toolkit comes from what was attempted, not from the error prose.
-    let toolkit_slug = risk_classifier::multi_execute_inner_actions(tool_input)
+    let toolkit_slug = attempted_slugs(tool_input)
         .into_iter()
-        .find_map(|(slug, _)| toolkit_from_slug(&slug).filter(|t| t != SERVER_NAME))?;
+        .find_map(|slug| toolkit_from_slug(&slug).filter(|t| t != SERVER_NAME))?;
     let app_name = toolkit_display(&toolkit_slug);
     Some(ConnectRequired {
         toolkit_slug,
