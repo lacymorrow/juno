@@ -41,17 +41,11 @@ pub fn apply_macos_setup(app_handle: &AppHandle) {
     {
         info!("Applying macOS specific setup...");
 
-        // Setup floating bar window
+        // Setup floating bar window. It is the only declared window that
+        // exists this early: the rest are built once the bar is on screen
+        // (`startup_windows`), and each is set up by
+        // `configure_deferred_window` as it is built.
         setup_floating_bar_window(app_handle);
-
-        // Setup floating panel window
-        setup_floating_panel_window(app_handle);
-
-        // Setup main window
-        setup_main_window(app_handle);
-
-        // Setup desktop cursor overlay (pre-created in config as visible:false)
-        setup_desktop_cursor_overlay_window(app_handle);
 
         // Read the keyboard layout while we are still on the main thread.
         // Paste insertion runs on a blocking worker and Text Input Services
@@ -926,6 +920,29 @@ pub mod mouse_tracking {
         }
 
         Ok(())
+    }
+}
+
+/// The macOS setup for a window built after launch by `startup_windows`:
+/// what `apply_macos_setup` used to do for it when every declared window
+/// existed before setup ran. AppKit, so it hops to the main thread.
+#[cfg(target_os = "macos")]
+pub fn configure_deferred_window(app_handle: &AppHandle, label: &str) {
+    if label == crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL {
+        // Already dispatches to the main thread itself.
+        setup_desktop_cursor_overlay_window(app_handle);
+        return;
+    }
+    let app = app_handle.clone();
+    let owned = label.to_string();
+    if let Err(e) = app_handle.run_on_main_thread(move || {
+        if owned == constants::window_labels::FLOATING_PANEL {
+            setup_floating_panel_window(&app);
+        } else if owned == constants::window_labels::MAIN {
+            setup_main_window(&app);
+        }
+    }) {
+        warn!("Could not set up the {} window: {}", label, e);
     }
 }
 
