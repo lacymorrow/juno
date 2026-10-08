@@ -33,7 +33,7 @@ computer-use-ai-sdk = { path = "./mcp-server-os-level" }
 # Native clipboard for the chat Copy button (already in the graph via the SDK)
 arboard = "3.4.1"
 dotenvy = "0.15"
-reqwest = { version = "0.12.5", features = ["json", "stream"] }
+reqwest = { version = "0.12.5", features = ["json", "stream", "multipart"] }
 tokio = { version = "1", features = ["full", "sync"] }
 tokio-stream = { version = "0.1", features = ["io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }

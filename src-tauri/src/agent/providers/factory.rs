@@ -702,6 +702,10 @@ impl BrainFactory {
         crate::agent::tools::schedule_tools::register_schedule_tools(provider, app_handle.clone())
             .await;
 
+        // Register image generation + editing tools (LAC-4206). Both declare
+        // the `image_edits` entitlement; LAC-4134 wires the hook.
+        crate::agent::tools::image_tools::register_image_tools(provider, app_handle.clone()).await;
+
         // Register self-awareness and introspection tools (per-provider instance, development mode only)
         crate::agent::tools::register_self_awareness_tools(provider).await;
 

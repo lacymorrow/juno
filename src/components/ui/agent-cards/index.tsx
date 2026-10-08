@@ -7,6 +7,8 @@
  * All components are registered in availableComponents in jsx-message-renderer.tsx.
  */
 
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { COMMANDS } from "@/lib/constants.generated";
 import { cn } from "@/lib/utils";
 import {
   Cloud,
@@ -707,6 +709,63 @@ export function TaskSummaryCard({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// ImageCard — a saved PNG on disk, loaded through the asset
+// protocol so no base64 crosses the IPC boundary. One primary
+// action: Open in Preview. LAC-4204 extends this with Save-to-
+// Finder reveal and Copy-image.
+// ============================================================
+
+interface ImageCardProps {
+  path?: string;
+  caption?: string;
+  before?: string;
+}
+
+function openInPreview(path: string) {
+  // The Rust side resolves `~/` and routes file:// through the system opener.
+  invoke(COMMANDS.DESKTOP_OPEN_URL, { url: `file://${path.replace(/^~\//, "")}` });
+}
+
+export function ImageCard({ path, caption, before }: ImageCardProps) {
+  if (!path) {
+    return null;
+  }
+  const src = convertFileSrc(path);
+  const beforeSrc = before ? convertFileSrc(before) : undefined;
+  return (
+    <div
+      className={cn(
+        "rounded-xl border bg-card overflow-hidden juno-animate-in",
+        "shadow-sm hover:shadow-md transition-shadow",
+      )}
+    >
+      {beforeSrc ? (
+        <div className="grid grid-cols-2 gap-px bg-border">
+          <img src={beforeSrc} alt="before" className="w-full h-auto block" />
+          <img src={src} alt={caption || "image"} className="w-full h-auto block" />
+        </div>
+      ) : (
+        <img src={src} alt={caption || "image"} className="w-full h-auto block" />
+      )}
+      <div className="flex items-center justify-between gap-3 p-3">
+        <div className="min-w-0 text-sm truncate">{caption || "Image"}</div>
+        <button
+          type="button"
+          onClick={() => openInPreview(path)}
+          className={cn(
+            "shrink-0 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1",
+            "text-xs font-medium hover:bg-muted/60 transition-colors",
+          )}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Open
+        </button>
+      </div>
     </div>
   );
 }

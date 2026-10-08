@@ -119,6 +119,10 @@ pub mod tool_names {
     pub const LIST_SCHEDULED_AUTOMATIONS: &str = "list_scheduled_automations";
     pub const DELETE_SCHEDULED_AUTOMATION: &str = "delete_scheduled_automation";
 
+    // Image tools (LAC-4206). The pair LAC-4204 extends.
+    pub const GENERATE_IMAGE: &str = "generate_image";
+    pub const EDIT_IMAGE: &str = "edit_image";
+
     // Timer tools
     pub const TIMER_CREATE: &str = "timer_create";
     pub const TIMER_START: &str = "timer_start";

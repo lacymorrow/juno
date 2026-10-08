@@ -35,6 +35,7 @@ pub mod display_info_tools; // Screen resolution and display information tools
 pub mod enhanced_coding_tools;
 pub mod enhanced_visual_reasoning;
 pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
+pub mod image_tools; // Image generate + edit tools (LAC-4206; LAC-4204 extends)
 pub mod mcp_integration;
 pub mod path_security; // Shared canonicalization + workspace-boundary enforcement for file tools
 pub mod permission_policy; // The one decision: does this action need asking, and what do we call it
@@ -67,6 +68,7 @@ pub use safari_tools::{get_safari_tool_definitions, get_safari_tools, SafariTool
 pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration
                                                              // pub use self_improvement::*; // Export self-improvement types and functions - TODO: Fix module not found
 
+pub use image_tools::register_image_tools; // Export image tool registration (LAC-4206)
 pub use schedule_tools::register_schedule_tools; // Export scheduled automation tool registration
 pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Export timer functions and types
 pub use tool_config::{ToolCategory, ToolConfig, ToolConfigManager}; // Export tool configuration types
