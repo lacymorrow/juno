@@ -684,11 +684,11 @@ export function useBackendEvents({
 	// (typed, voice, bar, rendered component, cloud, scheduled). This is the
 	// only place a user message enters the conversation and the only place
 	// processing switches on, so every source looks identical to the user.
-	useEventListener<{ content: string; timestamp: number }>(
+	useEventListener<{ content: string; timestamp: number; images?: string[] | null }>(
 		EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED,
 		(payload) => {
 			console.log("User message submitted event received:", payload);
-			const { content, timestamp } = payload;
+			const { content, timestamp, images } = payload;
 
 			setConversationWithPruning((prev) => [
 				...prev,
@@ -696,6 +696,7 @@ export function useBackendEvents({
 					role: "user",
 					content,
 					timestamp,
+					...(images && images.length > 0 ? { images } : {}),
 				}
 			]);
 			setIsProcessing(true);

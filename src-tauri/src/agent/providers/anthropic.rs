@@ -194,7 +194,7 @@ struct ApiContentBlock {
 ///
 /// Returns `None` for anything that is not a base64 data URL, so a malformed
 /// paste is dropped rather than sent as a block the API will reject.
-fn parse_data_url(url: &str) -> Option<(String, String)> {
+pub(super) fn parse_data_url(url: &str) -> Option<(String, String)> {
     let rest = url.strip_prefix("data:")?;
     let (meta, data) = rest.split_once(',')?;
     let media_type = meta.strip_suffix(";base64")?;
@@ -202,6 +202,28 @@ fn parse_data_url(url: &str) -> Option<(String, String)> {
         return None;
     }
     Some((media_type.to_string(), data.to_string()))
+}
+
+/// Image content blocks for a user turn's attachments.
+///
+/// Anything that is not a base64 image data URL is dropped (with a log line)
+/// rather than sent as a block the API would reject.
+fn user_image_blocks(images: Option<&Vec<String>>) -> Vec<ApiContentBlock> {
+    let mut blocks = Vec::new();
+    for url in images.into_iter().flatten() {
+        let Some((media_type, data)) = parse_data_url(url) else {
+            tracing::warn!("Dropping an attachment that is not a base64 image data URL");
+            continue;
+        };
+        let mut block = ApiContentBlock::empty("image");
+        block.source = Some(ApiImageSource {
+            source_type: "base64".to_string(),
+            media_type,
+            data,
+        });
+        blocks.push(block);
+    }
+    blocks
 }
 
 impl ApiContentBlock {
@@ -1573,23 +1595,7 @@ impl AnthropicBrain {
         // Images first: a turn reads as "here is a picture, now do this", and
         // the API pays attention to order.
         if message.role == Role::User {
-            if let Some(images) = &message.images {
-                for url in images {
-                    let Some((media_type, data)) = parse_data_url(url) else {
-                        tracing::warn!(
-                            "Dropping an attachment that is not a base64 image data URL"
-                        );
-                        continue;
-                    };
-                    let mut block = ApiContentBlock::empty("image");
-                    block.source = Some(ApiImageSource {
-                        source_type: "base64".to_string(),
-                        media_type,
-                        data,
-                    });
-                    content_blocks.push(block);
-                }
-            }
+            content_blocks.extend(user_image_blocks(message.images.as_ref()));
         }
 
         // Add text content if present
@@ -2718,6 +2724,25 @@ mod tests {
     use super::*;
 
     // --- Fixtures --------------------------------------------------------------------------
+
+    #[test]
+    fn user_attachment_becomes_an_image_block() {
+        let images = vec!["data:image/png;base64,aGk=".to_string()];
+        let blocks = user_image_blocks(Some(&images));
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].block_type, "image");
+        let source = blocks[0].source.as_ref().expect("image block has a source");
+        assert_eq!(source.source_type, "base64");
+        assert_eq!(source.media_type, "image/png");
+        assert_eq!(source.data, "aGk=");
+    }
+
+    #[test]
+    fn non_image_attachment_is_dropped_not_sent() {
+        let images = vec!["not a data url".to_string()];
+        assert!(user_image_blocks(Some(&images)).is_empty());
+        assert!(user_image_blocks(None).is_empty());
+    }
 
     fn image_block(seed: usize) -> ApiToolResultBlock {
         ApiToolResultBlock {

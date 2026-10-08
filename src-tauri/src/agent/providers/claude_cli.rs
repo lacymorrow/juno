@@ -558,6 +558,69 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
     }
 }
 
+/// Write each attached image to a file under `~/Library/Caches/Juno/attachments`,
+/// so a one-shot `claude -p` spawn can read it from disk. An attachment that is
+/// not a base64 image data URL, or that fails to decode or write, is skipped —
+/// the turn still runs on whatever text and images remain.
+fn save_attachment_files(images: &[String]) -> Vec<PathBuf> {
+    use base64::Engine as _;
+
+    let Some(dir) = dirs::cache_dir().map(|d| d.join("Juno").join("attachments")) else {
+        return Vec::new();
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        warn!("Could not create the attachments cache dir: {e}");
+        return Vec::new();
+    }
+
+    let mut paths = Vec::new();
+    for url in images {
+        let Some((media_type, data)) = super::anthropic::parse_data_url(url) else {
+            warn!("Dropping an attachment that is not a base64 image data URL");
+            continue;
+        };
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) else {
+            warn!("Dropping an attachment whose base64 payload did not decode");
+            continue;
+        };
+        // "image/png" → "png"; anything exotic falls back to a safe suffix.
+        let ext: String = media_type
+            .strip_prefix("image/")
+            .unwrap_or("png")
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        let ext = if ext.is_empty() { "png".to_string() } else { ext };
+        let path = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+        match std::fs::write(&path, bytes) {
+            Ok(()) => paths.push(path),
+            Err(e) => warn!("Could not write an attachment to {}: {e}", path.display()),
+        }
+    }
+    paths
+}
+
+/// Extend a one-shot query to point at the attachment files on disk.
+///
+/// The note is addressed to the model, never shown to the person, so a turn
+/// whose attachments all failed to save degrades to the bare query.
+fn query_with_image_paths(query: &str, paths: &[PathBuf]) -> String {
+    if paths.is_empty() {
+        return query.to_string();
+    }
+    let list = paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{query}\n\n[The person attached {count} image{plural} to this message. \
+Read these files to see them:\n{list}]",
+        count = paths.len(),
+        plural = if paths.len() == 1 { "" } else { "s" },
+    )
+}
+
 /// Claude CLI-based AgentBrain implementation.
 ///
 /// Spawns `claude -p --output-format=stream-json` as a subprocess for each query,
@@ -747,6 +810,19 @@ impl ClaudeCliBrain {
             .unwrap_or_else(|| "Hello".to_string())
     }
 
+    /// Images attached to the latest user message, as base64 data URLs.
+    ///
+    /// Only the latest turn's attachments travel: the CLI keeps earlier
+    /// turns, pictures included, in its own session transcript.
+    fn extract_images(messages: &[Message]) -> Vec<String> {
+        messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::User)
+            .and_then(|m| m.images.clone())
+            .unwrap_or_default()
+    }
+
     /// Run the Claude CLI subprocess and stream output to the Tauri frontend.
     ///
     /// Validates auth, spawns the subprocess with a timeout, drains stderr
@@ -755,6 +831,7 @@ impl ClaudeCliBrain {
     async fn run_streaming(
         &self,
         query: &str,
+        images: &[String],
         app_handle: Option<tauri::AppHandle>,
         message_id: Option<String>,
         cancel_rx: Option<crate::state::CancelReceiver>,
@@ -794,6 +871,7 @@ impl ClaudeCliBrain {
                     session_id: &session_id,
                     session_is_new,
                     query,
+                    images,
                     app_handle: handle,
                     message_id: message_id.clone(),
                     cancel_rx: cancel_rx.clone(),
@@ -820,6 +898,20 @@ impl ClaudeCliBrain {
                 }
             }
         }
+
+        // The one-shot spawn passes the query as a single argv string and
+        // gives the child no stdin, so an attachment cannot ride inline the
+        // way the persistent session's stream-json frame carries it. Instead
+        // each image is written under Juno's cache dir and the prompt says
+        // where to look — the CLI reads image files natively. When nothing
+        // could be saved the person's text still goes through unchanged.
+        let query_with_images;
+        let query = if images.is_empty() {
+            query
+        } else {
+            query_with_images = query_with_image_paths(query, &save_attachment_files(images));
+            query_with_images.as_str()
+        };
 
         let msg_id = message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
@@ -1667,7 +1759,8 @@ impl AgentBrain for ClaudeCliBrain {
         _available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
         let query = Self::extract_query(messages);
-        let result = self.run_streaming(&query, None, None, None).await?;
+        let images = Self::extract_images(messages);
+        let result = self.run_streaming(&query, &images, None, None, None).await?;
         Ok(AgentAction::Finish(result))
     }
 
@@ -1684,8 +1777,9 @@ impl AgentBrain for ClaudeCliBrain {
         cancel_rx: Option<crate::state::CancelReceiver>,
     ) -> Result<AgentAction, AgentError> {
         let query = Self::extract_query(messages);
+        let images = Self::extract_images(messages);
         let result = self
-            .run_streaming(&query, app_handle, message_id, cancel_rx)
+            .run_streaming(&query, &images, app_handle, message_id, cancel_rx)
             .await?;
         Ok(AgentAction::Finish(result))
     }
@@ -2317,6 +2411,35 @@ mod tests {
             images: None,
         }];
         assert_eq!(ClaudeCliBrain::extract_query(&messages), "Hello");
+    }
+
+    #[test]
+    fn extract_images_takes_the_latest_user_turn() {
+        let messages = vec![
+            Message::from_user("look", Some(vec!["data:image/png;base64,YQ==".to_string()])),
+            Message::new(Role::Assistant, "ok"),
+            Message::from_user(
+                "and this",
+                Some(vec!["data:image/jpeg;base64,Yg==".to_string()]),
+            ),
+        ];
+        assert_eq!(
+            ClaudeCliBrain::extract_images(&messages),
+            vec!["data:image/jpeg;base64,Yg==".to_string()]
+        );
+        assert!(ClaudeCliBrain::extract_images(&[Message::new(Role::Assistant, "hi")]).is_empty());
+    }
+
+    #[test]
+    fn one_shot_query_names_the_saved_image_files() {
+        let paths = vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.jpg")];
+        let query = query_with_image_paths("what are these?", &paths);
+        assert!(query.starts_with("what are these?"));
+        assert!(query.contains("attached 2 images"));
+        assert!(query.contains("/tmp/a.png"));
+        assert!(query.contains("/tmp/b.jpg"));
+        // No attachments saved: the person's text goes through untouched.
+        assert_eq!(query_with_image_paths("hello", &[]), "hello");
     }
 
     #[test]

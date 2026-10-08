@@ -203,6 +203,10 @@ pub struct TurnRequest<'a> {
     /// ("Session ID <id> is already in use"), verified against CLI 2.1.278.
     pub session_is_new: bool,
     pub query: &'a str,
+    /// Images the person attached to this turn, as base64 data URLs. They ride
+    /// the stream-json user frame as image content blocks, the same shape the
+    /// Anthropic API path sends.
+    pub images: &'a [String],
     pub app_handle: &'a tauri::AppHandle,
     pub message_id: Option<String>,
     pub cancel_rx: Option<crate::state::CancelReceiver>,
@@ -1041,6 +1045,26 @@ pub async fn run_turn(req: TurnRequest<'_>) -> TurnResult {
     }
 }
 
+/// Content blocks for one user turn on the stream-json stdin: attachments
+/// first, then the text, mirroring the Anthropic API path — a turn reads as
+/// "here is a picture, now do this". An attachment that is not a base64 image
+/// data URL is dropped rather than sent as a block the CLI would reject.
+fn user_content_blocks(query: &str, images: &[String]) -> Vec<Value> {
+    let mut blocks = Vec::with_capacity(images.len() + 1);
+    for url in images {
+        let Some((media_type, data)) = super::anthropic::parse_data_url(url) else {
+            warn!("[CliSession] Dropping an attachment that is not a base64 image data URL");
+            continue;
+        };
+        blocks.push(json!({
+            "type": "image",
+            "source": { "type": "base64", "media_type": media_type, "data": data }
+        }));
+    }
+    blocks.push(json!({ "type": "text", "text": query }));
+    blocks
+}
+
 /// [`run_turn`], once there is a process to run it in.
 async fn run_in_session(
     req: &TurnRequest<'_>,
@@ -1075,7 +1099,7 @@ async fn run_in_session(
         // It is the only thing that distinguishes this turn from one the CLI
         // decided to run on its own. Without it there is no safe reader.
         "uuid": command_uuid,
-        "message": { "role": "user", "content": [{ "type": "text", "text": req.query }] }
+        "message": { "role": "user", "content": user_content_blocks(req.query, req.images) }
     });
 
     let line = match serde_json::to_string(&message) {
@@ -1581,6 +1605,31 @@ fn emit_chunk(handle: &tauri::AppHandle, display: String, msg_id: &str, blocks: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_frame_carries_the_attachment_as_an_image_block() {
+        let images = vec!["data:image/jpeg;base64,YQ==".to_string()];
+        let blocks = user_content_blocks("what is this?", &images);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["type"], "image");
+        assert_eq!(blocks[0]["source"]["type"], "base64");
+        assert_eq!(blocks[0]["source"]["media_type"], "image/jpeg");
+        assert_eq!(blocks[0]["source"]["data"], "YQ==");
+        assert_eq!(blocks[1]["type"], "text");
+        assert_eq!(blocks[1]["text"], "what is this?");
+    }
+
+    #[test]
+    fn user_frame_without_attachments_is_text_only() {
+        let blocks = user_content_blocks("hello", &[]);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "text");
+        // A paste that is not a real image is dropped, not sent as a block
+        // the CLI would reject.
+        let bad = user_content_blocks("hello", &["nonsense".to_string()]);
+        assert_eq!(bad.len(), 1);
+        assert_eq!(bad[0]["type"], "text");
+    }
 
     #[test]
     fn signature_separates_model_from_prompt() {
