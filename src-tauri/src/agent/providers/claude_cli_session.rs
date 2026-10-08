@@ -1854,7 +1854,7 @@ async fn stream_turn(
                 if !ours {
                     // No lifecycle frame for our uuid within the window: an older CLI
                     // without msg_lifecycle_v1, or a wedged process. Our bubble was
-                    // never opened, so the one-shot path can take this turn — but
+                    // never opened, so the one-shot path can take this turn, but
                     // only because run_turn kills this process on the way out. The
                     // message is already on its stdin, and a live process would
                     // still run it.
