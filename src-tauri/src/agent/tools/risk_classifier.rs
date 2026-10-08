@@ -131,6 +131,155 @@ pub const GENERIC_NAMES_FROM_OUTSIDE_JUNO: &[&str] = &[
     "run_command",
 ];
 
+// --- tools from an external MCP server ---
+//
+// An MCP server registers tools at runtime under names nobody in this
+// repository ever reviewed, which is exactly the case the `_ => Low`
+// fall-through gets wrong: the moment a connector is attached,
+// `GMAIL_SEND_EMAIL` and `STRIPE_CREATE_REFUND` arrive as unnamed tools and
+// Low lets them through in every mode except AskFirst. Worse, Composio's
+// meta-tool buries the real action slugs inside the arguments of
+// `COMPOSIO_MULTI_EXECUTE_TOOL`, up to 50 per call, where a name-based
+// classifier cannot see them at all. The rules here are structural, not a
+// list: origin is read off the name prefix, risk is read off the slug's
+// verbs, and everything unreadable fails towards the gate.
+
+/// The prefix every tool discovered from an external MCP server carries.
+///
+/// `mcp_integration::MCPServerConnection::parse_tool_definition` writes it and
+/// this module reads it, so registration and classification cannot name
+/// different sets. It is also the pattern `tool_provider::is_mcp_tool_name`
+/// already treats as canonical for MCP tools.
+pub const MCP_TOOL_NAME_PREFIX: &str = "mcp_";
+
+/// Composio's batch meta-tool. The name says nothing about the risk; the
+/// real action slugs ride inside its arguments and
+/// [`classify_multi_execute_risk`] reads them out and takes the highest.
+pub const COMPOSIO_MULTI_EXECUTE_TOOL: &str = "COMPOSIO_MULTI_EXECUTE_TOOL";
+
+/// Slug verbs that send, destroy, spend money, or change who can see what.
+/// Matched as whole `_`-separated tokens, never substrings, so `RESEND` or
+/// `SENDER` cannot match by containing one.
+pub const INTEGRATION_HIGH_VERBS: &[&str] = &[
+    "SEND", "DELETE", "ARCHIVE", "REFUND", "PAY", "TRANSFER", "CHARGE", "REMOVE", "REVOKE", "SHARE",
+];
+
+/// Read-shaped slug verbs. A slug carrying one of these and no high verb
+/// reads and reports, which is the one thing a connected app can do that
+/// leaves nothing behind.
+pub const INTEGRATION_READ_VERBS: &[&str] = &["GET", "LIST", "SEARCH", "FETCH", "READ"];
+
+/// Whether this tool name was registered from an external MCP server.
+pub fn is_external_mcp_tool(tool_name: &str) -> bool {
+    tool_name.starts_with(MCP_TOOL_NAME_PREFIX)
+}
+
+/// The integration action slug inside a tool name, if one is there.
+///
+/// An integration slug is the connector naming shape `TOOLKIT_VERB_OBJECT`:
+/// all uppercase, at least two `_`-separated tokens (`GMAIL_SEND_EMAIL`).
+/// MCP registration prefixes the lowercase server name
+/// (`mcp_composio_GMAIL_SEND_EMAIL`), so this takes the longest all-uppercase
+/// tail of the name.
+pub fn integration_action_slug(tool_name: &str) -> Option<&str> {
+    fn is_slug_token(token: &str) -> bool {
+        !token.is_empty()
+            && token
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+    }
+
+    let tokens: Vec<&str> = tool_name.split('_').collect();
+    let mut start = None;
+    for index in (0..tokens.len()).rev() {
+        if is_slug_token(tokens[index]) {
+            start = Some(index);
+        } else {
+            break;
+        }
+    }
+    let start = start?;
+    if tokens.len() - start < 2 {
+        return None;
+    }
+    // Every boundary here is an ASCII underscore, so the offset is a char
+    // boundary; `get` keeps it a provable non-panic anyway.
+    let offset: usize = tokens[..start].iter().map(|t| t.len() + 1).sum();
+    let slug = tool_name.get(offset..)?;
+    slug.chars().any(|c| c.is_ascii_uppercase()).then_some(slug)
+}
+
+/// Classify an integration action slug by its verbs, never by an allowlist.
+///
+/// The order is the safety argument: a destroying or sending verb anywhere in
+/// the slug wins over a reading one (`GOOGLEDRIVE_DELETE_SHARED_LIST` is a
+/// delete, not a list), and a slug with no verb this build recognises is
+/// write-shaped until proven otherwise, which is Medium, not Low.
+pub fn classify_integration_slug(slug: &str) -> RiskLevel {
+    let tokens: Vec<&str> = slug.split('_').collect();
+    if tokens
+        .iter()
+        .any(|token| INTEGRATION_HIGH_VERBS.contains(token))
+    {
+        return RiskLevel::High;
+    }
+    if tokens
+        .iter()
+        .any(|token| INTEGRATION_READ_VERBS.contains(token))
+    {
+        return RiskLevel::Low;
+    }
+    RiskLevel::Medium
+}
+
+/// The inner actions of a multi-execute call: every action slug found in the
+/// arguments, each with the argument object it sits in.
+///
+/// The walk is deliberately schema-free rather than bound to today's
+/// `{"tools": [{"tool_slug": ..., "arguments": ...}]}` shape: a vendor
+/// meta-tool's schema is not ours to pin, and a schema drift that silently
+/// stopped the gate seeing sends is the exact failure this arm exists to
+/// stop. Looking for slug-valued fields anywhere fails safe in both
+/// directions — a missed slug leaves the batch at High (nothing readable),
+/// and a false positive can only raise the risk.
+pub fn multi_execute_inner_actions(input: &Value) -> Vec<(String, Value)> {
+    const SLUG_KEYS: &[&str] = &["tool_slug", "slug", "tool", "tool_name", "action", "name"];
+
+    fn walk(value: &Value, out: &mut Vec<(String, Value)>) {
+        match value {
+            Value::Object(map) => {
+                for key in SLUG_KEYS {
+                    if let Some(Value::String(candidate)) = map.get(*key) {
+                        if integration_action_slug(candidate) == Some(candidate.as_str()) {
+                            let args = map
+                                .get("arguments")
+                                .or_else(|| map.get("input"))
+                                .or_else(|| map.get("params"))
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            out.push((candidate.clone(), args));
+                            break;
+                        }
+                    }
+                }
+                for child in map.values() {
+                    walk(child, out);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    walk(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut actions = Vec::new();
+    walk(input, &mut actions);
+    actions
+}
+
 /// Registered tools that are deliberately left at [`RiskLevel::Low`].
 ///
 /// This list is the other half of the fix. The hole was never that `Low` is
@@ -301,6 +450,16 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
         "create_scheduled_automation" => RiskLevel::High,
         "delete_scheduled_automation" => RiskLevel::Medium,
 
+        // Tools from an external MCP server. The names arrive off the network
+        // at runtime, so they are unknown by definition and never fall through
+        // to the Low default below. Integration action slugs
+        // (`GMAIL_SEND_EMAIL`) are classified by verb, Composio's
+        // multi-execute by the slugs inside its arguments, and anything
+        // unreadable lands on Medium so "Ask me first" sees it.
+        name if is_external_mcp_tool(name) || integration_action_slug(name).is_some() => {
+            classify_external_mcp_risk(name, tool_input)
+        }
+
         // Everything else is low risk by default
         _ => RiskLevel::Low,
     }
@@ -389,11 +548,90 @@ pub fn extract_target_app(tool_name: &str, tool_input: &Value) -> Option<String>
                     .nth(2) // third segment = hostname
                     .map(|h| h.to_string())
             }),
+        // A connected-app action names its toolkit, which is the app the
+        // person recognises on the prompt badge.
+        name if is_external_mcp_tool(name) || integration_action_slug(name).is_some() => {
+            integration_target_app(name, tool_input)
+        }
         _ => None,
     }
 }
 
+/// The app a toolkit token names, in the words a person uses for it.
+///
+/// Composio's own meta-tools are plumbing rather than an app, so `COMPOSIO`
+/// deliberately names nothing. An unknown toolkit still gets a readable word
+/// (its token, title-cased) rather than shouting its slug.
+pub fn toolkit_display_name(toolkit: &str) -> Option<String> {
+    let known = match toolkit {
+        "GMAIL" => "Gmail",
+        "GOOGLECALENDAR" => "Google Calendar",
+        "GOOGLEDRIVE" => "Google Drive",
+        "GOOGLEDOCS" => "Google Docs",
+        "GOOGLESHEETS" => "Google Sheets",
+        "SLACK" => "Slack",
+        "NOTION" => "Notion",
+        "LINEAR" => "Linear",
+        "GITHUB" => "GitHub",
+        "STRIPE" => "Stripe",
+        "COMPOSIO" => return None,
+        _ => "",
+    };
+    if !known.is_empty() {
+        return Some(known.to_string());
+    }
+    let mut chars = toolkit.chars();
+    let first = chars.next()?;
+    Some(format!("{}{}", first, chars.as_str().to_lowercase()))
+}
+
 // --- private helpers ---
+
+/// The external-MCP arm of [`classify_risk`]. Never returns
+/// [`RiskLevel::Low`] for anything it cannot read, because the one thing
+/// known about an external tool is that nothing here reviewed it.
+fn classify_external_mcp_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
+    match integration_action_slug(tool_name) {
+        Some(slug) if slug == COMPOSIO_MULTI_EXECUTE_TOOL => {
+            classify_multi_execute_risk(tool_input)
+        }
+        Some(slug) => classify_integration_slug(slug),
+        // A name off the network with no readable action shape. Medium is the
+        // floor for external tools: "Ask me first" sees it, and the default
+        // mode is not interrupted.
+        None => RiskLevel::Medium,
+    }
+}
+
+/// The batch arm: the highest risk across the inner slugs, so one send among
+/// 49 reads still asks. A batch whose contents cannot be read could be
+/// sending, deleting or paying, so it fails towards the gate.
+fn classify_multi_execute_risk(input: &Value) -> RiskLevel {
+    let actions = multi_execute_inner_actions(input);
+    if actions.is_empty() {
+        return RiskLevel::High;
+    }
+    actions
+        .iter()
+        .map(|(slug, _)| classify_integration_slug(slug))
+        .max()
+        .unwrap_or(RiskLevel::High)
+}
+
+/// The prompt badge for a connected-app action: the toolkit of the slug, or
+/// of the riskiest inner slug when the call is a multi-execute batch.
+fn integration_target_app(tool_name: &str, tool_input: &Value) -> Option<String> {
+    let slug = integration_action_slug(tool_name)?;
+    let slug = if slug == COMPOSIO_MULTI_EXECUTE_TOOL {
+        multi_execute_inner_actions(tool_input)
+            .into_iter()
+            .max_by_key(|(inner, _)| classify_integration_slug(inner))?
+            .0
+    } else {
+        slug.to_string()
+    };
+    toolkit_display_name(slug.split('_').next()?)
+}
 
 fn classify_shell_risk(input: &Value) -> RiskLevel {
     let cmd = input
@@ -1354,6 +1592,211 @@ mod tests {
             classify_risk("delete_scheduled_automation", &json!({})),
             RiskLevel::Medium
         );
+    }
+
+    // --- connected-app (external MCP) classification ---
+    //
+    // The defect these pin: `classify_risk` ended in `_ => RiskLevel::Low`,
+    // so every tool a connector registered rated Low and ran unprompted in
+    // every mode but AskFirst. With Composio attached that meant
+    // `GMAIL_SEND_EMAIL` — and worse, the real slug rides inside
+    // `COMPOSIO_MULTI_EXECUTE_TOOL`'s arguments where a name-based
+    // classifier never saw it at all (LAC-4210).
+
+    /// The acceptance line: "email Katie that the site is live" stops and
+    /// asks first, even though the send is nested inside a batch meta-tool.
+    #[test]
+    fn a_send_nested_inside_multi_execute_is_high_and_asks() {
+        use crate::agent::tools::permission_policy::{requires_approval, PermissionMode};
+
+        let input = json!({
+            "tools": [{
+                "tool_slug": "GMAIL_SEND_EMAIL",
+                "arguments": {"to": "katie@example.com", "subject": "Site is live"}
+            }]
+        });
+        let risk = classify_risk("mcp_composio_COMPOSIO_MULTI_EXECUTE_TOOL", &input);
+        assert_eq!(risk, RiskLevel::High);
+        assert!(
+            requires_approval(PermissionMode::AskWhenRisky, &risk, false),
+            "a nested send must ask in the default mode"
+        );
+    }
+
+    /// One send among reads gates the whole batch. 49 harmless reads must not
+    /// average the send down.
+    #[test]
+    fn a_batch_with_one_send_among_reads_is_high() {
+        let input = json!({
+            "tools": [
+                {"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {}},
+                {"tool_slug": "GOOGLECALENDAR_EVENTS_LIST", "arguments": {}},
+                {"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {"to": "katie@example.com"}}
+            ]
+        });
+        assert_eq!(
+            classify_risk("mcp_composio_COMPOSIO_MULTI_EXECUTE_TOOL", &input),
+            RiskLevel::High
+        );
+    }
+
+    /// Reads stay quiet: "what's on my calendar" must not prompt.
+    #[test]
+    fn a_read_only_batch_stays_low() {
+        let input = json!({
+            "tools": [
+                {"tool_slug": "GOOGLECALENDAR_EVENTS_LIST", "arguments": {}},
+                {"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {"query": "is:unread"}}
+            ]
+        });
+        assert_eq!(
+            classify_risk("mcp_composio_COMPOSIO_MULTI_EXECUTE_TOOL", &input),
+            RiskLevel::Low
+        );
+    }
+
+    /// A batch whose contents cannot be read could be doing anything, so it
+    /// fails towards the gate rather than through it.
+    #[test]
+    fn an_unreadable_multi_execute_fails_towards_the_gate() {
+        for input in [json!({}), json!({"tools": "opaque"}), json!(null)] {
+            assert_eq!(
+                classify_risk("mcp_composio_COMPOSIO_MULTI_EXECUTE_TOOL", &input),
+                RiskLevel::High,
+                "{input:?} hid its contents and did not gate"
+            );
+        }
+    }
+
+    /// The verb test is on tokens, not an allowlist: a delete-shaped slug this
+    /// build has never heard of must not be Low.
+    #[test]
+    fn an_unknown_delete_shaped_slug_is_never_low() {
+        for slug in [
+            "FOOAPP_DELETE_WIDGET",
+            "SOMETOOL_REVOKE_ACCESS",
+            "NEWAPP_TRANSFER_FUNDS",
+            "VENDOR_SHARE_DOCUMENT",
+        ] {
+            let name = format!("mcp_composio_{slug}");
+            let risk = classify_risk(&name, &json!({}));
+            assert_eq!(risk, RiskLevel::High, "{slug} rated {risk:?}");
+        }
+    }
+
+    /// A destroying verb outranks a reading verb inside one slug: a slug is
+    /// classified by the worst thing it says, not the nicest.
+    #[test]
+    fn a_destructive_verb_outranks_a_read_verb_in_one_slug() {
+        assert_eq!(
+            classify_risk("mcp_composio_GOOGLEDRIVE_DELETE_SHARED_LIST", &json!({})),
+            RiskLevel::High
+        );
+    }
+
+    /// An unknown write-shaped slug is Medium: "Ask me first" sees it, the
+    /// default mode is not interrupted, and it is never Low.
+    #[test]
+    fn an_unknown_write_shaped_slug_is_medium_not_low() {
+        for slug in ["GOOGLECALENDAR_CREATE_EVENT", "GMAIL_MOVE_TO_INBOX"] {
+            let name = format!("mcp_composio_{slug}");
+            assert_eq!(
+                classify_risk(&name, &json!({})),
+                RiskLevel::Medium,
+                "{slug} must be Medium"
+            );
+        }
+    }
+
+    /// The structural rule itself: anything carrying the external-server
+    /// prefix never falls through to Low, slug or no slug.
+    #[test]
+    fn an_external_mcp_tool_never_defaults_to_low() {
+        let risk = classify_risk("mcp_someserver_do_thing", &json!({}));
+        assert_eq!(risk, RiskLevel::Medium);
+        let risk = classify_risk("mcp_other_server_tool", &json!({"x": 1}));
+        assert_eq!(risk, RiskLevel::Medium);
+    }
+
+    /// Catalog browsing stays quiet so the agent can find tools without a
+    /// prompt per lookup; managing connections is a change and is not Low.
+    #[test]
+    fn composio_catalog_browsing_stays_low_and_connection_changes_do_not() {
+        assert_eq!(
+            classify_risk("mcp_composio_COMPOSIO_SEARCH_TOOLS", &json!({})),
+            RiskLevel::Low
+        );
+        assert_eq!(
+            classify_risk("mcp_composio_COMPOSIO_GET_TOOL_SCHEMAS", &json!({})),
+            RiskLevel::Low
+        );
+        assert_eq!(
+            classify_risk("mcp_composio_COMPOSIO_MANAGE_CONNECTIONS", &json!({})),
+            RiskLevel::Medium
+        );
+    }
+
+    /// The default mode's promise, stated end to end: reads flow, sends ask.
+    #[test]
+    fn the_default_mode_asks_before_an_app_sends_but_not_before_it_reads() {
+        use crate::agent::tools::permission_policy::{requires_approval, PermissionMode};
+
+        let read = classify_risk("mcp_composio_GMAIL_FETCH_EMAILS", &json!({}));
+        assert!(!requires_approval(
+            PermissionMode::AskWhenRisky,
+            &read,
+            false
+        ));
+
+        let send = classify_risk("mcp_composio_GMAIL_SEND_EMAIL", &json!({}));
+        assert!(requires_approval(
+            PermissionMode::AskWhenRisky,
+            &send,
+            false
+        ));
+    }
+
+    /// The badge on the prompt names the app, read from the riskiest inner
+    /// slug when the call is a batch.
+    #[test]
+    fn the_prompt_badge_names_the_app_behind_the_slug() {
+        let input = json!({
+            "tools": [
+                {"tool_slug": "GOOGLECALENDAR_EVENTS_LIST", "arguments": {}},
+                {"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {"to": "katie@example.com"}}
+            ]
+        });
+        assert_eq!(
+            extract_target_app("mcp_composio_COMPOSIO_MULTI_EXECUTE_TOOL", &input),
+            Some("Gmail".to_string())
+        );
+        assert_eq!(
+            extract_target_app("mcp_composio_GOOGLECALENDAR_EVENTS_LIST", &json!({})),
+            Some("Google Calendar".to_string())
+        );
+    }
+
+    /// The slug finder takes the uppercase tail and nothing else, so ordinary
+    /// lowercase tools can never wander into the integration arm.
+    #[test]
+    fn the_slug_finder_matches_slugs_and_only_slugs() {
+        assert_eq!(
+            integration_action_slug("mcp_composio_GMAIL_SEND_EMAIL"),
+            Some("GMAIL_SEND_EMAIL")
+        );
+        assert_eq!(
+            integration_action_slug("GMAIL_SEND_EMAIL"),
+            Some("GMAIL_SEND_EMAIL")
+        );
+        for not_a_slug in [
+            "bash",
+            "write_file",
+            "browser_interact",
+            "mcp_server_tool",
+            "GMAIL",
+        ] {
+            assert_eq!(integration_action_slug(not_a_slug), None, "{not_a_slug}");
+        }
     }
 
     /// Deleting is recoverable now: Juno's shell session runs its own `rm`
