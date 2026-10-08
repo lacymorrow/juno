@@ -153,6 +153,13 @@ pub async fn show_bar_when_ready(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Where `set_bar_frame` left the bar's top-left, in global desktop points.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct BarFrameOrigin {
+    pub x: f64,
+    pub y: f64,
+}
+
 /// Move + resize the floating bar atomically so a frame change cannot show an
 /// intermediate frame. On macOS this is a single `NSWindow setFrame:`,
 /// dispatched to the main thread; elsewhere it falls back to separate
@@ -163,6 +170,13 @@ pub async fn show_bar_when_ready(app_handle: AppHandle) -> Result<(), String> {
 /// every display, so a frame aimed at a well on a second display of another
 /// density lands there (the old physical-pixel delta was scaled by the
 /// display the window was leaving).
+///
+/// `grab_x`/`grab_y`, when both are given, place the window by the cursor
+/// instead: that point inside the window (from its top-left) goes under the
+/// cursor as it is at the moment the frame is set, and `x`/`y` are only the
+/// fallback when the cursor cannot be read. The bar's drag uses it so the spot
+/// the user pressed is still under the cursor when the OS drag takes over.
+/// Returns the top-left the window ended up with.
 #[command]
 pub async fn set_bar_frame(
     app_handle: AppHandle,
@@ -170,7 +184,10 @@ pub async fn set_bar_frame(
     y: f64,
     width: f64,
     height: f64,
-) -> Result<(), String> {
+    grab_x: Option<f64>,
+    grab_y: Option<f64>,
+) -> Result<BarFrameOrigin, String> {
+    let grab = grab_x.zip(grab_y);
     #[cfg(target_os = "macos")]
     {
         let app = app_handle.clone();
@@ -178,26 +195,32 @@ pub async fn set_bar_frame(
         app_handle
             .run_on_main_thread(move || {
                 let _ = tx.send(crate::platform::macos::set_bar_frame_atomic(
-                    &app, x, y, width, height,
+                    &app, x, y, width, height, grab,
                 ));
             })
             .map_err(|e| e.to_string())?;
-        rx.await
-            .map_err(|e| format!("set_bar_frame main-thread call dropped: {}", e))?
+        let (x, y) = rx
+            .await
+            .map_err(|e| format!("set_bar_frame main-thread call dropped: {}", e))??;
+        Ok(BarFrameOrigin { x, y })
     }
     #[cfg(not(target_os = "macos"))]
     {
+        use crate::platform::desktop_points::{cursor_points, origin_under_cursor};
         use tauri::LogicalSize;
         let window = app_handle
             .get_webview_window(crate::constants::ui::window_labels::FLOATING_BAR)
             .ok_or("floating-bar window not found")?;
+        let (x, y) = grab
+            .and_then(|g| cursor_points(&app_handle).map(|c| origin_under_cursor(c, g)))
+            .unwrap_or((x, y));
         window
             .set_position(LogicalPosition::new(x, y))
             .map_err(|e| e.to_string())?;
         window
             .set_size(LogicalSize::new(width, height))
             .map_err(|e| e.to_string())?;
-        Ok(())
+        Ok(BarFrameOrigin { x, y })
     }
 }
 
