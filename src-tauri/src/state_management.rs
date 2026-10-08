@@ -328,6 +328,8 @@ async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String
     // With the provider settled, keep a booted `claude` process ready for the
     // next new conversation when the CLI is the provider. Spawned, never awaited.
     crate::agent::providers::claude_cli::start_warm_spare(app_handle.clone());
+    // Same for Codex: one warm `codex app-server` thread when it is the provider.
+    crate::agent::providers::codex_session::start_warm(app_handle.clone());
 
     if let Err(e) =
         crate::commands::onboarding::initialize_onboarding_system(app_handle.clone()).await

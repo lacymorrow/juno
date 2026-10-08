@@ -1267,6 +1267,7 @@ pub fn run() {
                         tauri::async_runtime::block_on(
                             agent::providers::claude_cli_session::shutdown_all(),
                         );
+                        agent::providers::codex_session::shutdown();
                     }
                     _ => {}
                 }
