@@ -1231,6 +1231,18 @@ where
     /// Anthropic non-streaming path). Speaks each block through the normal TTS
     /// path and returns the display text. Streaming brains already stripped
     /// the tags, so for them this is a no-op and nothing is spoken twice.
+    /// Add Juno's reply for this turn to memory, which tees it into the
+    /// conversation history. Best effort: history must never fail a turn.
+    async fn save_reply(&self, text: &str, interrupted: bool) {
+        let Some(message) = crate::conversation_history::reply_message(text, interrupted) else {
+            return;
+        };
+        let mut mem = self.memory.lock().await;
+        if let Err(e) = mem.add_message(message).await {
+            log::debug!("Could not keep the reply in history: {e}");
+        }
+    }
+
     fn speak_and_strip_tts(&self, text: String) -> String {
         if !crate::agent::tts_tags::contains_tts_tags(&text) {
             return text;
@@ -1405,6 +1417,9 @@ where
             // Handle agent action
             match action {
                 AgentAction::Finish(text) => {
+                    // Keep the reply in the conversation. The raw text still
+                    // has its spoken blocks, which the history keeps in order.
+                    self.save_reply(&text, false).await;
                     let final_response = self.speak_and_strip_tts(text);
                     log::info!("Agent finished with text response: \"{}\"", final_response);
                     self.transition_state(AgentState::Finished).await;
@@ -1482,18 +1497,30 @@ where
             // Brain supports streaming - generate a message ID and call streaming method
             let message_id = uuid::Uuid::new_v4().to_string();
             log::debug!("Using streaming brain with message ID: {}", message_id);
-            self.brain
+            let outcome = self
+                .brain
                 .decide_next_action_streaming(
                     &messages,
                     &tools,
                     Some((*self.app_handle).clone()),
-                    Some(message_id),
+                    Some(message_id.clone()),
                     // Session-aware cancel channel (merged session+global for
                     // session-tracked runs) so subprocess-based brains can kill
                     // their child on focused-session cancel (LAC-3697).
                     Some(cancel_rx.clone()),
                 )
-                .await?
+                .await;
+            // Whatever was streamed is either the final reply (kept by the
+            // run loop) or, if the turn was cut short, saved here.
+            let streamed = crate::conversation_history::take_streamed(&message_id);
+            match outcome {
+                Ok(action) => action,
+                Err(e) => {
+                    let interrupted = matches!(e, AgentError::Terminated);
+                    self.save_reply(&streamed, interrupted).await;
+                    return Err(e);
+                }
+            }
         } else {
             // Fall back to regular brain method
             log::debug!("Using non-streaming brain");
