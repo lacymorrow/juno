@@ -57,6 +57,9 @@ pub const BAR_AT_MS: u64 = 1000;
 /// shown, as the smoke starts to thin and the pill can be seen. Tweakable.
 pub const GREETING_AT_MS: u64 = 1300;
 
+// The beat falls inside the sequence, after the bar is shown.
+const _: () = assert!(GREETING_AT_MS >= BAR_AT_MS && GREETING_AT_MS < DURATION_MS);
+
 /// A beat this recent still counts for a greeting that starts waiting after
 /// it: `on_launch` and the reveal race, and either may come first.
 pub const GREETING_BEAT_FRESH: Duration = Duration::from_secs(3);
@@ -486,12 +489,6 @@ mod tests {
     async fn a_greeting_that_starts_after_the_beat_still_hears_it() {
         give_greeting_beat();
         assert!(greeting_beat(Duration::from_millis(10)).await);
-    }
-
-    #[test]
-    fn the_greeting_beat_falls_inside_the_sequence_after_the_bar() {
-        assert!(GREETING_AT_MS >= BAR_AT_MS);
-        assert!(GREETING_AT_MS < DURATION_MS);
     }
 
     #[test]
