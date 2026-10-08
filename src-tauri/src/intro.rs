@@ -11,8 +11,9 @@
 //! ends, which is the first such time), a transparent click-through window
 //! opens around the spot where the bar is about to land. Smoke gathers there,
 //! the bar is shown underneath it while it is dense, the smoke clears, and the
-//! greeting (which already waits for the bar to be visible) lands on a pill
-//! the eye is already on. The window is built for the occasion and destroyed
+//! greeting lands on a pill the eye is already on: the reveal wakes it at
+//! [`GREETING_AT_MS`], and the line was rendered while Juno started, so it
+//! plays at once. The window is built for the occasion and destroyed
 //! when the sequence ends, so it costs nothing for the rest of the session.
 //!
 //! This module owns the clock. The frontend draws the smoke and nothing else:
@@ -51,6 +52,14 @@ pub const DURATION_MS: u64 = 2600;
 /// When the bar is shown, inside the sequence. The smoke is densest around
 /// here, so the bar's own hard cut is hidden inside it.
 pub const BAR_AT_MS: u64 = 1000;
+
+/// When the greeting speaks, inside the sequence: a beat after the bar is
+/// shown, as the smoke starts to thin and the pill can be seen. Tweakable.
+pub const GREETING_AT_MS: u64 = 1300;
+
+/// A beat this recent still counts for a greeting that starts waiting after
+/// it: `on_launch` and the reveal race, and either may come first.
+pub const GREETING_BEAT_FRESH: Duration = Duration::from_secs(3);
 
 /// The intro window, logical points. Big enough for the cloud to fade out on
 /// its own before it reaches any edge.
@@ -228,6 +237,43 @@ struct Run {
 
 static RUN: Mutex<Option<Run>> = Mutex::new(None);
 
+/// When the bar was last brought on, and the greeting woken for it.
+static GREETING_BEAT_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+static GREETING_BEAT: Notify = Notify::const_new();
+
+/// The bar is on screen and the reveal is at its greeting beat.
+fn give_greeting_beat() {
+    if let Ok(mut at) = GREETING_BEAT_AT.lock() {
+        *at = Some(std::time::Instant::now());
+    }
+    GREETING_BEAT.notify_waiters();
+}
+
+fn beat_is_fresh() -> bool {
+    GREETING_BEAT_AT
+        .lock()
+        .ok()
+        .and_then(|at| *at)
+        .is_some_and(|at| at.elapsed() <= GREETING_BEAT_FRESH)
+}
+
+/// True while a reveal is bringing the bar on.
+pub fn reveal_in_flight() -> bool {
+    IN_FLIGHT.load(Ordering::SeqCst)
+}
+
+/// Wait for the moment the greeting should speak: the reveal's beat, or one
+/// that happened in the last [`GREETING_BEAT_FRESH`]. False on timeout.
+pub async fn greeting_beat(timeout: Duration) -> bool {
+    let notified = GREETING_BEAT.notified();
+    tokio::pin!(notified);
+    let _ = notified.as_mut().enable();
+    if beat_is_fresh() {
+        return true;
+    }
+    tokio::time::timeout(timeout, notified).await.is_ok()
+}
+
 /// Reveals run one at a time. A request while one is in flight is dropped:
 /// the running reveal is already bringing the bar on.
 static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
@@ -263,6 +309,7 @@ pub fn show_bar_with_reveal(app: &AppHandle) {
         if let Err(reason) = reveal(&app).await {
             debug!("[Intro] No reveal ({}); showing the bar plainly", reason);
             show_bar_plainly(&app);
+            give_greeting_beat();
         }
         IN_FLIGHT.store(false, Ordering::SeqCst);
     });
@@ -382,7 +429,17 @@ async fn reveal(app: &AppHandle) -> Result<(), String> {
     show_bar_plainly(app);
 
     if drawing {
-        tokio::time::sleep(Duration::from_millis(DURATION_MS.saturating_sub(BAR_AT_MS))).await;
+        // The greeting lands on the reveal's beat, not on whenever something
+        // next notices the bar is visible.
+        let to_beat = GREETING_AT_MS.saturating_sub(BAR_AT_MS);
+        tokio::time::sleep(Duration::from_millis(to_beat)).await;
+        give_greeting_beat();
+        tokio::time::sleep(Duration::from_millis(
+            DURATION_MS.saturating_sub(BAR_AT_MS + to_beat),
+        ))
+        .await;
+    } else {
+        give_greeting_beat();
     }
     // Destroyed, not closed: the next reveal checks for this label, and a
     // close that is still being requested would read as one still running.
@@ -423,6 +480,18 @@ mod tests {
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
+    }
+
+    #[tokio::test]
+    async fn a_greeting_that_starts_after_the_beat_still_hears_it() {
+        give_greeting_beat();
+        assert!(greeting_beat(Duration::from_millis(10)).await);
+    }
+
+    #[test]
+    fn the_greeting_beat_falls_inside_the_sequence_after_the_bar() {
+        assert!(GREETING_AT_MS >= BAR_AT_MS);
+        assert!(GREETING_AT_MS < DURATION_MS);
     }
 
     #[test]

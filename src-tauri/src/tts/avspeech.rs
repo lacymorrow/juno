@@ -59,6 +59,12 @@ pub const FIRST_BUFFER_TIMEOUT: Duration = Duration::from_millis(2_500);
 /// sentence never pauses this long between buffers.
 pub const RENDER_STALL: Duration = Duration::from_millis(1_500);
 
+/// How long a render ahead waits for the synthesizer to warm up at launch.
+pub const RENDER_WARM_WAIT: Duration = Duration::from_secs(5);
+
+/// How long a whole render ahead may take. A greeting renders in tens of ms.
+pub const RENDER_WHOLE_WAIT: Duration = Duration::from_secs(10);
+
 /// The rate AVFoundation speaks at when nothing is set, which renders exactly
 /// as `say` does at its own 175 words a minute (measured, see [`av_rate_for`]).
 pub const AV_DEFAULT_RATE: f32 = 0.5;
@@ -312,6 +318,21 @@ impl PlaybackBuffer {
         self.stopped
     }
 
+    /// The end marker arrived.
+    pub fn is_rendered(&self) -> bool {
+        self.rendered
+    }
+
+    /// Everything rendered, at the synthesizer's rate, for a render nobody
+    /// plays. `None` when nothing was rendered.
+    pub fn take_all(&mut self) -> Option<(Vec<f32>, f64)> {
+        if self.samples.is_empty() {
+            return None;
+        }
+        self.position = 0.0;
+        Some((self.samples.drain(..).collect(), self.source_rate))
+    }
+
     pub fn received_any(&self) -> bool {
         self.received_any
     }
@@ -505,6 +526,26 @@ impl<S: Synth> Speaker<S> {
         Ok(session)
     }
 
+    /// Make an already-filled session current (audio rendered ahead), with
+    /// the same stop race rule as [`Speaker::begin`]. Nothing is rendered.
+    pub fn adopt(
+        &self,
+        session: Arc<Session>,
+        stop_requested: impl Fn() -> bool,
+    ) -> Result<(), StartError> {
+        let previous = self.current().replace(session.clone());
+        if let Some(previous) = previous {
+            previous.stop();
+            self.synth.cancel();
+        }
+        if stop_requested() {
+            self.end(&session);
+            session.stop();
+            return Err(StartError::Stopped);
+        }
+        Ok(())
+    }
+
     /// Stop whatever is speaking. True when something was.
     pub fn stop_all(&self) -> bool {
         let taken = self.current().take();
@@ -635,6 +676,11 @@ mod mac {
     /// Main thread. Builds the utterance and starts the render; buffers
     /// arrive later, also on the main thread.
     fn render_on_main(utterance: Utterance, session: Arc<Session>) {
+        with_synth(|synth| start_render(synth, utterance, session));
+    }
+
+    /// Main thread. Start `synth` rendering `utterance` into `session`.
+    fn start_render(synth: &AVSpeechSynthesizer, utterance: Utterance, session: Arc<Session>) {
         if session.is_stopped() {
             return;
         }
@@ -667,9 +713,7 @@ mod mac {
                     // SAFETY: AVFoundation passes a live buffer for the call.
                     deliver(&sink, buffer.as_ref());
                 });
-            with_synth(|synth| {
-                synth.writeUtterance_toBufferCallback(&av, RcBlock::as_ptr(&block));
-            });
+            synth.writeUtterance_toBufferCallback(&av, RcBlock::as_ptr(&block));
         }
     }
 
@@ -1010,16 +1054,13 @@ mod mac {
             Err(StartError::Failed(e)) => return Spoken::UseSay(e),
         };
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let player_session = session.clone();
-        let device_name = device.map(str::to_string);
-        if let Err(e) = std::thread::Builder::new()
-            .name("juno-voice-out".to_string())
-            .spawn(move || run_player(player_session, device_name, tx))
-        {
-            SPEAKER.abandon(&session);
-            return Spoken::UseSay(format!("could not start the player: {e}"));
-        }
+        let mut rx = match start_player(&session, device) {
+            Ok(rx) => rx,
+            Err(e) => {
+                SPEAKER.abandon(&session);
+                return Spoken::UseSay(e);
+            }
+        };
 
         // Until the first buffer arrives the sentence can still go to `say`
         // without anything having been heard twice.
@@ -1056,6 +1097,29 @@ mod mac {
         }
 
         // The synthesizer is producing: from here this path owns the sentence.
+        let detail = format!(
+            "first_buffer_ms={} chars={} voice={} rate={:.2}",
+            render_ms,
+            chars,
+            match &plan {
+                VoicePlan::Identifier(id) => id.as_str(),
+                _ => "default",
+            },
+            rate,
+        );
+        play_out(&session, rx, started, "avspeech", &detail, device).await
+    }
+
+    /// Everything after the first buffer: mark first audio when the device
+    /// plays it, drive the mouth, and wait until the sentence ends or stops.
+    async fn play_out(
+        session: &Arc<Session>,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<PlayerEvent>,
+        started: Instant,
+        engine: &str,
+        detail: &str,
+        device: Option<&str>,
+    ) -> Spoken {
         crate::tts::release_stale_hold();
         let mut level: Option<crate::tts::speech_level::SpeechLevelSession> = None;
         while let Some(event) = rx.recv().await {
@@ -1068,16 +1132,11 @@ mod mac {
                         Duration::ZERO,
                     ));
                     info!(
-                        "[SpeechTiming] engine=avspeech first_audio_ms={} first_buffer_ms={} device_open_ms={} chars={} voice={} rate={:.2} device={}",
+                        "[SpeechTiming] engine={} first_audio_ms={} device_open_ms={} {} device={}",
+                        engine,
                         started.elapsed().as_millis(),
-                        render_ms,
                         device_open_ms,
-                        chars,
-                        match &plan {
-                            VoicePlan::Identifier(id) => id.as_str(),
-                            _ => "default",
-                        },
-                        rate,
+                        detail,
                         device.unwrap_or("system"),
                     );
                 }
@@ -1090,11 +1149,127 @@ mod mac {
         }
         drop(level);
         let stopped = session.is_stopped();
-        SPEAKER.end(&session);
+        SPEAKER.end(session);
         if stopped || crate::tts::is_tts_stop_requested() {
             Spoken::Status("TTS_STOPPED_BY_USER")
         } else {
             Spoken::Status("TTS_COMPLETED")
+        }
+    }
+
+    /// Spawn the player thread for a session.
+    fn start_player(
+        session: &Arc<Session>,
+        device: Option<&str>,
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<PlayerEvent>, String> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let player_session = session.clone();
+        let device_name = device.map(str::to_string);
+        std::thread::Builder::new()
+            .name("juno-voice-out".to_string())
+            .spawn(move || run_player(player_session, device_name, tx))
+            .map(|_| rx)
+            .map_err(|e| format!("could not start the player: {e}"))
+    }
+
+    /// Play audio rendered ahead of time (the greeting) on the chosen speaker,
+    /// with the same stop, hold and first-audio handling as a live sentence.
+    pub async fn play_pcm(samples: &[f32], sample_rate: f64, device: Option<&str>) -> Spoken {
+        let started = Instant::now();
+        let session = Arc::new(Session::new());
+        {
+            let mut buffer = session.buffer();
+            buffer.push(samples, sample_rate, Instant::now());
+            buffer.finish_render();
+        }
+        match SPEAKER.adopt(session.clone(), crate::tts::is_tts_stop_requested) {
+            Ok(()) => {}
+            Err(StartError::Stopped) => return Spoken::Status("TTS_STOPPED_BY_USER"),
+            Err(StartError::Failed(e)) => return Spoken::UseSay(e),
+        }
+        let rx = match start_player(&session, device) {
+            Ok(rx) => rx,
+            Err(e) => {
+                SPEAKER.abandon(&session);
+                return Spoken::UseSay(e);
+            }
+        };
+        let detail = format!("prerendered_frames={}", samples.len());
+        play_out(&session, rx, started, "prerendered", &detail, device).await
+    }
+
+    thread_local! {
+        /// A second synthesizer for rendering ahead, so a stop aimed at live
+        /// speech never cuts a render that will be cached. Main thread only.
+        static RENDER_SYNTH: RefCell<Option<Retained<AVSpeechSynthesizer>>> = const { RefCell::new(None) };
+    }
+
+    /// Render a whole line to samples without playing it. `Err` when this
+    /// path cannot honour the voice exactly (the caller uses `say -o`).
+    pub async fn render_pcm(
+        text: &str,
+        stored_voice: Option<&str>,
+        rate: f64,
+    ) -> Result<(Vec<f32>, f64), String> {
+        let app = APP.get().ok_or("not bound")?.clone();
+        // The voice list arrives with the warm-up, a moment after launch.
+        let deadline = Instant::now() + RENDER_WARM_WAIT;
+        let voices = loop {
+            if let Some(voices) = lock(&VOICES).clone() {
+                break voices;
+            }
+            if Instant::now() >= deadline {
+                return Err("the synthesizer did not warm up".to_string());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        let spoken = loop {
+            if let Some(spoken) = spoken_content() {
+                break Some(spoken);
+            }
+            if Instant::now() >= deadline {
+                break None;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        let plan = plan_voice(stored_voice, spoken.as_ref(), &voices);
+        if plan == VoicePlan::UseSay {
+            return Err("no AVFoundation voice for this choice".to_string());
+        }
+        let session = Arc::new(Session::new());
+        let utterance = Utterance {
+            text: text.to_string(),
+            voice: plan,
+            av_rate: av_rate_for(rate),
+        };
+        let target = session.clone();
+        app.run_on_main_thread(move || {
+            RENDER_SYNTH.with(|cell| {
+                let mut slot = cell.borrow_mut();
+                // SAFETY: plain `+new` on the main thread.
+                let synth = slot.get_or_insert_with(|| unsafe { AVSpeechSynthesizer::new() });
+                start_render(&**synth, utterance, target);
+            });
+        })
+        .map_err(|e| format!("could not reach the main thread: {e}"))?;
+
+        let deadline = Instant::now() + RENDER_WHOLE_WAIT;
+        loop {
+            {
+                let mut buffer = session.buffer();
+                if buffer.is_stopped() {
+                    return Err("the voice could not be loaded".to_string());
+                }
+                if buffer.is_rendered() {
+                    return buffer
+                        .take_all()
+                        .ok_or_else(|| "the render was empty".to_string());
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err("the render did not finish".to_string());
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
 }
@@ -1117,6 +1292,36 @@ pub fn stop_all() {
 
 #[cfg(not(target_os = "macos"))]
 pub fn stop_all() {}
+
+/// Play samples rendered ahead on the chosen speaker and wait for them.
+#[cfg(target_os = "macos")]
+pub async fn play_pcm(samples: &[f32], sample_rate: f64, device: Option<&str>) -> Spoken {
+    mac::play_pcm(samples, sample_rate, device).await
+}
+
+#[cfg(not(target_os = "macos"))]
+pub async fn play_pcm(_samples: &[f32], _sample_rate: f64, _device: Option<&str>) -> Spoken {
+    Spoken::UseSay("not macOS".to_string())
+}
+
+/// Render a line to samples without playing it.
+#[cfg(target_os = "macos")]
+pub async fn render_pcm(
+    text: &str,
+    voice: Option<&str>,
+    rate: f64,
+) -> Result<(Vec<f32>, f64), String> {
+    mac::render_pcm(text, voice, rate).await
+}
+
+#[cfg(not(target_os = "macos"))]
+pub async fn render_pcm(
+    _text: &str,
+    _voice: Option<&str>,
+    _rate: f64,
+) -> Result<(Vec<f32>, f64), String> {
+    Err("not macOS".to_string())
+}
 
 /// Speak one sentence in-process and wait for it, or say why `say` should.
 #[cfg(target_os = "macos")]
@@ -1484,6 +1689,50 @@ mod tests {
         let result = speaker.begin(utterance("Hello."), || false);
         assert!(matches!(result, Err(StartError::Failed(_))));
         assert!(!speaker.stop_all());
+    }
+
+    #[test]
+    fn audio_rendered_ahead_is_adopted_and_stopped_like_live_speech() {
+        let speaker = Speaker::new(FakeSynth::default());
+        let live = speaker.begin(utterance("Live."), || false).expect("starts");
+        let ahead = Arc::new(Session::new());
+        ahead.push(&[0.5; 32], 22_050.0);
+        ahead.finish_render();
+        speaker.adopt(ahead.clone(), || false).expect("adopts");
+        assert!(live.is_stopped(), "only one thing speaks at a time");
+        assert!(speaker.is_current(&ahead));
+        assert!(speaker.stop_all());
+        assert!(ahead.is_stopped());
+        assert!(speaker
+            .synth
+            .renders
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .all(|text| text == "Live."));
+    }
+
+    #[test]
+    fn adopting_after_a_stop_request_plays_nothing() {
+        let speaker = Speaker::new(FakeSynth::default());
+        let ahead = Arc::new(Session::new());
+        assert_eq!(
+            speaker.adopt(ahead.clone(), || true),
+            Err(StartError::Stopped)
+        );
+        assert!(ahead.is_stopped());
+        assert!(!speaker.stop_all());
+    }
+
+    #[test]
+    fn a_whole_render_can_be_taken_for_the_cache() {
+        let mut buffer = PlaybackBuffer::new();
+        assert_eq!(buffer.take_all(), None);
+        buffer.push(&[0.1, 0.2], 22_050.0, now());
+        buffer.push(&[0.3], 22_050.0, now());
+        buffer.finish_render();
+        assert!(buffer.is_rendered());
+        assert_eq!(buffer.take_all(), Some((vec![0.1, 0.2, 0.3], 22_050.0)));
     }
 
     #[test]

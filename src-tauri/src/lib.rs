@@ -910,6 +910,9 @@ pub fn run() {
             // The Mac's voice, kept loaded in-process so a sentence starts in
             // tens of milliseconds. Warms off the critical path.
             tts::avspeech::bind(app_handle.clone());
+            // The launch greeting, rendered in parallel with the rest of
+            // startup so it plays the moment the bar appears.
+            greeting::refresh_cache(&app_handle);
 
             // A demo build names the windows declared in tauri.conf.json
             // "Juno Demo". Windows opened later are renamed as they are built.
