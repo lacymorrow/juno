@@ -98,3 +98,23 @@ export function windowOriginInPoints(
   const sf = factor(windowScale);
   return { x: Math.round(pos.x / sf), y: Math.round(pos.y / sf) };
 }
+
+/**
+ * The window top-left that puts `grab` (a point inside the window, from its
+ * top-left) exactly under `cursor`. All in points.
+ *
+ * The bar's drag places its window this way. A drag only starts once the
+ * mouse has moved past the threshold, and a steady look then swaps its window
+ * to the shape behind a hidden frame or two; on a fast flick the cursor has
+ * travelled tens of points by then. The OS drag keeps whatever offset the
+ * window has from the cursor when it starts, so a window left at its old spot
+ * trails the cursor for the whole drag. Mirror of Rust's
+ * `desktop_points::origin_under_cursor`, which is what places it for real
+ * (it reads the cursor in the same main-thread call as the frame change).
+ */
+export function originUnderCursor(
+  cursor: { x: number; y: number },
+  grab: { x: number; y: number },
+): { x: number; y: number } {
+  return { x: cursor.x - grab.x, y: cursor.y - grab.y };
+}

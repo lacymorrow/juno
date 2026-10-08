@@ -60,6 +60,7 @@ import {
 import {
   dragLayout,
   getSteady,
+  grabInDragWindow,
   steadyLayout,
   steadySwapsSettled,
   swapSteadyLayout,
@@ -157,6 +158,29 @@ export async function applySteadyFrame(layout: SteadyLayout): Promise<void> {
 }
 
 /**
+ * Put the bar window down with `grab` (a point inside it, in points) under
+ * the cursor as it is right now, at `size`. `fallback` is the top-left used
+ * when the cursor cannot be read. Rust reads the cursor in the same
+ * main-thread call as the frame change, so nothing the page does can add lag
+ * between the two. Resolves to the top-left the window ended up with.
+ */
+async function placeGrabUnderCursor(
+  fallback: { x: number; y: number },
+  size: { width: number; height: number },
+  grab: { x: number; y: number },
+): Promise<{ x: number; y: number }> {
+  const placed = await invoke<{ x: number; y: number } | null>(COMMANDS.BAR_SET_BAR_FRAME, {
+    x: fallback.x,
+    y: fallback.y,
+    width: size.width,
+    height: size.height,
+    grabX: grab.x,
+    grabY: grab.y,
+  });
+  return placed && Number.isFinite(placed.x) && Number.isFinite(placed.y) ? placed : fallback;
+}
+
+/**
  * The steady layout for `well` on its display, or null when the display is
  * gone. Wells for a steady look are computed for its resting footprint.
  */
@@ -204,6 +228,10 @@ let dragHeld = false;
 let releaseWatch: ReturnType<typeof setInterval> | null = null;
 /** How often the release watch asks Rust whether the button is still down. */
 export const RELEASE_WATCH_MS = 150;
+// A look that is not steady is put back under the cursor before its OS drag;
+// the settle waits for that, so a quick release cannot glide first and then
+// have the placement land on top of the glide.
+let plainPlacement: Promise<void> | null = null;
 
 /** Forget the in-flight gesture. For tests, which share one module instance. */
 export function resetBarSnapState(): void {
@@ -213,6 +241,7 @@ export function resetBarSnapState(): void {
   lastShowPayload = null;
   footprintGrab = null;
   dragHeld = false;
+  plainPlacement = null;
   stopReleaseWatch();
 }
 
@@ -335,28 +364,59 @@ export function startBarDrag(grabOffset: { x: number; y: number }): void {
   const win = getCurrentWindow();
   const osDrag = () =>
     win.startDragging().catch((error) => console.debug("barDrag: startDragging failed:", error));
-  if (isBarWindow()) {
-    dragHeld = true;
-    startReleaseWatch();
+  if (!isBarWindow()) {
+    void osDrag();
+    return;
   }
-  const steady = isBarWindow() ? getSteady(win.label) : null;
+  dragHeld = true;
+  startReleaseWatch();
+  const steady = getSteady(win.label);
   const layout = steady?.layout;
   if (!steady || !layout) {
-    void osDrag();
+    plainPlacement = startPlainDrag(win, grabOffset, osDrag);
     return;
   }
   const footprint = steady.footprint ?? steady.spec.rest;
   const drag = dragLayout(layout, footprint);
+  const grab = grabInDragWindow(layout, footprint, grabOffset);
   swapSteadyLayout(win.label, drag, async (next) => {
-    await applySteadyFrame(next);
+    // Placed by the cursor, not where the shape was at the press: the
+    // threshold and the hidden frames before this let a fast flick carry the
+    // cursor well past the shape, and the OS drag would keep that gap.
+    const origin = await placeGrabUnderCursor(next.origin, next.size, grab);
     // The window is the shape now, still hidden for a frame. Released
     // already (a flick) means there is nothing left to drag; the settle,
     // queued behind this swap, glides it home.
     if (dragHeld) void osDrag();
+    return { ...next, origin };
   }).catch((error) => {
     console.debug("barDrag: drag layout failed:", error);
     if (dragHeld) void osDrag();
   });
+}
+
+/**
+ * A look that resizes its own window (not steady) keeps its window for the
+ * drag, but it is put back under the cursor first: by the time the press
+ * becomes a drag the cursor is past the threshold, and the OS drag would keep
+ * that gap for the whole drag.
+ */
+async function startPlainDrag(
+  win: AppWindow,
+  grabOffset: { x: number; y: number },
+  osDrag: () => Promise<void>,
+): Promise<void> {
+  try {
+    const [origin, logical] = await Promise.all([windowOrigin(win), logicalWindowSize(win)]);
+    await placeGrabUnderCursor(
+      origin,
+      { width: logical.windowWidth, height: logical.windowHeight },
+      grabOffset,
+    );
+  } catch (error) {
+    console.debug("barDrag: could not put the bar under the cursor:", error);
+  }
+  if (dragHeld) void osDrag();
 }
 
 /**
@@ -382,6 +442,8 @@ export async function settleBarSnap(): Promise<void> {
     // The shrink at drag start may still be in flight on a quick flick; the
     // settle reads the layout it leaves behind.
     await steadySwapsSettled(win.label);
+    if (plainPlacement) await plainPlacement;
+    plainPlacement = null;
     const steady = getSteady(win.label);
     if (steady?.layout) {
       await settleSteady(win, steady.spec, steady.layout);
