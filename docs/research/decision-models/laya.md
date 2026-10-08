@@ -84,4 +84,4 @@ Do not state: int8 sizes, Rust speed, or independent confirmation of the author'
 - https://www.datacamp.com/blog/top-open-source-jev-alternatives
 - https://pinggy.io/blog/best_open_source_jev_alternatives_self_hosted_decision_models/ (Convai attribution, Apache-2.0, M3 Pro 66 ms, jabr 0.583 vs 0.966)
 - Secondary: https://aiweekly.co/alerts/convai-ships-laya-a-421m-modernbert-decision-model-apache-20 , https://pub.towardsai.net/what-is-laya-laya-vs-jev-explained-simply-f7125dd3e582 , Jev third-party benchmarks https://github.com/AbdelStark/jev-benchmarks and https://github.com/nibzard/decision-model-benchmark (cited by the Laya README, not opened by me).
-- Probe: laya-probe/laya_probe.py and out_en_cpu.txt, out_en_mps.txt, out_ml_cpu.txt, out_ml_mps.txt in the report directory (/private/tmp/claude-501/-Users-lacy/842c4b33-eac7-4e3a-bf4f-71df60e6128b/scratchpad/decision-research/).
+- Probe: laya-probe/laya_probe.py and out_en_cpu.txt, out_en_mps.txt, out_ml_cpu.txt, out_ml_mps.txt (kept locally, not committed).
