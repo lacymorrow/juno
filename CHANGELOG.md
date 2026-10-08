@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.127] - 2026-10-08
+
+### Fixed
+
+- **settings:** sane min window sizes, wrapping rows, (?) info tips (#744) (06e2a790)
+
 ## [0.8.126] - 2026-10-08
 
 ### Added
@@ -1069,7 +1075,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.126...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.127...HEAD
+[0.8.127]: https://github.com/lacymorrow/juno/compare/cua-v0.8.126...v0.8.127
 [0.8.126]: https://github.com/lacymorrow/juno/compare/cua-v0.8.125...v0.8.126
 [0.8.125]: https://github.com/lacymorrow/juno/compare/cua-v0.8.124...v0.8.125
 [0.8.123]: https://github.com/lacymorrow/juno/compare/cua-v0.8.122...v0.8.123
