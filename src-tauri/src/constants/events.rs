@@ -399,6 +399,9 @@ pub mod system {
     pub const MOUSE_MOVED_WINDOW: &str = "mouse-moved-window";
     pub const BACKEND_RESPONSE: &str = "backend-response";
     pub const PROVIDER_SETTINGS_CHANGED: &str = "provider_settings_changed";
+    /// Network or provider health changed. Payload: `connectivity::Snapshot`
+    /// (`status`, `label`, `provider`).
+    pub const CONNECTIVITY_CHANGED: &str = "connectivity-changed";
 
     // Application lifecycle events
     pub const APP_READY: &str = "app-ready";

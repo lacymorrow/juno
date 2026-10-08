@@ -31,6 +31,7 @@ pub mod cleanup; // Application cleanup and resource management
 pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
+pub mod connectivity; // Can Juno answer right now: network and provider health, for the dot and submit_query
 pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
 pub mod cursor_overlay; // Juno's cursor on screen: glow behind the real one, or a ghost in the background
@@ -473,6 +474,7 @@ pub fn run() {
             check_api_keys_available,
             crate::demo::get_demo_info,
             crate::build_info::get_build_info,
+            crate::connectivity::get_connectivity,
             update_provider_model,
             update_provider_max_tokens,
             update_provider_temperature,

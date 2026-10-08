@@ -69,6 +69,12 @@ import {
 import { cursorInPoints } from "@/lib/desktopPoints";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { AgentRosterStrip } from "./AgentRosterStrip";
+import { PillTooltip, PILL_TOOLTIP_DELAY_MS } from "@/components/bar/PillTooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { shortcutCaps } from "@/components/settings/KeyCaps";
+import type { TriggerHints } from "@/components/onboarding/Onboarding";
+import { useConnectivity } from "@/hooks/useConnectivity";
+import { DOT_COLORS, dotLabel, dotTone, type Connectivity } from "@/lib/pillStatus";
 import { BarChatPane } from "./bar/BarChatPane";
 import type { BarAppearance } from "@/components/bar/barAppearance";
 
@@ -473,104 +479,124 @@ const BAR_KEYFRAMES = `
 `;
 
 // === STATUS DOT ===
-// One dot; state is communicated through motion and colour, not icons.
+// One dot; state is communicated through motion and colour, not icons. The
+// colour says one of three things (see `lib/pillStatus.ts`): fine (neutral),
+// listening (system blue), or Juno cannot answer right now (system red).
+// Nothing else gets a colour, so red is never confused with a passing error
+// and blue is never anything but an open microphone or Juno at the pointer.
 
 /** macOS system blue, the only accent the bar uses. */
 const SYSTEM_BLUE = "#0A84FF";
 
-function StatusDot({
-  state,
-  audioLevel,
-  driving = false,
-  voicePaused = false,
-}: {
-  state: UIState;
-  audioLevel: number;
-  driving?: boolean;
-  /** A wake phrase is configured, but its engine is paused right now. */
-  voicePaused?: boolean;
-}) {
-  const dot = "size-[7px] shrink-0 rounded-full";
-
-  // Juno has the physical cursor. That outranks every other status: the same
-  // travelling motion as working, in system blue, so it reads as Juno moving
-  // the pointer rather than as a fault.
-  if (driving) {
-    return (
-      <div
-        data-testid="floating-bar-driving-dot"
-        className={cn(dot)}
-        style={{
-          backgroundColor: SYSTEM_BLUE,
-          animation: "fbar-orbit 1.1s ease-in-out infinite",
-        }}
-      />
-    );
-  }
-
+/** The dot's motion for a bar state. Motion says what Juno is doing. */
+function dotMotion(state: UIState, voicePaused: boolean): string | undefined {
   switch (state) {
     case UI.BAR_STATES_LISTENING:
     case UI.BAR_STATES_ALWAYS_LISTENING:
     case UI.BAR_STATES_DICTATING:
-      return (
-        <div className="relative flex shrink-0 items-center justify-center">
-          <div
-            className={cn(dot, "relative z-10 bg-white")}
-            style={{
-              animation: "fbar-breathe 1.4s ease-in-out infinite",
-              opacity: Math.max(0.5, audioLevel),
-            }}
-          />
-        </div>
-      );
+      return "fbar-breathe 1.4s ease-in-out infinite";
     case UI.BAR_STATES_TRANSCRIBING:
     case UI.BAR_STATES_SUBMITTING:
     case UI.BAR_STATES_LOADING:
     case UI.BAR_STATES_AGENT_RESPONDING:
     case UI.BAR_STATES_FINISHING:
     case UI.BAR_STATES_STOPPING:
-      return (
-        <div
-          className={cn(dot, "bg-white/80")}
-          style={{ animation: "fbar-orbit 1.1s ease-in-out infinite" }}
-        />
-      );
+      return "fbar-orbit 1.1s ease-in-out infinite";
     case UI.BAR_STATES_SPEAKING:
-      return (
-        <div
-          className={cn(dot, "bg-white/80")}
-          style={{ animation: "fbar-ripple 1.4s ease-out infinite" }}
-        />
-      );
+      return "fbar-ripple 1.4s ease-out infinite";
     case UI.BAR_STATES_ERROR:
-      return (
-        <div
-          className={cn(dot, "bg-[#e8866a]")}
-          style={{ animation: "fbar-shake 0.4s ease-out" }}
-        />
-      );
+      return "fbar-shake 0.4s ease-out";
     case UI.BAR_STATES_SUCCESS:
-      return <div className={cn(dot, "bg-[#7aba8a]")} />;
     case UI.BAR_STATES_INPUT:
     case UI.BAR_STATES_EXPANDING:
-      return <div className={cn(dot, "bg-white/70")} />;
     case UI.BAR_STATES_DICTATION_READY:
-      return <div className={cn(dot, "bg-[#e8b36a]")} />;
+      return undefined;
     default:
-      // At rest the dot is the only thing on screen, so it carries whether Juno
-      // is listening for its wake phrase. Armed keeps the slow idle breath;
-      // paused is dimmer and still, because a dot that moves the same way in
-      // both states tells a person nothing about whether they can be heard.
-      return (
-        <div
-          data-testid={voicePaused ? "floating-bar-voice-paused" : undefined}
-          className={cn(dot, voicePaused ? "bg-white/30" : "bg-white")}
-          style={
-            voicePaused ? undefined : { animation: "fbar-idle 4s ease-in-out infinite" }
-          }
-        />
-      );
+      // At rest the dot carries whether Juno is listening for its wake
+      // phrase: armed keeps the slow idle breath, paused is still.
+      return voicePaused ? undefined : "fbar-idle 4s ease-in-out infinite";
   }
+}
+
+/** The neutral dot's opacity per state, unchanged from before colour meant status. */
+function neutralShade(state: UIState, voicePaused: boolean): string {
+  switch (state) {
+    case UI.BAR_STATES_TRANSCRIBING:
+    case UI.BAR_STATES_SUBMITTING:
+    case UI.BAR_STATES_LOADING:
+    case UI.BAR_STATES_AGENT_RESPONDING:
+    case UI.BAR_STATES_FINISHING:
+    case UI.BAR_STATES_STOPPING:
+    case UI.BAR_STATES_SPEAKING:
+    case UI.BAR_STATES_ERROR:
+      return "rgba(255,255,255,0.8)";
+    case UI.BAR_STATES_INPUT:
+    case UI.BAR_STATES_EXPANDING:
+    case UI.BAR_STATES_DICTATION_READY:
+      return "rgba(255,255,255,0.7)";
+    case UI.BAR_STATES_SUCCESS:
+      return "#ffffff";
+    default:
+      return voicePaused ? "rgba(255,255,255,0.3)" : "#ffffff";
+  }
+}
+
+/** The dot's fill: what `dotTone` decided, or the neutral shade for the state. */
+export function statusDotColor(
+  state: UIState,
+  connectivity: Connectivity | null,
+  { driving = false, voicePaused = false }: { driving?: boolean; voicePaused?: boolean } = {},
+): string {
+  if (driving) return SYSTEM_BLUE;
+  const tone = dotTone(state, connectivity);
+  return tone === "neutral" ? neutralShade(state, voicePaused) : DOT_COLORS[tone];
+}
+
+export function StatusDot({
+  state,
+  audioLevel,
+  connectivity,
+  driving = false,
+  voicePaused = false,
+}: {
+  state: UIState;
+  audioLevel: number;
+  connectivity: Connectivity | null;
+  driving?: boolean;
+  /** A wake phrase is configured, but its engine is paused right now. */
+  voicePaused?: boolean;
+}) {
+  const tone = driving ? "listening" : dotTone(state, connectivity);
+  const listening = tone === "listening" && !driving;
+  // One element in every state, the same size, so nothing about the dot
+  // moves or reflows when its meaning changes (#511); only the fill and the
+  // motion do. The fill cross-fades.
+  return (
+    <div
+      role="img"
+      aria-label={dotLabel(state, connectivity, { driving, voicePaused })}
+      data-testid={
+        driving
+          ? "floating-bar-driving-dot"
+          : voicePaused && state === UI.BAR_STATES_DEFAULT
+            ? "floating-bar-voice-paused"
+            : "floating-bar-status-dot"
+      }
+      data-tone={tone}
+      className="size-[7px] shrink-0 rounded-full transition-[background-color] duration-200 ease-out motion-reduce:transition-none"
+      style={{
+        backgroundColor: statusDotColor(state, connectivity, { driving, voicePaused }),
+        // Down is a fact, not a mood: a steady, full-strength red. The resting
+        // breath would dim it to half.
+        animation: driving
+          ? "fbar-orbit 1.1s ease-in-out infinite"
+          : tone === "down" && dotMotion(state, voicePaused)?.startsWith("fbar-idle")
+            ? undefined
+            : dotMotion(state, voicePaused),
+        opacity: listening ? Math.max(0.5, audioLevel) : undefined,
+      }}
+    />
+  );
 }
 
 /** Real-time audio feedback while a microphone is open. */
@@ -590,6 +616,17 @@ function AudioLevelBars({ audioLevel }: { audioLevel: number }) {
       ))}
     </div>
   );
+}
+
+/**
+ * A trigger hint as tooltip detail: the gesture and the key caps, "Hold ⌃⌥".
+ * Null when nothing keyboard-shaped is bound.
+ */
+export function hintDetail(hint: { shortcut: string; gesture: string } | null): string | null {
+  if (!hint || !hint.shortcut.trim()) return null;
+  const caps = shortcutCaps(hint.shortcut);
+  if (caps.length === 0) return null;
+  return `${hint.gesture} ${caps.map((cap) => cap.glyph).join("")}`;
 }
 
 /** Lower-case status label for the non-input states; null when none applies. */
@@ -762,8 +799,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // while another app is active; the native tracking area forwards the
   // cursor position and we light the button under it ourselves.
   const [hoveredButton, setHoveredButton] = useState<
-    "mic" | "type" | "chat" | "listen" | null
+    "dot" | "mic" | "type" | "chat" | "listen" | null
   >(null);
+  const dotRef = useRef<HTMLDivElement>(null);
   const micRef = useRef<HTMLButtonElement>(null);
   const typeRef = useRef<HTMLButtonElement>(null);
   const chatRef = useRef<HTMLButtonElement>(null);
@@ -807,7 +845,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     if (moveFrameRef.current !== null) return;
     moveFrameRef.current = requestAnimationFrame(() => {
       moveFrameRef.current = null;
-      const hit = (ref: React.RefObject<HTMLButtonElement | null>) => {
+      const hit = (ref: React.RefObject<HTMLElement | null>) => {
         const el = ref.current;
         if (!el) return false;
         const r = el.getBoundingClientRect();
@@ -815,7 +853,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         return pointInRect(x, y, r);
       };
       setHoveredButton(
-        hit(micRef)
+        hit(dotRef)
+          ? "dot"
+          : hit(micRef)
           ? "mic"
           : hit(typeRef)
             ? "type"
@@ -1089,6 +1129,24 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     // the composer up. Closing the pane is what "back to the pill" means.
     setPaneShown(false);
   }, [closeInput]);
+
+  // === CONNECTIVITY AND SHORTCUTS (for the dot and the tooltips) ===
+  //
+  // Whether Juno can answer is Rust's to say; the dot only shows it.
+  const connectivity = useConnectivity();
+  // The talk shortcut, named in the mic's tooltip. Read from the live trigger
+  // registry, never written here, so the tooltip cannot teach a dead key.
+  const [triggerHints, setTriggerHints] = useState<TriggerHints | null>(null);
+  const readTriggerHints = useCallback(() => {
+    invoke<TriggerHints>(COMMANDS.TRIGGERS_GET_TRIGGER_HINTS)
+      .then((hints) => setTriggerHints(hints ?? null))
+      .catch((error) => console.debug("FloatingBar: no trigger hints:", error));
+  }, []);
+  useEffect(() => {
+    readTriggerHints();
+  }, [readTriggerHints]);
+  useEventListener(EVENTS.TRIGGERS_CHANGED, readTriggerHints);
+  const talkShortcut = hintDetail(triggerHints?.agent ?? null);
 
   // === THE WAKE PHRASE ===
   //
@@ -1724,6 +1782,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   };
   const band = BAR_BAND + growth;
   const place = contentPlacement(dockLayout);
+  // Tooltips open toward the side the pill grows: the steady frame always has
+  // the pane's worth of room there, so a tooltip is never clipped by the window.
+  const tooltipSide = growUp ? "top" : "bottom";
 
   // The pane and roster render either below the pill (docked in the top half,
   // growing down) or above it (bottom half, growing up); only the margin side
@@ -1768,6 +1829,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     // The whole window: transparent, never resized per state. Clicks on it
     // outside the column pass through to whatever is underneath (Rust flips
     // the window's mouse handling as the cursor crosses the column's edge).
+    <TooltipProvider delayDuration={PILL_TOOLTIP_DELAY_MS} skipDelayDuration={300}>
     <div className="relative h-screen w-screen select-none overflow-hidden">
       <div
         data-testid="floating-bar-column"
@@ -1862,64 +1924,105 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             vertically centred, so it never reflows, never teleports, and never
             flickers out between states — the pill just grows around it and the
             content appears to its right. */}
-        <div
-          className="pointer-events-none absolute top-1/2 -translate-y-1/2"
-          style={{ left: DOT_HOME_LEFT }}
+        <PillTooltip
+          label={dotLabel(currentUiState, connectivity, {
+            driving: isDriving,
+            voicePaused: voiceConfigured && !voiceListening,
+          })}
+          forcedOpen={hoveredButton === "dot"}
+          side={tooltipSide}
+          // The dot's target sits mid-pill; clear the pill's edge the way the
+          // buttons' tooltips do.
+          sideOffset={pill.height / 2 - 7.5 + 3}
         >
-          <StatusDot
-            state={currentUiState}
-            audioLevel={barState.audioLevel}
-            driving={isDriving}
-            voicePaused={voiceConfigured && !voiceListening}
-          />
-        </div>
+          {/* A 15px hover target around the 7px dot, offset by its own
+              padding so the dot itself sits exactly where it always has. */}
+          <div
+            ref={dotRef}
+            data-testid="floating-bar-dot-target"
+            className="absolute top-1/2 -translate-y-1/2 p-1"
+            style={{ left: DOT_HOME_LEFT - 4 }}
+          >
+            <StatusDot
+              state={currentUiState}
+              audioLevel={barState.audioLevel}
+              connectivity={connectivity}
+              driving={isDriving}
+              voicePaused={voiceConfigured && !voiceListening}
+            />
+          </div>
+        </PillTooltip>
 
         {shownLayout === "compact" ? null : shownLayout === "hover" ? (
           <div
             className="flex items-center gap-1"
             style={{ animation: "fbar-reveal 0.18s ease-out both" }}
           >
-            <button
-              ref={micRef}
-              type="button"
-              onClick={startTalking}
-              aria-label="Talk to Juno"
-              title="Talk to Juno"
-              data-phover={hoveredButton === "mic" ? "" : undefined}
-              className={cn(pillButton, hoveredButton === "mic" && "bg-white/[0.12] text-white")}
+            <PillTooltip
+              label="Talk to Juno"
+              detail={talkShortcut}
+              forcedOpen={hoveredButton === "mic"}
+              side={tooltipSide}
             >
-              <Mic className="size-3.5" />
-            </button>
-            <button
-              ref={typeRef}
-              type="button"
-              onClick={openInput}
-              aria-label="Type to Juno"
-              title="Type to Juno"
-              data-phover={hoveredButton === "type" ? "" : undefined}
-              className={cn(pillButton, hoveredButton === "type" && "bg-white/[0.12] text-white")}
+              <button
+                ref={micRef}
+                type="button"
+                onClick={startTalking}
+                aria-label="Talk to Juno"
+                title="Talk to Juno"
+                data-phover={hoveredButton === "mic" ? "" : undefined}
+                className={cn(pillButton, hoveredButton === "mic" && "bg-white/[0.12] text-white")}
+              >
+                <Mic className="size-3.5" />
+              </button>
+            </PillTooltip>
+            <PillTooltip
+              label="Type to Juno"
+              forcedOpen={hoveredButton === "type"}
+              side={tooltipSide}
             >
-              <Type className="size-3.5" />
-            </button>
+              <button
+                ref={typeRef}
+                type="button"
+                onClick={openInput}
+                aria-label="Type to Juno"
+                title="Type to Juno"
+                data-phover={hoveredButton === "type" ? "" : undefined}
+                className={cn(pillButton, hoveredButton === "type" && "bg-white/[0.12] text-white")}
+              >
+                <Type className="size-3.5" />
+              </button>
+            </PillTooltip>
             {/* Always offered. This used to appear only when a conversation
                 had been dismissed, so after "New chat" emptied the history
                 there was no way back into the pane at all. */}
-            <button
-              ref={chatRef}
-              type="button"
-              onClick={reopenPane}
-              aria-label="Open chat"
-              title="Open chat"
-              data-phover={hoveredButton === "chat" ? "" : undefined}
-              className={cn(pillButton, hoveredButton === "chat" && "bg-white/[0.12] text-white")}
+            <PillTooltip
+              label="Open chat"
+              forcedOpen={hoveredButton === "chat"}
+              side={tooltipSide}
             >
-              <Maximize2 className="size-3.5" />
-            </button>
+              <button
+                ref={chatRef}
+                type="button"
+                onClick={reopenPane}
+                aria-label="Open chat"
+                title="Open chat"
+                data-phover={hoveredButton === "chat" ? "" : undefined}
+                className={cn(pillButton, hoveredButton === "chat" && "bg-white/[0.12] text-white")}
+              >
+                <Maximize2 className="size-3.5" />
+              </button>
+            </PillTooltip>
             {/* The wake phrase, when there is one. A microphone that is open
                 all day is worth being able to close for a while without going
                 to Settings and taking the trigger away, which is a different
                 and more permanent thing to mean. */}
             {voiceConfigured && (
+              <PillTooltip
+                label={voiceListening ? "Stop listening for the wake phrase" : "Listen for the wake phrase"}
+                forcedOpen={hoveredButton === "listen"}
+                side={tooltipSide}
+              >
               <button
                 ref={listenRef}
                 type="button"
@@ -1938,6 +2041,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               >
                 {voiceListening ? <Ear className="size-3.5" /> : <EarOff className="size-3.5" />}
               </button>
+              </PillTooltip>
             )}
           </div>
         ) : showInput && shownLayout === "full" ? (
@@ -2106,5 +2210,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       {!growUp && chatPaneNode}
       </div>
     </div>
+    </TooltipProvider>
   );
 }
