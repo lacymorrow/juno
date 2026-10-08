@@ -3,56 +3,20 @@
 Status: DRAFT. Lacy approves every post individually. Herald publishes after approval.
 No launch date set. Depends on step 1 (demo clip) and step 2 (download path QA pass).
 
-Note: humanizer skill was not available in this session. Humanizer rules applied manually
-from ~/.agents/skills/humanizer/SKILL.md. Herald should re-run through humanizer before publishing.
+Note: humanizer skill was not available when these drafts were written. Humanizer rules
+applied manually from writing checklist. Herald should re-run through humanizer before publishing.
 
-Pricing: LAC-4126 adds a pricing page. Once the founding presale checkout is live,
-replace `{{PRICING_URL}}` placeholders below with the real URL.
+Hook: "answers you can press" (ops lead, 2026-10-07). OpenAI shipped Intelligent UI;
+Juno's interactive response cards have been live for months. Lead every piece with this angle.
+Pricing URL: junebug.ai/pricing (LAC-4126). Verify preview is live before publishing.
+X thread: moved to LAC-4175 (under LAC-4173, due Oct 9).
 
 ---
 
-## 1. X Launch Thread (@junebug_ai, 5 posts)
+## 1. X Launch Thread
 
-Each post verified under 280 characters.
-
-### Post 1 (clip + hook)
-
-[Demo clip attached]
-
-Juno is out. A computer use agent for your Mac, controlled by voice.
-
-It reads your screen and drives your apps until the job is done, working in the background so your cursor stays yours.
-
-Free, open source. junebug.ai
-
-### Post 2 (what makes it different)
-
-Cloud computer use agents work in a sandbox. Desktop ones take over your mouse.
-
-Juno sends actions to apps through macOS accessibility APIs in the background. You keep your cursor and your frontmost window. The agent works alongside you.
-
-### Post 3 (technical moat)
-
-What makes this reliable on Mac: AX-grounded clicking.
-
-Before every click, Juno hit-tests the macOS accessibility tree. If there is a button at that coordinate, it fires AXPress instead of a raw pixel click. 1-5ms. Falls back silently.
-
-No Docker, no VNC. Native macOS.
-
-### Post 4 (no API key needed)
-
-If you have Claude Max or Pro, you already paid for this.
-
-Juno runs through the Claude CLI. Sign in once, the agent works on your Mac at zero additional cost.
-
-Direct API keys work too. {{PRICING_URL}}
-
-### Post 5 (CTA)
-
-40k+ lines of Rust, all open source. Built on Tauri v2 with React.
-
-github.com/lacymorrow/juno
-junebug.ai
+Moved to LAC-4175 (child of LAC-4173, due Oct 9). Original drafts in git history (b0e36abb).
+LAC-4175 owns the final thread with the "answers you can press" hook.
 
 ---
 
@@ -64,7 +28,7 @@ Show HN: Juno, voice-controlled computer use for macOS (Tauri/Rust, open source)
 
 ### Lacy's first comment
 
-I built Juno because I wanted voice computer use on my Mac without handing my desktop to a cloud VM or watching my cursor get hijacked.
+I built Juno because I wanted to say something to my Mac and have my apps respond. OpenAI just shipped "Intelligent UI" in ChatGPT, where answers come back as interactive components you can tap. Juno has been shipping this for months. The difference: instead of charts inside a chat window, Juno streams response cards with action buttons that press real controls in your apps through macOS accessibility APIs. You say "reschedule my 3pm," a card shows the event, and the Reschedule button fires an AXPress on Calendar.
 
 It is a Tauri v2 app. The backend is about 40k lines of Rust. Everything except the chat UI lives there: audio, screenshots, networking, accessibility, agent orchestration. The frontend is React + TypeScript, and it only renders what the backend tells it.
 
@@ -84,7 +48,7 @@ Tech stack:
 - tokio + async Rust for the concurrency layer
 - Multi-agent orchestration with memory isolation between specialists
 
-macOS 14+. Free. Pricing and founding presale: {{PRICING_URL}}. Source: https://github.com/lacymorrow/juno
+macOS 14+. Free. Pricing and founding presale: junebug.ai/pricing. Source: https://github.com/lacymorrow/juno
 
 Happy to answer questions about the accessibility API work or the architecture.
 
@@ -94,23 +58,25 @@ Happy to answer questions about the accessibility API work or the architecture.
 
 ### Tagline
 
-Voice-controlled computer use for your Mac. Your cursor stays yours.
+Answers you can press. Voice-controlled computer use for Mac.
 
 ### Description
 
-Juno is a desktop agent that uses your Mac the way you do. You talk or type. It reads your screen, clicks buttons, types text, and keeps going until the job is done.
+Most AI agents answer with text. Juno answers with buttons that work.
 
-What sets it apart from cloud-based computer use: Juno runs natively on macOS and acts through accessibility APIs in the background. Your cursor stays under your hand and your frontmost window stays in front.
+You talk or type. Juno reads your screen, streams a response card with action buttons, and presses real controls in your apps through macOS accessibility APIs. "Reschedule my 3pm" returns a card with the event and a Reschedule button that fires an AXPress on Calendar. The response is the action.
 
 Before every click, Juno checks the macOS accessibility tree at the target coordinate. If it finds a button, it clicks the element semantically instead of guessing at pixels. This is AX-grounded clicking, and it is the reason coordinate-based targeting drift does not bite here.
 
-Voice input runs locally through Whisper. No audio leaves your machine. If you have a Claude Max or Pro subscription, you do not need a separate API key. Pricing: {{PRICING_URL}}
+Background mode is on by default. Your cursor stays under your hand. Your frontmost window stays in front. The agent works alongside you.
+
+Voice input runs locally through Whisper. No audio leaves your machine. If you have a Claude Max or Pro subscription, you do not need a separate API key. Pricing: junebug.ai/pricing
 
 Built with Tauri v2 (Rust + React). Open source.
 
 ### Gallery list (suggested screenshots/assets)
 
-1. Hero: Juno bar + orb on the desktop with a voice command being spoken
+1. Hero: Juno streaming a response card with action buttons on the desktop
 2. AX grounding: Juno clicking a button in Figma, overlay showing the element it found
 3. Voice: local transcription in progress, waveform visible
 4. Background mode: user's cursor in one app while Juno works in another app
@@ -119,7 +85,9 @@ Built with Tauri v2 (Rust + React). Open source.
 
 ### Maker comment (from Lacy)
 
-I started building Juno because I wanted to say something to my Mac and have my apps respond. The existing computer use tools wanted me to type into a chat window or hand my desktop to a cloud VM, and that felt backward.
+I started building Juno because I wanted answers I could press. Say something to your Mac and have your apps respond with buttons that drive real controls on your desktop.
+
+OpenAI just showed this idea with Intelligent UI in ChatGPT. Juno has been shipping it for months. The difference is where the buttons point: theirs render inside a chat window. Ours fire AXPress actions on real macOS UI elements through the accessibility tree.
 
 The hard technical problem is clicking accuracy. Every computer use agent screenshots the display, picks a coordinate, and clicks. Between the screenshot and the click, UI can reflow, animate, or shift. That pipeline drifts 1-5 pixels, and coordinate-based agents miss their target constantly.
 
@@ -127,6 +95,6 @@ Juno fixes this with AX-grounded clicking. Before every click, we hit-test the m
 
 Your cursor stays yours. Background mode is on by default. Juno acts through accessibility APIs, not your physical mouse. You can keep working while it runs.
 
-40k+ lines of Rust, open source. Built on Tauri v2 with whisper.cpp for voice and ScreenCaptureKit for screenshots. Free if you already have Claude Max or Pro. Pricing and founding presale: {{PRICING_URL}}
+40k+ lines of Rust, open source. Built on Tauri v2 with whisper.cpp for voice and ScreenCaptureKit for screenshots. Free if you already have Claude Max or Pro. Pricing and founding presale: junebug.ai/pricing
 
 github.com/lacymorrow/juno
