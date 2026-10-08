@@ -170,6 +170,16 @@ fn save_conversation(app: &AppHandle, id: &str, messages: &[Message]) -> Result<
     )
 }
 
+/// Append one message to a conversation that is not the live one, straight
+/// to its file. For a turn Claude ran on its own in a conversation the person
+/// has since moved away from (`claude_cli_own_turn`). The live conversation
+/// goes through the memory manager instead, like every other message.
+pub fn append_message(app: &AppHandle, id: &str, message: Message) -> Result<(), String> {
+    let mut messages = load_messages(app, id)?;
+    messages.push(message);
+    save_conversation(app, id, &messages)
+}
+
 /// Remove a conversation from the index and delete its store file. Emptying the
 /// cached store before removing the file stops the plugin from resurrecting it
 /// with stale content on the next auto-save.
@@ -283,10 +293,22 @@ pub fn spawn_persist_task(
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(SAVE_DEBOUNCE_MS)), if dirty => {
-                    if let Some((aid, msgs)) = &accum {
-                        if let Err(e) = save_conversation(&app, aid, msgs) {
-                            log::warn!("[History] debounced save failed: {e}");
-                        }
+                    let saved = match &accum {
+                        Some((aid, msgs)) => match save_conversation(&app, aid, msgs) {
+                            Ok(()) => true,
+                            Err(e) => {
+                                log::warn!("[History] debounced save failed: {e}");
+                                false
+                            }
+                        },
+                        None => false,
+                    };
+                    if saved {
+                        // The file is now the whole truth, so the next message
+                        // reseeds from it. A message appended to the file in
+                        // the meantime (`append_message`) is then kept rather
+                        // than overwritten by this stale copy.
+                        accum = None;
                     }
                     dirty = false;
                 }

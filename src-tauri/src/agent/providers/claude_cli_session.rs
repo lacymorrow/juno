@@ -28,8 +28,16 @@
 //!
 //! So every message Juno sends carries its own `uuid`, and the CLI echoes it back as
 //! `command_uuid` on `command_lifecycle` frames. A turn is Juno's if and only if such
-//! a frame opened it. Everything else on the stream is dropped. Unsolicited turns
-//! carry no lifecycle frames at all, which is what makes the test exact.
+//! a frame opened it. Unsolicited turns carry no lifecycle frames at all, which is
+//! what makes the test exact.
+//!
+//! A turn that is not Juno's is not hidden either: it can drive the desktop, so the
+//! person sees it. It is shown as a turn of its own in the conversation that owns
+//! the process, through the same renderer as any other turn (bar, streamed text,
+//! tool and cursor indicators, speech), and Escape interrupts it. A watcher reads
+//! the stream between Juno's turns so it appears as it happens; one already on the
+//! stream when Juno sends a message is shown by that turn, ahead of its own answer.
+//! See `claude_cli_own_turn` for the stage around it.
 //!
 //! ## 3. Nothing is lost when this fails
 //!
@@ -53,7 +61,8 @@
 //! - a reader task owning the child's stdout, parsing NDJSON into a channel;
 //! - `inbox`, the receiving half, behind the session's only `TokioMutex`. Locking it
 //!   both serializes turns and hands the turn its frames, so there is no second lock
-//!   to acquire and no ordering to get wrong.
+//!   to acquire and no ordering to get wrong. Between turns a watcher holds it, and
+//!   gives it up the moment a turn asks.
 //!
 //! ## The warm spare
 //!
@@ -77,16 +86,17 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, Mutex as TokioMutex};
+use tokio::sync::{mpsc, Mutex as TokioMutex, MutexGuard as TokioMutexGuard, Notify};
 use tracing::{debug, info, warn};
 
 use super::claude_cli::claude_command;
+use super::claude_cli_own_turn::Stage;
 use crate::agent::core::AgentError;
 use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 
@@ -115,6 +125,11 @@ const IDLE_REAP_AFTER: Duration = Duration::from_secs(600);
 
 /// How often the reaper looks.
 const REAP_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How often the watcher between turns looks again while a turn is taking the
+/// stream from it. Only ever waited out in the instant between a turn asking
+/// for the stream and getting it.
+const TURN_HANDOFF_POLL: Duration = Duration::from_millis(10);
 
 /// How many `claude` processes may be alive at once.
 ///
@@ -305,6 +320,13 @@ struct CliSession {
     child: std::sync::Mutex<tokio::process::Child>,
     /// Unix seconds of the last turn, for the idle reaper.
     last_used: AtomicU64,
+    /// The conversation this process runs, which is where a turn Claude starts
+    /// on its own is shown. `None` for the warm spare until it is adopted.
+    owner: std::sync::Mutex<Option<String>>,
+    /// Turns waiting for `inbox`, and the signal that asks the watcher holding
+    /// it between turns to step aside (see [`watch_between_turns`]).
+    turns_waiting: AtomicUsize,
+    turn_wanted: Notify,
 }
 
 impl CliSession {
@@ -330,6 +352,34 @@ impl CliSession {
 
     fn idle_for(&self) -> Duration {
         Duration::from_secs(now_secs().saturating_sub(self.last_used.load(Ordering::Relaxed)))
+    }
+
+    fn owner(&self) -> Option<String> {
+        self.owner.lock().ok().and_then(|owner| owner.clone())
+    }
+
+    fn set_owner(&self, conversation_id: &str) {
+        if let Ok(mut owner) = self.owner.lock() {
+            *owner = Some(conversation_id.to_string());
+        }
+    }
+
+    /// Take the stream for a turn. Between turns the watcher holds it; this
+    /// asks it to step aside, and it does unless it is showing a turn Claude
+    /// started, which the CLI would finish before running ours anyway.
+    async fn lock_for_turn(&self) -> TokioMutexGuard<'_, mpsc::UnboundedReceiver<Value>> {
+        // Counted down on drop, so a turn abandoned while it waits cannot
+        // leave the watcher stepping aside forever.
+        struct Waiting<'a>(&'a AtomicUsize);
+        impl Drop for Waiting<'_> {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        self.turns_waiting.fetch_add(1, Ordering::SeqCst);
+        let _waiting = Waiting(&self.turns_waiting);
+        self.turn_wanted.notify_waiters();
+        self.inbox.lock().await
     }
 }
 
@@ -622,7 +672,9 @@ fn fill_spare(app: &tauri::AppHandle, config: LaunchConfig) {
                 && state.slot.is_none()
                 && state.config.as_ref().map(signature_of).as_deref() == Some(signature.as_str());
             if still_wanted {
-                state.slot = Some(Arc::new(session));
+                let session = Arc::new(session);
+                watch_between_turns(&session, app);
+                state.slot = Some(session);
             } else {
                 // Shut down, superseded by newer settings, or raced: not needed.
                 session.kill();
@@ -824,7 +876,11 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, Origin)> {
                 &label,
                 signature.clone(),
             ) {
-                Ok(session) => (Arc::new(session), Origin::Cold),
+                Ok(session) => {
+                    let session = Arc::new(session);
+                    watch_between_turns(&session, req.app_handle);
+                    (session, Origin::Cold)
+                }
                 Err(e) => {
                     warn!("[CliSession] Could not start a persistent Claude CLI session: {e}");
                     return None;
@@ -857,6 +913,9 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, Origin)> {
         }
     }
 
+    // From here on, a turn Claude starts in this process is shown in this
+    // conversation. A spare had no owner until now.
+    spawned.set_owner(req.conversation_id);
     map.insert(req.conversation_id.to_string(), Arc::clone(&spawned));
     Some((spawned, origin))
 }
@@ -884,9 +943,9 @@ fn spawn_session(
         .args(&args)
         // A process that outlives its turn can be woken by its own background
         // work: a finished background Bash task or subagent, a cron job, a
-        // scheduled wakeup. Each starts a turn nobody asked for, which lifecycle
-        // correlation hides but cannot stop from spending tokens or acting on
-        // the desktop (spike, Q2a). Switch those sources off at the root.
+        // scheduled wakeup. Each starts a turn nobody asked for, which Juno shows
+        // as Claude's own but cannot stop from spending tokens (spike, Q2a).
+        // Switch those sources off at the root.
         // Unknown to an older CLI, which simply ignores them.
         .envs(UNSOLICITED_TURN_ENV)
         .stdin(Stdio::piped())
@@ -977,6 +1036,9 @@ fn spawn_session(
         inbox: TokioMutex::new(frames_rx),
         child: std::sync::Mutex::new(child),
         last_used: AtomicU64::new(now_secs()),
+        owner: std::sync::Mutex::new(None),
+        turns_waiting: AtomicUsize::new(0),
+        turn_wanted: Notify::new(),
     })
 }
 
@@ -1085,7 +1147,7 @@ async fn run_in_session(
 ) -> Result<TurnOutcome, AgentError> {
     // Locking the inbox is what serializes turns: one at a time per process, which
     // is also the only order the CLI itself will run them in.
-    let mut inbox = session.inbox.lock().await;
+    let mut inbox = session.lock_for_turn().await;
 
     if session.is_dead() {
         drop(inbox);
@@ -1093,16 +1155,9 @@ async fn run_in_session(
         return Ok(TurnOutcome::Unavailable);
     }
 
-    // Anything still on the stream belongs to a turn that is over, or to a turn the
-    // CLI started by itself. Neither is ours. Clear it so the lifecycle scan below
-    // starts from a clean stream.
-    let mut discarded = 0usize;
-    while inbox.try_recv().is_ok() {
-        discarded += 1;
-    }
-    if discarded > 0 {
-        debug!("[CliSession] Discarded {discarded} stale frame(s) before this turn");
-    }
+    // Nothing is cleared off the stream first. Whatever is waiting there is a
+    // turn Claude started on its own (the watcher between turns had not reached
+    // it yet), and `stream_turn` shows it as one rather than throwing it away.
 
     let command_uuid = uuid::Uuid::new_v4().to_string();
     let message = json!({
@@ -1160,14 +1215,493 @@ async fn run_in_session(
 
 /// Whether a frame is the `command_lifecycle` acknowledgement of *our* turn.
 ///
-/// This is the correlation the whole persistent path hangs on: a turn is rendered
+/// This is the correlation the whole persistent path hangs on: a turn is Juno's
 /// if and only if a `command_lifecycle` frame carrying the exact `uuid` we put on
-/// the user message opens it. Anything else — a different uuid, a missing uuid, a
-/// non-string uuid, another frame type — is a turn the CLI started on its own
-/// (observed: a finishing background Bash task) and must stay invisible.
+/// the user message opens it. Anything else (a different uuid, a missing uuid, a
+/// non-string uuid, another frame type) belongs to a turn the CLI started on its
+/// own (observed: a finishing background Bash task). That turn is shown as its
+/// own turn, never as the answer to ours.
 fn lifecycle_frame_is_ours(frame: &Value, command_uuid: &str) -> bool {
     frame.get("type").and_then(Value::as_str) == Some("command_lifecycle")
         && frame.get("command_uuid").and_then(Value::as_str) == Some(command_uuid)
+}
+
+/// Where a frame belongs, seen from a turn waiting on its own uuid.
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    /// A `command_lifecycle` frame for our uuid, with its state.
+    OurLifecycle(String),
+    /// Part of our turn, which has started.
+    Ours,
+    /// Part of a turn Claude started on its own.
+    Claude,
+    /// Protocol chatter with no turn behind it: someone else's lifecycle frame,
+    /// a control response.
+    Skip,
+}
+
+/// Sorts the stream for one of Juno's turns. Before our `started` frame,
+/// everything that is not protocol chatter is Claude's own turn; from it on,
+/// everything is ours (the CLI runs turns strictly in order).
+struct Correlator<'a> {
+    command_uuid: &'a str,
+    ours: bool,
+}
+
+impl<'a> Correlator<'a> {
+    fn new(command_uuid: &'a str) -> Self {
+        Self {
+            command_uuid,
+            ours: false,
+        }
+    }
+
+    fn route(&mut self, frame: &Value) -> Route {
+        match frame.get("type").and_then(Value::as_str).unwrap_or("") {
+            "command_lifecycle" => {
+                if !lifecycle_frame_is_ours(frame, self.command_uuid) {
+                    return Route::Skip;
+                }
+                let state = frame
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                if state == "started" {
+                    self.ours = true;
+                }
+                Route::OurLifecycle(state)
+            }
+            "control_response" => Route::Skip,
+            _ if self.ours => Route::Ours,
+            _ => Route::Claude,
+        }
+    }
+}
+
+/// Whether a frame proves a turn is running. A turn Claude starts is raised
+/// on the first of these, so a stray `system` frame or the `result` tail of a
+/// turn that is already over never flashes the bar.
+fn starts_a_turn(frame: &Value) -> bool {
+    matches!(
+        frame.get("type").and_then(Value::as_str),
+        Some("stream_event" | "assistant" | "user")
+    )
+}
+
+/// How a turn's `result` frame ended it.
+#[derive(Debug)]
+struct TurnEnd {
+    /// The interrupt landed: `aborted_streaming` (mid-generation) or
+    /// `aborted_tools` (mid-tool-call). Nothing more is shown or spoken.
+    aborted: bool,
+    /// The raw final text, tags included.
+    text: Option<String>,
+}
+
+/// Renders one turn's frames: the same frames, through the same one-shot path
+/// handlers, whether Juno asked for the turn or Claude started it. Text deltas
+/// reach the screen and the TTS splitter as they arrive, tool and reasoning
+/// indicators rise and fall, and the whole-message `assistant` frame is only a
+/// fallback.
+struct TurnRenderer {
+    app: Option<tauri::AppHandle>,
+    msg_id: String,
+    // Partial-message bookkeeping, exactly as the one-shot `process_stream`
+    // keeps it. Fresh per turn: block indices and message ids restart.
+    blocks: HashMap<u64, super::claude_cli::StreamBlock>,
+    pending_tools: HashMap<String, String>,
+    streamed_messages: std::collections::HashSet<String>,
+    partial_message_id: Option<String>,
+    saw_text_delta: bool,
+    // Whole-message fallback: `assistant` frames are cumulative per message, so
+    // the char cursor restarts for each new message in a tool loop.
+    fallback_message_id: Option<String>,
+    previous_chars: usize,
+    accumulated: String,
+    tts: crate::agent::tts_tags::TtsTagStream,
+    spoken: Vec<String>,
+    /// The person asked the turn to stop. Nothing more reaches the screen or
+    /// the speaker; tool indicators still come down.
+    muted: bool,
+}
+
+impl TurnRenderer {
+    fn new(app: Option<tauri::AppHandle>, msg_id: String) -> Self {
+        Self {
+            app,
+            msg_id,
+            blocks: HashMap::new(),
+            pending_tools: HashMap::new(),
+            streamed_messages: std::collections::HashSet::new(),
+            partial_message_id: None,
+            saw_text_delta: false,
+            fallback_message_id: None,
+            previous_chars: 0,
+            accumulated: String::new(),
+            tts: crate::agent::tts_tags::TtsTagStream::new(),
+            spoken: Vec::new(),
+            muted: false,
+        }
+    }
+
+    /// Render one frame. Returns how the turn ended when `frame` is its `result`.
+    fn feed(&mut self, frame: &Value) -> Option<TurnEnd> {
+        use super::claude_cli::{clear_finished_tools, ClaudeCliBrain};
+
+        match frame.get("type").and_then(Value::as_str).unwrap_or("") {
+            "stream_event" => {
+                if self.muted {
+                    return None;
+                }
+                if let Some(event) = frame.get("event") {
+                    ClaudeCliBrain::handle_stream_event(
+                        event,
+                        &self.app,
+                        &self.msg_id,
+                        &mut self.blocks,
+                        &mut self.pending_tools,
+                        &mut self.streamed_messages,
+                        &mut self.partial_message_id,
+                        &mut self.saw_text_delta,
+                        &mut self.tts,
+                        &mut self.accumulated,
+                        &mut self.spoken,
+                    );
+                }
+            }
+            // Tool results come back as a `user` turn; their indicators come down.
+            "user" => clear_finished_tools(frame, &self.app, &self.msg_id, &mut self.pending_tools),
+            "assistant" => {
+                if self.muted {
+                    return None;
+                }
+                let message = frame.get("message")?;
+                let message_id = message
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                // When the partial stream is live it has already shown and
+                // spoken every word of this message. Diffing it again would
+                // render each word twice and speak the answer twice over.
+                let already_streamed = match message_id.as_ref() {
+                    Some(id) => self.streamed_messages.contains(id),
+                    None => self.saw_text_delta,
+                };
+                if already_streamed {
+                    return None;
+                }
+                if self.fallback_message_id != message_id {
+                    self.fallback_message_id = message_id;
+                    self.previous_chars = 0;
+                }
+                let text = super::claude_cli::extract_text_from_message(message);
+                let chars = text.chars().count();
+                if chars <= self.previous_chars {
+                    return None;
+                }
+                // Char offsets, never byte offsets: slicing bytes panics on
+                // multi-byte UTF-8.
+                let delta: String = text.chars().skip(self.previous_chars).collect();
+                self.previous_chars = chars;
+                ClaudeCliBrain::emit_display_text(
+                    &self.app,
+                    &self.msg_id,
+                    &delta,
+                    &mut self.tts,
+                    &mut self.accumulated,
+                    &mut self.spoken,
+                );
+            }
+            "result" => {
+                let subtype = frame.get("subtype").and_then(Value::as_str).unwrap_or("");
+                let terminal = frame
+                    .get("terminal_reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if let Some(ms) = frame.get("duration_ms").and_then(Value::as_u64) {
+                    info!("[CliSession] Turn duration: {ms}ms");
+                }
+                if let Some(cost) = frame.get("total_cost_usd").and_then(Value::as_f64) {
+                    info!("[CliSession] Turn cost: ${cost:.4}");
+                }
+                // `terminal_reason` is a closed protocol field, not an error
+                // message (LAC-3697).
+                let aborted = matches!(terminal, "aborted_streaming" | "aborted_tools");
+                if aborted {
+                    info!("[CliSession] Turn ended as {subtype}/{terminal}");
+                }
+                return Some(TurnEnd {
+                    aborted,
+                    text: frame
+                        .get("result")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                });
+            }
+            // `system/init` arrives at the head of every turn, not once per process.
+            // Nothing to do with it beyond noting the subtype.
+            "system" => {
+                // Hoisted out of the macro: tracing's expansion shadows `Value`
+                // with its own field trait of the same name (E0782).
+                let subtype = frame.get("subtype").and_then(Value::as_str).unwrap_or("?");
+                debug!("[CliSession] system/{subtype}");
+            }
+            other => debug!("[CliSession] frame '{other}' skipped"),
+        }
+        None
+    }
+
+    /// Nothing may be left spinning however the turn ended: a thinking block
+    /// the CLI never stopped, or a tool whose result never came.
+    fn wind_down(&mut self) {
+        super::claude_cli::close_open_thinking(&self.app, &mut self.blocks);
+        super::claude_cli::clear_pending_tools(&self.app, &self.msg_id, &mut self.pending_tools);
+    }
+
+    /// The text a completed turn leaves behind.
+    ///
+    /// Flushes the tag parser (a partial tag becomes display text, an
+    /// unterminated block is still spoken). The `result` frame carries the raw
+    /// final text, tags included: it is stripped for display, and any spoken
+    /// block the stream did not already cover is spoken now.
+    fn complete(&mut self, raw: Option<String>) -> String {
+        super::claude_cli::ClaudeCliBrain::flush_display_text(
+            &self.app,
+            &self.msg_id,
+            &mut self.tts,
+            &mut self.accumulated,
+            &mut self.spoken,
+        );
+        let display = raw.map(|raw| {
+            let (display, blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
+            let unspoken: Vec<String> = blocks
+                .into_iter()
+                .filter(|b| !self.spoken.contains(b))
+                .collect();
+            if let Some(handle) = self.app.as_ref() {
+                emit_chunk(handle, String::new(), &self.msg_id, &unspoken);
+            }
+            display
+        });
+        display.unwrap_or_else(|| self.accumulated.clone())
+    }
+}
+
+/// How a turn Claude started came to an end.
+enum OwnTurnEnd {
+    Finished(Option<String>),
+    /// Escape, or a turn that overran and was interrupted.
+    Cancelled,
+    /// The process went away mid-turn.
+    Lost,
+}
+
+/// A turn Claude started on its own, shown as it runs: its own bubble in the
+/// conversation that owns the process, speech, tool and cursor indicators, and
+/// (unless it is nested inside one of Juno's turns) the bar and Escape.
+struct OwnTurn {
+    stage: Stage,
+    renderer: TurnRenderer,
+    surface: TurnSurface,
+}
+
+impl OwnTurn {
+    async fn begin(app: &tauri::AppHandle, conversation_id: &str, nested: bool) -> Self {
+        let stage = Stage::begin(app, conversation_id, nested).await;
+        let msg_id = uuid::Uuid::new_v4().to_string();
+        // Off screen the bubble is not opened: the chat on screen belongs to
+        // another conversation. The text still streams to speech and the bar,
+        // and the history keeps it.
+        let mut surface = TurnSurface::new(app, msg_id.clone(), stage.on_screen());
+        surface.open();
+        Self {
+            stage,
+            renderer: TurnRenderer::new(Some(app.clone()), msg_id),
+            surface,
+        }
+    }
+
+    async fn finish(mut self, end: OwnTurnEnd) {
+        self.renderer.wind_down();
+        let (shown, kept, cancelled) = match end {
+            OwnTurnEnd::Finished(raw) => {
+                let text = self.renderer.complete(raw);
+                (text.clone(), text, false)
+            }
+            OwnTurnEnd::Cancelled => ("Cancelled".to_string(), String::new(), true),
+            // Fail silently: the bubble keeps what it already showed.
+            OwnTurnEnd::Lost => (self.renderer.accumulated.clone(), String::new(), true),
+        };
+        self.surface.close(shown);
+        self.stage.finish(kept, cancelled).await;
+    }
+}
+
+/// Resolves once `rx` reads true. Never, if its sender is gone.
+async fn until_set(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    loop {
+        if *rx.borrow() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+/// Resolves once `rx` turns true from here on. A value already set (the last
+/// Escape, still latched on the global channel) does not count.
+async fn until_raised(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    rx.borrow_and_update();
+    loop {
+        if rx.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+        if *rx.borrow_and_update() {
+            return;
+        }
+    }
+}
+
+/// Read the stream between Juno's turns, so a turn Claude starts on its own
+/// is shown while it happens instead of being found, later, in front of the
+/// person's next question.
+///
+/// Holds `inbox` while idle and steps aside the moment a turn asks for it
+/// ([`CliSession::lock_for_turn`]). Ends with the process: the reader drops
+/// the stream at EOF.
+fn watch_between_turns(session: &Arc<CliSession>, app: &tauri::AppHandle) {
+    let session = Arc::clone(session);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            // A turn wants the stream: let it take the lock before asking again.
+            if session.turns_waiting.load(Ordering::SeqCst) > 0 {
+                tokio::time::sleep(TURN_HANDOFF_POLL).await;
+                continue;
+            }
+            let mut inbox = session.inbox.lock().await;
+            // Armed before the check, so a turn arriving between the two is
+            // seen by one or the other.
+            let wanted = session.turn_wanted.notified();
+            tokio::pin!(wanted);
+            wanted.as_mut().enable();
+            if session.turns_waiting.load(Ordering::SeqCst) > 0 {
+                continue;
+            }
+            let frame = tokio::select! {
+                frame = inbox.recv() => frame,
+                _ = &mut wanted => continue,
+            };
+            let Some(frame) = frame else {
+                debug!("[CliSession] Stream closed; the watcher stops");
+                break;
+            };
+            if !starts_a_turn(&frame) {
+                let kind = frame.get("type").and_then(Value::as_str).unwrap_or("?");
+                debug!("[CliSession] Between turns: '{kind}' skipped");
+                continue;
+            }
+            match session.owner() {
+                Some(conversation_id) => {
+                    run_own_turn(&session, &mut inbox, &app, &conversation_id, frame).await;
+                }
+                None => {
+                    // The spare receives nothing until adopted, so it has no
+                    // reason to run a turn, and no conversation to show one in.
+                    debug!("[CliSession] The warm spare started a turn on its own; discarded");
+                }
+            }
+        }
+    });
+}
+
+/// Show a turn Claude started between Juno's turns, from its first frame to
+/// its `result`. Escape interrupts it like any other turn.
+async fn run_own_turn(
+    session: &CliSession,
+    inbox: &mut mpsc::UnboundedReceiver<Value>,
+    app: &tauri::AppHandle,
+    conversation_id: &str,
+    first: Value,
+) {
+    let mut turn = OwnTurn::begin(app, conversation_id, false).await;
+
+    // The roster row's stop (Escape on the focused row), and the global stop
+    // for when there is no row. A never-firing channel stands in for either.
+    let (_keep, never_cancels) = tokio::sync::watch::channel(false);
+    let mut row_rx = turn
+        .stage
+        .cancel_rx()
+        .unwrap_or_else(|| never_cancels.clone());
+    let mut global_rx = {
+        use tauri::Manager;
+        app.try_state::<crate::state::AppState>()
+            .map(|state| state.cancel_rx.clone())
+            .unwrap_or(never_cancels)
+    };
+
+    let turn_deadline = Instant::now() + TURN_TIMEOUT;
+    let mut cancel_deadline: Option<Instant> = None;
+    let mut end = turn.renderer.feed(&first);
+
+    let outcome = loop {
+        if let Some(done) = end.take() {
+            break if cancel_deadline.is_some() || done.aborted {
+                OwnTurnEnd::Cancelled
+            } else {
+                OwnTurnEnd::Finished(done.text)
+            };
+        }
+
+        let received = match cancel_deadline {
+            // Already interrupted: drain to the aborted result.
+            Some(deadline) => tokio::time::timeout_at(deadline.into(), inbox.recv()).await,
+            None => tokio::select! {
+                frame = tokio::time::timeout_at(turn_deadline.into(), inbox.recv()) => frame,
+                _ = async {
+                    tokio::select! {
+                        _ = until_set(&mut row_rx) => {}
+                        _ = until_raised(&mut global_rx) => {}
+                    }
+                } => {
+                    info!("[CliSession] Cancelled Claude's own turn; interrupting it");
+                    send_interrupt(session);
+                    turn.renderer.muted = true;
+                    cancel_deadline = Some(Instant::now() + INTERRUPT_GRACE);
+                    continue;
+                }
+            },
+        };
+
+        match received {
+            Ok(Some(frame)) => {
+                let kind = frame.get("type").and_then(Value::as_str).unwrap_or("");
+                if kind == "command_lifecycle" || kind == "control_response" {
+                    continue;
+                }
+                end = turn.renderer.feed(&frame);
+            }
+            Ok(None) => break OwnTurnEnd::Lost,
+            Err(_elapsed) => {
+                if cancel_deadline.is_some() {
+                    warn!("[CliSession] Interrupt went unanswered; killing the process");
+                    session.kill();
+                    break OwnTurnEnd::Cancelled;
+                }
+                warn!(
+                    "[CliSession] Claude's own turn exceeded {}s; interrupting",
+                    TURN_TIMEOUT.as_secs()
+                );
+                send_interrupt(session);
+                turn.renderer.muted = true;
+                cancel_deadline = Some(Instant::now() + INTERRUPT_GRACE);
+            }
+        }
+    };
+    session.touch();
+    turn.finish(outcome).await;
 }
 
 /// How a turn that Juno owns ended, when it did not complete.
@@ -1184,6 +1718,16 @@ impl TurnFailure {
             shown: "Cancelled",
         }
     }
+
+    fn timed_out() -> Self {
+        Self {
+            error: AgentError::Timeout(format!(
+                "Claude CLI timed out after {} seconds",
+                TURN_TIMEOUT.as_secs()
+            )),
+            shown: "Claude CLI timed out",
+        }
+    }
 }
 
 /// Read the turn off the stream, emitting as it goes.
@@ -1191,20 +1735,15 @@ impl TurnFailure {
 /// Split out from [`run_turn`] so every exit path there can decide whether the
 /// session survives, in one place.
 ///
-/// The frames inside a turn are the one-shot path's frames, so they go through
-/// the one-shot path's handlers: `stream_event` text deltas reach the screen and
-/// the TTS splitter as they arrive, tool and reasoning indicators rise and fall
-/// the same way, and the whole-message `assistant` frame is only a fallback.
+/// A turn Claude starts on its own can be on the stream ahead of ours (the CLI
+/// runs it before our queued message). It is shown as its own turn, with its
+/// own bubble and its own result, and ours keeps waiting for its `started`.
 async fn stream_turn(
     session: &CliSession,
     inbox: &mut mpsc::UnboundedReceiver<Value>,
     req: &TurnRequest<'_>,
     command_uuid: &str,
 ) -> Result<TurnOutcome, AgentError> {
-    use super::claude_cli::{clear_finished_tools, clear_pending_tools, close_open_thinking};
-    use super::claude_cli::{ClaudeCliBrain, StreamBlock};
-    use std::collections::HashSet;
-
     // Prefer the run's own cancellation channel. For session-tracked runs that is
     // the merged session+global receiver — escape cancels only the focused session,
     // whose token the global channel never sees (LAC-3697) — and the global AppState
@@ -1228,39 +1767,29 @@ async fn stream_turn(
         .message_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    // The shared handlers take the one-shot path's optional handle.
-    let app = Some(req.app_handle.clone());
 
     // The bubble. Opened only at our `started` frame, and closed however this
     // function is left once it is open, including a process that dies mid-turn.
-    let mut surface = TurnSurface::new(req.app_handle, msg_id.clone());
+    let mut surface = TurnSurface::new(req.app_handle, msg_id.clone(), true);
+    let mut renderer = TurnRenderer::new(Some(req.app_handle.clone()), msg_id);
+    let mut correlator = Correlator::new(command_uuid);
+    // A turn Claude started on its own, in progress ahead of ours.
+    let mut own: Option<OwnTurn> = None;
 
     // "Ours" begins at the command_lifecycle `started` frame carrying our uuid, and
-    // nothing before it is rendered. Until then the turn can still fall back to the
-    // one-shot path without the UI having seen anything.
+    // nothing before it is rendered as ours. Until then the turn can still fall
+    // back to the one-shot path without its own bubble having been opened.
     let mut ours = false;
     // Set once, when the interrupt goes out, so the grace window cannot be pushed
     // forward forever by a process that keeps talking but never ends the turn.
     let mut cancel_deadline: Option<Instant> = None;
-
-    let mut accumulated = String::new();
+    // The interrupt was ours, for running over TURN_TIMEOUT, not the person's.
+    let mut timed_out = false;
     let mut final_result: Option<String> = None;
-    let mut tts = crate::agent::tts_tags::TtsTagStream::new();
-    let mut spoken: Vec<String> = Vec::new();
 
-    // Partial-message bookkeeping, exactly as the one-shot `process_stream`
-    // keeps it. Fresh per turn: block indices and message ids restart.
-    let mut blocks: HashMap<u64, StreamBlock> = HashMap::new();
-    let mut pending_tools: HashMap<String, String> = HashMap::new();
-    let mut streamed_messages: HashSet<String> = HashSet::new();
-    let mut partial_message_id: Option<String> = None;
-    let mut saw_text_delta = false;
-    // Whole-message fallback: `assistant` frames are cumulative per message, so
-    // the char cursor restarts for each new message in a tool loop.
-    let mut fallback_message_id: Option<String> = None;
-    let mut previous_chars: usize = 0;
-
-    let ack_deadline = Instant::now() + LIFECYCLE_ACK_TIMEOUT;
+    // Claude's own turn ahead of ours holds our message in the CLI's queue, so
+    // the acknowledgement window restarts with each of its frames.
+    let mut ack_deadline = Instant::now() + LIFECYCLE_ACK_TIMEOUT;
     let turn_deadline = Instant::now() + TURN_TIMEOUT;
 
     let failure: Option<TurnFailure> = loop {
@@ -1276,18 +1805,13 @@ async fn stream_turn(
         } else {
             tokio::select! {
                 frame = tokio::time::timeout_at(deadline.into(), inbox.recv()) => frame,
-                // Loop on changed() + borrow() rather than wait_for(), to avoid
-                // holding a non-Send guard across the select boundary.
-                _ = async {
-                    loop {
-                        if *cancel_rx.borrow() { return; }
-                        if cancel_rx.changed().await.is_err() {
-                            std::future::pending::<()>().await;
-                        }
-                    }
-                } => {
+                _ = until_set(&mut cancel_rx) => {
                     info!("[CliSession] Cancelled; interrupting the turn (process stays alive)");
                     send_interrupt(session);
+                    renderer.muted = true;
+                    if let Some(turn) = own.as_mut() {
+                        turn.renderer.muted = true;
+                    }
                     cancel_deadline = Some(Instant::now() + INTERRUPT_GRACE);
                     continue;
                 }
@@ -1298,6 +1822,9 @@ async fn stream_turn(
             Ok(Some(frame)) => frame,
             // The sender was dropped: the reader saw EOF, so the process is gone.
             Ok(None) => {
+                if let Some(turn) = own.take() {
+                    turn.finish(OwnTurnEnd::Lost).await;
+                }
                 if !ours {
                     return Ok(TurnOutcome::Unavailable);
                 }
@@ -1314,207 +1841,126 @@ async fn stream_turn(
                     // the conversation survives it via the session id.
                     warn!("[CliSession] Interrupt went unanswered; killing the process");
                     session.kill();
-                    break Some(TurnFailure::cancelled());
+                    if let Some(turn) = own.take() {
+                        turn.finish(OwnTurnEnd::Cancelled).await;
+                    }
+                    break Some(if timed_out {
+                        TurnFailure::timed_out()
+                    } else {
+                        TurnFailure::cancelled()
+                    });
                 }
                 if !ours {
                     // No lifecycle frame for our uuid within the window: an older CLI
-                    // without msg_lifecycle_v1, or a wedged process. Nothing was
-                    // emitted, so the one-shot path can take this turn — but only
-                    // because run_turn kills this process on the way out. The message
-                    // is already on its stdin, and a live process would still run it.
+                    // without msg_lifecycle_v1, or a wedged process. Our bubble was
+                    // never opened, so the one-shot path can take this turn — but
+                    // only because run_turn kills this process on the way out. The
+                    // message is already on its stdin, and a live process would
+                    // still run it.
                     warn!(
                         "[CliSession] No command_lifecycle frame after {}s; falling back",
                         LIFECYCLE_ACK_TIMEOUT.as_secs()
                     );
+                    if let Some(turn) = own.take() {
+                        turn.finish(OwnTurnEnd::Lost).await;
+                    }
                     return Ok(TurnOutcome::Unavailable);
                 }
-                // A turn that overran is interrupted, not killed.
+                // A turn that overran is interrupted, not killed, and its aborted
+                // result is drained so it cannot surface later as a turn of its own.
                 warn!(
                     "[CliSession] Turn exceeded {}s; interrupting",
                     TURN_TIMEOUT.as_secs()
                 );
                 send_interrupt(session);
-                break Some(TurnFailure {
-                    error: AgentError::Timeout(format!(
-                        "Claude CLI timed out after {} seconds",
-                        TURN_TIMEOUT.as_secs()
-                    )),
-                    shown: "Claude CLI timed out",
-                });
+                renderer.muted = true;
+                timed_out = true;
+                cancel_deadline = Some(Instant::now() + INTERRUPT_GRACE);
+                continue;
             }
         };
 
-        let frame_type = frame.get("type").and_then(Value::as_str).unwrap_or("");
-
-        if frame_type == "command_lifecycle" {
-            if !lifecycle_frame_is_ours(&frame, command_uuid) {
-                continue;
+        match correlator.route(&frame) {
+            Route::Skip => {
+                if frame.get("type").and_then(Value::as_str) == Some("control_response") {
+                    debug!("[CliSession] control_response: {}", frame);
+                }
             }
-            match frame.get("state").and_then(Value::as_str) {
-                Some("started") => {
+            Route::OurLifecycle(state) => match state.as_str() {
+                "started" => {
                     ours = true;
+                    // Claude's own turn is over by the time ours starts. One
+                    // that never sent its result is closed here.
+                    if let Some(turn) = own.take() {
+                        turn.finish(OwnTurnEnd::Lost).await;
+                    }
                     surface.open();
                 }
-                Some("cancelled") => break Some(TurnFailure::cancelled()),
+                "cancelled" => break Some(TurnFailure::cancelled()),
                 _ => {}
-            }
-            continue;
-        }
-
-        if frame_type == "control_response" {
-            debug!("[CliSession] control_response: {}", frame);
-            continue;
-        }
-
-        if !ours {
-            // A turn the CLI started by itself, or the tail of an earlier one.
-            // Never rendered; see the module docs.
-            if frame_type == "result" {
-                debug!("[CliSession] Ignoring a result from a turn Juno did not ask for");
-            }
-            continue;
-        }
-
-        match frame_type {
-            "stream_event" => {
-                if cancel_deadline.is_some() {
-                    // The user asked to stop. Nothing more reaches the screen.
-                    continue;
+            },
+            Route::Claude => {
+                ack_deadline = Instant::now() + LIFECYCLE_ACK_TIMEOUT;
+                if own.is_none() {
+                    if !starts_a_turn(&frame) {
+                        // The tail of a turn that is already over.
+                        if frame.get("type").and_then(Value::as_str) == Some("result") {
+                            debug!("[CliSession] A result with no turn in progress; skipped");
+                        }
+                        continue;
+                    }
+                    // Inside our turn: it already owns the bar and Escape, and
+                    // its conversation owns this process.
+                    let mut turn = OwnTurn::begin(req.app_handle, req.conversation_id, true).await;
+                    turn.renderer.muted = cancel_deadline.is_some();
+                    own = Some(turn);
                 }
-                if let Some(event) = frame.get("event") {
-                    ClaudeCliBrain::handle_stream_event(
-                        event,
-                        &app,
-                        &msg_id,
-                        &mut blocks,
-                        &mut pending_tools,
-                        &mut streamed_messages,
-                        &mut partial_message_id,
-                        &mut saw_text_delta,
-                        &mut tts,
-                        &mut accumulated,
-                        &mut spoken,
-                    );
+                let ended = own.as_mut().and_then(|turn| turn.renderer.feed(&frame));
+                if let Some(done) = ended {
+                    if let Some(turn) = own.take() {
+                        let end = if done.aborted || turn.renderer.muted {
+                            OwnTurnEnd::Cancelled
+                        } else {
+                            OwnTurnEnd::Finished(done.text)
+                        };
+                        turn.finish(end).await;
+                    }
                 }
             }
-            // Tool results come back as a `user` turn; their indicators come down.
-            "user" => clear_finished_tools(&frame, &app, &msg_id, &mut pending_tools),
-            "assistant" => {
-                if cancel_deadline.is_some() {
-                    continue;
+            Route::Ours => {
+                if frame.get("type").and_then(Value::as_str) == Some("assistant") && !renderer.muted
+                {
+                    crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
                 }
-                crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
-                let Some(message) = frame.get("message") else {
-                    continue;
-                };
-                let message_id = message
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
-                // When the partial stream is live it has already shown and
-                // spoken every word of this message. Diffing it again would
-                // render each word twice and speak the answer twice over.
-                let already_streamed = match message_id.as_ref() {
-                    Some(id) => streamed_messages.contains(id),
-                    None => saw_text_delta,
-                };
-                if already_streamed {
-                    continue;
+                if let Some(done) = renderer.feed(&frame) {
+                    if cancel_deadline.is_some() || done.aborted {
+                        break Some(if timed_out {
+                            TurnFailure::timed_out()
+                        } else {
+                            TurnFailure::cancelled()
+                        });
+                    }
+                    final_result = done.text;
+                    break None;
                 }
-                if fallback_message_id != message_id {
-                    fallback_message_id = message_id;
-                    previous_chars = 0;
-                }
-                let text = super::claude_cli::extract_text_from_message(message);
-                let chars = text.chars().count();
-                if chars <= previous_chars {
-                    continue;
-                }
-                // Char offsets, never byte offsets: slicing bytes panics on
-                // multi-byte UTF-8.
-                let delta: String = text.chars().skip(previous_chars).collect();
-                previous_chars = chars;
-                ClaudeCliBrain::emit_display_text(
-                    &app,
-                    &msg_id,
-                    &delta,
-                    &mut tts,
-                    &mut accumulated,
-                    &mut spoken,
-                );
             }
-            "result" => {
-                let subtype = frame.get("subtype").and_then(Value::as_str).unwrap_or("");
-                let terminal = frame
-                    .get("terminal_reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-
-                if let Some(ms) = frame.get("duration_ms").and_then(Value::as_u64) {
-                    info!("[CliSession] Turn duration: {ms}ms");
-                }
-                if let Some(cost) = frame.get("total_cost_usd").and_then(Value::as_f64) {
-                    info!("[CliSession] Turn cost: ${cost:.4}");
-                }
-
-                // `terminal_reason` is a closed protocol field, not an error message:
-                // an interrupt ends a turn as `aborted_streaming` (mid-generation) or
-                // `aborted_tools` (mid-tool-call). Both mean the user's stop landed
-                // and nothing from this turn should be shown or spoken (LAC-3697).
-                let aborted = matches!(terminal, "aborted_streaming" | "aborted_tools");
-                if cancel_deadline.is_some() || aborted {
-                    info!("[CliSession] Turn ended as {subtype}/{terminal}");
-                    break Some(TurnFailure::cancelled());
-                }
-
-                if let Some(text) = frame.get("result").and_then(Value::as_str) {
-                    final_result = Some(text.to_string());
-                }
-                break None;
-            }
-            // `system/init` arrives at the head of every turn, not once per process.
-            // Nothing to do with it beyond noting the subtype.
-            "system" => {
-                // Hoisted out of the macro: tracing's expansion shadows `Value`
-                // with its own field trait of the same name (E0782).
-                let subtype = frame.get("subtype").and_then(Value::as_str).unwrap_or("?");
-                debug!("[CliSession] system/{subtype}");
-            }
-            other => debug!("[CliSession] frame '{other}' skipped"),
         }
     };
 
-    // Nothing may be left spinning however the turn ended: a thinking block the
-    // CLI never stopped, or a tool whose result never came.
-    close_open_thinking(&app, &mut blocks);
-    clear_pending_tools(&app, &msg_id, &mut pending_tools);
+    // Claude's own turn, if one was still going when ours ended.
+    if let Some(turn) = own.take() {
+        turn.finish(OwnTurnEnd::Lost).await;
+    }
+
+    // Nothing may be left spinning however the turn ended.
+    renderer.wind_down();
 
     if let Some(failure) = failure {
         surface.close(failure.shown.to_string());
         return Err(failure.error);
     }
 
-    // Flush the tag parser: a partial tag becomes display text, an unterminated
-    // block is still spoken.
-    let (tail_display, tail_spoken) = tts.finish();
-    if !tail_display.is_empty() || !tail_spoken.is_empty() {
-        accumulated.push_str(&tail_display);
-        emit_chunk(req.app_handle, tail_display, &msg_id, &tail_spoken);
-        spoken.extend(tail_spoken);
-    }
-
-    // The `result` frame carries the raw final text, tags included. Strip it for
-    // display and speak any block the streamed text did not already cover.
-    let final_result = final_result.map(|raw| {
-        let (display, blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
-        let unspoken: Vec<String> = blocks.into_iter().filter(|b| !spoken.contains(b)).collect();
-        if !unspoken.is_empty() {
-            emit_chunk(req.app_handle, String::new(), &msg_id, &unspoken);
-        }
-        display
-    });
-
-    let complete = final_result.unwrap_or(accumulated);
+    let complete = renderer.complete(final_result);
     surface.close(complete.clone());
     Ok(TurnOutcome::Completed(complete))
 }
@@ -1544,18 +1990,23 @@ fn send_interrupt(session: &CliSession) {
 /// must leave no trace (the one-shot path opens its own). Once open it is closed
 /// on every way out, including the ones nobody remembered: the frontend only
 /// stops a spinner on `stream_end`.
-struct TurnSurface<'a> {
-    app_handle: &'a tauri::AppHandle,
+///
+/// A bubble that is not `visible` never opens: a turn Claude started in a
+/// conversation that is not on screen has no chat to appear in.
+struct TurnSurface {
+    app_handle: tauri::AppHandle,
     msg_id: String,
+    visible: bool,
     started: bool,
     open: bool,
 }
 
-impl<'a> TurnSurface<'a> {
-    fn new(app_handle: &'a tauri::AppHandle, msg_id: String) -> Self {
+impl TurnSurface {
+    fn new(app_handle: &tauri::AppHandle, msg_id: String, visible: bool) -> Self {
         Self {
-            app_handle,
+            app_handle: app_handle.clone(),
             msg_id,
+            visible,
             started: false,
             open: false,
         }
@@ -1568,8 +2019,11 @@ impl<'a> TurnSurface<'a> {
             return;
         }
         self.started = true;
+        if !self.visible {
+            return;
+        }
         self.open = true;
-        crate::agent::tool_logger::emit_stream_start(self.app_handle, self.msg_id.clone());
+        crate::agent::tool_logger::emit_stream_start(&self.app_handle, self.msg_id.clone());
     }
 
     /// Close it on the text the person should be left looking at. A no-op if it
@@ -1579,11 +2033,11 @@ impl<'a> TurnSurface<'a> {
             return;
         }
         self.open = false;
-        crate::agent::tool_logger::emit_stream_end(self.app_handle, self.msg_id.clone(), text);
+        crate::agent::tool_logger::emit_stream_end(&self.app_handle, self.msg_id.clone(), text);
     }
 }
 
-impl Drop for TurnSurface<'_> {
+impl Drop for TurnSurface {
     fn drop(&mut self) {
         if self.open {
             warn!("[CliSession] Turn ended without closing its stream; closing it empty");
@@ -1731,6 +2185,9 @@ mod tests {
             inbox: TokioMutex::new(inbox),
             child: std::sync::Mutex::new(child),
             last_used: AtomicU64::new(now_secs()),
+            owner: std::sync::Mutex::new(None),
+            turns_waiting: AtomicUsize::new(0),
+            turn_wanted: Notify::new(),
         })
     }
 
@@ -1917,6 +2374,101 @@ mod tests {
         // Our uuid on a non-lifecycle frame opens nothing.
         let not_lifecycle = json!({ "type": "assistant", "command_uuid": uuid });
         assert!(!lifecycle_frame_is_ours(&not_lifecycle, uuid));
+    }
+
+    #[test]
+    fn a_turn_claude_started_is_its_own_turn_not_the_answer() {
+        let uuid = "3f2a77aa-0000-4000-8000-000000000002";
+        // What the spike saw: our message queued behind a turn Claude started
+        // when a background task finished, which carries no lifecycle frames.
+        let frames = [
+            json!({ "type": "command_lifecycle", "command_uuid": uuid, "state": "queued" }),
+            json!({ "type": "system", "subtype": "init" }),
+            json!({ "type": "assistant", "message": { "id": "msg-bg",
+                "content": [{ "type": "text", "text": "LATE_TASK has finished." }] } }),
+            json!({ "type": "result", "subtype": "success",
+                "result": "LATE_TASK has finished." }),
+            json!({ "type": "command_lifecycle", "command_uuid": "someone-else", "state": "started" }),
+            json!({ "type": "command_lifecycle", "command_uuid": uuid, "state": "started" }),
+            json!({ "type": "assistant", "message": { "id": "msg-ours",
+                "content": [{ "type": "text", "text": "It is 4pm." }] } }),
+            json!({ "type": "result", "subtype": "success", "result": "It is 4pm." }),
+        ];
+
+        let mut correlator = Correlator::new(uuid);
+        let mut claude = TurnRenderer::new(None, "claude".to_string());
+        let mut mine = TurnRenderer::new(None, "mine".to_string());
+        let (mut claude_end, mut my_end) = (None, None);
+        let mut routes = Vec::new();
+        for frame in &frames {
+            let route = correlator.route(frame);
+            match route {
+                Route::Claude => {
+                    if let Some(end) = claude.feed(frame) {
+                        claude_end = Some(end);
+                    }
+                }
+                Route::Ours => {
+                    if let Some(end) = mine.feed(frame) {
+                        my_end = Some(end);
+                    }
+                }
+                _ => {}
+            }
+            routes.push(route);
+        }
+
+        assert_eq!(routes[0], Route::OurLifecycle("queued".to_string()));
+        // No uuid at all: Claude's, never the waiting turn's.
+        assert_eq!(routes[2], Route::Claude);
+        assert_eq!(routes[3], Route::Claude);
+        // Someone else's lifecycle frame opens nothing.
+        assert_eq!(routes[4], Route::Skip);
+        assert_eq!(routes[5], Route::OurLifecycle("started".to_string()));
+        assert_eq!(routes[7], Route::Ours);
+
+        // Claude's turn ended with its own result, shown as its own text...
+        let claude_end = claude_end.expect("Claude's turn ended");
+        assert_eq!(claude_end.text.as_deref(), Some("LATE_TASK has finished."));
+        assert_eq!(claude.accumulated, "LATE_TASK has finished.");
+        // ...and the waiting turn still got exactly its own answer.
+        let my_end = my_end.expect("our turn ended");
+        assert!(!my_end.aborted);
+        assert_eq!(my_end.text.as_deref(), Some("It is 4pm."));
+        assert_eq!(mine.accumulated, "It is 4pm.");
+    }
+
+    #[test]
+    fn only_a_frame_with_a_turn_behind_it_raises_one() {
+        assert!(starts_a_turn(&json!({ "type": "stream_event" })));
+        assert!(starts_a_turn(&json!({ "type": "assistant" })));
+        assert!(starts_a_turn(&json!({ "type": "user" })));
+        // A stray system frame, or the result tail of a turn already over,
+        // must not flash the bar.
+        assert!(!starts_a_turn(
+            &json!({ "type": "system", "subtype": "init" })
+        ));
+        assert!(!starts_a_turn(
+            &json!({ "type": "result", "subtype": "success" })
+        ));
+        assert!(!starts_a_turn(&json!({ "type": "command_lifecycle" })));
+    }
+
+    #[test]
+    fn a_stopped_turn_shows_nothing_more_and_ends_aborted() {
+        let mut turn = TurnRenderer::new(None, "m".to_string());
+        turn.muted = true;
+        let more = json!({ "type": "assistant", "message": { "id": "a",
+            "content": [{ "type": "text", "text": "still talking" }] } });
+        assert!(turn.feed(&more).is_none());
+        assert!(turn.accumulated.is_empty());
+        let end = turn
+            .feed(
+                &json!({ "type": "result", "subtype": "error_during_execution",
+                "terminal_reason": "aborted_streaming" }),
+            )
+            .expect("ended");
+        assert!(end.aborted);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 pub mod anthropic;
 pub mod claude_cli;
+pub mod claude_cli_own_turn;
 pub mod claude_cli_session;
 pub mod cli_approval;
 pub mod codex_cli;
