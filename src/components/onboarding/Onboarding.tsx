@@ -11,7 +11,11 @@ import {
   type ReactElement,
 } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
-import type { SttDownloadProgress, SttModelsStatus } from "@/hooks/useSttModels";
+import {
+  DOWNLOAD_WAITING_FOR_NETWORK,
+  type SttDownloadProgress,
+  type SttModelsStatus,
+} from "@/hooks/useSttModels";
 import { AppearanceStep } from "./AppearanceStep";
 import { shortcutCaps, type KeyCap } from "@/components/settings/KeyCaps";
 
@@ -2020,9 +2024,11 @@ export default function OnboardingFlow({
                           />
                         </div>
                         <p className="text-[11px] tabular-nums text-muted-foreground">
-                          {sttProgress
-                            ? `${Math.round(sttProgress.percent)}% downloaded. You can keep going.`
-                            : "Starting download. You can keep going."}
+                          {sttProgress?.waiting
+                            ? DOWNLOAD_WAITING_FOR_NETWORK
+                            : sttProgress
+                              ? `${Math.round(sttProgress.percent)}% downloaded. You can keep going.`
+                              : "Starting download. You can keep going."}
                         </p>
                       </div>
                     )}

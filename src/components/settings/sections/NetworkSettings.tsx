@@ -329,7 +329,6 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
       {/* Active MCP Servers */}
       <SettingsGroup
         title="Active MCP Servers"
-        footer="Manage configured MCP servers and their connection status"
       >
         <SettingsRow
           below={
@@ -419,7 +418,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
       {settings.mcpTools.length > 0 && (
         <SettingsGroup
           title="Available MCP Tools"
-          footer="Tools provided by connected MCP servers. Toggle individual tools on or off."
+          footer="Toggle individual tools on or off."
         >
           <SettingsRow
             below={
