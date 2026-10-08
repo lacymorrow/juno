@@ -1248,7 +1248,7 @@ mod mac {
                 let mut slot = cell.borrow_mut();
                 // SAFETY: plain `+new` on the main thread.
                 let synth = slot.get_or_insert_with(|| unsafe { AVSpeechSynthesizer::new() });
-                start_render(&**synth, utterance, target);
+                start_render(synth, utterance, target);
             });
         })
         .map_err(|e| format!("could not reach the main thread: {e}"))?;
