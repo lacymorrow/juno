@@ -599,7 +599,7 @@ mod mac {
             let mut slot = cell.borrow_mut();
             // SAFETY: plain `+new` on the main thread.
             let synth = slot.get_or_insert_with(|| unsafe { AVSpeechSynthesizer::new() });
-            f(&**synth)
+            f(synth)
         })
     }
 
