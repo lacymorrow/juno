@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.142] - 2026-10-08
+
+### Added
+
+- **mac-apps:** Reminders, Calendar, Contacts via EventKit (LAC-4233) (#764) (eec921f1)
+
 ## [0.8.140] - 2026-10-08
 
 ### Fixed
@@ -1145,7 +1151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.140...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.142...HEAD
+[0.8.142]: https://github.com/lacymorrow/juno/compare/cua-v0.8.141...v0.8.142
 [0.8.140]: https://github.com/lacymorrow/juno/compare/cua-v0.8.139...v0.8.140
 [0.8.138]: https://github.com/lacymorrow/juno/compare/cua-v0.8.137...v0.8.138
 [0.8.137]: https://github.com/lacymorrow/juno/compare/cua-v0.8.136...v0.8.137
