@@ -18,11 +18,18 @@
 //! ## Protected settings
 //!
 //! Juno is permissive by default; the exceptions are sending and spending. An
-//! agent that could change its own permission mode, its approval gates, its
-//! tools, its keys or its MCP servers could be talked out of every guardrail
-//! by text on a web page or on screen. So a protected setting can be listed,
-//! read (secrets only as set or not set), opened and highlighted, and never
-//! changed by the agent. The person changes it.
+//! agent that could change its own permission mode or its ask-before-send gate
+//! could be talked out of both by text on a web page or on screen, and one
+//! that could change its provider, model, key or system prompt could spend the
+//! person's money or leave Juno unable to answer. So a protected setting can be
+//! listed, read (secrets only as set or not set), opened and highlighted, and
+//! never changed by the agent. The person changes it.
+//!
+//! The owner chose (2026-10-08) to let the agent change mouse control, account
+//! MCP connectors, tool categories and MCP servers. Those stay safe by
+//! construction elsewhere: a server the agent adds is saved unapproved, so its
+//! command never runs until the person approves it, exactly as when the person
+//! adds one in the window.
 //!
 //! The refusal is not a check the tool remembers to make. [`authorize_set`] is
 //! the only constructor of [`AuthorizedChange`], and the tool's writer takes
@@ -137,11 +144,51 @@ pub enum ValueKind {
     Shortcut,
     /// Free text.
     Text,
+    /// Turn one tool category on or off: `{ "category": "Browser", "enabled": false }`.
+    CategoryToggle,
+    /// Add or remove one MCP server (see [`McpChange`]).
+    McpServerChange,
+}
+
+/// Tool categories as `ToolConfigManager::parse_tool_category` spells them. A
+/// test parses each one, so this list cannot name a category that does not
+/// exist.
+pub const TOOL_CATEGORIES: &[&str] = &[
+    "AnthropicComputerUse",
+    "Desktop",
+    "Browser",
+    "Timer",
+    "Basic",
+    "MCP",
+];
+
+/// One MCP server change, checked before anything is written.
+#[derive(Debug, Clone, PartialEq)]
+pub enum McpChange {
+    /// The window's "Add server" shape: one server, keyed by its name.
+    Add {
+        name: String,
+        command: String,
+        args: Vec<String>,
+        env: std::collections::HashMap<String, String>,
+        description: Option<String>,
+    },
+    /// A server by name or id.
+    Remove(String),
 }
 
 impl ValueKind {
     fn describe(self) -> Value {
         match self {
+            ValueKind::CategoryToggle => json!({
+                "type": "object",
+                "shape": { "category": TOOL_CATEGORIES, "enabled": "boolean" }
+            }),
+            ValueKind::McpServerChange => json!({
+                "type": "object",
+                "add": { "add": { "<server name>": { "command": "npx", "args": ["..."], "env": {} } } },
+                "remove": { "remove": "<server name or id>" }
+            }),
             ValueKind::Bool => json!({ "type": "boolean" }),
             ValueKind::Choice(values) => json!({ "type": "choice", "values": values }),
             ValueKind::LiveChoice => {
@@ -223,17 +270,17 @@ setting_keys! {
     BackgroundMode,
     PersistentSession,
     SmoothMouseMovement,
+    MouseControl,
+    AccountConnectors,
+    ToolCategories,
+    McpServers,
     // Protected from here down.
     PermissionMode,
     AskBeforeSend,
-    MouseControl,
     ActiveProvider,
     Model,
     ApiKey,
     SystemPrompt,
-    AccountConnectors,
-    ToolCategories,
-    McpServers,
 }
 
 impl SettingKey {
@@ -386,6 +433,45 @@ impl SettingKey {
                 V::Bool,
                 "tools.smooth_mouse_movement",
             ),
+            K::MouseControl => row(
+                self,
+                "advanced.mouse_control",
+                "Mouse control",
+                Pane::Advanced,
+                "mouse-control",
+                V::Choice(&["ask", "always"]),
+                "agent.mouse_control",
+            ),
+            K::AccountConnectors => SettingSpec {
+                advanced: true,
+                ..row(
+                    self,
+                    "providers.account_connectors",
+                    "Load account MCP connectors",
+                    Pane::Providers,
+                    "load-account-mcp",
+                    V::Bool,
+                    "providers.load_account_mcp",
+                )
+            },
+            K::ToolCategories => row(
+                self,
+                "tools.tool_categories",
+                "Tool categories",
+                Pane::Tools,
+                "tool-categories",
+                V::CategoryToggle,
+                "tools.category_enabled",
+            ),
+            K::McpServers => row(
+                self,
+                "network.mcp_servers",
+                "MCP servers",
+                Pane::Network,
+                "mcp-json-config",
+                V::McpServerChange,
+                "tools.mcp_servers",
+            ),
 
             // Protected: the agent may show these and never change them.
             K::PermissionMode => SettingSpec {
@@ -411,18 +497,6 @@ impl SettingKey {
                     "cli-ask-before-send",
                     V::Bool,
                     "cli_ask_before_send_enabled",
-                )
-            },
-            K::MouseControl => SettingSpec {
-                protected: true,
-                ..row(
-                    self,
-                    "advanced.mouse_control",
-                    "Mouse control",
-                    Pane::Advanced,
-                    "mouse-control",
-                    V::Choice(&["ask", "always"]),
-                    "agent.mouse_control",
                 )
             },
             K::ActiveProvider => SettingSpec {
@@ -474,43 +548,6 @@ impl SettingKey {
                     "providers.system_prompt",
                 )
             },
-            K::AccountConnectors => SettingSpec {
-                protected: true,
-                advanced: true,
-                ..row(
-                    self,
-                    "providers.account_connectors",
-                    "Load account MCP connectors",
-                    Pane::Providers,
-                    "load-account-mcp",
-                    V::Bool,
-                    "providers.load_account_mcp",
-                )
-            },
-            K::ToolCategories => SettingSpec {
-                protected: true,
-                ..row(
-                    self,
-                    "tools.tool_categories",
-                    "Tool categories",
-                    Pane::Tools,
-                    "tool-categories",
-                    V::Text,
-                    "tools.category_enabled",
-                )
-            },
-            K::McpServers => SettingSpec {
-                protected: true,
-                ..row(
-                    self,
-                    "network.mcp_servers",
-                    "MCP servers",
-                    Pane::Network,
-                    "mcp-json-config",
-                    V::Text,
-                    "tools.mcp_servers",
-                )
-            },
         }
     }
 }
@@ -547,6 +584,13 @@ pub enum NewValue {
     /// running app's list.
     Text(String),
     Number(f64),
+    /// A tool category (canonical spelling from [`TOOL_CATEGORIES`]) on or off.
+    Category {
+        category: &'static str,
+        enabled: bool,
+    },
+    /// A validated MCP server change.
+    Mcp(McpChange),
 }
 
 /// Why a change was not made.
@@ -622,7 +666,132 @@ fn check_value(spec: &SettingSpec, raw: &Value) -> Result<NewValue, String> {
             }
             Ok(NewValue::Number(number))
         }
+        ValueKind::CategoryToggle => check_category(raw),
+        ValueKind::McpServerChange => check_mcp_change(raw).map(NewValue::Mcp),
     }
+}
+
+/// The agent may send an object, or the same object as a JSON string.
+/// Malformed JSON is refused here, before anything is written.
+fn as_object(raw: &Value) -> Result<serde_json::Map<String, Value>, String> {
+    let value = match raw {
+        Value::String(text) => serde_json::from_str::<Value>(text)
+            .map_err(|e| format!("That is not valid JSON ({e}). Nothing was changed."))?,
+        other => other.clone(),
+    };
+    match value {
+        Value::Object(map) => Ok(map),
+        _ => Err("Expected a JSON object. Nothing was changed.".to_string()),
+    }
+}
+
+fn check_category(raw: &Value) -> Result<NewValue, String> {
+    let map = as_object(raw)?;
+    let wanted = map
+        .get("category")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    // "Browser", "browser" and "Browser Tools" all name the Browser category.
+    let squashed: String = wanted
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let category = TOOL_CATEGORIES
+        .iter()
+        .copied()
+        .find(|c| {
+            let c = c.to_ascii_lowercase();
+            squashed == c || squashed == format!("{c}tools")
+        })
+        .ok_or_else(|| {
+            format!(
+                "Unknown tool category \"{wanted}\". Categories: {}.",
+                TOOL_CATEGORIES.join(", ")
+            )
+        })?;
+    let enabled = map
+        .get("enabled")
+        .and_then(parse_bool)
+        .ok_or("Tool categories need \"enabled\": true or false.")?;
+    Ok(NewValue::Category { category, enabled })
+}
+
+/// Read an add or a remove. An add takes the same shape the window's "Add
+/// server" box takes (`{ "<name>": { "command", "args", "env" } }`) under
+/// `"add"`; a remove names one server under `"remove"`.
+pub fn check_mcp_change(raw: &Value) -> Result<McpChange, String> {
+    let map = as_object(raw)?;
+    if let Some(target) = map.get("remove") {
+        let target = target
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or("\"remove\" takes a server name or id.")?;
+        return Ok(McpChange::Remove(target.to_string()));
+    }
+    let add = match map.get("add") {
+        Some(Value::Object(add)) => add,
+        Some(Value::String(text)) => {
+            return check_mcp_change(&json!({ "add": as_object(&json!(text))? }));
+        }
+        _ => {
+            return Err(
+                "Pass {\"add\": {\"<name>\": {\"command\": ..., \"args\": [...]}}} or \
+                 {\"remove\": \"<name>\"}. Nothing was changed."
+                    .to_string(),
+            )
+        }
+    };
+    let mut servers = add.iter();
+    let (name, config) = match (servers.next(), servers.next()) {
+        (Some(only), None) => only,
+        _ => return Err("Add one server at a time, keyed by its name.".to_string()),
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("The server needs a name.".to_string());
+    }
+    let config = config
+        .as_object()
+        .ok_or("The server's configuration must be an object.")?;
+    let command = config
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("The server needs a \"command\".")?
+        .to_string();
+    let args = match config.get("args") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|a| a.as_str().map(str::to_string))
+            .collect::<Option<Vec<String>>>()
+            .ok_or("\"args\" must be a list of strings.")?,
+        Some(_) => return Err("\"args\" must be a list of strings.".to_string()),
+    };
+    let env = match config.get("env") {
+        None | Some(Value::Null) => std::collections::HashMap::new(),
+        Some(Value::Object(vars)) => vars
+            .iter()
+            .map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+            .collect::<Option<std::collections::HashMap<String, String>>>()
+            .ok_or("\"env\" values must be strings.")?,
+        Some(_) => return Err("\"env\" must be an object of strings.".to_string()),
+    };
+    let description = config
+        .get("description")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok(McpChange::Add {
+        name: name.to_string(),
+        command,
+        args,
+        env,
+        description,
+    })
 }
 
 fn parse_bool(raw: &Value) -> Option<bool> {
@@ -642,28 +811,77 @@ mod tests {
     use std::collections::HashSet;
 
     /// Store fields that hold a guardrail: what Juno may do without asking,
-    /// where it sends, what it spends with, which tools and servers it has, and
-    /// what it is told to be. Anything that writes one of these is protected.
+    /// whether it asks before it sends, where it sends and who bills for it,
+    /// what it is told to be, and which individual tools it has. Anything that
+    /// writes one of these is protected.
     ///
     /// This is the list to extend when a new guardrail setting appears. The
     /// tests below fail if any spec writes one of these without being
-    /// protected.
+    /// protected, and if any protected spec writes something not listed here.
+    ///
+    /// Not listed, by the owner's decision of 2026-10-08: `agent.mouse_control`,
+    /// `tools.category_enabled` and `tools.mcp_servers` (a server the agent
+    /// adds is saved unapproved and never runs until the person approves it).
     const GUARDRAIL_FIELDS: &[&str] = &[
         "agent.permission_mode",
-        "agent.mouse_control",
         "cli_ask_before_send_enabled",
         "providers.",
         "tools.tools",
-        "tools.category_enabled",
-        "tools.mcp_servers",
         "cloud.",
         "updates.",
     ];
 
+    /// Fields under a guardrail prefix that are deliberately not guardrails.
+    /// Each one is an owner decision, not a convenience.
+    const CARVED_OUT: &[&str] = &[
+        // Which of the person's own claude.ai connectors load (2026-10-08).
+        // Sending through them still asks while "Ask before Juno sends" is on.
+        "providers.load_account_mcp",
+    ];
+
     fn writes_a_guardrail(spec: &SettingSpec) -> bool {
+        if CARVED_OUT.contains(&spec.writes) {
+            return false;
+        }
         GUARDRAIL_FIELDS.iter().any(|field| {
             spec.writes == *field || (field.ends_with('.') && spec.writes.starts_with(field))
         })
+    }
+
+    /// The other direction of the link: protection is never decoration. Each
+    /// protected spec names a guardrail field, so the guard and the field it
+    /// guards cannot drift apart.
+    #[test]
+    fn every_protected_setting_writes_a_guardrail() {
+        for spec in all_specs().filter(|s| s.protected) {
+            assert!(
+                writes_a_guardrail(&spec),
+                "{} is protected but writes {}, which GUARDRAIL_FIELDS does not name",
+                spec.id,
+                spec.writes
+            );
+        }
+        // And every guardrail field is still pinned by some protected setting
+        // or is out of the agent's reach entirely (no spec writes it).
+        for field in GUARDRAIL_FIELDS {
+            for spec in all_specs() {
+                let hits = spec.writes == *field
+                    || (field.ends_with('.') && spec.writes.starts_with(field));
+                if hits && !CARVED_OUT.contains(&spec.writes) {
+                    assert!(spec.protected, "{} writes guardrail {field}", spec.id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_carve_outs_are_real_settings() {
+        for field in CARVED_OUT {
+            assert!(
+                all_specs().any(|s| s.writes == *field && !s.protected),
+                "{field} is carved out but no settable spec writes it; drop it"
+            );
+        }
     }
 
     #[test]
@@ -680,12 +898,12 @@ mod tests {
         }
     }
 
-    /// The Security and Network panes are where permissions, approvals and
-    /// servers live. Nothing in them is the agent's to change.
+    /// The Security pane is where permissions and approvals live. Nothing in
+    /// it is the agent's to change.
     #[test]
-    fn nothing_in_security_or_network_is_settable() {
+    fn nothing_in_security_is_settable() {
         for spec in all_specs() {
-            if matches!(spec.pane, Pane::Security | Pane::Network) {
+            if spec.pane == Pane::Security {
                 assert!(
                     spec.protected,
                     "{} sits in {} and is not protected",
@@ -706,7 +924,7 @@ mod tests {
             .filter(|k| k.spec().protected)
             .collect();
         assert!(
-            protected.len() >= 10,
+            protected.len() >= 6,
             "the protected list shrank to {}",
             protected.len()
         );
@@ -734,19 +952,110 @@ mod tests {
     #[test]
     fn the_protected_list_is_the_one_in_the_pr() {
         let protected: HashSet<&str> = all_specs().filter(|s| s.protected).map(|s| s.id).collect();
-        for id in [
+        let expected: HashSet<&str> = [
             "security.permission_mode",
             "security.ask_before_send",
-            "advanced.mouse_control",
             "providers.provider",
             "providers.model",
             "providers.api_key",
             "providers.system_prompt",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(protected, expected);
+        // Settable by the owner's decision of 2026-10-08.
+        for id in [
+            "advanced.mouse_control",
             "providers.account_connectors",
             "tools.tool_categories",
             "network.mcp_servers",
         ] {
-            assert!(protected.contains(id), "{id} must stay protected");
+            assert!(!protected.contains(id), "{id} was opened to the agent");
+        }
+    }
+
+    #[test]
+    fn every_tool_category_parses_where_the_window_sends_it() {
+        for category in TOOL_CATEGORIES {
+            assert!(
+                crate::agent::tools::tool_config::ToolConfigManager::parse_tool_category(category)
+                    .is_ok(),
+                "{category}"
+            );
+        }
+    }
+
+    #[test]
+    fn tool_categories_are_checked() {
+        assert_eq!(
+            authorize_set(
+                SettingKey::ToolCategories,
+                &json!({ "category": "browser tools", "enabled": false })
+            )
+            .map(|c| c.value().clone()),
+            Ok(NewValue::Category {
+                category: "Browser",
+                enabled: false
+            })
+        );
+        assert!(authorize_set(
+            SettingKey::ToolCategories,
+            &json!({ "category": "Lasers", "enabled": true })
+        )
+        .is_err());
+        assert!(authorize_set(SettingKey::ToolCategories, &json!({ "category": "MCP" })).is_err());
+    }
+
+    #[test]
+    fn an_mcp_add_is_read_in_the_windows_shape() {
+        let change = check_mcp_change(&json!({
+            "add": { "firecrawl": { "command": "npx", "args": ["-y", "firecrawl-mcp"],
+                                    "env": { "FIRECRAWL_API_KEY": "k" } } }
+        }))
+        .expect("valid add");
+        match change {
+            McpChange::Add {
+                name,
+                command,
+                args,
+                env,
+                ..
+            } => {
+                assert_eq!(name, "firecrawl");
+                assert_eq!(command, "npx");
+                assert_eq!(args, vec!["-y", "firecrawl-mcp"]);
+                assert_eq!(env.get("FIRECRAWL_API_KEY").map(String::as_str), Some("k"));
+            }
+            other => panic!("not an add: {other:?}"),
+        }
+        // The same object as a JSON string.
+        assert!(
+            check_mcp_change(&json!(r#"{"add": {"x": {"command": "uvx", "args": []}}}"#)).is_ok()
+        );
+        assert_eq!(
+            check_mcp_change(&json!({ "remove": "firecrawl" })),
+            Ok(McpChange::Remove("firecrawl".into()))
+        );
+    }
+
+    /// A malformed config is refused before anything is written: the writer
+    /// only ever sees a checked `McpChange`.
+    #[test]
+    fn a_malformed_mcp_config_is_refused() {
+        for bad in [
+            json!("{\"add\": {\"x\": {\"command\": "),
+            json!({ "add": { "x": { "args": ["a"] } } }),
+            json!({ "add": { "x": { "command": "npx", "args": "not a list" } } }),
+            json!({ "add": { "x": { "command": "npx", "env": { "K": 1 } } } }),
+            json!({ "add": { "a": { "command": "npx" }, "b": { "command": "npx" } } }),
+            json!({ "remove": "" }),
+            json!([1, 2]),
+            json!({}),
+        ] {
+            assert!(
+                authorize_set(SettingKey::McpServers, &bad).is_err(),
+                "{bad} should be refused"
+            );
         }
     }
 

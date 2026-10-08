@@ -34,7 +34,7 @@ use crate::constants::settings::events;
 use crate::constants::ui::window_labels;
 use crate::settings::manager::SettingsManager;
 use crate::settings::registry::{
-    self, all_specs, AuthorizedChange, NewValue, Refusal, SettingKey, SettingSpec,
+    self, all_specs, AuthorizedChange, McpChange, NewValue, Refusal, SettingKey, SettingSpec,
 };
 use crate::state::AppState;
 use crate::triggers::{Binding, Gesture, TriggerTarget};
@@ -69,9 +69,12 @@ pub fn definition() -> ToolDefinition {
             (change it; applies live, exactly as if the person changed it), `open` (the \
             Settings window, optionally on a pane), `highlight` (open the window on one \
             setting and point at it; use this for \"show me\" and \"where is\"), \
-            `set_advanced` (show or hide advanced settings). Settings marked protected \
-            (permissions, approvals, mouse control, provider, model, API keys, system \
-            prompt, connectors, tools, MCP servers) cannot be changed by you: highlight \
+            `set_advanced` (show or hide advanced settings). Tool categories take \
+            {\"category\": \"Browser\", \"enabled\": false}; MCP servers take one change at a \
+            time, {\"add\": {\"<name>\": {\"command\": \"npx\", \"args\": [...], \"env\": {}}}} \
+            or {\"remove\": \"<name>\"}, and an added server waits for the person's approval \
+            before it runs. Settings marked protected (permission mode, ask before sending, \
+            provider, model, API key, system prompt) cannot be changed by you: highlight \
             them and tell the person to change them. Call `list` first if unsure of a key."
             .to_string(),
         input_schema: json!({
@@ -427,8 +430,13 @@ async fn read(app: &AppHandle, key: SettingKey) -> Result<(Value, Option<Value>)
             }
         }
         K::ToolCategories => json!(manager(app)?.get_tool_settings().await?.category_enabled),
+        // Names and state only: a server's env often carries an API key.
         K::McpServers => {
-            json!({ "count": manager(app)?.get_tool_settings().await?.mcp_servers.len() })
+            let servers = crate::commands::mcp::get_mcp_servers(app_state(app)?).await?;
+            json!(servers
+                .iter()
+                .map(|s| json!({ "id": s.id, "name": s.name, "enabled": s.enabled, "approved": s.approved }))
+                .collect::<Vec<Value>>())
         }
     };
     Ok((value, None))
@@ -603,18 +611,50 @@ async fn apply(app: &AppHandle, change: &AuthorizedChange) -> Result<(), String>
             )
             .await?;
         }
+        K::MouseControl => {
+            crate::input_control::commands::set_mouse_control(
+                want_text(change)?.to_string(),
+                app.clone(),
+            )
+            .await?;
+        }
+        K::AccountConnectors => {
+            let provider = manager(app)?.get_provider_settings().await?.active_provider;
+            crate::commands::providers::update_provider_load_account_mcp(
+                app.clone(),
+                provider,
+                want_bool(change)?,
+            )
+            .await?;
+        }
+        K::ToolCategories => {
+            let (category, enabled) = match change.value() {
+                NewValue::Category { category, enabled } => (*category, *enabled),
+                other => return Err(format!("Expected a tool category, got {other:?}.")),
+            };
+            crate::commands::tools::set_tool_category_enabled(
+                category.to_string(),
+                enabled,
+                app.clone(),
+                app_state(app)?,
+            )
+            .await?;
+        }
+        K::McpServers => {
+            let mcp = match change.value() {
+                NewValue::Mcp(mcp) => mcp.clone(),
+                other => return Err(format!("Expected an MCP server change, got {other:?}.")),
+            };
+            apply_mcp(app, mcp).await?;
+        }
         // `authorize_set` never builds a change for these. Listed, not
         // wildcarded, so a new key has to come through here and be decided.
         K::PermissionMode
         | K::AskBeforeSend
-        | K::MouseControl
         | K::ActiveProvider
         | K::Model
         | K::ApiKey
-        | K::SystemPrompt
-        | K::AccountConnectors
-        | K::ToolCategories
-        | K::McpServers => {
+        | K::SystemPrompt => {
             let spec: SettingSpec = key.spec();
             return Err(Refusal::Protected {
                 label: spec.label,
@@ -624,6 +664,58 @@ async fn apply(app: &AppHandle, change: &AuthorizedChange) -> Result<(), String>
         }
     }
     Ok(())
+}
+
+/// Add or remove one MCP server through the window's own commands. An added
+/// server is built the way the window's "Add server" box builds it, so it is
+/// saved unapproved: its command does not run until the person approves it.
+async fn apply_mcp(app: &AppHandle, change: McpChange) -> Result<(), String> {
+    match change {
+        McpChange::Add {
+            name,
+            command,
+            args,
+            env,
+            description,
+        } => {
+            let id = format!(
+                "mcp-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            );
+            let mut config = crate::agent::tools::MCPServerConfig::new(name.clone(), command, args);
+            config.id = id;
+            config.description = Some(description.unwrap_or_else(|| format!("MCP Server: {name}")));
+            config.environment_variables = env;
+            // As the window sends it: on, not auto-started, never pre-approved.
+            config.enabled = true;
+            config.auto_start = false;
+            config.approved = false;
+            crate::commands::mcp::add_mcp_server(app.clone(), app_state(app)?, config).await
+        }
+        McpChange::Remove(target) => {
+            let servers = crate::commands::mcp::get_mcp_servers(app_state(app)?).await?;
+            let wanted = target.to_lowercase();
+            let server = servers
+                .iter()
+                .find(|s| s.id.to_lowercase() == wanted || s.name.to_lowercase() == wanted)
+                .ok_or_else(|| {
+                    let names: Vec<&str> = servers.iter().map(|s| s.name.as_str()).collect();
+                    format!(
+                        "No MCP server called \"{target}\". Servers: {}.",
+                        if names.is_empty() {
+                            "none".to_string()
+                        } else {
+                            names.join(", ")
+                        }
+                    )
+                })?;
+            crate::commands::mcp::remove_mcp_server(app.clone(), app_state(app)?, server.id.clone())
+                .await
+        }
+    }
 }
 
 #[cfg(test)]
