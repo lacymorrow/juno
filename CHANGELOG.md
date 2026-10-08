@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.132] - 2026-10-08
+
+### Fixed
+
+- **bar:** a fast drag keeps the spot pressed under the cursor (#755) (1b29dd72)
+
+## [0.8.131] - 2026-10-08
+
+### Added
+
+- **pill:** status dot shows connection, offline reply, pill tooltips (#746) (318d99c8)
+
+## [0.8.130] - 2026-10-08
+
+### Fixed
+
+- **bar:** startup fallback stands down while the reveal is bringing the bar on (#753) (3dae441e)
+
+## [0.8.129] - 2026-10-08
+
+### Fixed
+
+- **intro:** drop the rim, make the smoke two-tone (#751) (e7df5495)
+
+## [0.8.128] - 2026-10-08
+
+### Added
+
+- **voice:** speaking speed, and no speech instructions when Juno is silent (#747) (cfec7405)
+
+### Fixed
+
+- graceful failure when the network drops (model downloads resume, no raw errors) (#745) (cf624be6)
+
 ## [0.8.127] - 2026-10-08
 
 ### Fixed
@@ -1075,7 +1109,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.127...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.132...HEAD
+[0.8.132]: https://github.com/lacymorrow/juno/compare/cua-v0.8.131...v0.8.132
+[0.8.131]: https://github.com/lacymorrow/juno/compare/cua-v0.8.130...v0.8.131
+[0.8.130]: https://github.com/lacymorrow/juno/compare/cua-v0.8.129...v0.8.130
+[0.8.129]: https://github.com/lacymorrow/juno/compare/cua-v0.8.128...v0.8.129
+[0.8.128]: https://github.com/lacymorrow/juno/compare/cua-v0.8.127...v0.8.128
 [0.8.127]: https://github.com/lacymorrow/juno/compare/cua-v0.8.126...v0.8.127
 [0.8.126]: https://github.com/lacymorrow/juno/compare/cua-v0.8.125...v0.8.126
 [0.8.125]: https://github.com/lacymorrow/juno/compare/cua-v0.8.124...v0.8.125

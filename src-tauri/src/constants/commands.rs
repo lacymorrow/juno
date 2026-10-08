@@ -329,6 +329,8 @@ pub mod agent_sessions {
 /// App-level commands: build info, config directory, diagnostics
 pub mod app {
     pub const GET_BUILD_INFO: &str = "get_build_info";
+    /// Network and provider health, for the bar's status dot.
+    pub const GET_CONNECTIVITY: &str = "get_connectivity";
     pub const OPEN_CONFIG_DIRECTORY: &str = "open_config_directory";
     pub const TEST_SYSTEM_CONTEXT: &str = "test_system_context";
 }

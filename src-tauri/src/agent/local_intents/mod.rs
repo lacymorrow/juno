@@ -221,10 +221,28 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
     true
 }
 
-async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
+/// Show and speak `reply` as a whole turn: the bar goes working and back,
+/// exactly as it does for a model's answer.
+pub(crate) async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
     let agent_state = if reply.failed { "Failed" } else { "Finished" };
     crate::commands::ui_commands::handle_agent_started(app_handle).await;
 
+    let display = reply.display.clone();
+    emit_reply_message(app_handle, reply, agent_state);
+
+    crate::commands::ui_commands::handle_agent_stopped(app_handle).await;
+    crate::commands::ui_commands::handle_backend_response(
+        app_handle,
+        Some(display),
+        agent_state.to_string(),
+    )
+    .await;
+}
+
+/// Append `reply` to the conversation as an assistant message and speak its
+/// spoken line, without touching the bar's lifecycle. For a turn that is
+/// already running and will close itself.
+pub(crate) fn emit_reply_message(app_handle: &AppHandle, reply: Reply, agent_state: &str) {
     let message_id = uuid::Uuid::new_v4().to_string();
     crate::agent::tool_logger::emit_stream_start(app_handle, message_id.clone());
     crate::agent::tool_logger::emit_streaming_text_chunk(
@@ -236,17 +254,9 @@ async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
     crate::agent::tool_logger::emit_stream_end_with_state(
         app_handle,
         message_id,
-        reply.display.clone(),
+        reply.display,
         agent_state.to_string(),
     );
-
-    crate::commands::ui_commands::handle_agent_stopped(app_handle).await;
-    crate::commands::ui_commands::handle_backend_response(
-        app_handle,
-        Some(reply.display),
-        agent_state.to_string(),
-    )
-    .await;
 }
 
 #[cfg(test)]

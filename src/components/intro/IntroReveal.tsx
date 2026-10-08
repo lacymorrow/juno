@@ -1,7 +1,7 @@
 /**
- * IntroReveal: the smoke Juno appears out of (route `/intro`, a
- * transparent click-through window the backend builds around the bar's spot
- * every launch, and destroys when the sequence is over).
+ * IntroReveal: the smoke Juno appears out of (route `/intro`, a transparent
+ * click-through window the backend builds around the bar's spot every
+ * launch, and destroys when the sequence is over).
  *
  * Display only. On mount it asks the backend for the plan; the answer is the
  * starting gun, because the backend shows this window and starts its own
@@ -10,7 +10,8 @@
  * backend at `bar_at_ms` whether this ever drew a frame.
  *
  * Nothing here is allowed to fail loudly. No WebGL, no plan, no window: the
- * host stays empty and the bar still appears, as it always did.
+ * host stays empty and the bar still appears, as it always did. Reduce
+ * Motion is the same empty window on purpose.
  */
 
 import { useEffect, useRef } from "react";
@@ -21,7 +22,6 @@ import { COMMANDS } from "@/lib/constants.generated";
 import {
   FRAG,
   VERT,
-  prefersDark,
   prefersReducedMotion,
   progressAt,
   uniformsFor,
@@ -51,7 +51,9 @@ export const IntroReveal = () => {
       } catch {
         return;
       }
-      if (cancelled) return;
+      // The backend's clock is running either way; with Reduce Motion the
+      // bar simply arrives on time with nothing drawn around it.
+      if (cancelled || prefersReducedMotion()) return;
 
       try {
         renderer = new Renderer({ alpha: true, premultipliedAlpha: true });
@@ -72,7 +74,7 @@ export const IntroReveal = () => {
       const program = new Program(gl, {
         vertex: VERT,
         fragment: FRAG,
-        uniforms: asOgl(uniformsFor(plan, viewport, dpr, prefersDark(), prefersReducedMotion())),
+        uniforms: asOgl(uniformsFor(plan, viewport, dpr)),
       });
       const mesh = new Mesh(gl, { geometry: new Triangle(gl), program });
 

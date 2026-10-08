@@ -282,6 +282,16 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
 /// to apply to physical pixels was scaled by the display the window was
 /// leaving, which put a frame aimed at a second display of another density
 /// in the wrong place.
+///
+/// `grab`, when given, is a point inside the window (from its top-left, in
+/// points) that must end up under the cursor: `x`/`y` are then ignored and the
+/// origin is computed from `NSEvent.mouseLocation`, read here on the main
+/// thread in the same call as `setFrame:`. The bar's drag window is placed
+/// this way so the spot the user pressed is under the cursor when the OS drag
+/// starts, however far a fast flick has carried the cursor since the press.
+///
+/// Returns the top-left the window actually has afterwards, in points (AppKit
+/// may constrain the frame, e.g. below the menu bar).
 #[cfg(target_os = "macos")]
 pub fn set_bar_frame_atomic(
     app_handle: &AppHandle,
@@ -289,7 +299,11 @@ pub fn set_bar_frame_atomic(
     y: f64,
     w_pt: f64,
     h_pt: f64,
-) -> Result<(), String> {
+    grab: Option<(f64, f64)>,
+) -> Result<(f64, f64), String> {
+    use crate::platform::desktop_points::{
+        cocoa_frame_top_left, cocoa_point_to_points, origin_under_cursor,
+    };
     let label = constants::ui::window_labels::FLOATING_BAR;
     let window = app_handle
         .get_webview_window(label)
@@ -307,13 +321,26 @@ pub fn set_bar_frame_atomic(
         }
         let primary: cocoa_id = msg_send![screens, objectAtIndex: 0usize];
         let primary_frame: NSRect = msg_send![primary, frame];
+        let primary_h = primary_frame.size.height;
+        let (x, y) = match grab {
+            Some(grab) => {
+                let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
+                origin_under_cursor(cocoa_point_to_points((mouse.x, mouse.y), primary_h), grab)
+            }
+            None => (x, y),
+        };
         let new_frame = NSRect::new(
-            NSPoint::new(x, primary_frame.size.height - y - h_pt),
+            NSPoint::new(x, primary_h - y - h_pt),
             NSSize::new(w_pt, h_pt),
         );
         let _: () = msg_send![ns_window, setFrame: new_frame display: YES animate: NO];
+        let placed: NSRect = msg_send![ns_window, frame];
+        Ok(cocoa_frame_top_left(
+            (placed.origin.x, placed.origin.y),
+            placed.size.height,
+            primary_h,
+        ))
     }
-    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -505,8 +532,11 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(BAR_SHOW_FALLBACK_MS)).await;
 
-        // The normal path already won: leave it alone.
-        if window.is_visible().unwrap_or(false) {
+        // The normal path already won: leave it alone. That includes a reveal
+        // whose smoke is up but whose bar is not yet: the window is still
+        // hidden for that second, and this used to log a second "put up" for
+        // a show the reveal guard then dropped.
+        if window.is_visible().unwrap_or(false) || crate::intro::reveal_in_flight() {
             return;
         }
 

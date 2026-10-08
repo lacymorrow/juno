@@ -1461,7 +1461,10 @@ async fn execute_tts_with_fallback(
     // If it's a cloud provider, do a quick network check first
     if is_cloud_provider {
         info!("Cloud TTS provider detected, checking network connectivity...");
-        let is_online = crate::utils::network::is_online().await;
+        // The network monitor already knows when there is no route, and
+        // answers at once; the slower probe only runs when it thinks there is.
+        let is_online =
+            crate::connectivity::network_up() && crate::utils::network::is_online().await;
         if !is_online {
             if !allow_direct {
                 return Err("offline; system voice cannot be rendered ahead".to_string());
