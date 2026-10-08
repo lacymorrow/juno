@@ -37,11 +37,37 @@ describe("dotTone", () => {
   });
 });
 
+describe("dotTone while Juno is still loading at launch", () => {
+  it("pulses blue at rest", () => {
+    expect(dotTone(UI.BAR_STATES_DEFAULT, connected, true)).toBe("loading");
+    expect(dotTone(UI.BAR_STATES_DEFAULT, null, true)).toBe("loading");
+  });
+
+  it("gives way to red, to an open microphone, and to work in progress", () => {
+    expect(dotTone(UI.BAR_STATES_DEFAULT, offline, true)).toBe("down");
+    expect(dotTone(UI.BAR_STATES_LISTENING, connected, true)).toBe("listening");
+    expect(dotTone(UI.BAR_STATES_DICTATING, offline, true)).toBe("listening");
+    for (const state of [UI.BAR_STATES_LOADING, UI.BAR_STATES_SPEAKING, UI.BAR_STATES_TRANSCRIBING]) {
+      expect(dotTone(state, connected, true)).toBe("neutral");
+    }
+  });
+
+  it("says so in the tooltip, only at rest", () => {
+    expect(dotLabel(UI.BAR_STATES_DEFAULT, connected, { loading: true })).toBe("Getting ready");
+    expect(dotLabel(UI.BAR_STATES_DEFAULT, offline, { loading: true })).toBe("No internet connection");
+    expect(dotLabel(UI.BAR_STATES_LOADING, connected, { loading: true })).toBe("Working");
+  });
+
+  it("is system blue, the one accent", () => {
+    expect(statusDotColor(UI.BAR_STATES_DEFAULT, connected, { loading: true })).toBe("#0A84FF");
+  });
+});
+
 describe("statusDotColor", () => {
   it("uses system blue and system red, and no other accent", () => {
     expect(statusDotColor(UI.BAR_STATES_LISTENING, connected)).toBe(DOT_COLORS.listening);
     expect(statusDotColor(UI.BAR_STATES_DEFAULT, offline)).toBe(DOT_COLORS.down);
-    expect(DOT_COLORS).toEqual({ listening: "#0A84FF", down: "#FF453A" });
+    expect(DOT_COLORS).toEqual({ listening: "#0A84FF", down: "#FF453A", loading: "#0A84FF" });
     // States that used to carry their own colours are neutral now.
     for (const state of [UI.BAR_STATES_ERROR, UI.BAR_STATES_SUCCESS, UI.BAR_STATES_DICTATION_READY]) {
       expect(statusDotColor(state, connected)).toMatch(/^(#ffffff|rgba\(255,255,255,[\d.]+\))$/);

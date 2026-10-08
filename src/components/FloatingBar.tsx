@@ -13,6 +13,8 @@
  */
 
 import {
+  lazy,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -74,8 +76,20 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { shortcutCaps } from "@/components/settings/KeyCaps";
 import type { TriggerHints } from "@/components/onboarding/Onboarding";
 import { useConnectivity } from "@/hooks/useConnectivity";
+import { useStartupReadiness } from "@/hooks/useStartupReadiness";
+import { takeBootBarPosition } from "@/lib/barBoot";
 import { DOT_COLORS, dotLabel, dotTone, type Connectivity } from "@/lib/pillStatus";
-import { BarChatPane } from "./bar/BarChatPane";
+// The conversation pane renders markdown, maths and diagrams: most of the
+// bar's script, and none of it needed to draw the pill. It loads after the
+// bar is on screen (`warmChatPane`), so the first open is still instant.
+const loadChatPane = () => import("./bar/BarChatPane");
+const BarChatPane = lazy(() => loadChatPane().then((m) => ({ default: m.BarChatPane })));
+/** How long after the pill is placed its pane's code is fetched. */
+const CHAT_PANE_WARM_MS = 1500;
+/** Fetch the pane's code in the background, once the pill has been placed. */
+function warmChatPane() {
+  void loadChatPane().catch((error) => console.debug("FloatingBar: pane preload failed:", error));
+}
 import type { BarAppearance } from "@/components/bar/barAppearance";
 
 /**
@@ -440,6 +454,12 @@ const BAR_KEYFRAMES = `
   0%, 100% { opacity: 0.4; transform: scale(1); }
   50%      { opacity: 0.6; transform: scale(1.08); }
 }
+/* Still loading after launch: a slow, shallow pulse. No scale, no glow; the
+   dot only fades. Reduce Motion stops it at the inline 0.6. */
+@keyframes fbar-warm {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.9; }
+}
 @keyframes fbar-breathe {
   0%, 100% { opacity: 0.6; transform: scale(1); }
   50%      { opacity: 1; transform: scale(1.25); }
@@ -545,10 +565,14 @@ function neutralShade(state: UIState, voicePaused: boolean): string {
 export function statusDotColor(
   state: UIState,
   connectivity: Connectivity | null,
-  { driving = false, voicePaused = false }: { driving?: boolean; voicePaused?: boolean } = {},
+  {
+    driving = false,
+    voicePaused = false,
+    loading = false,
+  }: { driving?: boolean; voicePaused?: boolean; loading?: boolean } = {},
 ): string {
   if (driving) return SYSTEM_BLUE;
-  const tone = dotTone(state, connectivity);
+  const tone = dotTone(state, connectivity, loading);
   return tone === "neutral" ? neutralShade(state, voicePaused) : DOT_COLORS[tone];
 }
 
@@ -558,6 +582,7 @@ export function StatusDot({
   connectivity,
   driving = false,
   voicePaused = false,
+  loading = false,
 }: {
   state: UIState;
   audioLevel: number;
@@ -565,8 +590,10 @@ export function StatusDot({
   driving?: boolean;
   /** A wake phrase is configured, but its engine is paused right now. */
   voicePaused?: boolean;
+  /** Just launched: what the first request needs is still loading. */
+  loading?: boolean;
 }) {
-  const tone = driving ? "listening" : dotTone(state, connectivity);
+  const tone = driving ? "listening" : dotTone(state, connectivity, loading);
   const listening = tone === "listening" && !driving;
   // One element in every state, the same size, so nothing about the dot
   // moves or reflows when its meaning changes (#511); only the fill and the
@@ -574,7 +601,7 @@ export function StatusDot({
   return (
     <div
       role="img"
-      aria-label={dotLabel(state, connectivity, { driving, voicePaused })}
+      aria-label={dotLabel(state, connectivity, { driving, voicePaused, loading })}
       data-testid={
         driving
           ? "floating-bar-driving-dot"
@@ -585,15 +612,17 @@ export function StatusDot({
       data-tone={tone}
       className="size-[7px] shrink-0 rounded-full transition-[background-color] duration-200 ease-out motion-reduce:transition-none"
       style={{
-        backgroundColor: statusDotColor(state, connectivity, { driving, voicePaused }),
+        backgroundColor: statusDotColor(state, connectivity, { driving, voicePaused, loading }),
         // Down is a fact, not a mood: a steady, full-strength red. The resting
         // breath would dim it to half.
         animation: driving
           ? "fbar-orbit 1.1s ease-in-out infinite"
-          : tone === "down" && dotMotion(state, voicePaused)?.startsWith("fbar-idle")
-            ? undefined
-            : dotMotion(state, voicePaused),
-        opacity: listening ? Math.max(0.5, audioLevel) : undefined,
+          : tone === "loading"
+            ? "fbar-warm 1.6s ease-in-out infinite"
+            : tone === "down" && dotMotion(state, voicePaused)?.startsWith("fbar-idle")
+              ? undefined
+              : dotMotion(state, voicePaused),
+        opacity: listening ? Math.max(0.5, audioLevel) : tone === "loading" ? 0.6 : undefined,
       }}
     />
   );
@@ -1134,6 +1163,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   //
   // Whether Juno can answer is Rust's to say; the dot only shows it.
   const connectivity = useConnectivity();
+  const warmingUp = useStartupReadiness();
   // The talk shortcut, named in the mic's tooltip. Read from the live trigger
   // registry, never written here, so the tooltip cannot teach a dead key.
   const [triggerHints, setTriggerHints] = useState<TriggerHints | null>(null);
@@ -1654,7 +1684,13 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     let cancelled = false;
     void (async () => {
       try {
-        const saved = await invoke<{ x: number; y: number } | null>(COMMANDS.BAR_GET_BAR_POSITION);
+        // Rust wrote the stored well into the page at launch; ask only when
+        // it did not (a reload, a preview, an older backend).
+        const booted = takeBootBarPosition();
+        const saved =
+          booted !== undefined
+            ? booted
+            : await invoke<{ x: number; y: number } | null>(COMMANDS.BAR_GET_BAR_POSITION);
         const [pos, mons] = await Promise.all([
           windowOrigin(getCurrentWindow()),
           availableMonitors(),
@@ -1694,6 +1730,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       } finally {
         if (!cancelled) {
           setPlaced(true);
+          // After the reveal has the bar on screen, not during it.
+          setTimeout(warmChatPane, CHAT_PANE_WARM_MS);
           await invoke(COMMANDS.BAR_SHOW_BAR_WHEN_READY).catch((error) =>
             console.error("FloatingBar: could not show the bar:", error),
           );
@@ -1798,6 +1836,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       // closed, with nothing connecting the two.
       style={{ animation: "fbar-reveal 0.18s ease-out both" }}
     >
+      <Suspense fallback={null}>
       <BarChatPane
         messages={chat.messages}
         isProcessing={isWorking}
@@ -1812,6 +1851,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         onDismiss={dismissPane}
         onNewChat={startNewChat}
       />
+      </Suspense>
     </div>
   ) : null;
 
@@ -1928,6 +1968,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           label={dotLabel(currentUiState, connectivity, {
             driving: isDriving,
             voicePaused: voiceConfigured && !voiceListening,
+            loading: warmingUp,
           })}
           forcedOpen={hoveredButton === "dot"}
           side={tooltipSide}
@@ -1949,6 +1990,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               connectivity={connectivity}
               driving={isDriving}
               voicePaused={voiceConfigured && !voiceListening}
+              loading={warmingUp}
             />
           </div>
         </PillTooltip>

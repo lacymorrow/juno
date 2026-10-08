@@ -781,7 +781,8 @@ describe("FloatingBar", () => {
 
     await submitUserMessage("Play my liked songs on Spotify");
 
-    const pane = screen.getByTestId("bar-chat-pane");
+    // The pane's code loads on first open (it is lazy, warmed after launch).
+    const pane = await screen.findByTestId("bar-chat-pane");
     expect(pane).toBeInTheDocument();
     expect(pane).toHaveClass("dark");
     expect(screen.getByText("Play my liked songs on Spotify")).toBeInTheDocument();
@@ -799,7 +800,7 @@ describe("FloatingBar", () => {
     // that it has finished working.
     await fire("agent-active", false);
 
-    expect(screen.getByText("It is half past nine.")).toBeInTheDocument();
+    expect(await screen.findByText("It is half past nine.")).toBeInTheDocument();
     expect(screen.getByTestId("bar-chat-pane-status")).toHaveTextContent("esc to close");
   });
 

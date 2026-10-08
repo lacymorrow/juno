@@ -138,6 +138,7 @@ pub async fn set_bar_position(app_handle: AppHandle, x: i32, y: i32) -> Result<(
 /// closes instead.
 #[command]
 pub async fn show_bar_when_ready(app_handle: AppHandle) -> Result<(), String> {
+    crate::startup_timing::mark_once("bar first paint reported");
     if crate::window_management::onboarding_is_open(&app_handle) {
         crate::window_management::mark_bar_withheld_for_onboarding();
         return Ok(());
@@ -267,7 +268,8 @@ pub async fn bar_order_above_snap_wells(
 /// With "Displays have separate Spaces" (the macOS default) a window is drawn
 /// on one display only, so the single overlay that used to span every monitor
 /// showed the wells on one display and none on the others. The first overlay
-/// is declared in `tauri.conf.json`; display `i > 0` gets a copy of that
+/// is declared in `tauri.conf.json` and built after launch (`startup_windows`),
+/// or here if a drag gets there first; display `i > 0` gets a copy of that
 /// declaration labelled `snap-wells-overlay-i`, built the first time a drag
 /// needs it. Returns how many displays there are. A copy that cannot be built
 /// is logged and skipped: the other displays still get their wells.
@@ -280,7 +282,7 @@ pub async fn ensure_snap_wells_overlays(app_handle: AppHandle) -> Result<usize, 
         .len();
     let base = crate::window_management::declared_window_config(&app_handle, base_label)
         .ok_or("The snap-wells overlay is not declared in tauri.conf.json")?;
-    for index in 1..displays {
+    for index in 0..displays {
         let label = overlay_label(index);
         if app_handle.get_webview_window(&label).is_some() {
             continue;
