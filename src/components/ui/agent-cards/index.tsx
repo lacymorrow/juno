@@ -8,6 +8,7 @@
  */
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { COMMANDS } from "@/lib/constants.generated";
 import { cn } from "@/lib/utils";
 import {
   Cloud,
@@ -727,7 +728,7 @@ interface ImageCardProps {
 
 function openInPreview(path: string) {
   // The Rust side resolves `~/` and routes file:// through the system opener.
-  invoke("open_url", { url: `file://${path.replace(/^~\//, "")}` });
+  invoke(COMMANDS.DESKTOP_OPEN_URL, { url: `file://${path.replace(/^~\//, "")}` });
 }
 
 export function ImageCard({ path, caption, before }: ImageCardProps) {

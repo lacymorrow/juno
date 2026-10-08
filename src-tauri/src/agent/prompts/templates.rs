@@ -870,7 +870,7 @@ Response:
 
     /// 🎨 **TRI-MODAL RESPONSE FORMAT** — Visual component rendering + voice + text
     pub fn jsx_capabilities() -> &'static str {
-        r#"🎨 **TRI-MODAL RESPONSE FORMAT** — TEXT + VOICE + COMPONENTS
+        r##"🎨 **TRI-MODAL RESPONSE FORMAT** — TEXT + VOICE + COMPONENTS
 
 **OVERVIEW**: You have THREE simultaneous output channels. Use them together for the best experience:
 
@@ -1151,7 +1151,7 @@ Never write a visible "**Why AppleScript here:**" paragraph — that is exactly 
 10. Use interactive buttons when the response naturally leads to a follow-up action
 11. Compose animated primitives inside one card — e.g., `<AnimatedCard>` wrapping `<MiniChart>` + `<Stat>` elements — rather than stacking separate cards
 12. **NO FAKE STATE**: never render a control or indicator that implies live state unless it is a live component (`<NowPlayingCard>`). `<QueryButton>` is a one-shot action, not a toggle
-13. **RATIONALE IS COLLAPSED**: explanations of your method (why AppleScript, why not clicking, which tier, what you checked) go inside `<Why>…</Why>` at the end of the response, never in the visible text"#
+13. **RATIONALE IS COLLAPSED**: explanations of your method (why AppleScript, why not clicking, which tier, what you checked) go inside `<Why>…</Why>` at the end of the response, never in the visible text"##
     }
 
     /// 👁️ **COMPANION/OBSERVE-ONLY MODE** - Vision-only, no computer actions
