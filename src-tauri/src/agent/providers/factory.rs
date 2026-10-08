@@ -8,6 +8,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::multi_agent::MultiAgentOrchestrator;
 use crate::agent::providers::anthropic::AnthropicBrain;
 use crate::agent::providers::claude_cli::ClaudeCliBrain;
+use crate::agent::providers::codex_cli::CodexCliBrain;
 use crate::agent::providers::config::{load_provider_config, AgentMode, ProviderConfig};
 use crate::agent::providers::gemini::GeminiBrain;
 use crate::agent::providers::openai::OpenAIBrain;
@@ -87,15 +88,16 @@ pub(crate) fn select_provider(
 
 /// Fail early, in plain words, when `provider` has no credential.
 ///
-/// The Claude CLI never needs a key: its credential is the login the `claude`
-/// binary already holds, so it is never refused here. Every other provider
-/// needs a key from settings or its environment variable.
+/// The CLIs never need a key: their credential is the login the `claude` or
+/// `codex` binary already holds, so they are never refused here. Every other
+/// provider needs a key from settings or its environment variable.
 pub(crate) fn check_credential(
     provider: &Provider,
     settings: &crate::settings::ProviderConfig,
     env_key: Option<String>,
 ) -> Result<(), AgentError> {
-    if *provider == Provider::ClaudeCli || crate::demo::is_demo_build() {
+    if matches!(provider, Provider::ClaudeCli | Provider::CodexCli) || crate::demo::is_demo_build()
+    {
         return Ok(());
     }
     let has = |k: &Option<String>| k.as_deref().is_some_and(|v| !v.is_empty());
@@ -113,7 +115,7 @@ fn ensure_can_run(
         Provider::Anthropic => Some("ANTHROPIC_API_KEY"),
         Provider::OpenAI | Provider::Rig => Some("OPENAI_API_KEY"),
         Provider::Gemini => Some("GEMINI_API_KEY"),
-        Provider::ClaudeCli => None,
+        Provider::ClaudeCli | Provider::CodexCli => None,
     };
     check_credential(provider, settings, env_name.and_then(|n| env::var(n).ok()))
 }
@@ -277,13 +279,22 @@ impl BrainFactory {
         app_handle: Option<&tauri::AppHandle>,
     ) -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
-        let providers = vec![
+        // Codex CLI follows the capability-shaped UX described in LAC-4125:
+        // if the binary is not installed, hide the provider from the Settings
+        // list entirely. Claude CLI's existing behaviour (always listed,
+        // greyed when signed out) is left alone because its users already
+        // know it is there and the setting carries history.
+        let codex_installed = crate::agent::providers::codex_cli::is_codex_cli_available();
+        let mut providers = vec![
             Provider::Anthropic,
             Provider::OpenAI,
             Provider::Rig,
             Provider::Gemini,
             Provider::ClaudeCli,
         ];
+        if codex_installed {
+            providers.push(Provider::CodexCli);
+        }
         let config = Some(load_provider_config(app_handle));
         // One filesystem probe for the whole listing.
         let cli_installed = crate::agent::providers::claude_cli::is_claude_cli_available();
@@ -346,11 +357,25 @@ impl BrainFactory {
                         use crate::agent::providers::claude_cli::{last_known_sign_in, SignIn};
                         cli_installed && last_known_sign_in() != SignIn::SignedOut
                     }
+                    Provider::CodexCli => {
+                        // Same shape as Claude CLI, but keyed on the ChatGPT
+                        // auth mode rather than a boolean sign-in: an `apikey`
+                        // auth is still a login the CLI can use, so the UI
+                        // should not grey it out, but it is not what the
+                        // default-provider rule picks up.
+                        use crate::agent::providers::codex_cli::{last_known_auth_mode, AuthMode};
+                        codex_installed && !matches!(last_known_auth_mode(), AuthMode::SignedOut)
+                    }
                 };
                 // The one unavailability you fix in a terminal rather than by
                 // pasting a key.
-                let needs_sign_in =
-                    provider == Provider::ClaudeCli && cli_installed && !is_available;
+                let needs_sign_in = matches!(provider, Provider::ClaudeCli | Provider::CodexCli)
+                    && match provider {
+                        Provider::ClaudeCli => cli_installed,
+                        Provider::CodexCli => codex_installed,
+                        _ => false,
+                    }
+                    && !is_available;
 
                 ProviderInfo {
                     id: provider_id.to_string(),
@@ -458,6 +483,11 @@ impl BrainFactory {
                 ClaudeCliBrain::from_config(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
+            Provider::CodexCli => {
+                info!("Initializing Codex CLI brain (subprocess-based, no API key)...");
+                CodexCliBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+            }
         }
     }
 
@@ -546,6 +576,11 @@ impl BrainFactory {
             Provider::ClaudeCli => {
                 info!("Initializing Claude CLI brain with custom system prompt...");
                 ClaudeCliBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+            }
+            Provider::CodexCli => {
+                info!("Initializing Codex CLI brain with custom system prompt...");
+                CodexCliBrain::from_config(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
         }
@@ -815,6 +850,14 @@ mod subscription_tests {
         let provider = select_provider(&config, None).unwrap();
         assert_eq!(provider, Provider::ClaudeCli);
         // No key in settings, none in the environment.
+        assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
+    }
+
+    #[test]
+    fn a_chatgpt_plan_choice_needs_no_api_key_either() {
+        let config = chose("codex_cli", true);
+        let provider = select_provider(&config, None).unwrap();
+        assert_eq!(provider, Provider::CodexCli);
         assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
     }
 
