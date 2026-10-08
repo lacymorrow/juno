@@ -479,9 +479,13 @@ impl AnthropicBrain {
         let max_tokens =
             max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_ANTHROPIC);
 
-        // Create HTTP client with proper timeout configuration to prevent hanging
+        // Create HTTP client with proper timeout configuration to prevent hanging.
+        // A read timeout, not a total one: it fires when the connection goes
+        // quiet (Wi-Fi dropped mid-answer), and never cuts off a long, healthy
+        // streamed turn. The API sends ping events while it works, so a quiet
+        // stream really is a dead one.
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(
+            .read_timeout(std::time::Duration::from_secs(
                 crate::constants::timeouts::HTTP_REQUEST_TIMEOUT_SECONDS,
             ))
             .connect_timeout(std::time::Duration::from_secs(
@@ -527,6 +531,19 @@ impl AnthropicBrain {
         )
     }
 
+    /// Statuses worth one more try before the turn fails: rate limited,
+    /// overloaded (529), or a server or gateway error.
+    fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+        matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504 | 529)
+    }
+
+    /// Pauses before the second and third tries of a request that never
+    /// started streaming.
+    const SEND_RETRY_DELAYS: [std::time::Duration; 2] = [
+        std::time::Duration::from_millis(800),
+        std::time::Duration::from_millis(2500),
+    ];
+
     fn format_anthropic_http_error_for_user(
         status: reqwest::StatusCode,
         error_body: &str,
@@ -538,6 +555,12 @@ impl AnthropicBrain {
             if let Some(message) = crate::demo::ended_message(status.as_u16(), error_body) {
                 return message.to_string();
             }
+        }
+
+        // Busy or briefly down: the request was already retried. Say so in
+        // words; the status and body are in the log.
+        if Self::is_retryable_status(status) {
+            return "Claude is busy right now. Try again in a moment.".to_string();
         }
 
         let trimmed = error_body.trim();
@@ -2184,20 +2207,42 @@ impl AgentBrain for AnthropicBrain {
 
         crate::turn_timing::note_llm("anthropic", &self.model);
         crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
-        let response = self
-            .client
-            .post(ANTHROPIC_API_URL)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01") // Current stable API version
-            // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
-            // comma-separated in a single header. Prompt caching reduces input token costs by
-            // ~90% and latency by ~50-80% for the stable system prompt and tool definitions.
-            .header("anthropic-beta", self.beta_header_value())
-            .header("content-type", "application/json")
-            .json(&request_payload)
-            .send()
-            .await
-            .map_err(|e| AgentError::LlmError(format!("HTTP request failed: {}", e)))?;
+        // A blip (connect failure, 429, 5xx, 529) before anything streamed is
+        // retried twice with a short pause; nothing has reached the person
+        // yet, so a retry is invisible. Anything else returns at once.
+        let mut attempt = 0usize;
+        let response = loop {
+            let sent = self
+                .client
+                .post(ANTHROPIC_API_URL)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", "2023-06-01") // Current stable API version
+                // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
+                // comma-separated in a single header. Prompt caching reduces input token costs by
+                // ~90% and latency by ~50-80% for the stable system prompt and tool definitions.
+                .header("anthropic-beta", self.beta_header_value())
+                .header("content-type", "application/json")
+                .json(&request_payload)
+                .send()
+                .await;
+            let delay = Self::SEND_RETRY_DELAYS.get(attempt).copied();
+            match (sent, delay) {
+                (Ok(r), Some(delay)) if Self::is_retryable_status(r.status()) => {
+                    log::warn!("Anthropic answered {}; retrying in {:?}", r.status(), delay);
+                    drop(r);
+                    tokio::time::sleep(delay).await;
+                }
+                (Err(e), Some(delay)) if e.is_connect() => {
+                    log::warn!("Anthropic request failed ({}); retrying in {:?}", e, delay);
+                    tokio::time::sleep(delay).await;
+                }
+                (Ok(r), _) => break r,
+                (Err(e), _) => {
+                    return Err(AgentError::LlmError(format!("HTTP request failed: {}", e)))
+                }
+            }
+            attempt += 1;
+        };
 
         // --- 3. Parse API Response ---
         if !response.status().is_success() {

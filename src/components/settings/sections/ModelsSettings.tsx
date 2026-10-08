@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useAdvancedSettings } from "../AdvancedSettingsContext";
 import { SettingsGroup, SettingsRow } from "../ui";
 import {
+  DOWNLOAD_WAITING_FOR_NETWORK,
   useSttModels,
   type SttDownloadProgress,
   type SttModelInfo,
@@ -81,11 +82,13 @@ function DownloadingAction({
           <Progress className="h-1.5 animate-pulse" aria-label="Starting download" />
         )}
         <p className="text-[11px] tabular-nums text-muted-foreground">
-          {progress
-            ? `${Math.round(pct)}% · ${formatMb(progress.bytes_downloaded)}${
-                total > 0 ? ` of ${formatMb(total)}` : ""
-              } MB`
-            : "Starting…"}
+          {progress?.waiting
+            ? DOWNLOAD_WAITING_FOR_NETWORK
+            : progress
+              ? `${Math.round(pct)}% · ${formatMb(progress.bytes_downloaded)}${
+                  total > 0 ? ` of ${formatMb(total)}` : ""
+                } MB`
+              : "Starting…"}
         </p>
       </div>
       <Button
@@ -219,7 +222,7 @@ function ModelRow({ model, stt, advanced }: RowProps) {
         </div>
         {failed && (
           <p className="text-[11px] text-[#e8866a]" role="alert">
-            Download failed. {stt.downloadError?.error}
+            {stt.downloadError?.error}
           </p>
         )}
         {actionError && (
