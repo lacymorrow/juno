@@ -286,7 +286,7 @@ fn update(transition: impl FnOnce(&mut Health) -> bool) {
         let Ok(mut health) = HEALTH.lock() else {
             return;
         };
-        transition(&mut *health).then(|| health.snapshot())
+        transition(&mut health).then(|| health.snapshot())
     };
     let Some(snapshot) = changed_to else {
         return;
