@@ -433,6 +433,18 @@ pub struct MCPServerConfig {
     /// `agent::tools::mcp_integration::MCPServerConfig::approved`.
     #[serde(default)]
     pub approved: bool,
+    /// Extra HTTP headers for HTTP transports. A `keychain:{account}` value
+    /// is resolved from the macOS Keychain at request time, so this file on
+    /// disk never holds the secret. See
+    /// `agent::tools::mcp_integration::MCPServerConfig::headers`.
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    /// This server authenticates with MCP OAuth; tokens live in the Keychain.
+    #[serde(default)]
+    pub oauth: bool,
+    /// Tools never registered from this server, by their unprefixed names.
+    #[serde(default)]
+    pub blocked_tools: Vec<String>,
 }
 
 /// Prompt configuration and templates

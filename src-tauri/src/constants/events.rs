@@ -472,6 +472,18 @@ pub mod triggers {
     pub const CHANGED: &str = "triggers-changed";
 }
 
+/// Connected-app integration events (LAC-4210)
+pub mod integrations {
+    /// A request needed an app that is not connected. The reply card in the
+    /// conversation renders one button from this. Payload fields:
+    /// toolkit_slug, app_name. No curly braces in this comment on purpose,
+    /// see COMPUTER_USE_PREVIEW below.
+    pub const CONNECT_REQUIRED: &str = "integration-connect-required";
+    /// The set of connected apps changed: one connected, one disconnected, or
+    /// the integration was turned off. Settings re-reads the list. No payload.
+    pub const CONNECTIONS_CHANGED: &str = "integration-connections-changed";
+}
+
 /// Tool and command execution events
 pub mod tools {
     pub const USAGE: &str = "tool-usage";
