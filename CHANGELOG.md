@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.137] - 2026-10-08
+
+### Added
+
+- **greeting:** speak on the reveal's beat, from a render made at launch (#754) (860ca336)
+
 ## [0.8.136] - 2026-10-08
 
 ### Added
@@ -1127,7 +1133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.136...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.137...HEAD
+[0.8.137]: https://github.com/lacymorrow/juno/compare/cua-v0.8.136...v0.8.137
 [0.8.136]: https://github.com/lacymorrow/juno/compare/cua-v0.8.135...v0.8.136
 [0.8.135]: https://github.com/lacymorrow/juno/compare/cua-v0.8.134...v0.8.135
 [0.8.134]: https://github.com/lacymorrow/juno/compare/cua-v0.8.133...v0.8.134
