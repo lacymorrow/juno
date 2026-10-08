@@ -45,6 +45,7 @@ pub mod greeting; // The one line Juno says when she starts
 pub mod hold_gate; // A hold released before its voice session finished starting
 pub mod input_control; // Background operation and consent for taking the physical cursor
 pub mod integration; // Application integration patterns, component coordination, and event listeners
+pub mod intro; // How Juno first appears: the smoke reveal around the bar
 pub mod menu; // Menu management for app and tray menus
 pub mod path_gate; // The one place that answers "may this path be touched, for this purpose"
 pub mod permission_gate; // Asking for a macOS permission at the moment it is needed
@@ -734,6 +735,8 @@ pub fn run() {
             window_management::open_onboarding_window,
             window_management::close_onboarding_window,
             window_management::open_desktop_cursor_overlay,
+            intro::intro_ready,
+            intro::replay_intro,
             // Onboarding Commands
             commands::check_onboarding_status,
             commands::complete_onboarding,

@@ -14,6 +14,9 @@ pub mod window_labels {
     /// The snap-well drop indicator for the first display. Every other display
     /// gets its own copy, labelled with this plus a dash and the display index.
     pub const SNAP_WELLS_OVERLAY: &str = "snap-wells-overlay";
+    /// The smoke around the bar the first time it appears. Built for the
+    /// occasion by `intro.rs`, not declared in tauri.conf.json.
+    pub const INTRO: &str = "intro";
 }
 
 /// Agent session identity colors (LAC-1432 / LAC-2830 spec section 2).

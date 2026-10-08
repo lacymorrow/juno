@@ -555,6 +555,13 @@ pub async fn restore_after_onboarding(app: &AppHandle) {
             }
             continue;
         }
+        // The bar coming back after setup is Juno's first appearance, so it
+        // is revealed rather than shown (see `intro.rs`). The greeting waits
+        // for the bar to be visible, so the voice still follows the picture.
+        if label == window_labels::FLOATING_BAR {
+            crate::intro::show_bar_with_reveal(app);
+            continue;
+        }
         // Shown, never focused: these are overlays, and focusing one would
         // pull the person out of whatever they are doing.
         if let Some(window) = app.get_webview_window(&label) {
