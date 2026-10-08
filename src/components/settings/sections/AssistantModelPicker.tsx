@@ -142,7 +142,6 @@ export default function AssistantModelPicker({
     <SettingsGroup
       title="Provider Selection"
       advanced={advanced}
-      footer="Choose your AI provider and model"
     >
       <SettingsRow
         htmlFor="ai-provider"

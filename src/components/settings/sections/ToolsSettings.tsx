@@ -203,12 +203,12 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
       <SettingsGroup
         title="Smooth Mouse Movement"
-        footer="Enable or disable smooth mouse movement for computer actions."
       >
         <SettingsRow
           htmlFor="smooth-mouse-movement"
           label="Enable Smooth Mouse Movement"
-          description="When enabled, mouse movements will be animated for better visual feedback."
+          description="Animate the pointer for clearer feedback."
+          info="When enabled, mouse movements will be animated for better visual feedback."
         >
           <Switch
             id="smooth-mouse-movement"
@@ -221,12 +221,12 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
       <SettingsGroup
         title="Companion Mode"
-        footer="Watch and advise without taking any actions on your computer"
       >
         <SettingsRow
           htmlFor="companion-mode"
           label="Enable Companion Mode"
-          description="Juno watches your screen and answers questions. It will not click, type, or automate anything."
+          description="Watch and answer, never act."
+          info="Juno watches your screen and answers questions. It will not click, type, or automate anything."
           below={
             companionMode && (
               <div className="rounded-lg border border-border bg-muted p-3">
@@ -256,11 +256,12 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
 
       <SettingsGroup
         title="Tool Categories"
-        footer="Enable or disable categories of tools available to the AI agent. Required tools stay on: the agent cannot work without them."
+        
       >
         <SettingsRow
           label="Everything at once"
-          description="Required tools are not affected."
+          description="Required tools stay on."
+          info="Enable or disable categories of tools available to the AI agent. Required tools stay on: the agent cannot work without them."
         >
           <div className="flex items-center gap-2">
             <Button
