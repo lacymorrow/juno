@@ -98,7 +98,7 @@ Answer components: for common requests ("play music", "set a timer", "what's the
 
 Two constraints decide whether these pay off:
 
-1. Changing the model today replaces the Claude CLI process. The model is part of the process signature in `claude_cli_session.rs`, so a per-turn model pick costs a 4 to 6 s cold start. Before building the tier or chat-only routes, check whether the CLI's stream-json control channel can switch model (and thinking budget) in a live process, as the Agent SDK's `setModel` suggests. Settings, components, the filler and the arbiter do not depend on this.
+1. Changing the model today replaces the Claude CLI process, because the model is part of the process signature in `claude_cli_session.rs`. Verified fix: the stream-json `set_model` control switches models in the live process (see Candidate comparison), so the signature should drop the model.
 2. Never run it serially before Claude. Run it on the partial transcripts Whisper already produces while the person is still talking, so the answer is ready at key release; or start it alongside Claude and cancel Claude when a local action wins (a decision lands about a second before Claude's first token).
 
 ## Open and self-hosted alternatives
@@ -124,6 +124,33 @@ One harness, `scripts/decision-bench/` (not built), replays a fixed labelled set
 4. Pass bar: decision P95 under 350 ms remote or 20 ms local, at least 95% accuracy above the threshold, zero wrong local actions on the near-miss set. Voice: first audio under 800 ms median.
 
 Needs: an OpenRouter key, an OpenAI key with Decisions access when it opens, and Lacy's privacy call on sending transcripts to each vendor.
+
+## Candidate comparison (2026-10-08)
+
+Four agents researched one candidate each; full reports with sources are in `docs/research/decision-models/`. Probes ran on Lacy's M1 (16 GB) with made-up utterances, so accuracy numbers are small-sample and only directional. Latency is the solid part.
+
+| | Jev (TypeSafe) | Small text model | Kev | Laya |
+|---|---|---|---|---|
+| What | Hosted decision API | Model2Vec potion-base-8M + logistic head per question | Open Qwen 3.5 + LoRA + pointer head, 0.8B to 27B | Open ModernBERT-large decision model |
+| License / access | Closed, API key, $0.042 per M input | MIT | Apache-2.0, 3 weeks old, one maintainer | Apache-2.0, v0.4.0 |
+| API | `POST /v1/systemone` | in-process Rust (`model2vec-rs`) | same `/v1/systemone` contract, local FastAPI + MLX | Python lib; TS/Java ONNX SDKs |
+| Size | none local | about 8 MB int8 | about 1.5 GB base + 45 MB adapter + Python/MLX | 644 to 843 MB |
+| Latency measured here | not yet (no key); reported p50 150 to 300 ms | 0.07 ms per utterance | 118 to 270 ms per question; 714 ms for 4; 11 s first call | 39 to 174 ms MPS, 129 to 414 ms CPU (machine loaded) |
+| Zero-shot result in probe | not run | n/a (always trained): 83% on 3-way route, toy set | 9/13; misses on escalate and mid-run input | English route 15/20, settings 9/15; multilingual sent 14/20 to computer-use at about 0.9 |
+| Fine-tuning | no | yes, minutes | yes, JSONL in API shape | yes, `laya-train` |
+| Ships inside Juno | network call | yes, pure Rust, both arches | optional download only | optional download; 1 to 2 weeks of Rust port |
+| Ease score | 4/5 | 4/5 | 4/5 | 3/5 |
+
+Shared findings:
+
+- Every candidate needs an explicit "none" option trained or listed with near-miss negatives. Without it, off-topic input gets confident answers (Jev 30 of 30 out-of-scope inputs at 0.99 in a third-party test; small text model 0.75 on side talk; Laya multilingual 0.9 on wrong routes).
+- Confidence is not calibrated out of the box anywhere. Fit a temperature on Juno's own labels and set the act threshold from the abstain curve.
+- Mid-run input (stop / add / new / not for Juno) is the hardest question for every candidate probed. Benchmark it first.
+- Jev's docs say option order biases the answer toward the first option; the harness shuffles option order and reports the spread.
+
+Benchmark plan, in order: label real requests from logs and history (Lacy reviews a sample); train the small text model and fine-tune Kev on the same split; run Jev zero-shot (needs a key) and Laya zero-shot plus fine-tuned; report accuracy above threshold, wrong-action rate on near-misses, calibration, and p50/p95 latency from the Mac. Keep raw results and scripts for the public write-up.
+
+Model switching inside the running CLI process: verified 2026-10-08 on Claude Code 2.1.294. A stream-json `control_request` with `subtype: "set_model"` switched sonnet to haiku to opus in one live process, context kept (it recalled a word from the previous turn), modelUsage confirmed each model. So tier routing does not need a cold start; Juno should drop the model from the process signature and switch through this control.
 
 ## Sources
 
