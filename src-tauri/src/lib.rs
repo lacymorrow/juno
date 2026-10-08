@@ -631,6 +631,7 @@ pub fn run() {
             commands::conversations::list_conversations,
             commands::conversations::get_current_conversation_id,
             commands::conversations::load_conversation,
+            commands::conversations::open_claude_turn_conversation,
             commands::conversations::new_conversation,
             commands::conversations::delete_conversation,
             commands::escape_key_coordinator::set_bar_pane_open,

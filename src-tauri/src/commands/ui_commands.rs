@@ -1472,6 +1472,26 @@ pub async fn ui_handle_interaction(
             return Ok(());
         }
 
+        // A click on the bar while Claude's own turn ran in a conversation
+        // that is not on screen opens that conversation. Also before the
+        // lock: loading a conversation emits to every surface.
+        if is_bar && interaction.interaction_type == ui::interaction_types::CLICK {
+            let app_handle = manager.lock().await.app_handle.clone();
+            if let Some(state) = app_handle.try_state::<crate::state::AppState>() {
+                if let Err(e) = crate::commands::conversations::open_claude_turn_conversation_for(
+                    &app_handle,
+                    &state,
+                )
+                .await
+                {
+                    debug!(
+                        "Could not open the conversation Claude's turn ran in: {}",
+                        e
+                    );
+                }
+            }
+        }
+
         let mut manager = manager.lock().await;
 
         if is_bar {

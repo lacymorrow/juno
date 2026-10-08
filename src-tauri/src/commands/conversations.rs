@@ -6,6 +6,7 @@
 
 use tauri::{AppHandle, State};
 
+use crate::agent::providers::claude_cli_own_turn;
 use crate::conversation_history::{self, ConversationMeta};
 use crate::state::AppState;
 
@@ -30,14 +31,49 @@ pub async fn load_conversation(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    let messages = conversation_history::load_messages(&app_handle, &id)?;
+    load_into_live(&app_handle, &state, id).await
+}
+
+async fn load_into_live(
+    app_handle: &AppHandle,
+    state: &AppState,
+    id: String,
+) -> Result<(), String> {
+    let messages = conversation_history::load_messages(app_handle, &id)?;
     {
         let memory_manager = state.get_memory_manager().await;
         let guard = memory_manager.lock().await;
         guard.replace_messages(messages.clone()).await;
     }
+    claude_cli_own_turn::conversation_opened(app_handle, &id);
     *state.current_conversation_id.lock().await = id;
-    conversation_history::emit_loaded(&app_handle, &messages)
+    conversation_history::emit_loaded(app_handle, &messages)
+}
+
+/// Open the conversation Claude last ran a turn of its own in while another
+/// one was on screen (see `claude_cli_own_turn`). The bar calls this on a
+/// click while it is offering one. Returns whether a conversation was opened.
+#[tauri::command]
+pub async fn open_claude_turn_conversation(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    open_claude_turn_conversation_for(&app_handle, &state).await
+}
+
+/// [`open_claude_turn_conversation`] for callers holding only a handle.
+pub async fn open_claude_turn_conversation_for(
+    app_handle: &AppHandle,
+    state: &AppState,
+) -> Result<bool, String> {
+    let Some(id) = claude_cli_own_turn::take_elsewhere(app_handle) else {
+        return Ok(false);
+    };
+    if *state.current_conversation_id.lock().await == id {
+        return Ok(false);
+    }
+    load_into_live(app_handle, state, id).await?;
+    Ok(true)
 }
 
 /// Start a fresh chat: rotate the active id and clear the live conversation. The

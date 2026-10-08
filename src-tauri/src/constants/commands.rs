@@ -362,6 +362,7 @@ pub mod conversations {
     pub const NEW_CONVERSATION: &str = "new_conversation";
     pub const DELETE_CONVERSATION: &str = "delete_conversation";
     pub const GET_CURRENT_CONVERSATION_ID: &str = "get_current_conversation_id";
+    pub const OPEN_CLAUDE_TURN_CONVERSATION: &str = "open_claude_turn_conversation";
     pub const SAVE_CHAT_EXPORT: &str = "save_chat_export";
     pub const LOAD_CHAT_IMPORT: &str = "load_chat_import";
 }

@@ -446,6 +446,11 @@ pub mod bar {
     pub const MAIN_WINDOW_OPENED: &str = "bar-main-window-opened";
     /// The full-size chat window went away. The bar takes the conversation back.
     pub const MAIN_WINDOW_CLOSED: &str = "bar-main-window-closed";
+    /// Claude started a turn on its own in a conversation that is not on
+    /// screen. Payload has a nullable `conversation_id` string field; while
+    /// it is set, clicking the bar opens that conversation. Null once it has
+    /// been opened.
+    pub const CONVERSATION_ELSEWHERE: &str = "bar-conversation-elsewhere";
 }
 
 /// Snap-well overlay. Window to window: the bar emits these while it is being
