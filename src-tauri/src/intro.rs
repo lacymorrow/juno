@@ -53,9 +53,9 @@ pub const DURATION_MS: u64 = 2600;
 /// here, so the bar's own hard cut is hidden inside it.
 pub const BAR_AT_MS: u64 = 1000;
 
-/// When the greeting speaks, inside the sequence: a beat after the bar is
-/// shown, as the smoke starts to thin and the pill can be seen. Tweakable.
-pub const GREETING_AT_MS: u64 = 1300;
+/// When the greeting speaks, inside the sequence: the moment the bar appears.
+/// Tweakable; a compile-time check keeps it inside the sequence.
+pub const GREETING_AT_MS: u64 = BAR_AT_MS;
 
 // The beat falls inside the sequence, after the bar is shown.
 const _: () = assert!(GREETING_AT_MS >= BAR_AT_MS && GREETING_AT_MS < DURATION_MS);
@@ -258,11 +258,6 @@ fn beat_is_fresh() -> bool {
         .ok()
         .and_then(|at| *at)
         .is_some_and(|at| at.elapsed() <= GREETING_BEAT_FRESH)
-}
-
-/// True while a reveal is bringing the bar on.
-pub fn reveal_in_flight() -> bool {
-    IN_FLIGHT.load(Ordering::SeqCst)
 }
 
 /// Wait for the moment the greeting should speak: the reveal's beat, or one
