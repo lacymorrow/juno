@@ -10,7 +10,7 @@ Parity is the floor. Juno already beats Siri at everything Siri cannot touch: an
 
 Person holds Fn+Control and says "remind me to call Katie tomorrow at nine." Juno says "Tomorrow at 9. Call Katie." and shows the reminder as a card. Nothing was set up. The first time, macOS asked once for Reminders access and Juno's answer was the ask itself.
 
-Second request: "text Doug I'm running ten minutes late." Juno shows the message with Doug's name on it and says "To Doug: I'm running ten minutes late. Send it?" Person says "yes." Juno says "Sent." That is the whole demo. Everything below exists to make those two exchanges true, fast, and true again on the fiftieth try.
+Second request: "text Doug I'm running ten minutes late." Juno shows the message with Doug's name on it and says "To Doug: I'm running ten minutes late. Say send it." Person says "send it." Juno says "Sent." That is the whole demo. Everything below exists to make those two exchanges true, fast, and true again on the fiftieth try.
 
 ## Where Siri on the Mac stands (checked 2026-10-08)
 
@@ -102,13 +102,21 @@ Every write reads back and reports what it observed, not what it sent (#646). A 
 
 `risk_classifier.rs` gains a `Send` consequence. `messages_send` and `mail_send` carry it. Send asks in every mode, including Don't Ask, and the per-conversation "do not ask again" grant does not cover it. This is the one line permissions-by-consequence already draws, now wired to the tools that can cross it (the dead-control rule: pin the link with a test that fails if either tool loses the class).
 
-The ask is one card and one word. The card shows the recipient as Contacts resolved them, the body, and a Send button. "Yes", "send it", or the button sends. Anything else is a correction and re-renders the card. No "are you sure" after that.
+The ask is one card and one phrase. The card shows the recipient as Contacts resolved them, the body, and a Send button. The phrase "send it" (or the button) sends. A bare "yes" does not, decided by Lacy 2026-10-08: half a sentence followed by a pause ("yes, but change...") must never send. "Send it" is a whole phrase a person does not say by accident. Juno's prompt tells them the phrase. Anything else is a correction and re-renders the card. No "are you sure" after that.
 
-### Permissions, in the moment
+### Permissions, progressively, right before the act
 
-Nothing is requested at install or in onboarding. Each permission is asked the first time its tool runs, by the system dialog, with Juno's spoken line being the reason ("I need Reminders for that."). Declined is designed, not an error: Juno says the one sentence and shows the one action that changes it (Open Privacy Settings, deep-linked to the right pane). It never names a framework, a plist key, or TCC (capability-shaped UX).
+Decided by Lacy 2026-10-08: after the basics (microphone, accessibility, screen recording), every permission is disclosed progressively. Nothing is requested at install or in onboarding. Juno asks for a permission in the moment it is about to run the command that needs it, says why in one spoken line ("I need Reminders for that."), and brings the dialog up itself. The person is never sent to find a setting on their own.
 
-Info.plist needs three strings it does not have: `NSRemindersFullAccessUsageDescription`, `NSCalendarsFullAccessUsageDescription`, `NSContactsUsageDescription`. Automation and Apple Events are already declared. Full Disk Access cannot be prompted; it is the one case where the "open settings" card is the first thing the person sees, and only when they ask to read messages.
+How each kind is brought up:
+
+- **Reminders, Calendar, Contacts.** The system dialog appears when the tool first calls the framework. Juno speaks the line, calls, and the dialog is the next thing on screen.
+- **Controlling a specific app (Messages, Mail, Notes, Music).** The Automation dialog comes from macOS the first time Juno scripts that app, one per app. Juno says "I need to control Messages for that" and runs the script; the dialog is the next thing on screen. It must come from the Tauri main process so the dialog names Juno (see gotchas).
+- **Full Disk Access (reading Messages).** macOS has no prompt for it. Juno says "I need Full Disk Access to read your messages", opens the Privacy pane on that row, and shows the one card with that action. When the person comes back, the read runs without being asked again.
+
+Declined is designed, not an error: one sentence, one action that changes it, never a framework name, a plist key, or the word TCC (capability-shaped UX). Nothing already granted is asked again, and nothing is asked that the current request does not need.
+
+Info.plist needs three strings it does not have: `NSRemindersFullAccessUsageDescription`, `NSCalendarsFullAccessUsageDescription`, `NSContactsUsageDescription`. Automation and Apple Events are already declared.
 
 ### Cards
 
@@ -146,11 +154,11 @@ Neither is built until the scorecard says it is needed.
 
 **Slice 1: Reminders, Calendar, Contacts.** EventKit and Contacts through objc2 (the 0.3 generation already in `Cargo.toml`). Nine tools, `AgendaCard`, three plist strings, decline states. Demo: "what's on my calendar this afternoon", "remind me to call Katie tomorrow at nine", "move my three o'clock to four", and "add this to my calendar" while an invite is on screen. Scorecard rows for the three domains.
 
-**Slice 2: Messages, FaceTime, Mail, Notes, and the send gate.** Nine tools, `Send` consequence with its pinning test, `MessageCard`, Full Disk Access ask for reading. Demo: "text Doug I'm running late" through confirm to "Sent.", "read me my unread mail", "what did Katie text me", "make a note: pick up the drawings Thursday", "FaceTime Mom". This is the keynote slice and the one to record for the growth push (LAC-4173).
+**Slice 2: Messages, FaceTime, Mail, Notes, and the send gate.** Nine tools, `Send` consequence with its pinning test, `MessageCard`, Full Disk Access ask for reading. Demo: "text Doug I'm running late" through "send it" to "Sent.", "read me my unread mail", "what did Katie text me" (the Full Disk Access ask, in the moment), "make a note: pick up the drawings Thursday", "FaceTime Mom". This is the keynote slice.
 
 **Slice 3: Music, Maps, Shortcuts, Focus.** Four tools, the signed "Juno Focus" shortcut and its one-click import, the four tier-0 phrasings above. Demo: "play Boards of Canada", "directions to the airport", "turn on the porch lights" (Lacy's existing shortcut), "turn on do not disturb" the first time (import) and the second (instant).
 
-**Slice 4: Speed and close-out.** Fill every scorecard row with a number and a recording. Pull the two speed levers only where rows miss 1.5 s. Then record the three "beyond Siri" demos (compound, any-app, files) as the proof the floor was worth building.
+**Slice 4: Speed and close-out.** Fill every scorecard row with a number and a recording. Pull the two speed levers only where rows miss 1.5 s. Then record the three "beyond Siri" demos (compound, any-app, files) as the proof the floor was worth building. This slice produces the growth-push recording (LAC-4173), decided by Lacy 2026-10-08: the recording shows the whole floor plus what is above it, not one slice.
 
 Build rule: one agent per slice, Sonnet unless the send gate is in scope (slice 2 gets Opus for the classifier work). Each slice is one PR against `main`, CI only, no local cargo (juno-remote-builds).
 
@@ -177,18 +185,18 @@ Build rule: one agent per slice, Sonnet unless the send gate is in scope (slice 
 - A Shortcuts run that needs input stalls the CLI. Only run shortcuts whose input type is none or text, and pass text on stdin.
 - Automation prompts come from the target app, one per app, and only when Juno is the frontmost process's responsible app. Trigger them from the Tauri main process, never from a spawned `osascript` with a different responsible PID.
 
-## Open questions for Lacy
+## Decided by Lacy, 2026-10-08
 
-1. The send confirm accepts a spoken "yes". Siri does the same. Keep it, or button only?
-2. Full Disk Access for reading Messages: ask once in context (recommended), or never ask and always read through the window?
-3. Slice 2 is the recording for the growth push. Agree, or slice 1?
+1. Send needs the phrase "send it" or the button. A bare "yes" never sends, so half a sentence and a pause cannot misfire.
+2. Juno asks for Full Disk Access, and for control of each app, right before the command that needs it, and brings the dialog up itself. Progressive disclosure after the basics.
+3. Slice 4 produces the growth-push recording.
 
 ## Demo test
 
-1. Ten seconds: hold the key, say the reminder, hear it back, see the card. Say the text, see the card, say yes, hear "Sent."
+1. Ten seconds: hold the key, say the reminder, hear it back, see the card. Say the text, see the card, say "send it", hear "Sent."
 2. Removed: a settings page, twelve cards, model-written AppleScript for the seven apps, a custom NLU, private APIs, and every domain without a public path.
 3. One primary action: Send on the message card. Everything else acts on the request itself.
-4. Defaults: every tool on, every permission asked in the moment, send always asks.
+4. Defaults: every tool on, every permission asked right before the act that needs it, send always asks for "send it".
 5. States: declined permission (one sentence, one action), empty calendar ("Nothing until 3."), tool failure (read-back says what it saw), offline (tier 0 still works, tier 1 says it needs a connection once).
 6. Instant on tier 0; first audio within 1.5 s on tier 1 or the speed slice runs.
 7. Seams to close: the prompt's "write AppleScript" instruction, the blanket High rating, the Composio-versus-local overlap on Calendar.
