@@ -1392,7 +1392,7 @@ dependencies = [
 
 [[package]]
 name = "computer-use-ai-sdk"
-version = "0.8.135"
+version = "0.8.136"
 dependencies = [
  "accessibility",
  "accessibility-sys",
@@ -4186,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "juno"
-version = "0.8.135"
+version = "0.8.136"
 dependencies = [
  "any-tts",
  "arboard",
@@ -4222,6 +4222,7 @@ dependencies = [
  "objc",
  "objc-sys",
  "objc2",
+ "objc2-avf-audio",
  "objc2-foundation",
  "objc2-user-notifications",
  "once_cell",
@@ -4271,7 +4272,7 @@ dependencies = [
 
 [[package]]
 name = "juno-cua"
-version = "0.8.135"
+version = "0.8.136"
 dependencies = [
  "anyhow",
  "clap",
@@ -5191,6 +5192,18 @@ dependencies = [
  "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",
+ "objc2-foundation",
+]
+
+[[package]]
+name = "objc2-avf-audio"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
+dependencies = [
+ "bitflags 2.13.2",
+ "block2",
+ "objc2",
  "objc2-foundation",
 ]
 
@@ -8081,7 +8094,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-voice-transcription"
-version = "0.8.135"
+version = "0.8.136"
 dependencies = [
  "base64 0.22.1",
  "block",
