@@ -907,6 +907,9 @@ pub fn run() {
             let app_handle = app.handle().clone();
             // Juno's speaking level goes to every window from here on.
             tts::speech_level::bind(app_handle.clone());
+            // The Mac's voice, kept loaded in-process so a sentence starts in
+            // tens of milliseconds. Warms off the critical path.
+            tts::avspeech::bind(app_handle.clone());
 
             // A demo build names the windows declared in tauri.conf.json
             // "Juno Demo". Windows opened later are renamed as they are built.
