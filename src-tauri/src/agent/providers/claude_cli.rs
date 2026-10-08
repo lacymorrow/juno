@@ -98,7 +98,7 @@ fn forget_session(conversation_id: &str) {
 }
 
 /// Which Juno conversation this run belongs to.
-async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<String> {
+pub(super) async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<String> {
     use tauri::Manager;
     let handle = app_handle.as_ref()?;
     let state = handle.try_state::<crate::state::AppState>()?;
@@ -482,7 +482,8 @@ pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
 /// System-prompt guidance appended when Juno's tool server is wired in.
 /// Without this, models tend to fall back to `cliclick`/`screencapture` via
 /// Bash even when MCP computer-use tools are available (LAC-3692).
-const MCP_TOOL_GUIDANCE: &str = "You have a desktop automation tool from the \"juno\" MCP \
+pub(super) const MCP_TOOL_GUIDANCE: &str =
+    "You have a desktop automation tool from the \"juno\" MCP \
 server: `computer`, which takes screenshots and moves, clicks, types, scrolls and presses keys. \
 For ANY desktop or GUI automation use it. Do NOT use shell commands like cliclick, \
 screencapture, or osascript for desktop automation: they bypass Juno, so the pointer moves with \

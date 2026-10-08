@@ -9,12 +9,11 @@
 //! case Juno already covers via the OpenAI provider, so this provider is
 //! deliberately tied to the ChatGPT auth mode.
 //!
-//! v1 is chat-only: `codex exec --json -s read-only` for every turn. No tool
-//! integration, no session resumption, no approvals. Those live in Claude CLI
-//! today because that provider is further along; the point here is to prove
-//! the login path and let someone on ChatGPT answer a question through Juno
-//! without pasting a key. Everything streams through the same Tauri events
-//! as the Anthropic provider so the UI needs no changes.
+//! A turn runs on a warm `codex app-server` thread ([`super::codex_session`])
+//! when it can, and on a one-shot `codex exec --json -s read-only` when it
+//! cannot. Both paths get Juno's computer tool over MCP, stream through the
+//! same `<TTS>` funnel and Tauri events as the Claude CLI, and leave the shell
+//! read-only: the desktop goes through Juno, not through Codex's sandbox.
 //!
 //! NOTE: macOS-only, matching Juno's platform target.
 
@@ -29,6 +28,8 @@ use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use super::claude_cli::ClaudeCliBrain;
+use super::codex_session;
+use super::juno_mcp;
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolDefinition};
 use crate::agent::traits::AgentBrain;
 use crate::settings::ProviderConfig as CentralizedProviderConfig;
@@ -328,7 +329,20 @@ impl CodexCliBrain {
     /// Codex has its own shell tools and this provider is chat-only in v1, so
     /// any filesystem touch would be surprising. If somebody later wants
     /// write access, that is an explicit decision, not a default.
-    fn build_args(&self, query: &str) -> Vec<String> {
+    /// What Codex is told about Juno: the system prompt, plus, when Juno's
+    /// computer tool is on offer, the same steer toward it the Claude CLI gets.
+    fn developer_instructions(&self, with_computer_tool: bool) -> String {
+        let mut instructions = self.system_prompt.clone().unwrap_or_default();
+        if with_computer_tool {
+            if !instructions.is_empty() {
+                instructions.push_str("\n\n");
+            }
+            instructions.push_str(super::claude_cli::MCP_TOOL_GUIDANCE);
+        }
+        instructions
+    }
+
+    fn build_args(&self, query: &str, mcp: Option<&juno_mcp::Endpoint>) -> Vec<String> {
         let mut args = vec![
             "exec".to_string(),
             "--json".to_string(),
@@ -344,13 +358,17 @@ impl CodexCliBrain {
             "-m".to_string(),
             self.model.clone(),
         ];
-        if let Some(ref prompt) = self.system_prompt {
-            // Codex has no `--system-prompt`, so we prepend the prompt to the
-            // query as a plain "System:" preamble. It is a weaker signal than
-            // a dedicated flag, but it is the one the CLI gives us today.
-            args.push(format!("System: {}\n\nUser: {}", prompt, query));
-        } else {
+        if let Some(mcp) = mcp {
+            args.extend(codex_session::mcp_config_args(&mcp.url));
+        }
+        let instructions = self.developer_instructions(mcp.is_some());
+        if instructions.is_empty() {
             args.push(query.to_string());
+        } else {
+            // `codex exec` has no system-prompt flag, so the instructions ride
+            // in front of the query. The persistent path sends them properly,
+            // as `developerInstructions`; this is only its fallback.
+            args.push(format!("System: {}\n\nUser: {}", instructions, query));
         }
         args
     }
@@ -365,12 +383,55 @@ impl CodexCliBrain {
     ) -> Result<String, AgentError> {
         check_cli_auth_status().await?;
 
+        // Juno's own computer tool, served in-process. Without an app handle
+        // (headless, tests) there is no desktop and Codex runs toolless.
+        let mcp = match app_handle.as_ref() {
+            Some(handle) => juno_mcp::ensure_running(handle)
+                .await
+                .map_err(|e| warn!("[CodexCLI] Could not offer Juno's computer tool: {e}"))
+                .ok(),
+            None => None,
+        };
+
+        // The warm app-server path first. Anything it cannot do comes back as
+        // `Unavailable` having shown nothing, and the one-shot path below runs
+        // the same message. Nobody is told.
+        if let Some(handle) = app_handle.as_ref() {
+            if let Some(conversation_id) = super::claude_cli::conversation_id_for(&app_handle).await
+            {
+                let request = codex_session::TurnRequest {
+                    launch: codex_session::Launch {
+                        binary: self.binary_path.clone(),
+                        mcp: mcp.clone(),
+                    },
+                    thread: codex_session::ThreadConfig {
+                        model: self.model.clone(),
+                        instructions: self.developer_instructions(mcp.is_some()),
+                    },
+                    conversation_id: &conversation_id,
+                    query,
+                    app_handle: handle,
+                    message_id: message_id.clone(),
+                    cancel_rx: cancel_rx.clone(),
+                };
+                match codex_session::run_turn(request).await {
+                    Ok(codex_session::TurnOutcome::Completed(text)) => return Ok(text),
+                    Ok(codex_session::TurnOutcome::Unavailable) => {
+                        debug!("[CodexCLI] app-server unavailable; running codex exec");
+                    }
+                    // The turn ran and failed or was cancelled. Running it
+                    // again would spend the plan twice for one message.
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
         let msg_id = message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         if let Some(ref handle) = app_handle {
             crate::agent::tool_logger::emit_stream_start(handle, msg_id.clone());
         }
 
-        let args = self.build_args(query);
+        let args = self.build_args(query, mcp.as_ref());
         info!(
             "Spawning Codex CLI: {} {}",
             self.binary_path.display(),
@@ -381,6 +442,11 @@ impl CodexCliBrain {
         crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
         let spawn_result = codex_command(&self.binary_path)
             .args(&args)
+            // The bearer token for Juno's tool server, by name, never on argv.
+            .envs(
+                mcp.as_ref()
+                    .map(|m| (codex_session::MCP_TOKEN_ENV, m.token.clone())),
+            )
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null())
@@ -779,10 +845,31 @@ mod tests {
             model: "gpt-6-luna".to_string(),
             system_prompt: None,
         };
-        let args = brain.build_args("hi");
+        let args = brain.build_args("hi", None);
         assert!(args.contains(&"--skip-git-repo-check".to_string()));
         assert!(args.contains(&"--ephemeral".to_string()));
         assert_eq!(args.last().map(String::as_str), Some("hi"));
+    }
+
+    #[test]
+    fn the_fallback_gets_the_computer_tool_too() {
+        let brain = CodexCliBrain {
+            binary_path: PathBuf::from("/usr/bin/false"),
+            model: "gpt-6-luna".to_string(),
+            system_prompt: Some("You are Juno.".to_string()),
+        };
+        let endpoint = juno_mcp::Endpoint {
+            url: "http://127.0.0.1:51234/mcp".to_string(),
+            token: "secret".to_string(),
+        };
+        let args = brain.build_args("hi", Some(&endpoint));
+        let joined = args.join(" ");
+        assert!(joined.contains("mcp_servers.juno.url"));
+        assert!(!joined.contains("secret"), "the token never reaches argv");
+        let last = args.last().cloned().unwrap_or_default();
+        assert!(last.starts_with("System: You are Juno."));
+        assert!(last.contains("`computer`"), "steered toward Juno's tool");
+        assert!(last.ends_with("User: hi"));
     }
 
     #[test]
