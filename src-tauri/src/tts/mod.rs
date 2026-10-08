@@ -1,6 +1,7 @@
 pub mod avspeech;
 pub mod elevenlabs;
 pub mod kokoro;
+pub mod prerender;
 pub mod rate;
 pub mod replicate;
 pub mod speech_level;
@@ -1050,6 +1051,57 @@ pub async fn invoke_tts(
         execute_tts_with_completion_tracking(filtered_text, &provider, &state, &app_handle).await;
 
     // CRITICAL FIX 6: Cleanup happens in execute_tts_with_completion_tracking after actual audio completion
+    result
+}
+
+/// Play a line rendered ahead of time (the launch greeting), with everything
+/// [`invoke_tts`] gives a spoken line: it skips when something is already
+/// speaking, honours speech being off, holds the echo guard and the Escape
+/// key while it plays, and stops on every stop path. The Mac's voice plays on
+/// the chosen speaker through the in-process player; other engines' audio
+/// plays the way theirs always does.
+///
+/// `Err` only when the audio could not be played at all, so the caller can
+/// speak the line the ordinary way instead.
+pub async fn speak_prerendered(
+    audio: prerender::Prerendered,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    if is_tts_playing() || with_queue(|queue| queue.is_busy()) {
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+    let _guard = TTS_MUTEX.lock().await;
+    if is_tts_playing() {
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+    reset_tts_stop_flag();
+
+    let provider = state
+        .get_tts_provider()
+        .map_err(|e| format!("Failed to get tts_provider: {}", e))?;
+    if provider.is_empty() || provider.eq_ignore_ascii_case("off") {
+        return Ok("TTS_DISABLED_BY_SETTING".to_string());
+    }
+    crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+    crate::turn_timing::note_tts_engine(&provider);
+
+    set_tts_playing(true);
+    register_tts_escape_key(&app_handle).await;
+
+    let result = match audio {
+        prerender::Prerendered::Pcm { samples, rate } => {
+            let device = state.get_output_device().ok().flatten();
+            match avspeech::play_pcm(&samples, rate, device.as_deref()).await {
+                avspeech::Spoken::Status(status) => Ok(status.to_string()),
+                avspeech::Spoken::UseSay(reason) => Err(reason),
+            }
+        }
+        prerender::Prerendered::Encoded(encoded) => play_rendered(Ok(encoded), &state).await,
+    };
+
+    set_tts_playing(false);
+    unregister_tts_escape_key(&app_handle).await;
     result
 }
 
