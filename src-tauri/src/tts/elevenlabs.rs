@@ -33,11 +33,11 @@ struct ElevenLabsPayload {
 }
 // --- End ElevenLabs API Structures ---
 
-// --- ElevenLabs TTS Command ---
-#[tauri::command]
 /// The voice used when `ELEVENLABS_VOICE_ID` is not set.
 pub const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
 
+// --- ElevenLabs TTS Command ---
+#[tauri::command]
 pub async fn invoke_elevenlabs_tts(text: String, speed: Option<f64>) -> Result<String, String> {
     info!("Invoking ElevenLabs TTS for text: {}", text);
 
