@@ -1226,11 +1226,6 @@ where
         }
     }
 
-    /// Safety net for brains that leave `<TTS>` blocks in their final text
-    /// instead of extracting them while streaming (OpenAI, Gemini, rig, the
-    /// Anthropic non-streaming path). Speaks each block through the normal TTS
-    /// path and returns the display text. Streaming brains already stripped
-    /// the tags, so for them this is a no-op and nothing is spoken twice.
     /// Add Juno's reply for this turn to memory, which tees it into the
     /// conversation history. Best effort: history must never fail a turn.
     async fn save_reply(&self, text: &str, interrupted: bool) {
@@ -1243,6 +1238,11 @@ where
         }
     }
 
+    /// Safety net for brains that leave `<TTS>` blocks in their final text
+    /// instead of extracting them while streaming (OpenAI, Gemini, rig, the
+    /// Anthropic non-streaming path). Speaks each block through the normal TTS
+    /// path and returns the display text. Streaming brains already stripped
+    /// the tags, so for them this is a no-op and nothing is spoken twice.
     fn speak_and_strip_tts(&self, text: String) -> String {
         if !crate::agent::tts_tags::contains_tts_tags(&text) {
             return text;
