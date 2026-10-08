@@ -1,6 +1,13 @@
 import React from "react";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { HelpCircle } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useAdvancedSettings } from "./AdvancedSettingsContext";
 
 /**
@@ -11,6 +18,37 @@ import { useAdvancedSettings } from "./AdvancedSettingsContext";
  * row puts its label (and optional description) on the left and its control
  * on the right, matching the native two-column list.
  */
+
+/**
+ * A small (?) that reveals longer explanation on hover or keyboard focus.
+ * Keeps rows to a title plus one short line.
+ */
+export function InfoTip({
+  children,
+  label = "More info",
+}: {
+  children: React.ReactNode;
+  label?: string;
+}) {
+  return (
+    <TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[260px] text-[12px] leading-snug">
+        {children}
+      </TooltipContent>
+    </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 interface SettingsGroupProps {
   /** Small heading shown above the card. */
@@ -58,6 +96,8 @@ export const SETTINGS_ROW_ID_PREFIX = "settings-row-";
 interface SettingsRowProps {
   label?: React.ReactNode;
   description?: React.ReactNode;
+  /** Longer explanation, shown in a (?) tooltip beside the label. */
+  info?: React.ReactNode;
   /**
    * Stable anchor key so search deep-linking can scroll to and highlight this
    * row. Rendered as `settings-row-<id>`. Falls back to `htmlFor` when omitted,
@@ -80,6 +120,7 @@ interface SettingsRowProps {
 export function SettingsRow({
   label,
   description,
+  info,
   id,
   htmlFor,
   children,
@@ -105,19 +146,24 @@ export function SettingsRow({
       )}
     >
       {hasTopLine && (
-        <div className="flex min-h-[28px] items-center justify-between gap-4">
+        <div className="flex min-h-[28px] flex-wrap items-center justify-between gap-x-4 gap-y-2">
           {(label || description) && (
-            <div className="min-w-0 flex-1 space-y-0.5">
+            <div className="min-w-[14rem] flex-1 space-y-0.5">
               {label && (
-                <Label
-                  htmlFor={htmlFor}
-                  className={cn(
-                    "block text-[13px] font-medium leading-tight",
-                    destructive && "text-destructive",
+                <div className="flex items-center gap-1.5">
+                  <Label
+                    htmlFor={htmlFor}
+                    className={cn(
+                      "block text-[13px] font-medium leading-tight",
+                      destructive && "text-destructive",
+                    )}
+                  >
+                    {label}
+                  </Label>
+                  {info && (
+                    <InfoTip>{info}</InfoTip>
                   )}
-                >
-                  {label}
-                </Label>
+                </div>
               )}
               {description && (
                 <p className="text-[12px] leading-snug text-muted-foreground">
@@ -126,7 +172,7 @@ export function SettingsRow({
               )}
             </div>
           )}
-          {children && <div className="shrink-0">{children}</div>}
+          {children && <div className="max-w-full shrink-0">{children}</div>}
         </div>
       )}
       {below && <div className={cn(hasTopLine && "mt-3")}>{below}</div>}

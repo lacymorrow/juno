@@ -7,6 +7,7 @@ use crate::state::AppState;
 use crate::utils::coordinates;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
+use tauri::Emitter;
 use tauri::State;
 use tracing::warn;
 use tracing::{error, info};
@@ -593,10 +594,17 @@ pub async fn get_agent_execution_progress(
 
 /// Set debug mode enabled/disabled
 #[tauri::command]
-pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_debug_mode(
+    enabled: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     info!("Setting debug mode to: {}", enabled);
 
     let _ = state.set_debug_mode(enabled);
+    if let Err(e) = app.emit(crate::constants::events::bar::DEBUG_MODE_CHANGED, enabled) {
+        warn!("Failed to emit debug mode change: {}", e);
+    }
 
     info!("Debug mode successfully set to: {}", enabled);
     Ok(())

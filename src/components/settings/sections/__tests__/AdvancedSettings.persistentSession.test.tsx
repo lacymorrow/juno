@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -70,6 +70,14 @@ beforeEach(() => {
   mockBackend();
 });
 
+async function openInfo(el: HTMLElement, text: RegExp) {
+  const row = el.closest('[id^="settings-row-"]') as HTMLElement;
+  await act(async () => {
+    within(row).getByRole("button", { name: "More info" }).focus();
+  });
+  return (await screen.findAllByText(text))[0];
+}
+
 describe("Persistent Claude session toggle", () => {
   it("is on by default", async () => {
     await mount();
@@ -91,7 +99,7 @@ describe("Persistent Claude session toggle", () => {
     expect(row.closest("section")?.textContent ?? "").not.toMatch(
       /Beta features/,
     );
-    const description = screen.getByText(/keeps one Claude CLI process/i);
+    const description = await openInfo(row, /keeps one Claude CLI process/i);
     expect(description).toHaveTextContent(/1\.6–3\.1s faster/);
     expect(description).toHaveTextContent(/stall|hang/i);
     expect(description).toHaveTextContent(/next message/i);

@@ -255,7 +255,8 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
               advanced
               htmlFor="load-account-mcp"
               label="Load account MCP connectors"
-              description="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
+              description="Use your Claude account connectors in chats."
+            info="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
             >
               <Switch
                 id="load-account-mcp"

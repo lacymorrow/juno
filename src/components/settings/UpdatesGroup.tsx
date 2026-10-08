@@ -111,7 +111,8 @@ export function UpdatesGroup() {
         advanced
         htmlFor="auto-update-check"
         label="Check automatically"
-        description="Look for a new version shortly after launch, then every few hours. Off still leaves the button above."
+        description="Look for new versions in the background."
+          info="Look for a new version shortly after launch, then every few hours. Off still leaves the button above."
       >
         <Switch
           id="auto-update-check"
@@ -130,7 +131,8 @@ export function UpdatesGroup() {
         advanced
         htmlFor="update-prereleases"
         label="Get prereleases"
-        description="Take every build as it is merged, not only the ones promoted for release. On while Juno's own team are the testers."
+        description="Get every build as it is merged."
+          info="Take every build as it is merged, not only the ones promoted for release. On while Juno's own team are the testers."
       >
         <Switch
           id="update-prereleases"
