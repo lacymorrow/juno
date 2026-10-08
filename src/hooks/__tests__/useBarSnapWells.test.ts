@@ -259,7 +259,9 @@ describe("a fast drag keeps the spot pressed under the cursor", () => {
         // ...and the hand keeps going while the window swaps behind its
         // hidden frames.
         cursor = { x: pressedOnScreen.x + 90, y: pressedOnScreen.y - 40 };
-        await tick();
+        // Until the OS drag starts, not a fixed delay: the swap waits on
+        // animation frames, which a loaded runner can stretch past 120ms.
+        await vi.waitFor(() => expect(order).toHaveLength(1), { timeout: 5000 });
 
         expect(frames).toHaveLength(1);
         expect(order).toEqual(["drag after 1 frame(s)"]);
@@ -292,7 +294,7 @@ describe("a fast drag keeps the spot pressed under the cursor", () => {
     const press = { x: drawn.x + 30, y: drawn.y + 20 };
     cursor = { x: docked.origin.x + press.x, y: docked.origin.y + press.y };
     startBarDrag(press);
-    await tick();
+    await vi.waitFor(() => expect(win.startDragging).toHaveBeenCalled(), { timeout: 5000 });
     expect(frames).toEqual([dragLayout(docked, fp).origin]);
   });
 
