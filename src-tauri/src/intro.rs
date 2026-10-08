@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn top_centre_puts_the_pill_near_the_top_of_the_window() {
-        let (rect, plan) = place(pill_at(756.0, 60.0), SCREEN);
+        let (rect, plan) = place(pill_at(756.0, 70.0), SCREEN);
         assert!(close(rect.x, 756.0 - WINDOW_WIDTH / 2.0));
         assert!(close(plan.pill_x, WINDOW_WIDTH / 2.0));
         assert!(close(plan.pill_y, PILL_INSET_Y));
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn the_plan_carries_the_pills_own_shape() {
-        let (_, plan) = place(pill_at(756.0, 60.0), SCREEN);
+        let (_, plan) = place(pill_at(756.0, 70.0), SCREEN);
         assert_eq!(
             (plan.pill_w, plan.pill_h, plan.pill_radius),
             (56.0, 16.0, 8.0)
