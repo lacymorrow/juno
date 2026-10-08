@@ -38,6 +38,14 @@ export interface AudioDeviceChoices {
 	missing_output: string | null;
 }
 
+/** The speed row. Present only when the engine in force can change speed. */
+export interface VoiceSpeed {
+	/** The rate in force, already inside the engine's range. 1 is its own pace. */
+	value: number;
+	min: number;
+	max: number;
+}
+
 /** One row of the "Juno's voice" picker. */
 export interface JunoVoiceOption {
 	id: string;
@@ -70,6 +78,11 @@ export interface JunoVoiceList {
 	note: string | null;
 	/** The engines the advanced picker offers. Silence is not one: it is a row. */
 	engines: { id: string; name: string }[];
+	/**
+	 * How fast Juno speaks. Absent when Juno is silent or the engine has no
+	 * speed control, and then the pane draws nothing for it.
+	 */
+	speed?: VoiceSpeed | null;
 }
 
 /**
@@ -758,6 +771,22 @@ export function useSettings() {
 		}
 	}, [applyVoiceList]);
 
+	/**
+	 * Set how fast Juno speaks. Rust stores it for every engine, plays the
+	 * sample at the new pace and answers with the list, so the slider settles
+	 * on what Rust decided (an engine can narrow the range).
+	 */
+	const handleJunoVoiceRateChange = useCallback(async (rate: number) => {
+		try {
+			await applyVoiceList(() =>
+				invoke<JunoVoiceList>(COMMANDS.AUDIO_SET_JUNO_VOICE_RATE, { rate }),
+			);
+		} catch (error) {
+			console.error("Failed to set Juno's speed:", error);
+			toast.error(String(error));
+		}
+	}, [applyVoiceList]);
+
 	/** Hear the voice already chosen again. */
 	const handlePreviewJunoVoice = useCallback(async () => {
 		try {
@@ -1204,6 +1233,7 @@ export function useSettings() {
 		handleAudioOutputDeviceChange,
 		handleJunoVoiceChange,
 		handlePreviewJunoVoice,
+		handleJunoVoiceRateChange,
 		dismissCaptureFailure: () => setCaptureFailure(null),
 		handleTtsProviderChange,
 		handleChatterboxSettingsChange,

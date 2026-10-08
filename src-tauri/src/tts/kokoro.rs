@@ -244,14 +244,15 @@ pub fn sync_with_engine(engine: &str, on_settled: impl FnOnce() + Send + 'static
 /// Invoke Kokoro-82M TTS synthesis.
 ///
 /// `voice` has already been resolved against the embeddings on disk by the
-/// caller. Returns base64-encoded WAV audio on success. afplay on macOS reads
+/// caller. `speed` is a factor, 1.0 being normal (see `tts::rate`). Returns base64-encoded WAV audio on success. afplay on macOS reads
 /// format from magic bytes, not extension, so WAV bytes work fine in the .m4a
 /// temp file that play_base64_audio_with_tracking creates.
-pub async fn invoke_kokoro_tts(text: String, voice: String) -> Result<String, String> {
+pub async fn invoke_kokoro_tts(text: String, voice: String, speed: f64) -> Result<String, String> {
     info!(
-        "[Kokoro] TTS requested: {} chars, voice: {}",
+        "[Kokoro] TTS requested: {} chars, voice: {}, speed: {:.2}",
         text.chars().count(),
-        voice
+        voice,
+        speed
     );
 
     if crate::tts::is_tts_stop_requested() {
@@ -269,7 +270,10 @@ pub async fn invoke_kokoro_tts(text: String, voice: String) -> Result<String, St
             return Ok("TTS_STOPPED_BY_USER".to_string());
         }
 
-        let request = any_tts::SynthesisRequest::new(text.as_str()).with_voice(voice.as_str());
+        // any-tts reads Kokoro's speed factor from `temperature` (1.0 normal).
+        let request = any_tts::SynthesisRequest::new(text.as_str())
+            .with_voice(voice.as_str())
+            .with_temperature(speed);
 
         info!("[Kokoro] Synthesizing with voice '{}'", voice);
         let audio = model

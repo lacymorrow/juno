@@ -611,6 +611,7 @@ export const COMMANDS = {
   AUDIO_SET_AUDIO_OUTPUT_DEVICE: 'set_audio_output_device',
   AUDIO_GET_JUNO_VOICES: 'get_juno_voices',
   AUDIO_SET_JUNO_VOICE: 'set_juno_voice',
+  AUDIO_SET_JUNO_VOICE_RATE: 'set_juno_voice_rate',
   AUDIO_PREVIEW_JUNO_VOICE: 'preview_juno_voice',
   TTS_INVOKE_TTS: 'invoke_tts',
   TTS_SET_TTS_PROVIDER: 'set_tts_provider_command',

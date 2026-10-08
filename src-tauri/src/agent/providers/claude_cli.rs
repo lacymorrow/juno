@@ -409,20 +409,26 @@ pub fn start_warm_spare(app: tauri::AppHandle) {
 
     let generation = std::sync::Arc::new(AtomicU64::new(0));
     let listener_app = app.clone();
-    app.listen_any(
+    let reprime = std::sync::Arc::new(move || {
+        let mine = generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let generation = std::sync::Arc::clone(&generation);
+        let app = listener_app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(SPARE_SETTINGS_DEBOUNCE).await;
+            if generation.load(Ordering::Relaxed) == mine {
+                prewarm_persistent_session(app).await;
+            }
+        });
+    });
+    // Audio settings count too: turning Juno's voice off (or on) changes the
+    // system prompt, and with it the fingerprint a spare is adopted by.
+    for event in [
         crate::constants::settings::events::PROVIDER_SETTINGS_CHANGED,
-        move |_| {
-            let mine = generation.fetch_add(1, Ordering::Relaxed) + 1;
-            let generation = std::sync::Arc::clone(&generation);
-            let app = listener_app.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(SPARE_SETTINGS_DEBOUNCE).await;
-                if generation.load(Ordering::Relaxed) == mine {
-                    prewarm_persistent_session(app).await;
-                }
-            });
-        },
-    );
+        crate::constants::settings::events::AUDIO_SETTINGS_CHANGED,
+    ] {
+        let reprime = std::sync::Arc::clone(&reprime);
+        app.listen_any(event, move |_| (*reprime)());
+    }
 
     tauri::async_runtime::spawn(prewarm_persistent_session(app));
 }
@@ -454,6 +460,17 @@ pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
         debug!("[CliSession] No turn has run yet; no warm spare until one has");
         return;
     };
+    // The remembered prompt asks for speech, or deliberately does not, to match
+    // Juno's voice at the time. If the voice has been switched since, a spare
+    // started from it could never be adopted, so none is kept. The next turn
+    // starts cold, remembers the prompt it ran with and primes from that.
+    if claude_cli_session::remembered_voice(&app)
+        != Some(crate::agent::voice_policy::voice_enabled_now(&app))
+    {
+        debug!("[CliSession] Juno's voice changed since the last turn; no warm spare until a turn has run");
+        claude_cli_session::stop_spare();
+        return;
+    }
 
     let config = crate::agent::providers::config::load_provider_config(Some(&app));
     let Some(mut provider_config) = config.resolve_provider(Provider::ClaudeCli) else {
