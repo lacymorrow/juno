@@ -268,6 +268,9 @@ impl ToolConfigManager {
                 timeout_seconds: settings_server.timeout_seconds,
                 max_retries: settings_server.max_retries,
                 approved: settings_server.approved,
+                headers: settings_server.headers.clone(),
+                oauth: settings_server.oauth,
+                blocked_tools: settings_server.blocked_tools.clone(),
             };
             mcp_servers.insert(settings_server.id.clone(), server_config);
         }
@@ -334,6 +337,9 @@ impl ToolConfigManager {
                 timeout_seconds: server_config.timeout_seconds,
                 max_retries: server_config.max_retries,
                 approved: server_config.approved,
+                headers: server_config.headers.clone(),
+                oauth: server_config.oauth,
+                blocked_tools: server_config.blocked_tools.clone(),
             };
             mcp_servers.push(settings_server);
         }

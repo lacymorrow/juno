@@ -927,7 +927,7 @@ impl LocalToolProvider {
         .await;
 
         match execution_result {
-            Ok(result) => result,
+            Ok(result) => self.surface_missing_connection(&tool_call, result).await,
             Err(_) => {
                 // Timeout occurred - create a proper timeout error with the correct tool call ID
                 let timeout_error = format!(
@@ -947,6 +947,51 @@ impl LocalToolProvider {
                 })
             }
         }
+    }
+
+    /// Turn a Composio "no connected account" failure into the just-in-time
+    /// connect flow (LAC-4210): emit the event the conversation renders as a
+    /// one-button connect card, and hand the model one sentence of guidance
+    /// instead of the vendor error, so its reply points at the button rather
+    /// than reciting JSON. Results from anything but the Composio server pass
+    /// through untouched.
+    async fn surface_missing_connection(
+        &self,
+        tool_call: &ToolCall,
+        result: Result<ToolResult, AgentError>,
+    ) -> Result<ToolResult, AgentError> {
+        use crate::agent::tools::composio;
+
+        let Ok(tool_result) = result else {
+            return result;
+        };
+        let prefix = composio::registered_tool_name("");
+        if !tool_call.name.starts_with(&prefix) {
+            return Ok(tool_result);
+        }
+        let Some(required) = composio::connection_needed(&tool_call.input, &tool_result.output)
+        else {
+            return Ok(tool_result);
+        };
+
+        info!(
+            "Composio reports no connection for {}; showing the connect card",
+            required.toolkit_slug
+        );
+        if let Some(ref app_handle) = self.app_handle {
+            if let Err(e) = app_handle.emit(events::integrations::CONNECT_REQUIRED, &required) {
+                warn!("Failed to emit connect-required event: {}", e);
+            }
+        }
+
+        Ok(ToolResult {
+            call_id: tool_result.call_id,
+            output: serde_json::json!({
+                "connection_required": true,
+                "app": required.app_name,
+                "guidance": composio::connect_guidance(&required.app_name),
+            }),
+        })
     }
 
     /// Comprehensive tool call validation before execution

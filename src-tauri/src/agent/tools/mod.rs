@@ -29,6 +29,7 @@ pub mod basic_tools; // Ensure basic_tools is declared
 pub mod browser_controller;
 pub mod browser_tools;
 pub mod collaborative_ai; // Advanced Collaborative AI System Design from ComfyBench research
+pub mod composio; // The one place that knows Composio: server config, connect flow, app records
 pub mod cursor_integration;
 pub mod desktop_tools;
 pub mod display_info_tools; // Screen resolution and display information tools
@@ -36,6 +37,7 @@ pub mod enhanced_coding_tools;
 pub mod enhanced_visual_reasoning;
 pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
 pub mod mcp_integration;
+pub mod mcp_oauth; // Generic OAuth for remote MCP servers: discovery, DCR, PKCE, Keychain
 pub mod path_security; // Shared canonicalization + workspace-boundary enforcement for file tools
 pub mod permission_policy; // The one decision: does this action need asking, and what do we call it
 pub mod safari_tools; // Native Safari DOM automation with AppleScript injection

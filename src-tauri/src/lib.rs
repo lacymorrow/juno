@@ -51,6 +51,7 @@ pub mod permission_gate; // Asking for a macOS permission at the moment it is ne
 pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
 pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
+pub mod secrets; // Secrets live in the macOS Keychain, never in settings JSON
 pub mod settings; // Centralized settings management with reactive updates
 pub mod shell_command; // The one place that parses a shell command string
 pub mod shortcuts; // Shortcut string parsing utilities
@@ -670,6 +671,11 @@ pub fn run() {
             commands::cloud::simulate_cloud_command,
             commands::cloud::get_websocket_diagnostics,
             commands::cloud::run_websocket_test_suite,
+            // Connected apps (LAC-4210)
+            commands::integrations::get_integrations_status,
+            commands::integrations::set_byo_composio_enabled,
+            commands::integrations::connect_integration_app,
+            commands::integrations::disconnect_integration_app,
             // MCP Server Management Commands
             add_mcp_server,
             approve_mcp_server,

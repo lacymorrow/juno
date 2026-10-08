@@ -37,6 +37,7 @@ pub mod error_recovery;
 pub mod escape_key_coordinator;
 pub mod filesystem;
 // floating_bar and floating_panel modules removed - functionality migrated to ui_commands
+pub mod integrations; // Connected apps: connect card, Connected apps group, BYO Composio toggle
 pub mod keyboard;
 pub mod mcp;
 pub mod media; // Live player state/control for <NowPlayingCard> (no fake state)
