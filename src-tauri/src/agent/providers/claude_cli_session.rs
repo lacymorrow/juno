@@ -712,6 +712,30 @@ fn signature_of(launch: &LaunchConfig) -> String {
     )
 }
 
+/// Names the first spawn-time setting that differs between two signatures, in
+/// the order `signature_of` writes them.
+fn signature_change(old: &str, new: &str) -> &'static str {
+    const PARTS: [&str; 9] = [
+        "the model changed",
+        "the system prompt changed",
+        "the MCP config changed",
+        "account MCP loading changed",
+        "ask-before-send changed",
+        "the effort changed",
+        "the partial-messages flag changed",
+        "the CLI binary changed",
+        "the MCP guidance changed",
+    ];
+    let mut old_parts = old.split('\u{1f}');
+    let mut new_parts = new.split('\u{1f}');
+    for name in PARTS {
+        if old_parts.next() != new_parts.next() {
+            return name;
+        }
+    }
+    "the launch settings changed"
+}
+
 /// Where the process a turn runs in came from. Logged per turn, so cold, spare
 /// and warm first-token times are never averaged together.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -755,6 +779,18 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, Origin)> {
             if usable {
                 return Some((Arc::clone(existing), Origin::Warm));
             }
+            // A replaced process costs the next turn a cold boot. Say why.
+            let reason = if existing.is_dead() {
+                "the process exited"
+            } else if existing.session_id != req.session_id {
+                "the CLI session id changed"
+            } else {
+                signature_change(&existing.signature, &signature)
+            };
+            info!(
+                "[CliSession] Replacing the process for conversation {}: {reason}",
+                req.conversation_id
+            );
         }
     }
 
@@ -1611,6 +1647,28 @@ mod tests {
         // Same for "Ask before Juno sends": a live session would otherwise
         // keep the permission posture it was born with (LAC-4058).
         assert_ne!(base, signature_parts("sonnet", None, None, true, false));
+    }
+
+    #[test]
+    fn a_replaced_process_names_what_changed() {
+        let base = launch("sonnet");
+        let mut prompt = launch("sonnet");
+        prompt.system_prompt = Some("a new memory".into());
+        let mut effort = launch("sonnet");
+        effort.effort = "low".into();
+        let sig = signature_of(&base);
+        assert_eq!(
+            signature_change(&sig, &signature_of(&launch("opus"))),
+            "the model changed"
+        );
+        assert_eq!(
+            signature_change(&sig, &signature_of(&prompt)),
+            "the system prompt changed"
+        );
+        assert_eq!(
+            signature_change(&sig, &signature_of(&effort)),
+            "the effort changed"
+        );
     }
 
     #[test]
