@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.134] - 2026-10-08
+
+### Fixed
+
+- **cli:** separate text blocks so sentences around tool calls don't run together (#748) (8f8e341b)
+
 ## [0.8.132] - 2026-10-08
 
 ### Fixed
@@ -1109,7 +1115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.132...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.134...HEAD
+[0.8.134]: https://github.com/lacymorrow/juno/compare/cua-v0.8.133...v0.8.134
 [0.8.132]: https://github.com/lacymorrow/juno/compare/cua-v0.8.131...v0.8.132
 [0.8.131]: https://github.com/lacymorrow/juno/compare/cua-v0.8.130...v0.8.131
 [0.8.130]: https://github.com/lacymorrow/juno/compare/cua-v0.8.129...v0.8.130
