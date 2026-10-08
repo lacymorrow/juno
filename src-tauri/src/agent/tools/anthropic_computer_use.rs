@@ -1178,11 +1178,12 @@ async fn run_element_action(
             let state_manager = app_handle.state::<AppState>();
             let _guard = state_manager.input_arbiter().acquire(session_id).await;
             let target_app = get_frontmost_app_name();
+            let window_pin = Some(pin);
             let outcome = match run_background_first(
                 app_handle,
                 action,
                 target_app.as_deref(),
-                Some(pin),
+                window_pin,
                 |allow_physical| match action {
                     "right_click" => state_manager.desktop.right_click_no_warp(
                         center_x,
