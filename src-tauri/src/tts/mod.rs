@@ -1,5 +1,6 @@
 pub mod elevenlabs;
 pub mod kokoro;
+pub mod rate;
 pub mod replicate;
 pub mod speech_level;
 pub mod supertonic;
@@ -1558,6 +1559,13 @@ pub async fn play_sample(base64_audio: &str) -> Result<(), String> {
     handle.wait_for_completion().await
 }
 
+/// The stored voice rate, or normal pace when state is unavailable.
+fn stored_rate(state: Option<&AppState>) -> f64 {
+    state
+        .and_then(|s| s.get_voice_rate().ok())
+        .unwrap_or(rate::DEFAULT_RATE)
+}
+
 // Invoke TTS for a specific provider name
 pub async fn invoke_tts_for_provider(
     text: String,
@@ -1573,7 +1581,10 @@ pub async fn invoke_tts_for_provider(
     }
 
     match provider.to_lowercase().as_str() {
-        "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
+        "elevenlabs" => {
+            let speed = rate::effective("elevenlabs", stored_rate(_state.as_ref()));
+            elevenlabs::invoke_elevenlabs_tts(text, speed).await
+        }
         "kokoro" => {
             // An embedding that is not on disk is not a slow voice: `any_tts`
             // loads `voices/<id>.pt` straight off disk and never fetches a
@@ -1583,7 +1594,9 @@ pub async fn invoke_tts_for_provider(
             // been open to have resolved it.
             let stored = _state.as_ref().and_then(|s| s.get_kokoro_voice().ok());
             let voice = voices::resolve_kokoro_voice(stored.as_deref());
-            kokoro::invoke_kokoro_tts(text, voice).await
+            let speed = rate::effective("kokoro", stored_rate(_state.as_ref()))
+                .unwrap_or(rate::DEFAULT_RATE);
+            kokoro::invoke_kokoro_tts(text, voice, speed).await
         }
         "replicate" => replicate::invoke_replicate_tts(text).await,
         "chatterbox" => {
@@ -1617,6 +1630,12 @@ pub async fn invoke_tts_for_provider(
                     supertonic::DEFAULT_VOICE.to_string(),
                     supertonic::DEFAULT_SPEED,
                 ));
+            // The Supertonic setting is the engine's own trim; the voice rate
+            // scales it, so 1.0x leaves it exactly where it was.
+            let speed = (speed
+                * rate::effective("supertonic", stored_rate(_state.as_ref()))
+                    .unwrap_or(rate::DEFAULT_RATE))
+            .clamp(0.5, 2.0);
             supertonic::invoke_supertonic_tts(text, server_url, voice, speed).await
         }
         // Straight to the speakers rather than to a file and back. This is the
@@ -1636,7 +1655,9 @@ pub async fn invoke_tts_for_provider(
                 .as_ref()
                 .and_then(|s| s.get_output_device().ok())
                 .flatten();
-            system::speak_directly(text, voice, device).await
+            let words_per_minute = rate::effective("system", stored_rate(_state.as_ref()))
+                .and_then(rate::say_words_per_minute);
+            system::speak_directly(text, voice, device, words_per_minute).await
         }
         "off" => {
             warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");

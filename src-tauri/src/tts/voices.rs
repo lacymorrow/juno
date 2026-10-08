@@ -865,7 +865,7 @@ pub struct JunoVoiceOption {
 
 /// The whole answer the Audio pane renders: the rows, the engine they belong
 /// to, and anything that has to be said rather than shown.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct JunoVoiceList {
     /// The stored engine. `off` means Juno is silent.
     pub provider: String,
@@ -881,6 +881,22 @@ pub struct JunoVoiceList {
     /// The engines the advanced picker offers, so the pane holds no list of
     /// engine names of its own.
     pub engines: Vec<EngineOption>,
+    /// The speed row: present only when the engine in force can change speed
+    /// and Juno is not silent, so the pane never shows a control that does
+    /// nothing. Filled in by [`JunoVoiceList::with_rate`].
+    pub speed: Option<crate::tts::rate::VoiceSpeed>,
+}
+
+impl JunoVoiceList {
+    /// Attach the speed row for the stored rate.
+    pub fn with_rate(mut self, stored_rate: f64) -> Self {
+        self.speed = if self.provider.eq_ignore_ascii_case(OFF_PROVIDER) {
+            None
+        } else {
+            crate::tts::rate::speed_for(&self.engine, stored_rate)
+        };
+        self
+    }
 }
 
 /// Build the rows.
@@ -967,6 +983,7 @@ pub fn voice_list(
         engine,
         options,
         note,
+        speed: None,
     }
 }
 
@@ -1377,8 +1394,9 @@ async fn resolve_and_list(
             .map_err(|e| format!("Failed to save Juno's voice: {e}"))?;
     }
     push_voice_to_state(state, &engine, resolution.voice.as_deref())?;
+    state.set_voice_rate(audio.voice_rate)?;
 
-    Ok(voice_list(&audio.tts_provider, &inventory, &resolution))
+    Ok(voice_list(&audio.tts_provider, &inventory, &resolution).with_rate(audio.voice_rate))
 }
 
 /// Put the stored engine and voice in force: at startup, and after a reset.
@@ -1460,7 +1478,7 @@ pub async fn switch_engine(
         provider,
         resolution.voice.as_deref().unwrap_or("its own default")
     );
-    Ok(voice_list(&provider, &inventory, &resolution))
+    Ok(voice_list(&provider, &inventory, &resolution).with_rate(audio.voice_rate))
 }
 
 // ---------------------------------------------------------------------------
@@ -1522,7 +1540,9 @@ pub async fn set_juno_voice(
 
         let stored = audio.voice_for(&engine).map(str::to_string);
         let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
-        return Ok(voice_list(&audio.tts_provider, &inventory, &resolution));
+        return Ok(
+            voice_list(&audio.tts_provider, &inventory, &resolution).with_rate(audio.voice_rate)
+        );
     }
 
     let offered = |inventory: &VoiceInventory| match provider_voices(&engine, inventory) {
@@ -1577,8 +1597,61 @@ pub async fn set_juno_voice(
         voice: chosen,
         substituted: false,
     };
-    let list = voice_list(&audio.tts_provider, &inventory, &resolution);
+    let list = voice_list(&audio.tts_provider, &inventory, &resolution).with_rate(audio.voice_rate);
     audition(&app_handle, state.inner(), &engine, &id);
+    Ok(list)
+}
+
+/// Set how fast Juno speaks, and hear it.
+///
+/// Stored once for every engine; an engine with no speed control ignores it
+/// and the pane does not offer it. Answers with the list so the slider
+/// settles on what Rust decided, and plays the sample at the new pace.
+#[tauri::command]
+pub async fn set_juno_voice_rate(
+    rate: f64,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<JunoVoiceList, String> {
+    if !rate.is_finite() {
+        return Err("The speed has to be a number.".to_string());
+    }
+    let rate = crate::tts::rate::sanitize(rate);
+
+    let _change = VOICE_CHANGE.lock().await;
+    let manager = settings_manager(&app_handle)?;
+    let mut audio = manager
+        .get_audio_settings()
+        .await
+        .map_err(|e| format!("Failed to get audio settings: {e}"))?;
+
+    audio.voice_rate = rate;
+    manager
+        .set_audio_settings(&audio)
+        .await
+        .map_err(|e| format!("Failed to save Juno's speed: {e}"))?;
+    state.set_voice_rate(rate)?;
+    info!("[Voices] Juno speaks at {rate:.2}x");
+
+    let engine = listed_engine(&audio.tts_provider).to_string();
+    let inventory = inventory_for(&engine, Freshness::Recent).await;
+    let stored = audio.voice_for(&engine).map(str::to_string);
+    let resolution = resolve_stored_voice(
+        &engine,
+        &inventory,
+        stored.as_deref(),
+        audio.system_voice_chosen,
+    );
+    let list = voice_list(&audio.tts_provider, &inventory, &resolution).with_rate(rate);
+
+    // Hearing it is the point of moving the slider. Only when the engine in
+    // force can change speed: otherwise the sample would sound the same.
+    if list.speed.is_some() {
+        let row = resolution
+            .voice
+            .unwrap_or_else(|| SYSTEM_DEFAULT_ID.to_string());
+        audition(&app_handle, state.inner(), &engine, &row);
+    }
     Ok(list)
 }
 
@@ -2399,5 +2472,34 @@ Bubbles             en_US    # Hello! My name is Bubbles.
             crate::tts::system::say_arguments("hi", reply.as_deref(), None),
             vec!["hi"]
         );
+    }
+
+    // -- speed -------------------------------------------------------------
+
+    #[test]
+    fn the_speed_row_shows_for_an_engine_that_can_change_speed() {
+        let list = list_for("system", &stock_mac(), None).with_rate(1.5);
+        let speed = list.speed.expect("the Mac's voice can change speed");
+        assert_eq!(speed.value, 1.5);
+        assert_eq!((speed.min, speed.max), (0.75, 2.0));
+    }
+
+    #[test]
+    fn the_speed_row_is_absent_when_the_engine_has_no_speed_control() {
+        for provider in ["replicate", "chatterbox"] {
+            let list = list_for(provider, &stock_mac(), None).with_rate(1.5);
+            assert!(list.speed.is_none(), "{provider} has no speed control");
+        }
+    }
+
+    #[test]
+    fn silence_has_no_speed_row() {
+        let list = list_for("off", &stock_mac(), None).with_rate(1.5);
+        assert!(list.speed.is_none());
+    }
+
+    #[test]
+    fn a_new_list_has_no_speed_until_one_is_attached() {
+        assert!(list_for("system", &stock_mac(), None).speed.is_none());
     }
 }

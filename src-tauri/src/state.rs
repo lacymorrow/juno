@@ -237,6 +237,8 @@ pub struct AudioSettings {
     pub supertonic_server_url: String,
     pub supertonic_voice: String,
     pub supertonic_speed: f64,
+    /// How fast Juno speaks; see `tts::rate`.
+    pub voice_rate: f64,
     /// Whether a dictation session is running right now.
     ///
     /// A liveness flag and nothing more: it goes false the moment the session
@@ -280,6 +282,7 @@ impl Default for AudioSettings {
             supertonic_server_url: crate::tts::supertonic::DEFAULT_SERVER_URL.to_string(),
             supertonic_voice: crate::tts::supertonic::DEFAULT_VOICE.to_string(),
             supertonic_speed: crate::tts::supertonic::DEFAULT_SPEED,
+            voice_rate: crate::tts::rate::DEFAULT_RATE,
             dictation_active: false,
             dictation_clipboard_enabled: true,
             dictation_insertion_mode:
@@ -739,6 +742,20 @@ impl AppState {
             .lock()
             .map(|mut settings| settings.supertonic_speed = speed)
             .map_err(|e| format_error(templates::FAILED_TO_SET, "Supertonic speed", e))
+    }
+
+    pub fn get_voice_rate(&self) -> Result<f64, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.voice_rate)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "voice rate", e))
+    }
+
+    pub fn set_voice_rate(&self, rate: f64) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.voice_rate = crate::tts::rate::sanitize(rate))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "voice rate", e))
     }
 
     pub fn get_dictation_active(&self) -> Result<bool, String> {

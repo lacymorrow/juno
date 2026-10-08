@@ -5,8 +5,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { VoicePicker } from "../VoicePicker";
@@ -26,6 +27,58 @@ const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
  * sentinel that would later look like a device name.
  */
 const FOLLOW_SYSTEM = "__system__";
+
+/** "1.5x", "2x": the rate as a person says it. */
+function formatRate(rate: number): string {
+  return `${Number(rate.toFixed(2))}x`;
+}
+
+/**
+ * How fast Juno speaks. Drawn only when Rust says the engine in force has a
+ * speed control (`list.speed`), so there is never a slider that does nothing.
+ *
+ * The thumb follows the finger locally while it moves, and the change is sent
+ * once, when it is let go: moving it plays the sample, and a sample per pixel
+ * would be a stutter. Rust answers with the rate in force.
+ */
+function SpeedRow({
+  speed,
+  onCommit,
+}: {
+  speed: { value: number; min: number; max: number };
+  onCommit: (rate: number) => void;
+}) {
+  const [draft, setDraft] = useState(speed.value);
+  // Rust's answer wins whenever it arrives (a narrower range, a new engine).
+  useEffect(() => setDraft(speed.value), [speed.value]);
+
+  return (
+    <SettingsRow
+      htmlFor="voice-speed"
+      label="Speaking speed"
+      description="How fast Juno talks."
+    >
+      <div className="flex w-[210px] items-center gap-3">
+        <Slider
+          id="voice-speed"
+          aria-label="Speaking speed"
+          min={speed.min}
+          max={speed.max}
+          step={0.05}
+          value={[draft]}
+          onValueChange={([next]) => setDraft(next)}
+          onValueCommit={([next]) => onCommit(next)}
+        />
+        <span
+          className="w-10 shrink-0 text-right text-[12px] tabular-nums text-muted-foreground"
+          aria-hidden="true"
+        >
+          {formatRate(draft)}
+        </span>
+      </div>
+    </SettingsRow>
+  );
+}
 
 /**
  * Audio: which microphone Juno hears you on, which speaker it answers from,
@@ -52,6 +105,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     handleAudioOutputDeviceChange,
     handleJunoVoiceChange,
     handlePreviewJunoVoice,
+    handleJunoVoiceRateChange,
     handleTtsProviderChange,
     dismissCaptureFailure,
   } = settings;
@@ -118,6 +172,13 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             />
           }
         />
+
+        {junoVoices?.speed && (
+          <SpeedRow
+            speed={junoVoices.speed}
+            onCommit={(rate) => void handleJunoVoiceRateChange(rate)}
+          />
+        )}
       </SettingsGroup>
 
       <TtsEngineGroup settings={settings} />

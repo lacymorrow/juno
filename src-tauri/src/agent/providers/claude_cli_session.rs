@@ -167,6 +167,11 @@ pub const MAX_SPARE_FAILURES: u32 = 3;
 /// the settings store: it is a cache, not a setting.
 const SPARE_STORE_FILE: &str = "cli_session.json";
 const SPARE_PROMPT_KEY: &str = "spare_system_prompt";
+/// Whether the remembered prompt was written for a spoken reply. The prompt
+/// carries the speech instructions only when Juno's voice is on
+/// (`agent::voice_policy`), so a spare primed from it at launch is only
+/// worth starting when the voice is still the same.
+const SPARE_VOICE_KEY: &str = "spare_voice";
 
 /// What a turn produced, or that there was no persistent session to run it in.
 pub enum TurnOutcome {
@@ -650,8 +655,9 @@ fn fill_spare(app: &tauri::AppHandle, config: LaunchConfig) {
     let Some(persist_prompt) = spawn else {
         return;
     };
-    if persist_prompt {
-        remember_system_prompt(app, config.system_prompt.as_deref());
+    let voice_now = crate::agent::voice_policy::voice_enabled_now(app);
+    if persist_prompt || remembered_voice(app) != Some(voice_now) {
+        remember_system_prompt(app, config.system_prompt.as_deref(), voice_now);
     }
 
     // Lock released: spawning forks a process.
@@ -698,7 +704,17 @@ pub fn remembered_system_prompt(app: &tauri::AppHandle) -> Option<String> {
         .map(str::to_string)
 }
 
-fn remember_system_prompt(app: &tauri::AppHandle, prompt: Option<&str>) {
+/// Whether Juno's voice was on when the remembered prompt was saved. `None`
+/// before the first turn, and for a store written before this was recorded.
+pub fn remembered_voice(app: &tauri::AppHandle) -> Option<bool> {
+    use tauri_plugin_store::StoreExt;
+    app.store(SPARE_STORE_FILE)
+        .ok()?
+        .get(SPARE_VOICE_KEY)?
+        .as_bool()
+}
+
+fn remember_system_prompt(app: &tauri::AppHandle, prompt: Option<&str>, voice: bool) {
     use tauri_plugin_store::StoreExt;
     let store = match app.store(SPARE_STORE_FILE) {
         Ok(store) => store,
@@ -708,9 +724,13 @@ fn remember_system_prompt(app: &tauri::AppHandle, prompt: Option<&str>) {
         }
     };
     match prompt {
-        Some(prompt) => store.set(SPARE_PROMPT_KEY, Value::String(prompt.to_string())),
+        Some(prompt) => {
+            store.set(SPARE_PROMPT_KEY, Value::String(prompt.to_string()));
+            store.set(SPARE_VOICE_KEY, Value::Bool(voice));
+        }
         None => {
             store.delete(SPARE_PROMPT_KEY);
+            store.delete(SPARE_VOICE_KEY);
         }
     }
     if let Err(e) = store.save() {
