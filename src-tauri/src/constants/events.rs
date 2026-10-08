@@ -432,6 +432,9 @@ pub mod bar {
     pub const COMPLETE_TRANSITION: &str = "floating-bar-complete-transition";
     pub const CLEAR_ERROR: &str = "floating-bar-clear-error";
     pub const CONFIG_CHANGED: &str = "floating-bar-config-changed";
+    /// Debug mode was toggled in settings. Payload: the new bool. The bar
+    /// window outlines itself while it is on, to make resizes visible.
+    pub const DEBUG_MODE_CHANGED: &str = "bar-debug-mode-changed";
     /// Reopen the chat pane if a conversation is retained, or close it if it is
     /// already open (tray "Show/Hide Chat"). Frontend flips its dismissed state.
     pub const TOGGLE_PANE: &str = "bar-toggle-pane";
