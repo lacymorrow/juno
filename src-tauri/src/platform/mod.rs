@@ -10,8 +10,6 @@ pub mod macos;
 
 /// Automation (TCC AppleEvents) consent per target app, asked before macOS asks.
 pub mod automation;
-/// The bar drag, driven from Rust so it is never held below the menu bar.
-pub mod bar_drag;
 /// Click-through for a steady bar window: hit-test the cursor against what the page draws.
 pub mod bar_hit_test;
 /// Tauri's mixed-scale screen numbers, converted to global desktop points.

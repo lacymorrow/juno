@@ -6,6 +6,7 @@ import {
   wellForSlot,
   easeOutCubic,
   SLOT,
+  screenInsets,
   type MonitorRect,
 } from "../snapWells";
 import { monitorsInPoints } from "../desktopPoints";
@@ -13,6 +14,52 @@ import { monitorsInPoints } from "../desktopPoints";
 const oneMonitor: MonitorRect[] = [
   { position: { x: 0, y: 0 }, size: { width: 1000, height: 800 }, scaleFactor: 1 },
 ];
+
+describe("screenInsets: the real menu bar and Dock, per display", () => {
+  // As Tauri reports them: each display's work area scaled like its frame.
+  const tauri = (menuBarPt: number, scale: number, dock: { left?: number; bottom?: number } = {}) => ({
+    position: { x: 0, y: 0 },
+    size: { width: 1512 * scale, height: 982 * scale },
+    scaleFactor: scale,
+    workArea: {
+      position: { x: (dock.left ?? 0) * scale, y: menuBarPt * scale },
+      size: {
+        width: (1512 - (dock.left ?? 0)) * scale,
+        height: (982 - menuBarPt - (dock.bottom ?? 0)) * scale,
+      },
+    },
+  });
+
+  it("puts the top row just under a 24 point menu bar, as before", () => {
+    const [m] = monitorsInPoints([tauri(24, 1)]);
+    expect(screenInsets(m).top).toBe(36);
+  });
+
+  it("clears a notched MacBook's taller menu bar", () => {
+    const [m] = monitorsInPoints([tauri(38, 2)]);
+    expect(screenInsets(m).top).toBe(50);
+    const wells = computeWells([m], { windowWidth: 88, windowHeight: 76 });
+    for (const w of wells.filter((w) => w.fy === 0)) expect(w.y).toBe(50);
+  });
+
+  it("uses the ordinary margin when the menu bar auto-hides", () => {
+    const [m] = monitorsInPoints([tauri(0, 2)]);
+    expect(screenInsets(m).top).toBe(16);
+  });
+
+  it("keeps the wells clear of the Dock, wherever it is", () => {
+    const [bottom] = monitorsInPoints([tauri(24, 2, { bottom: 70 })]);
+    expect(screenInsets(bottom).bottom).toBe(86);
+    const [left] = monitorsInPoints([tauri(24, 1, { left: 64 })]);
+    expect(screenInsets(left).left).toBe(80);
+    const wells = computeWells([left], { windowWidth: 88, windowHeight: 76 });
+    for (const w of wells.filter((w) => w.fx === 0)) expect(w.x).toBe(80);
+  });
+
+  it("falls back to the fixed insets when a display reports no work area", () => {
+    expect(screenInsets(oneMonitor[0])).toEqual({ top: 36, right: 16, bottom: 16, left: 16 });
+  });
+});
 
 describe("computeWells", () => {
   it("lays out eight wells per monitor (3×3 minus the centre)", () => {

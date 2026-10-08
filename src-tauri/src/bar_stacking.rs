@@ -362,10 +362,47 @@ pub fn apply(app: &AppHandle) {
     crate::platform::macos::apply_bar_stacking(app, stacking, front);
 }
 
+/// Whether the bar should be ordered above a drop overlay, given the stacking
+/// last applied. Only a floating bar shares the overlay's level; a bar that
+/// stepped aside for a window or a system prompt stays aside. Nothing applied
+/// yet is the resting state, which is floating.
+pub fn bar_goes_over_overlay(applied: Option<BarStacking>) -> bool {
+    matches!(applied, None | Some(BarStacking::Floating))
+}
+
+/// Keep the bar above one of Juno's own drop overlays.
+///
+/// The overlay and the bar are both at the floating level, and showing the
+/// overlay orders it to the front of that level, over the bar being dragged.
+/// Ordering within a level is app-relative and touches nothing else on the
+/// system, so this is the one restack the drag needs, and it is decided here
+/// with every other one.
+pub fn raise_over_overlay(app: &AppHandle, overlay_label: &str) {
+    let applied = match OBSERVED.lock() {
+        Ok(observed) => observed.applied.map(|(stacking, _)| stacking),
+        Err(_) => return,
+    };
+    if !bar_goes_over_overlay(applied) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    crate::platform::macos::order_bar_above(app, overlay_label);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, overlay_label);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tauri::utils::config::WindowConfig as DeclaredWindowConfig;
+
+    #[test]
+    fn only_a_floating_bar_is_put_over_the_drop_overlay() {
+        assert!(bar_goes_over_overlay(None));
+        assert!(bar_goes_over_overlay(Some(BarStacking::Floating)));
+        assert!(!bar_goes_over_overlay(Some(BarStacking::Normal)));
+        assert!(!bar_goes_over_overlay(Some(BarStacking::BelowFront)));
+    }
 
     fn situation() -> BarSituation {
         BarSituation::default()

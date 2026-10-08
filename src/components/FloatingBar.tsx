@@ -52,6 +52,7 @@ import {
   getSteady,
   registerSteady,
   roomForContent,
+  setSteadyFootprint,
   setSteadyLayout,
   steadyLayout,
   subscribeSteady,
@@ -1641,8 +1642,17 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     [layout, paneOpen, showRosterStrip, showInput, composerGrowth, pillExtraWidth],
   );
   const paneHeight = pillPaneHeight(dockLayout, frame);
-  const content = contentRect(dockLayout, pillFootprint({ ...frame, paneHeight }));
+  const footprint = pillFootprint({ ...frame, paneHeight });
+  const content = contentRect(dockLayout, footprint);
   contentRef.current = content;
+
+  // A drag shrinks the window to exactly this (`dragLayout`), so the OS drag
+  // carries the pill and not the empty room around it. While it does, the
+  // content rect above is the whole window, and that is what the hit test is
+  // told: the cursor is on the pill for the whole drag by construction.
+  useLayoutEffect(() => {
+    setSteadyFootprint(windowLabel, { width: footprint.width, height: footprint.height });
+  }, [windowLabel, footprint.width, footprint.height]);
 
   // The footprint is the only part of the window that takes the mouse: the
   // backend flips click-through as the cursor crosses its edge, and reports

@@ -441,8 +441,6 @@ pub mod bar {
     /// The cursor moved to a different display; payload carries the cursor's
     /// `x`/`y` in global points so the bar re-homes to the same drag-well slot there.
     pub const CURSOR_DISPLAY_CHANGED: &str = "bar-cursor-display-changed";
-    /// The left mouse button came up during a bar drag Rust was driving. No payload.
-    pub const DRAG_ENDED: &str = "bar-drag-ended";
     /// The full-size chat window is now on screen. The bar shows the same
     /// conversation, so it collapses to the idle pill and stays out of the way.
     pub const MAIN_WINDOW_OPENED: &str = "bar-main-window-opened";

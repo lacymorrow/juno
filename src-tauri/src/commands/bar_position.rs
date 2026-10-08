@@ -199,24 +199,42 @@ pub async fn set_bar_frame(
     }
 }
 
-/// A press on the bar has become a drag: move the window under the cursor
-/// until the button comes up (see `platform::bar_drag`). `grab_x`/`grab_y`
-/// are where the press sits inside the window, in points from its top-left.
-/// Called again mid-drag it only changes that offset. Errors off macOS, where
-/// the page falls back to the OS window drag.
+/// Whether the left mouse button is held right now.
+///
+/// During the OS window drag the page sees no mouse events, so it cannot tell
+/// a long drag from a drag whose release it missed. The drop overlay keeps its
+/// wells up for as long as this is true, however long the drag; the bar
+/// settles a drag once it turns false, even if its own mouseup never arrived.
+/// Errors off macOS, where both fall back to their timers.
 #[command]
-pub async fn bar_drag_follow(
-    app_handle: AppHandle,
-    grab_x: f64,
-    grab_y: f64,
-) -> Result<(), String> {
-    crate::platform::bar_drag::follow(app_handle, (grab_x, grab_y))
+pub async fn bar_pointer_held() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        Ok(crate::platform::bar_hit_test::left_button_down())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("The pointer state is only read on macOS".to_string())
+    }
 }
 
-/// End a driven bar drag from the page's side (it is settling).
+/// A drop overlay has just been shown: keep the bar above it.
+///
+/// The overlay and the bar share the floating level, and showing the overlay
+/// orders it in front of the bar, so its dim could cover the pill being
+/// dragged. Only an overlay may ask, and only for itself; the decision is
+/// `bar_stacking`'s.
 #[command]
-pub async fn bar_drag_stop(app_handle: AppHandle) -> Result<(), String> {
-    crate::platform::bar_drag::stop(app_handle).await
+pub async fn bar_order_above_snap_wells(
+    app_handle: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<(), String> {
+    let label = window.label();
+    if !label.starts_with(crate::constants::ui::window_labels::SNAP_WELLS_OVERLAY) {
+        return Err(format!("'{label}' is not a drop overlay"));
+    }
+    crate::bar_stacking::raise_over_overlay(&app_handle, label);
+    Ok(())
 }
 
 /// Make sure every display has its own snap-well overlay window.

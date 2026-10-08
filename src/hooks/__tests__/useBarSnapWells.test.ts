@@ -8,6 +8,7 @@ const win = {
   outerSize: vi.fn(async () => ({ width: 300, height: 200 })),
   scaleFactor: vi.fn(async () => 1),
   setPosition: vi.fn(async () => {}),
+  startDragging: vi.fn(async () => {}),
 };
 let cursor: { x: number; y: number } | null = { x: 0, y: 0 };
 
@@ -73,60 +74,112 @@ import {
   getSteady,
   registerSteady,
   resetSteady,
+  setSteadyFootprint,
   setSteadyLayout,
   steadyLayout,
+  type SteadyLayout,
 } from "@/lib/steadyFrame";
 import { monitorsInPoints } from "@/lib/desktopPoints";
 import { wellForSlot } from "@/lib/snapWells";
 
 const SPEC = { rest: { width: 88, height: 76 }, max: { width: 452, height: 574 }, stage: { width: 452, height: 76 } };
 const ONE = [{ position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 }];
+const tick = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 
-describe("the driven drag of a steady look", () => {
+/** The frames Rust was asked to apply, in order, as plain rects. */
+function framesApplied() {
+  return vi
+    .mocked(invoke)
+    .mock.calls.filter((c) => c[0] === "set_bar_frame")
+    .map((c) => c[1] as { x: number; y: number; width: number; height: number });
+}
+
+describe("dragging the shape, not the stage", () => {
+  let docked: SteadyLayout;
+
   beforeEach(() => {
     resetBarSnapState();
     resetSteady();
-    vi.mocked(invoke).mockClear();
-  });
-
-  it("hands the drag to Rust, re-laid out with the shape centred", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async () => {});
+    win.startDragging.mockClear();
     const wells = steadyWells(ONE, SPEC);
-    const bottom = wellForSlot({ fx: 0.5, fy: 1 }, 0, wells)!;
-    const docked = steadyLayout(bottom, ONE[0], SPEC);
+    docked = steadyLayout(wellForSlot({ fx: 0.5, fy: 1 }, 0, wells)!, ONE[0], SPEC);
     registerSteady("floating-bar", SPEC);
     setSteadyLayout("floating-bar", docked);
-    // Pressed in the middle of the resting pill, near the bottom of its window.
-    const grab = { x: docked.anchor.x + 44, y: docked.anchor.y + 38 };
-    startBarDrag(grab);
-    await new Promise((r) => setTimeout(r, 120));
-    const follows = vi
-      .mocked(invoke)
-      .mock.calls.filter((c) => c[0] === "bar_drag_follow")
-      .map((c) => c[1]);
-    expect(follows[0]).toEqual({ grabX: grab.x, grabY: grab.y });
-    const drag = getSteady("floating-bar")!.layout!;
-    expect(drag).toEqual(dragLayout(docked));
-    // The re-grab keeps the same point of the pill under the cursor.
-    expect(follows[1]).toEqual({ grabX: drag.anchor.x + 44, grabY: drag.anchor.y + 38 });
-    // And the pill has not moved on screen in the re-layout.
-    expect(anchorScreenOrigin(drag)).toEqual(anchorScreenOrigin(docked));
   });
 
-  it("lands a pill docked low in the top row when carried there", async () => {
-    const wells = steadyWells(ONE, SPEC);
-    const bottom = wellForSlot({ fx: 0.5, fy: 1 }, 0, wells)!;
-    const docked = steadyLayout(bottom, ONE[0], SPEC);
-    registerSteady("floating-bar", SPEC);
-    setSteadyLayout("floating-bar", dragLayout(docked));
-    await armBarSnap({ x: docked.anchor.x + 44, y: docked.anchor.y + 38 });
-    // Rust carried the window above the top of the screen: its top is well
-    // above y = 0 while the pill is just under the menu bar.
+  it("shrinks the window to the footprint where it is, then hands it to the OS drag once", async () => {
+    // The hovered pill is wider than the resting one.
+    const footprint = { width: 164, height: 76 };
+    setSteadyFootprint("floating-bar", footprint);
+    const order: string[] = [];
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "set_bar_frame") order.push("frame");
+    });
+    win.startDragging.mockImplementation(async () => {
+      order.push("drag");
+    });
+    startBarDrag({ x: docked.anchor.x + 44, y: docked.anchor.y + 38 });
+    await tick();
+    const drag = dragLayout(docked, footprint);
+    expect(framesApplied()).toEqual([
+      { x: drag.origin.x, y: drag.origin.y, width: 164, height: 76 },
+    ]);
+    expect(win.startDragging).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["frame", "drag"]);
+    expect(getSteady("floating-bar")!.layout).toEqual(drag);
+    // The pill has not moved on screen.
+    expect(anchorScreenOrigin(drag)).toEqual(anchorScreenOrigin(docked));
+    // No Rust-driven drag is involved any more.
+    const commands = vi.mocked(invoke).mock.calls.map((c) => c[0]);
+    expect(commands.some((c) => String(c).startsWith("bar_drag"))).toBe(false);
+  });
+
+  it("does not start an OS drag once the button is already up (a flick)", async () => {
+    startBarDrag({ x: docked.anchor.x + 44, y: docked.anchor.y + 38 });
+    cursor = null;
+    win.position = { ...docked.origin };
+    await settleBarSnap();
+    expect(win.startDragging).not.toHaveBeenCalled();
+    // And the settle put the steady window back.
+    expect(getSteady("floating-bar")!.layout!.size).toEqual(docked.size);
+  });
+
+  it("lands a pill docked low in the top row with the pill on the well, then grows back", async () => {
+    startBarDrag({ x: docked.anchor.x + 44, y: docked.anchor.y + 38 });
+    await tick();
     const drag = getSteady("floating-bar")!.layout!;
-    cursor = { x: 720, y: 60 };
-    win.position = { x: 720 - drag.anchor.x - 44, y: 60 - drag.anchor.y - 38 };
-    expect(win.position.y).toBeLessThan(0);
+    expect(drag.size).toEqual(SPEC.rest);
+    // The OS carried the pill-sized window to the top: its top is just under
+    // the menu bar, the pill with it.
+    cursor = { x: 720, y: 40 + 38 };
+    win.position = { x: 720 - 44 - drag.anchor.x, y: 40 - drag.anchor.y };
     await settleBarSnap();
     expect(getDockSlot("floating-bar")).toEqual({ fx: 0.5, fy: 0 });
+    const top = wellForSlot({ fx: 0.5, fy: 0 }, 0, steadyWells(ONE, SPEC))!;
+    const landed = getSteady("floating-bar")!.layout!;
+    expect(anchorScreenOrigin(landed)).toEqual({ x: top.x, y: top.y });
+    expect(landed).toEqual(steadyLayout(top, ONE[0], SPEC));
+    // The last frame applied is the steady one for the top well.
+    const last = framesApplied().at(-1)!;
+    expect(last).toEqual({ ...landed.origin, ...landed.size });
+  });
+
+  it("settles a drag whose mouseup never reached the page, once Rust says the button is up", async () => {
+    let held = true;
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "bar_pointer_held") return held;
+    });
+    startBarDrag({ x: docked.anchor.x + 44, y: docked.anchor.y + 38 });
+    await tick(200);
+    expect(getDockSlot("floating-bar")).not.toEqual({ fx: 1, fy: 0.5 });
+    const drag = getSteady("floating-bar")!.layout!;
+    cursor = { x: 1400, y: 450 };
+    win.position = { x: 1400 - 44 - drag.anchor.x, y: 450 - 38 - drag.anchor.y };
+    held = false;
+    await tick(600);
+    expect(getDockSlot("floating-bar")).toEqual({ fx: 1, fy: 0.5 });
   });
 });
 
