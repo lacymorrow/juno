@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.135] - 2026-10-08
+
+### Fixed
+
+- **history:** save Juno's reply in every conversation (#758) (a070b731)
+
 ## [0.8.134] - 2026-10-08
 
 ### Fixed
@@ -1115,7 +1121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.134...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.135...HEAD
+[0.8.135]: https://github.com/lacymorrow/juno/compare/cua-v0.8.134...v0.8.135
 [0.8.134]: https://github.com/lacymorrow/juno/compare/cua-v0.8.133...v0.8.134
 [0.8.132]: https://github.com/lacymorrow/juno/compare/cua-v0.8.131...v0.8.132
 [0.8.131]: https://github.com/lacymorrow/juno/compare/cua-v0.8.130...v0.8.131
