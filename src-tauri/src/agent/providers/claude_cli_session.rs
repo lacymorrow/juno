@@ -1550,10 +1550,10 @@ async fn until_set(rx: &mut tokio::sync::watch::Receiver<bool>) {
     }
 }
 
-/// Resolves once `rx` turns true from here on. A value already set (the last
-/// Escape, still latched on the global channel) does not count.
+/// Resolves once `rx` changes to true. A value already seen (the last Escape,
+/// still latched on the global channel) does not count: mark it seen with
+/// `borrow_and_update` once, before the first call.
 async fn until_raised(rx: &mut tokio::sync::watch::Receiver<bool>) {
-    rx.borrow_and_update();
     loop {
         if rx.changed().await.is_err() {
             std::future::pending::<()>().await;
@@ -1586,7 +1586,7 @@ fn watch_between_turns(session: &Arc<CliSession>, app: &tauri::AppHandle) {
             // seen by one or the other.
             let wanted = session.turn_wanted.notified();
             tokio::pin!(wanted);
-            wanted.as_mut().enable();
+            let _ = wanted.as_mut().enable();
             if session.turns_waiting.load(Ordering::SeqCst) > 0 {
                 continue;
             }
@@ -1641,6 +1641,7 @@ async fn run_own_turn(
             .map(|state| state.cancel_rx.clone())
             .unwrap_or(never_cancels)
     };
+    global_rx.borrow_and_update();
 
     let turn_deadline = Instant::now() + TURN_TIMEOUT;
     let mut cancel_deadline: Option<Instant> = None;

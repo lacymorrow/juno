@@ -897,6 +897,16 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   const dismissPane = useCallback(() => setPaneShown(false), []);
 
+  // Rust says whether a turn Claude started ran in a conversation that is not
+  // on screen. While one did, a click anywhere on the pill opens it.
+  const [elsewhere, setElsewhere] = useState(false);
+  const elsewhereRef = useRef(false);
+  elsewhereRef.current = elsewhere;
+  useEventListener<{ conversation_id: string | null }>(
+    EVENTS.BAR_CONVERSATION_ELSEWHERE,
+    (payload) => setElsewhere(Boolean(payload?.conversation_id)),
+  );
+
   /**
    * The chat button on the idle pill: show the conversation here, in the pane.
    *
@@ -913,8 +923,24 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         console.error("FloatingBar: could not close the main window:", error),
       );
     }
+    // Claude ran a turn of its own in another conversation: that is the one
+    // to show. Rust loads it and the pane repopulates from its snapshot.
+    if (elsewhereRef.current) {
+      void invoke(COMMANDS.CONVERSATIONS_OPEN_CLAUDE_TURN_CONVERSATION).catch((error) =>
+        console.debug("FloatingBar: could not open the conversation:", error),
+      );
+    }
     setPaneShown(true);
   }, [mainWindowOpen]);
+
+  const openElsewhereOnClick = useCallback(
+    (e: React.MouseEvent) => {
+      // The pill's own buttons keep doing what they say.
+      if ((e.target as HTMLElement).closest("button")) return;
+      reopenPane();
+    },
+    [reopenPane],
+  );
 
   // The full-size window taking over, and handing back.
   useEventListener(EVENTS.BAR_MAIN_WINDOW_OPENED, () => setMainWindowOpen(true));
@@ -1793,6 +1819,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       <div
         data-testid="floating-bar"
         data-state={currentUiState}
+        onClick={elsewhere ? openElsewhereOnClick : undefined}
         data-layout={shownLayout}
         data-driving={isDriving ? "" : undefined}
         className={cn(
