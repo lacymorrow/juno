@@ -41,6 +41,7 @@ pub mod keyboard;
 pub mod mcp;
 pub mod media; // Live player state/control for <NowPlayingCard> (no fake state)
 pub mod memory;
+pub mod model_download; // Resumable, retrying model file fetch (lost Wi-Fi pauses, never corrupts)
 pub mod monitors; // What is watching the screen or a file right now, and the stop for it
 pub mod mouse;
 pub mod native_permissions;

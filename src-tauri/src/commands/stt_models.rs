@@ -10,9 +10,10 @@
 //! directory of ONNX files (manifest in the voice plugin, next to its loader).
 //! Every download streams into `<app data>/models/.partial/<id>/` and is moved
 //! into place only once every byte is verified, so a loader never finds a
-//! half file.
+//! half file. A lost connection pauses the download and it resumes by itself
+//! (see `model_download`); if the connection stays gone, the bytes so far are
+//! kept and the next Download picks up where this one stopped.
 
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +28,7 @@ use tauri_plugin_voice_transcription::{
     PARAKEET_MODEL_FILES, PARAKEET_SUPPORTED,
 };
 
+use super::model_download::{fetch_resumable, FetchError, FetchEvent, FetchTarget, RetryPolicy};
 use crate::constants::events::stt_models as events;
 use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 use crate::settings::manager::SettingsManager;
@@ -299,6 +301,10 @@ pub struct DownloadProgress {
     /// The caller asked for the model to become active when it lands (the
     /// onboarding offer does; the Models pane waits for a tap on Use).
     pub activate_when_done: bool,
+    /// The connection dropped and the download is waiting to try again. It
+    /// resumes by itself; the UI says so in one plain line.
+    #[serde(default)]
+    pub waiting: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -466,6 +472,7 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
                     total_bytes: expected_total_bytes(&a.model_id),
                     percent: 0.0,
                     activate_when_done: a.activate_when_done,
+                    waiting: false,
                 })
             })
         })
@@ -558,10 +565,27 @@ fn expected_total_bytes(model_id: &str) -> u64 {
     }
 }
 
-enum DownloadOutcome {
-    Done,
-    Cancelled,
-    Failed(String),
+/// Clears the in-flight slot when the download task ends, however it ends
+/// (a panic included), so the pane can never be left showing a download that
+/// no longer exists. It only clears its own download: a new one started after
+/// the explicit clear is left alone.
+struct ClearActiveOnDrop {
+    state: SharedDownloadState,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Drop for ClearActiveOnDrop {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.state.lock() {
+            if guard
+                .active
+                .as_ref()
+                .is_some_and(|a| Arc::ptr_eq(&a.cancel, &self.cancel))
+            {
+                guard.active = None;
+            }
+        }
+    }
 }
 
 /// Start a download in the background. Returns as soon as it is queued; progress
@@ -610,6 +634,10 @@ pub fn start_download(
     let app = app.clone();
     let model_id = model_id.to_string();
     tauri::async_runtime::spawn(async move {
+        let _clear = ClearActiveOnDrop {
+            state: state.clone(),
+            cancel: cancel.clone(),
+        };
         info!(
             "[SttModels] Downloading {} ({}, {} MB){}",
             model_id,
@@ -622,14 +650,18 @@ pub fn start_download(
             }
         );
         let outcome = match run_download(&app, def, &state, &cancel, activate_when_done).await {
-            Ok(()) => DownloadOutcome::Done,
-            Err(e) if cancel.load(Ordering::SeqCst) => {
-                info!("[SttModels] Download of {} cancelled ({})", model_id, e);
-                DownloadOutcome::Cancelled
+            Ok(()) => Ok(()),
+            Err(_) if cancel.load(Ordering::SeqCst) => {
+                info!("[SttModels] Download of {} cancelled", model_id);
+                Err(FetchError::Cancelled)
             }
             Err(e) => {
-                error!("[SttModels] Download of {} failed: {}", model_id, e);
-                DownloadOutcome::Failed(e)
+                error!(
+                    "[SttModels] Download of {} failed: {}",
+                    model_id,
+                    e.detail()
+                );
+                Err(e)
             }
         };
 
@@ -638,7 +670,7 @@ pub fn start_download(
         }
 
         match outcome {
-            DownloadOutcome::Done => {
+            Ok(()) => {
                 let activated = if activate_when_done {
                     activate_after_download(&app, &model_id).await
                 } else {
@@ -649,16 +681,16 @@ pub fn start_download(
                     serde_json::json!({ "model_id": model_id, "activated": activated }),
                 );
             }
-            DownloadOutcome::Cancelled => {
+            Err(e) => {
+                // `error` is the one plain line the pane prints; the detail
+                // went to the log above.
                 let _ = app.emit(
                     events::DOWNLOAD_ERROR,
-                    serde_json::json!({ "model_id": model_id, "error": "Cancelled", "cancelled": true }),
-                );
-            }
-            DownloadOutcome::Failed(e) => {
-                let _ = app.emit(
-                    events::DOWNLOAD_ERROR,
-                    serde_json::json!({ "model_id": model_id, "error": e, "cancelled": false }),
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "error": e.human_message(),
+                        "cancelled": e == FetchError::Cancelled,
+                    }),
                 );
             }
         }
@@ -667,31 +699,61 @@ pub fn start_download(
     Ok(())
 }
 
+/// Where a download remembers each file's server validator between attempts,
+/// next to (not inside) the staging directory, so a Parakeet staging dir that
+/// is renamed into place carries only model files.
+fn validator_dir(models_dir: &Path, def: &ModelDef) -> PathBuf {
+    models_dir
+        .join(PARTIAL_DIR)
+        .join(format!("{}.validators", def.id))
+}
+
+async fn remove_staging(staging: &Path, validators: &Path) {
+    let _ = tokio::fs::remove_dir_all(staging).await;
+    let _ = tokio::fs::remove_dir_all(validators).await;
+}
+
 async fn run_download(
     app: &AppHandle,
     def: &ModelDef,
     state: &SharedDownloadState,
     cancel: &AtomicBool,
     activate_when_done: bool,
-) -> Result<(), String> {
-    let models_dir = models_dir(app)?;
+) -> Result<(), FetchError> {
+    let models_dir = models_dir(app).map_err(FetchError::Permanent)?;
     if models_dir
         .components()
         .any(|c| c == std::path::Component::ParentDir)
     {
-        return Err("Invalid models directory: path traversal not allowed".to_string());
+        return Err(FetchError::Permanent(
+            "Invalid models directory: path traversal not allowed".to_string(),
+        ));
     }
+    // The staging dir is kept between attempts: whatever a lost connection
+    // left there is resumed, not thrown away.
     let staging = models_dir.join(PARTIAL_DIR).join(def.id);
-    let _ = tokio::fs::remove_dir_all(&staging).await;
+    let validators = validator_dir(&models_dir, def);
     tokio::fs::create_dir_all(&staging)
         .await
-        .map_err(|e| format!("Failed to create download directory: {}", e))?;
+        .map_err(|e| FetchError::Permanent(format!("create download directory: {}", e)))?;
 
-    let result = fetch_all(app, def, state, cancel, activate_when_done, &staging).await;
-    if let Err(e) = result {
-        let _ = tokio::fs::remove_dir_all(&staging).await;
+    if let Err(e) = fetch_all(
+        app,
+        def,
+        state,
+        cancel,
+        activate_when_done,
+        &staging,
+        &validators,
+    )
+    .await
+    {
+        if !e.keeps_partial() {
+            remove_staging(&staging, &validators).await;
+        }
         return Err(e);
     }
+    let _ = tokio::fs::remove_dir_all(&validators).await;
 
     // Every file is complete and the right size: move into place in one step.
     match def.engine {
@@ -699,26 +761,76 @@ async fn run_download(
             let dest = models_dir.join(def.filename);
             tokio::fs::rename(staging.join(def.filename), &dest)
                 .await
-                .map_err(|e| format!("Failed to move downloaded file into place: {}", e))?;
+                .map_err(|e| FetchError::Permanent(format!("move into place: {}", e)))?;
             let _ = tokio::fs::remove_dir_all(&staging).await;
         }
         Engine::Parakeet => {
             let dest = PathBuf::from(parakeet_dir(app));
             if dest.exists() {
-                tokio::fs::remove_dir_all(&dest)
-                    .await
-                    .map_err(|e| format!("Failed to replace old Parakeet files: {}", e))?;
+                tokio::fs::remove_dir_all(&dest).await.map_err(|e| {
+                    FetchError::Permanent(format!("replace old Parakeet files: {}", e))
+                })?;
             }
             if let Some(parent) = dest.parent() {
                 let _ = tokio::fs::create_dir_all(parent).await;
             }
             tokio::fs::rename(&staging, &dest)
                 .await
-                .map_err(|e| format!("Failed to move downloaded files into place: {}", e))?;
+                .map_err(|e| FetchError::Permanent(format!("move into place: {}", e)))?;
         }
     }
     info!("[SttModels] {} is on disk", def.id);
     Ok(())
+}
+
+/// One progress stream per download, however many files it has.
+struct Reporter<'a> {
+    app: &'a AppHandle,
+    state: &'a SharedDownloadState,
+    model_id: &'static str,
+    activate_when_done: bool,
+    /// Sum of the manifest sizes (Parakeet), plus what servers announced for
+    /// files the manifest does not size (Whisper).
+    total_bytes: u64,
+    /// Bytes of the files already finished.
+    done_bytes: u64,
+    last_percent: f32,
+    last_report: std::time::Instant,
+    waiting: bool,
+}
+
+impl Reporter<'_> {
+    fn emit(&mut self, current_file_bytes: u64, waiting: bool, force: bool) {
+        let bytes_downloaded = self.done_bytes + current_file_bytes;
+        let percent = if self.total_bytes > 0 {
+            (bytes_downloaded as f32 / self.total_bytes as f32) * 100.0
+        } else {
+            0.0
+        };
+        let due = waiting != self.waiting
+            || percent - self.last_percent >= 1.0
+            || self.last_report.elapsed() >= std::time::Duration::from_millis(500);
+        if !(force || due) {
+            return;
+        }
+        let progress = DownloadProgress {
+            model_id: self.model_id.to_string(),
+            bytes_downloaded,
+            total_bytes: self.total_bytes,
+            percent,
+            activate_when_done: self.activate_when_done,
+            waiting,
+        };
+        if let Ok(mut guard) = self.state.lock() {
+            if let Some(active) = guard.active.as_mut() {
+                active.last_progress = Some(progress.clone());
+            }
+        }
+        let _ = self.app.emit(events::DOWNLOAD_PROGRESS, progress);
+        self.last_percent = percent;
+        self.last_report = std::time::Instant::now();
+        self.waiting = waiting;
+    }
 }
 
 async fn fetch_all(
@@ -728,121 +840,69 @@ async fn fetch_all(
     cancel: &AtomicBool,
     activate_when_done: bool,
     staging: &Path,
-) -> Result<(), String> {
+    validators: &Path,
+) -> Result<(), FetchError> {
     let files = fetch_plan(def);
+    // No overall timeout: a 3 GB model on slow Wi-Fi is legitimately long.
+    // A stalled body is caught per chunk by the policy's idle timeout.
     let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .read_timeout(std::time::Duration::from_secs(120))
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .read_timeout(std::time::Duration::from_secs(60))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .map_err(|e| FetchError::Permanent(format!("HTTP client: {}", e)))?;
+    let policy = RetryPolicy::MODELS;
 
-    // Manifest sizes are exact; a Whisper file's size is learned from the
-    // server's Content-Length when its response arrives.
-    let mut total_bytes: u64 = files.iter().filter_map(|f| f.expected_bytes).sum();
-    let mut bytes_downloaded: u64 = 0;
-    let mut last_reported_percent: f32 = -1.0;
-    let mut last_report = std::time::Instant::now();
-
-    let mut report = |bytes_downloaded: u64, total_bytes: u64, force: bool| {
-        let percent = if total_bytes > 0 {
-            (bytes_downloaded as f32 / total_bytes as f32) * 100.0
-        } else {
-            0.0
-        };
-        let due = percent - last_reported_percent >= 1.0
-            || last_report.elapsed() >= std::time::Duration::from_millis(500);
-        if !(force || due) {
-            return;
-        }
-        let progress = DownloadProgress {
-            model_id: def.id.to_string(),
-            bytes_downloaded,
-            total_bytes,
-            percent,
-            activate_when_done,
-        };
-        if let Ok(mut guard) = state.lock() {
-            if let Some(active) = guard.active.as_mut() {
-                active.last_progress = Some(progress.clone());
-            }
-        }
-        let _ = app.emit(events::DOWNLOAD_PROGRESS, progress);
-        last_reported_percent = percent;
-        last_report = std::time::Instant::now();
+    let mut reporter = Reporter {
+        app,
+        state,
+        model_id: def.id,
+        activate_when_done,
+        total_bytes: files.iter().filter_map(|f| f.expected_bytes).sum(),
+        done_bytes: 0,
+        last_percent: -1.0,
+        last_report: std::time::Instant::now(),
+        waiting: false,
     };
-
-    report(0, total_bytes, true);
+    reporter.emit(0, false, true);
 
     for file in &files {
         if cancel.load(Ordering::SeqCst) {
-            return Err("cancelled".to_string());
+            return Err(FetchError::Cancelled);
         }
-        let response = client
-            .get(&file.url)
-            .send()
-            .await
-            .map_err(|e| format!("Could not reach {}: {}", file.url, e))?;
-        if !response.status().is_success() {
-            return Err(format!(
-                "Server returned HTTP {} for {}",
-                response.status().as_u16(),
-                file.name
-            ));
-        }
-        let content_length = response.content_length().unwrap_or(0);
-        let expected = file
-            .expected_bytes
-            .or((content_length > 0).then_some(content_length));
-        if file.expected_bytes.is_none() && content_length > 0 {
-            total_bytes += content_length;
-        }
-        if let (Some(exp), true) = (file.expected_bytes, content_length > 0) {
-            if exp != content_length {
-                return Err(format!(
-                    "{} changed upstream (expected {} bytes, server offers {})",
-                    file.name, exp, content_length
-                ));
+        let path = staging.join(&file.name);
+        let validator_path = validators.join(&file.name);
+        let target = FetchTarget {
+            url: &file.url,
+            path: &path,
+            expected_bytes: file.expected_bytes,
+            validator_path: &validator_path,
+        };
+        let unsized_file = file.expected_bytes.is_none();
+        let base_total = reporter.total_bytes;
+        let mut current: u64 = 0;
+        let mut on_event = |event: FetchEvent| match event {
+            FetchEvent::Progress {
+                file_bytes,
+                file_total,
+            } => {
+                if unsized_file {
+                    reporter.total_bytes = base_total + file_total.unwrap_or(0);
+                }
+                current = file_bytes;
+                reporter.emit(file_bytes, false, false);
             }
+            FetchEvent::Waiting => reporter.emit(current, true, true),
+        };
+        let size = fetch_resumable(&client, &target, &policy, cancel, &mut on_event).await?;
+        if unsized_file {
+            reporter.total_bytes = base_total + size;
         }
-
-        let tmp_path = staging.join(&file.name);
-        let mut out = tokio::fs::File::create(&tmp_path)
-            .await
-            .map_err(|e| format!("Failed to create {}: {}", tmp_path.display(), e))?;
-        let mut stream = response.bytes_stream();
-        let mut file_bytes: u64 = 0;
-
-        while let Some(chunk) = stream.next().await {
-            if cancel.load(Ordering::SeqCst) {
-                return Err("cancelled".to_string());
-            }
-            let chunk = chunk.map_err(|e| format!("Download interrupted: {}", e))?;
-            use tokio::io::AsyncWriteExt;
-            out.write_all(&chunk)
-                .await
-                .map_err(|e| format!("Failed to write {}: {}", file.name, e))?;
-            file_bytes += chunk.len() as u64;
-            bytes_downloaded += chunk.len() as u64;
-            report(bytes_downloaded, total_bytes, false);
-        }
-
-        use tokio::io::AsyncWriteExt;
-        out.flush()
-            .await
-            .map_err(|e| format!("Failed to flush {}: {}", file.name, e))?;
-        drop(out);
-
-        if let Some(exp) = expected {
-            if file_bytes != exp {
-                return Err(format!(
-                    "{} is incomplete ({} of {} bytes)",
-                    file.name, file_bytes, exp
-                ));
-            }
-        }
+        reporter.done_bytes += size;
     }
 
-    report(bytes_downloaded, total_bytes, true);
+    let done = reporter.done_bytes;
+    reporter.done_bytes = 0;
+    reporter.emit(done, false, true);
     Ok(())
 }
 
