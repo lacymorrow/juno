@@ -174,8 +174,8 @@ const DevToolsPanel: React.FC = () => {
     await invokeCommand(COMMANDS.UTILS_WAIT, { duration_sec }, "wait");
   };
 
-  // The smoke Juno first appears out of, again, on the bar that is on screen.
-  // The only way to see it without redoing setup; the numbers it draws from
+  // The smoke Juno appears out of, again, on the bar that is on screen.
+  // The only way to see it without relaunching; the numbers it draws from
   // are in src/components/intro/introModel.ts.
   const handleReplayIntro = async () => {
     await invokeCommand(COMMANDS.INTRO_REPLAY, undefined, "replayIntro");
