@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.121] - 2026-10-08
+
+### Added
+
+- **intro:** reveal the bar out of smoke the first time it appears (#737) (ee2b263c)
+
 ## [0.8.120] - 2026-10-08
 
 ### Changed
@@ -1039,7 +1045,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.120...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.121...HEAD
+[0.8.121]: https://github.com/lacymorrow/juno/compare/cua-v0.8.120...v0.8.121
 [0.8.120]: https://github.com/lacymorrow/juno/compare/cua-v0.8.119...v0.8.120
 [0.8.119]: https://github.com/lacymorrow/juno/compare/cua-v0.8.118...v0.8.119
 [0.8.118]: https://github.com/lacymorrow/juno/compare/cua-v0.8.117...v0.8.118
