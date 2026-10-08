@@ -109,9 +109,10 @@ src/
 │   ├── implementations/       # Agent implementations
 │   ├── providers/            # AI provider integrations
 │   ├── tools/                # Tool system
-│   └── prompts/              # Prompt management
+│   ├── prompts/              # Prompt management
+│   └── voice_policy.rs       # Voice Silent: speech instructions left out of every prompt
 ├── cloud/                     # Cloud connector system
-├── tts/                       # Text-to-speech providers
+├── tts/                       # Text-to-speech providers (rate.rs: one speed setting mapped per engine)
 └── utils/                     # Utilities and helpers
 ```
 

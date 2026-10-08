@@ -14,6 +14,9 @@ use crate::settings::{
 pub struct PromptManager {
     config: PromptConfig,
     templates: HashMap<PromptType, PromptTemplate>,
+    /// Whether anyone will hear the reply. Off, and the prompts handed out
+    /// carry no instructions about speech at all; see `agent::voice_policy`.
+    voice: bool,
 }
 
 impl PromptManager {
@@ -22,7 +25,15 @@ impl PromptManager {
         Self {
             config: PromptConfig::default(),
             templates: DefaultPrompts::get_all(),
+            voice: true,
         }
+    }
+
+    /// Say whether the reply will be spoken. Prompts come out without the
+    /// speech instructions when it will not.
+    pub fn with_voice(mut self, voice: bool) -> Self {
+        self.voice = voice;
+        self
     }
 
     /// Load configuration from centralized settings manager.
@@ -36,9 +47,11 @@ impl PromptManager {
         })?;
 
         let config = Self::from_centralized_settings(&prompt_settings)?;
+        let voice = crate::agent::voice_policy::voice_enabled_from_settings(settings_manager).await;
         let mut manager = Self {
             config,
             templates: DefaultPrompts::get_all(),
+            voice,
         };
 
         // Merge custom prompts from config
@@ -145,7 +158,7 @@ impl PromptManager {
             content = self.substitute_variables(&content, &template.variables, &ctx)?;
         }
 
-        Ok(content)
+        Ok(crate::agent::voice_policy::apply(content, self.voice))
     }
 
     /// Get the default system prompt (backwards compatibility)
