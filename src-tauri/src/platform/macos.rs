@@ -520,15 +520,11 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
             return;
         }
 
-        // Only show, never steal focus. Overlays must not activate Juno.
-        if let Err(e) = window.show() {
-            warn!(
-                "{}",
-                format_error(templates::FAILED_TO_PROCESS, "show floating bar window", e)
-            );
-        } else {
-            info!("Floating bar shown by the startup fallback (no focus steal)");
-        }
+        // Revealed, never focused: the same smoke the normal path uses, and
+        // it leaves a reveal already in flight alone. Overlays must not
+        // activate Juno.
+        info!("Floating bar put up by the startup fallback (no focus steal)");
+        crate::intro::show_bar_with_reveal(&window.app_handle().clone());
     });
 }
 

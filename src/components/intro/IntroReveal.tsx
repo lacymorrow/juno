@@ -1,7 +1,7 @@
 /**
- * IntroReveal: the smoke Juno first appears out of (route `/intro`, a
+ * IntroReveal: the smoke Juno appears out of (route `/intro`, a
  * transparent click-through window the backend builds around the bar's spot
- * the one time setup ends, and closes when the sequence is over).
+ * every launch, and destroys when the sequence is over).
  *
  * Display only. On mount it asks the backend for the plan; the answer is the
  * starting gun, because the backend shows this window and starts its own
