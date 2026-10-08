@@ -114,6 +114,16 @@ pub mod tool_names {
     pub const SET_FILE_MONITOR: &str = "set_file_monitor";
     pub const CHECK_EXPIRED_TIMERS: &str = "check_expired_timers";
 
+    // Mac app tools (Reminders, Calendar, Contacts through EventKit and Contacts)
+    pub const REMINDERS_LIST: &str = "reminders_list";
+    pub const REMINDERS_CREATE: &str = "reminders_create";
+    pub const REMINDERS_COMPLETE: &str = "reminders_complete";
+    pub const CALENDAR_EVENTS: &str = "calendar_events";
+    pub const CALENDAR_CREATE_EVENT: &str = "calendar_create_event";
+    pub const CALENDAR_MOVE_EVENT: &str = "calendar_move_event";
+    pub const CALENDAR_DELETE_EVENT: &str = "calendar_delete_event";
+    pub const CONTACTS_FIND: &str = "contacts_find";
+
     // Scheduled automation tools (user-facing cron schedules)
     pub const CREATE_SCHEDULED_AUTOMATION: &str = "create_scheduled_automation";
     pub const LIST_SCHEDULED_AUTOMATIONS: &str = "list_scheduled_automations";

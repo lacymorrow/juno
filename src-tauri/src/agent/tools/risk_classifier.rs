@@ -99,6 +99,22 @@ const VERB_IN_INPUT_TOOLS: &[&str] = &[
 /// Agent self-scheduling.
 const SCHEDULING_TOOLS: &[&str] = &["create_scheduled_automation", "delete_scheduled_automation"];
 
+/// Mac app writes that the person can undo in the app itself: a reminder or an
+/// event added, a reminder ticked off, an event moved. Read back after every
+/// write (`agent::tools::mac_apps`), so a bad one is visible at once.
+const MAC_APP_WRITE_TOOLS: &[&str] = &[
+    "reminders_create",
+    "reminders_complete",
+    "calendar_create_event",
+    "calendar_move_event",
+];
+
+/// Mac app deletes. Calendar has no Trash, and a deleted event can take its
+/// invitations with it, so there is no construction that makes this safe to
+/// run unasked. Critical, because Critical is the one level no permission mode
+/// and no standing "do not ask again" waives.
+const MAC_APP_DELETE_TOOLS: &[&str] = &["calendar_delete_event"];
+
 /// Generic names that no Juno tool uses, kept on purpose.
 ///
 /// These are not the fictional names #586 removed. #586 deleted
@@ -176,6 +192,9 @@ pub const DELIBERATELY_UNGATED_TOOLS: &[&str] = &[
     "safari_extract_dom",
     "safari_get_url",
     "safari_list_clickable_elements",
+    "reminders_list",
+    "calendar_events",
+    "contacts_find",
     // Desktop and page input the person is watching happen
     "click_focused_element",
     "hold_key",
@@ -206,6 +225,8 @@ pub fn guarded_tool_names() -> Vec<&'static str> {
         .chain(FORM_FILL_TOOLS)
         .chain(VERB_IN_INPUT_TOOLS)
         .chain(SCHEDULING_TOOLS)
+        .chain(MAC_APP_WRITE_TOOLS)
+        .chain(MAC_APP_DELETE_TOOLS)
         .copied()
         .collect();
     names.sort_unstable();
@@ -300,6 +321,13 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
         // ends, so creation requires human confirmation
         "create_scheduled_automation" => RiskLevel::High,
         "delete_scheduled_automation" => RiskLevel::Medium,
+
+        // Reminders and Calendar writes the person can undo in the app.
+        name if MAC_APP_WRITE_TOOLS.contains(&name) => RiskLevel::Medium,
+
+        // Deleting a calendar event asks in every mode. Pinned by
+        // `mac_app_tests::deleting_a_calendar_event_asks_in_every_mode`.
+        name if MAC_APP_DELETE_TOOLS.contains(&name) => RiskLevel::Critical,
 
         // Everything else is low risk by default
         _ => RiskLevel::Low,
@@ -1418,6 +1446,9 @@ mod gate_name_truth {
         for definition in get_safari_tool_definitions() {
             names.insert(definition.name);
         }
+        for definition in crate::agent::tools::mac_apps::tool_definitions() {
+            names.insert(definition.name);
+        }
         for definition in
             create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124))
         {
@@ -1661,6 +1692,101 @@ mod gate_name_truth {
                 !sentence.starts_with("Use "),
                 "{name:?} falls through to the generic sentence: {sentence:?}. A \
                  prompt about a file has to name what happens to it."
+            );
+        }
+    }
+}
+
+/// The Mac app tools and the gate that names them. A safeguard is only real if
+/// something fails when it comes loose from what it names.
+#[cfg(test)]
+mod mac_app_tests {
+    use super::*;
+    use crate::agent::tools::mac_apps;
+    use crate::agent::tools::permission_policy::{requires_approval, PermissionMode};
+    use crate::constants::agent::tool_names;
+    use serde_json::json;
+
+    const MODES: [PermissionMode; 3] = [
+        PermissionMode::AskFirst,
+        PermissionMode::AskWhenRisky,
+        PermissionMode::DontAsk,
+    ];
+
+    #[test]
+    fn deleting_a_calendar_event_asks_in_every_mode() {
+        // The name the tool registers under is the name the gate classifies.
+        let registered: Vec<String> = mac_apps::tool_definitions()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+        assert!(registered
+            .iter()
+            .any(|n| n == tool_names::CALENDAR_DELETE_EVENT));
+        assert_eq!(tool_names::CALENDAR_DELETE_EVENT, "calendar_delete_event");
+        assert!(guarded_tool_names().contains(&"calendar_delete_event"));
+
+        let risk = classify_risk(tool_names::CALENDAR_DELETE_EVENT, &json!({"id": "abc@1"}));
+        assert_eq!(risk, RiskLevel::Critical);
+        for mode in MODES {
+            assert!(
+                requires_approval(mode, &risk, false),
+                "{mode:?} lets calendar_delete_event through unasked"
+            );
+            assert!(
+                requires_approval(mode, &risk, true),
+                "{mode:?} lets a standing grant cover calendar_delete_event"
+            );
+        }
+    }
+
+    #[test]
+    fn every_mac_app_tool_has_a_class_that_matches_what_it_does() {
+        for definition in mac_apps::tool_definitions() {
+            let risk = classify_risk(&definition.name, &json!({}));
+            let reads = mac_apps::READ_TOOLS.contains(&definition.name.as_str());
+            if reads {
+                assert_eq!(risk, RiskLevel::Low, "{} only reads", definition.name);
+                assert!(
+                    DELIBERATELY_UNGATED_TOOLS.contains(&definition.name.as_str()),
+                    "{} reads, so it is listed as deliberately ungated",
+                    definition.name
+                );
+            } else if definition.name == tool_names::CALENDAR_DELETE_EVENT {
+                assert_eq!(risk, RiskLevel::Critical);
+            } else {
+                assert_eq!(
+                    risk,
+                    RiskLevel::Medium,
+                    "{} writes and can be undone",
+                    definition.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reversible_writes_ask_only_in_ask_first() {
+        for name in MAC_APP_WRITE_TOOLS {
+            let risk = classify_risk(name, &json!({}));
+            assert!(requires_approval(PermissionMode::AskFirst, &risk, false));
+            assert!(!requires_approval(
+                PermissionMode::AskWhenRisky,
+                &risk,
+                false
+            ));
+            assert!(!requires_approval(PermissionMode::DontAsk, &risk, false));
+        }
+    }
+
+    #[test]
+    fn the_prompt_for_each_write_reads_as_a_sentence() {
+        use crate::agent::tools::permission_policy::describe_action;
+        for name in MAC_APP_WRITE_TOOLS.iter().chain(MAC_APP_DELETE_TOOLS) {
+            let sentence = describe_action(name, &json!({"title": "Call Katie"}));
+            assert!(
+                !sentence.contains('_') && !sentence.starts_with("Use "),
+                "{name}: {sentence}"
             );
         }
     }
