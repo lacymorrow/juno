@@ -505,8 +505,11 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(BAR_SHOW_FALLBACK_MS)).await;
 
-        // The normal path already won: leave it alone.
-        if window.is_visible().unwrap_or(false) {
+        // The normal path already won: leave it alone. That includes a reveal
+        // whose smoke is up but whose bar is not yet: the window is still
+        // hidden for that second, and this used to log a second "put up" for
+        // a show the reveal guard then dropped.
+        if window.is_visible().unwrap_or(false) || crate::intro::reveal_in_flight() {
             return;
         }
 

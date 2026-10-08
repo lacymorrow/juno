@@ -232,6 +232,13 @@ static RUN: Mutex<Option<Run>> = Mutex::new(None);
 /// the running reveal is already bringing the bar on.
 static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
+/// Is a reveal bringing the bar on right now? Between the smoke starting and
+/// the bar itself appearing ([`BAR_AT_MS`]) the bar window is still hidden, so
+/// "is the bar visible" alone reads a reveal in progress as no bar at all.
+pub fn reveal_in_flight() -> bool {
+    IN_FLIGHT.load(Ordering::SeqCst)
+}
+
 /// Put the bar on screen the way she appears or, if the reveal cannot be
 /// arranged, the plain way. Either way the bar is on screen afterwards;
 /// nothing here is allowed to leave the person without one.
