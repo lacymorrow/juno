@@ -259,6 +259,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
         
       >
         <SettingsRow
+          id="tool-categories"
           label="Everything at once"
           description="Required tools stay on."
           info="Enable or disable categories of tools available to the AI agent. Required tools stay on: the agent cannot work without them."

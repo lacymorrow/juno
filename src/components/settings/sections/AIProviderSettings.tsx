@@ -123,6 +123,7 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
           }
         >
           <SettingsRow
+            id="api-key"
             below={
               settings.activeProvider === "claude_cli" ? (
                 <div className="rounded-md border border-border bg-muted/40 p-4">

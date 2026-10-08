@@ -114,6 +114,9 @@ pub mod tool_names {
     pub const SET_FILE_MONITOR: &str = "set_file_monitor";
     pub const CHECK_EXPIRED_TIMERS: &str = "check_expired_timers";
 
+    // Juno's own Settings window: list, read, change, open and highlight
+    pub const SETTINGS: &str = "settings";
+
     // Scheduled automation tools (user-facing cron schedules)
     pub const CREATE_SCHEDULED_AUTOMATION: &str = "create_scheduled_automation";
     pub const LIST_SCHEDULED_AUTOMATIONS: &str = "list_scheduled_automations";

@@ -30,7 +30,7 @@ import { useEventListener } from "@/hooks/useEventListener";
 import { useDerivedIssues } from "@/hooks/useDerivedIssues";
 
 import { SettingsSectionProps } from "../types";
-import { SettingsGroup } from "../ui";
+import { SETTINGS_ROW_ID_PREFIX, SettingsGroup } from "../ui";
 import { useAdvancedSettings } from "../AdvancedSettingsContext";
 import { ShortcutRecorder } from "../ShortcutRecorder";
 import { KeyCaps } from "../KeyCaps";
@@ -591,6 +591,8 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
 
   /* ------------------------------- list ---------------------------------- */
 
+  const anchors = triggerAnchors(triggers);
+
   const usesFn = visibleTriggers.some(
     (t) => t.enabled && isFnBinding(t.binding),
   );
@@ -608,6 +610,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         {visibleTriggers.map((trigger) => (
           <TriggerRow
             key={trigger.id}
+            anchor={anchors.get(trigger.id)}
             trigger={trigger}
             editing={editingKey === trigger.id}
             bindingTab={bindingTab[trigger.id] ?? "keyboard"}
@@ -680,9 +683,34 @@ interface TriggerRowProps {
       key recorded by pressing it and one chosen here take the same path. */
   onSetBinding: (id: string, binding: Binding | null) => Promise<void>;
   onRemove: () => void;
+  /** Row anchor for search and the agent's `settings` tool, if this row has one. */
+  anchor?: string;
+}
+
+/**
+ * The first key or mouse row for each target is the one the agent's
+ * `settings` tool calls "the shortcut" (Rust: `settings_tool::shortcut_row`),
+ * so that row carries the anchor the tool highlights.
+ */
+const TRIGGER_ANCHOR: Record<Trigger["target"], string> = {
+  agent: "trigger-agent",
+  dictation: "trigger-dictation",
+};
+
+/** Anchor for each row id: the first non-voice row per target gets one. */
+function triggerAnchors(triggers: Trigger[]): Map<string, string> {
+  const anchors = new Map<string, string>();
+  const claimed = new Set<string>();
+  for (const t of triggers) {
+    if (t.gesture === "say" || claimed.has(t.target)) continue;
+    claimed.add(t.target);
+    anchors.set(t.id, TRIGGER_ANCHOR[t.target]);
+  }
+  return anchors;
 }
 
 function TriggerRow({
+  anchor,
   trigger,
   editing,
   bindingTab,
@@ -709,7 +737,14 @@ function TriggerRow({
   const setBindingNow = (binding: Binding | null) => onSetBinding(key, binding);
 
   return (
-    <div className="px-4 py-3">
+    <div
+      id={anchor ? `${SETTINGS_ROW_ID_PREFIX}${anchor}` : undefined}
+      className={cn(
+        "px-4 py-3",
+        anchor &&
+          "scroll-mt-16 transition-colors duration-300 motion-reduce:transition-none",
+      )}
+    >
       <div className="flex items-center gap-3">
         <span
           className={cn(
