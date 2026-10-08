@@ -96,6 +96,10 @@ const VERB_IN_INPUT_TOOLS: &[&str] = &[
     "browser_interact",
 ];
 
+/// Tools that are the `computer` tool under another schema: each call maps
+/// onto a `computer` action and is classified exactly as that action is.
+const COMPUTER_SCHEMA_TOOLS: &[&str] = &["app_controls"];
+
 /// Agent self-scheduling.
 const SCHEDULING_TOOLS: &[&str] = &["create_scheduled_automation", "delete_scheduled_automation"];
 
@@ -224,6 +228,7 @@ pub fn guarded_tool_names() -> Vec<&'static str> {
         .chain(BROWSER_NAV_TOOLS)
         .chain(FORM_FILL_TOOLS)
         .chain(VERB_IN_INPUT_TOOLS)
+        .chain(COMPUTER_SCHEMA_TOOLS)
         .chain(SCHEDULING_TOOLS)
         .chain(MAC_APP_WRITE_TOOLS)
         .chain(MAC_APP_DELETE_TOOLS)
@@ -243,6 +248,17 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
 
         // Computer use actions (screenshot/cursor are safe; keyboard combos vary)
         "computer" => classify_computer_use_risk(tool_input),
+
+        // The same actions offered under the `app_controls` schema. A call
+        // that does not map is refused by the tool, so it changes nothing.
+        name if COMPUTER_SCHEMA_TOOLS.contains(&name) => {
+            match crate::agent::tools::anthropic_computer_use::app_controls_to_computer_input(
+                tool_input,
+            ) {
+                Ok(computer) => classify_computer_use_risk(&computer),
+                Err(_) => RiskLevel::Low,
+            }
+        }
 
         // File mutations
         name if FILE_WRITE_TOOLS.contains(&name) => classify_file_write_risk(tool_input),
