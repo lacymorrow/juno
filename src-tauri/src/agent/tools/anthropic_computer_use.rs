@@ -425,6 +425,14 @@ pub(crate) fn failure_halts_batch(tool_name: &str, input: &Value) -> bool {
             None => true,
         };
     }
+    // A failed press halts the batch like a failed click; a failed list or
+    // window picture changes nothing on screen.
+    if tool_name == APP_CONTROLS_TOOL {
+        return match app_controls_to_computer_input(input) {
+            Ok(computer) => failure_halts_batch("computer", &computer),
+            Err(_) => true,
+        };
+    }
     is_ui_modifying_action(tool_name)
 }
 
@@ -3542,6 +3550,50 @@ pub async fn execute_str_replace_tool(
 ///
 /// This function creates tools with proper API types and versioning to ensure
 /// compliance with the official Anthropic Computer Use specification
+/// The accessibility-first tool offered next to Anthropic's built-in
+/// `computer` tool on the direct API.
+pub const APP_CONTROLS_TOOL: &str = "app_controls";
+
+/// An `app_controls` call as the `computer` action it is: one executor, two
+/// schemas.
+pub fn app_controls_to_computer_input(input: &Value) -> Result<Value, String> {
+    let action = input.get("action").and_then(Value::as_str).ok_or_else(|| {
+        "Missing 'action': use list, press, right_click, double_click, type or screenshot"
+            .to_string()
+    })?;
+    let computer_action = match action {
+        "list" => "elements",
+        "press" => "left_click",
+        "right_click" => "right_click",
+        "double_click" => "double_click",
+        "type" => "type",
+        "screenshot" => "screenshot",
+        other => {
+            return Err(format!(
+                "Unknown action '{other}': use list, press, right_click, double_click, type or screenshot"
+            ))
+        }
+    };
+    if matches!(action, "press" | "right_click" | "double_click") && element_param(input).is_none()
+    {
+        return Err(format!(
+            "'{action}' needs 'element': an id from your latest list, such as \"e7\""
+        ));
+    }
+    if action == "screenshot" && input.get("window").is_none_or(Value::is_null) {
+        return Err(
+            "'screenshot' needs 'window'; for the whole screen use the computer tool".to_string(),
+        );
+    }
+    let mut computer = json!({ "action": computer_action });
+    for key in ["window", "element", "text"] {
+        if let Some(value) = input.get(key).filter(|v| !v.is_null()) {
+            computer[key] = value.clone();
+        }
+    }
+    Ok(computer)
+}
+
 pub fn create_versioned_tools(version_config: ToolVersionConfig) -> Vec<ToolDefinition> {
     let manager = ToolVersionManager::with_config(version_config);
 
@@ -3721,8 +3773,50 @@ Example usage:
         }),
     };
 
+    // Accessibility-first controls, as a tool of its own. On the direct API
+    // the `computer` tool is Anthropic's built-in schema, which the model
+    // reads and Juno cannot extend, so `elements` and `element` are offered
+    // here instead. The Claude CLI gets the same actions inside `computer`
+    // (Juno's own schema) and is not offered this tool.
+    let app_controls_tool = ToolDefinition {
+        name: APP_CONTROLS_TOOL.to_string(),
+        description: "Read and operate an app's real controls through macOS accessibility, in the background, without guessing pixels. Use this before the computer tool's screenshots and coordinates.
+
+- list: every button, field and piece of text in a window, with an id, its name and its current value. Works on windows behind other windows and costs far fewer tokens than a screenshot.
+- press, right_click, double_click: act on a control by its id from the latest list. The result names what was pressed.
+- type: type 'text' into a field by its id (or into the working window's focused field without one).
+- screenshot: a picture of just that window, even when it is covered. Afterwards the computer tool's coordinates are pixels in that picture, and its clicks go to that window.
+
+Always name the window (its title, its app's name, or its id). It becomes your working window: computer-tool actions without a window go to it, and a click that would land on another app is refused. Read results from the values in a fresh list.".to_string(),
+        api_type: None,
+        beta_flag: None,
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "press", "right_click", "double_click", "type", "screenshot"]
+                },
+                "window": {
+                    "type": ["integer", "string"],
+                    "description": "The window: its title, its app's name (when the app has one window), or its id. Optional after the first call: your working window is used."
+                },
+                "element": {
+                    "type": ["string", "integer"],
+                    "description": "An id from your latest list, such as \"e7\"."
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Text to type, for type."
+                }
+            },
+            "required": ["action"]
+        }),
+    };
+
     // Apply versioning to all tools
     tools.push(manager.apply_versioning(computer_tool));
+    tools.push(app_controls_tool);
     tools.push(manager.apply_versioning(bash_tool));
     tools.push(manager.apply_versioning(str_replace_tool));
 
@@ -3819,6 +3913,38 @@ pub async fn register_anthropic_computer_use_tools_with_version(
                                 run_computer_action(
                                     &handle,
                                     input,
+                                    session_id.as_deref(),
+                                    &cursor_id,
+                                    &cursor_color,
+                                )
+                                .await
+                            }
+                        }
+                    })
+                    .await;
+            }
+            APP_CONTROLS_TOOL => {
+                provider
+                    .register_async_tool(tool, {
+                        let handle = app_handle.clone();
+                        let cursor_id = agent_cursor_id.clone();
+                        let cursor_color = agent_cursor_color.clone();
+                        let session_id = session_id.clone();
+                        move |input: Value| {
+                            let handle = handle.clone();
+                            let cursor_id = cursor_id.clone();
+                            let cursor_color = cursor_color.clone();
+                            let session_id = session_id.clone();
+                            async move {
+                                let computer_input = match app_controls_to_computer_input(&input) {
+                                    Ok(computer_input) => computer_input,
+                                    Err(message) => {
+                                        return Ok(create_anthropic_error_response(message))
+                                    }
+                                };
+                                run_computer_action(
+                                    &handle,
+                                    computer_input,
                                     session_id.as_deref(),
                                     &cursor_id,
                                     &cursor_color,
@@ -4603,6 +4729,57 @@ mod input_targeting_tests {
             .expect("action enum");
         assert!(actions.contains(&json!("elements")));
         assert!(computer.input_schema["properties"]["element"].is_object());
+    }
+
+    #[test]
+    fn app_controls_calls_are_computer_actions() {
+        assert_eq!(
+            app_controls_to_computer_input(&json!({ "action": "list", "window": "Calculator" })),
+            Ok(json!({ "action": "elements", "window": "Calculator" }))
+        );
+        assert_eq!(
+            app_controls_to_computer_input(&json!({ "action": "press", "element": "e7" })),
+            Ok(json!({ "action": "left_click", "element": "e7" }))
+        );
+        assert_eq!(
+            app_controls_to_computer_input(
+                &json!({ "action": "type", "element": "e3", "text": "hi" })
+            ),
+            Ok(json!({ "action": "type", "element": "e3", "text": "hi" }))
+        );
+    }
+
+    #[test]
+    fn app_controls_refuses_what_would_fall_back_to_pixels() {
+        // A press without an element would become a coordinate-less click.
+        assert!(app_controls_to_computer_input(&json!({ "action": "press" })).is_err());
+        // A screenshot without a window is the computer tool's job.
+        assert!(app_controls_to_computer_input(&json!({ "action": "screenshot" })).is_err());
+        assert!(app_controls_to_computer_input(&json!({ "action": "drag" })).is_err());
+    }
+
+    #[test]
+    fn a_failed_press_halts_the_batch_and_a_failed_list_does_not() {
+        assert!(failure_halts_batch(
+            APP_CONTROLS_TOOL,
+            &json!({ "action": "press", "element": "e1" })
+        ));
+        assert!(!failure_halts_batch(
+            APP_CONTROLS_TOOL,
+            &json!({ "action": "list", "window": "Calculator" })
+        ));
+    }
+
+    #[test]
+    fn app_controls_is_offered_as_a_custom_tool() {
+        let tools = create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124));
+        let controls = tools
+            .iter()
+            .find(|t| t.name == APP_CONTROLS_TOOL)
+            .expect("app_controls tool");
+        // No Anthropic type: it goes out with its own description and schema.
+        assert_eq!(controls.api_type, None);
+        assert!(controls.input_schema["properties"]["element"].is_object());
     }
 
     #[test]
