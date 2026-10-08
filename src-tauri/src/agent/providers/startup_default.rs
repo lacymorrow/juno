@@ -136,7 +136,7 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
                 },
                 id if id == Provider::CodexCli.id() => match codex_status.email {
                     Some(email) => info!(
-                        "[Providers] No API key configured and the Codex CLI is signed in with ChatGPT as {email} — using it"
+                        "[Providers] No API key configured and the Codex CLI is signed in with ChatGPT as {email}, using it"
                     ),
                     None => info!("[Providers] Active provider is now '{provider_id}'"),
                 },

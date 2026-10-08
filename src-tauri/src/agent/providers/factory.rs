@@ -88,15 +88,16 @@ pub(crate) fn select_provider(
 
 /// Fail early, in plain words, when `provider` has no credential.
 ///
-/// The Claude CLI never needs a key: its credential is the login the `claude`
-/// binary already holds, so it is never refused here. Every other provider
-/// needs a key from settings or its environment variable.
+/// The CLIs never need a key: their credential is the login the `claude` or
+/// `codex` binary already holds, so they are never refused here. Every other
+/// provider needs a key from settings or its environment variable.
 pub(crate) fn check_credential(
     provider: &Provider,
     settings: &crate::settings::ProviderConfig,
     env_key: Option<String>,
 ) -> Result<(), AgentError> {
-    if *provider == Provider::ClaudeCli || crate::demo::is_demo_build() {
+    if matches!(provider, Provider::ClaudeCli | Provider::CodexCli) || crate::demo::is_demo_build()
+    {
         return Ok(());
     }
     let has = |k: &Option<String>| k.as_deref().is_some_and(|v| !v.is_empty());
@@ -114,7 +115,7 @@ fn ensure_can_run(
         Provider::Anthropic => Some("ANTHROPIC_API_KEY"),
         Provider::OpenAI | Provider::Rig => Some("OPENAI_API_KEY"),
         Provider::Gemini => Some("GEMINI_API_KEY"),
-        Provider::ClaudeCli => None,
+        Provider::ClaudeCli | Provider::CodexCli => None,
     };
     check_credential(provider, settings, env_name.and_then(|n| env::var(n).ok()))
 }
@@ -849,6 +850,14 @@ mod subscription_tests {
         let provider = select_provider(&config, None).unwrap();
         assert_eq!(provider, Provider::ClaudeCli);
         // No key in settings, none in the environment.
+        assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
+    }
+
+    #[test]
+    fn a_chatgpt_plan_choice_needs_no_api_key_either() {
+        let config = chose("codex_cli", true);
+        let provider = select_provider(&config, None).unwrap();
+        assert_eq!(provider, Provider::CodexCli);
         assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
     }
 

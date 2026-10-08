@@ -295,7 +295,7 @@ pub enum Provider {
     /// Claude CLI (Claude Code) — subprocess-based provider, no API key needed.
     /// Uses the locally installed `claude` binary with the user's existing auth.
     ClaudeCli,
-    /// Codex CLI — subprocess-based provider, no API key needed.
+    /// Codex CLI: subprocess-based provider, no API key needed.
     /// Uses the locally installed `codex` binary with the user's ChatGPT-plan auth.
     CodexCli,
 }
@@ -338,7 +338,7 @@ impl Provider {
             Provider::Gemini => "Google's Gemini models for multimodal AI capabilities",
             Provider::ClaudeCli => "Use your local Claude CLI installation — no API key required",
             Provider::CodexCli => {
-                "Use your local Codex CLI installation with your ChatGPT plan — no API key required"
+                "Use your local Codex CLI installation with your ChatGPT plan, no API key required"
             }
         }
     }
@@ -767,14 +767,16 @@ impl Provider {
                     router_role: None,
                 },
             ],
-            // Codex CLI (v1): chat-only through the user's ChatGPT plan. No
-            // Anthropic tool version applies; computer-use tooling is tracked
-            // as unsupported until this provider is wired to Juno's own
-            // function tools or MCP server.
+            // Codex CLI: chat-only through the person's ChatGPT plan. No
+            // Anthropic tool version applies. IDs are what `codex app-server`
+            // `model/list` returned for a ChatGPT login on 2026-10-07 (codex-cli
+            // 0.159.0); `gpt-5-codex` and `gpt-5` are refused with a 400 on
+            // ChatGPT accounts. The plan's catalog moves, so re-check with
+            // `model/list` rather than from memory.
             Provider::CodexCli => &[
                 ModelDefinition {
-                    id: "gpt-5-codex",
-                    name: "GPT-5 Codex (via CLI)",
+                    id: "gpt-6-luna",
+                    name: "GPT-6 Luna (via Codex)",
                     computer_use: ComputerUse::No,
                     availability: Availability::Current,
                     toolset_ga: false,
@@ -785,8 +787,20 @@ impl Provider {
                     router_role: None,
                 },
                 ModelDefinition {
-                    id: "gpt-5",
-                    name: "GPT-5 (via CLI)",
+                    id: "gpt-5.6-terra",
+                    name: "GPT-5.6 Terra (via Codex)",
+                    computer_use: ComputerUse::No,
+                    availability: Availability::Current,
+                    toolset_ga: false,
+                    image_tier: ImageTier::Standard,
+                    adaptive_thinking: false,
+                    server_side_fallback: false,
+                    is_recommended: false,
+                    router_role: None,
+                },
+                ModelDefinition {
+                    id: "gpt-5.6-luna",
+                    name: "GPT-5.6 Luna (via Codex)",
                     computer_use: ComputerUse::No,
                     availability: Availability::Current,
                     toolset_ga: false,
@@ -885,7 +899,7 @@ impl Provider {
                     Provider::Rig => model_ids::OPENAI_SOL_5_6,
                     Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
                     Provider::ClaudeCli => "sonnet",
-                    Provider::CodexCli => "gpt-5-codex",
+                    Provider::CodexCli => "gpt-6-luna",
                 }
             })
     }

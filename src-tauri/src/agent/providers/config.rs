@@ -137,7 +137,7 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         },
         CentralizedProviderConfig {
             id: Provider::CodexCli.id().to_string(),
-            api_key: None, // Codex CLI doesn't need an API key — uses its own auth
+            api_key: None, // Codex CLI doesn't need an API key, it uses its own auth
             model: Some(Provider::CodexCli.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),

@@ -1,4 +1,4 @@
-//! Codex CLI provider — uses the `codex` binary (OpenAI Codex CLI) as a
+//! Codex CLI provider: uses the `codex` binary (OpenAI Codex CLI) as a
 //! subprocess-based AI provider. Mirrors [`super::claude_cli`] in shape: the
 //! user already pays for a ChatGPT plan, so Juno should run on it rather than
 //! ask for an OpenAI API key on top.
@@ -28,17 +28,17 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
+use super::claude_cli::ClaudeCliBrain;
 use crate::agent::core::{AgentAction, AgentError, Message, Role, ToolDefinition};
 use crate::agent::traits::AgentBrain;
 use crate::settings::ProviderConfig as CentralizedProviderConfig;
 
-/// Codex CLI model aliases — passed as `-m` to the subprocess. Codex accepts
-/// any string the account can serve, so these are the ones ChatGPT plans
-/// actually offer today.
+/// Codex CLI model ids, passed as `-m`. The catalog lives in
+/// `Provider::model_definitions`; this is only the fallback when a config
+/// entry has no model at all.
 pub mod model_aliases {
-    /// The recommended default. Codex's own coding-tuned model.
-    pub const GPT_5_CODEX: &str = "gpt-5-codex";
-    pub const GPT_5: &str = "gpt-5";
+    /// The ChatGPT plan's default model as of codex-cli 0.159.0.
+    pub const DEFAULT: &str = "gpt-6-luna";
 }
 
 /// Upper bound on how long one `codex exec` call runs before we give up. Codex
@@ -60,7 +60,7 @@ pub enum AuthMode {
     Unknown,
     /// `auth_mode: "chatgpt"` in `~/.codex/auth.json`.
     ChatGPT,
-    /// `auth_mode: "apikey"` — a login, but not the one this provider is for.
+    /// `auth_mode: "apikey"`: a login, but not the one this provider is for.
     ApiKey,
     /// The file is missing, empty, or has `auth_mode: null`.
     SignedOut,
@@ -181,7 +181,7 @@ struct AuthTokens {
 ///
 /// Never returns an error: everything that could go wrong is one of the
 /// [`AuthMode`] variants. A missing or malformed file reads as `SignedOut`
-/// rather than `Unknown`, because that is what it operationally means — the
+/// rather than `Unknown`, because that is what it operationally means: the
 /// CLI has no login to use. `Unknown` is reserved for "we have not asked
 /// yet", which only matters synchronously in Settings.
 pub async fn cli_status() -> CliStatus {
@@ -247,7 +247,7 @@ pub async fn cli_status() -> CliStatus {
 }
 
 /// Decode the `email` claim out of a JWT without verifying it. We never trust
-/// this for authorization — the CLI has already — we only use it to show
+/// this for authorization (the CLI has already); we only use it to show
 /// whose account Juno is spending in Settings. Returns `None` on anything
 /// unexpected so a broken token is a missing email, not a crash.
 fn email_from_id_token(id_token: &str) -> Option<String> {
@@ -296,7 +296,7 @@ impl CodexCliBrain {
         let model = config
             .model
             .clone()
-            .unwrap_or_else(|| model_aliases::GPT_5_CODEX.to_string());
+            .unwrap_or_else(|| model_aliases::DEFAULT.to_string());
 
         info!(
             "Initializing Codex CLI brain (binary: {}, model: {})",
@@ -332,6 +332,13 @@ impl CodexCliBrain {
         let mut args = vec![
             "exec".to_string(),
             "--json".to_string(),
+            // Juno spawns from the home directory, which is not a git repo
+            // and, for most people, not a directory Codex has been told to
+            // trust. Without this flag `codex exec` refuses to start there.
+            "--skip-git-repo-check".to_string(),
+            // Juno keeps its own conversation memory. A rollout file per
+            // spoken question would only clutter the person's Codex history.
+            "--ephemeral".to_string(),
             "-s".to_string(),
             "read-only".to_string(),
             "-m".to_string(),
@@ -370,7 +377,9 @@ impl CodexCliBrain {
             args.iter().take(5).cloned().collect::<Vec<_>>().join(" ")
         );
 
-        let spawn_result = tokio::process::Command::new(&self.binary_path)
+        crate::turn_timing::note_llm("codex_cli/oneshot", &self.model);
+        crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
+        let spawn_result = codex_command(&self.binary_path)
             .args(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -533,11 +542,10 @@ impl CodexCliBrain {
 
     /// Parse Codex NDJSON and emit text as it arrives.
     ///
-    /// Codex items complete whole rather than streaming per-token, so each
-    /// `item.completed { type: "agent_message", text: ... }` is pushed to the
-    /// UI as a single chunk. The simpler shape costs some perceived latency
-    /// against Claude CLI's per-delta stream, but it matches what Codex
-    /// actually emits and keeps the parser small.
+    /// `codex exec --json` reports whole items, not token deltas, so each
+    /// `item.completed { type: "agent_message" }` lands as one chunk. It goes
+    /// through the same `<TTS>` splitter the Claude CLI uses, so a voice turn
+    /// speaks and the tags never reach the visible answer.
     async fn process_stream(
         stdout: tokio::process::ChildStdout,
         app_handle: &Option<tauri::AppHandle>,
@@ -546,61 +554,39 @@ impl CodexCliBrain {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
         let mut accumulated = String::new();
+        let mut tts_stream = crate::agent::tts_tags::TtsTagStream::new();
+        let mut spoken_blocks: Vec<String> = Vec::new();
+        let mut failure: Option<String> = None;
+        let mut messages_seen = 0usize;
 
         loop {
             match lines.next_line().await {
-                Ok(Some(line)) => {
-                    if line.trim().is_empty() {
-                        continue;
+                Ok(Some(line)) => match parse_exec_line(&line) {
+                    ExecEvent::AgentMessage(text) => {
+                        crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
+                        // Separate messages are separate paragraphs, not one
+                        // run-on sentence.
+                        let text = if messages_seen > 0 {
+                            format!("\n\n{text}")
+                        } else {
+                            text
+                        };
+                        messages_seen += 1;
+                        ClaudeCliBrain::emit_display_text(
+                            app_handle,
+                            msg_id,
+                            &text,
+                            &mut tts_stream,
+                            &mut accumulated,
+                            &mut spoken_blocks,
+                        );
                     }
-                    let parsed: Value = match serde_json::from_str(&line) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            debug!(
-                                "Non-JSON line from Codex CLI: {} ({})",
-                                line.chars().take(80).collect::<String>(),
-                                e
-                            );
-                            continue;
-                        }
-                    };
-                    let event_type = parsed.get("type").and_then(Value::as_str).unwrap_or("");
-                    match event_type {
-                        "item.completed" => {
-                            let item = match parsed.get("item") {
-                                Some(item) => item,
-                                None => continue,
-                            };
-                            let item_type = item.get("type").and_then(Value::as_str).unwrap_or("");
-                            if item_type != "agent_message" {
-                                debug!("Codex CLI item '{}': skipped", item_type);
-                                continue;
-                            }
-                            let text = match item.get("text").and_then(Value::as_str) {
-                                Some(text) if !text.is_empty() => text,
-                                _ => continue,
-                            };
-                            accumulated.push_str(text);
-                            if let Some(handle) = app_handle {
-                                crate::agent::tool_logger::emit_streaming_text_chunk(
-                                    handle,
-                                    text.to_string(),
-                                    Some(msg_id.to_string()),
-                                    None,
-                                );
-                            }
-                        }
-                        "turn.completed" => {
-                            if let Some(usage) = parsed.get("usage") {
-                                debug!("Codex CLI turn usage: {}", usage);
-                            }
-                        }
-                        "thread.started" | "turn.started" => {
-                            debug!("Codex CLI {}", event_type);
-                        }
-                        other => debug!("Codex CLI event '{}': skipped", other),
+                    ExecEvent::Failed(message) => {
+                        warn!("[CodexCLI] Turn failed: {}", message);
+                        failure = Some(message);
                     }
-                }
+                    ExecEvent::Other => {}
+                },
                 Ok(None) => break,
                 Err(e) => {
                     warn!("Error reading Codex CLI stdout: {}", e);
@@ -609,8 +595,74 @@ impl CodexCliBrain {
             }
         }
 
-        Ok(accumulated)
+        ClaudeCliBrain::flush_display_text(
+            app_handle,
+            msg_id,
+            &mut tts_stream,
+            &mut accumulated,
+            &mut spoken_blocks,
+        );
+
+        match failure {
+            Some(message) if accumulated.trim().is_empty() && spoken_blocks.is_empty() => {
+                Err(AgentError::LlmError(message))
+            }
+            _ => Ok(accumulated),
+        }
     }
+}
+
+/// What one `codex exec --json` line means to Juno.
+#[derive(Debug, PartialEq, Eq)]
+enum ExecEvent {
+    /// A finished assistant message.
+    AgentMessage(String),
+    /// The turn failed, with the CLI's message.
+    Failed(String),
+    /// Anything else: lifecycle, reasoning, usage, non-JSON noise.
+    Other,
+}
+
+fn parse_exec_line(line: &str) -> ExecEvent {
+    let Ok(parsed) = serde_json::from_str::<Value>(line.trim()) else {
+        return ExecEvent::Other;
+    };
+    match parsed.get("type").and_then(Value::as_str).unwrap_or("") {
+        "item.completed" => {
+            let Some(item) = parsed.get("item") else {
+                return ExecEvent::Other;
+            };
+            if item.get("type").and_then(Value::as_str) != Some("agent_message") {
+                return ExecEvent::Other;
+            }
+            match item.get("text").and_then(Value::as_str) {
+                Some(text) if !text.is_empty() => ExecEvent::AgentMessage(text.to_string()),
+                _ => ExecEvent::Other,
+            }
+        }
+        "turn.failed" => ExecEvent::Failed(
+            parsed
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("Codex turn failed")
+                .to_string(),
+        ),
+        other => {
+            debug!("Codex CLI event '{}': skipped", other);
+            ExecEvent::Other
+        }
+    }
+}
+
+/// A `codex` command rooted in the home directory, the way `claude_command`
+/// roots `claude`: a GUI app starts in `/`, and a cwd is the first thing a
+/// coding agent reads.
+pub(crate) fn codex_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(binary);
+    if let Some(home) = dirs::home_dir() {
+        command.current_dir(home);
+    }
+    command
 }
 
 #[async_trait]
@@ -673,7 +725,7 @@ mod tests {
         };
         assert!(!status.is_signed_in());
         // Still "could run": the UI should not grey it out, because the CLI
-        // can answer with that key — it just is not the default-rule case.
+        // can answer with that key; it just is not the default-rule case.
         assert!(status.could_run());
     }
 
@@ -690,7 +742,7 @@ mod tests {
 
     #[test]
     fn unknown_leaves_the_ui_alone() {
-        // Unreadable auth file. Not "signed out" — we don't know. The UI
+        // Unreadable auth file. Not "signed out"; we don't know. The UI
         // reads this as runnable so the person is not greyed out mid-query.
         let status = CliStatus {
             installed: true,
@@ -718,6 +770,43 @@ mod tests {
     #[test]
     fn email_is_absent_when_the_token_is_junk() {
         assert_eq!(email_from_id_token("not a jwt"), None);
+    }
+
+    #[test]
+    fn exec_runs_outside_a_git_repo_and_leaves_no_history() {
+        let brain = CodexCliBrain {
+            binary_path: PathBuf::from("/usr/bin/false"),
+            model: "gpt-6-luna".to_string(),
+            system_prompt: None,
+        };
+        let args = brain.build_args("hi");
+        assert!(args.contains(&"--skip-git-repo-check".to_string()));
+        assert!(args.contains(&"--ephemeral".to_string()));
+        assert_eq!(args.last().map(String::as_str), Some("hi"));
+    }
+
+    #[test]
+    fn exec_lines_parse_to_messages_and_failures() {
+        assert_eq!(
+            parse_exec_line(
+                r#"{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"<TTS>Hi.</TTS>"}}"#
+            ),
+            ExecEvent::AgentMessage("<TTS>Hi.</TTS>".to_string())
+        );
+        assert_eq!(
+            parse_exec_line(r#"{"type":"turn.failed","error":{"message":"model not supported"}}"#),
+            ExecEvent::Failed("model not supported".to_string())
+        );
+        assert_eq!(
+            parse_exec_line(
+                r#"{"type":"item.completed","item":{"type":"reasoning","text":"thinking"}}"#
+            ),
+            ExecEvent::Other
+        );
+        assert_eq!(
+            parse_exec_line("Reading additional input from stdin..."),
+            ExecEvent::Other
+        );
     }
 
     #[test]

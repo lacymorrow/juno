@@ -15,12 +15,12 @@
 //!   choice, and Juno does not overrule it.
 //!   [`crate::settings::ProviderSettings::provider_chosen_by_user`] records
 //!   that, and every path a human can pick through sets it.
-//! - *no credentials* — somebody who pasted an Anthropic key wants that key
+//! - *no credentials*: somebody who pasted an Anthropic key wants that key
 //!   used. Free is not better than what they asked for.
-//! - *installed and signed in* — an installed-but-logged-out CLI cannot
+//! - *installed and signed in*: an installed-but-logged-out CLI cannot
 //!   answer, and switching to it would trade an honest "add a key" for a
 //!   confusing "run `claude login`" they never asked to see.
-//! - *fixed order* — ties go to the first CLI in the list. Today that is
+//! - *fixed order*: ties go to the first CLI in the list. Today that is
 //!   Claude first, Codex second. When one person has both signed in Juno
 //!   runs on Claude, because the Claude provider has further-along tool
 //!   integration and that is what their experience will depend on.
@@ -46,7 +46,7 @@ pub struct CliCandidate {
     pub provider_id: &'static str,
     /// The binary exists.
     pub installed: bool,
-    /// The CLI reports a usable login — proof enough for Juno to switch
+    /// The CLI reports a usable login, proof enough for Juno to switch
     /// somebody onto it who did not ask.
     pub signed_in: bool,
 }
