@@ -26,6 +26,7 @@ import {
   LinkCard,
   TaskSummaryCard,
   NowPlayingCard,
+  ImageCard,
 } from "@/components/ui/agent-cards";
 import { WhyBlock } from "@/components/ui/why-block";
 import {
@@ -446,6 +447,7 @@ const availableComponents = {
   TimerCard,
   LinkCard,
   TaskSummaryCard,
+  ImageCard,
   // Live components — bound to real player state, never fake
   NowPlayingCard,
   // Method rationale, collapsed by default (top-level <Why> is lifted out
