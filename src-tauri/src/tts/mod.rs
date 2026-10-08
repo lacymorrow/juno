@@ -1,3 +1,4 @@
+pub mod avspeech;
 pub mod elevenlabs;
 pub mod kokoro;
 pub mod rate;
@@ -238,6 +239,35 @@ fn audio_processes() -> std::sync::MutexGuard<'static, AudioProcesses> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The hold, readable without the lock. Speech played inside Juno (the Mac's
+/// voice through `avspeech`) has no process to `SIGSTOP`; its audio callback
+/// reads this instead, plays silence while it is set and resumes from the same
+/// sample when it clears. Written only under `JUNO_AUDIO`, next to
+/// `held_since`.
+static HELD_SILENT: AtomicBool = AtomicBool::new(false);
+
+fn sync_held(processes: &AudioProcesses) {
+    HELD_SILENT.store(processes.held_since.is_some(), Ordering::SeqCst);
+}
+
+/// True while a microphone is open and Juno must not be heard.
+pub(crate) fn is_held_silent() -> bool {
+    HELD_SILENT.load(Ordering::SeqCst)
+}
+
+/// In-process speech started: the same stale-hold check a spawned player
+/// gets in [`register_audio_pid`], so a leaked hold cannot silence it for good.
+pub(crate) fn release_stale_hold() {
+    let mut processes = audio_processes();
+    let stale = processes.release_if_stale(std::time::Instant::now());
+    sync_held(&processes);
+    if !stale.is_empty() {
+        warn!("[TTS] A capture hold outlived its session; letting Juno speak again");
+        #[cfg(unix)]
+        signal_players(&stale, libc::SIGCONT);
+    }
+}
+
 /// Send `signal` to each of Juno's players. Unix only; a no-op elsewhere.
 fn signal_players(pids: &[u32], signal: i32) {
     #[cfg(unix)]
@@ -265,6 +295,7 @@ pub(crate) fn register_audio_pid(pid: u32) {
     crate::turn_timing::mark(crate::turn_timing::Stage::FirstAudio);
     let mut processes = audio_processes();
     let stale = processes.release_if_stale(std::time::Instant::now());
+    sync_held(&processes);
     if !stale.is_empty() {
         warn!("[TTS] A capture hold outlived its session; letting Juno speak again");
         #[cfg(unix)]
@@ -286,6 +317,7 @@ pub(crate) fn unregister_audio_pid(pid: u32) {
 pub fn hold_for_capture() {
     let mut processes = audio_processes();
     let pids = processes.hold(std::time::Instant::now());
+    sync_held(&processes);
     if !pids.is_empty() {
         info!(
             "[TTS] Holding {} player(s) while the microphone is open",
@@ -301,6 +333,7 @@ pub fn hold_for_capture() {
 pub fn release_after_capture() {
     let mut processes = audio_processes();
     let pids = processes.release();
+    sync_held(&processes);
     if !pids.is_empty() {
         info!("[TTS] Resuming {} held player(s)", pids.len());
     }
@@ -699,8 +732,12 @@ pub fn stop_speech() {
     kill_audio_processes();
 }
 
-/// SIGTERM every audio process Juno spawned. Does not touch the queue.
+/// Stop everything Juno is playing: SIGTERM to every audio process it
+/// spawned, and the Mac's voice when it is speaking in-process. Every stop
+/// (Escape, `stop_coordinator`, a new turn, an audition) comes through here.
+/// Does not touch the queue.
 fn kill_audio_processes() {
+    avspeech::stop_all();
     let pids_to_kill: Vec<u32> = audio_processes().pids.clone();
 
     if pids_to_kill.is_empty() {
