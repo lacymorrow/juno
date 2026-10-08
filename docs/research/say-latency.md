@@ -43,3 +43,13 @@ Only the cheap part, which is not a latency fix: `say` now receives `-r` for the
 ## Recommendation
 
 Do (a) as its own PR, with the device routing and echo hold built first and a measured before and after on this table. The expected result is about 450 ms once at engine start (which can happen at launch, behind the same preload Kokoro gets in #678) and about 10 ms per sentence after that.
+
+## Built (feat/avspeech-tts)
+
+Option (a) is in `src-tauri/src/tts/avspeech.rs`. Two more measurements made while building it, with a throwaway Swift probe (rendering only, nothing played):
+
+- `writeUtterance:toBufferCallback:` returns at once and delivers its buffers on the main thread: mono Float32, 22,050 Hz, non-interleaved, ending with one zero-length buffer. A stop at `Immediate` also ends with the zero-length buffer, and the next write works.
+- `AVSpeechUtterance.rate` against `say -r`: the same 24-word sentence in Samantha lasts 6.32 s at both `say -r 175` and AV rate 0.5, and the other speeds match at 0.42 (0.75x), 0.54 (1.25x), 0.575 (1.5x), 0.60 (1.75x) and 0.64 (2.0x). The table and its interpolation are in `av_rate_for`.
+- With no System Voice ever chosen, AVFoundation's default voice and `say` with no `-v` render the same duration to the sample, so that case runs in-process too. A Siri System Voice cannot be used by another app and stays on `say`.
+
+Each sentence logs `[SpeechTiming] engine=avspeech first_audio_ms=...`, or `engine=say` when it fell back.
