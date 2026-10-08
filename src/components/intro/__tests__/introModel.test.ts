@@ -23,16 +23,19 @@ describe("uniformsFor", () => {
     expect(u.uInward).toEqual([0, -1]);
   });
 
-  it("draws the pill at the size the backend measured, so the smoke hugs the real shape", () => {
-    const u = uniformsFor(topCentre, viewport, 2);
-    expect(u.uHalf).toEqual([56, 16]);
-    expect(u.uRadius).toBe(16);
+  it("trusts only the centre of what the backend measured: the Pill reports its hit footprint, which is wider than the shape", () => {
+    const wide = { ...topCentre, pill_w: 88, pill_h: 76, pill_radius: 38 };
+    expect(uniformsFor(wide, viewport, 2)).toEqual(uniformsFor(topCentre, viewport, 2));
   });
 
   it("carries both tones at once, so the cloud reads over a dark desktop and a light one", () => {
     const u = uniformsFor(topCentre, viewport, 1);
     expect(u.uDark).toEqual([...LOOK.dark]);
     expect(u.uLight).toEqual([...LOOK.light]);
+    // Near black and near white, not two greys: each must show on its own
+    // against the other's background.
+    expect(Math.max(...LOOK.dark)).toBeLessThan(0.15);
+    expect(Math.min(...LOOK.light)).toBeGreaterThan(0.9);
     expect(u.uLightness).toBe(LOOK.lightness);
     expect(u.uRelief).toBe(LOOK.relief);
   });
@@ -72,5 +75,10 @@ describe("the shader", () => {
 
   it("draws no rim around the pill: the smoke is the whole picture", () => {
     expect(FRAG).not.toMatch(/rim|ring|halo/i);
+  });
+
+  it("leaves no hole under the bar: nothing in the shader knows the bar's shape", () => {
+    expect(FRAG).not.toMatch(/sdRound|inside|hollow/);
+    expect(FRAG).not.toMatch(/uHalf|uRadius/);
   });
 });
