@@ -112,7 +112,9 @@ pub fn set_regions(regions: Option<Vec<HitRect>>) {
     ACTIVE.store(active, Ordering::SeqCst);
 }
 
-fn current_regions() -> Option<Vec<HitRect>> {
+/// The rectangles the page is drawing right now, if the look is a steady one.
+/// Also how the intro reveal (`intro.rs`) learns where the pill actually is.
+pub fn current_regions() -> Option<Vec<HitRect>> {
     match REGIONS.lock() {
         Ok(guard) => guard.clone(),
         Err(poisoned) => poisoned.into_inner().clone(),

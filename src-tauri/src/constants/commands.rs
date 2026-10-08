@@ -425,6 +425,14 @@ pub mod onboarding {
     pub const RECORD_ONBOARDING_EVENT: &str = "record_onboarding_event";
 }
 
+/// How Juno first appears
+pub mod intro {
+    /// The intro window is loaded and about to draw: hand it the plan.
+    pub const READY: &str = "intro_ready";
+    /// Run the reveal again on the bar that is on screen (developer control).
+    pub const REPLAY: &str = "replay_intro";
+}
+
 /// Scheduled automations
 pub mod scheduler {
     pub const LIST_SCHEDULED_TASKS: &str = "list_scheduled_tasks";

@@ -174,6 +174,13 @@ const DevToolsPanel: React.FC = () => {
     await invokeCommand(COMMANDS.UTILS_WAIT, { duration_sec }, "wait");
   };
 
+  // The smoke Juno first appears out of, again, on the bar that is on screen.
+  // The only way to see it without redoing setup; the numbers it draws from
+  // are in src/components/intro/introModel.ts.
+  const handleReplayIntro = async () => {
+    await invokeCommand(COMMANDS.INTRO_REPLAY, undefined, "replayIntro");
+  };
+
   return (
     <ScrollArea className="h-full w-full rounded-md border p-4">
       <div className="space-y-6">
@@ -289,6 +296,15 @@ const DevToolsPanel: React.FC = () => {
                 onChange={(e) => setWaitDuration(e.target.value)}
               />
               <Button onClick={handleWait}>Wait</Button>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Button variant="outline" onClick={handleReplayIntro}>
+                Replay intro
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                The smoke the bar first appears out of
+              </span>
             </div>
           </div>
         </div>

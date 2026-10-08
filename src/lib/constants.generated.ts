@@ -405,6 +405,7 @@ export const UI = {
   WINDOW_LABELS_VOICE_BAR: 'voice-bar',
   WINDOW_LABELS_DYNAMIC_BAR: 'dynamic-bar',
   WINDOW_LABELS_SNAP_WELLS_OVERLAY: 'snap-wells-overlay',
+  WINDOW_LABELS_INTRO: 'intro',
   AGENT_SESSION_COLORS_SLOT_0: '#3B82F6',
   AGENT_SESSION_COLORS_SLOT_1: '#10B981',
   AGENT_SESSION_COLORS_SLOT_2: '#F59E0B',
@@ -777,6 +778,8 @@ export const COMMANDS = {
   ONBOARDING_TEST_GLOBAL_SHORTCUTS_WORKING: 'test_global_shortcuts_working',
   ONBOARDING_GET_LAST_ONBOARDING_PHASE: 'get_last_onboarding_phase',
   ONBOARDING_RECORD_ONBOARDING_EVENT: 'record_onboarding_event',
+  INTRO_READY: 'intro_ready',
+  INTRO_REPLAY: 'replay_intro',
   SCHEDULER_LIST_SCHEDULED_TASKS: 'list_scheduled_tasks',
   SCHEDULER_CREATE_SCHEDULED_TASK: 'create_scheduled_task',
   SCHEDULER_UPDATE_SCHEDULED_TASK: 'update_scheduled_task',
@@ -1534,6 +1537,7 @@ export const WINDOW_LABELS = {
   VOICE_BAR: 'voice-bar',
   DYNAMIC_BAR: 'dynamic-bar',
   SNAP_WELLS_OVERLAY: 'snap-wells-overlay',
+  INTRO: 'intro',
 } as const;
 
 // Frontend-specific constants (not duplicated from Rust)
