@@ -1,18 +1,19 @@
 //! # Intro reveal
 //!
-//! How Juno first appears.
+//! How Juno appears.
 //!
 //! Until now the floating bar reached the screen with a plain `show()`: a black
 //! capsule with a faint hairline, no shadow, dropped onto whatever was there.
-//! Over a dark window that is black on black, and the person's first contact
-//! with Juno was a voice from nowhere saying hello.
+//! Over a dark window that is black on black, and the person's contact with
+//! Juno was a voice from nowhere saying hello.
 //!
-//! Now, the one time setup ends, a transparent click-through window opens
-//! around the spot where the bar is about to land. Smoke gathers there, the
-//! bar is shown underneath it while it is dense, the smoke clears, and the
+//! Now, every time the bar comes onto the screen at launch (and when setup
+//! ends, which is the first such time), a transparent click-through window
+//! opens around the spot where the bar is about to land. Smoke gathers there,
+//! the bar is shown underneath it while it is dense, the smoke clears, and the
 //! greeting (which already waits for the bar to be visible) lands on a pill
-//! the eye is already on. The window is built for the occasion and closed
-//! when the sequence ends, so it costs nothing on any later launch.
+//! the eye is already on. The window is built for the occasion and destroyed
+//! when the sequence ends, so it costs nothing for the rest of the session.
 //!
 //! This module owns the clock. The frontend draws the smoke and nothing else:
 //! it asks for the plan, draws for `duration_ms`, and the bar appears at
@@ -31,6 +32,7 @@
 //! and the `LOOK` block in `src/components/intro/introModel.ts` (density,
 //! size, colour). See `docs/plans/intro-reveal.md`.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -68,6 +70,12 @@ const DEAD_ZONE: f64 = 0.15;
 /// How long to wait for the frontend to say it is drawing before giving up
 /// and showing the bar the plain way.
 const READY_WAIT: Duration = Duration::from_millis(1500);
+
+/// How long to wait, at most, for a steady look to report what it is drawing
+/// before measuring. At launch the page asks to be shown the moment its frame
+/// is set, which can be a beat before it reports its drawn rectangles.
+const REGIONS_WAIT: Duration = Duration::from_millis(400);
+const REGIONS_POLL: Duration = Duration::from_millis(25);
 
 /// What the bar's shape is taken to be when the look has not reported what it
 /// is drawing: the resting Pill, 56 by 16, centred in its window.
@@ -220,14 +228,37 @@ struct Run {
 
 static RUN: Mutex<Option<Run>> = Mutex::new(None);
 
-/// Put the bar on screen the way she first appears or, if the reveal cannot
-/// be arranged, the plain way. Either way the bar is on screen afterwards;
+/// Reveals run one at a time. A request while one is in flight is dropped:
+/// the running reveal is already bringing the bar on.
+static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Put the bar on screen the way she appears or, if the reveal cannot be
+/// arranged, the plain way. Either way the bar is on screen afterwards;
 /// nothing here is allowed to leave the person without one.
+///
+/// A bar that is already visible is left alone, and so is a reveal already in
+/// flight. The startup routes that all end in "show the bar" (the page asking
+/// once its frame is set, the macOS fallback timer, setup closing) therefore
+/// produce one reveal between them, and showing a visible bar stays the no-op
+/// it always was.
 pub fn show_bar_with_reveal(app: &AppHandle) {
-    if let Err(reason) = begin(app) {
-        debug!("[Intro] No reveal ({}); showing the bar plainly", reason);
-        show_bar_plainly(app);
+    let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) else {
+        return;
+    };
+    if bar.is_visible().unwrap_or(false) {
+        return;
     }
+    if IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(reason) = reveal(&app).await {
+            debug!("[Intro] No reveal ({}); showing the bar plainly", reason);
+            show_bar_plainly(&app);
+        }
+        IN_FLIGHT.store(false, Ordering::SeqCst);
+    });
 }
 
 fn show_bar_plainly(app: &AppHandle) {
@@ -238,18 +269,27 @@ fn show_bar_plainly(app: &AppHandle) {
     }
 }
 
-/// Build the intro window around the bar's spot and start the clock.
+/// Build the intro window around the bar's spot, run the clock, and put the
+/// bar up on time. Returns only once the sequence is over.
 ///
 /// The window is built hidden. The frontend loads, asks for the plan through
 /// [`intro_ready`], and that is the moment the window is shown and the clock
 /// starts, so the first frame drawn is the first frame seen. If the frontend
 /// never asks, the bar is shown at [`READY_WAIT`] and the window goes away.
-fn begin(app: &AppHandle) -> Result<(), String> {
+async fn reveal(app: &AppHandle) -> Result<(), String> {
     let bar = app
         .get_webview_window(window_labels::FLOATING_BAR)
         .ok_or("no floating bar")?;
     if app.get_webview_window(window_labels::INTRO).is_some() {
-        return Err("a reveal is already running".into());
+        return Err("the last intro window is still going away".into());
+    }
+
+    // A steady look reports its drawn rectangles a beat after it asks to be
+    // shown. Give it that beat, but no more: a look that never reports (the
+    // Island, the Orb) gets the fallback pill and should not wait for it.
+    let deadline = tokio::time::Instant::now() + REGIONS_WAIT;
+    while bar_hit_test::current_regions().is_none() && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(REGIONS_POLL).await;
     }
 
     // Everything in global desktop points (`platform::desktop_points`): the
@@ -285,7 +325,8 @@ fn begin(app: &AppHandle) -> Result<(), String> {
     let (rect, plan) = place(pill, screen);
 
     // Built here rather than declared in tauri.conf.json, because a declared
-    // window is created at every launch and this one is wanted once.
+    // window stays alive for the whole session and this one is wanted for
+    // under three seconds of it.
     let window =
         WebviewWindowBuilder::new(app, window_labels::INTRO, WebviewUrl::App("/intro".into()))
             .title("Juno")
@@ -318,33 +359,32 @@ fn begin(app: &AppHandle) -> Result<(), String> {
         });
     }
 
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let drawing = tokio::time::timeout(READY_WAIT, ready.notified())
-            .await
-            .is_ok();
-        if drawing {
-            info!("[Intro] Revealing the bar");
-            if let Err(e) = window.show() {
-                warn!("[Intro] Could not show the intro window: {}", e);
-            }
-            tokio::time::sleep(Duration::from_millis(BAR_AT_MS)).await;
-        } else {
-            debug!("[Intro] The intro window never reported in; showing the bar plainly");
+    let drawing = tokio::time::timeout(READY_WAIT, ready.notified())
+        .await
+        .is_ok();
+    if drawing {
+        info!("[Intro] Revealing the bar");
+        if let Err(e) = window.show() {
+            warn!("[Intro] Could not show the intro window: {}", e);
         }
+        tokio::time::sleep(Duration::from_millis(BAR_AT_MS)).await;
+    } else {
+        debug!("[Intro] The intro window never reported in; showing the bar plainly");
+    }
 
-        show_bar_plainly(&app);
+    show_bar_plainly(app);
 
-        if drawing {
-            tokio::time::sleep(Duration::from_millis(DURATION_MS.saturating_sub(BAR_AT_MS))).await;
-        }
-        if let Err(e) = window.close() {
-            warn!("[Intro] Could not close the intro window: {}", e);
-        }
-        if let Ok(mut run) = RUN.lock() {
-            *run = None;
-        }
-    });
+    if drawing {
+        tokio::time::sleep(Duration::from_millis(DURATION_MS.saturating_sub(BAR_AT_MS))).await;
+    }
+    // Destroyed, not closed: the next reveal checks for this label, and a
+    // close that is still being requested would read as one still running.
+    if let Err(e) = window.destroy() {
+        warn!("[Intro] Could not destroy the intro window: {}", e);
+    }
+    if let Ok(mut run) = RUN.lock() {
+        *run = None;
+    }
 
     Ok(())
 }
@@ -360,7 +400,7 @@ pub async fn intro_ready() -> Result<IntroPlan, String> {
 }
 
 /// Run the reveal again on the bar that is already on screen. A developer
-/// control: the only way to watch the sequence without redoing setup.
+/// control: the only way to watch the sequence without relaunching.
 #[tauri::command]
 pub async fn replay_intro(app: AppHandle) -> Result<(), String> {
     if let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) {

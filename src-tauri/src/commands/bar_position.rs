@@ -143,12 +143,14 @@ pub async fn show_bar_when_ready(app_handle: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let window = app_handle
+    app_handle
         .get_webview_window(crate::constants::ui::window_labels::FLOATING_BAR)
         .ok_or("floating-bar window not found")?;
-    window
-        .show()
-        .map_err(|e| format!("Failed to show the floating bar: {}", e))
+    // Revealed, not shown: the bar arrives out of smoke every launch (see
+    // `intro.rs`). A visible bar is left alone, so the repeat calls stay
+    // harmless.
+    crate::intro::show_bar_with_reveal(&app_handle);
+    Ok(())
 }
 
 /// Move + resize the floating bar atomically so a frame change cannot show an

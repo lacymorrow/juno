@@ -1,6 +1,6 @@
 # Intro reveal: how Juno first appears (spec)
 
-**Status:** Built on `feat/intro-smoke-reveal`. Rust tests for the geometry, vitest for the uniform math, CI for fmt, clippy and cargo test.
+**Status:** Shipped in #737 (setup end only). Every launch since the follow-up PR. Rust tests for the geometry, vitest for the uniform math, CI for fmt, clippy and cargo test.
 **DRI:** Lacy for the hardware pass (first run on a real desk, dark window underneath, each well). Frontend Engineer for the look.
 **Prototype:** https://claude.ai/artifact/ECo3zSUEx6MkLFkae2LmbT (the smoke on a mock desktop; three backgrounds, Reduce Motion, well bounds).
 
@@ -10,7 +10,7 @@ Lacy, 2026-10-07: the pill just appears on the screen, black on black over dark 
 
 ## The ten seconds
 
-Setup ends. Where the bar is about to be, smoke gathers out of nothing, white over a dark desk and charcoal over a light one. The pill condenses inside it, its rim catching light. The smoke thins and breaks up. "Hi, I'm Juno. To talk to me, hold the globe key." The eye is already on her.
+Juno launches (or setup ends). Where the bar is about to be, smoke gathers out of nothing, white over a dark desk and charcoal over a light one. The pill condenses inside it, its rim catching light. The smoke thins and breaks up. "Hi, I'm Juno. To talk to me, hold the globe key." The eye is already on her.
 
 ## What was removed
 
@@ -24,9 +24,11 @@ Setup ends. Where the bar is about to be, smoke gathers out of nothing, white ov
 ## How it works
 
 ```
-onboarding closes
-  └─ window_management::restore_after_onboarding
-       └─ intro::show_bar_with_reveal
+the bar asks to be shown (show_bar_when_ready), or the macOS fallback
+timer fires, or onboarding closes (restore_after_onboarding)
+  └─ intro::show_bar_with_reveal
+       ├─ bar already visible, or a reveal in flight: do nothing
+       ├─ wait <= 400 ms for a steady look to report its drawn rectangles
             ├─ measure: bar window origin (points), the look's drawn rectangles
             │  (bar_hit_test::current_regions, the pill at rest), the display's
             │  work area
@@ -66,7 +68,7 @@ Two blocks, each a handful of numbers with a comment per line.
 | `src-tauri/src/intro.rs` | `DURATION_MS` (2600), `BAR_AT_MS` (1000), `WINDOW_WIDTH` / `WINDOW_HEIGHT` (560x360), `PILL_INSET_X` / `PILL_INSET_Y` (70 / 40), `DEAD_ZONE` (0.15), `READY_WAIT` (1.5 s) |
 | `src/components/intro/introModel.ts` `LOOK` | `reach` (0.55, how far the cloud spreads), `density` (0.65), `churn` (1, speed), `rim` (1, the lit edge; 0 off), `colorOnDark`, `colorOnLight` |
 
-Dev Tools has a **Replay intro** button (`replay_intro`) that hides the bar and runs the reveal on it again, so a change can be looked at without redoing setup.
+Dev Tools has a **Replay intro** button (`replay_intro`) that hides the bar and runs the reveal on it again, so a change can be looked at without relaunching.
 
 ## Reduce Motion
 
@@ -87,6 +89,6 @@ No smoke. The rim alone traces the pill after it appears, over the same clock. T
 
 ## Not done, on purpose
 
-- No setting to turn it off. It runs once per setup.
+- No setting to turn it off. It runs on every launch, and the Reduce Motion fallback is the quiet version.
 - No sound of its own. The greeting is the sound.
 - No per-appearance variants. Island, Orb and the rest get the same reveal around whatever they draw at rest.
