@@ -1277,6 +1277,15 @@ impl ClaudeCliBrain {
                                         // multi-byte UTF-8.
                                         let delta: String =
                                             text.chars().skip(previous_char_count).collect();
+                                        if previous_char_count == 0 {
+                                            Self::separate_text_block(
+                                                app_handle,
+                                                msg_id,
+                                                &mut tts_stream,
+                                                &mut accumulated_text,
+                                                &mut spoken_blocks,
+                                            );
+                                        }
                                         previous_char_count = char_count;
                                         Self::emit_display_text(
                                             app_handle,
@@ -1470,8 +1479,18 @@ impl ClaudeCliBrain {
                             },
                         );
                     }
-                    // Plain text needs no bookkeeping: its deltas go straight
-                    // out, and nothing has to be closed when it stops.
+                    // A new text block is a new paragraph. Between two
+                    // blocks there is usually a tool call, and the model
+                    // starts the next one with no leading space, so without
+                    // this "window." and "That went" render as "window.That".
+                    "text" => Self::separate_text_block(
+                        app_handle,
+                        msg_id,
+                        tts_stream,
+                        accumulated_text,
+                        spoken_blocks,
+                    ),
+                    // Other blocks need no bookkeeping.
                     _ => {}
                 }
             }
@@ -1608,6 +1627,29 @@ impl ClaudeCliBrain {
             Self::emit_chunk_with_tts(handle, display_delta, msg_id, &tts_blocks);
         }
         spoken_blocks.extend(tts_blocks);
+    }
+
+    /// Start a new text block on its own paragraph. A no-op at the start of
+    /// the answer and when the text already ends in whitespace, so it never
+    /// stacks blank lines. Goes through [`Self::emit_display_text`] so the
+    /// break stays in sequence with the `<TTS>` parser.
+    pub(super) fn separate_text_block(
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        accumulated_text: &mut String,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        if let Some(separator) = text_block_separator(accumulated_text) {
+            Self::emit_display_text(
+                app_handle,
+                msg_id,
+                separator,
+                tts_stream,
+                accumulated_text,
+                spoken_blocks,
+            );
+        }
     }
 
     /// End-of-stream companion to [`Self::emit_display_text`]: flush what the
@@ -2133,6 +2175,15 @@ fn describe_computer_action(input: &Value) -> Option<String> {
 
 /// Extract text content from a Claude CLI assistant message JSON object.
 /// Handles both `content` array format and direct `content` string.
+/// What goes between the text so far and a new text block: a paragraph
+/// break, unless there is no text yet or it already ends in whitespace.
+pub(super) fn text_block_separator(text_so_far: &str) -> Option<&'static str> {
+    match text_so_far.chars().last() {
+        Some(last) if !last.is_whitespace() => Some("\n\n"),
+        _ => None,
+    }
+}
+
 pub(super) fn extract_text_from_message(message: &Value) -> String {
     // Try content array format: {"content": [{"type": "text", "text": "..."}]}
     if let Some(content_array) = message.get("content").and_then(|v| v.as_array()) {
@@ -2140,6 +2191,9 @@ pub(super) fn extract_text_from_message(message: &Value) -> String {
         for block in content_array {
             if block.get("type").and_then(|v| v.as_str()) == Some("text") {
                 if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
+                    if let Some(separator) = text_block_separator(&text) {
+                        text.push_str(separator);
+                    }
                     text.push_str(t);
                 }
             }
@@ -2250,6 +2304,74 @@ mod tests {
             ]
         });
         assert_eq!(extract_text_from_message(&message), "Hello world!");
+    }
+
+    #[test]
+    fn text_blocks_in_one_message_do_not_run_together() {
+        let message = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "I'll redo it in the Calculator window."},
+                {"type": "tool_use", "name": "computer", "input": {}},
+                {"type": "text", "text": "That went into Zed instead."}
+            ]
+        });
+        assert_eq!(
+            extract_text_from_message(&message),
+            "I'll redo it in the Calculator window.\n\nThat went into Zed instead."
+        );
+    }
+
+    #[test]
+    fn separator_only_between_text_that_needs_one() {
+        assert_eq!(text_block_separator(""), None);
+        assert_eq!(text_block_separator("Done. "), None);
+        assert_eq!(text_block_separator("Done.\n"), None);
+        assert_eq!(text_block_separator("Done."), Some("\n\n"));
+        assert_eq!(text_block_separator("世界"), Some("\n\n"));
+    }
+
+    /// The live path: text blocks separated by a tool call, streamed as
+    /// deltas, reach the answer as two paragraphs. This is the
+    /// "window.That went into Zed" bug from the 2026-10-08 Calculator run.
+    #[test]
+    fn streamed_text_blocks_across_a_tool_call_are_separate_paragraphs() {
+        let mut blocks = std::collections::HashMap::new();
+        let mut pending_tools = std::collections::HashMap::new();
+        let mut streamed_messages = std::collections::HashSet::new();
+        let mut partial_message_id = None;
+        let mut saw_text_delta = false;
+        let mut tts_stream = crate::agent::tts_tags::TtsTagStream::new();
+        let mut accumulated = String::new();
+        let mut spoken = Vec::new();
+
+        let events = [
+            serde_json::json!({"type": "message_start", "message": {"id": "m1"}}),
+            serde_json::json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Redoing it in the Calculator window."}}),
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+            serde_json::json!({"type": "message_start", "message": {"id": "m2"}}),
+            serde_json::json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "That went into Zed instead."}}),
+        ];
+        for event in &events {
+            ClaudeCliBrain::handle_stream_event(
+                event,
+                &None,
+                "msg",
+                &mut blocks,
+                &mut pending_tools,
+                &mut streamed_messages,
+                &mut partial_message_id,
+                &mut saw_text_delta,
+                &mut tts_stream,
+                &mut accumulated,
+                &mut spoken,
+            );
+        }
+        assert_eq!(
+            accumulated,
+            "Redoing it in the Calculator window.\n\nThat went into Zed instead."
+        );
     }
 
     #[test]
