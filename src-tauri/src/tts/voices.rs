@@ -231,7 +231,7 @@ pub struct VoiceInventory {
     pub kokoro_problem: Option<String>,
     /// What the Mac's own voice is, as far as its settings say.
     pub system_voice: SystemVoice,
-    /// A readable name for it ("Simone (Siri)"), when the settings give one.
+    /// The `say` name of the System Voice when Juno can speak it ("Ava (Premium)").
     pub system_voice_name: Option<String>,
 }
 
