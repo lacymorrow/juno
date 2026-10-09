@@ -1414,11 +1414,8 @@ mod tests {
     /// must not be touched.
     #[test]
     fn ghostty_settings_press_closes_nothing() {
-        let terminal = win("201", "~/repo/juno");
-        let plan = close_plan(
-            &app_target("ghostty"),
-            &opened(true, std::slice::from_ref(&terminal), &[terminal]),
-        );
+        let windows = [win("201", "~/repo/juno")];
+        let plan = close_plan(&app_target("ghostty"), &opened(true, &windows, &windows));
         assert_eq!(plan, CloseAction::Nothing);
     }
 
