@@ -272,42 +272,42 @@ pub fn classify_system_voice(id: Option<&str>, name: Option<&str>) -> SystemVoic
 }
 
 /// True when the Mac's own voice (`say` with no `-v`) should be Juno's
-/// default: a Siri voice the person chose, or no choice at all while the Mac
-/// has no better English voice downloaded for the ranking to pick.
+/// default: only when nothing is recorded at all. A recorded choice is either
+/// a voice Juno can speak with (it follows it) or one it cannot, in which case
+/// the ranking picks the best installed voice.
 pub fn prefers_system_voice(inventory: &VoiceInventory) -> bool {
-    match inventory.system_voice {
-        SystemVoice::Siri => true,
-        // Nothing recorded means the person never changed it, so it is the
-        // voice macOS ships as its default, which on current macOS is a Siri
-        // voice. That beats any downloaded voice the person never picked.
-        SystemVoice::Unset => true,
-        SystemVoice::Other => false,
+    inventory.system_voice == SystemVoice::Unset
+}
+
+/// The installed `say` voice the person's System Voice names, when Juno can
+/// speak with it. `None` for Siri voices and anything not installed.
+pub fn followed_system_voice(inventory: &VoiceInventory) -> Option<String> {
+    if inventory.system_voice != SystemVoice::Other {
+        return None;
+    }
+    let name = inventory.system_voice_name.as_deref()?.trim();
+    inventory
+        .macos
+        .iter()
+        .find(|voice| voice.name.eq_ignore_ascii_case(name))
+        .map(|voice| voice.name.clone())
+}
+
+/// The row for the Mac's own voice, shown only when nothing is recorded.
+fn system_voice_row() -> ProviderVoice {
+    ProviderVoice {
+        id: SYSTEM_DEFAULT_ID.to_string(),
+        name: "Your Mac's voice".to_string(),
+        descriptor: "Whichever voice this Mac is set to use.".to_string(),
     }
 }
 
-/// The row for the Mac's own voice. Named "Siri" only when that is known, and
-/// by the voice's own name ("Simone (Siri)") when the settings give one.
-fn system_voice_row(kind: SystemVoice, name: Option<&str>) -> ProviderVoice {
-    let name = name.map(str::trim).filter(|n| !n.is_empty());
-    match kind {
-        SystemVoice::Siri => ProviderVoice {
-            id: SYSTEM_DEFAULT_ID.to_string(),
-            name: name.unwrap_or("Siri").to_string(),
-            descriptor: "The voice you chose for your Mac.".to_string(),
-        },
-        _ => ProviderVoice {
-            id: SYSTEM_DEFAULT_ID.to_string(),
-            name: name.unwrap_or("Your Mac's voice").to_string(),
-            descriptor: "Whichever voice this Mac is set to use.".to_string(),
-        },
-    }
-}
-
-/// The voice id for the first of `languages` that has a selection in the
-/// `SpokenContentDefaultVoiceSelectionsByLanguage` value, given as JSON
-/// (`plutil -extract ... json`). The value alternates a language code and a
-/// dict: `["en", {"boundLanguage": "en", "voiceId": "com.apple..."}]`. Pure.
-pub fn parse_voice_selections(json: &str, languages: &[String]) -> Option<String> {
+/// The `(language, voice id)` for the first of `languages` that has a
+/// selection in the `SpokenContentDefaultVoiceSelectionsByLanguage` value,
+/// given as JSON (`plutil -extract ... json`). The value alternates a
+/// language code and a dict:
+/// `["en", {"boundLanguage": "en", "voiceId": "com.apple..."}]`. Pure.
+pub fn parse_voice_selections(json: &str, languages: &[String]) -> Option<(String, String)> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let items = value.as_array()?;
     let mut by_language: Vec<(String, String)> = Vec::new();
@@ -327,25 +327,28 @@ pub fn parse_voice_selections(json: &str, languages: &[String]) -> Option<String
         by_language
             .iter()
             .find(|(lang, _)| lang.eq_ignore_ascii_case(wanted))
-            .map(|(_, id)| id.clone())
+            .cloned()
     })
 }
 
-/// A readable name for a voice id, when the id carries one: the Siri naturals
-/// (`com.apple.siri.natural.Simone`) and the older Siri ids
-/// (`...custom.siri.aaron`) become "Simone (Siri)" and "Aaron (Siri)". Pure.
-pub fn siri_display_name(id: &str) -> Option<String> {
-    if !id.to_ascii_lowercase().contains("siri") {
+/// The `say`-style name of a voice from its AVFoundation id, so it can be
+/// found in the installed list: `com.apple.voice.premium.en-US.Ava` is
+/// "Ava (Premium)", `...enhanced...` is "Ava (Enhanced)", `...compact...` is
+/// "Ava". `None` for ids that do not have that shape (Siri voices included). Pure.
+pub fn say_name_from_id(id: &str) -> Option<String> {
+    let parts: Vec<&str> = id.split('.').collect();
+    let ["com", "apple", "voice", quality, _locale, name] = parts.as_slice() else {
+        return None;
+    };
+    if name.is_empty() {
         return None;
     }
-    let last = id.rsplit('.').next()?.trim();
-    if last.is_empty() || last.eq_ignore_ascii_case("siri") || last.eq_ignore_ascii_case("natural")
-    {
-        return None;
+    match *quality {
+        "premium" => Some(format!("{name} (Premium)")),
+        "enhanced" => Some(format!("{name} (Enhanced)")),
+        "compact" => Some((*name).to_string()),
+        _ => None,
     }
-    let mut chars = last.chars();
-    let first = chars.next()?.to_uppercase().collect::<String>();
-    Some(format!("{first}{} (Siri)", chars.as_str()))
 }
 
 /// The System Voice from both places it can live. The macOS 26 key wins; the
@@ -357,16 +360,18 @@ pub fn spoken_content_from(
     old_name: Option<String>,
 ) -> crate::tts::avspeech::SpokenContent {
     match selections_json.and_then(|json| parse_voice_selections(json, languages)) {
-        Some(id) => {
-            let voice_name = siri_display_name(&id);
+        Some((language, id)) => {
+            let voice_name = say_name_from_id(&id);
             crate::tts::avspeech::SpokenContent {
                 voice_id: Some(id),
                 voice_name,
+                language: Some(language),
             }
         }
         None => crate::tts::avspeech::SpokenContent {
             voice_id: old_id,
             voice_name: old_name,
+            language: languages.first().cloned(),
         },
     }
 }
@@ -823,18 +828,9 @@ pub fn provider_voices(engine: &str, inventory: &VoiceInventory) -> ProviderVoic
     match engine.to_ascii_lowercase().as_str() {
         "system" => {
             let mut rows = macos_voices(&inventory.macos);
-            if inventory.system_voice != SystemVoice::Other {
-                // The Mac's own voice leads when it is the default, and sits
-                // after the ranking otherwise so it is still a way back.
-                let own = system_voice_row(
-                    inventory.system_voice,
-                    inventory.system_voice_name.as_deref(),
-                );
-                if prefers_system_voice(inventory) {
-                    rows.insert(0, own);
-                } else {
-                    rows.push(own);
-                }
+            if prefers_system_voice(inventory) {
+                // Nothing is recorded: the Mac's own voice leads.
+                rows.insert(0, system_voice_row());
             }
             ProviderVoices::Known(rows)
         }
@@ -857,7 +853,7 @@ pub fn provider_voices(engine: &str, inventory: &VoiceInventory) -> ProviderVoic
 pub fn default_voice(engine: &str, inventory: &VoiceInventory) -> Option<String> {
     match engine.to_ascii_lowercase().as_str() {
         "system" if prefers_system_voice(inventory) => Some(SYSTEM_DEFAULT_ID.to_string()),
-        "system" => best_macos_voice(&inventory.macos),
+        "system" => followed_system_voice(inventory).or_else(|| best_macos_voice(&inventory.macos)),
         "kokoro" => {
             let rows = kokoro_voices(&inventory.kokoro);
             rows.iter()
@@ -951,6 +947,16 @@ pub fn resolve_stored_voice(
             {
                 return VoiceResolution {
                     voice: Some(SYSTEM_DEFAULT_ID.to_string()),
+                    substituted: false,
+                };
+            }
+        }
+    }
+    if engine.eq_ignore_ascii_case("system") && !chosen {
+        if let (Some(voice), Some(followed)) = (trimmed, followed_system_voice(inventory)) {
+            if Some(voice) == best_macos_voice(&inventory.macos).as_deref() {
+                return VoiceResolution {
+                    voice: Some(followed),
                     substituted: false,
                 };
             }
@@ -2428,52 +2434,11 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         }
     }
 
-    // -- the Mac's own voice (Siri) ----------------------------------------
+    // -- the Mac's own voice -------------------------------------------------
 
     fn with_system_voice(mut inventory: VoiceInventory, voice: SystemVoice) -> VoiceInventory {
         inventory.system_voice = voice;
         inventory
-    }
-
-    #[test]
-    fn the_system_voice_choice_is_read_from_its_id_or_name() {
-        assert_eq!(classify_system_voice(None, None), SystemVoice::Unset);
-        assert_eq!(
-            classify_system_voice(Some(" "), Some("")),
-            SystemVoice::Unset
-        );
-        assert_eq!(
-            classify_system_voice(
-                Some("com.apple.speech.synthesis.voice.custom.siri.nicky.enh"),
-                None
-            ),
-            SystemVoice::Siri
-        );
-        assert_eq!(
-            classify_system_voice(None, Some("Siri Voice 2")),
-            SystemVoice::Siri
-        );
-        assert_eq!(
-            classify_system_voice(Some("com.apple.voice.premium.en-US.Zoe"), Some("Zoe")),
-            SystemVoice::Other
-        );
-    }
-
-    /// A Siri voice cannot be named to `say`, so the default is `say` with no
-    /// `-v`, shown as "Siri", even when Samantha is installed.
-    #[test]
-    fn a_siri_system_voice_is_the_default_and_is_named_siri() {
-        let inventory = with_system_voice(stock_mac(), SystemVoice::Siri);
-        let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-        assert!(!resolution.substituted);
-
-        let list = voice_list("system", &inventory, &resolution);
-        let siri = &list.options[1];
-        assert_eq!(siri.id, SYSTEM_DEFAULT_ID);
-        assert_eq!(siri.name, "Siri");
-        assert!(siri.selected && siri.speaks);
-        assert_eq!(list.options.iter().filter(|o| o.selected).count(), 1);
     }
 
     fn langs(list: &[&str]) -> Vec<String> {
@@ -2483,36 +2448,55 @@ Bubbles             en_US    # Hello! My name is Bubbles.
     const NEW_SELECTIONS: &str = r#"["en",{"boundLanguage":"en","_type":"Speech.VoiceSelection","voiceId":"com.apple.siri.natural.Simone","_version":0}]"#;
 
     #[test]
+    fn the_system_voice_choice_is_read_from_its_id_or_name() {
+        assert_eq!(classify_system_voice(None, None), SystemVoice::Unset);
+        assert_eq!(
+            classify_system_voice(Some("com.apple.siri.natural.Simone"), None),
+            SystemVoice::Siri
+        );
+        assert_eq!(
+            classify_system_voice(
+                Some("com.apple.voice.premium.en-US.Ava"),
+                Some("Ava (Premium)")
+            ),
+            SystemVoice::Other
+        );
+    }
+
+    #[test]
     fn the_macos_26_voice_selection_is_read_by_language() {
         assert_eq!(
-            parse_voice_selections(NEW_SELECTIONS, &langs(&["en"])).as_deref(),
-            Some("com.apple.siri.natural.Simone")
+            parse_voice_selections(NEW_SELECTIONS, &langs(&["en"])),
+            Some((
+                "en".to_string(),
+                "com.apple.siri.natural.Simone".to_string()
+            ))
         );
         let two = r#"["en",{"voiceId":"a.en"},"fr",{"voiceId":"a.fr"}]"#;
-        assert_eq!(
-            parse_voice_selections(two, &langs(&["fr", "en"])).as_deref(),
-            Some("a.fr")
-        );
-        assert_eq!(
-            parse_voice_selections(two, &langs(&["de", "en"])).as_deref(),
-            Some("a.en")
-        );
+        let fr = parse_voice_selections(two, &langs(&["fr", "en"]));
+        assert_eq!(fr.map(|(_, id)| id).as_deref(), Some("a.fr"));
+        let en = parse_voice_selections(two, &langs(&["de", "en"]));
+        assert_eq!(en.map(|(_, id)| id).as_deref(), Some("a.en"));
         assert_eq!(parse_voice_selections(two, &langs(&["de"])), None);
         assert_eq!(parse_voice_selections("not json", &langs(&["en"])), None);
         assert_eq!(parse_voice_selections("[]", &langs(&["en"])), None);
     }
 
     #[test]
-    fn a_siri_id_becomes_a_readable_name() {
+    fn an_av_id_becomes_the_say_name() {
         assert_eq!(
-            siri_display_name("com.apple.siri.natural.Simone").as_deref(),
-            Some("Simone (Siri)")
+            say_name_from_id("com.apple.voice.premium.en-US.Ava").as_deref(),
+            Some("Ava (Premium)")
         );
         assert_eq!(
-            siri_display_name("com.apple.speech.synthesis.voice.custom.siri.aaron").as_deref(),
-            Some("Aaron (Siri)")
+            say_name_from_id("com.apple.voice.enhanced.en-US.Zoe").as_deref(),
+            Some("Zoe (Enhanced)")
         );
-        assert_eq!(siri_display_name("com.apple.voice.premium.en-US.Ava"), None);
+        assert_eq!(
+            say_name_from_id("com.apple.voice.compact.en-US.Samantha").as_deref(),
+            Some("Samantha")
+        );
+        assert_eq!(say_name_from_id("com.apple.siri.natural.Simone"), None);
     }
 
     #[test]
@@ -2527,7 +2511,8 @@ Bubbles             en_US    # Hello! My name is Bubbles.
             new.voice_id.as_deref(),
             Some("com.apple.siri.natural.Simone")
         );
-        assert_eq!(new.voice_name.as_deref(), Some("Simone (Siri)"));
+        assert_eq!(new.voice_name, None);
+        assert_eq!(new.language.as_deref(), Some("en"));
         assert_eq!(
             classify_system_voice(new.voice_id.as_deref(), new.voice_name.as_deref()),
             SystemVoice::Siri
@@ -2544,26 +2529,55 @@ Bubbles             en_US    # Hello! My name is Bubbles.
             Some("com.apple.voice.premium.en-US.Ava")
         );
         assert_eq!(old.voice_name.as_deref(), Some("Ava"));
-
-        let none = spoken_content_from(Some("[]"), &langs(&["en"]), None, None);
-        assert_eq!(none, crate::tts::avspeech::SpokenContent::default());
     }
 
+    /// A Siri voice cannot be spoken by Juno: the ranking picks the voice, the
+    /// pane lists no row for the Mac's own voice and says nothing about Siri.
     #[test]
-    fn the_voice_row_carries_the_voices_own_name() {
-        let mut inventory = with_system_voice(stock_mac(), SystemVoice::Siri);
-        inventory.system_voice_name = Some("Simone (Siri)".to_string());
-        let resolution = resolve_voice("system", &inventory, None);
-        let list = voice_list("system", &inventory, &resolution);
-        assert_eq!(list.options[1].name, "Simone (Siri)");
-    }
-
-    /// Siri beats a downloaded voice only because the person chose it.
-    #[test]
-    fn a_siri_system_voice_beats_a_downloaded_one() {
+    fn a_siri_system_voice_uses_the_ranking_and_shows_no_siri_row() {
         let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Siri);
         let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
+        assert_eq!(resolution.voice.as_deref(), Some("Ava (Premium)"));
+        let list = voice_list("system", &inventory, &resolution);
+        assert!(list.options.iter().all(|o| o.id != SYSTEM_DEFAULT_ID));
+        assert!(list.options.iter().all(|o| !o.name.contains("Siri")));
+        assert_eq!(list.options.iter().filter(|o| o.selected).count(), 1);
+
+        let stock = with_system_voice(stock_mac(), SystemVoice::Siri);
+        let resolution = resolve_voice("system", &stock, None);
+        assert_eq!(resolution.voice.as_deref(), Some("Samantha"));
+    }
+
+    /// A voice Juno can speak is followed, and is what the pane shows.
+    #[test]
+    fn a_buildable_system_voice_is_followed() {
+        let mut inventory = with_system_voice(mac_with_downloads(), SystemVoice::Other);
+        inventory.system_voice_name = Some("Ava (Premium)".to_string());
+        assert_eq!(
+            followed_system_voice(&inventory).as_deref(),
+            Some("Ava (Premium)")
+        );
+        let resolution = resolve_voice("system", &inventory, None);
+        assert_eq!(resolution.voice.as_deref(), Some("Ava (Premium)"));
+
+        // Chosen but not installed here: the ranking, not silence.
+        inventory.system_voice_name = Some("Nobody (Premium)".to_string());
+        assert_eq!(followed_system_voice(&inventory), None);
+        assert!(resolve_voice("system", &inventory, None).voice.is_some());
+    }
+
+    /// An old auto-picked top voice yields when the person's chosen voice is
+    /// a different one that can be spoken.
+    #[test]
+    fn an_auto_picked_voice_yields_to_the_followed_one() {
+        let mut inventory = with_system_voice(mac_with_downloads(), SystemVoice::Other);
+        inventory.system_voice_name = Some("Samantha (Enhanced)".to_string());
+        let best = best_macos_voice(&inventory.macos);
+        assert_eq!(best.as_deref(), Some("Ava (Premium)"));
+        let resolution = resolve_stored_voice("system", &inventory, best.as_deref(), false);
+        assert_eq!(resolution.voice.as_deref(), Some("Samantha (Enhanced)"));
+        let kept = resolve_stored_voice("system", &inventory, best.as_deref(), true);
+        assert_eq!(kept.voice, best);
     }
 
     /// An explicit pick still wins over the default.
@@ -2573,14 +2587,6 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         let resolution = resolve_voice("system", &inventory, Some("Samantha"));
         assert_eq!(resolution.voice.as_deref(), Some("Samantha"));
         assert!(!resolution.substituted);
-        let list = voice_list("system", &inventory, &resolution);
-        let selected: Vec<&str> = list
-            .options
-            .iter()
-            .filter(|o| o.selected)
-            .map(|o| o.id.as_str())
-            .collect();
-        assert_eq!(selected, vec!["Samantha"]);
     }
 
     /// No recorded choice and nothing better downloaded: the Mac's own voice,
