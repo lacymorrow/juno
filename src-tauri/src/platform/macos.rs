@@ -360,68 +360,43 @@ unsafe fn primary_screen_height() -> Result<f64, String> {
     Ok(primary_frame.size.height)
 }
 
-/// Hand the bar to the OS window drag, anchored at the cursor as it is now.
+/// Start carrying the bar with the cursor: from here until the release, every
+/// mouse-dragged event puts `grab` (points from the window's top-left) under
+/// the cursor (`platform::bar_drag_follow`).
 ///
-/// This is the same OS drag `startDragging()` asks for
-/// (`performWindowDragWithEvent:`), with two differences that are the whole
-/// point, both about where the drag is anchored:
+/// This replaced handing the window to the OS drag (`performWindowDragWithEvent:`
+/// with a mouse-down made at the cursor, #766). That drag is the
+/// WindowServer's: Juno cannot see it, and with a mouse-down that is not the
+/// real press the window drifted off the cursor as the drag went on, and once
+/// was left behind off screen. See the module docs for the evidence.
 ///
-/// - It runs in the same main-thread turn as the `setFrame:` that put the
-///   grab under the cursor. Through the page it ran one IPC round trip later
-///   (the reply to the page, then `startDragging()` back through Tauri to the
-///   main thread), and the cursor kept moving in between. The OS drag keeps
-///   whatever offset the window has from the cursor when it starts, so a
-///   fast flick still left the bar trailing the cursor by that travel.
-/// - The event it hands AppKit is a mouse-down made now, at the cursor, in the
-///   window's current coordinates. tao's `drag_window` hands over
-///   `NSApp.currentEvent`, which is whatever event AppKit last dequeued: the
-///   press, or a mouse-dragged from several points back, measured against
-///   the big window it was in before the drag window replaced it. Only an
-///   event of one private type (0x15) is replaced by tao with a fresh one.
-///
-/// Must run on the main thread. Returns the cursor (global points) the drag
-/// was anchored at. Never touches the window's class or its level: the menu
-/// bar constraint and the #728 rules in `docs/plans/appearance-steady-frame.md`
-/// hold exactly as they do for `startDragging()`.
+/// Must run on the main thread, right after the frame was set, so no event is
+/// handled between the placement and the first move. Returns the cursor
+/// (global points) the drag started at. Never touches the window's class or
+/// its level: every move goes through `setFrameTopLeftPoint:`, so the menu bar
+/// constraint holds exactly as it does for any frame change, and the #728
+/// rules in `docs/plans/appearance-steady-frame.md` are untouched.
 #[cfg(target_os = "macos")]
-pub fn start_bar_os_drag(app_handle: &AppHandle) -> Result<(f64, f64), String> {
-    use crate::platform::desktop_points::{cocoa_point_to_points, point_in_window};
+pub fn start_bar_drag_follow(
+    app_handle: &AppHandle,
+    grab: (f64, f64),
+) -> Result<(f64, f64), String> {
+    use crate::platform::desktop_points::cocoa_point_to_points;
     let label = constants::ui::window_labels::FLOATING_BAR;
     let window = app_handle
         .get_webview_window(label)
         .ok_or("floating-bar window not found")?;
     let ns_window = window.ns_window().map_err(|e| e.to_string())? as cocoa_id;
 
-    // SAFETY: standard AppKit/Foundation selectors on live objects, on the
-    // main thread (the caller is a `run_on_main_thread` closure). The event
-    // is autoreleased and only used within this call.
-    unsafe {
+    // SAFETY: standard AppKit selectors on the main thread (the caller is a
+    // `run_on_main_thread` closure).
+    let cursor = unsafe {
         let primary_h = primary_screen_height()?;
         let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
-        let frame: NSRect = msg_send![ns_window, frame];
-        let (lx, ly) = point_in_window((mouse.x, mouse.y), (frame.origin.x, frame.origin.y));
-        let window_number: isize = msg_send![ns_window, windowNumber];
-        let process_info: cocoa_id = msg_send![class!(NSProcessInfo), processInfo];
-        let timestamp: f64 = msg_send![process_info, systemUptime];
-        // NSEventTypeLeftMouseDown = 1, no modifiers, one click.
-        let event: cocoa_id = msg_send![
-            class!(NSEvent),
-            mouseEventWithType: 1usize
-            location: NSPoint::new(lx, ly)
-            modifierFlags: 0usize
-            timestamp: timestamp
-            windowNumber: window_number
-            context: nil
-            eventNumber: 0isize
-            clickCount: 1isize
-            pressure: 1.0f32
-        ];
-        if event == nil {
-            return Err("Could not make the mouse-down to start the drag with".to_string());
-        }
-        let _: () = msg_send![ns_window, performWindowDragWithEvent: event];
-        Ok(cocoa_point_to_points((mouse.x, mouse.y), primary_h))
-    }
+        cocoa_point_to_points((mouse.x, mouse.y), primary_h)
+    };
+    crate::platform::bar_drag_follow::start(app_handle, ns_window, grab)?;
+    Ok(cursor)
 }
 
 #[cfg(target_os = "macos")]

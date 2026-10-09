@@ -109,8 +109,9 @@ export interface BarDrag {
  *
  * A mousedown anywhere except text entry arms a drag; moving past the
  * threshold starts the drag and swallows the click that would otherwise fire
- * on release. Every look is moved by the OS window drag; a steady look (the
- * Pill) first shrinks its window to the shape it is drawing, so the OS's
+ * on release. Every look is then carried by Rust, which puts the spot pressed
+ * under the cursor on every mouse-dragged event until the release; a steady
+ * look (the Pill) first shrinks its window to the shape it is drawing, so the
  * menu bar rule holds the pill and not its empty room (see `startBarDrag`).
  * A press and release without movement is an ordinary click on whatever was
  * pressed.

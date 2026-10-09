@@ -10,6 +10,8 @@ pub mod macos;
 
 /// Automation (TCC AppleEvents) consent per target app, asked before macOS asks.
 pub mod automation;
+/// The bar's drag: Juno moves the window on every mouse-dragged event until the release.
+pub mod bar_drag_follow;
 /// Click-through for a steady bar window: hit-test the cursor against what the page draws.
 pub mod bar_hit_test;
 /// Tauri's mixed-scale screen numbers, converted to global desktop points.

@@ -172,7 +172,9 @@ pub struct BarFrameOrigin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DragStart {
-    /// The OS drag was started in the same main-thread call as the frame.
+    /// Rust carries the window with the cursor from here to the release
+    /// (`platform::bar_drag_follow`), started in the same main-thread call
+    /// as the frame.
     Started,
     /// The button was already up (a flick): there is nothing to drag.
     Released,
@@ -250,12 +252,12 @@ pub fn grab_error(cursor: (f64, f64), origin: (f64, f64), grab: (f64, f64)) -> (
 /// cursor as it is at the moment the frame is set, and `x`/`y` are only the
 /// fallback when the cursor cannot be read.
 ///
-/// `start_drag` (with a grab) also starts the OS window drag, in the same
-/// main-thread call, anchored at the cursor as it is then
-/// (`macos::start_bar_os_drag`). That is the bar's drag start: placing the
-/// window and then letting the page call `startDragging()` one IPC round
-/// trip later left the bar trailing the cursor by however far it moved in
-/// between. `trace` is only for the `[Drag]` log lines.
+/// `start_drag` (with a grab) also starts the drag itself, in the same
+/// main-thread call: from then until the release every mouse-dragged event
+/// puts the grab under the cursor (`macos::start_bar_drag_follow`). Nothing
+/// can happen between the placement and the first move, and every move is
+/// absolute, so the bar cannot drift off the cursor however fast it goes.
+/// `trace` is only for the `[Drag]` log lines.
 /// Returns the top-left the window ended up with.
 #[command]
 #[allow(clippy::too_many_arguments)]
@@ -307,23 +309,25 @@ pub async fn set_bar_frame(
                     y: p.y,
                     drag,
                 }));
-                match drag {
-                    Some(DragStart::Started) => {
-                        match crate::platform::macos::start_bar_os_drag(&app) {
+                match (drag, grab) {
+                    (Some(DragStart::Started), Some(grab)) => {
+                        match crate::platform::macos::start_bar_drag_follow(&app, grab) {
                             Ok(cursor) => {
                                 if let Ok(mut held) = DRAG_IN_FLIGHT.lock() {
-                                    *held = grab;
+                                    *held = Some(grab);
                                 }
                                 info!(
-                                    "[Drag] OS drag started with the cursor at {}",
+                                    "[Drag] following the cursor from {}",
                                     fmt_point(Some(cursor))
                                 );
                             }
-                            Err(e) => warn!("[Drag] could not start the OS drag: {}", e),
+                            // The release watch still settles it: the bar
+                            // stays where it was placed and glides home.
+                            Err(e) => warn!("[Drag] could not follow the cursor: {}", e),
                         }
                     }
-                    Some(DragStart::Released) => {
-                        info!("[Drag] the button was already up: no OS drag (a flick)");
+                    (Some(DragStart::Released), _) => {
+                        info!("[Drag] the button was already up: nothing to follow (a flick)");
                     }
                     _ => {}
                 }
@@ -356,12 +360,31 @@ pub async fn set_bar_frame(
     }
 }
 
-/// The page saw the drag end (its mouseup, or the release watch). Logs where
-/// the bar was against the cursor at that moment: the spot pressed should be
-/// under it, and the difference is the drag offset this log exists to catch.
-/// Logging only; the settle is the page's.
+/// The page saw the drag end (its mouseup, or the release watch). Stops the
+/// follow if it is still on, then logs where the bar was against the cursor
+/// at that moment: the spot pressed should be under it, and the difference is
+/// the drag offset this log exists to catch. The settle is the page's, and it
+/// waits for this so no move can land on top of its glide.
 #[command]
 pub async fn bar_drag_released(app_handle: AppHandle) -> Result<(), String> {
+    // Stop carrying the window before the page glides it. Normally the
+    // release already did (its mouse-up reaches the monitor before the page);
+    // this is the release no monitor saw, caught by the page's release watch.
+    #[cfg(target_os = "macos")]
+    {
+        let app = app_handle.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app_handle
+            .run_on_main_thread(move || {
+                let _ = crate::platform::bar_drag_follow::end(
+                    &app,
+                    crate::platform::bar_drag_follow::EndReason::Page,
+                );
+                let _ = tx.send(());
+            })
+            .map_err(|e| e.to_string())?;
+        let _ = rx.await;
+    }
     let grab = DRAG_IN_FLIGHT.lock().ok().and_then(|mut held| held.take());
     let Some(grab) = grab else {
         return Ok(());
