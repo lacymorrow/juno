@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.147] - 2026-10-09
+
+### Fixed
+
+- **bar:** carry the bar with the cursor on every drag event, not the OS drag (#768) (f4f0d438)
+
 ## [0.8.146] - 2026-10-09
 
 ### Added
@@ -1175,7 +1181,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.146...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.147...HEAD
+[0.8.147]: https://github.com/lacymorrow/juno/compare/cua-v0.8.146...v0.8.147
 [0.8.146]: https://github.com/lacymorrow/juno/compare/cua-v0.8.145...v0.8.146
 [0.8.145]: https://github.com/lacymorrow/juno/compare/cua-v0.8.144...v0.8.145
 [0.8.144]: https://github.com/lacymorrow/juno/compare/cua-v0.8.143...v0.8.144
