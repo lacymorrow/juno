@@ -31,6 +31,26 @@
 //! every other grammar here, and match only while that memory is live, so
 //! "no" at any other time still reaches the agent.
 //!
+//! # What closing may touch
+//!
+//! A correction or a tapped chip closes what Juno opened, and only what it can
+//! identify exactly ([`close_plan`]):
+//!
+//! - Juno's own Settings window: closed.
+//! - System Settings: quit, but only when Juno launched it (it was not running
+//!   before the action). Never when it was already open.
+//! - Another app's settings: only a window that was not in the app's window
+//!   list before the action and is in it after, matched by its window number,
+//!   and closed with its AX close button.
+//! - Anything else, including a settings window that belongs to a different
+//!   app than the one pressed (Ghostty's "Settings..." opens its config file in
+//!   TextEdit): nothing is closed and the alternative simply opens.
+//!
+//! Never Cmd+Q, never an app quit for any app but System Settings Juno itself
+//! launched, never a window that existed before. The first version closed
+//! "the first window" of the pressed app. For Ghostty that was its terminal
+//! window, and Ghostty answered by asking to quit all of Ghostty.
+//!
 //! The person's words never reach a script: app names for the Settings press
 //! come from the running process list or from a bundle matched on disk, and
 //! travel as `argv`.
@@ -232,8 +252,11 @@ pub enum Target {
     Juno,
     Mac(Option<&'static Pane>),
     App {
-        /// Process and display name.
+        /// The process name System Events knows it by (Ghostty's is "ghostty").
         name: String,
+        /// The name the person knows it by ("Ghostty"): the app's localized
+        /// display name, never the process or bundle name.
+        display: String,
         /// Where to launch it from when it is not running yet.
         path: Option<PathBuf>,
     },
@@ -246,7 +269,7 @@ impl Target {
             Target::Juno => "Juno settings".into(),
             Target::Mac(None) => "Mac settings".into(),
             Target::Mac(Some(p)) => format!("{} settings", p.label),
-            Target::App { name, .. } => format!("{} settings", name),
+            Target::App { display, .. } => format!("{} settings", display),
         }
     }
 
@@ -259,10 +282,26 @@ impl Target {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frontmost {
     pub name: String,
+    /// The localized name shown in the Dock and Finder, when System Events
+    /// has one.
+    pub display: Option<String>,
     pub bundle_id: Option<String>,
     pub pid: i32,
     /// A regular Dock app, not a menu bar extra or a helper.
     pub regular: bool,
+}
+
+impl Frontmost {
+    /// What to call the app aloud: its localized display name, falling back to
+    /// the process name.
+    pub fn display_name(&self) -> String {
+        self.display
+            .as_deref()
+            .map(|d| d.trim().trim_end_matches(".app").trim())
+            .filter(|d| !d.is_empty())
+            .unwrap_or(&self.name)
+            .to_string()
+    }
 }
 
 /// What the frontmost app means for a bare "open settings".
@@ -311,6 +350,7 @@ pub fn bare_target(kind: &FrontKind) -> Target {
         FrontKind::Mac => Target::Mac(None),
         FrontKind::App(f) => Target::App {
             name: f.name.clone(),
+            display: f.display_name(),
             path: None,
         },
     }
@@ -351,8 +391,8 @@ pub fn alternatives(current: &Target, previous: Option<&Target>) -> Vec<Target> 
 #[derive(Debug, Clone)]
 struct Session {
     target: Target,
-    /// Title of the window the Settings press opened, when one was seen.
-    window: Option<String>,
+    /// What the action changed, which is all closing may act on.
+    opened: Opened,
     previous: Option<Target>,
     alternatives: Vec<Target>,
     at: Instant,
@@ -500,6 +540,69 @@ pub fn forget(app: &AppHandle) {
     }
 }
 
+/* ------------------------- what an action opened ------------------------- */
+
+/// One window of an app, identified by its AX window number. A window with no
+/// number cannot be told apart from another, so it is never listed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WinRef {
+    pub number: String,
+    pub title: String,
+}
+
+/// What opening a target changed. Everything closing is allowed to do comes
+/// from here and nowhere else.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Opened {
+    /// System Settings was already running before the action.
+    pub was_running: bool,
+    /// The pressed app's windows before the action.
+    pub before: Vec<WinRef>,
+    /// The pressed app's windows after it.
+    pub after: Vec<WinRef>,
+}
+
+/// The windows in `after` that were not in `before`. Pure.
+pub fn new_windows(before: &[WinRef], after: &[WinRef]) -> Vec<WinRef> {
+    after
+        .iter()
+        .filter(|w| !w.number.is_empty() && !before.iter().any(|b| b.number == w.number))
+        .cloned()
+        .collect()
+}
+
+/// What closing a session may do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseAction {
+    /// Close Juno's own Settings window.
+    JunoWindow,
+    /// Quit System Settings, which Juno launched.
+    QuitSystemSettings,
+    /// Close exactly these windows of the pressed app, by AX close button.
+    CloseWindows(Vec<WinRef>),
+    /// Close nothing.
+    Nothing,
+}
+
+/// Decide what to close for `target`, given what opening it changed. Pure, and
+/// the only place that decides: nothing quits an app but System Settings that
+/// Juno launched, and no window that existed before is ever closed.
+pub fn close_plan(target: &Target, opened: &Opened) -> CloseAction {
+    match target {
+        Target::Juno => CloseAction::JunoWindow,
+        Target::Mac(_) if !opened.was_running => CloseAction::QuitSystemSettings,
+        Target::Mac(_) => CloseAction::Nothing,
+        Target::App { .. } => {
+            let fresh = new_windows(&opened.before, &opened.after);
+            if fresh.is_empty() {
+                CloseAction::Nothing
+            } else {
+                CloseAction::CloseWindows(fresh)
+            }
+        }
+    }
+}
+
 /* --------------------------------- native --------------------------------- */
 
 const FRONTMOST_SCRIPT: &str = r#"tell application "System Events"
@@ -508,7 +611,11 @@ const FRONTMOST_SCRIPT: &str = r#"tell application "System Events"
 	try
 		set b to bundle identifier of p
 	end try
-	return (name of p) & tab & b & tab & ((unix id of p) as text) & tab & ((background only of p) as text)
+	set d to ""
+	try
+		set d to displayed name of p
+	end try
+	return (name of p) & tab & b & tab & ((unix id of p) as text) & tab & ((background only of p) as text) & tab & d
 end tell"#;
 
 /// Parse [`FRONTMOST_SCRIPT`]'s output. Pure.
@@ -518,11 +625,16 @@ pub fn parse_frontmost(out: &str) -> Option<Frontmost> {
     let bundle = parts.next()?.trim().to_string();
     let pid = parts.next()?.trim().parse::<i32>().ok()?;
     let background = parts.next()?.trim() == "true";
+    let display = parts
+        .next()
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty() && d != "missing value");
     if name.is_empty() {
         return None;
     }
     Some(Frontmost {
         name,
+        display,
         bundle_id: (!bundle.is_empty()).then_some(bundle),
         pid,
         regular: !background,
@@ -535,20 +647,42 @@ async fn frontmost() -> Option<Frontmost> {
 }
 
 /// Press the app's Settings or Preferences menu item, or send Cmd+, when the
-/// menu cannot be read. Reports window counts and titles either side so the
-/// caller can tell whether anything opened. Fields are tab separated.
-const OPEN_SCRIPT: &str = r#"on run argv
+/// menu cannot be read. Lists the app's windows (AX window number and title)
+/// before and after, so the caller can tell which window, if any, the press
+/// created. Output: the way it was pressed, then `=B` and the windows before,
+/// then `=A` and the windows after. Window fields are separated by ASCII 31.
+const OPEN_SCRIPT: &str = r#"on listWindows(procName)
+	set out to ""
+	set sep to (ASCII character 31)
+	tell application "System Events"
+		tell process procName
+			repeat with w in windows
+				set n to ""
+				try
+					set n to (value of attribute "AXWindowNumber" of w) as text
+				end try
+				set t to ""
+				try
+					set t to name of w
+				end try
+				if t is missing value then set t to ""
+				set out to out & n & sep & t & linefeed
+			end repeat
+		end tell
+	end tell
+	return out
+end listWindows
+
+on run argv
 	set procName to item 1 of argv
 	tell application "System Events"
 		if not (exists process procName) then return "missing"
+	end tell
+	set beforeList to my listWindows(procName)
+	tell application "System Events"
 		tell process procName
 			set frontmost to true
 			delay 0.15
-			set beforeCount to count of windows
-			set beforeTitle to ""
-			try
-				set beforeTitle to name of window 1
-			end try
 			set how to "noitem"
 			set menuRead to false
 			try
@@ -574,40 +708,50 @@ const OPEN_SCRIPT: &str = r#"on run argv
 			end if
 			if how is "noitem" then return "noitem"
 			delay 0.5
-			set afterCount to count of windows
-			set afterTitle to ""
-			try
-				set afterTitle to name of window 1
-			end try
-			return how & tab & (beforeCount as text) & tab & (afterCount as text) & tab & beforeTitle & tab & afterTitle
 		end tell
 	end tell
+	set afterList to my listWindows(procName)
+	return how & linefeed & "=B" & linefeed & beforeList & "=A" & linefeed & afterList
 end run"#;
 
-/// Close the window of `argv[0]` titled `argv[1]` (the first window when the
-/// title is empty) with its close button. Never quits the app.
+/// Close the window of `argv[0]` whose AX window number is `argv[1]`, with its
+/// close button. It matches by number only: there is no "first window", no
+/// title match, no keystroke, and it never quits the app.
 const CLOSE_SCRIPT: &str = r#"on run argv
 	set procName to item 1 of argv
-	set wantTitle to item 2 of argv
+	set wantNumber to item 2 of argv
+	if wantNumber is "" then return "refused"
 	tell application "System Events"
 		if not (exists process procName) then return "gone"
 		tell process procName
 			repeat with w in windows
-				set t to ""
+				set n to ""
 				try
-					set t to name of w
+					set n to (value of attribute "AXWindowNumber" of w) as text
 				end try
-				if wantTitle is "" or t is wantTitle then
+				if n is wantNumber then
 					try
 						click (first button of w whose subrole is "AXCloseButton")
 						return "closed"
 					end try
+					return "no_close_button"
 				end if
 			end repeat
 		end tell
 	end tell
 	return "not_found"
 end run"#;
+
+/// Whether System Settings is running, by bundle id (its name is localized).
+const SYSTEM_SETTINGS_RUNNING_SCRIPT: &str = r#"tell application "System Events"
+	return ((count of (application processes whose bundle identifier is "com.apple.systempreferences")) > 0) as text
+end tell"#;
+
+/// Quit System Settings, and only System Settings: used when Juno launched it
+/// for the person and they asked for something else. No other app is ever
+/// addressed this way.
+const QUIT_SYSTEM_SETTINGS_SCRIPT: &str =
+    r#"tell application id "com.apple.systempreferences" to quit"#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenError {
@@ -616,45 +760,81 @@ pub enum OpenError {
     Failed,
 }
 
-/// Read [`OPEN_SCRIPT`]'s output: the title of the window that opened.
-pub fn parse_open_result(out: &str) -> Result<Option<String>, OpenError> {
+/// Read [`OPEN_SCRIPT`]'s output: the windows either side of the press.
+pub fn parse_open_result(out: &str) -> Result<Opened, OpenError> {
     let out = out.trim_end_matches(['\n', '\r']);
     if out == "noitem" {
         return Err(OpenError::NoItem);
     }
-    let mut parts = out.splitn(5, '\t');
-    let how = parts.next().ok_or(OpenError::Failed)?;
-    let before: i64 = parts
-        .next()
-        .and_then(|s| s.trim().parse().ok())
-        .ok_or(OpenError::Failed)?;
-    let after: i64 = parts
-        .next()
-        .and_then(|s| s.trim().parse().ok())
-        .ok_or(OpenError::Failed)?;
-    let before_title = parts.next().unwrap_or("");
-    let after_title = parts.next().unwrap_or("");
-    let changed = after > before || before_title != after_title;
-    match how {
-        // A pressed menu item is trusted even when the window was already up.
-        "menu" => Ok((!after_title.is_empty()).then(|| after_title.to_string())),
-        // A keystroke proves nothing by itself: only a visible change counts.
-        "keys" if changed => Ok((!after_title.is_empty()).then(|| after_title.to_string())),
-        "keys" => Err(OpenError::NoItem),
-        _ => Err(OpenError::Failed),
+    let mut lines = out.lines();
+    let how = lines.next().ok_or(OpenError::Failed)?.trim();
+    if how != "menu" && how != "keys" {
+        return Err(OpenError::Failed);
     }
+    #[derive(PartialEq)]
+    enum Section {
+        None,
+        Before,
+        After,
+    }
+    let mut section = Section::None;
+    let mut opened = Opened::default();
+    for line in lines {
+        match line {
+            "=B" => section = Section::Before,
+            "=A" => section = Section::After,
+            row => {
+                let mut fields = row.split('\u{1f}');
+                let number = fields.next().unwrap_or("").trim();
+                let title = fields.next().unwrap_or("");
+                // No number, no identity: never listed, so never closed.
+                if number.is_empty() {
+                    continue;
+                }
+                let win = WinRef {
+                    number: number.to_string(),
+                    title: title.to_string(),
+                };
+                match section {
+                    Section::Before => opened.before.push(win),
+                    Section::After => opened.after.push(win),
+                    Section::None => {}
+                }
+            }
+        }
+    }
+    // A pressed menu item is trusted even when the window was already up. A
+    // keystroke proves nothing by itself: only a new window counts.
+    if how == "keys" && new_windows(&opened.before, &opened.after).is_empty() {
+        return Err(OpenError::NoItem);
+    }
+    Ok(opened)
 }
 
-async fn open_target(app: &AppHandle, target: &Target) -> Result<Option<String>, OpenError> {
+async fn system_settings_running() -> bool {
+    // Unsure counts as running: Juno quits System Settings only when it is
+    // certain it started it.
+    !matches!(
+        osascript(SYSTEM_SETTINGS_RUNNING_SCRIPT, Vec::new())
+            .await
+            .as_deref(),
+        Ok("false")
+    )
+}
+
+async fn open_target(app: &AppHandle, target: &Target) -> Result<Opened, OpenError> {
     match target {
         Target::Juno => crate::window_management::open_settings_window(app.clone())
             .await
-            .map(|_| None)
+            .map(|_| Opened::default())
             .map_err(|e| {
                 log::warn!("settings_follow: Juno settings failed: {}", e);
                 OpenError::Failed
             }),
         Target::Mac(pane) => {
+            // Asked before opening: only a System Settings Juno starts is
+            // Juno's to quit afterwards.
+            let was_running = system_settings_running().await;
             let result = match pane {
                 Some(p) => run("open", vec![format!("x-apple.systempreferences:{}", p.id)]).await,
                 None => match apps::resolve_installed("settings").await {
@@ -668,12 +848,17 @@ async fn open_target(app: &AppHandle, target: &Target) -> Result<Option<String>,
                     None => Err("System Settings is not installed".into()),
                 },
             };
-            result.map(|_| None).map_err(|e| {
-                log::warn!("settings_follow: System Settings failed: {}", e);
-                OpenError::Failed
-            })
+            result
+                .map(|_| Opened {
+                    was_running,
+                    ..Opened::default()
+                })
+                .map_err(|e| {
+                    log::warn!("settings_follow: System Settings failed: {}", e);
+                    OpenError::Failed
+                })
         }
-        Target::App { name, path } => {
+        Target::App { name, path, .. } => {
             if let Some(path) = path {
                 if let Err(e) = run(
                     "open",
@@ -698,16 +883,13 @@ async fn open_target(app: &AppHandle, target: &Target) -> Result<Option<String>,
 }
 
 /// Open `target`; an app with no settings falls back to System Settings.
-async fn open_with_fallback(
-    app: &AppHandle,
-    target: Target,
-) -> Result<(Target, Option<String>), Target> {
+async fn open_with_fallback(app: &AppHandle, target: Target) -> Result<(Target, Opened), Target> {
     match open_target(app, &target).await {
-        Ok(window) => Ok((target, window)),
+        Ok(opened) => Ok((target, opened)),
         Err(OpenError::NoItem) => {
             let mac = Target::Mac(None);
             match open_target(app, &mac).await {
-                Ok(window) => Ok((mac, window)),
+                Ok(opened) => Ok((mac, opened)),
                 Err(_) => Err(mac),
             }
         }
@@ -715,22 +897,42 @@ async fn open_with_fallback(
     }
 }
 
-async fn close_target(app: &AppHandle, target: &Target, window: Option<&str>) {
-    match target {
-        Target::Juno => {
+async fn close_target(app: &AppHandle, target: &Target, opened: &Opened) {
+    match close_plan(target, opened) {
+        CloseAction::JunoWindow => {
             if let Err(e) = crate::window_management::close_settings_window(app.clone()).await {
                 log::warn!("settings_follow: closing Juno settings failed: {}", e);
             }
         }
-        Target::Mac(_) | Target::App { .. } => {
-            let process = match target {
-                Target::App { name, .. } => name.clone(),
-                _ => "System Settings".to_string(),
-            };
-            let title = window.unwrap_or("").to_string();
-            if let Err(e) = osascript(CLOSE_SCRIPT, vec![process, title]).await {
-                log::warn!("settings_follow: closing a settings window failed: {}", e);
+        CloseAction::QuitSystemSettings => {
+            if let Err(e) = osascript(QUIT_SYSTEM_SETTINGS_SCRIPT, Vec::new()).await {
+                log::warn!("settings_follow: quitting System Settings failed: {}", e);
             }
+        }
+        CloseAction::CloseWindows(windows) => {
+            let Target::App { name, .. } = target else {
+                return;
+            };
+            for win in windows {
+                match osascript(CLOSE_SCRIPT, vec![name.clone(), win.number.clone()]).await {
+                    Ok(result) => log::info!(
+                        "settings_follow: closing {} window {} ({}): {}",
+                        name,
+                        win.number,
+                        win.title,
+                        result
+                    ),
+                    Err(e) => {
+                        log::warn!("settings_follow: closing a settings window failed: {}", e)
+                    }
+                }
+            }
+        }
+        CloseAction::Nothing => {
+            log::info!(
+                "settings_follow: nothing to close for {}; it opens the alternative only",
+                target.label()
+            );
         }
     }
 }
@@ -746,6 +948,7 @@ async fn resolve_spec(spec: &Spec) -> Option<Target> {
         Spec::App(key) => {
             let app = apps::resolve_installed(key).await?;
             Some(Target::App {
+                display: app.name.clone(),
                 name: app.name,
                 path: Some(app.path),
             })
@@ -759,11 +962,11 @@ fn own_pid() -> i32 {
 
 async fn open_and_remember(app: &AppHandle, wanted: Target, previous: Option<Target>) -> Reply {
     match open_with_fallback(app, wanted).await {
-        Ok((target, window)) => {
+        Ok((target, opened)) => {
             let alternatives = alternatives(&target, previous.as_ref());
             remember(Session {
                 target: target.clone(),
-                window,
+                opened,
                 previous,
                 alternatives,
                 at: Instant::now(),
@@ -799,7 +1002,7 @@ pub(super) async fn handle_correction(app: &AppHandle, correction: Correction) -
     };
     take_session();
     if destination.as_ref() != Some(&session.target) {
-        close_target(app, &session.target, session.window.as_deref()).await;
+        close_target(app, &session.target, &session.opened).await;
     }
     match destination {
         None => Some(Reply::text(format!("Closed {}.", session.target.label()))),
@@ -821,8 +1024,12 @@ pub async fn run_reply_chip(app: AppHandle, id: String) -> Result<(), String> {
         .cloned()
         .ok_or("Unknown suggestion.")?;
     take_session();
-    close_target(&app, &session.target, session.window.as_deref()).await;
+    close_target(&app, &session.target, &session.opened).await;
     let reply = open_and_remember(&app, target, session.previous).await;
+    // A chip is a new action, not the tail of the turn before it. That turn
+    // has ended (and may have been stopped), and speech from a stopped turn is
+    // dropped, so the chip opens its own turn to be heard.
+    crate::tts::begin_turn();
     super::emit_reply(&app, reply).await;
     publish(&app);
     Ok(())
@@ -848,6 +1055,7 @@ mod tests {
     fn front(name: &str, bundle: &str, pid: i32) -> Frontmost {
         Frontmost {
             name: name.into(),
+            display: None,
             bundle_id: Some(bundle.into()),
             pid,
             regular: true,
@@ -857,7 +1065,15 @@ mod tests {
     fn app_target(name: &str) -> Target {
         Target::App {
             name: name.into(),
+            display: name.into(),
             path: None,
+        }
+    }
+
+    fn win(number: &str, title: &str) -> WinRef {
+        WinRef {
+            number: number.into(),
+            title: title.into(),
         }
     }
 
@@ -965,7 +1181,7 @@ mod tests {
         assert_eq!(alternatives(&Target::Juno, None), vec![Target::Mac(None)]);
         let chips = chips_for(&Session {
             target: music.clone(),
-            window: None,
+            opened: Opened::default(),
             previous: Some(music),
             alternatives: vec![Target::Mac(None), Target::Juno],
             at: Instant::now(),
@@ -1043,7 +1259,7 @@ mod tests {
         let at = Instant::now();
         let session = Session {
             target: Target::Juno,
-            window: None,
+            opened: Opened::default(),
             previous: None,
             alternatives: vec![Target::Mac(None)],
             at,
@@ -1080,26 +1296,181 @@ mod tests {
         assert_eq!(parse_frontmost("Music\tcom.apple.Music\tnope\tfalse"), None);
     }
 
+    const US: char = '\u{1f}';
+
+    fn open_output(how: &str, before: &[(&str, &str)], after: &[(&str, &str)]) -> String {
+        let rows = |list: &[(&str, &str)]| {
+            list.iter()
+                .map(|(n, t)| format!("{n}{US}{t}\n"))
+                .collect::<String>()
+        };
+        format!("{how}\n=B\n{}=A\n{}", rows(before), rows(after))
+    }
+
     #[test]
-    fn open_results_decide_whether_a_window_opened() {
-        // A pressed menu item opened something; its title is remembered.
-        assert_eq!(
-            parse_open_result("menu\t1\t2\tMusic\tGeneral"),
-            Ok(Some("General".into()))
+    fn open_results_list_the_windows_either_side() {
+        let out = open_output(
+            "menu",
+            &[("10", "Music")],
+            &[("10", "Music"), ("11", "General")],
         );
+        let opened = parse_open_result(&out).expect("opened");
+        assert_eq!(opened.before, vec![win("10", "Music")]);
+        assert_eq!(opened.after, vec![win("10", "Music"), win("11", "General")]);
+        assert_eq!(
+            new_windows(&opened.before, &opened.after),
+            vec![win("11", "General")]
+        );
+        // A pressed menu item is trusted even when nothing new appeared.
+        let same = open_output("menu", &[("10", "Music")], &[("10", "Music")]);
+        assert!(parse_open_result(&same).is_ok());
         // Cmd+, that changed nothing is not a success.
-        assert_eq!(
-            parse_open_result("keys\t1\t1\tMusic\tMusic"),
-            Err(OpenError::NoItem)
+        let silent = open_output("keys", &[("10", "Music")], &[("10", "Music")]);
+        assert_eq!(parse_open_result(&silent), Err(OpenError::NoItem));
+        let loud = open_output(
+            "keys",
+            &[("10", "Music")],
+            &[("10", "Music"), ("12", "Prefs")],
         );
-        assert_eq!(
-            parse_open_result("keys\t1\t2\tMusic\tGeneral"),
-            Ok(Some("General".into()))
-        );
+        assert!(parse_open_result(&loud).is_ok());
         // No Settings item: System Settings is next.
         assert_eq!(parse_open_result("noitem"), Err(OpenError::NoItem));
         assert_eq!(parse_open_result("missing"), Err(OpenError::Failed));
         assert_eq!(parse_open_result("garbage"), Err(OpenError::Failed));
+    }
+
+    #[test]
+    fn a_window_without_a_number_has_no_identity() {
+        // Titles change (a terminal retitles itself), so a window with no
+        // number is never listed, and so never counted as new.
+        let out = open_output("menu", &[("", "zsh")], &[("", "vim"), ("", "zsh")]);
+        let opened = parse_open_result(&out).expect("opened");
+        assert!(opened.before.is_empty() && opened.after.is_empty());
+        assert_eq!(
+            close_plan(&app_target("ghostty"), &opened),
+            CloseAction::Nothing
+        );
+    }
+
+    fn opened(was_running: bool, before: &[WinRef], after: &[WinRef]) -> Opened {
+        Opened {
+            was_running,
+            before: before.to_vec(),
+            after: after.to_vec(),
+        }
+    }
+
+    #[test]
+    fn closing_juno_settings_closes_its_window() {
+        assert_eq!(
+            close_plan(&Target::Juno, &Opened::default()),
+            CloseAction::JunoWindow
+        );
+    }
+
+    #[test]
+    fn system_settings_is_quit_only_when_juno_launched_it() {
+        let launched = opened(false, &[], &[]);
+        let already_open = opened(true, &[], &[]);
+        for target in [Target::Mac(None), Target::Mac(PANES.first())] {
+            assert_eq!(
+                close_plan(&target, &launched),
+                CloseAction::QuitSystemSettings
+            );
+            assert_eq!(close_plan(&target, &already_open), CloseAction::Nothing);
+        }
+    }
+
+    #[test]
+    fn another_apps_settings_close_only_a_window_the_action_created() {
+        let target = app_target("Music");
+        // The press opened a new window: close exactly it.
+        let plan = close_plan(
+            &target,
+            &opened(
+                true,
+                &[win("1", "Music")],
+                &[win("1", "Music"), win("2", "General")],
+            ),
+        );
+        assert_eq!(plan, CloseAction::CloseWindows(vec![win("2", "General")]));
+        // The press created nothing: nothing is closed.
+        let plan = close_plan(
+            &target,
+            &opened(true, &[win("1", "Music")], &[win("1", "Music")]),
+        );
+        assert_eq!(plan, CloseAction::Nothing);
+        // A window that was already there is never closed, even retitled.
+        let plan = close_plan(
+            &target,
+            &opened(true, &[win("1", "Music")], &[win("1", "Settings")]),
+        );
+        assert_eq!(plan, CloseAction::Nothing);
+    }
+
+    /// The reported defect: tapping a chip in Ghostty tried to quit all of
+    /// Ghostty. Ghostty's Settings opens its config file in TextEdit, so the
+    /// press adds no Ghostty window; its terminal window was there before and
+    /// must not be touched.
+    #[test]
+    fn ghostty_settings_press_closes_nothing() {
+        let terminal = win("201", "~/repo/juno");
+        let plan = close_plan(
+            &app_target("ghostty"),
+            &opened(true, &[terminal.clone()], &[terminal]),
+        );
+        assert_eq!(plan, CloseAction::Nothing);
+    }
+
+    #[test]
+    fn only_new_windows_are_ever_in_a_plan() {
+        let before = [win("1", "a"), win("2", "b")];
+        let after = [win("1", "a"), win("2", "b"), win("3", "c"), win("4", "d")];
+        match close_plan(&app_target("X"), &opened(true, &before, &after)) {
+            CloseAction::CloseWindows(list) => {
+                assert_eq!(list, vec![win("3", "c"), win("4", "d")]);
+                assert!(list.iter().all(|w| !before.contains(w)));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn nothing_quits_an_app_but_system_settings_juno_launched() {
+        let source = include_str!("settings_follow.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        // No synthesized Cmd+Q, no `quit` addressed to a named process, no
+        // process kill. The one quit is the fixed System Settings script.
+        assert!(!production.contains("keystroke \"q\""));
+        assert!(!production.contains("kill"));
+        assert_eq!(production.matches("to quit\"#").count(), 1);
+        assert!(QUIT_SYSTEM_SETTINGS_SCRIPT.contains("com.apple.systempreferences"));
+        // The close script closes by number, never "the first window".
+        assert!(CLOSE_SCRIPT.contains("AXWindowNumber"));
+        assert!(!CLOSE_SCRIPT.contains("quit"));
+        assert!(!CLOSE_SCRIPT.contains("keystroke"));
+        assert!(!CLOSE_SCRIPT.contains("window 1"));
+    }
+
+    #[test]
+    fn apps_are_called_by_their_display_name() {
+        let f = parse_frontmost("ghostty\tcom.mitchellh.ghostty\t512\tfalse\tGhostty\n")
+            .expect("parsed");
+        assert_eq!(f.name, "ghostty");
+        assert_eq!(f.display_name(), "Ghostty");
+        let kind = classify_front(Some(&f), 1);
+        let target = bare_target(&kind);
+        assert_eq!(target.label(), "Ghostty settings");
+        assert_eq!(target.chip(), "Open Ghostty settings");
+        // No display name: the process name is the fallback.
+        let plain = parse_frontmost("Music\tcom.apple.Music\t5\tfalse\n").expect("parsed");
+        assert_eq!(plain.display_name(), "Music");
+        // A ".app" suffix is not part of the name.
+        let suffixed = Frontmost {
+            display: Some("Ghostty.app".into()),
+            ..plain
+        };
+        assert_eq!(suffixed.display_name(), "Ghostty");
     }
 
     #[test]

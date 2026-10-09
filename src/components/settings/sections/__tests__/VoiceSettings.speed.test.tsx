@@ -56,8 +56,10 @@ function list(overrides: Partial<JunoVoiceList> = {}): JunoVoiceList {
 function renderSection(
   voices: JunoVoiceList,
   handleJunoVoiceRateChange = vi.fn(async (_rate: number) => {}),
+  debug = true,
 ) {
-  invokeMock.mockImplementation((() => Promise.resolve(false)) as typeof invoke);
+  invokeMock.mockImplementation(((command: string) =>
+    Promise.resolve(command === "get_debug_mode" ? debug : false)) as typeof invoke);
   const settings = {
     audioDevices: null,
     junoVoices: voices,
@@ -85,7 +87,7 @@ function renderSection(
       <VoiceSettings settings={settings} />
     </AdvancedSettingsProvider>,
   );
-  return { handleJunoVoiceRateChange };
+  return { handleJunoVoiceRateChange, loadJunoVoices: settings.loadJunoVoices };
 }
 
 beforeEach(() => {
@@ -100,6 +102,21 @@ describe("Audio: how fast Juno speaks", () => {
     expect(screen.getByText("1.5x")).toBeInTheDocument();
     expect(screen.getByRole("slider")).toHaveAttribute("aria-valuemin", "0.75");
     expect(screen.getByRole("slider")).toHaveAttribute("aria-valuemax", "2");
+  });
+
+  it("reads the voices again when the window regains focus", async () => {
+    const { loadJunoVoices } = renderSection(list());
+    await screen.findByText("Samantha");
+    const before = vi.mocked(loadJunoVoices).mock.calls.length;
+    fireEvent.focus(window);
+    expect(vi.mocked(loadJunoVoices).mock.calls.length).toBe(before + 1);
+  });
+
+  it("hides the speed unless debug mode is on", async () => {
+    renderSection(list(), undefined, false);
+    await screen.findByText("Samantha");
+    expect(screen.queryByText("Speaking speed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   });
 
   it("draws no speed control when the engine has none", async () => {

@@ -12,8 +12,10 @@
 //! juno://settings?highlight=<id>            the same, without naming the pane
 //! ```
 //!
-//! Pane and setting ids come from [`crate::settings::registry`]. An unknown
-//! id opens Settings on General, silently. Extra path segments and unknown
+//! Pane and setting ids come from [`crate::settings::registry`]. A highlight
+//! resolves leniently: an exact setting id, then a setting id's last segment
+//! or alias (`voice` is `audio.voice`), then a pane id, otherwise General.
+//! An unknown id opens Settings on General, silently. Extra path segments and unknown
 //! query keys (`?set=`, `?value=`) are ignored. Case does not matter.
 //!
 //! A link runs through the same functions the `settings` tool's `open` and
@@ -34,7 +36,7 @@ use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC
 use tauri::AppHandle;
 use tracing::{info, warn};
 
-use crate::settings::registry::{Pane, SettingKey};
+use crate::settings::registry::{resolve_target, Pane, Resolved, SettingKey};
 
 const SCHEME: &str = "juno";
 
@@ -125,9 +127,12 @@ fn parse_settings(pane: Option<&str>, query: &str) -> SettingsTarget {
         .filter(|value| !value.is_empty());
 
     if let Some(value) = highlight {
-        return match decode(value).map(|id| SettingKey::from_id(&id)) {
-            Some(Ok(key)) => SettingsTarget::Setting(key),
-            _ => general,
+        // Lenient: an exact id, then an id's last segment or alias ("voice" is
+        // `audio.voice`), then a pane, otherwise General. Still navigation only.
+        return match decode(value).and_then(|name| resolve_target(&name)) {
+            Some(Resolved::Setting(key)) => SettingsTarget::Setting(key),
+            Some(Resolved::Pane(pane)) => SettingsTarget::Pane(pane),
+            None => general,
         };
     }
     match pane {
@@ -243,6 +248,44 @@ mod tests {
         let key = SettingKey::JunoVoice;
         let url = format!("juno://settings?highlight={}", key.spec().id);
         assert_eq!(settings(&url), SettingsTarget::Setting(key));
+    }
+
+    #[test]
+    fn highlight_voice_lands_on_the_voice_setting_in_the_voice_pane() {
+        let target = settings("juno://settings?highlight=voice");
+        assert_eq!(target, SettingsTarget::Setting(SettingKey::JunoVoice));
+        // The setting lives on the Voice pane (sidebar id "voice") and its row
+        // is the one the window flashes.
+        let spec = SettingKey::JunoVoice.spec();
+        assert_eq!(spec.pane, Pane::Audio);
+        assert_eq!(spec.pane.id(), "voice");
+        assert_eq!(spec.row, "juno-voice");
+    }
+
+    #[test]
+    fn highlight_resolves_leniently() {
+        // Exact id, last segment, alias, in that order.
+        assert_eq!(
+            settings("juno://settings?highlight=audio.voice"),
+            SettingsTarget::Setting(SettingKey::JunoVoice)
+        );
+        assert_eq!(
+            settings("juno://settings?highlight=Speaking_Speed"),
+            SettingsTarget::Setting(SettingKey::SpeakingSpeed)
+        );
+        assert_eq!(
+            settings("juno://settings?highlight=mic"),
+            SettingsTarget::Setting(SettingKey::InputDevice)
+        );
+        // A pane id when no setting answers to it.
+        assert_eq!(
+            settings("juno://settings?highlight=security"),
+            SettingsTarget::Pane(Pane::Security)
+        );
+        assert_eq!(
+            settings("juno://settings?highlight=providers"),
+            SettingsTarget::Pane(Pane::Providers)
+        );
     }
 
     #[test]
