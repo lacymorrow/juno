@@ -83,6 +83,20 @@ pub async fn speak_directly(
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
+    // In-process first: the same voice, rate and speaker, starting in tens of
+    // milliseconds instead of a second or two. Anything it cannot honour
+    // exactly comes back here and `say` speaks it, as before.
+    let rate = crate::tts::avspeech::rate_from_words_per_minute(words_per_minute);
+    match crate::tts::avspeech::speak(&text, voice.as_deref(), device.as_deref(), rate).await {
+        crate::tts::avspeech::Spoken::Status(status) => return Ok(status.to_string()),
+        crate::tts::avspeech::Spoken::UseSay(reason) => {
+            info!("[AVSpeech] Using say for this sentence: {reason}");
+        }
+    }
+    if crate::tts::is_tts_stop_requested() {
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
     info!(
         "Speaking via system TTS: {} chars, voice {}, out of {}",
         text.chars().count(),
@@ -90,6 +104,7 @@ pub async fn speak_directly(
         device.as_deref().unwrap_or("the system output")
     );
 
+    let spawned = std::time::Instant::now();
     let status = run_say(say_arguments_at(
         &text,
         voice.as_deref(),
@@ -97,6 +112,13 @@ pub async fn speak_directly(
         words_per_minute,
     ))
     .await?;
+    // `say` gives no signal when sound begins, so only the whole run is known.
+    // Compare with `engine=avspeech first_audio_ms`.
+    info!(
+        "[SpeechTiming] engine=say first_audio_ms=- total_ms={} chars={}",
+        spawned.elapsed().as_millis(),
+        text.chars().count()
+    );
 
     // A stop arrives as SIGTERM to that pid, so a non-success exit right after
     // one is the user pressing Escape rather than a failure worth reporting.

@@ -1348,6 +1348,8 @@ fn settings_manager(
 /// finishes the pane is told, because Kokoro's voices are on disk only once
 /// it has.
 pub fn sync_engine_model(app_handle: &AppHandle, provider: &str) {
+    // The greeting rendered ahead follows the engine and voice in force.
+    crate::greeting::refresh_cache(app_handle);
     let app = app_handle.clone();
     crate::tts::kokoro::sync_with_engine(provider, move || {
         if let Err(e) = app.emit(ENGINE_READY_EVENT, "kokoro") {
@@ -1598,6 +1600,7 @@ pub async fn set_juno_voice(
         substituted: false,
     };
     let list = voice_list(&audio.tts_provider, &inventory, &resolution).with_rate(audio.voice_rate);
+    crate::greeting::refresh_cache(&app_handle);
     audition(&app_handle, state.inner(), &engine, &id);
     Ok(list)
 }
@@ -1650,6 +1653,7 @@ pub async fn set_juno_voice_rate(
         let row = resolution
             .voice
             .unwrap_or_else(|| SYSTEM_DEFAULT_ID.to_string());
+        crate::greeting::refresh_cache(&app_handle);
         audition(&app_handle, state.inner(), &engine, &row);
     }
     Ok(list)

@@ -1,6 +1,6 @@
 [package]
 name = "juno"
-version = "0.8.132"
+version = "0.8.143"
 description = "A Tauri App"
 authors = ["Lacy Morrow <me@lacymorrow.com>"]
 edition = "2021"
@@ -128,7 +128,14 @@ block = "0.1"
 # posts through the deprecated NSUserNotificationCenter, so it is not used to post.
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSError", "NSString", "NSDate", "NSCalendar", "NSPredicate"] }
+# Reminders and Calendar through EventKit, Contacts through the Contacts framework
+# (agent/tools/mac_apps/). Only the classes those tools touch are switched on.
+objc2-event-kit = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "EKObject", "EKTypes", "EKCalendar", "EKCalendarItem", "EKAlarm", "EKEvent", "EKReminder", "EKEventStore"] }
+objc2-contacts = { version = "0.3", default-features = false, features = ["std", "block2", "CNContact", "CNContactStore", "CNContact_Predicates", "CNLabeledValue", "CNPhoneNumber", "CNContactRelation"] }
+# The Mac's voice in-process (tts/avspeech.rs): AVSpeechSynthesizer rendering
+# to buffers that Juno plays on the chosen speaker.
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioBuffer", "AVAudioFormat", "AVAudioTypes", "AVSpeechSynthesis"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "UNUserNotificationCenter", "UNNotificationSettings", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationSound", "UNNotificationTrigger"] }
 # Metal GPU acceleration for Kokoro-82M on Apple Silicon
 any-tts = { version = "0.1", default-features = false, features = ["kokoro", "download", "metal"] }

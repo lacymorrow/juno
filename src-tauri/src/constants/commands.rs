@@ -335,6 +335,8 @@ pub mod app {
     pub const GET_BUILD_INFO: &str = "get_build_info";
     /// Network and provider health, for the bar's status dot.
     pub const GET_CONNECTIVITY: &str = "get_connectivity";
+    /// What is still loading after launch, for the bar's status dot.
+    pub const GET_STARTUP_READINESS: &str = "get_startup_readiness";
     pub const OPEN_CONFIG_DIRECTORY: &str = "open_config_directory";
     pub const TEST_SYSTEM_CONTEXT: &str = "test_system_context";
 }
@@ -353,6 +355,7 @@ pub mod bar {
     pub const SET_BAR_FRAME: &str = "set_bar_frame";
     pub const SET_BAR_HIT_REGIONS: &str = "set_bar_hit_regions";
     pub const POINTER_HELD: &str = "bar_pointer_held";
+    pub const DRAG_RELEASED: &str = "bar_drag_released";
     pub const ORDER_ABOVE_SNAP_WELLS: &str = "bar_order_above_snap_wells";
     pub const ENSURE_SNAP_WELLS_OVERLAYS: &str = "ensure_snap_wells_overlays";
     pub const SHOW_BAR_WHEN_READY: &str = "show_bar_when_ready";

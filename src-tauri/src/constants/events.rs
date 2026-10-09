@@ -408,6 +408,9 @@ pub mod system {
     /// Network or provider health changed. Payload: `connectivity::Snapshot`
     /// (`status`, `label`, `provider`).
     pub const CONNECTIVITY_CHANGED: &str = "connectivity-changed";
+    /// What is still loading after launch changed. Payload:
+    /// `readiness::Snapshot` (`loading`, `pending`).
+    pub const STARTUP_READINESS_CHANGED: &str = "startup-readiness-changed";
 
     // Application lifecycle events
     pub const APP_READY: &str = "app-ready";
