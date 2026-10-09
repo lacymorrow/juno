@@ -25,6 +25,7 @@
 
 pub mod accessibility_tools; // Native macOS accessibility tools for element-level interaction
 pub mod anthropic_computer_use; // Add the new Anthropic Computer Use tools
+pub mod ax_targeting; // Accessibility-first targeting: element listing, working window, window pictures
 pub mod basic_tools; // Ensure basic_tools is declared
 pub mod browser_controller;
 pub mod browser_tools;

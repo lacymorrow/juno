@@ -97,14 +97,37 @@ pub async fn run_computer_action(
         return Err(reason);
     }
 
+    // Frames and targets an action sets belong to this agent alone.
+    coordinates::scoped_to_agent(
+        session_id,
+        run_scoped_computer_action(app_handle, input, session_id, cursor_id, cursor_color),
+    )
+    .await
+}
+
+async fn run_scoped_computer_action(
+    app_handle: &tauri::AppHandle,
+    input: Value,
+    session_id: Option<&str>,
+    cursor_id: &str,
+    cursor_color: &str,
+) -> Result<Value, String> {
     let result = execute_computer_tool(app_handle, input.clone(), session_id).await;
 
     // Put Juno's cursor where the action landed. A screenshot or a keystroke
     // has no point, so the cursor is left where it is rather than moved to
     // nowhere.
     if let Ok(response) = &result {
-        if let Some((raw_x, raw_y)) = extract_coordinate(&input) {
-            let (sx, sy) = coordinates::transform_to_screen_coordinates(raw_x, raw_y);
+        let point = match extract_coordinate(&input) {
+            Some((raw_x, raw_y)) => {
+                Some(coordinates::transform_to_screen_coordinates(raw_x, raw_y))
+            }
+            // An `element` action reports where the control is.
+            None => response["screen_point"]
+                .as_array()
+                .and_then(|p| Some((p.first()?.as_f64()?, p.get(1)?.as_f64()?))),
+        };
+        if let Some((sx, sy)) = point {
             let background = crate::input_control::background_mode_enabled(app_handle).await;
             crate::cursor_overlay::take(
                 app_handle,
@@ -846,7 +869,14 @@ fn try_ax_grounded_click(
 
     let attrs = element.attributes();
     let role = attrs.role.clone();
-    let label = attrs.label.clone();
+    // Calculator's keys, like many icon buttons, have no title, only a
+    // description ("1", "Add"). Without it a result said "button" and nothing
+    // more, and a press on the wrong key looked exactly like the right one.
+    let label = computer_use_ai_sdk::ax_elements::element_name(
+        attrs.label.as_deref(),
+        attrs.description.as_deref(),
+        None,
+    );
 
     if !is_interactive_ax_role(&role) {
         tracing::debug!(
@@ -1070,6 +1100,122 @@ fn resolve_named_window(input: &Value) -> Result<Option<NamedWindow>, String> {
         let _ = selector;
         Err("Window targeting is only available on macOS".to_string())
     }
+}
+
+/// Read-only actions that still take a `window`: a picture of that window, or
+/// the list of its controls.
+fn takes_window_for_reading(action: &str) -> bool {
+    matches!(action, "screenshot" | "elements")
+}
+
+/// The `element` parameter, as a string id, if one was given.
+fn element_param(input: &Value) -> Option<String> {
+    match input.get("element")? {
+        Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// Act on a control from the latest `elements` listing: press it or open its
+/// menu (`type` is handled in [`execute_computer_tool`], which focuses the
+/// field and types through the verified typing path). Accessibility first:
+/// when the control refuses the accessibility action, the fallback clicks its
+/// real centre, read from the accessibility tree, never a guessed pixel.
+async fn run_element_action(
+    app_handle: &tauri::AppHandle,
+    action: &str,
+    element_id: &str,
+    session_id: Option<&str>,
+) -> Result<Value, String> {
+    use super::ax_targeting;
+
+    if !matches!(action, "left_click" | "right_click" | "double_click") {
+        return Ok(create_anthropic_error_response(format!(
+            "'element' works with left_click, right_click, double_click and type, not {action}"
+        )));
+    }
+    let resolved = match ax_targeting::resolve_element(element_id) {
+        Ok(resolved) => resolved,
+        Err(message) => return Ok(create_anthropic_error_response(message)),
+    };
+    let pin = resolved.pin;
+    let (center_x, center_y) = resolved.screen_center();
+    ax_targeting::set_working_window(pin);
+
+    let accessibility = match action {
+        "left_click" => computer_use_ai_sdk::ax_elements::press(&resolved.element),
+        "right_click" => computer_use_ai_sdk::ax_elements::show_menu(&resolved.element),
+        // A double click means "open" to most apps, which has no reliable
+        // accessibility action; click the real centre twice instead.
+        _ => Err("double click goes to the centre".to_string()),
+    };
+
+    let mut response = match accessibility {
+        Ok(()) => {
+            computer_use_ai_sdk::background::remember_target_window(pin.pid, Some(pin.window_id));
+            info!(
+                "✨ AX {} on {} via accessibility",
+                action,
+                resolved.describe()
+            );
+            let method = if action == "right_click" {
+                "AXShowMenu"
+            } else {
+                "AXPress"
+            };
+            json!({ "success": true, "method": method })
+        }
+        Err(reason) => {
+            info!(
+                "[AX] {} on {}: {}; clicking its centre at ({:.0}, {:.0})",
+                action,
+                resolved.describe(),
+                reason,
+                center_x,
+                center_y
+            );
+            let state_manager = app_handle.state::<AppState>();
+            let _guard = state_manager.input_arbiter().acquire(session_id).await;
+            let target_app = get_frontmost_app_name();
+            let window_pin = Some(pin);
+            let outcome = match run_background_first(
+                app_handle,
+                action,
+                target_app.as_deref(),
+                window_pin,
+                |allow_physical| match action {
+                    "right_click" => state_manager.desktop.right_click_no_warp(
+                        center_x,
+                        center_y,
+                        allow_physical,
+                    ),
+                    "double_click" => state_manager.desktop.double_click_no_warp(
+                        center_x,
+                        center_y,
+                        None,
+                        allow_physical,
+                    ),
+                    _ => state_manager.desktop.left_click_no_warp(
+                        center_x,
+                        center_y,
+                        None,
+                        allow_physical,
+                    ),
+                },
+            )
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(message) => return Ok(create_anthropic_error_response(message)),
+            };
+            with_input_tier(json!({ "success": true }), &outcome)
+        }
+    };
+    response["pressed"] = resolved.describe();
+    // Where the control is, so Juno's pointer can be drawn on it.
+    response["screen_point"] = json!([center_x.round(), center_y.round()]);
+    Ok(response)
 }
 
 /// Which app (and window) a `type` should land in, before anything is written.
@@ -1927,7 +2073,7 @@ pub async fn execute_computer_tool(
     // 5. Optional `window`: pin input to one window so stacking cannot redirect
     //    it. Accepted the same way on both request shapes: the toolset's member
     //    input reaches here unchanged, so this one read covers both.
-    let named_window = if is_ui_modifying_action(action) {
+    let mut named_window = if is_ui_modifying_action(action) || takes_window_for_reading(action) {
         match resolve_named_window(&input) {
             Ok(window) => window,
             Err(message) => return Ok(create_anthropic_error_response(message)),
@@ -1935,15 +2081,132 @@ pub async fn execute_computer_tool(
     } else {
         None
     };
-    let window_pin = named_window.as_ref().map(|w| PinnedWindow {
+    let mut window_pin = named_window.as_ref().map(|w| PinnedWindow {
         pid: w.pid,
         window_id: w.id,
     });
 
+    // 6. Accessibility first (see `ax_targeting`). A window the agent names
+    //    becomes its working window, so the unnamed actions that follow go
+    //    there and never to whatever happens to be on top.
+    if let Some(pin) = window_pin {
+        super::ax_targeting::set_working_window(pin);
+    }
+    // Coordinates are pixels in the last screenshot. When that showed one
+    // window, they belong to that window and to no other.
+    if extract_coordinate(&input).is_some() {
+        if let Some((pid, window_id)) = coordinates::current_frame().window() {
+            match window_pin {
+                Some(pin) if pin.window_id != window_id => {
+                    return Ok(create_anthropic_error_response(format!(
+                        "Your coordinates are pixels in your last screenshot, which shows only \
+                         window {window_id}. Take a screenshot with 'window' set to the window \
+                         you want, then use coordinates from that picture."
+                    )));
+                }
+                Some(_) => {}
+                None => window_pin = Some(PinnedWindow { pid, window_id }),
+            }
+        }
+    }
+    if window_pin.is_none() && is_ui_modifying_action(action) {
+        window_pin = super::ax_targeting::working_window();
+    }
+    // A pointer action aimed at the working window that would land on another
+    // app is refused rather than sent into someone else's window.
+    if let (Some(pin), Some((x, y))) = (window_pin, extract_coordinate(&input)) {
+        if is_ui_modifying_action(action) {
+            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+            if let Some(refusal) =
+                super::ax_targeting::pinned_point_refusal(pin, screen_x, screen_y)
+            {
+                warn!(
+                    "[AX] Refused {} at ({:.0}, {:.0}): off the working window",
+                    action, screen_x, screen_y
+                );
+                return Ok(create_anthropic_error_response(refusal));
+            }
+        }
+    }
+    // An `element` from the latest listing: act on the control itself. Typing
+    // focuses the field inside its app (no raise), then goes through the
+    // normal verified typing path, pinned to the field's window.
+    if let Some(element_id) = element_param(&input) {
+        if action != "type" {
+            return run_element_action(app_handle, action, &element_id, session_id).await;
+        }
+        let resolved = match super::ax_targeting::resolve_element(&element_id) {
+            Ok(resolved) => resolved,
+            Err(message) => return Ok(create_anthropic_error_response(message)),
+        };
+        if let Err(reason) = computer_use_ai_sdk::ax_elements::focus(&resolved.element) {
+            tracing::info!(
+                "[AX] Focus before typing failed ({}); typing into the window",
+                reason
+            );
+        }
+        super::ax_targeting::set_working_window(resolved.pin);
+        named_window = Some(NamedWindow {
+            pid: resolved.pin.pid,
+            id: resolved.pin.window_id,
+        });
+        window_pin = Some(resolved.pin);
+    }
+
     // Execute action
     let execution_start = std::time::Instant::now();
     let result = match action {
+        "screenshot" if window_pin.is_some() => {
+            handle_anthropic_result!(validate_permission(
+                app_handle,
+                RequiredPermission::ScreenRecording,
+                "computer (screenshot)"
+            )
+            .await
+            .map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
+            let Some(pin) = window_pin else {
+                return Ok(create_anthropic_error_response(
+                    "No window to capture".to_string(),
+                ));
+            };
+            // Captured on a blocking thread; adopted back here, on the agent's
+            // task, where its coordinate frame lives.
+            let picture = handle_anthropic_result!(tokio::task::spawn_blocking(move || {
+                super::ax_targeting::capture_window(pin)
+            })
+            .await
+            .map_err(|e| format!("Window capture task failed: {}", e))
+            .and_then(|r| r));
+            Ok::<Value, String>(super::ax_targeting::adopt_picture(picture))
+        }
+        "elements" => {
+            handle_anthropic_result!(validate_permission(
+                app_handle,
+                RequiredPermission::Accessibility,
+                "computer (elements)"
+            )
+            .await
+            .map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
+            let Some(pin) = window_pin.or_else(super::ax_targeting::working_window) else {
+                return Ok(create_anthropic_error_response(
+                    "Name the window to read, for example {\"action\": \"elements\", \"window\": \"Calculator\"}. \
+                     An app name works when the app has one window."
+                        .to_string(),
+                ));
+            };
+            // Read on a blocking thread; remembered back here, on the agent's
+            // task, where its element ids live.
+            let listing = handle_anthropic_result!(tokio::task::spawn_blocking(move || {
+                super::ax_targeting::read_elements(pin)
+            })
+            .await
+            .map_err(|e| format!("Element listing task failed: {}", e))
+            .and_then(|r| r));
+            Ok::<Value, String>(super::ax_targeting::present_elements(listing))
+        }
         "screenshot" => {
+            // A full screenshot puts coordinates back in screen space.
+            coordinates::set_frame(coordinates::CoordinateFrame::Screen);
             // Use the pre-captured PTT screenshot if available (parallelized at PTT release).
             // Falls back to a fresh capture if none is cached or serialization fails.
             let app_state = app_handle.state::<crate::state::AppState>();
@@ -2847,14 +3110,35 @@ pub async fn execute_computer_tool(
                 )));
             }
 
-            // Capture screenshot (already scaled to standard resolution by capture_screenshot_command)
-            let screenshot_result =
-                handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
-                    app_handle.clone(),
-                    state_manager.clone()
-                )
-                .await
-                .map_err(|e| format!("Zoom screenshot capture failed: {}", e)));
+            // Crop from the same kind of picture the coordinates refer to: the
+            // window on its own when the last screenshot was one window,
+            // otherwise the screen at the standard resolution.
+            let source_base64 = match coordinates::current_frame() {
+                coordinates::CoordinateFrame::Window { pid, window_id, .. } => {
+                    let pin = PinnedWindow { pid, window_id };
+                    let picture =
+                        handle_anthropic_result!(tokio::task::spawn_blocking(move || {
+                            super::ax_targeting::capture_window(pin)
+                        })
+                        .await
+                        .map_err(|e| format!("Window capture task failed: {}", e))
+                        .and_then(|r| r));
+                    let picture = super::ax_targeting::adopt_picture(picture);
+                    picture["base64_image"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string()
+                }
+                coordinates::CoordinateFrame::Screen => {
+                    handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
+                        app_handle.clone(),
+                        state_manager.clone()
+                    )
+                    .await
+                    .map_err(|e| format!("Zoom screenshot capture failed: {}", e)))
+                    .base64_image
+                }
+            };
 
             // Decode the base64 screenshot for cropping
             use base64::Engine;
@@ -2862,7 +3146,7 @@ pub async fn execute_computer_tool(
             use std::io::Cursor;
             let engine = base64::engine::general_purpose::STANDARD;
             let image_data = handle_anthropic_result!(engine
-                .decode(&screenshot_result.base64_image)
+                .decode(&source_base64)
                 .map_err(|e| format!("Failed to decode screenshot for zoom: {}", e)));
 
             let img = handle_anthropic_result!(image::load_from_memory(&image_data)
@@ -3266,28 +3550,33 @@ pub fn create_versioned_tools(version_config: ToolVersionConfig) -> Vec<ToolDefi
     // Computer tool - main screen interaction tool (Official Anthropic Computer Use API)
     let computer_tool = ToolDefinition {
         name: "computer".to_string(),
-        description: "Use a computer to complete tasks. This tool gives you access to interact with any desktop application using the mouse and keyboard, take screenshots, and perform various system operations.
+        description: "Use a computer to complete tasks: read and operate any desktop app, in the background, without taking the person's mouse or keyboard.
 
-The computer tool accepts these actions:
-- screenshot: Take a screenshot of the current screen
-- left_click: Click at coordinates with left mouse button
-- right_click: Click at coordinates with right mouse button
-- middle_click: Click at coordinates with middle mouse button
-- double_click: Double-click at coordinates
-- triple_click: Triple-click at coordinates
-- left_click_drag: Drag from start coordinates to end coordinates
-- mouse_move: Move mouse to coordinates
-- left_mouse_down: Press and hold left mouse button at coordinates
-- left_mouse_up: Release left mouse button at coordinates
+Work through accessibility first and pixels last:
+1. List the window's controls: {\"action\": \"elements\", \"window\": \"Calculator\"}. You get every button, field and piece of text with an id, its name and its current value. It works on windows behind other windows and costs far fewer tokens than a screenshot.
+2. Act on a control by id: {\"action\": \"left_click\", \"element\": \"e7\"}, or {\"action\": \"type\", \"element\": \"e3\", \"text\": \"hello\"}. The result names the control that was pressed.
+3. Read the outcome from the values in a fresh elements listing.
+Use screenshots and coordinates only when a window has no controls to list (games, canvases, remote screens) or you need to see its layout. Then prefer {\"action\": \"screenshot\", \"window\": \"Calculator\"}: a picture of just that window, even when it is covered. Coordinates you send afterwards are pixels in that picture. A screenshot without 'window' is the whole screen, in screen coordinates.
+
+Always say which window you mean with 'window' (its title, its app's name, or its id). The window you name becomes your working window: later actions without 'window' go to it, never to whatever is on top, and a click that would land on another app is refused instead of sent.
+
+Actions:
+- elements: List a window's controls and text with ids (needs 'window', or uses your working window)
+- screenshot: Picture of one window (with 'window') or of the whole screen
+- left_click, right_click, double_click: Press a control ('element') or click at 'coordinate'
+- type: Type text into a field ('element') or into the working window's focused field
 - key: Press a key (supports modifiers like 'cmd+c', 'ctrl+v', etc.)
 - hold_key: Hold a key down for a duration ('duration' in seconds, max 300; or 'duration_ms' in milliseconds)
-- type: Type text at current cursor position
+- middle_click, triple_click: Click at coordinates
+- left_click_drag: Drag from start coordinates to end coordinates
+- mouse_move: Move mouse to coordinates
+- left_mouse_down, left_mouse_up: Press or release the left button at coordinates
 - scroll: Scroll at coordinates in specified direction
 - cursor_position: Get current mouse cursor position
 - wait: Wait for specified number of seconds
-- zoom: View a specific screen region at full native resolution (region: [x0, y0, x1, y1])
+- zoom: View a region of your last screenshot in more detail (region: [x0, y0, x1, y1])
 
-Coordinates are provided as [x, y] arrays and are automatically transformed from screenshot coordinates to screen coordinates.".to_string(),
+Coordinates are [x, y] pixels in your last screenshot.".to_string(),
         api_type: None, // Will be set by version manager
         beta_flag: None, // Will be set by version manager
         input_schema: json!({
@@ -3296,7 +3585,11 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 "action": {
                     "type": "string",
                     "description": "The action to perform",
-                    "enum": ["screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait", "zoom"]
+                    "enum": ["elements", "screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait", "zoom"]
+                },
+                "element": {
+                    "type": ["string", "integer"],
+                    "description": "An id from your latest 'elements' listing, such as \"e7\". For left_click, right_click, double_click and type: acts on that control directly instead of at a coordinate."
                 },
                 "coordinate": {
                     "type": "array",
@@ -3338,7 +3631,7 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 },
                 "window": {
                     "type": ["integer", "string"],
-                    "description": "Optional, for clicks, scrolls, key and type: the window to act on, by window id or title. Use it when several windows overlap, so the input reaches that window even when another is on top. Results report the window each action reached."
+                    "description": "The window to act on or read: its title, its app's name (when the app has one window), or its id. Works for elements, screenshot, clicks, scrolls, key and type, even when the window is behind others. It becomes your working window, so later actions without 'window' go to it. Results report the window each action reached."
                 }
             },
             "required": ["action"]
@@ -4271,6 +4564,45 @@ mod input_targeting_tests {
         assert_eq!(name, "computer");
         assert_eq!(input["action"], json!("type"));
         assert_eq!(input["window"], json!("zsh: logs"));
+    }
+
+    #[test]
+    fn element_ids_are_read_as_strings_or_numbers() {
+        assert_eq!(
+            element_param(&json!({ "element": "e7" })),
+            Some("e7".to_string())
+        );
+        assert_eq!(
+            element_param(&json!({ "element": 7 })),
+            Some("7".to_string())
+        );
+        assert_eq!(element_param(&json!({ "element": " " })), None);
+        assert_eq!(element_param(&json!({})), None);
+    }
+
+    #[test]
+    fn listing_and_pictures_take_a_window_but_change_nothing() {
+        for action in ["elements", "screenshot"] {
+            assert!(takes_window_for_reading(action));
+            assert!(
+                !is_ui_modifying_action(action),
+                "{action} must not be paced"
+            );
+        }
+    }
+
+    #[test]
+    fn the_schema_offers_elements_and_element_ids() {
+        let tools = create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124));
+        let computer = tools
+            .iter()
+            .find(|t| t.name == "computer")
+            .expect("computer tool");
+        let actions = computer.input_schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("action enum");
+        assert!(actions.contains(&json!("elements")));
+        assert!(computer.input_schema["properties"]["element"].is_object());
     }
 
     #[test]

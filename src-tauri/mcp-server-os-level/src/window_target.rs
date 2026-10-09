@@ -138,7 +138,7 @@ pub fn select_window<'a>(
                 .collect();
             match partial.as_slice() {
                 [only] => Ok(**only),
-                [] => Err(format!("No on-screen window title contains '{}'", title)),
+                [] => by_app_name(records, title, own_pid),
                 many => Err(format!(
                     "'{}' matches {} windows; pass one of these ids as 'window': {}",
                     title,
@@ -156,6 +156,44 @@ pub fn select_window<'a>(
             }
         }
     }
+}
+
+/// No title matched: an app name ("Calculator", "Zed") names its window when
+/// the app has exactly one. More than one is refused with the ids, as for
+/// titles.
+fn by_app_name<'a>(
+    records: &'a [WindowRecord],
+    name: &str,
+    own_pid: i32,
+) -> Result<&'a WindowRecord, String> {
+    let wanted = name.to_lowercase();
+    let owned: Vec<&WindowRecord> = records
+        .iter()
+        .filter(|w| w.pid != own_pid && w.is_user_layer() && w.owner.to_lowercase() == wanted)
+        .collect();
+    match owned.as_slice() {
+        [only] => Ok(*only),
+        [] => Err(format!(
+            "No on-screen window title contains '{}', and no app by that name has a window",
+            name
+        )),
+        many => Err(format!(
+            "{} has {} windows; pass one of these ids as 'window': {}",
+            name,
+            many.len(),
+            many.iter()
+                .map(|w| format!("{} ({})", w.id, w.title.as_deref().unwrap_or("untitled")))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// Whether a point falls on any window of `pid`: the target window itself or
+/// one of its app's sheets, popovers and menus. Used to refuse a click aimed at
+/// one app that would land on another.
+pub fn app_window_contains(records: &[WindowRecord], pid: i32, x: f64, y: f64) -> bool {
+    records.iter().any(|w| w.pid == pid && w.contains(x, y))
 }
 
 /// The topmost window under a point, front-to-back order assumed.
@@ -311,6 +349,59 @@ mod tests {
         let records = stacked();
         let err = select_window(&records, &WindowSelector::Title("zsh".into()), JUNO).unwrap_err();
         assert!(err.contains("11") && err.contains("12"), "{}", err);
+    }
+
+    fn calculator_over_zed() -> Vec<WindowRecord> {
+        vec![
+            WindowRecord {
+                id: 11502,
+                pid: 70,
+                owner: "Calculator".to_string(),
+                title: Some("Calculator".to_string()),
+                bounds: (368.0, 410.0, 230.0, 408.0),
+                layer: 0,
+            },
+            WindowRecord {
+                id: 106,
+                pid: 80,
+                owner: "Zed".to_string(),
+                title: Some("juno".to_string()),
+                bounds: (0.0, 30.0, 934.0, 870.0),
+                layer: 0,
+            },
+        ]
+    }
+
+    #[test]
+    fn an_app_name_names_its_only_window() {
+        let records = calculator_over_zed();
+        let zed = select_window(&records, &WindowSelector::Title("zed".into()), JUNO).unwrap();
+        assert_eq!(zed.id, 106);
+    }
+
+    #[test]
+    fn an_app_with_several_windows_is_refused_with_the_ids() {
+        let mut records = calculator_over_zed();
+        records.push(WindowRecord {
+            id: 107,
+            pid: 80,
+            owner: "Zed".to_string(),
+            title: Some("notes".to_string()),
+            bounds: (0.0, 30.0, 500.0, 500.0),
+            layer: 0,
+        });
+        let err = select_window(&records, &WindowSelector::Title("Zed".into()), JUNO).unwrap_err();
+        assert!(err.contains("106") && err.contains("107"), "{}", err);
+    }
+
+    /// The 2026-10-08 Calculator run: the "1" key click landed at screen
+    /// x=361, 7 points left of Calculator, on the Zed window beneath it.
+    #[test]
+    fn a_point_just_outside_the_target_app_is_not_on_it() {
+        let records = calculator_over_zed();
+        assert!(!app_window_contains(&records, 70, 361.0, 730.0));
+        assert!(app_window_contains(&records, 70, 410.0, 730.0));
+        assert!(app_window_contains(&records, 80, 361.0, 730.0));
     }
 
     #[test]

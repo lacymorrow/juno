@@ -278,14 +278,18 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
 /// look at rather than as a wall of base64 in a text block.
 fn to_mcp_content(value: Value) -> Value {
     if let Some(image) = value.get("base64_image").and_then(Value::as_str) {
-        return json!({
-            "content": [{
-                "type": "image",
-                "data": image,
-                "mimeType": "image/png"
-            }],
-            "isError": false
-        });
+        let mut content = vec![json!({
+            "type": "image",
+            "data": image,
+            "mimeType": image_mime_type(image)
+        })];
+        // What the picture is and how to read coordinates in it ("This
+        // picture is only the Calculator window..."). Dropping it left the
+        // model guessing which frame its coordinates were in.
+        if let Some(note) = value.get("output").and_then(Value::as_str) {
+            content.push(json!({ "type": "text", "text": note }));
+        }
+        return json!({ "content": content, "isError": false });
     }
 
     let text = match value.as_str() {
@@ -296,6 +300,16 @@ fn to_mcp_content(value: Value) -> Value {
         "content": [{ "type": "text", "text": text }],
         "isError": false
     })
+}
+
+/// Screenshots are JPEG and zoom crops are PNG; label each as what it is,
+/// read from the first bytes of the base64.
+fn image_mime_type(base64: &str) -> &'static str {
+    if base64.starts_with("/9j/") {
+        "image/jpeg"
+    } else {
+        "image/png"
+    }
 }
 
 struct RpcError {
@@ -319,6 +333,32 @@ impl RpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_window_picture_carries_its_note_and_its_real_type() {
+        let result = to_mcp_content(json!({
+            "base64_image": "/9j/4AAQ",
+            "output": "This picture is only the Calculator window"
+        }));
+        assert_eq!(result["content"][0]["mimeType"], "image/jpeg");
+        assert_eq!(
+            result["content"][1]["text"],
+            "This picture is only the Calculator window"
+        );
+    }
+
+    #[test]
+    fn the_computer_tool_offers_elements_first() {
+        let tools = tool_list();
+        let schema = &tools[0]["inputSchema"]["properties"];
+        assert!(schema["action"]["enum"]
+            .as_array()
+            .is_some_and(|actions| actions.contains(&json!("elements"))));
+        assert!(schema["element"].is_object());
+        assert!(tools[0]["description"]
+            .as_str()
+            .is_some_and(|d| d.contains("accessibility first")));
+    }
 
     #[test]
     fn the_computer_settings_and_approve_tools_are_offered() {
