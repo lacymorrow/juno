@@ -136,7 +136,7 @@ impl Health {
         let name = self.answerer.name();
         let label = match self.status() {
             Status::Connected => format!("Connected to {name}"),
-            Status::Offline => "No internet connection".to_string(),
+            Status::Offline => "Network unavailable".to_string(),
             Status::SignedOut => format!("Not signed in to {name}"),
             Status::ProviderUnreachable => format!("Can't reach {name}"),
         };
@@ -491,7 +491,7 @@ mod tests {
         let mut health = Health::default();
         assert!(health.network_changed(false));
         assert_eq!(health.status(), Status::Offline);
-        assert_eq!(health.snapshot().label, "No internet connection");
+        assert_eq!(health.snapshot().label, "Network unavailable");
         assert_eq!(health.blocked(), Some(Blocked::Offline));
         // Same news twice is not a change.
         assert!(!health.network_changed(false));
