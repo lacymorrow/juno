@@ -158,26 +158,70 @@ export async function applySteadyFrame(layout: SteadyLayout): Promise<void> {
 }
 
 /**
+ * What the page saw of the gesture, for Rust's `[Drag]` log lines. Screen
+ * points (DOM `screenX`/`screenY`) and milliseconds.
+ */
+export interface DragTrace {
+  pressX: number;
+  pressY: number;
+  crossX: number;
+  crossY: number;
+  pressToCrossMs: number;
+  /** `performance.now()` at the crossing; turned into a delay on the way out. */
+  crossedAt: number;
+}
+
+/** What Rust did with `startDrag` (`DragStart` in `bar_position.rs`). */
+type DragOutcome = "started" | "released" | "unsupported";
+
+/**
  * Put the bar window down with `grab` (a point inside it, in points) under
  * the cursor as it is right now, at `size`. `fallback` is the top-left used
  * when the cursor cannot be read. Rust reads the cursor in the same
  * main-thread call as the frame change, so nothing the page does can add lag
- * between the two. Resolves to the top-left the window ended up with.
+ * between the two.
+ *
+ * With `startDrag`, Rust also starts the OS window drag in that same call,
+ * anchored at the cursor as it is then. It has to be there: the OS drag keeps
+ * whatever offset the window has from the cursor when it starts, and asking
+ * for it from the page (`startDragging()`) came one IPC round trip after the
+ * placement, by which time a fast hand had moved on. `drag` says what
+ * happened: "unsupported" (or nothing, from an older backend) leaves the OS
+ * drag to the caller.
  */
 async function placeGrabUnderCursor(
   fallback: { x: number; y: number },
   size: { width: number; height: number },
   grab: { x: number; y: number },
-): Promise<{ x: number; y: number }> {
-  const placed = await invoke<{ x: number; y: number } | null>(COMMANDS.BAR_SET_BAR_FRAME, {
-    x: fallback.x,
-    y: fallback.y,
-    width: size.width,
-    height: size.height,
-    grabX: grab.x,
-    grabY: grab.y,
-  });
-  return placed && Number.isFinite(placed.x) && Number.isFinite(placed.y) ? placed : fallback;
+  trace?: DragTrace | null,
+): Promise<{ origin: { x: number; y: number }; drag: DragOutcome | null }> {
+  const placed = await invoke<{ x: number; y: number; drag?: DragOutcome } | null>(
+    COMMANDS.BAR_SET_BAR_FRAME,
+    {
+      x: fallback.x,
+      y: fallback.y,
+      width: size.width,
+      height: size.height,
+      grabX: grab.x,
+      grabY: grab.y,
+      startDrag: true,
+      trace: trace
+        ? {
+            pressX: trace.pressX,
+            pressY: trace.pressY,
+            crossX: trace.crossX,
+            crossY: trace.crossY,
+            pressToCrossMs: trace.pressToCrossMs,
+            crossToRequestMs: performance.now() - trace.crossedAt,
+          }
+        : null,
+    },
+  );
+  const origin =
+    placed && Number.isFinite(placed.x) && Number.isFinite(placed.y)
+      ? { x: placed.x, y: placed.y }
+      : fallback;
+  return { origin, drag: placed?.drag ?? null };
 }
 
 /**
@@ -233,8 +277,41 @@ export const RELEASE_WATCH_MS = 150;
 // have the placement land on top of the glide.
 let plainPlacement: Promise<void> | null = null;
 
+// ── Whether a bar drag is in progress ─────────────────────────────────────
+//
+// From the press crossing the threshold until the snap has settled. Tooltips
+// read it: nothing may pop up on a bar being carried, and one already open
+// closes the moment the drag starts.
+
+let barDragging = false;
+const draggingListeners = new Set<() => void>();
+
+function setBarDragging(next: boolean): void {
+  if (barDragging === next) return;
+  barDragging = next;
+  draggingListeners.forEach((fn) => fn());
+}
+
+/** True from the drag start until the snap has settled. */
+export function isBarDragging(): boolean {
+  return barDragging;
+}
+
+function subscribeBarDragging(fn: () => void): () => void {
+  draggingListeners.add(fn);
+  return () => {
+    draggingListeners.delete(fn);
+  };
+}
+
+/** Re-renders when a bar drag starts or finishes settling. */
+export function useBarDragging(): boolean {
+  return useSyncExternalStore(subscribeBarDragging, isBarDragging, isBarDragging);
+}
+
 /** Forget the in-flight gesture. For tests, which share one module instance. */
 export function resetBarSnapState(): void {
+  setBarDragging(false);
   snapArmed = false;
   snapAnimating = false;
   overlayShown = false;
@@ -359,7 +436,10 @@ export function answerOverlayReady(): void {
  * small window glides into the well and the settle swaps the steady layout
  * back. Every other look drags its window as it is.
  */
-export function startBarDrag(grabOffset: { x: number; y: number }): void {
+export function startBarDrag(
+  grabOffset: { x: number; y: number },
+  trace: DragTrace | null = null,
+): void {
   void armBarSnap(grabOffset);
   const win = getCurrentWindow();
   const osDrag = () =>
@@ -368,12 +448,13 @@ export function startBarDrag(grabOffset: { x: number; y: number }): void {
     void osDrag();
     return;
   }
+  setBarDragging(true);
   dragHeld = true;
   startReleaseWatch();
   const steady = getSteady(win.label);
   const layout = steady?.layout;
   if (!steady || !layout) {
-    plainPlacement = startPlainDrag(win, grabOffset, osDrag);
+    plainPlacement = startPlainDrag(win, grabOffset, osDrag, trace);
     return;
   }
   const footprint = steady.footprint ?? steady.spec.rest;
@@ -382,37 +463,45 @@ export function startBarDrag(grabOffset: { x: number; y: number }): void {
   swapSteadyLayout(win.label, drag, async (next) => {
     // Placed by the cursor, not where the shape was at the press: the
     // threshold and the hidden frames before this let a fast flick carry the
-    // cursor well past the shape, and the OS drag would keep that gap.
-    const origin = await placeGrabUnderCursor(next.origin, next.size, grab);
-    // The window is the shape now, still hidden for a frame. Released
+    // cursor well past the shape. Rust starts the OS drag in the same call,
+    // so the cursor cannot get ahead again before it begins. Released
     // already (a flick) means there is nothing left to drag; the settle,
     // queued behind this swap, glides it home.
-    if (dragHeld) void osDrag();
-    return { ...next, origin };
+    const placed = await placeGrabUnderCursor(next.origin, next.size, grab, trace);
+    if (!osDragHandled(placed.drag) && dragHeld) void osDrag();
+    return { ...next, origin: placed.origin };
   }).catch((error) => {
     console.debug("barDrag: drag layout failed:", error);
     if (dragHeld) void osDrag();
   });
 }
 
+/** Rust started the drag, or found nothing to drag: the page does nothing. */
+function osDragHandled(drag: DragOutcome | null): boolean {
+  return drag === "started" || drag === "released";
+}
+
 /**
  * A look that resizes its own window (not steady) keeps its window for the
  * drag, but it is put back under the cursor first: by the time the press
  * becomes a drag the cursor is past the threshold, and the OS drag would keep
- * that gap for the whole drag.
+ * that gap for the whole drag. Rust starts the OS drag in the same call.
  */
 async function startPlainDrag(
   win: AppWindow,
   grabOffset: { x: number; y: number },
   osDrag: () => Promise<void>,
+  trace: DragTrace | null,
 ): Promise<void> {
   try {
     const [origin, logical] = await Promise.all([windowOrigin(win), logicalWindowSize(win)]);
-    await placeGrabUnderCursor(
+    const placed = await placeGrabUnderCursor(
       origin,
       { width: logical.windowWidth, height: logical.windowHeight },
       grabOffset,
+      trace,
     );
+    if (osDragHandled(placed.drag)) return;
   } catch (error) {
     console.debug("barDrag: could not put the bar under the cursor:", error);
   }
@@ -432,9 +521,16 @@ export async function settleBarSnap(): Promise<void> {
     lastShowPayload = null;
     void emit(EVENTS.SNAP_WELLS_HIDE);
   }
+  if (dragHeld) {
+    void invoke(COMMANDS.BAR_DRAG_RELEASED).catch(() => {});
+  }
   dragHeld = false;
   stopReleaseWatch();
-  if (!snapArmed || snapAnimating) return;
+  if (snapAnimating) return;
+  if (!snapArmed) {
+    setBarDragging(false);
+    return;
+  }
   snapArmed = false;
   snapAnimating = true;
   try {
@@ -472,6 +568,7 @@ export async function settleBarSnap(): Promise<void> {
   } finally {
     snapAnimating = false;
     footprintGrab = null;
+    setBarDragging(false);
   }
 }
 

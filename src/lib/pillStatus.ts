@@ -26,7 +26,7 @@ export type ConnectivityStatus =
 /** `connectivity::Snapshot` in Rust. */
 export interface Connectivity {
   status: ConnectivityStatus;
-  /** A short sentence for the status, e.g. "No internet connection". */
+  /** A short sentence for the status, e.g. "Network unavailable". */
   label: string;
   /** The provider's everyday name, e.g. "Claude". */
   provider: string;

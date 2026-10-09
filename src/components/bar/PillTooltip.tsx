@@ -9,6 +9,8 @@
  *   an inactive window's web view, so without this a tooltip would never show
  *   in the case that matters most. It opens after the same delay.
  *
+ * Never while the bar is being dragged (`useBarDragging`).
+ *
  * Placement: the Pill's window is its largest footprint (pane included), so
  * there is always room on the side the pill grows toward. The caller passes
  * that side; Radix keeps the tooltip inside the window if it would cross an
@@ -16,9 +18,10 @@
  * tooltip is showing so the two never appear together.
  */
 
-import { cloneElement, useEffect, useState, type ReactElement } from "react";
+import { cloneElement, useEffect, useRef, useState, type ReactElement } from "react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useBarDragging } from "@/hooks/useBarSnapWells";
 
 /** Matches macOS: long enough not to flash on a passing cursor. */
 export const PILL_TOOLTIP_DELAY_MS = 500;
@@ -41,6 +44,7 @@ export function PillTooltip({
   label,
   detail,
   forcedOpen = false,
+  blocked = false,
   side,
   sideOffset = 6,
   children,
@@ -50,6 +54,8 @@ export function PillTooltip({
   detail?: string | null;
   /** The native tracking area says the cursor is over this control. */
   forcedOpen?: boolean;
+  /** Another control is the one being pointed at; stay closed. */
+  blocked?: boolean;
   side: "top" | "bottom";
   /** Gap between the trigger and the tooltip. */
   sideOffset?: number;
@@ -64,11 +70,26 @@ export function PillTooltip({
     if (!forcedOpen) setPressed(false);
   }, [forcedOpen]);
 
-  const open = !pressed && (hoverOpen || forced);
+  // A bar being carried shows no tooltips: none opens from the press past the
+  // threshold until the snap has settled, and one already up closes. It
+  // counts as a press, so it stays away until the cursor leaves the control,
+  // rather than popping up under a cursor that happens to rest there after.
+  const dragging = useBarDragging();
+  const hoveringRef = useRef(false);
+  hoveringRef.current = forcedOpen || hoverOpen;
+  useEffect(() => {
+    if (!dragging) return;
+    // Only while over this control: `pressed` is cleared by leaving it, and a
+    // control the cursor is not on would otherwise never be cleared.
+    if (hoveringRef.current) setPressed(true);
+    setHoverOpen(false);
+  }, [dragging]);
+
+  const open = !blocked && !dragging && !pressed && (hoverOpen || forced);
   const trigger = cloneElement(children, { title: open ? undefined : label });
 
   return (
-    <Tooltip open={open} onOpenChange={setHoverOpen}>
+    <Tooltip open={open} onOpenChange={(next) => setHoverOpen(next && !dragging)}>
       <TooltipTrigger
         asChild
         onPointerDown={() => setPressed(true)}

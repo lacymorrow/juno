@@ -421,6 +421,13 @@ export function pointInRect(
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+/** The dot's hover target where it is drawn now, or null when it is not drawn. */
+function idleDotRect(el: HTMLElement | null): DOMRect | null {
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return r.width === 0 && r.height === 0 ? null : r;
+}
+
 /** Which layout a combination of backend state and local UI state gets. */
 export function pickLayout({
   state,
@@ -831,6 +838,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     "dot" | "mic" | "type" | "chat" | "listen" | null
   >(null);
   const dotRef = useRef<HTMLDivElement>(null);
+  // The layout on screen, for the hover callbacks below (set at render).
+  const shownLayoutRef = useRef<BarLayout>("compact");
+  // Where the dot was in the idle pill when the cursor came to it. Hovering
+  // grows the pill away from the edge it is docked to, which carries the dot
+  // (on its leading edge) out from under a resting cursor: on a right-docked
+  // bar it slid 76pt left and the cursor landed on a button. The dot is what
+  // the person pointed at, so it stays the hovered control until the cursor
+  // leaves the spot where the dot was.
+  const dotLatchRef = useRef<DOMRect | null>(null);
   const micRef = useRef<HTMLButtonElement>(null);
   const typeRef = useRef<HTMLButtonElement>(null);
   const chatRef = useRef<HTMLButtonElement>(null);
@@ -842,6 +858,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       clearTimeout(leaveTimerRef.current);
       leaveTimerRef.current = null;
     }
+    // Read before the pill grows: this is the dot the person can see.
+    if (shownLayoutRef.current === "compact") dotLatchRef.current = idleDotRect(dotRef.current);
     setHovered(true);
   }, []);
 
@@ -859,6 +877,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         console.debug("FloatingBar: cursor check failed:", error);
       }
       if (!inside) {
+        dotLatchRef.current = null;
         setHovered(false);
         setHoveredButton(null);
       }
@@ -881,6 +900,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         if (r.width === 0 && r.height === 0) return false;
         return pointInRect(x, y, r);
       };
+      const latch = dotLatchRef.current;
+      if (latch && pointInRect(x, y, latch)) {
+        setHoveredButton("dot");
+        return;
+      }
+      dotLatchRef.current = null;
+      if (shownLayoutRef.current === "compact" && hit(dotRef)) {
+        dotLatchRef.current = idleDotRect(dotRef.current);
+      }
       setHoveredButton(
         hit(dotRef)
           ? "dot"
@@ -1813,6 +1841,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // The typed text makes the pill taller; the band grows with it, so the pane
   // slides rather than jumps.
   const shownLayout = frame.layout;
+  shownLayoutRef.current = shownLayout;
   const growth = frame.composerGrowth;
   const pill = {
     width: BAR_LAYOUTS[shownLayout].width + frame.extraWidth,
@@ -2004,6 +2033,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               label="Talk to Juno"
               detail={talkShortcut}
               forcedOpen={hoveredButton === "mic"}
+              blocked={hoveredButton === "dot"}
               side={tooltipSide}
             >
               <button
@@ -2021,6 +2051,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             <PillTooltip
               label="Type to Juno"
               forcedOpen={hoveredButton === "type"}
+              blocked={hoveredButton === "dot"}
               side={tooltipSide}
             >
               <button
@@ -2041,6 +2072,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             <PillTooltip
               label="Open chat"
               forcedOpen={hoveredButton === "chat"}
+              blocked={hoveredButton === "dot"}
               side={tooltipSide}
             >
               <button
@@ -2063,6 +2095,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               <PillTooltip
                 label={voiceListening ? "Stop listening for the wake phrase" : "Listen for the wake phrase"}
                 forcedOpen={hoveredButton === "listen"}
+              blocked={hoveredButton === "dot"}
                 side={tooltipSide}
               >
               <button
