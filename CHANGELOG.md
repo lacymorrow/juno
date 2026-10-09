@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.160] - 2026-10-09
+
+### Added
+
+- **tray:** Center Floating Bar row, and act on the icon's press (#771) (f47651e3)
+
 ## [0.8.159] - 2026-10-09
 
 ### Fixed
@@ -1247,7 +1253,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.159...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.160...HEAD
+[0.8.160]: https://github.com/lacymorrow/juno/compare/cua-v0.8.159...v0.8.160
 [0.8.159]: https://github.com/lacymorrow/juno/compare/cua-v0.8.158...v0.8.159
 [0.8.158]: https://github.com/lacymorrow/juno/compare/cua-v0.8.157...v0.8.158
 [0.8.157]: https://github.com/lacymorrow/juno/compare/cua-v0.8.156...v0.8.157
