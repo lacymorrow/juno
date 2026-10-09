@@ -234,6 +234,13 @@ pub mod defaults {
     /// Juno's policy is capability first, so "high" rather than "medium".
     /// Anything outside `CLAUDE_CLI_EFFORT_LEVELS` is ignored and this is used.
     pub const CLAUDE_CLI_EFFORT: &str = "high";
+    /// The effort for a spoken turn when the person has not set one. At "high"
+    /// the model plans before it writes its first spoken line, and on voice
+    /// turns that plan was most of the 1.5 to 2 seconds between the request
+    /// and the first word. "medium" rather than "low": a spoken request still
+    /// drives tools and multi-step work, and "low" trades away too much of the
+    /// planning that makes those land.
+    pub const CLAUDE_CLI_VOICE_EFFORT: &str = "medium";
     /// The levels the CLI accepts. A store value outside this list is dropped
     /// rather than passed through, so a stale setting cannot make every spawn
     /// fail on an unknown argument.

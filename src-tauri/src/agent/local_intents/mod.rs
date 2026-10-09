@@ -97,6 +97,23 @@ impl Reply {
             ..Self::text(line)
         }
     }
+
+    /// Shown only: the spoken line already went out ahead of the action
+    /// ([`speak_ahead`]). A failure after it stays quiet rather than
+    /// following the acknowledgement with a second, contradicting line.
+    pub fn unspoken(self) -> Self {
+        Self {
+            spoken: String::new(),
+            ..self
+        }
+    }
+}
+
+/// Say `line` now, before the action it describes has run, so the person
+/// hears the acknowledgement while the window is still opening. Joins the
+/// turn's speech queue like any spoken chunk.
+pub(crate) fn speak_ahead(app_handle: &AppHandle, line: &str) {
+    crate::tts::enqueue_speech(line.to_string(), app_handle.clone());
 }
 
 /// A parsed local request.
@@ -237,7 +254,12 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
     let Some(reply) = reply else {
         return false;
     };
-    log::info!("Local intent {:?} served: {}", intent, reply.spoken);
+    let served = if reply.spoken.is_empty() {
+        &reply.display
+    } else {
+        &reply.spoken
+    };
+    log::info!("Local intent {:?} served: {}", intent, served);
     emit_reply(app_handle, reply).await;
     settings_follow::publish(app_handle);
     true
@@ -271,7 +293,7 @@ pub(crate) fn emit_reply_message(app_handle: &AppHandle, reply: Reply, agent_sta
         app_handle,
         reply.display.clone(),
         Some(message_id.clone()),
-        Some(reply.spoken),
+        spoken_line(reply.spoken),
     );
     crate::agent::tool_logger::emit_stream_end_with_state(
         app_handle,
@@ -281,9 +303,30 @@ pub(crate) fn emit_reply_message(app_handle: &AppHandle, reply: Reply, agent_sta
     );
 }
 
+/// The line still to speak, if any. Empty when it was spoken ahead.
+fn spoken_line(spoken: String) -> Option<String> {
+    Some(spoken).filter(|line| !line.trim().is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reply_spoken_ahead_is_not_spoken_again() {
+        let done = Reply::text("Opening Ghostty settings.").unspoken();
+        assert_eq!(done.display, "Opening Ghostty settings.");
+        assert_eq!(spoken_line(done.spoken), None);
+        // A failure after the acknowledgement stays quiet.
+        let failed = Reply::failure("I couldn't open Ghostty settings.").unspoken();
+        assert!(failed.failed);
+        assert_eq!(spoken_line(failed.spoken), None);
+        // An ordinary reply is still spoken.
+        assert_eq!(
+            spoken_line(Reply::text("Volume 40%.").spoken).as_deref(),
+            Some("Volume 40%.")
+        );
+    }
 
     #[test]
     fn each_domain_is_reachable_from_the_entry_parser() {
