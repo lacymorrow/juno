@@ -12,6 +12,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { homeDir } from "@tauri-apps/api/path";
 import { cn } from "@/lib/utils";
 import { COMMANDS } from "@/lib/constants.generated";
 import { useState, useCallback, useEffect, useRef } from "react";
@@ -307,8 +308,13 @@ export function OpenButton({
       if (app) {
         await invoke(COMMANDS.DESKTOP_OPEN_APPLICATION, { appName: app });
       } else if (path) {
-        // Convert file path to file:// URL for open_url
-        const fileUrl = path.startsWith("file://") ? path : `file://${path.replace(/^~/, "")}`;
+        // The model writes paths the way people say them, "~/Downloads".
+        // Dropping the tilde used to send file:///Downloads, a folder that
+        // does not exist, so the button looked pressed and nothing opened.
+        const expanded = path.startsWith("~")
+          ? path.replace(/^~/, (await homeDir()).replace(/\/$/, ""))
+          : path;
+        const fileUrl = expanded.startsWith("file://") ? expanded : `file://${expanded}`;
         await invoke(COMMANDS.DESKTOP_OPEN_URL, { url: fileUrl });
       } else if (url) {
         await invoke(COMMANDS.DESKTOP_OPEN_URL, { url });
