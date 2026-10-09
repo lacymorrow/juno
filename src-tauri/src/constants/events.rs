@@ -76,6 +76,12 @@ pub mod agent_sessions {
     pub const NEEDS_INPUT: &str = "agent-session-needs-input";
 }
 
+/// Suggested-reply chips under a locally served reply
+pub mod chips {
+    /// Payload: `{ chips: [{ id, label }] }`. An empty list clears the row.
+    pub const REPLY_CHIPS: &str = "reply-chips";
+}
+
 /// Streaming events
 pub mod streaming {
     pub const TEXT_STREAM: &str = "agent-text-stream";
