@@ -32,6 +32,8 @@ pub mod settings {
     pub const SET_AUTOSTART_ENABLED: &str = "set_autostart_enabled";
     pub const GET_ADVANCED_SETTINGS_ENABLED: &str = "get_advanced_settings_enabled";
     pub const SET_ADVANCED_SETTINGS_ENABLED: &str = "set_advanced_settings_enabled";
+    /// The pane and row the agent asked for before the window existed.
+    pub const TAKE_PENDING_SETTINGS_NAVIGATION: &str = "take_pending_settings_navigation";
     /// Beta: one long-lived claude process per conversation.
     /// See docs/plans/cli-persistent-session-spike.md
     pub const GET_CLI_PERSISTENT_SESSION_ENABLED: &str = "get_cli_persistent_session_enabled";

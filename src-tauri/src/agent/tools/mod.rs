@@ -41,7 +41,8 @@ pub mod path_security; // Shared canonicalization + workspace-boundary enforceme
 pub mod permission_policy; // The one decision: does this action need asking, and what do we call it
 pub mod safari_tools; // Native Safari DOM automation with AppleScript injection
 pub mod self_awareness_tools; // Self-building and introspection capabilities
-                              // pub mod self_improvement; // Research-backed autonomous code generation system - TODO: Fix module not found
+pub mod settings_tool; // The agent drives its own Settings window (list, get, set, open, highlight)
+                       // pub mod self_improvement; // Research-backed autonomous code generation system - TODO: Fix module not found
 
 pub mod risk_classifier; // Automatic risk level classification for tool approval gating
 pub mod schedule_tools; // User-facing scheduled automations (cron-based agent tasks)

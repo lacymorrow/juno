@@ -114,6 +114,9 @@ pub mod tool_names {
     pub const SET_FILE_MONITOR: &str = "set_file_monitor";
     pub const CHECK_EXPIRED_TIMERS: &str = "check_expired_timers";
 
+    // Juno's own Settings window: list, read, change, open and highlight
+    pub const SETTINGS: &str = "settings";
+
     // Mac app tools (Reminders, Calendar, Contacts through EventKit and Contacts)
     pub const REMINDERS_LIST: &str = "reminders_list";
     pub const REMINDERS_CREATE: &str = "reminders_create";
