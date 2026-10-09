@@ -610,6 +610,17 @@ pub async fn set_debug_mode(
     Ok(())
 }
 
+/// Whether debug mode is on: the Advanced switch, a debug build, or
+/// `RUST_LOG=debug`. The one answer for the window and for the `settings`
+/// tool, which both hide debug-only settings (speaking speed) without it.
+pub fn debug_mode_active(state: &AppState) -> bool {
+    state.is_debug_mode()
+        || cfg!(debug_assertions)
+        || std::env::var("RUST_LOG")
+            .unwrap_or_default()
+            .contains("debug")
+}
+
 /// Get current debug mode status
 #[tauri::command]
 pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> {

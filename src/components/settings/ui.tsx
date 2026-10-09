@@ -143,7 +143,7 @@ export function SettingsRow({
         // Keep a deep-linked row clear of the drag band when scrolled into
         // view; the colour transition is the fade of `revealRow`'s tint.
         anchor &&
-          "scroll-mt-16 transition-colors duration-300 motion-reduce:transition-none",
+          "scroll-mt-16 outline outline-2 -outline-offset-2 outline-transparent transition-colors duration-500 motion-reduce:transition-none",
         className,
       )}
     >

@@ -129,7 +129,7 @@ pub async fn run(app: &AppHandle, input: Value) -> Result<Value, String> {
             .await
         }
         "open" => open(app, input.get("pane").and_then(Value::as_str)).await,
-        "highlight" => highlight(app, key_from(&input)?).await,
+        "highlight" => highlight_name(app, &input).await,
         "set_advanced" => {
             let enabled = input
                 .get("enabled")
@@ -163,8 +163,37 @@ async fn advanced_on(app: &AppHandle) -> bool {
     }
 }
 
+/// Debug mode, as the Settings window sees it.
+fn debug_on(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .is_some_and(|state| crate::commands::core::debug_mode_active(&state))
+}
+
+/// Whether the agent is offered a setting right now: a debug-only one (speaking
+/// speed) exists only while debug mode is on, so it is not listed, read or set
+/// otherwise, matching the window, which hides the row.
+fn offered(spec: &SettingSpec, debug: bool) -> bool {
+    !spec.debug_only || debug
+}
+
+fn ensure_offered(app: &AppHandle, key: SettingKey) -> Result<(), String> {
+    let spec = key.spec();
+    if offered(&spec, debug_on(app)) {
+        Ok(())
+    } else {
+        Err(format!(
+            "\"{}\" is not available right now. Call action \"list\" for the settings you can use.",
+            spec.id
+        ))
+    }
+}
+
 async fn list(app: &AppHandle) -> Result<Value, String> {
-    let settings: Vec<Value> = all_specs().map(|spec| spec.describe()).collect();
+    let debug = debug_on(app);
+    let settings: Vec<Value> = all_specs()
+        .filter(|spec| offered(spec, debug))
+        .map(|spec| spec.describe())
+        .collect();
     Ok(json!({
         "advanced_settings_shown": advanced_on(app).await,
         "settings": settings,
@@ -172,6 +201,7 @@ async fn list(app: &AppHandle) -> Result<Value, String> {
 }
 
 async fn get(app: &AppHandle, key: SettingKey) -> Result<Value, String> {
+    ensure_offered(app, key)?;
     let spec = key.spec();
     let mut out = spec.describe();
     let (current, choices) = read(app, key).await?;
@@ -183,6 +213,7 @@ async fn get(app: &AppHandle, key: SettingKey) -> Result<Value, String> {
 }
 
 async fn set(app: &AppHandle, key: SettingKey, raw: &Value) -> Result<Value, String> {
+    ensure_offered(app, key)?;
     let change = match registry::authorize_set(key, raw) {
         Ok(change) => change,
         Err(refusal) => {
@@ -255,10 +286,34 @@ pub async fn open_pane(app: &AppHandle, pane: Option<registry::Pane>) -> Result<
     }))
 }
 
+/// The tool's `highlight`: the name is resolved leniently (exact id, then an id's
+/// last segment or alias, then a pane) and falls back to General, the same
+/// resolution `juno://settings?highlight=` uses.
+async fn highlight_name(app: &AppHandle, input: &Value) -> Result<Value, String> {
+    let name = input
+        .get("key")
+        .and_then(Value::as_str)
+        .ok_or("This action needs a \"key\". Call action \"list\" for the keys.")?;
+    follow_name(app, name).await
+}
+
+/// Follow a highlight name from the tool or from a link. Navigation only.
+pub async fn follow_name(app: &AppHandle, name: &str) -> Result<Value, String> {
+    match registry::resolve_target(name) {
+        Some(registry::Resolved::Setting(key)) => highlight(app, key).await,
+        Some(registry::Resolved::Pane(pane)) => open_pane(app, Some(pane)).await,
+        None => open_pane(app, Some(registry::Pane::General)).await,
+    }
+}
+
 /// Open the window on a setting's pane, scroll to its row and flash it. The one
 /// path for the tool's `highlight` and for `juno://settings?highlight=` links.
 pub async fn highlight(app: &AppHandle, key: SettingKey) -> Result<Value, String> {
     let spec = key.spec();
+    // A debug-only row is not on screen without debug mode: open its pane.
+    if !offered(&spec, debug_on(app)) {
+        return open_pane(app, Some(spec.pane)).await;
+    }
     // A row behind the advanced toggle does not exist on screen until the
     // toggle is on, and "show me where it is" has to show it.
     let mut turned_on_advanced = false;

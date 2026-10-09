@@ -46,7 +46,7 @@
 use crate::tts::voices::{voice_base_name, voice_quality, VoiceQuality};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// How long the first buffer of a sentence may take before `say` is used
 /// instead. A warm synthesizer answers in about 30 ms and a voice it has not
@@ -161,6 +161,22 @@ pub fn quality_from_av(raw: isize) -> VoiceQuality {
 pub struct SpokenContent {
     pub voice_id: Option<String>,
     pub voice_name: Option<String>,
+}
+
+/// How long a reading of the Spoken Content voice is trusted without looking
+/// at the preferences file again.
+pub const SPOKEN_FRESH_FOR: Duration = Duration::from_secs(5);
+
+/// Whether a reading of the Spoken Content voice must be redone before a
+/// sentence is spoken with it. The person can change the System Voice at any
+/// time, so a reading is stale when the preferences file has been written since
+/// (its modification time moved), or when it is simply old. Pure.
+pub fn spoken_is_stale(
+    age: Duration,
+    mtime_when_read: Option<SystemTime>,
+    mtime_now: Option<SystemTime>,
+) -> bool {
+    age >= SPOKEN_FRESH_FOR || mtime_when_read != mtime_now
 }
 
 /// Which voice a sentence is rendered with.
@@ -621,9 +637,10 @@ mod mac {
     /// warm-up has run; until then `say` speaks.
     static VOICES: StdMutex<Option<Vec<AvVoice>>> = StdMutex::new(None);
 
-    /// The Spoken Content voice, and when it was read.
-    static SPOKEN: StdMutex<Option<(Instant, SpokenContent)>> = StdMutex::new(None);
-    const SPOKEN_TTL: Duration = Duration::from_secs(60);
+    /// The Spoken Content voice, when it was read, and the modification time
+    /// of the preferences file at that moment.
+    static SPOKEN: StdMutex<Option<(Instant, Option<SystemTime>, SpokenContent)>> =
+        StdMutex::new(None);
 
     pub(super) static SPEAKER: Speaker<AvSynth> = Speaker::new(AvSynth);
 
@@ -807,21 +824,42 @@ mod mac {
         }
     }
 
-    /// The Spoken Content voice as last read. A stale value is used as is and
-    /// refreshed in the background, so no sentence waits on `defaults`.
-    fn spoken_content() -> Option<SpokenContent> {
+    /// When the Spoken Content preferences file was last written.
+    fn spoken_prefs_mtime() -> Option<SystemTime> {
+        let home = std::env::var_os("HOME")?;
+        std::fs::metadata(
+            std::path::Path::new(&home)
+                .join("Library/Preferences/com.apple.speech.voice.prefs.plist"),
+        )
+        .ok()?
+        .modified()
+        .ok()
+    }
+
+    /// Forget the reading, so the next sentence reads the System Voice again.
+    pub fn forget_spoken_content() {
+        *lock(&SPOKEN) = None;
+    }
+
+    /// The Spoken Content voice as it is now. A reading is reused only while
+    /// the preferences file has not been written and it is younger than
+    /// [`SPOKEN_FRESH_FOR`]; otherwise it is read again before the sentence
+    /// speaks, so a System Voice the person just changed is the one heard.
+    async fn current_spoken_content() -> Option<SpokenContent> {
+        let mtime = spoken_prefs_mtime();
         let cached = lock(&SPOKEN).clone();
-        let stale = cached
-            .as_ref()
-            .is_none_or(|(at, _)| at.elapsed() >= SPOKEN_TTL);
-        if stale {
-            tauri::async_runtime::spawn(async {
-                if let Ok(spoken) = tokio::task::spawn_blocking(read_spoken_content).await {
-                    *lock(&SPOKEN) = Some((Instant::now(), spoken));
-                }
-            });
+        if let Some((at, seen, spoken)) = &cached {
+            if !spoken_is_stale(at.elapsed(), *seen, mtime) {
+                return Some(spoken.clone());
+            }
         }
-        cached.map(|(_, spoken)| spoken)
+        match tokio::task::spawn_blocking(read_spoken_content).await {
+            Ok(spoken) => {
+                *lock(&SPOKEN) = Some((Instant::now(), mtime, spoken.clone()));
+                Some(spoken)
+            }
+            Err(_) => cached.map(|(_, _, spoken)| spoken),
+        }
     }
 
     /// Keep the app handle, read the voices and load the synthesizer, off
@@ -832,7 +870,9 @@ mod mac {
         if APP.set(app.clone()).is_err() {
             return;
         }
-        let _ = spoken_content();
+        tauri::async_runtime::spawn(async {
+            let _ = current_spoken_content().await;
+        });
         let stored_voice = app
             .try_state::<crate::state::AppState>()
             .and_then(|state| state.get_system_voice().ok().flatten());
@@ -1031,7 +1071,8 @@ mod mac {
         let Some(voices) = voices else {
             return Spoken::UseSay("still warming up".to_string());
         };
-        let plan = plan_voice(stored_voice, spoken_content().as_ref(), &voices);
+        let spoken = current_spoken_content().await;
+        let plan = plan_voice(stored_voice, spoken.as_ref(), &voices);
         if plan == VoicePlan::UseSay {
             // A voice installed since the last listing is found next time.
             refresh_voices();
@@ -1224,7 +1265,7 @@ mod mac {
             tokio::time::sleep(Duration::from_millis(50)).await;
         };
         let spoken = loop {
-            if let Some(spoken) = spoken_content() {
+            if let Some(spoken) = current_spoken_content().await {
                 break Some(spoken);
             }
             if Instant::now() >= deadline {
@@ -1273,6 +1314,15 @@ mod mac {
         }
     }
 }
+
+/// The System Voice may have changed: read it again before the next sentence.
+#[cfg(target_os = "macos")]
+pub fn forget_spoken_content() {
+    mac::forget_spoken_content();
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn forget_spoken_content() {}
 
 /// Keep the app handle and warm the synthesizer. Called once from setup.
 #[cfg(target_os = "macos")]
@@ -1384,6 +1434,42 @@ mod tests {
     }
 
     // --- rate ---
+
+    #[test]
+    fn a_changed_system_voice_is_read_again() {
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+        let t1 = t0 + Duration::from_secs(2);
+        let young = Duration::from_secs(1);
+        // Nothing moved and the reading is young: reuse it.
+        assert!(!spoken_is_stale(young, Some(t0), Some(t0)));
+        assert!(!spoken_is_stale(young, None, None));
+        // The preferences file was written since: read again, however young.
+        assert!(spoken_is_stale(young, Some(t0), Some(t1)));
+        assert!(spoken_is_stale(young, None, Some(t1)));
+        assert!(spoken_is_stale(young, Some(t0), None));
+        // An old reading is read again even if the file looks unchanged.
+        assert!(spoken_is_stale(SPOKEN_FRESH_FOR, Some(t0), Some(t0)));
+    }
+
+    #[test]
+    fn a_changed_system_voice_changes_the_plan() {
+        let voices = installed();
+        let siri = SpokenContent {
+            voice_id: Some("com.apple.speech.synthesis.voice.custom.siri.nicky".into()),
+            voice_name: Some("Siri".into()),
+        };
+        assert_eq!(plan_voice(None, Some(&siri), &voices), VoicePlan::UseSay);
+        // The person picks another voice: the same call now follows it.
+        let named = voices.first().expect("a voice").clone();
+        let chosen = SpokenContent {
+            voice_id: Some(named.identifier.clone()),
+            voice_name: Some(named.name.clone()),
+        };
+        assert_eq!(
+            plan_voice(None, Some(&chosen), &voices),
+            VoicePlan::Identifier(named.identifier)
+        );
+    }
 
     #[test]
     fn normal_pace_is_avfoundations_default() {

@@ -1153,6 +1153,12 @@ async fn macos_inventory(freshness: Freshness) -> Vec<InstalledVoice> {
 /// Everything this engine needs known about this machine, and nothing else:
 /// the Mac's list costs a process and Kokoro's costs a directory read.
 pub async fn inventory_for(engine: &str, freshness: Freshness) -> VoiceInventory {
+    // Reading the Mac fresh is how the pane learns the System Voice changed;
+    // the voice that speaks must learn it from the same moment, not from a
+    // reading made earlier.
+    if freshness == Freshness::Now && engine.eq_ignore_ascii_case("system") {
+        crate::tts::avspeech::forget_spoken_content();
+    }
     VoiceInventory {
         macos: if engine.eq_ignore_ascii_case("system") {
             macos_inventory(freshness).await
