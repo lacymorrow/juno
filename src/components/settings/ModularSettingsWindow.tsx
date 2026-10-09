@@ -19,7 +19,11 @@ import {
   Wrench,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { COMMANDS, SETTINGS } from "@/lib/constants.generated";
+import { useEventListener } from "@/hooks/useEventListener";
+import { revealRow } from "./revealRow";
 import {
   GeneralSettings,
   VoiceSettings,
@@ -38,7 +42,18 @@ import {
   useAdvancedSettings,
 } from "./AdvancedSettingsContext";
 import { SettingsCategory } from "./types";
-import { SETTINGS_ROW_ID_PREFIX } from "./ui";
+
+/**
+ * Where the agent's `settings` tool wants the window (Rust:
+ * `agent::tools::settings_tool::Navigation`). `pane` is a sidebar id, `row` a
+ * row anchor, and `reload` means the agent changed a setting, so every value
+ * is read back from Rust before it is pointed at.
+ */
+export interface SettingsNavigation {
+  pane: string | null;
+  row: string | null;
+  reload: boolean;
+}
 
 /**
  * Sidebar sections, styled like macOS System Settings: a coloured icon tile
@@ -265,6 +280,15 @@ export default function ModularSettingsWindow() {
 function SettingsWindowContent() {
   const [selectedCategory, setSelectedCategory] = useState("general");
   const [query, setQuery] = useState("");
+  // The agent's request, held until the pane it names is on the sidebar
+  // (advanced settings may still be loading or turning on).
+  const [navigation, setNavigation] = useState<SettingsNavigation | null>(null);
+  // The row to point at. Its own state, so clearing `navigation` does not
+  // cancel the wait for a section that is still loading.
+  const [revealTarget, setRevealTarget] = useState<{ row: string } | null>(null);
+  // Bumped when the agent changes a setting: the pane remounts and reads
+  // every value back from Rust, as if it had just been opened.
+  const [paneVersion, setPaneVersion] = useState(0);
   const settings = useSettingsContext();
   const theme = useSystemTheme();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -309,21 +333,52 @@ function SettingsWindowContent() {
     const target = rowMatches[0];
     if (!target) return;
     setSelectedCategory(target.sectionId);
-
-    // Wait for the target section to render, then scroll + flash the row.
-    const raf = requestAnimationFrame(() => {
-      const el = document.getElementById(
-        `${SETTINGS_ROW_ID_PREFIX}${target.rowId}`,
-      );
-      if (!el) return;
-      el.scrollIntoView?.({ block: "center", behavior: "smooth" });
-      const ring = ["ring-2", "ring-primary/50", "rounded-md"];
-      el.classList.add(...ring);
-      // Plain setTimeout — the local `window` is the Tauri window, not global.
-      setTimeout(() => el.classList.remove(...ring), 1600);
-    });
-    return () => cancelAnimationFrame(raf);
+    // Waits for the target section to render, then scrolls + flashes the row.
+    return revealRow(target.rowId);
   }, [rowMatches]);
+
+  // The agent's `settings` tool. A window it opened asks for the request it
+  // was opened with (the event went out before anything was listening); a
+  // window already open hears the event.
+  const receiveNavigation = (nav: SettingsNavigation) => {
+    if (nav.reload) {
+      void settings.loadAllSettings?.();
+      setPaneVersion((v) => v + 1);
+    }
+    if (nav.pane) {
+      setQuery("");
+      setNavigation(nav);
+    }
+  };
+  useEventListener<SettingsNavigation>(SETTINGS.EVENTS_SETTINGS_NAVIGATE, receiveNavigation);
+  useEffect(() => {
+    let alive = true;
+    invoke<SettingsNavigation | null>(COMMANDS.SETTINGS_TAKE_PENDING_SETTINGS_NAVIGATION)
+      .then((nav) => {
+        if (alive && nav) receiveNavigation(nav);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+    // Once, on mount: there is only ever one request to collect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Act on it once its pane is on the sidebar. A pane behind the advanced
+  // toggle appears when Rust's advanced-settings event arrives.
+  useEffect(() => {
+    if (!navigation?.pane || advancedLoading) return;
+    if (!categories.some((c) => c.id === navigation.pane)) return;
+    setSelectedCategory(navigation.pane);
+    if (navigation.row) setRevealTarget({ row: navigation.row });
+    setNavigation(null);
+  }, [navigation, categories, advancedLoading]);
+
+  useEffect(() => {
+    if (!revealTarget) return;
+    return revealRow(revealTarget.row);
+  }, [revealTarget]);
 
   // Scroll the content pane back to the top whenever the section changes.
   // Skip when a row is deep-linked — that effect scrolls to the row instead.
@@ -471,7 +526,7 @@ function SettingsWindowContent() {
               <h1 className="pb-4 pt-1 text-[22px] font-bold tracking-tight">
                 {current?.name}
               </h1>
-              {renderCategoryContent()}
+              <Fragment key={paneVersion}>{renderCategoryContent()}</Fragment>
             </div>
           </div>
         </main>

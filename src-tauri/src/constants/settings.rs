@@ -346,6 +346,13 @@ pub mod events {
     pub const PROMPT_SETTINGS_CHANGED: &str = "prompt_settings_changed";
     pub const CLI_SETTINGS_CHANGED: &str = "cli_settings_changed";
     pub const VOICE_TRANSCRIPTION_SETTINGS_CHANGED: &str = "voice_transcription_settings_changed";
+    /// The agent asked the Settings window to show a pane, and maybe one row
+    /// in it, or changed a setting the window should redraw. Payload:
+    /// `{ pane, row, reload }`. See `agent::tools::settings_tool`.
+    pub const SETTINGS_NAVIGATE: &str = "settings_navigate";
+    /// "Show advanced settings" changed, from the sidebar or from the agent.
+    /// Payload: the new value.
+    pub const ADVANCED_SETTINGS_CHANGED: &str = "advanced_settings_changed";
 }
 
 #[cfg(test)]

@@ -504,7 +504,9 @@ pub(super) const MCP_TOOL_GUIDANCE: &str =
 server: `computer`, which takes screenshots and moves, clicks, types, scrolls and presses keys. \
 For ANY desktop or GUI automation use it. Do NOT use shell commands like cliclick, \
 screencapture, or osascript for desktop automation: they bypass Juno, so the pointer moves with \
-nothing on screen saying that Juno is the one moving it.";
+nothing on screen saying that Juno is the one moving it. For Juno's own settings (its voice, \
+shortcuts, devices, or where a setting is) use the `settings` tool from the same server, never \
+the desktop: it changes them live and points the Settings window at them.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.

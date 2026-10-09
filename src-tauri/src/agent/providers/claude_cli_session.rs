@@ -268,6 +268,14 @@ pub async fn get_cli_persistent_session_enabled(
     Ok(is_enabled(&app_handle))
 }
 
+/// Start a prewarm in the background. A plain fn, not inlined into the async
+/// command below: the prewarm reaches Juno's MCP server, whose settings tool
+/// calls that command, and spawning it inline makes the command's future type
+/// depend on itself (E0391).
+fn spawn_prewarm(app_handle: tauri::AppHandle) {
+    tauri::async_runtime::spawn(super::claude_cli::prewarm_persistent_session(app_handle));
+}
+
 /// Turn the persistent-session path on or off.
 ///
 /// Turning it off kills every live process immediately rather than waiting for the
@@ -293,9 +301,7 @@ pub async fn set_cli_persistent_session_enabled(
 
     if enabled {
         resume_spares();
-        tauri::async_runtime::spawn(super::claude_cli::prewarm_persistent_session(
-            app_handle.clone(),
-        ));
+        spawn_prewarm(app_handle.clone());
     } else {
         shutdown_all().await;
     }

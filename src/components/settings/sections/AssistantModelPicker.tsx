@@ -199,6 +199,7 @@ export default function AssistantModelPicker({
 
       {/* Model selector — same component as chat input */}
       <SettingsRow
+        id="ai-model"
         label="Model"
         below={
           <div className="space-y-2">

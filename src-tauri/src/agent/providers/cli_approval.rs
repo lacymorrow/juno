@@ -40,9 +40,11 @@ pub const APPROVE_TOOL_NAME: &str = "approve";
 /// Tools the CLI may use without a per-call prompt. The CLI's own toolset
 /// keeps working exactly as it did under skip-permissions; what changes is
 /// connector writes. Juno's `computer` is listed so desktop automation never
-/// round-trips through the prompt either.
-pub const ALLOWED_TOOLS: &str =
-    "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit,TodoWrite,Task,mcp__juno__computer";
+/// round-trips through the prompt either, and so is `settings`, whose
+/// guardrail settings are refused by construction
+/// (`settings::registry::authorize_set`).
+pub const ALLOWED_TOOLS: &str = "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit,\
+     TodoWrite,Task,mcp__juno__computer,mcp__juno__settings";
 
 /// How long the sheet waits for an answer before denying.
 const APPROVAL_TIMEOUT_SECS: u64 = 60;
@@ -936,6 +938,8 @@ mod tests {
     #[test]
     fn junos_own_tools_never_prompt() {
         assert_eq!(verdict_for("mcp__juno__computer"), Verdict::Allow);
+        assert_eq!(verdict_for("mcp__juno__settings"), Verdict::Allow);
+        assert!(ALLOWED_TOOLS.split(',').any(|t| t == "mcp__juno__settings"));
     }
 
     #[test]

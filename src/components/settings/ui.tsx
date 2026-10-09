@@ -140,8 +140,10 @@ export function SettingsRow({
       id={anchor ? `${SETTINGS_ROW_ID_PREFIX}${anchor}` : undefined}
       className={cn(
         "px-4 py-2.5",
-        // Keep a deep-linked row clear of the drag band when scrolled into view.
-        anchor && "scroll-mt-16 transition-shadow",
+        // Keep a deep-linked row clear of the drag band when scrolled into
+        // view; the colour transition is the fade of `revealRow`'s tint.
+        anchor &&
+          "scroll-mt-16 transition-colors duration-300 motion-reduce:transition-none",
         className,
       )}
     >
