@@ -429,6 +429,10 @@ fn build_window(app: &AppHandle, rect: Rect) -> Result<tauri::WebviewWindow, Str
             .skip_taskbar(true)
             .shadow(false)
             .focused(false)
+            // Never the key window: a window that can take the keyboard hands it
+            // on when it hides, and AppKit picks the recipient. See the overlay
+            // rule in `bar_stacking`.
+            .focusable(false)
             .visible(false)
             .build()
             .map_err(|e| e.to_string())?;

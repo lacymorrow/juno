@@ -96,7 +96,8 @@
         "shadow": false,
         "center": false,
         "fullscreen": false,
-        "focus": false
+        "focus": false,
+        "focusable": false
       },
       {
         "label": "snap-wells-overlay",
@@ -115,7 +116,8 @@
         "shadow": false,
         "center": false,
         "fullscreen": false,
-        "focus": false
+        "focus": false,
+        "focusable": false
       },
       {
         "label": "listening-overlay",
@@ -134,7 +136,8 @@
         "shadow": false,
         "center": false,
         "fullscreen": false,
-        "focus": false
+        "focus": false,
+        "focusable": false
       },
       {
         "label": "settings",
