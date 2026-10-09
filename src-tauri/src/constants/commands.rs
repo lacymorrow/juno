@@ -197,6 +197,8 @@ pub mod windows {
     pub const CLOSE_MAIN_WINDOW: &str = "close_main_window";
     pub const OPEN_MAIN_WINDOW: &str = "open_main_window";
     pub const OPEN_SETTINGS_WINDOW: &str = "open_settings_window";
+    /// Tap a suggested-reply chip under a locally served reply
+    pub const RUN_REPLY_CHIP: &str = "run_reply_chip";
     pub const CLOSE_WINDOW: &str = "close_window";
     pub const FOCUS_WINDOW: &str = "focus_window";
     pub const GET_WINDOW_INFO: &str = "get_window_info";
