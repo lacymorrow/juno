@@ -161,6 +161,8 @@ pub fn quality_from_av(raw: isize) -> VoiceQuality {
 pub struct SpokenContent {
     pub voice_id: Option<String>,
     pub voice_name: Option<String>,
+    /// The language the choice was made for (`en`), when known.
+    pub language: Option<String>,
 }
 
 /// How long a reading of the Spoken Content voice is trusted without looking
@@ -234,23 +236,58 @@ pub fn plan_voice(
     let Some(spoken) = spoken_content else {
         return VoicePlan::UseSay;
     };
+    let by_id = || {
+        spoken
+            .voice_id
+            .as_deref()
+            .and_then(|id| voices.iter().find(|voice| voice.identifier == id))
+            .map(|voice| VoicePlan::Identifier(voice.identifier.clone()))
+    };
     match crate::tts::voices::classify_system_voice(
         spoken.voice_id.as_deref(),
         spoken.voice_name.as_deref(),
     ) {
         crate::tts::voices::SystemVoice::Unset => VoicePlan::LanguageDefault,
-        crate::tts::voices::SystemVoice::Siri => VoicePlan::UseSay,
-        crate::tts::voices::SystemVoice::Other => {
-            let by_id = spoken
-                .voice_id
-                .as_deref()
-                .and_then(|id| voices.iter().find(|voice| voice.identifier == id));
-            match by_id {
-                Some(voice) => VoicePlan::Identifier(voice.identifier.clone()),
-                None => VoicePlan::UseSay,
-            }
-        }
+        // A voice AVFoundation can build is spoken as chosen. A Siri voice, or
+        // one that is not installed, is not buildable here: the best installed
+        // voice for the language speaks instead.
+        _ => by_id().unwrap_or_else(|| match best_voice(voices, spoken.language.as_deref()) {
+            Some(voice) => VoicePlan::Identifier(voice.identifier.clone()),
+            None => VoicePlan::LanguageDefault,
+        }),
     }
+}
+
+/// The best installed voice for a language: Premium, then Enhanced, then
+/// Compact; among those the real Apple voices (`com.apple.voice.*`) before
+/// novelty ones, American English, Samantha (what a Mac ships with), then the
+/// name and identifier so the pick never changes between two reads. With no
+/// voice in the language, the best of any. Pure.
+pub fn best_voice<'a>(voices: &'a [AvVoice], language: Option<&str>) -> Option<&'a AvVoice> {
+    let language = language
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .unwrap_or("en")
+        .to_ascii_lowercase();
+    let in_language = |voice: &AvVoice| {
+        let tag = voice.language.to_ascii_lowercase().replace('_', "-");
+        tag == language || tag.starts_with(&format!("{language}-"))
+    };
+    let rank = |voice: &'a AvVoice| {
+        (
+            voice.quality,
+            voice.identifier.starts_with("com.apple.voice."),
+            voice.language.eq_ignore_ascii_case("en-US"),
+            voice.name == "Samantha",
+            std::cmp::Reverse(voice.name.as_str()),
+            std::cmp::Reverse(voice.identifier.as_str()),
+        )
+    };
+    voices
+        .iter()
+        .filter(|voice| in_language(voice))
+        .max_by_key(|voice| rank(voice))
+        .or_else(|| voices.iter().max_by_key(|voice| rank(voice)))
 }
 
 // ---------------------------------------------------------------------------
@@ -807,33 +844,16 @@ mod mac {
     }
 
     fn read_spoken_content() -> SpokenContent {
-        fn read(key: &str) -> Option<String> {
-            let output = std::process::Command::new("defaults")
-                .args(["read", "com.apple.speech.voice.prefs", key])
-                .output()
-                .ok()?;
-            output
-                .status
-                .success()
-                .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-                .filter(|v| !v.is_empty())
-        }
-        SpokenContent {
-            voice_id: read("SelectedVoiceID"),
-            voice_name: read("SelectedVoiceName"),
-        }
+        crate::tts::voices::read_spoken_content_blocking()
     }
 
-    /// When the Spoken Content preferences file was last written.
+    /// When the System Voice preferences were last written: the newest of the
+    /// Accessibility plist (macOS 26) and the old Speech one.
     fn spoken_prefs_mtime() -> Option<SystemTime> {
-        let home = std::env::var_os("HOME")?;
-        std::fs::metadata(
-            std::path::Path::new(&home)
-                .join("Library/Preferences/com.apple.speech.voice.prefs.plist"),
-        )
-        .ok()?
-        .modified()
-        .ok()
+        crate::tts::voices::spoken_prefs_files()
+            .iter()
+            .filter_map(|path| std::fs::metadata(path).ok()?.modified().ok())
+            .max()
     }
 
     /// Forget the reading, so the next sentence reads the System Voice again.
@@ -1520,14 +1540,20 @@ mod tests {
         let voices = installed();
         let siri = SpokenContent {
             voice_id: Some("com.apple.speech.synthesis.voice.custom.siri.nicky".into()),
-            voice_name: Some("Siri".into()),
+            voice_name: None,
+            language: Some("en".into()),
         };
-        assert_eq!(plan_voice(None, Some(&siri), &voices), VoicePlan::UseSay);
+        // Not buildable here: the best installed voice (Ava Premium) speaks.
+        assert_eq!(
+            plan_voice(None, Some(&siri), &voices),
+            VoicePlan::Identifier("com.apple.voice.premium.en-US.Ava".to_string())
+        );
         // The person picks another voice: the same call now follows it.
         let named = voices.first().expect("a voice").clone();
         let chosen = SpokenContent {
             voice_id: Some(named.identifier.clone()),
             voice_name: Some(named.name.clone()),
+            language: Some("en".into()),
         };
         assert_eq!(
             plan_voice(None, Some(&chosen), &voices),
@@ -1622,14 +1648,87 @@ mod tests {
     }
 
     #[test]
-    fn a_siri_system_voice_stays_with_say() {
+    fn a_siri_system_voice_speaks_with_the_best_installed_voice() {
         let spoken = SpokenContent {
-            voice_id: Some("com.apple.speech.synthesis.voice.custom.siri.aaron".to_string()),
-            voice_name: Some("Siri Voice 2".to_string()),
+            voice_id: Some("com.apple.siri.natural.Simone".to_string()),
+            voice_name: None,
+            language: Some("en".to_string()),
         };
+        // `installed()` has Ava Premium: it outranks the compact voices.
         assert_eq!(
             plan_voice(None, Some(&spoken), &installed()),
-            VoicePlan::UseSay
+            VoicePlan::Identifier("com.apple.voice.premium.en-US.Ava".to_string())
+        );
+    }
+
+    #[test]
+    fn the_fallback_ranks_premium_then_enhanced_then_compact() {
+        let compact = voice(
+            "com.apple.voice.compact.en-US.Samantha",
+            "Samantha",
+            VoiceQuality::Compact,
+            "en-US",
+        );
+        let enhanced = voice(
+            "com.apple.voice.enhanced.en-US.Zoe",
+            "Zoe",
+            VoiceQuality::Enhanced,
+            "en-US",
+        );
+        let premium = voice(
+            "com.apple.voice.premium.en-GB.Serena",
+            "Serena",
+            VoiceQuality::Premium,
+            "en-GB",
+        );
+        let french = voice(
+            "com.apple.voice.premium.fr-FR.Amelie",
+            "Amelie",
+            VoiceQuality::Premium,
+            "fr-FR",
+        );
+        let novelty = voice(
+            "com.apple.speech.synthesis.voice.Albert",
+            "Albert",
+            VoiceQuality::Compact,
+            "en-US",
+        );
+        let mut all = vec![
+            novelty.clone(),
+            compact.clone(),
+            french.clone(),
+            enhanced.clone(),
+        ];
+        let pick = |all: &[AvVoice]| best_voice(all, Some("en")).map(|v| v.identifier.clone());
+        assert_eq!(pick(&all), Some(enhanced.identifier.clone()));
+        all.push(premium.clone());
+        assert_eq!(pick(&all), Some(premium.identifier.clone()));
+        // Only compact left: Samantha beats a novelty voice, in any order.
+        let compacts = vec![novelty.clone(), compact.clone()];
+        assert_eq!(pick(&compacts), Some(compact.identifier.clone()));
+        let reversed = vec![compact.clone(), novelty.clone()];
+        assert_eq!(pick(&reversed), Some(compact.identifier.clone()));
+        // Another language ranks within itself, and falls back to any voice.
+        assert_eq!(
+            best_voice(&all, Some("fr")).map(|v| v.identifier.clone()),
+            Some(french.identifier.clone())
+        );
+        assert_eq!(
+            best_voice(&compacts, Some("de")).map(|v| v.identifier.clone()),
+            Some(compact.identifier.clone())
+        );
+        assert!(best_voice(&[], Some("en")).is_none());
+    }
+
+    #[test]
+    fn a_siri_system_voice_with_no_voices_is_the_language_default() {
+        let spoken = SpokenContent {
+            voice_id: Some("com.apple.siri.natural.Simone".to_string()),
+            ..SpokenContent::default()
+        };
+        assert_eq!(
+            plan_voice(None, Some(&spoken), &[]),
+            VoicePlan::LanguageDefault
         );
     }
 
@@ -1638,6 +1737,7 @@ mod tests {
         let spoken = SpokenContent {
             voice_id: Some("com.apple.voice.premium.en-US.Ava".to_string()),
             voice_name: Some("Ava".to_string()),
+            language: Some("en".to_string()),
         };
         assert_eq!(
             plan_voice(None, Some(&spoken), &installed()),
