@@ -107,6 +107,7 @@ pub fn is_tray_menu_event(event_id: &str) -> bool {
         constants::tray_menu_ids::SHOW_HIDE
             | constants::tray_menu_ids::NEW_CHAT
             | constants::tray_menu_ids::SHOW_HIDE_FLOATING_BAR
+            | constants::tray_menu_ids::CENTER_FLOATING_BAR
             | constants::tray_menu_ids::DEVELOPER_TOOLS
             | constants::tray_menu_ids::SETTINGS
             | constants::tray_menu_ids::QUIT

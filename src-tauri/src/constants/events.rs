@@ -230,6 +230,7 @@ pub mod menu {
     pub const IMPORT_CHAT_REQUESTED: &str = "import-chat-requested";
     pub const EXPORT_CHAT_REQUESTED: &str = "export-chat-requested";
     pub const TOGGLE_FLOATING_BAR_REQUESTED: &str = "toggle-floating-bar-requested";
+    pub const CENTER_FLOATING_BAR_REQUESTED: &str = "center-floating-bar-requested";
     pub const TOGGLE_DEV_PANEL_REQUESTED: &str = "toggle-dev-panel-requested";
     pub const TOGGLE_FULLSCREEN_REQUESTED: &str = "toggle-fullscreen-requested";
     pub const MINIMIZE_WINDOW_REQUESTED: &str = "minimize-window-requested";

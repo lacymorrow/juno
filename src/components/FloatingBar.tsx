@@ -1098,6 +1098,34 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     if (!mainWindowOpenRef.current) startNewChat();
   });
 
+  // The tray's "Center Floating Bar": the way back when a drag leaves the bar
+  // somewhere it cannot be grabbed. Same transaction as the first placement,
+  // aimed at the centre well of the display the bar is on.
+  useEventListener(EVENTS.MENU_CENTER_FLOATING_BAR_REQUESTED, () => {
+    void (async () => {
+      try {
+        const [pos, mons] = await Promise.all([
+          windowOrigin(getCurrentWindow()),
+          availableMonitors(),
+        ]);
+        if (!mons.length) return;
+        const rects = toMonitorRects(mons);
+        const wells = steadyWells(rects, PILL_STEADY_SPEC);
+        const mon = Math.max(0, monitorIndexAt(rects, pos.x, pos.y));
+        const target = wellForSlot(SLOT.center, mon, wells);
+        const rect = target ? rects[target.monitorIndex] : undefined;
+        if (!target || !rect) return;
+        const next = steadyLayout(target, rect, PILL_STEADY_SPEC);
+        await applySteadyFrame(next);
+        setSteadyLayout(windowLabel, next);
+        setDockSlot(windowLabel, { fx: target.fx, fy: target.fy });
+        await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y }).catch(() => {});
+      } catch (error) {
+        console.debug("FloatingBar: center failed:", error);
+      }
+    })();
+  });
+
   // External open/close of the pane: the tray "Show/Hide Chat" toggles it, so a
   // dismissed conversation can be reopened showing the retained history.
   useEffect(() => {
