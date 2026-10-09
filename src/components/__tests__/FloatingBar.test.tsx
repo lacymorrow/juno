@@ -781,7 +781,10 @@ describe("FloatingBar", () => {
 
     await submitUserMessage("Play my liked songs on Spotify");
 
-    const pane = screen.getByTestId("bar-chat-pane");
+    // The pane's code loads on first open (it is lazy, warmed after launch).
+    // The first import of it in the run can take over a second on a loaded
+    // runner, so this waits longer than findBy's default.
+    const pane = await screen.findByTestId("bar-chat-pane", {}, { timeout: 5000 });
     expect(pane).toBeInTheDocument();
     expect(pane).toHaveClass("dark");
     expect(screen.getByText("Play my liked songs on Spotify")).toBeInTheDocument();
@@ -799,7 +802,7 @@ describe("FloatingBar", () => {
     // that it has finished working.
     await fire("agent-active", false);
 
-    expect(screen.getByText("It is half past nine.")).toBeInTheDocument();
+    expect(await screen.findByText("It is half past nine.")).toBeInTheDocument();
     expect(screen.getByTestId("bar-chat-pane-status")).toHaveTextContent("esc to close");
   });
 
@@ -1222,5 +1225,160 @@ describe("FloatingBar expand control", () => {
 
     await fire("bar-main-window-opened", null);
     expect(screen.queryByRole("button", { name: "Open chat" })).not.toBeInTheDocument();
+  });
+});
+
+describe("FloatingBar status dot", () => {
+  const dot = () => screen.getByRole("img");
+  const offline = { status: "offline", label: "Network unavailable", provider: "Claude" };
+  const connected = { status: "connected", label: "Connected to Claude", provider: "Claude" };
+
+  it("is neutral and says it is connected while Juno can answer", async () => {
+    await renderBar();
+    await fire("connectivity-changed", connected);
+    expect(dot()).toHaveAttribute("data-tone", "neutral");
+    expect(dot()).toHaveAccessibleName("Connected to Claude");
+  });
+
+  it("asks Rust for the status on mount", async () => {
+    await renderBar();
+    expect(invoke).toHaveBeenCalledWith("get_connectivity");
+  });
+
+  it("goes system red when the connection is lost, and back when it returns", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    expect(dot()).toHaveAttribute("data-tone", "down");
+    expect(dot()).toHaveStyle({ backgroundColor: "#FF453A" });
+    expect(dot()).toHaveAccessibleName("Network unavailable");
+
+    await fire("connectivity-changed", connected);
+    expect(dot()).toHaveAttribute("data-tone", "neutral");
+  });
+
+  it("goes system blue while listening, even offline", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    await setBarState({ barState: "listening", voiceMode: "agent" });
+    expect(dot()).toHaveAttribute("data-tone", "listening");
+    expect(dot()).toHaveStyle({ backgroundColor: "#0A84FF" });
+    expect(dot()).toHaveAccessibleName("Listening");
+  });
+
+  it("never changes size or position with its meaning (#511)", async () => {
+    await renderBar();
+    const before = screen.getByTestId("floating-bar-dot-target").getAttribute("style");
+    const sizeBefore = dot().className;
+    await fire("connectivity-changed", offline);
+    await setBarState({ barState: "listening", voiceMode: "agent" });
+    expect(screen.getByTestId("floating-bar-dot-target").getAttribute("style")).toBe(before);
+    expect(dot().className).toBe(sizeBefore);
+  });
+});
+
+describe("FloatingBar tooltips", () => {
+  const boxes = (label: string | null) =>
+    label === "Talk to Juno"
+      ? { left: 100, top: 20, right: 140, bottom: 48 }
+      : label === "Type to Juno"
+        ? { left: 150, top: 20, right: 190, bottom: 48 }
+        : label === "dot"
+          ? dotBox()
+          : { left: 0, top: 0, right: 0, bottom: 0 };
+  // The dot rides the pill's leading edge. On a right-docked bar the idle
+  // pill grows 76pt leftward on hover, carrying the dot with it and putting
+  // the mic where the dot was.
+  const dotBox = () =>
+    screen.queryByTestId("floating-bar")?.getAttribute("data-layout") === "compact"
+      ? { left: 100, top: 36, right: 115, bottom: 48 }
+      : { left: 34, top: 26, right: 49, bottom: 41 };
+
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const box = boxes(
+        this.getAttribute?.("data-testid") === "floating-bar-dot-target"
+          ? "dot"
+          : this.getAttribute?.("aria-label"),
+      );
+      return { ...box, width: box.right - box.left, height: box.bottom - box.top, x: box.left, y: box.top, toJSON() {} } as DOMRect;
+    });
+  });
+
+  it("names the mic and its live shortcut when the forwarded cursor rests on it", async () => {
+    invoke.mockImplementation((...args: unknown[]) =>
+      args[0] === "get_trigger_hints"
+        ? Promise.resolve({
+            agent: { shortcut: "Control+Option", gesture: "Hold", sentence: "Hold to talk to Juno" },
+            dictation: null,
+          })
+        : defaultInvoke(...args),
+    );
+    await renderBar();
+    await hover(true);
+
+    await move(120, 30); // over the mic, Juno inactive
+    expect(screen.queryByTestId("pill-tooltip")).toBeNull(); // not before the delay
+    await settle(500);
+    const tip = await screen.findByTestId("pill-tooltip");
+    expect(tip).toHaveTextContent("Talk to Juno");
+    expect(tip).toHaveTextContent("Hold ⌃⌥");
+    // The native title steps aside while the tooltip shows, so there is one.
+    expect(screen.getByRole("button", { name: "Talk to Juno" })).not.toHaveAttribute("title");
+  });
+
+  it("labels the type button and keeps the title as a fallback when closed", async () => {
+    await renderBar();
+    await hover(true);
+    const type = screen.getByRole("button", { name: "Type to Juno" });
+    expect(type).toHaveAttribute("title", "Type to Juno");
+
+    await move(170, 30);
+    await settle(500);
+    expect(await screen.findByTestId("pill-tooltip")).toHaveTextContent("Type to Juno");
+
+    await move(300, 300); // off every control
+    await waitFor(() => expect(type).toHaveAttribute("title", "Type to Juno"));
+  });
+
+  const offline = { status: "offline", label: "Network unavailable", provider: "Claude" };
+
+  it("says the network is unavailable when the forwarded cursor rests on a red dot", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    await hover(true);
+    await move(40, 33); // over the dot in the grown pill, Juno inactive
+    await settle(500);
+    expect(await screen.findByTestId("pill-tooltip")).toHaveTextContent("Network unavailable");
+  });
+
+  it("keeps naming the dot when hovering grows the pill out from under the cursor", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+    // The cursor arrives on the idle pill's dot; the pill grows and the mic
+    // is now where the dot was.
+    await hover(true);
+    expect(bar()).toHaveAttribute("data-layout", "hover");
+    await move(107, 42);
+    await move(108, 43); // a resting hand still trembles
+    await settle(500);
+    const tip = await screen.findByTestId("pill-tooltip");
+    expect(tip).toHaveTextContent("Network unavailable");
+    expect(tip).not.toHaveTextContent("Talk to Juno");
+
+    // Off the spot the dot was: the control under the cursor counts again.
+    await move(130, 30);
+    await settle(500);
+    await waitFor(() =>
+      expect(screen.getByTestId("pill-tooltip")).toHaveTextContent("Talk to Juno"),
+    );
+  });
+
+  it("says what the expand control does", async () => {
+    await renderBar();
+    await hover(true);
+    expect(screen.getByRole("button", { name: "Open chat" })).toHaveAttribute("title", "Open chat");
   });
 });

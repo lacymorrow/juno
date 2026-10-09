@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Juno",
         "width": 600,
         "height": 700,
@@ -28,6 +29,7 @@
       },
       {
         "label": "floating-panel",
+        "create": false,
         "url": "/floating-panel",
         "width": 180,
         "height": 100,
@@ -45,6 +47,7 @@
       },
       {
         "label": "floating-bar",
+        "create": false,
         "url": "/floating-bar",
         "width": 88,
         "height": 66,
@@ -60,6 +63,7 @@
       },
       {
         "label": "onboarding",
+        "create": false,
         "title": "Welcome to Juno",
         "url": "/onboarding",
         "width": 440,
@@ -77,6 +81,7 @@
       },
       {
         "label": "desktop-cursor-overlay",
+        "create": false,
         "url": "/desktop-cursor-overlay",
         "width": 2560,
         "height": 1600,
@@ -95,6 +100,7 @@
       },
       {
         "label": "snap-wells-overlay",
+        "create": false,
         "url": "/snap-wells-overlay",
         "width": 2560,
         "height": 1600,
@@ -113,6 +119,7 @@
       },
       {
         "label": "listening-overlay",
+        "create": false,
         "url": "/listening-overlay",
         "width": 2560,
         "height": 1600,
@@ -131,6 +138,7 @@
       },
       {
         "label": "settings",
+        "create": false,
         "title": "Juno Settings",
         "url": "/settings",
         "width": 700,
@@ -157,6 +165,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["juno"]
+      }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZEQjgyRUFDMEFBMTIxN0EKUldSNklhRUtyQzY0YllnSTg0QTAxL0UwbEd1bGZkWDhrNTE4QnVORVhtYm9RaWNWTmZhZzR0WlIK",
       "endpoints": [

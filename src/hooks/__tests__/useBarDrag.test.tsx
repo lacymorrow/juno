@@ -116,6 +116,16 @@ afterEach(async () => {
   });
 });
 
+/**
+ * The OS drag starts once the window has been put back under the cursor,
+ * which takes a few IPC round trips.
+ */
+async function flushPlacement() {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+}
+
 describe("the shared bar drag gesture", () => {
   it("drags the window from anywhere once the mouse moves, and swallows the click that follows", async () => {
     await renderBar();
@@ -125,7 +135,13 @@ describe("the shared bar drag gesture", () => {
     fireEvent.mouseMove(mic, { clientX: 12, clientY: 11 }); // under the threshold
     expect(startDragging).not.toHaveBeenCalled();
     fireEvent.mouseMove(mic, { clientX: 30, clientY: 20 });
+    await flushPlacement();
     expect(startDragging).toHaveBeenCalledTimes(1);
+    // The window was first put back with the spot pressed under the cursor.
+    expect(invoke).toHaveBeenCalledWith(
+      COMMANDS.BAR_SET_BAR_FRAME,
+      expect.objectContaining({ grabX: 10, grabY: 10, width: 164, height: 66 }),
+    );
 
     fireEvent.mouseUp(mic);
     fireEvent.click(mic);
@@ -140,6 +156,7 @@ describe("the shared bar drag gesture", () => {
     // Drag hands off to the OS window drag.
     fireEvent.mouseDown(mic, { button: 0, clientX: 10, clientY: 10 });
     fireEvent.mouseMove(mic, { clientX: 30, clientY: 20 });
+    await flushPlacement();
     expect(startDragging).toHaveBeenCalledTimes(1);
 
     // The OS drops the window near the bottom-right; release settles it.

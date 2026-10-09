@@ -33,6 +33,8 @@
 //!   time, date
 //! - [`timer`]: start, check, cancel countdown timers (backend-owned)
 //! - [`apps`]: open or quit an installed app, open a website
+//! - [`settings_follow`]: "open settings" opens the settings of the app you
+//!   were in, and a short window to correct it
 //! - [`quit`]: "quit", "quit Juno": close Juno itself
 //! - [`stop`]: a bare "stop" or "cancel" while a run is in flight
 //!
@@ -42,6 +44,7 @@
 pub mod apps;
 pub mod media;
 pub mod quit;
+pub mod settings_follow;
 pub mod stop;
 pub mod system;
 pub mod timer;
@@ -103,6 +106,7 @@ pub enum LocalIntent {
     System(system::SystemIntent),
     Timer(timer::TimerIntent),
     App(apps::AppIntent),
+    Settings(settings_follow::SettingsIntent),
 }
 
 /// Parse everything but media, in precedence order. Apps come last because
@@ -114,6 +118,10 @@ fn parse_non_media(query: &str) -> Option<LocalIntent> {
     }
     if let Some(i) = timer::parse(&utterance) {
         return Some(LocalIntent::Timer(i));
+    }
+    // Before apps: "open Music settings" would otherwise be an app name.
+    if let Some(i) = settings_follow::parse(&utterance) {
+        return Some(LocalIntent::Settings(i));
     }
     apps::parse(&utterance).map(LocalIntent::App)
 }
@@ -193,6 +201,18 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
         return true;
     }
 
+    // A correction of the settings window just opened ("no, not that",
+    // "Mac settings"). Fires only while that action is under 60 s old.
+    if let Some(correction) = settings_follow::correction_for(query) {
+        if let Some(reply) = settings_follow::handle_correction(app_handle, correction).await {
+            emit_reply(app_handle, reply).await;
+            settings_follow::publish(app_handle);
+            return true;
+        }
+    }
+    // Anything else is an unrelated turn: the chance to correct has passed.
+    settings_follow::forget(app_handle);
+
     if let Some(intent) = parse_media_intent(query) {
         if let Some(reply) = media::handle(app_handle, intent).await {
             emit_reply(app_handle, reply).await;
@@ -211,6 +231,7 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
         LocalIntent::System(i) => system::handle(app_handle, i).await,
         LocalIntent::Timer(i) => timer::handle(app_handle, i),
         LocalIntent::App(i) => apps::handle(app_handle, i).await,
+        LocalIntent::Settings(i) => settings_follow::handle(app_handle, i).await,
         LocalIntent::Media(_) => None,
     };
     let Some(reply) = reply else {
@@ -218,13 +239,32 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
     };
     log::info!("Local intent {:?} served: {}", intent, reply.spoken);
     emit_reply(app_handle, reply).await;
+    settings_follow::publish(app_handle);
     true
 }
 
-async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
+/// Show and speak `reply` as a whole turn: the bar goes working and back,
+/// exactly as it does for a model's answer.
+pub(crate) async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
     let agent_state = if reply.failed { "Failed" } else { "Finished" };
     crate::commands::ui_commands::handle_agent_started(app_handle).await;
 
+    let display = reply.display.clone();
+    emit_reply_message(app_handle, reply, agent_state);
+
+    crate::commands::ui_commands::handle_agent_stopped(app_handle).await;
+    crate::commands::ui_commands::handle_backend_response(
+        app_handle,
+        Some(display),
+        agent_state.to_string(),
+    )
+    .await;
+}
+
+/// Append `reply` to the conversation as an assistant message and speak its
+/// spoken line, without touching the bar's lifecycle. For a turn that is
+/// already running and will close itself.
+pub(crate) fn emit_reply_message(app_handle: &AppHandle, reply: Reply, agent_state: &str) {
     let message_id = uuid::Uuid::new_v4().to_string();
     crate::agent::tool_logger::emit_stream_start(app_handle, message_id.clone());
     crate::agent::tool_logger::emit_streaming_text_chunk(
@@ -236,17 +276,9 @@ async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
     crate::agent::tool_logger::emit_stream_end_with_state(
         app_handle,
         message_id,
-        reply.display.clone(),
+        reply.display,
         agent_state.to_string(),
     );
-
-    crate::commands::ui_commands::handle_agent_stopped(app_handle).await;
-    crate::commands::ui_commands::handle_backend_response(
-        app_handle,
-        Some(reply.display),
-        agent_state.to_string(),
-    )
-    .await;
 }
 
 #[cfg(test)]

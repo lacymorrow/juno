@@ -44,7 +44,9 @@ use tracing::{debug, error, info, warn};
 use crate::agent::core::AgentError;
 use crate::agent::providers::cli_approval;
 use crate::agent::tools::anthropic_computer_use::{create_versioned_tools, run_computer_action};
+use crate::agent::tools::settings_tool;
 use crate::agent::tools::tool_versioning::{ApiVersion, ToolVersionConfig};
+use crate::constants::agent::tool_names;
 
 /// The MCP protocol revision this server speaks.
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -207,6 +209,14 @@ fn tool_list() -> Vec<Value> {
                 })
             })
             .collect();
+    // Juno's own settings: find, show and change them, with the guardrail
+    // settings refused (`settings::registry`).
+    let settings = settings_tool::definition();
+    tools.push(json!({
+        "name": settings.name,
+        "description": settings.description,
+        "inputSchema": settings.input_schema,
+    }));
     tools.push(json!({
         "name": cli_approval::APPROVE_TOOL_NAME,
         "description": "Internal: Juno's permission prompt. The Claude CLI calls this \
@@ -235,6 +245,15 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
 
     if name == cli_approval::APPROVE_TOOL_NAME {
         return Ok(cli_approval::handle_approve(app, &arguments).await);
+    }
+    if name == tool_names::SETTINGS {
+        return Ok(match settings_tool::run(app, arguments).await {
+            Ok(value) => to_mcp_content(value),
+            Err(e) => json!({
+                "content": [{ "type": "text", "text": e }],
+                "isError": true
+            }),
+        });
     }
     if name != "computer" {
         return Err(RpcError::method_not_found(name));
@@ -342,9 +361,9 @@ mod tests {
     }
 
     #[test]
-    fn the_computer_and_approve_tools_are_offered() {
+    fn the_computer_settings_and_approve_tools_are_offered() {
         let tools = tool_list();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
         assert_eq!(tools[0]["name"], "computer");
         assert!(
             tools[0]["inputSchema"]["properties"]["action"].is_object(),
@@ -352,8 +371,11 @@ mod tests {
         );
         // The permission prompt tool (LAC-4058) must exist on the server the
         // CLI is pointed at, or every gated call would hang and die.
-        assert_eq!(tools[1]["name"], "approve");
-        assert!(tools[1]["inputSchema"]["properties"]["tool_name"].is_object());
+        // Juno's own settings, so "change my voice" works on the CLI path.
+        assert_eq!(tools[1]["name"], "settings");
+        assert!(tools[1]["inputSchema"]["properties"]["action"].is_object());
+        assert_eq!(tools[2]["name"], "approve");
+        assert!(tools[2]["inputSchema"]["properties"]["tool_name"].is_object());
     }
 
     #[test]

@@ -7,6 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.148] - 2026-10-09
+
+### Fixed
+
+- **agent-actions:** expand ~ in OpenButton paths so Open Downloads opens Finder (#769) (ccd7680b)
+
+## [0.8.147] - 2026-10-09
+
+### Fixed
+
+- **bar:** carry the bar with the cursor on every drag event, not the OS drag (#768) (f4f0d438)
+
+## [0.8.146] - 2026-10-09
+
+### Added
+
+- juno:// links for Settings (navigation only) (#767) (b21b9b15)
+
+## [0.8.145] - 2026-10-09
+
+### Added
+
+- **settings:** "open settings" follows the app you were in (#761) (f382070b)
+
+## [0.8.144] - 2026-10-09
+
+### Added
+
+- **settings:** Juno can open, point at and change its own settings (#759) (93bd5af8)
+
+## [0.8.143] - 2026-10-09
+
+### Fixed
+
+- **pill:** start the OS drag where the window is placed, reachable offline dot tooltip, no tooltips mid-drag (#766) (fe495d44)
+
+## [0.8.142] - 2026-10-08
+
+### Added
+
+- **mac-apps:** Reminders, Calendar, Contacts via EventKit (LAC-4233) (#764) (eec921f1)
+
+## [0.8.140] - 2026-10-08
+
+### Fixed
+
+- **intro:** smoke runs under the bar with no hole, both tones always (#763) (1f7ee44d)
+
+## [0.8.138] - 2026-10-08
+
+### Changed
+
+- **startup:** build only the bar at launch, and show it sooner (#756) (84756844)
+
+## [0.8.137] - 2026-10-08
+
+### Added
+
+- **greeting:** speak on the reveal's beat, from a render made at launch (#754) (860ca336)
+
+## [0.8.136] - 2026-10-08
+
+### Added
+
+- **tts:** speak the Mac's voice in-process (AVSpeechSynthesizer) (#752) (e3943f0d)
+
+## [0.8.135] - 2026-10-08
+
+### Fixed
+
+- **history:** save Juno's reply in every conversation (#758) (a070b731)
+
+## [0.8.134] - 2026-10-08
+
+### Fixed
+
+- **cli:** separate text blocks so sentences around tool calls don't run together (#748) (8f8e341b)
+
+## [0.8.132] - 2026-10-08
+
+### Fixed
+
+- **bar:** a fast drag keeps the spot pressed under the cursor (#755) (1b29dd72)
+
+## [0.8.131] - 2026-10-08
+
+### Added
+
+- **pill:** status dot shows connection, offline reply, pill tooltips (#746) (318d99c8)
+
+## [0.8.130] - 2026-10-08
+
+### Fixed
+
+- **bar:** startup fallback stands down while the reveal is bringing the bar on (#753) (3dae441e)
+
+## [0.8.129] - 2026-10-08
+
+### Fixed
+
+- **intro:** drop the rim, make the smoke two-tone (#751) (e7df5495)
+
+## [0.8.128] - 2026-10-08
+
+### Added
+
+- **voice:** speaking speed, and no speech instructions when Juno is silent (#747) (cfec7405)
+
+### Fixed
+
+- graceful failure when the network drops (model downloads resume, no raw errors) (#745) (cf624be6)
+
 ## [0.8.127] - 2026-10-08
 
 ### Fixed
@@ -1075,7 +1187,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.127...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.148...HEAD
+[0.8.148]: https://github.com/lacymorrow/juno/compare/cua-v0.8.147...v0.8.148
+[0.8.147]: https://github.com/lacymorrow/juno/compare/cua-v0.8.146...v0.8.147
+[0.8.146]: https://github.com/lacymorrow/juno/compare/cua-v0.8.145...v0.8.146
+[0.8.145]: https://github.com/lacymorrow/juno/compare/cua-v0.8.144...v0.8.145
+[0.8.144]: https://github.com/lacymorrow/juno/compare/cua-v0.8.143...v0.8.144
+[0.8.143]: https://github.com/lacymorrow/juno/compare/cua-v0.8.142...v0.8.143
+[0.8.142]: https://github.com/lacymorrow/juno/compare/cua-v0.8.141...v0.8.142
+[0.8.140]: https://github.com/lacymorrow/juno/compare/cua-v0.8.139...v0.8.140
+[0.8.138]: https://github.com/lacymorrow/juno/compare/cua-v0.8.137...v0.8.138
+[0.8.137]: https://github.com/lacymorrow/juno/compare/cua-v0.8.136...v0.8.137
+[0.8.136]: https://github.com/lacymorrow/juno/compare/cua-v0.8.135...v0.8.136
+[0.8.135]: https://github.com/lacymorrow/juno/compare/cua-v0.8.134...v0.8.135
+[0.8.134]: https://github.com/lacymorrow/juno/compare/cua-v0.8.133...v0.8.134
+[0.8.132]: https://github.com/lacymorrow/juno/compare/cua-v0.8.131...v0.8.132
+[0.8.131]: https://github.com/lacymorrow/juno/compare/cua-v0.8.130...v0.8.131
+[0.8.130]: https://github.com/lacymorrow/juno/compare/cua-v0.8.129...v0.8.130
+[0.8.129]: https://github.com/lacymorrow/juno/compare/cua-v0.8.128...v0.8.129
+[0.8.128]: https://github.com/lacymorrow/juno/compare/cua-v0.8.127...v0.8.128
 [0.8.127]: https://github.com/lacymorrow/juno/compare/cua-v0.8.126...v0.8.127
 [0.8.126]: https://github.com/lacymorrow/juno/compare/cua-v0.8.125...v0.8.126
 [0.8.125]: https://github.com/lacymorrow/juno/compare/cua-v0.8.124...v0.8.125

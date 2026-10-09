@@ -10,12 +10,14 @@ Lacy, 2026-10-07: the pill just appears on the screen, black on black over dark 
 
 ## The ten seconds
 
-Juno launches (or setup ends). Where the bar is about to be, smoke gathers out of nothing, white over a dark desk and charcoal over a light one. The pill condenses inside it, its rim catching light. The smoke thins and breaks up. "Hi, I'm Juno. To talk to me, hold the globe key." The eye is already on her.
+Juno launches (or setup ends). Where the bar is about to be, smoke gathers out of nothing, light and dark in the same cloud, each billow lit from one side. The pill appears inside it. The smoke thins and breaks up. "Hi, I'm Juno. To talk to me, hold the globe key." The eye is already on her.
 
 ## What was removed
 
 - The Pavel Dobryakov fluid simulation and its wrappers (`webgl-fluid`, `WebGL-Fluid-Enhanced`): 1,600 lines built around mouse splats, bloom and sunrays, neon dye. Cannot be choreographed; the look is what Juno's design rules call AI slop.
-- Any tint on the smoke. It is grey.
+- Any tint on the smoke. It is grey, two greys: light and dark together, so it reads over any desktop without a theme check.
+- The lit rim around the pill. On the real 56x16 pill it read as a solid white ring, jarring and out of place (Lacy, 2026-10-08). The smoke is the whole picture.
+- The hole the smoke left for the bar. The shader hollowed out the rectangle the backend measured, and that rectangle is the Pill's hit footprint, 88x76 with its margin, not the 56x16 shape: an empty rounded box around the pill "like an invisible force field" (Lacy, 2026-10-08). Now nothing in the shader knows the bar's shape. The smoke is densest at the centre, the bar is drawn over it, and the last wisp goes at the centre.
 - A declared window in `tauri.conf.json`. A declared window is built on every launch; this one is wanted once, so it is built for the occasion and closed.
 - Nine per-well variants. The shape of the cloud is one parameter, the inward vector.
 - A crossfade of the bar itself. The bar is a separate window and is shown with a plain `show()` as before; the smoke is dense around it at that moment, which is what hides the cut.
@@ -49,6 +51,10 @@ The frontend (`/intro`, `src/components/intro/IntroReveal.tsx`) asks for the pla
 
 If the page never asks (no WebGL, a failed load), the bar is shown at 1.5 s and the window closes. If there is no bar, no display, no regions: the bar is shown plainly. The log says why at debug level.
 
+## Two tones
+
+The smoke does not read the theme, because the theme is no guide to what is behind the bar: a light window sits on a dark desktop and the other way round. Mid-sized noise blotches decide which patches of the cloud are near white and which near black, so both are in every frame side by side, and the haze sampled a little toward the upper left lights each billow from that side (`relief`). Over a dark window the light patches carry the picture; over a light one the dark patches do. One shader, no `prefers-color-scheme`.
+
 ## The inward vector
 
 The bar docks in a 3x3 grid of wells per display. The smoke must never meet the screen edge, and the cloud is bigger than the gap between the pill and that edge. So the plan carries one vector: from the pill toward the open screen, computed from where the pill sits on its display (`inward_for`). Edge midpoints give a pure axis, corners a diagonal, the centre nothing.
@@ -57,7 +63,7 @@ The shader uses it twice. Smoke is faded to nothing on the edge-facing side of t
 
 ## The pill's shape
 
-The Pill is a steady look: one window far bigger than the shape it draws. The window's centre is no guide to the pill. The look already reports its drawn rectangles to Rust for click-through (`set_bar_hit_regions`), and at rest that is the pill alone, so the reveal reads the same table (`drawn_bounds`). With nothing reported, a 56x16 pill centred in the bar window is assumed (`fallback_pill`).
+The Pill is a steady look: one window far bigger than the shape it draws. The window's centre is no guide to the pill. The look already reports its footprint to Rust for click-through (`set_bar_hit_regions`), and at rest that is the pill plus the margin around it (88x76 for a 56x16 pill), so the reveal reads the same table (`drawn_bounds`) and trusts its centre, which is the pill's centre. The shader uses nothing but that centre. With nothing reported, a 56x16 pill centred in the bar window is assumed (`fallback_pill`).
 
 ## Tweakables
 
@@ -66,13 +72,13 @@ Two blocks, each a handful of numbers with a comment per line.
 | Where | What |
 |---|---|
 | `src-tauri/src/intro.rs` | `DURATION_MS` (2600), `BAR_AT_MS` (1000), `WINDOW_WIDTH` / `WINDOW_HEIGHT` (560x360), `PILL_INSET_X` / `PILL_INSET_Y` (70 / 40), `DEAD_ZONE` (0.15), `READY_WAIT` (1.5 s) |
-| `src/components/intro/introModel.ts` `LOOK` | `reach` (0.55, how far the cloud spreads), `density` (0.65), `churn` (1, speed), `rim` (1, the lit edge; 0 off), `colorOnDark`, `colorOnLight` |
+| `src/components/intro/introModel.ts` `LOOK` | `reach` (0.55, how far the cloud spreads), `density` (0.85), `churn` (1, speed), `dark` and `light` (the two tones, near black and near white), `lightness` (0.5, how much of the cloud is light), `relief` (0.6, how strongly billows are lit from the upper left) |
 
 Dev Tools has a **Replay intro** button (`replay_intro`) that hides the bar and runs the reveal on it again, so a change can be looked at without relaunching.
 
 ## Reduce Motion
 
-No smoke. The rim alone traces the pill after it appears, over the same clock. The bar still shows at 1.0 s and the greeting still follows it.
+Nothing drawn. The bar still arrives at 1.0 s and the greeting follows it. The bar still shows at 1.0 s and the greeting still follows it.
 
 ## Demo test
 

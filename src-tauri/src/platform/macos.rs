@@ -41,17 +41,11 @@ pub fn apply_macos_setup(app_handle: &AppHandle) {
     {
         info!("Applying macOS specific setup...");
 
-        // Setup floating bar window
+        // Setup floating bar window. It is the only declared window that
+        // exists this early: the rest are built once the bar is on screen
+        // (`startup_windows`), and each is set up by
+        // `configure_deferred_window` as it is built.
         setup_floating_bar_window(app_handle);
-
-        // Setup floating panel window
-        setup_floating_panel_window(app_handle);
-
-        // Setup main window
-        setup_main_window(app_handle);
-
-        // Setup desktop cursor overlay (pre-created in config as visible:false)
-        setup_desktop_cursor_overlay_window(app_handle);
 
         // Read the keyboard layout while we are still on the main thread.
         // Paste insertion runs on a blocking worker and Text Input Services
@@ -282,6 +276,17 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
 /// to apply to physical pixels was scaled by the display the window was
 /// leaving, which put a frame aimed at a second display of another density
 /// in the wrong place.
+///
+/// `grab`, when given, is a point inside the window (from its top-left, in
+/// points) that must end up under the cursor: `x`/`y` are then ignored and the
+/// origin is computed from `NSEvent.mouseLocation`, read here on the main
+/// thread in the same call as `setFrame:`. The bar's drag window is placed
+/// this way so the spot the user pressed is under the cursor when the OS drag
+/// starts, however far a fast flick has carried the cursor since the press.
+///
+/// Returns where the window actually is afterwards, in points (AppKit may
+/// constrain the frame, e.g. below the menu bar), and the cursor it was
+/// placed by, when it was placed by one.
 #[cfg(target_os = "macos")]
 pub fn set_bar_frame_atomic(
     app_handle: &AppHandle,
@@ -289,7 +294,11 @@ pub fn set_bar_frame_atomic(
     y: f64,
     w_pt: f64,
     h_pt: f64,
-) -> Result<(), String> {
+    grab: Option<(f64, f64)>,
+) -> Result<BarFramePlaced, String> {
+    use crate::platform::desktop_points::{
+        cocoa_frame_top_left, cocoa_point_to_points, origin_under_cursor,
+    };
     let label = constants::ui::window_labels::FLOATING_BAR;
     let window = app_handle
         .get_webview_window(label)
@@ -300,20 +309,94 @@ pub fn set_bar_frame_atomic(
     // AppKit selectors on live objects; ns_window is the bar's window handle
     // from Tauri. The command dispatches this to the main thread.
     unsafe {
-        let screens: cocoa_id = msg_send![class!(NSScreen), screens];
-        let count: usize = msg_send![screens, count];
-        if count == 0 {
-            return Err("No screens to place the bar on".to_string());
-        }
-        let primary: cocoa_id = msg_send![screens, objectAtIndex: 0usize];
-        let primary_frame: NSRect = msg_send![primary, frame];
+        let primary_h = primary_screen_height()?;
+        let cursor = grab.map(|_| {
+            let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
+            cocoa_point_to_points((mouse.x, mouse.y), primary_h)
+        });
+        let (x, y) = match (grab, cursor) {
+            (Some(grab), Some(cursor)) => origin_under_cursor(cursor, grab),
+            _ => (x, y),
+        };
         let new_frame = NSRect::new(
-            NSPoint::new(x, primary_frame.size.height - y - h_pt),
+            NSPoint::new(x, primary_h - y - h_pt),
             NSSize::new(w_pt, h_pt),
         );
         let _: () = msg_send![ns_window, setFrame: new_frame display: YES animate: NO];
+        let placed: NSRect = msg_send![ns_window, frame];
+        let (x, y) = cocoa_frame_top_left(
+            (placed.origin.x, placed.origin.y),
+            placed.size.height,
+            primary_h,
+        );
+        Ok(BarFramePlaced { x, y, cursor })
     }
-    Ok(())
+}
+
+/// Where `set_bar_frame_atomic` left the bar, in global points.
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy)]
+pub struct BarFramePlaced {
+    pub x: f64,
+    pub y: f64,
+    /// The cursor the window was placed by, read in the same call.
+    pub cursor: Option<(f64, f64)>,
+}
+
+/// The primary display's height in points: the flip between Cocoa's
+/// bottom-up frames and global top-left points.
+///
+/// # Safety
+/// Main thread only (AppKit).
+#[cfg(target_os = "macos")]
+unsafe fn primary_screen_height() -> Result<f64, String> {
+    let screens: cocoa_id = msg_send![class!(NSScreen), screens];
+    let count: usize = msg_send![screens, count];
+    if count == 0 {
+        return Err("No screens to place the bar on".to_string());
+    }
+    let primary: cocoa_id = msg_send![screens, objectAtIndex: 0usize];
+    let primary_frame: NSRect = msg_send![primary, frame];
+    Ok(primary_frame.size.height)
+}
+
+/// Start carrying the bar with the cursor: from here until the release, every
+/// mouse-dragged event puts `grab` (points from the window's top-left) under
+/// the cursor (`platform::bar_drag_follow`).
+///
+/// This replaced handing the window to the OS drag (`performWindowDragWithEvent:`
+/// with a mouse-down made at the cursor, #766). That drag is the
+/// WindowServer's: Juno cannot see it, and with a mouse-down that is not the
+/// real press the window drifted off the cursor as the drag went on, and once
+/// was left behind off screen. See the module docs for the evidence.
+///
+/// Must run on the main thread, right after the frame was set, so no event is
+/// handled between the placement and the first move. Returns the cursor
+/// (global points) the drag started at. Never touches the window's class or
+/// its level: every move goes through `setFrameTopLeftPoint:`, so the menu bar
+/// constraint holds exactly as it does for any frame change, and the #728
+/// rules in `docs/plans/appearance-steady-frame.md` are untouched.
+#[cfg(target_os = "macos")]
+pub fn start_bar_drag_follow(
+    app_handle: &AppHandle,
+    grab: (f64, f64),
+) -> Result<(f64, f64), String> {
+    use crate::platform::desktop_points::cocoa_point_to_points;
+    let label = constants::ui::window_labels::FLOATING_BAR;
+    let window = app_handle
+        .get_webview_window(label)
+        .ok_or("floating-bar window not found")?;
+    let ns_window = window.ns_window().map_err(|e| e.to_string())? as cocoa_id;
+
+    // SAFETY: standard AppKit selectors on the main thread (the caller is a
+    // `run_on_main_thread` closure).
+    let cursor = unsafe {
+        let primary_h = primary_screen_height()?;
+        let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
+        cocoa_point_to_points((mouse.x, mouse.y), primary_h)
+    };
+    crate::platform::bar_drag_follow::start(app_handle, ns_window, grab)?;
+    Ok(cursor)
 }
 
 #[cfg(target_os = "macos")]
@@ -505,8 +588,11 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(BAR_SHOW_FALLBACK_MS)).await;
 
-        // The normal path already won: leave it alone.
-        if window.is_visible().unwrap_or(false) {
+        // The normal path already won: leave it alone. That includes a reveal
+        // whose smoke is up but whose bar is not yet: the window is still
+        // hidden for that second, and this used to log a second "put up" for
+        // a show the reveal guard then dropped.
+        if window.is_visible().unwrap_or(false) || crate::intro::reveal_in_flight() {
             return;
         }
 
@@ -896,6 +982,29 @@ pub mod mouse_tracking {
         }
 
         Ok(())
+    }
+}
+
+/// The macOS setup for a window built after launch by `startup_windows`:
+/// what `apply_macos_setup` used to do for it when every declared window
+/// existed before setup ran. AppKit, so it hops to the main thread.
+#[cfg(target_os = "macos")]
+pub fn configure_deferred_window(app_handle: &AppHandle, label: &str) {
+    if label == crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL {
+        // Already dispatches to the main thread itself.
+        setup_desktop_cursor_overlay_window(app_handle);
+        return;
+    }
+    let app = app_handle.clone();
+    let owned = label.to_string();
+    if let Err(e) = app_handle.run_on_main_thread(move || {
+        if owned == constants::window_labels::FLOATING_PANEL {
+            setup_floating_panel_window(&app);
+        } else if owned == constants::window_labels::MAIN {
+            setup_main_window(&app);
+        }
+    }) {
+        warn!("Could not set up the {} window: {}", label, e);
     }
 }
 

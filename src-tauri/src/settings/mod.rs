@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 pub mod manager;
 pub mod persist;
+pub mod registry;
 pub mod reset;
 
 /// Main application settings structure
@@ -289,6 +290,10 @@ pub struct AudioSettings {
     pub supertonic_voice: String,
     #[serde(default = "AudioSettings::default_supertonic_speed")]
     pub supertonic_speed: f64,
+    /// How fast Juno speaks, 1.0 being the engine's own pace. One setting for
+    /// every engine that can change speed; see `tts::rate`.
+    #[serde(default = "AudioSettings::default_voice_rate")]
+    pub voice_rate: f64,
     pub sound_enabled: bool,
     /// Legacy single clipboard knob, kept so older stores migrate cleanly.
     /// Read through [`AudioSettings::dictation_copy_to_clipboard`], which
@@ -388,6 +393,10 @@ impl AudioSettings {
 
     fn default_supertonic_speed() -> f64 {
         crate::tts::supertonic::DEFAULT_SPEED
+    }
+
+    fn default_voice_rate() -> f64 {
+        crate::tts::rate::DEFAULT_RATE
     }
 }
 
@@ -647,6 +656,7 @@ impl Default for AudioSettings {
             supertonic_server_url: Self::default_supertonic_server_url(),
             supertonic_voice: Self::default_supertonic_voice(),
             supertonic_speed: Self::default_supertonic_speed(),
+            voice_rate: Self::default_voice_rate(),
             sound_enabled: defaults::SOUND_ENABLED,
             dictation_clipboard_enabled: defaults::DICTATION_CLIPBOARD_ENABLED,
             dictation_insertion_mode: defaults::dictation_insertion_mode(),

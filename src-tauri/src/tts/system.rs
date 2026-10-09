@@ -28,7 +28,22 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 /// omitted when nothing was chosen, which leaves `say` on the Mac's own
 /// settings.
 pub fn say_arguments(text: &str, voice: Option<&str>, device: Option<&str>) -> Vec<String> {
+    say_arguments_at(text, voice, device, None)
+}
+
+/// [`say_arguments`] with a pace: `-r` is words per minute, and `None` leaves
+/// `say` at the Mac's own.
+pub fn say_arguments_at(
+    text: &str,
+    voice: Option<&str>,
+    device: Option<&str>,
+    words_per_minute: Option<u32>,
+) -> Vec<String> {
     let mut args = Vec::new();
+    if let Some(wpm) = words_per_minute {
+        args.push("-r".to_string());
+        args.push(wpm.to_string());
+    }
     if let Some(voice) = voice.map(str::trim).filter(|v| !v.is_empty()) {
         args.push("-v".to_string());
         args.push(voice.to_string());
@@ -62,7 +77,22 @@ pub async fn speak_directly(
     text: String,
     voice: Option<String>,
     device: Option<String>,
+    words_per_minute: Option<u32>,
 ) -> Result<String, String> {
+    if crate::tts::is_tts_stop_requested() {
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
+    // In-process first: the same voice, rate and speaker, starting in tens of
+    // milliseconds instead of a second or two. Anything it cannot honour
+    // exactly comes back here and `say` speaks it, as before.
+    let rate = crate::tts::avspeech::rate_from_words_per_minute(words_per_minute);
+    match crate::tts::avspeech::speak(&text, voice.as_deref(), device.as_deref(), rate).await {
+        crate::tts::avspeech::Spoken::Status(status) => return Ok(status.to_string()),
+        crate::tts::avspeech::Spoken::UseSay(reason) => {
+            info!("[AVSpeech] Using say for this sentence: {reason}");
+        }
+    }
     if crate::tts::is_tts_stop_requested() {
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
@@ -74,7 +104,21 @@ pub async fn speak_directly(
         device.as_deref().unwrap_or("the system output")
     );
 
-    let status = run_say(say_arguments(&text, voice.as_deref(), device.as_deref())).await?;
+    let spawned = std::time::Instant::now();
+    let status = run_say(say_arguments_at(
+        &text,
+        voice.as_deref(),
+        device.as_deref(),
+        words_per_minute,
+    ))
+    .await?;
+    // `say` gives no signal when sound begins, so only the whole run is known.
+    // Compare with `engine=avspeech first_audio_ms`.
+    info!(
+        "[SpeechTiming] engine=say first_audio_ms=- total_ms={} chars={}",
+        spawned.elapsed().as_millis(),
+        text.chars().count()
+    );
 
     // A stop arrives as SIGTERM to that pid, so a non-success exit right after
     // one is the user pressing Escape rather than a failure worth reporting.
@@ -93,7 +137,13 @@ pub async fn speak_directly(
     // what covers the time before that.
     if let Some(missing) = voice.as_deref() {
         warn!("[TTS] 'say' would not use {missing} ({status}); retrying with the Mac's own voice");
-        let retry = run_say(say_arguments(&text, None, device.as_deref())).await?;
+        let retry = run_say(say_arguments_at(
+            &text,
+            None,
+            device.as_deref(),
+            words_per_minute,
+        ))
+        .await?;
         if crate::tts::is_tts_stop_requested() {
             return Ok("TTS_STOPPED_BY_USER".to_string());
         }
@@ -270,13 +320,14 @@ pub async fn speak_directly(
     text: String,
     _voice: Option<String>,
     _device: Option<String>,
+    _words_per_minute: Option<u32>,
 ) -> Result<String, String> {
     invoke_system_tts(text).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::say_arguments;
+    use super::{say_arguments, say_arguments_at};
 
     /// Nothing chosen means nothing imposed: `say` keeps the Mac's own voice
     /// and output device.
@@ -324,6 +375,22 @@ mod tests {
         assert_eq!(
             say_arguments("hi", Some("Grandma (Enhanced)"), None),
             vec!["-v", "Grandma (Enhanced)", "hi"]
+        );
+    }
+
+    #[test]
+    fn a_pace_reaches_say_ahead_of_the_text() {
+        assert_eq!(
+            say_arguments_at("hello", Some("Daniel"), None, Some(263)),
+            vec!["-r", "263", "-v", "Daniel", "hello"]
+        );
+    }
+
+    #[test]
+    fn no_pace_adds_no_flag() {
+        assert_eq!(
+            say_arguments_at("hello", None, None, None),
+            say_arguments("hello", None, None)
         );
     }
 }

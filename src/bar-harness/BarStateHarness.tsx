@@ -157,6 +157,14 @@ function NumberField({
 
 // === THE HARNESS ===
 
+/** The snapshots Rust's `connectivity` module emits, one per status. */
+const CONNECTIVITY = {
+  connected: { status: "connected", label: "Connected to Claude", provider: "Claude" },
+  offline: { status: "offline", label: "Network unavailable", provider: "Claude" },
+  provider_unreachable: { status: "provider_unreachable", label: "Can't reach Claude", provider: "Claude" },
+  signed_out: { status: "signed_out", label: "Not signed in to Claude", provider: "Claude" },
+} as const;
+
 export default function BarStateHarness() {
   const { monitor, frame, requested, freezeAutoResize } = useHarness();
   const scale = monitor.scaleFactor;
@@ -177,6 +185,8 @@ export default function BarStateHarness() {
   const drivingApp = "Safari";
   const [wake, setWake] = useState<"none" | "paused" | "armed">("none");
   const [rosterCount, setRosterCount] = useState(0);
+  // What Rust's connectivity monitor reports (`connectivity-changed`).
+  const [connection, setConnection] = useState<keyof typeof CONNECTIVITY>("connected");
 
   // Simulated screen zoom, so a 1440-wide desktop fits the panel.
   const [zoom, setZoom] = useState(0.5);
@@ -222,6 +232,10 @@ export default function BarStateHarness() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hovered]);
+
+  useEffect(() => {
+    void emit(EVENTS.SYSTEM_CONNECTIVITY_CHANGED, CONNECTIVITY[connection]);
+  }, [connection]);
 
   useEffect(() => {
     void emit(EVENTS.INPUT_CONTROL_STATE, driving ? { active: true, target_app: drivingApp } : { active: false });
@@ -383,6 +397,18 @@ export default function BarStateHarness() {
             <Btn active={driving} onClick={() => setDriving((v) => !v)}>
               driving
             </Btn>
+          </div>
+          <div className="mt-2 space-y-1">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-black/35">
+              Connection
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.keys(CONNECTIVITY) as Array<keyof typeof CONNECTIVITY>).map((key) => (
+                <Btn key={key} active={connection === key} onClick={() => setConnection(key)}>
+                  {key.replace(/_/g, " ")}
+                </Btn>
+              ))}
+            </div>
           </div>
           <div className="mt-2 space-y-1">
             <div className="text-[10px] font-medium uppercase tracking-wide text-black/35">

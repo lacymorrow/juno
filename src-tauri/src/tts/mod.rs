@@ -1,5 +1,8 @@
+pub mod avspeech;
 pub mod elevenlabs;
 pub mod kokoro;
+pub mod prerender;
+pub mod rate;
 pub mod replicate;
 pub mod speech_level;
 pub mod supertonic;
@@ -237,6 +240,35 @@ fn audio_processes() -> std::sync::MutexGuard<'static, AudioProcesses> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The hold, readable without the lock. Speech played inside Juno (the Mac's
+/// voice through `avspeech`) has no process to `SIGSTOP`; its audio callback
+/// reads this instead, plays silence while it is set and resumes from the same
+/// sample when it clears. Written only under `JUNO_AUDIO`, next to
+/// `held_since`.
+static HELD_SILENT: AtomicBool = AtomicBool::new(false);
+
+fn sync_held(processes: &AudioProcesses) {
+    HELD_SILENT.store(processes.held_since.is_some(), Ordering::SeqCst);
+}
+
+/// True while a microphone is open and Juno must not be heard.
+pub(crate) fn is_held_silent() -> bool {
+    HELD_SILENT.load(Ordering::SeqCst)
+}
+
+/// In-process speech started: the same stale-hold check a spawned player
+/// gets in [`register_audio_pid`], so a leaked hold cannot silence it for good.
+pub(crate) fn release_stale_hold() {
+    let mut processes = audio_processes();
+    let stale = processes.release_if_stale(std::time::Instant::now());
+    sync_held(&processes);
+    if !stale.is_empty() {
+        warn!("[TTS] A capture hold outlived its session; letting Juno speak again");
+        #[cfg(unix)]
+        signal_players(&stale, libc::SIGCONT);
+    }
+}
+
 /// Send `signal` to each of Juno's players. Unix only; a no-op elsewhere.
 fn signal_players(pids: &[u32], signal: i32) {
     #[cfg(unix)]
@@ -264,6 +296,7 @@ pub(crate) fn register_audio_pid(pid: u32) {
     crate::turn_timing::mark(crate::turn_timing::Stage::FirstAudio);
     let mut processes = audio_processes();
     let stale = processes.release_if_stale(std::time::Instant::now());
+    sync_held(&processes);
     if !stale.is_empty() {
         warn!("[TTS] A capture hold outlived its session; letting Juno speak again");
         #[cfg(unix)]
@@ -285,6 +318,7 @@ pub(crate) fn unregister_audio_pid(pid: u32) {
 pub fn hold_for_capture() {
     let mut processes = audio_processes();
     let pids = processes.hold(std::time::Instant::now());
+    sync_held(&processes);
     if !pids.is_empty() {
         info!(
             "[TTS] Holding {} player(s) while the microphone is open",
@@ -300,6 +334,7 @@ pub fn hold_for_capture() {
 pub fn release_after_capture() {
     let mut processes = audio_processes();
     let pids = processes.release();
+    sync_held(&processes);
     if !pids.is_empty() {
         info!("[TTS] Resuming {} held player(s)", pids.len());
     }
@@ -698,8 +733,12 @@ pub fn stop_speech() {
     kill_audio_processes();
 }
 
-/// SIGTERM every audio process Juno spawned. Does not touch the queue.
+/// Stop everything Juno is playing: SIGTERM to every audio process it
+/// spawned, and the Mac's voice when it is speaking in-process. Every stop
+/// (Escape, `stop_coordinator`, a new turn, an audition) comes through here.
+/// Does not touch the queue.
 fn kill_audio_processes() {
+    avspeech::stop_all();
     let pids_to_kill: Vec<u32> = audio_processes().pids.clone();
 
     if pids_to_kill.is_empty() {
@@ -1012,6 +1051,57 @@ pub async fn invoke_tts(
         execute_tts_with_completion_tracking(filtered_text, &provider, &state, &app_handle).await;
 
     // CRITICAL FIX 6: Cleanup happens in execute_tts_with_completion_tracking after actual audio completion
+    result
+}
+
+/// Play a line rendered ahead of time (the launch greeting), with everything
+/// [`invoke_tts`] gives a spoken line: it skips when something is already
+/// speaking, honours speech being off, holds the echo guard and the Escape
+/// key while it plays, and stops on every stop path. The Mac's voice plays on
+/// the chosen speaker through the in-process player; other engines' audio
+/// plays the way theirs always does.
+///
+/// `Err` only when the audio could not be played at all, so the caller can
+/// speak the line the ordinary way instead.
+pub async fn speak_prerendered(
+    audio: prerender::Prerendered,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    if is_tts_playing() || with_queue(|queue| queue.is_busy()) {
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+    let _guard = TTS_MUTEX.lock().await;
+    if is_tts_playing() {
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+    reset_tts_stop_flag();
+
+    let provider = state
+        .get_tts_provider()
+        .map_err(|e| format!("Failed to get tts_provider: {}", e))?;
+    if provider.is_empty() || provider.eq_ignore_ascii_case("off") {
+        return Ok("TTS_DISABLED_BY_SETTING".to_string());
+    }
+    crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+    crate::turn_timing::note_tts_engine(&provider);
+
+    set_tts_playing(true);
+    register_tts_escape_key(&app_handle).await;
+
+    let result = match audio {
+        prerender::Prerendered::Pcm { samples, rate } => {
+            let device = state.get_output_device().ok().flatten();
+            match avspeech::play_pcm(&samples, rate, device.as_deref()).await {
+                avspeech::Spoken::Status(status) => Ok(status.to_string()),
+                avspeech::Spoken::UseSay(reason) => Err(reason),
+            }
+        }
+        prerender::Prerendered::Encoded(encoded) => play_rendered(Ok(encoded), &state).await,
+    };
+
+    set_tts_playing(false);
+    unregister_tts_escape_key(&app_handle).await;
     result
 }
 
@@ -1423,7 +1513,10 @@ async fn execute_tts_with_fallback(
     // If it's a cloud provider, do a quick network check first
     if is_cloud_provider {
         info!("Cloud TTS provider detected, checking network connectivity...");
-        let is_online = crate::utils::network::is_online().await;
+        // The network monitor already knows when there is no route, and
+        // answers at once; the slower probe only runs when it thinks there is.
+        let is_online =
+            crate::connectivity::network_up() && crate::utils::network::is_online().await;
         if !is_online {
             if !allow_direct {
                 return Err("offline; system voice cannot be rendered ahead".to_string());
@@ -1558,6 +1651,13 @@ pub async fn play_sample(base64_audio: &str) -> Result<(), String> {
     handle.wait_for_completion().await
 }
 
+/// The stored voice rate, or normal pace when state is unavailable.
+fn stored_rate(state: Option<&AppState>) -> f64 {
+    state
+        .and_then(|s| s.get_voice_rate().ok())
+        .unwrap_or(rate::DEFAULT_RATE)
+}
+
 // Invoke TTS for a specific provider name
 pub async fn invoke_tts_for_provider(
     text: String,
@@ -1573,7 +1673,10 @@ pub async fn invoke_tts_for_provider(
     }
 
     match provider.to_lowercase().as_str() {
-        "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
+        "elevenlabs" => {
+            let speed = rate::effective("elevenlabs", stored_rate(_state.as_ref()));
+            elevenlabs::invoke_elevenlabs_tts(text, speed).await
+        }
         "kokoro" => {
             // An embedding that is not on disk is not a slow voice: `any_tts`
             // loads `voices/<id>.pt` straight off disk and never fetches a
@@ -1583,7 +1686,9 @@ pub async fn invoke_tts_for_provider(
             // been open to have resolved it.
             let stored = _state.as_ref().and_then(|s| s.get_kokoro_voice().ok());
             let voice = voices::resolve_kokoro_voice(stored.as_deref());
-            kokoro::invoke_kokoro_tts(text, voice).await
+            let speed = rate::effective("kokoro", stored_rate(_state.as_ref()))
+                .unwrap_or(rate::DEFAULT_RATE);
+            kokoro::invoke_kokoro_tts(text, voice, speed).await
         }
         "replicate" => replicate::invoke_replicate_tts(text).await,
         "chatterbox" => {
@@ -1617,6 +1722,12 @@ pub async fn invoke_tts_for_provider(
                     supertonic::DEFAULT_VOICE.to_string(),
                     supertonic::DEFAULT_SPEED,
                 ));
+            // The Supertonic setting is the engine's own trim; the voice rate
+            // scales it, so 1.0x leaves it exactly where it was.
+            let speed = (speed
+                * rate::effective("supertonic", stored_rate(_state.as_ref()))
+                    .unwrap_or(rate::DEFAULT_RATE))
+            .clamp(0.5, 2.0);
             supertonic::invoke_supertonic_tts(text, server_url, voice, speed).await
         }
         // Straight to the speakers rather than to a file and back. This is the
@@ -1636,7 +1747,9 @@ pub async fn invoke_tts_for_provider(
                 .as_ref()
                 .and_then(|s| s.get_output_device().ok())
                 .flatten();
-            system::speak_directly(text, voice, device).await
+            let words_per_minute = rate::effective("system", stored_rate(_state.as_ref()))
+                .and_then(rate::say_words_per_minute);
+            system::speak_directly(text, voice, device, words_per_minute).await
         }
         "off" => {
             warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
