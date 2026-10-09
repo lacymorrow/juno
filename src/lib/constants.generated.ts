@@ -96,6 +96,7 @@ export const EVENTS = {
   MENU_IMPORT_CHAT_REQUESTED: 'import-chat-requested',
   MENU_EXPORT_CHAT_REQUESTED: 'export-chat-requested',
   MENU_TOGGLE_FLOATING_BAR_REQUESTED: 'toggle-floating-bar-requested',
+  MENU_CENTER_FLOATING_BAR_REQUESTED: 'center-floating-bar-requested',
   MENU_TOGGLE_DEV_PANEL_REQUESTED: 'toggle-dev-panel-requested',
   MENU_TOGGLE_FULLSCREEN_REQUESTED: 'toggle-fullscreen-requested',
   MENU_MINIMIZE_WINDOW_REQUESTED: 'minimize-window-requested',
