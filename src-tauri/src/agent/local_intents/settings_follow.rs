@@ -1417,7 +1417,7 @@ mod tests {
         let terminal = win("201", "~/repo/juno");
         let plan = close_plan(
             &app_target("ghostty"),
-            &opened(true, &[terminal.clone()], &[terminal]),
+            &opened(true, std::slice::from_ref(&terminal), &[terminal]),
         );
         assert_eq!(plan, CloseAction::Nothing);
     }
