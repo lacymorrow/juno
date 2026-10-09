@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const invoke = vi.fn(() => Promise.resolve());
+const { invoke } = vi.hoisted(() => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 import { checkLink, isJunoLink, junoUrlTransform } from "../junoLinks";
