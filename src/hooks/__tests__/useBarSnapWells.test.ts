@@ -80,7 +80,7 @@ import {
   steadyLayout,
   type SteadyLayout,
 } from "@/lib/steadyFrame";
-import { monitorsInPoints } from "@/lib/desktopPoints";
+import { monitorsInPoints, originUnderCursor } from "@/lib/desktopPoints";
 import { wellForSlot } from "@/lib/snapWells";
 
 const SPEC = { rest: { width: 88, height: 76 }, max: { width: 452, height: 574 }, stage: { width: 452, height: 76 } };
@@ -322,11 +322,12 @@ describe("a fast drag keeps the spot pressed under the cursor", () => {
   });
 });
 
-describe("the OS drag starts where the window is placed", () => {
-  // Rust as it now is: read the cursor, set the frame with the grab under it
-  // and, with startDrag and the button down, start the OS drag in that same
-  // call, anchored at the cursor then. The OS drag keeps whatever offset the
-  // window has from the cursor when it starts; that offset is what we record.
+describe("the drag starts where the window is placed", () => {
+  // Rust: read the cursor, set the frame with the grab under it and, with
+  // startDrag and the button down, start the drag in that same call, anchored
+  // at the cursor then. The offset the window has from the cursor at that
+  // moment is what we record; the follow keeps it from there on (see the
+  // "carries the window" tests below).
   let anchors: { x: number; y: number }[];
   let buttonDown: boolean;
 
@@ -424,6 +425,155 @@ describe("the OS drag starts where the window is placed", () => {
     // The release is reported once, for the [Drag] log.
     const released = vi.mocked(invoke).mock.calls.filter((c) => c[0] === "bar_drag_released");
     expect(released).toHaveLength(1);
+  });
+});
+
+describe("Rust carries the window with the cursor for the whole drag", () => {
+  // Rust as it now is (`platform/bar_drag_follow.rs`): `set_bar_frame` with
+  // startDrag places the window with the grab under the cursor and, with the
+  // button down, starts following; every mouse-dragged event after that puts
+  // the window's top-left at the cursor minus that same grab, until the
+  // button comes up or the page's settle stops it (`bar_drag_released`).
+  let follow: { x: number; y: number } | null;
+  let buttonDown: boolean;
+  let log: string[];
+
+  function emulateRust() {
+    vi.mocked(invoke).mockImplementation(async (cmd, args) => {
+      if (cmd === "bar_pointer_held") return buttonDown;
+      if (cmd === "bar_drag_released") {
+        log.push(follow ? "stopped by the page" : "released");
+        follow = null;
+        return undefined;
+      }
+      if (cmd !== "set_bar_frame") return undefined;
+      const a = args as { x: number; y: number; grabX?: number; grabY?: number; startDrag?: boolean };
+      const grab = a.grabX !== undefined && a.grabY !== undefined ? { x: a.grabX, y: a.grabY } : null;
+      const placed = grab && cursor ? originUnderCursor(cursor, grab) : { x: a.x, y: a.y };
+      win.position = { ...placed };
+      if (!a.startDrag) return placed;
+      if (!buttonDown || !grab) return { ...placed, drag: "released" };
+      follow = grab;
+      log.push("following");
+      return { ...placed, drag: "started" };
+    });
+  }
+
+  /** One mouse-dragged event: the hand is at `p`. */
+  function dragTo(p: { x: number; y: number }) {
+    cursor = p;
+    if (follow && buttonDown) win.position = originUnderCursor(p, follow);
+  }
+
+  /** The button comes up; Rust's monitor sees it and stops. */
+  function release() {
+    buttonDown = false;
+    follow = null;
+  }
+
+  /** How far the spot pressed is from the cursor right now. */
+  function drift(grab: { x: number; y: number }) {
+    return { x: cursor!.x - win.position.x - grab.x, y: cursor!.y - win.position.y - grab.y };
+  }
+
+  beforeEach(() => {
+    resetBarSnapState();
+    resetSteady();
+    vi.mocked(invoke).mockReset();
+    win.startDragging.mockReset();
+    win.setPosition.mockReset();
+    win.setPosition.mockImplementation(async () => {
+      log.push("glide");
+    });
+    follow = null;
+    buttonDown = true;
+    log = [];
+    emulateRust();
+  });
+
+  // Speeds in points per mouse-dragged event: a slow drag, a quick one, and
+  // a flick far faster than a hand (a 120 Hz trackpad at 30,000 pt/s).
+  for (const speed of [3, 40, 250]) {
+    it(`keeps the spot pressed under the cursor at ${speed}pt per event, with zero drift after 600 events`, async () => {
+      const docked = steadyLayout(wellForSlot({ fx: 1, fy: 1 }, 0, steadyWells(ONE, SPEC))!, ONE[0], SPEC);
+      registerSteady("floating-bar", SPEC);
+      setSteadyLayout("floating-bar", docked);
+      const fp = { width: 164, height: 76 };
+      setSteadyFootprint("floating-bar", fp);
+      const drawn = contentRect(docked, fp);
+      const press = { x: drawn.x + 30, y: drawn.y + 20 };
+      const grab = { x: press.x - drawn.x, y: press.y - drawn.y };
+      cursor = { x: docked.origin.x + press.x + 4, y: docked.origin.y + press.y };
+      startBarDrag(press);
+      // The hand keeps moving while the window swaps behind its hidden frames.
+      dragTo({ x: cursor.x - speed, y: cursor.y - speed });
+      await vi.waitFor(() => expect(log).toContain("following"), { timeout: 5000 });
+      expect(drift(grab)).toEqual({ x: 0, y: 0 });
+
+      // A zig-zag across the whole display and past its edges, every event
+      // `speed` points from the last, checked after every single one.
+      let worst = 0;
+      let p = { ...cursor! };
+      for (let i = 0; i < 600; i++) {
+        const angle = i * 0.91;
+        p = {
+          x: Math.min(1700, Math.max(-200, p.x + speed * Math.cos(angle))),
+          y: Math.min(1100, Math.max(-100, p.y + speed * Math.sin(angle * 1.3))),
+        };
+        dragTo(p);
+        const d = drift(grab);
+        worst = Math.max(worst, Math.abs(d.x), Math.abs(d.y));
+      }
+      expect(worst).toBe(0);
+      expect(drift(grab)).toEqual({ x: 0, y: 0 });
+      expect(win.startDragging).not.toHaveBeenCalled();
+
+      // Released near the top-left: it lands in the top-left well, with the
+      // resting footprint exactly on it.
+      dragTo({ x: 140, y: 90 });
+      release();
+      await settleBarSnap();
+      expect(getDockSlot("floating-bar")).toEqual({ fx: 0, fy: 0 });
+      const well = wellForSlot({ fx: 0, fy: 0 }, 0, steadyWells(ONE, SPEC))!;
+      expect(anchorScreenOrigin(getSteady("floating-bar")!.layout!)).toEqual({ x: well.x, y: well.y });
+    });
+  }
+
+  it("stops following before the glide when the release was never seen", async () => {
+    const docked = steadyLayout(wellForSlot({ fx: 0.5, fy: 1 }, 0, steadyWells(ONE, SPEC))!, ONE[0], SPEC);
+    registerSteady("floating-bar", SPEC);
+    setSteadyLayout("floating-bar", docked);
+    cursor = { x: docked.origin.x + docked.anchor.x + 40, y: docked.origin.y + docked.anchor.y + 30 };
+    startBarDrag({ x: docked.anchor.x + 40, y: docked.anchor.y + 30 });
+    await vi.waitFor(() => expect(log).toContain("following"), { timeout: 5000 });
+    for (let i = 0; i < 50; i++) dragTo({ x: cursor!.x + 23, y: cursor!.y - 15 });
+    // The button comes up where no monitor hears it: Rust is still following
+    // and the page heard no mouseup. The release watch notices.
+    buttonDown = false;
+    await vi.waitFor(() => expect(isBarDragging()).toBe(false), { timeout: 5000 });
+    // The page stopped the follow, and only then did anything glide.
+    expect(log[log.indexOf("following") + 1]).toBe("stopped by the page");
+    const firstGlide = log.indexOf("glide");
+    if (firstGlide >= 0) expect(firstGlide).toBeGreaterThan(log.indexOf("stopped by the page"));
+    expect(follow).toBeNull();
+    // And it landed in a well, not where the hand let go.
+    expect(getDockSlot("floating-bar")).not.toBeNull();
+    expect(getSteady("floating-bar")!.layout!.size).toEqual(docked.size);
+  });
+
+  it("a look that is not steady is carried the same way", async () => {
+    win.position = { x: 700, y: 400 };
+    cursor = { x: 850 + 60, y: 420 };
+    startBarDrag({ x: 150, y: 20 });
+    await vi.waitFor(() => expect(log).toContain("following"), { timeout: 5000 });
+    for (let i = 0; i < 200; i++) {
+      dragTo({ x: 910 - i * 4, y: 420 + ((i * 37) % 300) });
+      expect(drift({ x: 150, y: 20 })).toEqual({ x: 0, y: 0 });
+    }
+    release();
+    await settleBarSnap();
+    expect(win.startDragging).not.toHaveBeenCalled();
+    expect(log).toContain("released");
   });
 });
 
