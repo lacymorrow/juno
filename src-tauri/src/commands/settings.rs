@@ -462,6 +462,14 @@ pub async fn open_juno_link(app: tauri::AppHandle, url: String) -> Result<(), St
     Ok(())
 }
 
+/// The pane and row the agent pointed the Settings window at before the
+/// window existed. Taken once, by the window, when it mounts.
+#[command]
+pub async fn take_pending_settings_navigation(
+) -> Result<Option<crate::agent::tools::settings_tool::Navigation>, String> {
+    Ok(crate::agent::tools::settings_tool::take_pending_navigation())
+}
+
 /// Reset all settings to defaults that work on this machine.
 ///
 /// The policy lives in [`crate::settings::reset`], which is also where the
