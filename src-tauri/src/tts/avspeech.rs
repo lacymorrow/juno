@@ -873,6 +873,7 @@ mod mac {
         tauri::async_runtime::spawn(async {
             let _ = current_spoken_content().await;
         });
+        tauri::async_runtime::spawn(warm_configured_voice(app.clone()));
         let stored_voice = app
             .try_state::<crate::state::AppState>()
             .and_then(|state| state.get_system_voice().ok().flatten());
@@ -903,6 +904,69 @@ mod mac {
         if let Err(e) = result {
             warn!("[AVSpeech] Could not start the synthesizer: {e}; the Mac's voice uses say");
         }
+    }
+
+    /// Load the voice the person will actually hear. The launch render above
+    /// only knows the voice stored for `say`; the Mac's own System Voice is
+    /// read from Spoken Content, so without this the first real sentence pays
+    /// for loading it (measured 430 ms to first buffer for Samantha, against
+    /// 50 ms once loaded). Renders a word into a session nobody plays, with
+    /// the voice and rate the real speech will use. Skipped unless the engine
+    /// is the Mac's voice.
+    async fn warm_configured_voice(app: AppHandle) {
+        let deadline = Instant::now() + RENDER_WARM_WAIT;
+        let voices = loop {
+            if let Some(voices) = lock(&VOICES).clone() {
+                break voices;
+            }
+            if Instant::now() >= deadline {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        let Some(key) = crate::tts::prerender::current_key(&app, "Ready.").await else {
+            return;
+        };
+        if key.engine != "system" {
+            return;
+        }
+        let stored = Some(key.voice.as_str()).filter(|v| !v.is_empty());
+        let spoken = current_spoken_content().await;
+        let plan = plan_voice(stored, spoken.as_ref(), &voices);
+        if plan == VoicePlan::UseSay {
+            return;
+        }
+        let started = Instant::now();
+        let session = Arc::new(Session::new());
+        let utterance = Utterance {
+            text: key.text.clone(),
+            voice: plan,
+            av_rate: av_rate_for(key.rate_milli as f64 / 1000.0),
+        };
+        let target = session.clone();
+        if app
+            .run_on_main_thread(move || render_on_main(utterance, target))
+            .is_err()
+        {
+            return;
+        }
+        let give_up = Instant::now() + RENDER_WHOLE_WAIT;
+        loop {
+            {
+                let buffer = session.buffer();
+                if buffer.is_stopped() || buffer.is_rendered() {
+                    break;
+                }
+            }
+            if Instant::now() >= give_up {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        info!(
+            "[AVSpeech] voice warmed in {} ms",
+            started.elapsed().as_millis()
+        );
     }
 
     pub fn stop_all() {
