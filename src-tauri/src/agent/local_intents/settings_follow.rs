@@ -757,7 +757,15 @@ fn own_pid() -> i32 {
     i32::try_from(std::process::id()).unwrap_or(-1)
 }
 
+/// The acknowledgement for opening `target`, said before it opens.
+fn opening_line(target: &Target) -> String {
+    format!("Opening {}.", target.label())
+}
+
 async fn open_and_remember(app: &AppHandle, wanted: Target, previous: Option<Target>) -> Reply {
+    // Speak first: opening a settings window takes the better part of a
+    // second, and the acknowledgement does not depend on how it went.
+    super::speak_ahead(app, &opening_line(&wanted));
     match open_with_fallback(app, wanted).await {
         Ok((target, window)) => {
             let alternatives = alternatives(&target, previous.as_ref());
@@ -769,9 +777,9 @@ async fn open_and_remember(app: &AppHandle, wanted: Target, previous: Option<Tar
                 at: Instant::now(),
                 generation: 0,
             });
-            Reply::text(format!("Opened {}.", target.label()))
+            Reply::text(opening_line(&target)).unspoken()
         }
-        Err(target) => Reply::failure(format!("I couldn't open {}.", target.label())),
+        Err(target) => Reply::failure(format!("I couldn't open {}.", target.label())).unspoken(),
     }
 }
 
@@ -832,6 +840,17 @@ pub async fn run_reply_chip(app: AppHandle, id: String) -> Result<(), String> {
 mod tests {
     use super::super::utterance::normalize;
     use super::*;
+
+    #[test]
+    fn the_acknowledgement_is_present_tense() {
+        let ghostty = Target::App {
+            name: "Ghostty".to_string(),
+            path: None,
+        };
+        assert_eq!(opening_line(&ghostty), "Opening Ghostty settings.");
+        assert_eq!(opening_line(&Target::Mac(None)), "Opening Mac settings.");
+        assert_eq!(opening_line(&Target::Juno), "Opening Juno settings.");
+    }
 
     fn p(q: &str) -> Option<SettingsIntent> {
         normalize(q).and_then(|u| parse(&u))

@@ -606,6 +606,9 @@ pub struct ClaudeCliBrain {
     /// at construction from the hidden `providers[].effort` setting, so the
     /// stream loop never has to reach for the store.
     effort: String,
+    /// The person set `providers[].effort` themselves. Their level is then used
+    /// for every turn, spoken or typed; see [`effort_for_turn`].
+    effort_explicit: bool,
     /// Whether the CLI may load the MCP servers on the person's own Claude
     /// account — claude.ai connectors (Slack, Gmail, Drive) and user-level
     /// servers. When false, `build_args` passes `--strict-mcp-config` so
@@ -633,6 +636,7 @@ impl ClaudeCliBrain {
             .unwrap_or_else(|| model_aliases::SONNET.to_string());
 
         let effort = resolve_effort(config.effort.as_deref());
+        let effort_explicit = effort_is_explicit(config.effort.as_deref());
 
         info!(
             "Initializing Claude CLI brain (binary: {}, model: {}, effort: {})",
@@ -646,6 +650,7 @@ impl ClaudeCliBrain {
             model,
             system_prompt: config.system_prompt.clone(),
             effort,
+            effort_explicit,
             load_account_mcp: config.load_account_mcp,
             observed_session: std::sync::Mutex::new(None),
         })
@@ -794,6 +799,17 @@ impl ClaudeCliBrain {
 
         let (mcp_config, ask_before_send) = turn_environment(app_handle.as_ref()).await;
 
+        // A spoken turn runs at a lower effort than a typed one, unless the
+        // person chose a level. Logged on the [TurnTiming] line for A/B.
+        let voice = crate::turn_timing::open_turn_is_voice();
+        let turn_effort = effort_for_turn(&self.effort, self.effort_explicit, voice);
+        crate::turn_timing::note_effort(&turn_effort);
+        info!(
+            "Claude CLI turn effort: {} ({})",
+            turn_effort,
+            if voice { "voice" } else { "typed" }
+        );
+
         // On unless the person turned it off: run this turn in one long-lived process
         // kept alive for the conversation, instead of spawning a fresh one here.
         // Worth ~1.6-3.1s per follow-up — see docs/plans/cli-persistent-session-spike.md.
@@ -820,6 +836,7 @@ impl ClaudeCliBrain {
                     session_id: &session_id,
                     session_is_new,
                     query,
+                    effort: &turn_effort,
                     app_handle: handle,
                     message_id: message_id.clone(),
                     cancel_rx: cancel_rx.clone(),
@@ -892,6 +909,7 @@ impl ClaudeCliBrain {
                 mcp_config.as_deref(),
                 ask_before_send,
             );
+            set_effort_arg(&mut args, &turn_effort);
             if !include_partial_messages {
                 strip_partial_messages(&mut args);
             }
@@ -1382,16 +1400,11 @@ impl ClaudeCliBrain {
         }
 
         // The `result` event carries the raw final text, tags included. Strip
-        // it for display and speak any block the assistant events did not
-        // already cover (older CLI builds emit no assistant events).
+        // it for display, and speak from it only when the stream carried no
+        // text at all (older CLI builds emit no assistant events).
+        let stream_carried_text = !spoken_blocks.is_empty() || !accumulated_text.trim().is_empty();
         let final_result = final_result.map(|raw| {
-            // Named apart from the content-block map above, which is a
-            // different `blocks` entirely.
-            let (display, tts_blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
-            let unspoken: Vec<String> = tts_blocks
-                .into_iter()
-                .filter(|b| !spoken_blocks.contains(b))
-                .collect();
+            let (display, unspoken) = result_text(&raw, stream_carried_text);
             if !unspoken.is_empty() {
                 info!(
                     "Speaking {} TTS block(s) found only in the Claude CLI result",
@@ -1427,6 +1440,12 @@ impl ClaudeCliBrain {
     ) {
         let inner_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        // A new content block, or the end of the message, ends the text block
+        // before it. A `<TTS>` the model left open there stops being spoken.
+        if matches!(inner_type, "content_block_start" | "message_stop") {
+            Self::end_text_block(app_handle, msg_id, tts_stream, spoken_blocks);
+        }
 
         match inner_type {
             "message_start" => {
@@ -1665,6 +1684,7 @@ impl ClaudeCliBrain {
         accumulated_text: &mut String,
         spoken_blocks: &mut Vec<String>,
     ) {
+        Self::end_text_block(app_handle, msg_id, tts_stream, spoken_blocks);
         if let Some(separator) = text_block_separator(accumulated_text) {
             Self::emit_display_text(
                 app_handle,
@@ -1675,6 +1695,29 @@ impl ClaudeCliBrain {
                 spoken_blocks,
             );
         }
+    }
+
+    /// A text block ended. Speak what is left of a `<TTS>` block the model
+    /// never closed, and close it, so the text that follows (the next
+    /// message's display text, after a tool call) is shown, not read aloud.
+    pub(super) fn end_text_block(
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        let released = tts_stream.end_block();
+        if released.is_empty() {
+            return;
+        }
+        info!(
+            "Closed a <TTS> block the model left open at the end of a text block: {:?}",
+            released
+        );
+        if let Some(handle) = app_handle {
+            Self::emit_chunk_with_tts(handle, String::new(), msg_id, &released);
+        }
+        spoken_blocks.extend(released);
     }
 
     /// End-of-stream companion to [`Self::emit_display_text`]: flush what the
@@ -1940,6 +1983,54 @@ fn resolve_effort(configured: Option<&str>) -> String {
             CLAUDE_CLI_EFFORT.to_string()
         }
         None => CLAUDE_CLI_EFFORT.to_string(),
+    }
+}
+
+/// What a turn's `result` frame adds: its display text (tags stripped), and
+/// the spoken blocks to say now.
+///
+/// The result is only a fallback voice, for a CLI that streamed no text at
+/// all. When the stream carried text it already spoke every block once, and
+/// re-splitting the result to find "unspoken" blocks is how a turn talks past
+/// its spoken line: the result's split can disagree with the stream's (a block
+/// the stream closed at a content-block boundary reads to the end of the
+/// result, a sentence that spans two text blocks splits differently), and every
+/// disagreement was spoken a second time or read display text aloud.
+pub(super) fn result_text(raw: &str, stream_carried_text: bool) -> (String, Vec<String>) {
+    let (display, blocks) = crate::agent::tts_tags::split_tts_tags(raw);
+    if stream_carried_text {
+        (display, Vec::new())
+    } else {
+        (display, blocks)
+    }
+}
+
+/// Whether `configured` is a level the person set and the CLI accepts. An
+/// unknown value was dropped by [`resolve_effort`], so it is not a choice to
+/// respect.
+fn effort_is_explicit(configured: Option<&str>) -> bool {
+    use crate::constants::settings::defaults::CLAUDE_CLI_EFFORT_LEVELS;
+    configured.is_some_and(|level| CLAUDE_CLI_EFFORT_LEVELS.contains(&level))
+}
+
+/// The effort one turn runs at. A spoken turn gets
+/// [`CLAUDE_CLI_VOICE_EFFORT`](crate::constants::settings::defaults::CLAUDE_CLI_VOICE_EFFORT)
+/// so the first spoken line is not held behind a long plan; a typed turn keeps
+/// `base`. A level the person set themselves wins either way.
+fn effort_for_turn(base: &str, explicit: bool, voice: bool) -> String {
+    if voice && !explicit {
+        crate::constants::settings::defaults::CLAUDE_CLI_VOICE_EFFORT.to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+/// Replace the value after `--effort` in a built argument list.
+fn set_effort_arg(args: &mut [String], effort: &str) {
+    if let Some(idx) = args.iter().position(|a| a == "--effort") {
+        if let Some(value) = args.get_mut(idx + 1) {
+            *value = effort.to_string();
+        }
     }
 }
 
@@ -2474,6 +2565,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2498,6 +2590,7 @@ mod tests {
             model: "opus".to_string(),
             system_prompt: Some("You are helpful.".to_string()),
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2518,6 +2611,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2541,6 +2635,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2567,6 +2662,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             // Connectors off: the strict flag must ride with the config.
             load_account_mcp: false,
             observed_session: std::sync::Mutex::new(None),
@@ -2598,6 +2694,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2615,6 +2712,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2643,6 +2741,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2662,6 +2761,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2700,6 +2800,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         }
@@ -2965,6 +3066,50 @@ echo '{{"type":"result","result":"answered the old way"}}'"#,
         assert_eq!(resolve_effort(Some("xhigh")), "xhigh");
         assert_eq!(resolve_effort(Some("banana")), "high");
         assert_eq!(resolve_effort(None), "high");
+    }
+
+    #[test]
+    fn the_result_is_spoken_only_when_the_stream_carried_no_text() {
+        // The stream closed the first block at its content-block boundary;
+        // the result alone would read the display text after it aloud.
+        let raw = "<TTS>Opening it now\n\nHere is the list. One. Two.";
+        let (_, fallback) = result_text(raw, false);
+        assert!(!fallback.is_empty());
+        let (display, spoken) = result_text(raw, true);
+        assert!(spoken.is_empty());
+        assert_eq!(display, "");
+        let (display, spoken) = result_text("<TTS>Hi there.</TTS>Shown.", true);
+        assert!(spoken.is_empty());
+        assert_eq!(display, "Shown.");
+    }
+
+    #[test]
+    fn a_spoken_turn_runs_at_voice_effort_unless_the_person_chose_one() {
+        use crate::constants::settings::defaults::{CLAUDE_CLI_EFFORT, CLAUDE_CLI_VOICE_EFFORT};
+        assert_eq!(CLAUDE_CLI_VOICE_EFFORT, "medium");
+        // Default: typed keeps high, spoken drops to medium.
+        assert_eq!(effort_for_turn(CLAUDE_CLI_EFFORT, false, false), "high");
+        assert_eq!(effort_for_turn(CLAUDE_CLI_EFFORT, false, true), "medium");
+        // An explicit level is respected for both.
+        assert_eq!(effort_for_turn("xhigh", true, true), "xhigh");
+        assert_eq!(effort_for_turn("low", true, false), "low");
+        // Only a valid stored level counts as a choice.
+        assert!(effort_is_explicit(Some("high")));
+        assert!(!effort_is_explicit(Some("banana")));
+        assert!(!effort_is_explicit(None));
+    }
+
+    #[test]
+    fn the_turn_effort_replaces_the_spawn_effort_in_one_shot_args() {
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        let mut args = brain.build_args("hello", None, None, false);
+        set_effort_arg(&mut args, "medium");
+        let idx = args
+            .iter()
+            .position(|a| a == "--effort")
+            .expect("--effort is always passed");
+        assert_eq!(args[idx + 1], "medium");
+        assert_eq!(args.iter().filter(|a| *a == "--effort").count(), 1);
     }
 
     #[test]

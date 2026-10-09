@@ -1167,6 +1167,7 @@ export const SETTING_DEFAULTS = {
   PERMISSION_MODE_DONT_ASK: 'dont_ask',
   PERMISSION_MODE: 'ask_when_risky',
   CLAUDE_CLI_EFFORT: 'high',
+  CLAUDE_CLI_VOICE_EFFORT: 'medium',
   CLAUDE_CLI_EFFORT_LEVELS: ['low', 'medium', 'high', 'xhigh', 'max'],
   CLAUDE_CLI_LOAD_ACCOUNT_MCP: true,
   AUTO_UPDATE_CHECK_ENABLED: true,
