@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.150] - 2026-10-09
+
+### Changed
+
+- **voice:** faster first audio on voice turns (#773) (4d232615)
+
 ## [0.8.149] - 2026-10-09
 
 ### Added
@@ -1193,7 +1199,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.149...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.150...HEAD
+[0.8.150]: https://github.com/lacymorrow/juno/compare/cua-v0.8.149...v0.8.150
 [0.8.149]: https://github.com/lacymorrow/juno/compare/cua-v0.8.148...v0.8.149
 [0.8.148]: https://github.com/lacymorrow/juno/compare/cua-v0.8.147...v0.8.148
 [0.8.147]: https://github.com/lacymorrow/juno/compare/cua-v0.8.146...v0.8.147
