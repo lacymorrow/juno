@@ -239,7 +239,18 @@ pub fn plan_voice(
         spoken.voice_name.as_deref(),
     ) {
         crate::tts::voices::SystemVoice::Unset => VoicePlan::LanguageDefault,
-        crate::tts::voices::SystemVoice::Siri => VoicePlan::UseSay,
+        // A Siri voice is spoken by identifier when AVFoundation lists it;
+        // otherwise `say` with no `-v` speaks the System Voice itself.
+        crate::tts::voices::SystemVoice::Siri => {
+            let by_id = spoken
+                .voice_id
+                .as_deref()
+                .and_then(|id| voices.iter().find(|voice| voice.identifier == id));
+            match by_id {
+                Some(voice) => VoicePlan::Identifier(voice.identifier.clone()),
+                None => VoicePlan::UseSay,
+            }
+        }
         crate::tts::voices::SystemVoice::Other => {
             let by_id = spoken
                 .voice_id
@@ -807,33 +818,16 @@ mod mac {
     }
 
     fn read_spoken_content() -> SpokenContent {
-        fn read(key: &str) -> Option<String> {
-            let output = std::process::Command::new("defaults")
-                .args(["read", "com.apple.speech.voice.prefs", key])
-                .output()
-                .ok()?;
-            output
-                .status
-                .success()
-                .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-                .filter(|v| !v.is_empty())
-        }
-        SpokenContent {
-            voice_id: read("SelectedVoiceID"),
-            voice_name: read("SelectedVoiceName"),
-        }
+        crate::tts::voices::read_spoken_content_blocking()
     }
 
-    /// When the Spoken Content preferences file was last written.
+    /// When the System Voice preferences were last written: the newest of the
+    /// Accessibility plist (macOS 26) and the old Speech one.
     fn spoken_prefs_mtime() -> Option<SystemTime> {
-        let home = std::env::var_os("HOME")?;
-        std::fs::metadata(
-            std::path::Path::new(&home)
-                .join("Library/Preferences/com.apple.speech.voice.prefs.plist"),
-        )
-        .ok()?
-        .modified()
-        .ok()
+        crate::tts::voices::spoken_prefs_files()
+            .iter()
+            .filter_map(|path| std::fs::metadata(path).ok()?.modified().ok())
+            .max()
     }
 
     /// Forget the reading, so the next sentence reads the System Voice again.
@@ -1563,6 +1557,30 @@ mod tests {
             voice_id: Some("com.apple.speech.synthesis.voice.custom.siri.aaron".to_string()),
             voice_name: Some("Siri Voice 2".to_string()),
         };
+        assert_eq!(
+            plan_voice(None, Some(&spoken), &installed()),
+            VoicePlan::UseSay
+        );
+    }
+
+    #[test]
+    fn a_listed_siri_system_voice_is_used_by_identifier() {
+        let mut voices = installed();
+        voices.push(AvVoice {
+            identifier: "com.apple.siri.natural.Simone".to_string(),
+            name: "Simone".to_string(),
+            quality: VoiceQuality::Premium,
+            language: "en-US".to_string(),
+        });
+        let spoken = SpokenContent {
+            voice_id: Some("com.apple.siri.natural.Simone".to_string()),
+            voice_name: Some("Simone (Siri)".to_string()),
+        };
+        assert_eq!(
+            plan_voice(None, Some(&spoken), &voices),
+            VoicePlan::Identifier("com.apple.siri.natural.Simone".to_string())
+        );
+        // Not listed: `say` with no voice speaks the System Voice itself.
         assert_eq!(
             plan_voice(None, Some(&spoken), &installed()),
             VoicePlan::UseSay

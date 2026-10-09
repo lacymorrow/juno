@@ -231,6 +231,8 @@ pub struct VoiceInventory {
     pub kokoro_problem: Option<String>,
     /// What the Mac's own voice is, as far as its settings say.
     pub system_voice: SystemVoice,
+    /// A readable name for it ("Simone (Siri)"), when the settings give one.
+    pub system_voice_name: Option<String>,
 }
 
 /// The voice `say` uses when it is given no `-v`, which is the one chosen
@@ -283,20 +285,148 @@ pub fn prefers_system_voice(inventory: &VoiceInventory) -> bool {
     }
 }
 
-/// The row for the Mac's own voice. Named "Siri" only when that is known.
-fn system_voice_row(kind: SystemVoice) -> ProviderVoice {
+/// The row for the Mac's own voice. Named "Siri" only when that is known, and
+/// by the voice's own name ("Simone (Siri)") when the settings give one.
+fn system_voice_row(kind: SystemVoice, name: Option<&str>) -> ProviderVoice {
+    let name = name.map(str::trim).filter(|n| !n.is_empty());
     match kind {
         SystemVoice::Siri => ProviderVoice {
             id: SYSTEM_DEFAULT_ID.to_string(),
-            name: "Siri".to_string(),
+            name: name.unwrap_or("Siri").to_string(),
             descriptor: "The voice you chose for your Mac.".to_string(),
         },
         _ => ProviderVoice {
             id: SYSTEM_DEFAULT_ID.to_string(),
-            name: "Your Mac's voice".to_string(),
+            name: name.unwrap_or("Your Mac's voice").to_string(),
             descriptor: "Whichever voice this Mac is set to use.".to_string(),
         },
     }
+}
+
+/// The voice id for the first of `languages` that has a selection in the
+/// `SpokenContentDefaultVoiceSelectionsByLanguage` value, given as JSON
+/// (`plutil -extract ... json`). The value alternates a language code and a
+/// dict: `["en", {"boundLanguage": "en", "voiceId": "com.apple..."}]`. Pure.
+pub fn parse_voice_selections(json: &str, languages: &[String]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let items = value.as_array()?;
+    let mut by_language: Vec<(String, String)> = Vec::new();
+    for pair in items.chunks(2) {
+        let [lang, selection] = pair else { continue };
+        let (Some(lang), Some(id)) = (
+            lang.as_str(),
+            selection.get("voiceId").and_then(|v| v.as_str()),
+        ) else {
+            continue;
+        };
+        if !id.trim().is_empty() {
+            by_language.push((lang.to_string(), id.trim().to_string()));
+        }
+    }
+    languages.iter().find_map(|wanted| {
+        by_language
+            .iter()
+            .find(|(lang, _)| lang.eq_ignore_ascii_case(wanted))
+            .map(|(_, id)| id.clone())
+    })
+}
+
+/// A readable name for a voice id, when the id carries one: the Siri naturals
+/// (`com.apple.siri.natural.Simone`) and the older Siri ids
+/// (`...custom.siri.aaron`) become "Simone (Siri)" and "Aaron (Siri)". Pure.
+pub fn siri_display_name(id: &str) -> Option<String> {
+    if !id.to_ascii_lowercase().contains("siri") {
+        return None;
+    }
+    let last = id.rsplit('.').next()?.trim();
+    if last.is_empty() || last.eq_ignore_ascii_case("siri") || last.eq_ignore_ascii_case("natural")
+    {
+        return None;
+    }
+    let mut chars = last.chars();
+    let first = chars.next()?.to_uppercase().collect::<String>();
+    Some(format!("{first}{} (Siri)", chars.as_str()))
+}
+
+/// The System Voice from both places it can live. The macOS 26 key wins; the
+/// old domain is what older macOS (and a Mac never touched) still has. Pure.
+pub fn spoken_content_from(
+    selections_json: Option<&str>,
+    languages: &[String],
+    old_id: Option<String>,
+    old_name: Option<String>,
+) -> crate::tts::avspeech::SpokenContent {
+    match selections_json.and_then(|json| parse_voice_selections(json, languages)) {
+        Some(id) => {
+            let voice_name = siri_display_name(&id);
+            crate::tts::avspeech::SpokenContent {
+                voice_id: Some(id),
+                voice_name,
+            }
+        }
+        None => crate::tts::avspeech::SpokenContent {
+            voice_id: old_id,
+            voice_name: old_name,
+        },
+    }
+}
+
+/// Where the System Voice choice is written, newest first.
+pub fn spoken_prefs_files() -> Vec<PathBuf> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let prefs = PathBuf::from(home).join("Library/Preferences");
+    vec![
+        prefs.join("com.apple.Accessibility.plist"),
+        prefs.join("com.apple.speech.voice.prefs.plist"),
+    ]
+}
+
+/// Read the System Voice. Blocking; runs `plutil` and `defaults`, both
+/// read-only.
+#[cfg(target_os = "macos")]
+pub fn read_spoken_content_blocking() -> crate::tts::avspeech::SpokenContent {
+    fn run(cmd: &str, args: &[&str]) -> Option<String> {
+        let output = std::process::Command::new(cmd).args(args).output().ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .filter(|v| !v.is_empty())
+    }
+    fn extract(file: &std::path::Path, key: &str) -> Option<String> {
+        run(
+            "plutil",
+            &["-extract", key, "json", "-o", "-", &file.to_string_lossy()],
+        )
+    }
+    fn old(key: &str) -> Option<String> {
+        run("defaults", &["read", "com.apple.speech.voice.prefs", key])
+    }
+    let selections = spoken_prefs_files()
+        .first()
+        .and_then(|file| extract(file, "SpokenContentDefaultVoiceSelectionsByLanguage"));
+    let mut languages: Vec<String> = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        let global = PathBuf::from(home).join("Library/Preferences/.GlobalPreferences.plist");
+        if let Some(Ok(list)) =
+            extract(&global, "AppleLanguages").map(|j| serde_json::from_str::<Vec<String>>(&j))
+        {
+            languages.extend(
+                list.iter()
+                    .filter_map(|l| l.split('-').next())
+                    .map(str::to_string),
+            );
+        }
+    }
+    languages.push("en".to_string());
+    spoken_content_from(
+        selections.as_deref(),
+        &languages,
+        old("SelectedVoiceID"),
+        old("SelectedVoiceName"),
+    )
 }
 
 /// Which voice will actually speak, and whether that is the one asked for.
@@ -696,7 +826,10 @@ pub fn provider_voices(engine: &str, inventory: &VoiceInventory) -> ProviderVoic
             if inventory.system_voice != SystemVoice::Other {
                 // The Mac's own voice leads when it is the default, and sits
                 // after the ranking otherwise so it is still a way back.
-                let own = system_voice_row(inventory.system_voice);
+                let own = system_voice_row(
+                    inventory.system_voice,
+                    inventory.system_voice_name.as_deref(),
+                );
                 if prefers_system_voice(inventory) {
                     rows.insert(0, own);
                 } else {
@@ -838,6 +971,7 @@ pub fn resolve_kokoro_voice(stored: Option<&str>) -> String {
         kokoro: installed_kokoro_voices(),
         kokoro_problem: None,
         system_voice: SystemVoice::default(),
+        system_voice_name: None,
     };
     resolve_voice("kokoro", &inventory, stored)
         .voice
@@ -1023,32 +1157,21 @@ async fn installed_macos_voices() -> Vec<InstalledVoice> {
     }
 }
 
-/// Ask the Mac which System Voice is chosen.
+/// Ask the Mac which System Voice is chosen, and what it is called.
 #[cfg(target_os = "macos")]
-async fn read_system_voice() -> SystemVoice {
-    fn read(key: &str) -> Option<String> {
-        let output = std::process::Command::new("defaults")
-            .args(["read", "com.apple.speech.voice.prefs", key])
-            .output()
-            .ok()?;
-        output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-    }
+async fn read_system_voice() -> (SystemVoice, Option<String>) {
     tokio::task::spawn_blocking(|| {
-        classify_system_voice(
-            read("SelectedVoiceID").as_deref(),
-            read("SelectedVoiceName").as_deref(),
-        )
+        let spoken = read_spoken_content_blocking();
+        let kind = classify_system_voice(spoken.voice_id.as_deref(), spoken.voice_name.as_deref());
+        (kind, spoken.voice_name)
     })
     .await
     .unwrap_or_default()
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn read_system_voice() -> SystemVoice {
-    SystemVoice::Other
+async fn read_system_voice() -> (SystemVoice, Option<String>) {
+    (SystemVoice::Other, None)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1159,6 +1282,11 @@ pub async fn inventory_for(engine: &str, freshness: Freshness) -> VoiceInventory
     if freshness == Freshness::Now && engine.eq_ignore_ascii_case("system") {
         crate::tts::avspeech::forget_spoken_content();
     }
+    let (system_voice, system_voice_name) = if engine.eq_ignore_ascii_case("system") {
+        read_system_voice().await
+    } else {
+        (SystemVoice::default(), None)
+    };
     VoiceInventory {
         macos: if engine.eq_ignore_ascii_case("system") {
             macos_inventory(freshness).await
@@ -1175,11 +1303,8 @@ pub async fn inventory_for(engine: &str, freshness: Freshness) -> VoiceInventory
         } else {
             None
         },
-        system_voice: if engine.eq_ignore_ascii_case("system") {
-            read_system_voice().await
-        } else {
-            SystemVoice::default()
-        },
+        system_voice,
+        system_voice_name,
     }
 }
 
@@ -1736,6 +1861,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
             kokoro: Vec::new(),
             kokoro_problem: None,
             system_voice: SystemVoice::default(),
+            system_voice_name: None,
         }
     }
 
@@ -1745,6 +1871,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
             kokoro: Vec::new(),
             kokoro_problem: None,
             system_voice: SystemVoice::default(),
+            system_voice_name: None,
         }
     }
 
@@ -1758,6 +1885,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
             ],
             kokoro_problem: None,
             system_voice: SystemVoice::default(),
+            system_voice_name: None,
         }
     }
 
@@ -1970,6 +2098,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
             kokoro: Vec::new(),
             kokoro_problem: None,
             system_voice: SystemVoice::default(),
+            system_voice_name: None,
         };
         assert_eq!(best_macos_voice(&bare.macos), None);
 
@@ -2345,6 +2474,88 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         assert_eq!(siri.name, "Siri");
         assert!(siri.selected && siri.speaks);
         assert_eq!(list.options.iter().filter(|o| o.selected).count(), 1);
+    }
+
+    fn langs(list: &[&str]) -> Vec<String> {
+        list.iter().map(|l| l.to_string()).collect()
+    }
+
+    const NEW_SELECTIONS: &str = r#"["en",{"boundLanguage":"en","_type":"Speech.VoiceSelection","voiceId":"com.apple.siri.natural.Simone","_version":0}]"#;
+
+    #[test]
+    fn the_macos_26_voice_selection_is_read_by_language() {
+        assert_eq!(
+            parse_voice_selections(NEW_SELECTIONS, &langs(&["en"])).as_deref(),
+            Some("com.apple.siri.natural.Simone")
+        );
+        let two = r#"["en",{"voiceId":"a.en"},"fr",{"voiceId":"a.fr"}]"#;
+        assert_eq!(
+            parse_voice_selections(two, &langs(&["fr", "en"])).as_deref(),
+            Some("a.fr")
+        );
+        assert_eq!(
+            parse_voice_selections(two, &langs(&["de", "en"])).as_deref(),
+            Some("a.en")
+        );
+        assert_eq!(parse_voice_selections(two, &langs(&["de"])), None);
+        assert_eq!(parse_voice_selections("not json", &langs(&["en"])), None);
+        assert_eq!(parse_voice_selections("[]", &langs(&["en"])), None);
+    }
+
+    #[test]
+    fn a_siri_id_becomes_a_readable_name() {
+        assert_eq!(
+            siri_display_name("com.apple.siri.natural.Simone").as_deref(),
+            Some("Simone (Siri)")
+        );
+        assert_eq!(
+            siri_display_name("com.apple.speech.synthesis.voice.custom.siri.aaron").as_deref(),
+            Some("Aaron (Siri)")
+        );
+        assert_eq!(siri_display_name("com.apple.voice.premium.en-US.Ava"), None);
+    }
+
+    #[test]
+    fn the_new_key_wins_and_the_old_domain_is_the_fallback() {
+        let new = spoken_content_from(
+            Some(NEW_SELECTIONS),
+            &langs(&["en"]),
+            Some("old.id".to_string()),
+            Some("Old".to_string()),
+        );
+        assert_eq!(
+            new.voice_id.as_deref(),
+            Some("com.apple.siri.natural.Simone")
+        );
+        assert_eq!(new.voice_name.as_deref(), Some("Simone (Siri)"));
+        assert_eq!(
+            classify_system_voice(new.voice_id.as_deref(), new.voice_name.as_deref()),
+            SystemVoice::Siri
+        );
+
+        let old = spoken_content_from(
+            None,
+            &langs(&["en"]),
+            Some("com.apple.voice.premium.en-US.Ava".to_string()),
+            Some("Ava".to_string()),
+        );
+        assert_eq!(
+            old.voice_id.as_deref(),
+            Some("com.apple.voice.premium.en-US.Ava")
+        );
+        assert_eq!(old.voice_name.as_deref(), Some("Ava"));
+
+        let none = spoken_content_from(Some("[]"), &langs(&["en"]), None, None);
+        assert_eq!(none, crate::tts::avspeech::SpokenContent::default());
+    }
+
+    #[test]
+    fn the_voice_row_carries_the_voices_own_name() {
+        let mut inventory = with_system_voice(stock_mac(), SystemVoice::Siri);
+        inventory.system_voice_name = Some("Simone (Siri)".to_string());
+        let resolution = resolve_voice("system", &inventory, None);
+        let list = voice_list("system", &inventory, &resolution);
+        assert_eq!(list.options[1].name, "Simone (Siri)");
     }
 
     /// Siri beats a downloaded voice only because the person chose it.
