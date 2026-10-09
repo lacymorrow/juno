@@ -1850,7 +1850,11 @@ impl AgentBrain for AnthropicBrain {
                     ) {
                         Ok(json_value) => {
                             // Check for computer tool with base64 screenshot data
-                            if tool_name == "computer" {
+                            // (`app_controls` returns window pictures the same way)
+                            if tool_name == "computer"
+                                || tool_name
+                                    == crate::agent::tools::anthropic_computer_use::APP_CONTROLS_TOOL
+                            {
                                 if let Some(base64_data) =
                                     json_value.get("base64_image").and_then(|v| v.as_str())
                                 {
@@ -1859,7 +1863,13 @@ impl AgentBrain for AnthropicBrain {
                                         block_type: "image".to_string(),
                                         source: Some(ApiImageSource {
                                             source_type: "base64".to_string(),
-                                            media_type: "image/jpeg".to_string(),
+                                            // Screenshots are JPEG; zoom crops are PNG.
+                                            media_type: if base64_data.starts_with("iVBOR") {
+                                                "image/png"
+                                            } else {
+                                                "image/jpeg"
+                                            }
+                                            .to_string(),
                                             data: base64_data.to_string(),
                                         }),
                                         text: None,

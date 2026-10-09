@@ -580,7 +580,9 @@ where
 
             // Skip runner-level logging for "computer" tool — it self-logs with
             // enhanced metadata inside anthropic_computer_use.rs
-            if tool_call.name != "computer" {
+            if tool_call.name != "computer"
+                && tool_call.name != crate::agent::tools::anthropic_computer_use::APP_CONTROLS_TOOL
+            {
                 crate::agent::tool_logger::log_tool_call_request(
                     &self.app_handle,
                     &tool_call.name,
@@ -646,7 +648,9 @@ where
 
             // Skip runner-level result logging for "computer" tool — it self-logs
             // with enhanced metadata inside anthropic_computer_use.rs
-            if tool_call.name != "computer" {
+            if tool_call.name != "computer"
+                && tool_call.name != crate::agent::tools::anthropic_computer_use::APP_CONTROLS_TOOL
+            {
                 match &tool_result {
                     Ok(result) => {
                         let success = !tool_failed;
@@ -1145,7 +1149,11 @@ where
                 Ok(result) => {
                     // For computer tool with screenshot data, preserve the full JSON
                     // so the Anthropic provider can extract the base64 image later
-                    if tool_call.name == "computer" && result.output.get("base64_image").is_some() {
+                    if (tool_call.name == "computer"
+                        || tool_call.name
+                            == crate::agent::tools::anthropic_computer_use::APP_CONTROLS_TOOL)
+                        && result.output.get("base64_image").is_some()
+                    {
                         serde_json::to_string(&result.output)
                             .unwrap_or_else(|_| tool_result_content(&result.output))
                     } else {
