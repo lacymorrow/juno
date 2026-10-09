@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.145] - 2026-10-09
+
+### Added
+
+- **settings:** "open settings" follows the app you were in (#761) (f382070b)
+
 ## [0.8.144] - 2026-10-09
 
 ### Added
@@ -1163,7 +1169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.144...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.145...HEAD
+[0.8.145]: https://github.com/lacymorrow/juno/compare/cua-v0.8.144...v0.8.145
 [0.8.144]: https://github.com/lacymorrow/juno/compare/cua-v0.8.143...v0.8.144
 [0.8.143]: https://github.com/lacymorrow/juno/compare/cua-v0.8.142...v0.8.143
 [0.8.142]: https://github.com/lacymorrow/juno/compare/cua-v0.8.141...v0.8.142
