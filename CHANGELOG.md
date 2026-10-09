@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.148] - 2026-10-09
+
+### Fixed
+
+- **agent-actions:** expand ~ in OpenButton paths so Open Downloads opens Finder (#769) (ccd7680b)
+
 ## [0.8.147] - 2026-10-09
 
 ### Fixed
@@ -1181,7 +1187,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.147...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.148...HEAD
+[0.8.148]: https://github.com/lacymorrow/juno/compare/cua-v0.8.147...v0.8.148
 [0.8.147]: https://github.com/lacymorrow/juno/compare/cua-v0.8.146...v0.8.147
 [0.8.146]: https://github.com/lacymorrow/juno/compare/cua-v0.8.145...v0.8.146
 [0.8.145]: https://github.com/lacymorrow/juno/compare/cua-v0.8.144...v0.8.145
