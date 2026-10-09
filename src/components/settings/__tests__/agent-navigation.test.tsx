@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -142,10 +144,23 @@ describe("revealRow", () => {
     vi.advanceTimersByTime(500);
   });
 
-  it("is flat: a tint, never a ring or a glow", () => {
+  it("is flat: a system blue outline and a tint, never a glow or a spring", () => {
     const el = document.createElement("div");
     flashRow(el, 10);
-    expect(el.className).not.toMatch(/ring|shadow|glow|animate/);
+    expect(el.className).toMatch(/outline-\[#007AFF\]/);
+    expect(el.className).toMatch(/bg-\[#007AFF\]\/20/);
+    expect(el.className).not.toMatch(/ring|shadow|glow|animate|spring/);
+  });
+
+  it("holds the mark about two and a half seconds", () => {
+    expect(ROW_FLASH_MS).toBe(2500);
+  });
+
+  it("reserves the outline on the row so the mark never shifts layout", () => {
+    const source = readFileSync(resolve(__dirname, "../ui.tsx"), "utf8");
+    expect(source).toContain("outline-2");
+    expect(source).toContain("outline-transparent");
+    expect(source).toContain("motion-reduce:transition-none");
   });
 });
 

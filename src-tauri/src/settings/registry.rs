@@ -128,6 +128,31 @@ impl Pane {
     }
 }
 
+/// Lowercase letters and digits only, so "Speaking-Speed", "speaking speed"
+/// and "speaking_speed" are one word.
+fn squash(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Where a name from a link or the agent leads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolved {
+    Setting(SettingKey),
+    Pane(Pane),
+}
+
+/// Resolve leniently: an exact setting id, then a setting's last id segment or
+/// alias ("voice" is `audio.voice`), then a pane ("security"). `None` when
+/// nothing matches; callers open General.
+pub fn resolve_target(name: &str) -> Option<Resolved> {
+    SettingKey::resolve_lenient(name)
+        .map(Resolved::Setting)
+        .or_else(|| Pane::from_name(name).map(Resolved::Pane))
+}
+
 /// What a setting takes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValueKind {
@@ -217,6 +242,10 @@ pub struct SettingSpec {
     pub advanced: bool,
     /// The agent may show this setting and must not change it.
     pub protected: bool,
+    /// Offered (listed, readable, settable, highlightable) only while debug
+    /// mode is on, because it is known to be broken for most voices and
+    /// providers. The Settings window hides the row on the same condition.
+    pub debug_only: bool,
     /// The store field the UI's write path changes, as `section.field`. Read by
     /// the tests that keep guardrails protected, so it must be the truth.
     pub writes: &'static str,
@@ -301,6 +330,47 @@ impl SettingKey {
             })
     }
 
+    /// Other words a person or a link uses for this setting, beyond its id and
+    /// the id's last segment. Compared after [`squash`].
+    pub fn aliases(self) -> &'static [&'static str] {
+        match self {
+            SettingKey::JunoVoice => &["juno voice", "mac voice", "system voice"],
+            SettingKey::SpeakingSpeed => &["speed", "rate", "speech rate"],
+            SettingKey::InputDevice => &["mic", "input"],
+            SettingKey::OutputDevice => &["output", "speakers"],
+            SettingKey::PlaySounds => &["sounds"],
+            _ => &[],
+        }
+    }
+
+    /// A setting by exact id, then by an id's last segment or an alias.
+    /// `None` when nothing matches, or when a last segment names two settings.
+    pub fn resolve_lenient(name: &str) -> Option<SettingKey> {
+        if let Ok(key) = SettingKey::from_id(name) {
+            return Some(key);
+        }
+        let wanted = squash(name);
+        if wanted.is_empty() {
+            return None;
+        }
+        let only = |pred: &dyn Fn(SettingKey) -> bool| -> Option<SettingKey> {
+            let mut found = SettingKey::ALL.iter().copied().filter(|k| pred(*k));
+            match (found.next(), found.next()) {
+                (Some(one), None) => Some(one),
+                _ => None,
+            }
+        };
+        let last = |k: SettingKey| {
+            k.spec()
+                .id
+                .rsplit('.')
+                .next()
+                .is_some_and(|seg| squash(seg) == wanted)
+        };
+        let alias = |k: SettingKey| k.aliases().iter().any(|a| squash(a) == wanted);
+        only(&last).or_else(|| only(&alias))
+    }
+
     pub fn spec(self) -> SettingSpec {
         use SettingKey as K;
         use ValueKind as V;
@@ -319,6 +389,7 @@ impl SettingKey {
             kind,
             advanced: false,
             protected: false,
+            debug_only: false,
             writes,
         };
         match self {
@@ -331,18 +402,21 @@ impl SettingKey {
                 V::LiveChoice,
                 "audio.system_voice",
             ),
-            K::SpeakingSpeed => row(
-                self,
-                "audio.speaking_speed",
-                "Speaking speed",
-                Pane::Audio,
-                "voice-speed",
-                V::Number {
-                    min: crate::tts::rate::MIN_RATE,
-                    max: crate::tts::rate::MAX_RATE,
-                },
-                "audio.voice_rate",
-            ),
+            K::SpeakingSpeed => SettingSpec {
+                debug_only: true,
+                ..row(
+                    self,
+                    "audio.speaking_speed",
+                    "Speaking speed",
+                    Pane::Audio,
+                    "voice-speed",
+                    V::Number {
+                        min: crate::tts::rate::MIN_RATE,
+                        max: crate::tts::rate::MAX_RATE,
+                    },
+                    "audio.voice_rate",
+                )
+            },
             K::InputDevice => row(
                 self,
                 "audio.microphone",
@@ -1100,6 +1174,81 @@ mod tests {
             Ok(NewValue::Number(1.25))
         );
         assert!(authorize_set(SettingKey::AgentShortcut, &json!("  ")).is_err());
+    }
+
+    #[test]
+    fn lenient_resolution_goes_id_then_segment_or_alias_then_pane() {
+        // Exact id.
+        assert_eq!(
+            resolve_target("audio.voice"),
+            Some(Resolved::Setting(SettingKey::JunoVoice))
+        );
+        // Last segment: "voice" is the setting, not the Voice pane.
+        assert_eq!(
+            resolve_target("voice"),
+            Some(Resolved::Setting(SettingKey::JunoVoice))
+        );
+        assert_eq!(
+            resolve_target(" Speaking-Speed "),
+            Some(Resolved::Setting(SettingKey::SpeakingSpeed))
+        );
+        // Alias.
+        assert_eq!(
+            resolve_target("mic"),
+            Some(Resolved::Setting(SettingKey::InputDevice))
+        );
+        // A pane when no setting answers to the name.
+        assert_eq!(
+            resolve_target("security"),
+            Some(Resolved::Pane(Pane::Security))
+        );
+        assert_eq!(
+            resolve_target("providers"),
+            Some(Resolved::Pane(Pane::Providers))
+        );
+        // Nothing.
+        assert_eq!(resolve_target("nope"), None);
+        assert_eq!(resolve_target(""), None);
+    }
+
+    #[test]
+    fn no_last_segment_or_alias_is_ambiguous_or_shadows_an_id() {
+        for key in SettingKey::ALL {
+            let spec = key.spec();
+            assert_eq!(
+                SettingKey::resolve_lenient(spec.id),
+                Some(*key),
+                "{} must resolve to itself",
+                spec.id
+            );
+            let last = spec.id.rsplit('.').next().unwrap_or("");
+            assert_eq!(
+                SettingKey::resolve_lenient(last),
+                Some(*key),
+                "last segment {last} of {} is ambiguous",
+                spec.id
+            );
+            for alias in key.aliases() {
+                assert_eq!(
+                    SettingKey::resolve_lenient(alias),
+                    Some(*key),
+                    "alias {alias} of {} collides",
+                    spec.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn speaking_speed_is_debug_only_and_nothing_else_is() {
+        for key in SettingKey::ALL {
+            assert_eq!(
+                key.spec().debug_only,
+                *key == SettingKey::SpeakingSpeed,
+                "{}",
+                key.spec().id
+            );
+        }
     }
 
     #[test]

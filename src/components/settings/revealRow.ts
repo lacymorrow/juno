@@ -5,16 +5,27 @@ import { SETTINGS_ROW_ID_PREFIX } from "./ui";
  * a moment. Used by sidebar search and by the agent's `settings` tool
  * ("show me where the model setting is").
  *
- * Flat on purpose, the way System Settings marks a search hit: a tint that
- * fades in and out (the row's own `transition-colors`), no ring, no glow, no
- * spring. Reduced motion jumps instead of scrolling and drops the fade.
+ * Flat on purpose: an outline and a tint, no glow, no spring. The tint alone
+ * read as part of the design, so the outline makes it unmistakable. Reduced
+ * motion jumps instead of scrolling and keeps the outline but drops the fade.
  */
 
-/** The tint. Plain class strings so Tailwind generates them. */
-export const ROW_FLASH_CLASSES = ["bg-[#007AFF]/15", "dark:bg-[#0A84FF]/25"];
+/**
+ * The mark: a 2px system blue outline drawn inside the row (the row's base
+ * classes reserve it transparent) over a stronger tint. Plain class strings
+ * so Tailwind generates them. Only colour changes, so the row's own
+ * `transition-colors` is the fade; reduced motion removes it and the mark
+ * simply disappears at the end.
+ */
+export const ROW_FLASH_CLASSES = [
+  "bg-[#007AFF]/20",
+  "dark:bg-[#0A84FF]/30",
+  "outline-[#007AFF]",
+  "dark:outline-[#0A84FF]",
+];
 
-/** How long the tint stays before it fades. */
-export const ROW_FLASH_MS = 1600;
+/** How long the mark is held before it eases out. */
+export const ROW_FLASH_MS = 2500;
 
 /** How long to wait for a row whose section is still loading. */
 const ROW_WAIT_MS = 2000;

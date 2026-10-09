@@ -265,6 +265,25 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
     true
 }
 
+/// When a locally served reply last finished, for [`replied_within`].
+static LAST_REPLY: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// A frontend "stop" that lands this soon after a local reply is not a
+/// decision about that reply: nobody can read an answer and reach for Stop in
+/// this long. The log of 2026-10-09 shows one arriving 70 ms after "Opened
+/// ghostty settings." was served, which cut the reply's speech and dropped the
+/// chip's.
+pub const STOP_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Whether a local reply finished within `window`.
+pub fn replied_within(window: std::time::Duration) -> bool {
+    LAST_REPLY
+        .lock()
+        .ok()
+        .and_then(|last| *last)
+        .is_some_and(|at| at.elapsed() < window)
+}
+
 /// Show and speak `reply` as a whole turn: the bar goes working and back,
 /// exactly as it does for a model's answer.
 pub(crate) async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
@@ -281,6 +300,9 @@ pub(crate) async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
         agent_state.to_string(),
     )
     .await;
+    if let Ok(mut last) = LAST_REPLY.lock() {
+        *last = Some(std::time::Instant::now());
+    }
 }
 
 /// Append `reply` to the conversation as an assistant message and speak its

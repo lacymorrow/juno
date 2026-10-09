@@ -7,7 +7,10 @@ import {
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { useEventListener } from "@/hooks/useEventListener";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { VoicePicker } from "../VoicePicker";
@@ -81,6 +84,29 @@ function SpeedRow({
 }
 
 /**
+ * Whether debug mode is on. Rust answers; this only displays it.
+ *
+ * The speaking speed row is shown only then: speed is broken for most voices
+ * and providers, so it is not offered to anyone who has not asked for debug
+ * features. The agent's `settings` tool hides it on the same condition
+ * (`SettingSpec::debug_only`).
+ */
+export function useDebugMode(): boolean {
+  const [debug, setDebug] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    invoke<boolean>(COMMANDS.CORE_GET_DEBUG_MODE)
+      .then((on) => alive && setDebug(Boolean(on)))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEventListener<boolean>(EVENTS.BAR_DEBUG_MODE_CHANGED, (on) => setDebug(Boolean(on)));
+  return debug;
+}
+
+/**
  * Audio: which microphone Juno hears you on, which speaker it answers from,
  * and which voice it answers in.
  *
@@ -109,6 +135,17 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     handleTtsProviderChange,
     dismissCaptureFailure,
   } = settings;
+
+  const debugMode = useDebugMode();
+
+  // The Mac's voice can be changed in System Settings while this window is
+  // open. Coming back to it asks Rust to read the Mac again; Rust decides what
+  // the rows say.
+  useEffect(() => {
+    const onFocus = () => void loadJunoVoices();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [loadJunoVoices]);
 
   useEffect(() => {
     void loadAudioDevices();
@@ -173,7 +210,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
           }
         />
 
-        {junoVoices?.speed && (
+        {debugMode && junoVoices?.speed && (
           <SpeedRow
             speed={junoVoices.speed}
             onCommit={(rate) => void handleJunoVoiceRateChange(rate)}
