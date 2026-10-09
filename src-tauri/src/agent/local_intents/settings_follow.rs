@@ -1135,7 +1135,8 @@ mod tests {
     #[test]
     fn the_acknowledgement_is_present_tense() {
         let ghostty = Target::App {
-            name: "Ghostty".to_string(),
+            name: "ghostty".to_string(),
+            display: "Ghostty".to_string(),
             path: None,
         };
         assert_eq!(opening_line(&ghostty), "Opening Ghostty settings.");
