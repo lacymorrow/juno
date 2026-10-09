@@ -143,7 +143,7 @@ fn elevenlabs_voice() -> Option<String> {
     )
 }
 
-async fn current_key(app: &AppHandle, text: &str) -> Option<LineKey> {
+pub(crate) async fn current_key(app: &AppHandle, text: &str) -> Option<LineKey> {
     let manager = crate::settings::manager::SettingsManager::new(app.clone()).ok()?;
     let audio = manager.get_audio_settings().await.ok()?;
     key_for(&audio, text, elevenlabs_voice().as_deref())

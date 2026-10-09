@@ -641,7 +641,91 @@ pub fn parse_frontmost(out: &str) -> Option<Frontmost> {
     })
 }
 
+/// Build a [`Frontmost`] from what `NSRunningApplication` reports. Pure.
+///
+/// `name` is the executable's file name, which is what System Events calls
+/// the process (and what its `process "..."` lookups take); the localized
+/// name is the fallback and the display name. `policy` is
+/// `NSApplicationActivationPolicy`: 0 is a regular Dock app.
+#[cfg(any(target_os = "macos", test))]
+fn frontmost_from_parts(
+    localized: Option<String>,
+    bundle_id: Option<String>,
+    executable: Option<String>,
+    pid: i32,
+    policy: isize,
+) -> Option<Frontmost> {
+    let clean = |s: Option<String>| s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let localized = clean(localized);
+    let name = clean(executable).or_else(|| localized.clone())?;
+    Some(Frontmost {
+        name,
+        display: localized,
+        bundle_id: clean(bundle_id),
+        pid,
+        regular: policy == 0,
+    })
+}
+
+/// The frontmost app straight from `NSWorkspace`: microseconds, where the
+/// System Events script below takes about half a second.
+#[cfg(target_os = "macos")]
+fn native_frontmost() -> Option<Frontmost> {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe fn ns_string(obj: *mut Object) -> Option<String> {
+        if obj.is_null() {
+            return None;
+        }
+        let bytes: *const std::os::raw::c_char = msg_send![obj, UTF8String];
+        if bytes.is_null() {
+            return None;
+        }
+        std::ffi::CStr::from_ptr(bytes)
+            .to_str()
+            .ok()
+            .map(str::to_string)
+    }
+
+    objc::rc::autoreleasepool(|| {
+        // SAFETY: plain reads of NSWorkspace and NSRunningApplication
+        // properties, each null-checked, inside an autorelease pool.
+        unsafe {
+            let workspace: *mut Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+            if workspace.is_null() {
+                return None;
+            }
+            let front: *mut Object = msg_send![workspace, frontmostApplication];
+            if front.is_null() {
+                return None;
+            }
+            let localized: *mut Object = msg_send![front, localizedName];
+            let bundle: *mut Object = msg_send![front, bundleIdentifier];
+            let pid: i32 = msg_send![front, processIdentifier];
+            let policy: isize = msg_send![front, activationPolicy];
+            let url: *mut Object = msg_send![front, executableURL];
+            let executable: *mut Object = if url.is_null() {
+                std::ptr::null_mut()
+            } else {
+                msg_send![url, lastPathComponent]
+            };
+            frontmost_from_parts(
+                ns_string(localized),
+                ns_string(bundle),
+                ns_string(executable),
+                pid,
+                policy,
+            )
+        }
+    })
+}
+
 async fn frontmost() -> Option<Frontmost> {
+    #[cfg(target_os = "macos")]
+    if let Some(front) = native_frontmost() {
+        return Some(front);
+    }
     let out = osascript(FRONTMOST_SCRIPT, Vec::new()).await.ok()?;
     parse_frontmost(&out)
 }
@@ -1302,6 +1386,35 @@ mod tests {
         ] {
             assert_eq!(correction_for(q), None, "{q}");
         }
+    }
+
+    #[test]
+    fn native_frontmost_maps_like_system_events() {
+        let f = frontmost_from_parts(
+            Some("Ghostty".into()),
+            Some("com.mitchellh.ghostty".into()),
+            Some("ghostty".into()),
+            512,
+            0,
+        )
+        .expect("mapped");
+        assert_eq!(f.name, "ghostty");
+        assert_eq!(f.display.as_deref(), Some("Ghostty"));
+        assert_eq!(f.bundle_id.as_deref(), Some("com.mitchellh.ghostty"));
+        assert!(f.regular);
+        assert_eq!(f.display_name(), "Ghostty");
+
+        // Accessory apps are not regular; no executable falls back to the
+        // localized name; nothing to call it is no app.
+        let accessory =
+            frontmost_from_parts(Some("Helper".into()), None, None, 9, 1).expect("mapped");
+        assert_eq!(accessory.name, "Helper");
+        assert!(!accessory.regular);
+        assert_eq!(accessory.bundle_id, None);
+        assert_eq!(
+            frontmost_from_parts(None, None, Some(" ".into()), 1, 0),
+            None
+        );
     }
 
     #[test]
