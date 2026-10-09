@@ -12,6 +12,12 @@
 //! [`crate::tts::invoke_tts`] path. And a machine that booted a moment ago is
 //! assumed to be opening Juno as a login item, where an unprompted voice is a
 //! bad way to start someone's day, so she stays quiet.
+//!
+//! The launch line is the same every time, so it is rendered while Juno
+//! starts and kept on disk (`tts::prerender`), keyed by engine, voice, rate
+//! and text. The reveal wakes the greeting on its beat (`intro::GREETING_AT_MS`)
+//! and the file plays at once. When the render is not ready, or the voice has
+//! changed since, the line is spoken the ordinary way.
 
 use tauri::{AppHandle, Manager};
 use tracing::{debug, info, warn};
@@ -33,17 +39,24 @@ const INTRO_UNBOUND: &str = "Hi, I'm Juno. I'm in your menu bar whenever you nee
 /// How long to wait for the bar before giving up and speaking anyway.
 const BAR_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
 
+/// Render the launch line ahead, in the engine, voice and rate in force, so
+/// it plays the moment the reveal starts. Called at launch, in parallel with
+/// startup, and after any change of engine, voice or rate.
+pub fn refresh_cache(app: &AppHandle) {
+    crate::tts::prerender::refresh_in_background(app, HELLO);
+}
+
 /// How often to look while waiting.
 const BAR_POLL: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// Say hello. Called on every launch where onboarding is already behind us.
 pub async fn on_launch(app: &AppHandle) {
-    speak(app, HELLO.to_string()).await;
+    speak(app, HELLO.to_string(), true).await;
 }
 
 /// Introduce herself. Called once, the moment onboarding finishes.
 pub async fn on_first_run(app: &AppHandle) {
-    speak(app, introduction(app)).await;
+    speak(app, introduction(app), false).await;
 }
 
 /// The line she opens with, naming the trigger that is actually in effect.
@@ -139,7 +152,7 @@ fn spoken(combo: &str) -> String {
 }
 
 /// Speak a line, unless this launch is one where speaking would be rude.
-async fn speak(app: &AppHandle, line: String) {
+async fn speak(app: &AppHandle, line: String, rendered_ahead: bool) {
     if booted_just_now() {
         debug!("[Greeting] Machine just booted; this is a login item, staying quiet");
         return;
@@ -156,6 +169,17 @@ async fn speak(app: &AppHandle, line: String) {
         wait_for_the_bar(&app).await;
 
         info!("[Greeting] {}", line);
+        // Played from the render made at launch when it matches the voice
+        // in force; spoken the ordinary way otherwise.
+        if rendered_ahead {
+            if let Some(audio) = crate::tts::prerender::ready_for(&app, &line).await {
+                let state = app.state::<crate::state::AppState>();
+                match crate::tts::speak_prerendered(audio, state, app.clone()).await {
+                    Ok(_) => return,
+                    Err(e) => debug!("[Greeting] Rendered line did not play ({e}); speaking it"),
+                }
+            }
+        }
         let state = app.state::<crate::state::AppState>();
         if let Err(e) = crate::tts::invoke_tts(line, state, app.clone()).await {
             warn!("[Greeting] Could not speak: {}", e);
@@ -163,17 +187,31 @@ async fn speak(app: &AppHandle, line: String) {
     });
 }
 
-/// Block until the floating bar is on screen, or until [`BAR_WAIT`] is up.
+/// Wait for the moment to speak: the reveal's greeting beat when the bar is
+/// coming on with the intro, or the bar simply being on screen otherwise.
 ///
-/// Polled rather than driven by an event, because the bar reaches the screen
-/// by several routes (its declared config, the startup timer, onboarding
-/// handing it back) and "is it visible" is the one question all of them
-/// answer the same way. Giving up and speaking anyway is deliberate: a
-/// greeting that waits forever for a bar someone has switched off is a
-/// greeting that never happens.
+/// The beat is what makes the line land as the pill appears. Polling for
+/// visibility found the bar up to 150 ms late and knew nothing of the smoke.
+/// The poll stays for the routes that show the bar with no reveal (a bar that
+/// was already visible, or a reveal that could not be arranged). Giving up
+/// after [`BAR_WAIT`] and speaking anyway is deliberate: a greeting that waits
+/// forever for a bar someone has switched off is a greeting that never
+/// happens.
 async fn wait_for_the_bar(app: &AppHandle) {
     let deadline = std::time::Instant::now() + BAR_WAIT;
     let label = crate::constants::window_labels::FLOATING_BAR;
+
+    // A reveal is running, or is about to: its beat is the moment.
+    let bar_visible = app
+        .get_webview_window(label)
+        .and_then(|bar| bar.is_visible().ok())
+        .unwrap_or(false);
+    if bar_visible && !crate::intro::reveal_in_flight() {
+        return;
+    }
+    if crate::intro::greeting_beat(BAR_WAIT).await {
+        return;
+    }
 
     while std::time::Instant::now() < deadline {
         if let Some(bar) = app.get_webview_window(label) {

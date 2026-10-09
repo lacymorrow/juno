@@ -32,6 +32,8 @@ pub enum ToolCategory {
     Timer,
     /// Basic file and text manipulation tools
     Basic,
+    /// Mac apps the Mac already syncs: Reminders, Calendar, Contacts
+    MacApps,
     /// MCP (Model Context Protocol) tools from external servers
     MCP,
 }
@@ -46,6 +48,7 @@ impl ToolCategory {
             ToolCategory::Browser => "Browser Tools",
             ToolCategory::Timer => "Timer & Scheduling",
             ToolCategory::Basic => "Basic Tools",
+            ToolCategory::MacApps => "Mac Apps",
             ToolCategory::MCP => "MCP Tools",
         }
     }
@@ -61,6 +64,7 @@ impl ToolCategory {
             ToolCategory::Browser => "Web browser automation and control",
             ToolCategory::Timer => "Task scheduling and timer management",
             ToolCategory::Basic => "File operations and basic text manipulation",
+            ToolCategory::MacApps => "Reminders, Calendar and Contacts on this Mac",
             ToolCategory::MCP => "External MCP server tools and integrations",
         }
     }
@@ -74,6 +78,7 @@ impl ToolCategory {
             ToolCategory::Browser,
             ToolCategory::Timer,
             ToolCategory::Basic,
+            ToolCategory::MacApps,
             ToolCategory::MCP,
         ]
     }
@@ -168,6 +173,7 @@ impl Default for ToolConfigManager {
         Self::add_default_browser_tools(&mut tools);
         Self::add_default_timer_tools(&mut tools);
         Self::add_default_basic_tools(&mut tools);
+        Self::add_default_mac_apps_tools(&mut tools);
 
         // Enable all categories by default
         for category in ToolCategory::all_categories() {
@@ -354,6 +360,7 @@ impl ToolConfigManager {
             "Browser" => Ok(ToolCategory::Browser),
             "Timer" => Ok(ToolCategory::Timer),
             "Basic" => Ok(ToolCategory::Basic),
+            "MacApps" => Ok(ToolCategory::MacApps),
             "MCP" => Ok(ToolCategory::MCP),
             _ => Err(format!("Unknown tool category: {}", category_str)),
         }
@@ -367,6 +374,7 @@ impl ToolConfigManager {
             ToolCategory::Browser => "Browser".to_string(),
             ToolCategory::Timer => "Timer".to_string(),
             ToolCategory::Basic => "Basic".to_string(),
+            ToolCategory::MacApps => "MacApps".to_string(),
             ToolCategory::MCP => "MCP".to_string(),
         }
     }
@@ -623,6 +631,20 @@ impl ToolConfigManager {
         }
     }
 
+    /// Initializes the default Mac app tools (Reminders, Calendar, Contacts).
+    ///
+    /// The names and descriptions come from the one catalog in
+    /// `agent::tools::mac_apps`, so this list cannot drift from what is registered.
+    ///
+    /// Used by: Default configuration creation
+    fn add_default_mac_apps_tools(tools: &mut HashMap<String, ToolConfig>) {
+        for definition in crate::agent::tools::mac_apps::tool_definitions() {
+            let config = ToolConfig::new(definition.name.clone(), ToolCategory::MacApps, true)
+                .with_description(definition.description.clone());
+            tools.insert(definition.name, config);
+        }
+    }
+
     /// Initializes default browser automation tools
     ///
     /// Used by: Default configuration creation
@@ -749,6 +771,7 @@ impl ToolConfigManager {
         Self::add_default_browser_tools(&mut default_tools);
         Self::add_default_timer_tools(&mut default_tools);
         Self::add_default_basic_tools(&mut default_tools);
+        Self::add_default_mac_apps_tools(&mut default_tools);
 
         // Add missing default tools
         for (name, config) in default_tools {

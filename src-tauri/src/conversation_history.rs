@@ -16,7 +16,8 @@
 use crate::agent::core::{Message, Role};
 use crate::constants::events;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
@@ -67,12 +68,31 @@ pub struct ConversationFile {
     pub messages: Vec<Message>,
 }
 
+/// What the person actually said. A saved user message carries the system
+/// context block (time, focused app, running apps, location) the model was
+/// given, followed by `User Query: <text>`. History shows and titles only the
+/// query. The stored message is left whole (the model still gets the context
+/// it was given), so old files need no migration.
+pub(crate) fn visible_user_text(content: &str) -> &str {
+    const MARKER: &str = "\n\nUser Query: ";
+    if content.starts_with("Current time: ") {
+        if let Some(at) = content.find(MARKER) {
+            return &content[at + MARKER.len()..];
+        }
+    }
+    content
+}
+
 /// Title from the first non-empty user message, else a placeholder. Uses
 /// `chars().take` so a multi-byte title never panics on a byte boundary.
 fn derive_title(messages: &[Message]) -> String {
     for m in messages {
         if m.role == Role::User {
-            let t: String = m.content.trim().chars().take(TITLE_MAX_CHARS).collect();
+            let t: String = visible_user_text(&m.content)
+                .trim()
+                .chars()
+                .take(TITLE_MAX_CHARS)
+                .collect();
             if !t.is_empty() {
                 return t;
             }
@@ -129,6 +149,86 @@ pub fn load_messages(app: &AppHandle, id: &str) -> Result<Vec<Message>, String> 
     }
 }
 
+/// Text streamed to the person so far, per streaming message id. Every
+/// provider streams through `emit_streaming_text_chunk`, so this is the one
+/// place that knows what was shown or spoken when a turn is cut short.
+fn streamed() -> &'static StdMutex<HashMap<String, String>> {
+    static STREAMED: OnceLock<StdMutex<HashMap<String, String>>> = OnceLock::new();
+    STREAMED.get_or_init(|| StdMutex::new(HashMap::new()))
+}
+
+/// Remember a streamed chunk (shown text and/or a spoken block).
+pub(crate) fn record_streamed(message_id: &str, shown: &str, spoken: Option<&str>) {
+    let Ok(mut map) = streamed().lock() else {
+        return;
+    };
+    // Entries are taken by the runner at the end of every step. A caller that
+    // never takes (a local intent) must not grow the map without bound.
+    if map.len() > 64 && !map.contains_key(message_id) {
+        map.clear();
+    }
+    let entry = map.entry(message_id.to_string()).or_default();
+    for piece in [spoken.unwrap_or(""), shown] {
+        if piece.trim().is_empty() {
+            continue;
+        }
+        if !entry.is_empty() && !entry.ends_with(char::is_whitespace) {
+            entry.push(' ');
+        }
+        entry.push_str(piece);
+    }
+}
+
+/// Take (and forget) what was streamed under this id.
+pub(crate) fn take_streamed(message_id: &str) -> String {
+    streamed()
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(message_id))
+        .unwrap_or_default()
+}
+
+/// The assistant message to keep for a finished turn, or `None` when there is
+/// no text. `<TTS>` markers are dropped but the spoken words stay, in order.
+/// A turn that was cut short ends in an ellipsis. Compact by construction:
+/// text only, no tool calls, no thinking.
+pub(crate) fn reply_message(text: &str, interrupted: bool) -> Option<Message> {
+    let cleaned = text.replace("<TTS>", "").replace("</TTS>", " ");
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        return None;
+    }
+    let content = if interrupted {
+        format!("{cleaned}\u{2026}")
+    } else {
+        cleaned.to_string()
+    };
+    Some(Message {
+        role: Role::Assistant,
+        content,
+        tool_calls: None,
+        tool_call_id: None,
+        name: None,
+        images: None,
+    })
+}
+
+fn build_file(
+    id: &str,
+    messages: &[Message],
+    created_at: u64,
+    updated_at: u64,
+) -> ConversationFile {
+    ConversationFile {
+        version: VERSION,
+        id: id.to_string(),
+        title: derive_title(messages),
+        created_at,
+        updated_at,
+        messages: messages.to_vec(),
+    }
+}
+
 /// Persist a conversation's full message list and refresh its index entry. An
 /// empty conversation is never written, so a bare "new chat" leaves no file.
 fn save_conversation(app: &AppHandle, id: &str, messages: &[Message]) -> Result<(), String> {
@@ -141,15 +241,8 @@ fn save_conversation(app: &AppHandle, id: &str, messages: &[Message]) -> Result<
         .map(|m| m.created_at)
         .unwrap_or_else(now_secs);
     let updated_at = now_secs();
-    let title = derive_title(messages);
-    let file = ConversationFile {
-        version: VERSION,
-        id: id.to_string(),
-        title: title.clone(),
-        created_at,
-        updated_at,
-        messages: messages.to_vec(),
-    };
+    let file = build_file(id, messages, created_at, updated_at);
+    let title = file.title.clone();
     let store = app
         .store(conversation_file(id))
         .map_err(|e| e.to_string())?;
@@ -205,7 +298,9 @@ pub fn to_ui_messages(messages: &[Message]) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     for m in messages {
         match m.role {
-            Role::User => out.push(serde_json::json!({ "role": "user", "content": m.content })),
+            Role::User => out.push(
+                serde_json::json!({ "role": "user", "content": visible_user_text(&m.content) }),
+            ),
             Role::System => out.push(serde_json::json!({ "role": "system", "content": m.content })),
             Role::Assistant => {
                 if !m.content.trim().is_empty() {
@@ -394,5 +489,70 @@ mod tests {
         let ui = to_ui_messages(&[assistant]);
         let roles: Vec<&str> = ui.iter().filter_map(|m| m["role"].as_str()).collect();
         assert_eq!(roles, vec!["tool_call_request"]);
+    }
+
+    #[test]
+    fn visible_text_drops_context_block() {
+        let raw = "Current time: 9am\nPlatform: macOS\n\nUser Query: open Notes";
+        assert_eq!(visible_user_text(raw), "open Notes");
+        assert_eq!(visible_user_text("plain question"), "plain question");
+        // A query that mentions the marker is not cut when there is no context.
+        let odd = "say\n\nUser Query: hi";
+        assert_eq!(visible_user_text(odd), odd);
+        assert_eq!(derive_title(&[msg(Role::User, raw)]), "open Notes");
+        let ui = to_ui_messages(&[msg(Role::User, raw)]);
+        assert_eq!(ui[0]["content"], "open Notes");
+    }
+
+    #[test]
+    fn a_turn_saves_both_sides() {
+        let reply = reply_message("<TTS>It is 4pm.</TTS>\n\nSet by your clock.", false).unwrap();
+        assert_eq!(reply.role, Role::Assistant);
+        assert!(reply.content.starts_with("It is 4pm."));
+        assert!(!reply.content.contains("TTS"));
+        assert!(reply.tool_calls.is_none());
+        let file = build_file("c1", &[msg(Role::User, "what time is it"), reply], 1, 2);
+        let back: ConversationFile =
+            serde_json::from_value(serde_json::to_value(&file).unwrap()).unwrap();
+        assert_eq!(back.messages.len(), 2);
+        assert_eq!(back.messages[1].role, Role::Assistant);
+        let ui = to_ui_messages(&back.messages);
+        assert_eq!(ui[1]["role"], "assistant");
+    }
+
+    #[test]
+    fn empty_reply_is_not_saved() {
+        assert!(reply_message("  <TTS></TTS> ", false).is_none());
+    }
+
+    #[test]
+    fn a_cancelled_turn_keeps_what_was_streamed() {
+        record_streamed("cancel-test", "", Some("Opening Notes."));
+        record_streamed("cancel-test", "Looking for", None);
+        let partial = take_streamed("cancel-test");
+        assert_eq!(partial, "Opening Notes. Looking for");
+        assert_eq!(take_streamed("cancel-test"), "");
+        let kept = reply_message(&partial, true).unwrap();
+        assert!(kept.content.ends_with('\u{2026}'));
+        assert!(reply_message("", true).is_none());
+    }
+
+    #[test]
+    fn old_file_without_replies_still_loads() {
+        let old = serde_json::json!({
+            "version": 1,
+            "id": "old",
+            "title": "Current time: 9am",
+            "created_at": 1,
+            "updated_at": 2,
+            "messages": [
+                { "role": "User", "content": "Current time: 9am\n\nUser Query: hi" }
+            ]
+        });
+        let file: ConversationFile = serde_json::from_value(old).unwrap();
+        assert_eq!(file.messages.len(), 1);
+        let ui = to_ui_messages(&file.messages);
+        assert_eq!(ui.len(), 1);
+        assert_eq!(ui[0]["content"], "hi");
     }
 }

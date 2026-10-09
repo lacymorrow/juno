@@ -215,6 +215,14 @@ impl SettingsManager {
         self.get_floating_bar_settings_from_store(&store)
     }
 
+    /// The same answer without an `.await`, for launch code that runs before
+    /// any task could await it (the bar's config is written into its page as
+    /// the window is built). The read is synchronous underneath anyway.
+    pub fn floating_bar_settings_now(&self) -> Result<FloatingBarSettings, String> {
+        let store = self.store()?;
+        self.get_floating_bar_settings_from_store(&store)
+    }
+
     pub async fn get_agent_settings(&self) -> Result<AgentSettings, String> {
         let store = self.store()?;
         self.get_agent_settings_from_store(&store)

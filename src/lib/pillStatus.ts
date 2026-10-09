@@ -10,6 +10,9 @@
  *   neutral  = everything is fine, or Juno is busy (motion says which)
  *   blue     = a microphone is open and Juno is listening
  *   red      = Juno cannot answer: no internet, no provider, not signed in
+ *   blue, slow pulse = just launched, still loading what the first request
+ *                      needs (the speech engine). Rust owns that answer too
+ *                      (`readiness.rs`, `startup-readiness-changed`).
  */
 
 import { UI } from "@/lib/constants.generated";
@@ -23,18 +26,19 @@ export type ConnectivityStatus =
 /** `connectivity::Snapshot` in Rust. */
 export interface Connectivity {
   status: ConnectivityStatus;
-  /** A short sentence for the status, e.g. "No internet connection". */
+  /** A short sentence for the status, e.g. "Network unavailable". */
   label: string;
   /** The provider's everyday name, e.g. "Claude". */
   provider: string;
 }
 
-export type DotTone = "neutral" | "listening" | "down";
+export type DotTone = "neutral" | "listening" | "down" | "loading";
 
 /** macOS system blue and system red (dark appearance). */
 export const DOT_COLORS: Record<Exclude<DotTone, "neutral">, string> = {
   listening: "#0A84FF",
   down: "#FF453A",
+  loading: "#0A84FF",
 };
 
 const LISTENING_STATES: readonly string[] = [
@@ -60,17 +64,37 @@ export function isDown(connectivity: Connectivity | null): boolean {
  * someone is talking, the one thing the dot must say is "I hear you", and
  * speech-to-text runs on the Mac. The red comes back the moment it closes.
  */
-export function dotTone(state: string, connectivity: Connectivity | null): DotTone {
+export function dotTone(
+  state: string,
+  connectivity: Connectivity | null,
+  loading = false,
+): DotTone {
   if (LISTENING_STATES.includes(state)) return "listening";
   if (isDown(connectivity)) return "down";
+  // Only at rest: while Juno is working or speaking, that is what the dot says.
+  if (loading && isResting(state)) return "loading";
   return "neutral";
+}
+
+/** Not listening, working, transcribing or speaking. */
+function isResting(state: string): boolean {
+  return (
+    !LISTENING_STATES.includes(state) &&
+    !WORKING_STATES.includes(state) &&
+    state !== UI.BAR_STATES_TRANSCRIBING &&
+    state !== UI.BAR_STATES_SPEAKING
+  );
 }
 
 /** The dot's accessible label and tooltip: what it is showing right now. */
 export function dotLabel(
   state: string,
   connectivity: Connectivity | null,
-  { driving = false, voicePaused = false }: { driving?: boolean; voicePaused?: boolean } = {},
+  {
+    driving = false,
+    voicePaused = false,
+    loading = false,
+  }: { driving?: boolean; voicePaused?: boolean; loading?: boolean } = {},
 ): string {
   if (driving) return "Juno is using the pointer";
   switch (state) {
@@ -84,6 +108,7 @@ export function dotLabel(
       break;
   }
   if (connectivity && isDown(connectivity)) return connectivity.label;
+  if (loading && isResting(state)) return "Getting ready";
   if (state === UI.BAR_STATES_TRANSCRIBING) return "Transcribing";
   if (WORKING_STATES.includes(state)) return "Working";
   if (state === UI.BAR_STATES_SPEAKING) return "Speaking";

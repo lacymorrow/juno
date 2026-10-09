@@ -33,6 +33,9 @@ struct ElevenLabsPayload {
 }
 // --- End ElevenLabs API Structures ---
 
+/// The voice used when `ELEVENLABS_VOICE_ID` is not set.
+pub const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
+
 // --- ElevenLabs TTS Command ---
 #[tauri::command]
 pub async fn invoke_elevenlabs_tts(text: String, speed: Option<f64>) -> Result<String, String> {
@@ -46,8 +49,7 @@ pub async fn invoke_elevenlabs_tts(text: String, speed: Option<f64>) -> Result<S
 
     let api_key = env::var("ELEVENLABS_API_KEY")
         .map_err(|_| "ELEVENLABS_API_KEY environment variable not set".to_string())?;
-    let voice_id =
-        env::var("ELEVENLABS_VOICE_ID").unwrap_or_else(|_| "21m00Tcm4TlvDq8ikWAM".to_string());
+    let voice_id = env::var("ELEVENLABS_VOICE_ID").unwrap_or_else(|_| DEFAULT_VOICE_ID.to_string());
     info!("Using ElevenLabs Voice ID: {}", voice_id);
 
     let url = format!(
