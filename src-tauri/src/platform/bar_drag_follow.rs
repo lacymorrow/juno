@@ -377,13 +377,15 @@ mod tests {
             stats.record(asked, asked);
             let top_left = to_points(asked, primary_h);
             let cursor = cocoa_point_to_points(mouse, primary_h);
-            assert_eq!(
-                (
-                    cursor.0 - top_left.0 - grab.0,
-                    cursor.1 - top_left.1 - grab.1
-                ),
-                (0.0, 0.0),
-                "drift at event {i}"
+            // Float rounding only (1e-13 at these magnitudes); drift that
+            // accumulated would grow with i.
+            let gap = (
+                cursor.0 - top_left.0 - grab.0,
+                cursor.1 - top_left.1 - grab.1,
+            );
+            assert!(
+                gap.0.abs() < 1e-9 && gap.1.abs() < 1e-9,
+                "drift at event {i}: {gap:?}"
             );
         }
         assert_eq!(stats.moves, 2000);
