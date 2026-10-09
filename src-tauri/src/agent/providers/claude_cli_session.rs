@@ -223,6 +223,12 @@ pub struct TurnRequest<'a> {
     /// ("Session ID <id> is already in use"), verified against CLI 2.1.278.
     pub session_is_new: bool,
     pub query: &'a str,
+    /// The effort this turn runs at. Can differ from `launch.effort`, which is
+    /// only what the process was born with: a spoken turn runs lower than a
+    /// typed one, and the live process is switched with
+    /// [`effort_request`] rather than replaced, so the warm process and the
+    /// spare survive the switch.
+    pub effort: &'a str,
     pub app_handle: &'a tauri::AppHandle,
     pub message_id: Option<String>,
     pub cancel_rx: Option<crate::state::CancelReceiver>,
@@ -338,6 +344,9 @@ struct CliSession {
     /// it between turns to step aside (see [`watch_between_turns`]).
     turns_waiting: AtomicUsize,
     turn_wanted: Notify,
+    /// The effort the process is running at now: born with `--effort`, then
+    /// whatever the last [`effort_request`] set.
+    live_effort: std::sync::Mutex<String>,
 }
 
 impl CliSession {
@@ -1065,6 +1074,7 @@ fn spawn_session(
         owner: std::sync::Mutex::new(None),
         turns_waiting: AtomicUsize::new(0),
         turn_wanted: Notify::new(),
+        live_effort: std::sync::Mutex::new(launch.effort.clone()),
     })
 }
 
@@ -1203,6 +1213,9 @@ async fn run_in_session(
             )))
         }
     };
+
+    // Before the message, on the same stdin, so the CLI applies it first.
+    align_effort(&session, req.effort);
 
     if session.to_child.send(line).is_err() {
         drop(inbox);
@@ -1498,8 +1511,8 @@ impl TurnRenderer {
     ///
     /// Flushes the tag parser (a partial tag becomes display text, an
     /// unterminated block is still spoken). The `result` frame carries the raw
-    /// final text, tags included: it is stripped for display, and any spoken
-    /// block the stream did not already cover is spoken now.
+    /// final text, tags included: it is stripped for display, and spoken only
+    /// when the stream carried no text (see `claude_cli::result_text`).
     fn complete(&mut self, raw: Option<String>) -> String {
         super::claude_cli::ClaudeCliBrain::flush_display_text(
             &self.app,
@@ -1508,15 +1521,13 @@ impl TurnRenderer {
             &mut self.accumulated,
             &mut self.spoken,
         );
+        let stream_carried_text = !self.spoken.is_empty() || !self.accumulated.trim().is_empty();
         let display = raw.map(|raw| {
-            let (display, blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
-            let unspoken: Vec<String> = blocks
-                .into_iter()
-                .filter(|b| !self.spoken.contains(b))
-                .collect();
+            let (display, unspoken) = super::claude_cli::result_text(&raw, stream_carried_text);
             if let Some(handle) = self.app.as_ref() {
                 emit_chunk(handle, String::new(), &self.msg_id, &unspoken);
             }
+            self.spoken.extend(unspoken);
             display
         });
         display.unwrap_or_else(|| self.accumulated.clone())
@@ -2001,6 +2012,49 @@ async fn stream_turn(
     Ok(TurnOutcome::Completed(complete))
 }
 
+/// The control request that switches a live process's effort. The CLI applies
+/// `effortLevel` from flag settings over its `--effort` argument and keeps it
+/// in memory only (verified against CLI 2.1.295 with `get_settings`: the
+/// applied effort went from "high" to "medium"). The process keeps the
+/// signature it was spawned with, so the warm process and the spare still
+/// match the next turn whichever effort it wants.
+fn effort_request(effort: &str, request_id: &str) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": {
+            "subtype": "apply_flag_settings",
+            "settings": { "effortLevel": effort }
+        }
+    })
+}
+
+/// Switch the process to `effort` when it is running at something else. A CLI
+/// that refuses answers with an error `control_response`, which is skipped
+/// like any other, and the turn runs at the effort the process already had.
+fn align_effort(session: &CliSession, effort: &str) {
+    let mut live = session
+        .live_effort
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if live.as_str() == effort {
+        return;
+    }
+    let request = effort_request(effort, &format!("juno_effort_{}", uuid::Uuid::new_v4()));
+    match serde_json::to_string(&request) {
+        Ok(line) => {
+            if session.to_child.send(format!("{line}\n")).is_ok() {
+                info!(
+                    "[CliSession] Effort {} -> {effort} for this turn",
+                    live.as_str()
+                );
+                *live = effort.to_string();
+            }
+        }
+        Err(e) => warn!("[CliSession] Could not encode the effort switch: {e}"),
+    }
+}
+
 /// Ask the CLI to end the running turn. The process stays alive and is immediately
 /// reusable — that is the whole point of this module.
 fn send_interrupt(session: &CliSession) {
@@ -2224,6 +2278,7 @@ mod tests {
             owner: std::sync::Mutex::new(None),
             turns_waiting: AtomicUsize::new(0),
             turn_wanted: Notify::new(),
+            live_effort: std::sync::Mutex::new("high".to_string()),
         })
     }
 
@@ -2490,6 +2545,79 @@ mod tests {
         assert!(!starts_a_turn(&json!({ "type": "command_lifecycle" })));
     }
 
+    /// The frames one assistant message streams with partial messages on,
+    /// followed by the whole-message `assistant` frame the CLI also sends.
+    fn message_frames(id: &str, chunks: &[&str], then_tool: bool) -> Vec<Value> {
+        let event = |e: Value| json!({ "type": "stream_event", "event": e });
+        let mut frames = vec![
+            event(json!({ "type": "message_start", "message": { "id": id } })),
+            event(json!({ "type": "content_block_start", "index": 0,
+                "content_block": { "type": "text", "text": "" } })),
+        ];
+        for chunk in chunks {
+            frames.push(event(json!({ "type": "content_block_delta", "index": 0,
+                "delta": { "type": "text_delta", "text": chunk } })));
+        }
+        frames.push(event(json!({ "type": "content_block_stop", "index": 0 })));
+        if then_tool {
+            frames.push(event(json!({ "type": "content_block_start", "index": 1,
+                "content_block": { "type": "tool_use", "id": "t1", "name": "Bash" } })));
+            frames.push(event(json!({ "type": "content_block_stop", "index": 1 })));
+        }
+        frames.push(event(json!({ "type": "message_stop" })));
+        frames.push(json!({ "type": "assistant", "message": { "id": id,
+            "content": [{ "type": "text", "text": chunks.concat() }] } }));
+        frames
+    }
+
+    #[test]
+    fn a_turn_speaks_only_its_tts_text_once() {
+        // Message one leaves its <TTS> open before a tool call; message two
+        // is well formed. Both the deltas and the whole-message frames arrive,
+        // and the result repeats the last message.
+        let first = ["<TTS>Sure, opening Ghost", "ty settings now"];
+        let second = [
+            "<TTS>Done. Settings are open on your scr",
+            "een.</TT",
+            "S>\n\nHere is more detail. It is display only.",
+        ];
+        let mut turn = TurnRenderer::new(None, "m".to_string());
+        for frame in message_frames("msg1", &first, true) {
+            assert!(turn.feed(&frame).is_none());
+        }
+        turn.feed(&json!({ "type": "user", "message": { "content": [
+            { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }] } }));
+        for frame in message_frames("msg2", &second, false) {
+            assert!(turn.feed(&frame).is_none());
+        }
+        let end = turn
+            .feed(&json!({ "type": "result", "subtype": "success",
+                "result": second.concat() }))
+            .expect("ended");
+        let display = turn.complete(end.text);
+        assert_eq!(
+            turn.spoken,
+            vec![
+                "Sure, opening Ghostty settings now",
+                "Done. Settings are open on your screen."
+            ]
+        );
+        assert_eq!(display, "Here is more detail. It is display only.");
+        assert!(!turn.accumulated.contains("TTS"));
+    }
+
+    #[test]
+    fn the_result_speaks_only_when_nothing_streamed() {
+        let mut turn = TurnRenderer::new(None, "m".to_string());
+        let end = turn
+            .feed(&json!({ "type": "result", "subtype": "success",
+                "result": "<TTS>Only the result carried this.</TTS>Shown." }))
+            .expect("ended");
+        let display = turn.complete(end.text);
+        assert_eq!(turn.spoken, vec!["Only the result carried this."]);
+        assert_eq!(display, "Shown.");
+    }
+
     #[test]
     fn a_stopped_turn_shows_nothing_more_and_ends_aborted() {
         let mut turn = TurnRenderer::new(None, "m".to_string());
@@ -2505,6 +2633,51 @@ mod tests {
             )
             .expect("ended");
         assert!(end.aborted);
+    }
+
+    #[test]
+    fn effort_request_has_the_shape_the_cli_expects() {
+        let request = effort_request("medium", "juno_effort_1");
+        assert_eq!(request["type"], "control_request");
+        assert_eq!(request["request_id"], "juno_effort_1");
+        assert_eq!(request["request"]["subtype"], "apply_flag_settings");
+        assert_eq!(request["request"]["settings"]["effortLevel"], "medium");
+    }
+
+    #[tokio::test]
+    async fn a_live_process_switches_effort_only_when_it_changes() {
+        let (to_child, mut outbox) = mpsc::unbounded_channel();
+        let (_frames, inbox) = mpsc::unbounded_channel();
+        let child = tokio::process::Command::new("true")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn test child");
+        let session = CliSession {
+            session_id: "s".to_string(),
+            signature: "sig".to_string(),
+            to_child,
+            inbox: TokioMutex::new(inbox),
+            child: std::sync::Mutex::new(child),
+            last_used: AtomicU64::new(now_secs()),
+            owner: std::sync::Mutex::new(None),
+            turns_waiting: AtomicUsize::new(0),
+            turn_wanted: Notify::new(),
+            live_effort: std::sync::Mutex::new("high".to_string()),
+        };
+        // Same effort as the process was born with: nothing is written.
+        align_effort(&session, "high");
+        assert!(outbox.try_recv().is_err());
+        // A spoken turn: one switch, then nothing while it stays the same.
+        align_effort(&session, "medium");
+        let line = outbox.try_recv().expect("switch written");
+        let frame: Value = serde_json::from_str(line.trim()).expect("json");
+        assert_eq!(frame["request"]["settings"]["effortLevel"], "medium");
+        align_effort(&session, "medium");
+        assert!(outbox.try_recv().is_err());
+        // A typed turn after it switches back.
+        align_effort(&session, "high");
+        let line = outbox.try_recv().expect("switch back written");
+        assert!(line.contains("\"high\""));
     }
 
     #[test]

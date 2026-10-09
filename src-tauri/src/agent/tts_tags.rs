@@ -18,6 +18,14 @@
 //! start answering while the rest of the reply is still being written. See
 //! [`split_ready_sentences`] for the boundary rules.
 //!
+//! What is spoken is exactly what sits inside `<TTS>...</TTS>`, once, and
+//! nothing else. Three guards keep a malformed reply from talking past its
+//! spoken line: a close tag in any case (`</tts>`) closes the block, a stray
+//! `<TTS>` inside an open block is dropped rather than read aloud, and a
+//! provider calls [`TtsTagStream::end_block`] when a content block ends, so a
+//! block the model never closed stops there instead of reading out the rest of
+//! the reply.
+//!
 //! Two entry points:
 //! - [`TtsTagStream`] for streaming providers. Feed chunks as they arrive; tags
 //!   split across chunk boundaries are held back until they resolve.
@@ -31,6 +39,17 @@ const CLOSE_TAG: &str = "</TTS>";
 /// are short; anything longer is prose and goes out rather than stalling the
 /// stream.
 const MAX_COMPONENT_FRAGMENT_BYTES: usize = 64;
+
+/// True when `rest` starts with `tag`, ignoring ASCII case.
+fn starts_with_tag(rest: &str, tag: &str) -> bool {
+    rest.len() >= tag.len() && rest.as_bytes()[..tag.len()].eq_ignore_ascii_case(tag.as_bytes())
+}
+
+/// True when all of `rest` is a proper prefix of `tag`, ignoring ASCII case:
+/// the tag may still be arriving.
+fn is_partial_tag(rest: &str, tag: &str) -> bool {
+    rest.len() < tag.len() && tag.as_bytes()[..rest.len()].eq_ignore_ascii_case(rest.as_bytes())
+}
 
 /// True when `rest` is the start of a component tag whose name has not
 /// finished arriving: `<`, `</`, `<W`, `<WeatherCa`, `</Card`. It must run to
@@ -219,14 +238,21 @@ impl TtsTagStream {
             }
 
             if self.in_tag {
-                if rest.starts_with(CLOSE_TAG) {
+                // Any case: a model that closes with `</tts>` must not have
+                // the rest of its reply read out.
+                if starts_with_tag(rest, CLOSE_TAG) {
                     self.release_remainder(&mut spoken_blocks);
                     self.in_tag = false;
                     consumed += CLOSE_TAG.len();
                     continue;
                 }
-                if CLOSE_TAG.starts_with(rest) {
-                    // Possible partial "</TTS>" at the end; wait for more.
+                if rest.starts_with(OPEN_TAG) {
+                    // A nested open tag is markup, not speech.
+                    consumed += OPEN_TAG.len();
+                    continue;
+                }
+                if is_partial_tag(rest, CLOSE_TAG) || OPEN_TAG.starts_with(rest) {
+                    // Possible partial tag at the end; wait for more.
                     break;
                 }
             } else {
@@ -266,25 +292,34 @@ impl TtsTagStream {
         (display, spoken_blocks)
     }
 
+    /// The content block the text came from has ended (a tool call, a new
+    /// text block, the end of the message). A spoken block cannot span two
+    /// content blocks, so one still open was never closed: its text is
+    /// released now and the parser leaves it, so the next block's text is
+    /// shown rather than spoken. A half-arrived tag is dropped. Returns the
+    /// spoken chunks released; display state is untouched.
+    pub fn end_block(&mut self) -> Vec<String> {
+        let mut spoken_blocks = Vec::new();
+        if self.in_tag {
+            // Inside a block the buffer only ever holds a partial tag.
+            self.buffer.clear();
+            self.release_remainder(&mut spoken_blocks);
+            self.in_tag = false;
+        }
+        spoken_blocks
+    }
+
     /// Flush at end of stream. Returns `(display_text, spoken_blocks)`.
     ///
     /// A block that never closed is still spoken (the model ran out of tokens
-    /// or the tag was malformed); a partial tag left in the buffer is shown
-    /// as plain text so nothing is silently dropped.
+    /// or the tag was malformed), without the half-arrived tag that may end
+    /// it; outside a block a partial tag left in the buffer is shown as plain
+    /// text so nothing is silently dropped.
     pub fn finish(&mut self) -> (String, Vec<String>) {
-        let mut display = String::new();
-        let mut spoken_blocks = Vec::new();
-
-        let tail = std::mem::take(&mut self.buffer);
         if self.in_tag {
-            self.spoken.push_str(&tail);
-            self.release_remainder(&mut spoken_blocks);
-            self.in_tag = false;
-        } else {
-            display.push_str(&tail);
+            return (String::new(), self.end_block());
         }
-
-        (display, spoken_blocks)
+        (std::mem::take(&mut self.buffer), Vec::new())
     }
 }
 
@@ -719,6 +754,112 @@ mod tests {
         let (sentences, rest) = split_ready_sentences("First sentence here. Second one is ", 20);
         assert_eq!(sentences, vec!["First sentence here."]);
         assert_eq!(rest, "First sentence here. ".len());
+    }
+
+    /// Whitespace-normalized.
+    fn norm(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// What should be spoken, worked out independently of the parser: the
+    /// text after each `<TTS>` up to the next close tag in any case (or the
+    /// end), with nested open tags removed.
+    fn reference_spoken(input: &str) -> String {
+        let mut out = String::new();
+        let mut rest = input;
+        while let Some(open) = rest.find(OPEN_TAG) {
+            let after = &rest[open + OPEN_TAG.len()..];
+            // ASCII lowercasing keeps byte offsets, so `end` indexes `after`.
+            let end = after.to_ascii_lowercase().find("</tts>");
+            let inner = end.map_or(after, |e| &after[..e]);
+            out.push_str(&inner.replace(OPEN_TAG, " "));
+            out.push(' ');
+            rest = end.map_or("", |e| &after[e + CLOSE_TAG.len()..]);
+        }
+        norm(&out)
+    }
+
+    const INVARIANT_INPUTS: &[&str] = &[
+        "Intro <TTS>Sure, opening Ghostty settings now. It takes a second.</TTS>\n\n- one\n- two <TTS>Done. Anything else you need?</TTS> tail.",
+        "<TTS>Dr. Smith pays 3.5 percent, e.g. in tax... See https://example.com/a.b now. Okay!</TTS>shown after",
+        "<TTS>This block never closes. And it keeps going to the end",
+        "<TTS>Outer words <TTS>inner words here.</TTS> after </TTS> end",
+        "<TTS>Spoken part is right here.</tts> Display text that must stay silent. More of it.",
+        "h\u{e9}llo <TTS>caf\u{e9} \u{2615} \u{65e5}\u{672c} is great today. Second sentence.</TTS> w\u{f6}rld",
+        "<Card>x</Card><TTS>Paused.</TTS><TTS>Two blocks, back to back.</TTS>",
+    ];
+
+    fn spoken_for(chunks: &[&str]) -> Vec<String> {
+        stream_all(chunks).1
+    }
+
+    #[test]
+    fn spoken_text_is_exactly_the_tagged_text_at_every_split() {
+        for &input in INVARIANT_INPUTS {
+            let expected = reference_spoken(input);
+            let whole = spoken_for(&[input]);
+            assert_eq!(norm(&whole.join(" ")), expected, "whole: {input:?}");
+            assert!(whole.iter().all(|c| !c.trim().is_empty()));
+            let bounds: Vec<usize> = (1..input.len())
+                .filter(|i| input.is_char_boundary(*i))
+                .collect();
+            for &i in &bounds {
+                let spoken = spoken_for(&[&input[..i], &input[i..]]);
+                assert_eq!(norm(&spoken.join(" ")), expected, "split {i}: {input:?}");
+                // Chunking never changes what is said, sentence for sentence.
+                assert_eq!(spoken, whole, "split {i}: {input:?}");
+            }
+            for (n, &i) in bounds.iter().enumerate() {
+                for &j in bounds.iter().skip(n + 1).step_by(7) {
+                    let spoken = spoken_for(&[&input[..i], &input[i..j], &input[j..]]);
+                    assert_eq!(spoken, whole, "split {i},{j}: {input:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tags_split_inside_their_names_still_speak_once() {
+        let spoken = spoken_for(&["<T", "TS>Hello there, how are you?</TT", "S> shown"]);
+        assert_eq!(spoken, vec!["Hello there, how are you?"]);
+        let spoken = spoken_for(&["<TTS>Lower case close tag here.</t", "ts> not spoken"]);
+        assert_eq!(spoken, vec!["Lower case close tag here."]);
+    }
+
+    #[test]
+    fn a_nested_open_tag_is_not_read_aloud() {
+        let (display, spoken) = split_tts_tags("<TTS>One <TTS>two.</TTS> three");
+        assert_eq!(spoken, vec!["One two."]);
+        assert_eq!(display, "three");
+    }
+
+    #[test]
+    fn end_block_stops_an_unclosed_block_at_the_content_boundary() {
+        let mut s = TtsTagStream::new();
+        let (_, t1) = s.push("<TTS>Sure, opening it now");
+        assert!(t1.is_empty());
+        assert_eq!(s.end_block(), vec!["Sure, opening it now"]);
+        // The next message's text is shown, never spoken.
+        let (d2, t2) = s.push("Here is the list. It has three items.");
+        assert_eq!(d2, "Here is the list. It has three items.");
+        assert!(t2.is_empty());
+        let (d3, t3) = s.finish();
+        assert!(d3.is_empty() && t3.is_empty());
+        // Nothing open: a no-op that keeps a held display fragment.
+        let mut s = TtsTagStream::new();
+        s.push("text <TT");
+        assert!(s.end_block().is_empty());
+        let (d, _) = s.push("S>spoken words here.</TTS>");
+        assert_eq!(d, "");
+    }
+
+    #[test]
+    fn a_half_arrived_close_tag_is_never_spoken() {
+        let mut s = TtsTagStream::new();
+        s.push("<TTS>Cut off right at the end.</TT");
+        assert_eq!(s.end_block(), vec!["Cut off right at the end."]);
+        let (_, spoken) = stream_all(&["<TTS>Ran out of tokens here.</T"]);
+        assert_eq!(spoken, vec!["Ran out of tokens here."]);
     }
 
     #[test]

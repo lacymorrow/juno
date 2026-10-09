@@ -1169,6 +1169,16 @@ async fn stream_turn(
                         crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
                         surface.open();
                         let new_item = last_item.as_deref() != Some(item_id.as_str());
+                        if new_item {
+                            // The previous message is over: a `<TTS>` it
+                            // left open must not read out this one.
+                            ClaudeCliBrain::end_text_block(
+                                &app,
+                                &msg_id,
+                                &mut tts_stream,
+                                &mut spoken,
+                            );
+                        }
                         let delta = if new_item && last_item.is_some() {
                             // A second message is a second paragraph.
                             format!("\n\n{delta}")

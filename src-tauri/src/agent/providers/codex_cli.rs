@@ -646,6 +646,14 @@ impl CodexCliBrain {
                             &mut accumulated,
                             &mut spoken_blocks,
                         );
+                        // The message is complete: a `<TTS>` it left open
+                        // must not read out the next one.
+                        ClaudeCliBrain::end_text_block(
+                            app_handle,
+                            msg_id,
+                            &mut tts_stream,
+                            &mut spoken_blocks,
+                        );
                     }
                     ExecEvent::Failed(message) => {
                         warn!("[CodexCLI] Turn failed: {}", message);
