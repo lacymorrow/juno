@@ -1392,7 +1392,7 @@ dependencies = [
 
 [[package]]
 name = "computer-use-ai-sdk"
-version = "0.8.144"
+version = "0.8.145"
 dependencies = [
  "accessibility",
  "accessibility-sys",
@@ -4186,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "juno"
-version = "0.8.144"
+version = "0.8.145"
 dependencies = [
  "any-tts",
  "arboard",
@@ -4274,7 +4274,7 @@ dependencies = [
 
 [[package]]
 name = "juno-cua"
-version = "0.8.144"
+version = "0.8.145"
 dependencies = [
  "anyhow",
  "clap",
@@ -8119,7 +8119,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-voice-transcription"
-version = "0.8.144"
+version = "0.8.145"
 dependencies = [
  "base64 0.22.1",
  "block",
