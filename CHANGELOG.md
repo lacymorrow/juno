@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.152] - 2026-10-09
+
+### Fixed
+
+- **settings:** owner QA on v0.8.146 (chips, highlight, Mac voice, speed) (#772) (efd5b2f5)
+
 ## [0.8.151] - 2026-10-09
 
 ### Added
@@ -1205,7 +1211,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.151...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.152...HEAD
+[0.8.152]: https://github.com/lacymorrow/juno/compare/cua-v0.8.151...v0.8.152
 [0.8.151]: https://github.com/lacymorrow/juno/compare/cua-v0.8.150...v0.8.151
 [0.8.150]: https://github.com/lacymorrow/juno/compare/cua-v0.8.149...v0.8.150
 [0.8.149]: https://github.com/lacymorrow/juno/compare/cua-v0.8.148...v0.8.149
