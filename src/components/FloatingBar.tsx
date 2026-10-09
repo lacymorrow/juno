@@ -34,7 +34,12 @@ import {
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, Ear, EarOff, Maximize2, Mic, Square, Type, X } from "lucide-react";
 import { VoiceTurnControls } from "@/components/bar/VoiceTurnControls";
-import { cancelVoiceTurn, isRecordingTurn, sendVoiceTurn } from "@/lib/voiceTurn";
+import {
+  cancelVoiceTurn,
+  isDictationTurn,
+  isRecordingTurn,
+  sendVoiceTurn,
+} from "@/lib/voiceTurn";
 
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
@@ -1046,6 +1051,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // The text input is local until submit, so there is no per-keystroke IPC.
   const [inputOpen, setInputOpen] = useState(false);
   const [composerGrowth, setComposerGrowth] = useState(0);
+  // Whether the caret is in the composer, kept by its own focus and blur so
+  // it can be read the moment a dictation begins, before anything re-renders.
+  const composerHasCaretRef = useRef(false);
 
   // Whether a turn is in flight, readable from callbacks that are defined
   // above the derived state that works it out. Kept in step during render.
@@ -1491,6 +1499,29 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     (WORKING_STATES.includes(currentUiState) && !isRecording) || chat.isProcessing;
   isWorkingRef.current = isWorking;
 
+  // === A DICTATION INTO THE COMPOSER ===
+  //
+  // Dictation types what you say into whatever has the caret. When that is
+  // this composer, the voice look must not take the pill over: the box
+  // unmounted, the keystrokes Rust posts at the end landed nowhere, and the
+  // box came back empty. Decided from where the caret was when the dictation
+  // began and held for the rest of it (the final decode runs after the mic
+  // closes, still inside the dictation), so a dictation into another app and
+  // a spoken query to Juno still take the pill over as before.
+  const dictating = isDictationTurn({
+    barState: currentUiState,
+    isDictationMode: barState.isDictationMode,
+  });
+  const [dictationHeld, setDictationHeld] = useState(false);
+  const dictationInComposer =
+    dictating && (dictationHeld || (composerHasCaretRef.current && document.hasFocus()));
+  useEffect(() => {
+    setDictationHeld(dictationInComposer);
+    // The composer is now the person's open one, whatever opened it, so it
+    // stays up with the words in it once Rust goes back to rest.
+    if (dictationInComposer) setInputOpen(true);
+  }, [dictationInComposer]);
+
   // === JUNO IS DRIVING ===
   //
   // Juno normally works without touching the pointer. While it holds the real
@@ -1575,12 +1606,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   // The input shows when the user opened it, while the backend is in its
   // input states, and between turns with the pane open so a follow-up is one
-  // click away. Voice and working states show status instead.
+  // click away. Voice and working states show status instead, except a
+  // dictation that is being typed into the composer itself.
+  const takenOver = (isVoice || isWorking) && !dictationInComposer;
   const showInput =
-    !isDriving &&
-    !isWorking &&
-    !isVoice &&
-    (inputOpen || isInputState || (paneOpen && isIdle));
+    !isDriving && !takenOver && (inputOpen || isInputState || (paneOpen && isIdle));
   const label = driving
     ? drivingLabel(driving)
     : statusLabel(currentUiState, barState);
@@ -1603,8 +1633,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // A voice or working state that starts while the input is open (hotkey,
   // wake word) takes over; the input is not waiting underneath.
   useEffect(() => {
-    if ((isVoice || isWorking) && inputOpen) closeInput();
-  }, [isVoice, isWorking, inputOpen, closeInput]);
+    if (takenOver && inputOpen) closeInput();
+  }, [takenOver, inputOpen, closeInput]);
 
   /**
    * The X, wherever it appears, and the Stop square: one meaning.
@@ -2145,9 +2175,23 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               }}
               onPaste={handlePaste}
               onMouseDown={activateWindow}
-              onFocus={handleFocus}
-              onBlur={handleInputBlur}
-              placeholder={paneOpen ? "Follow up…" : "Ask Juno"}
+              onFocus={() => {
+                composerHasCaretRef.current = true;
+                void handleFocus();
+              }}
+              onBlur={() => {
+                composerHasCaretRef.current = false;
+                handleInputBlur();
+              }}
+              placeholder={
+                dictationInComposer
+                  ? isRecording
+                    ? "Listening…"
+                    : "Transcribing…"
+                  : paneOpen
+                    ? "Follow up…"
+                    : "Ask Juno"
+              }
               aria-label="Ask Juno"
               className={cn(
                 "min-w-0 flex-1 resize-none cursor-text border-none bg-transparent outline-none",
@@ -2160,16 +2204,22 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               {/* Not "switch to dictation": dictation types what you say into
                   whatever app has focus, and this mic is the inverse of the
                   "type instead" control next to it. It opens a spoken turn to
-                  Juno, the same one the pill's mic opens, so it says so. */}
-              <button
-                type="button"
-                onClick={switchToTalking}
-                aria-label="Talk to Juno"
-                title="Talk to Juno"
-                className={inputControlButton}
-              >
-                <Mic className="size-3" />
-              </button>
+                  Juno, the same one the pill's mic opens, so it says so.
+                  While a dictation is landing here the mic is already open,
+                  so the level takes its place. */}
+              {dictationInComposer ? (
+                <AudioLevelBars audioLevel={barState.audioLevel} />
+              ) : (
+                <button
+                  type="button"
+                  onClick={switchToTalking}
+                  aria-label="Talk to Juno"
+                  title="Talk to Juno"
+                  className={inputControlButton}
+                >
+                  <Mic className="size-3" />
+                </button>
+              )}
               <button
                 type="submit"
                 aria-label="Send"
