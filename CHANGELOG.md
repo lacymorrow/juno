@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.159] - 2026-10-09
+
+### Fixed
+
+- **pill:** a dictation into the composer keeps the composer, so the words land in it (#779) (20f72f78)
+
 ## [0.8.158] - 2026-10-09
 
 ### Fixed
@@ -1241,7 +1247,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.158...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.159...HEAD
+[0.8.159]: https://github.com/lacymorrow/juno/compare/cua-v0.8.158...v0.8.159
 [0.8.158]: https://github.com/lacymorrow/juno/compare/cua-v0.8.157...v0.8.158
 [0.8.157]: https://github.com/lacymorrow/juno/compare/cua-v0.8.156...v0.8.157
 [0.8.155]: https://github.com/lacymorrow/juno/compare/cua-v0.8.154...v0.8.155
