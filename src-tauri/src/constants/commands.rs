@@ -34,6 +34,8 @@ pub mod settings {
     pub const SET_ADVANCED_SETTINGS_ENABLED: &str = "set_advanced_settings_enabled";
     /// The pane and row the agent asked for before the window existed.
     pub const TAKE_PENDING_SETTINGS_NAVIGATION: &str = "take_pending_settings_navigation";
+    /// A `juno://` link clicked in a reply; Rust parses and follows it.
+    pub const OPEN_JUNO_LINK: &str = "open_juno_link";
     /// Beta: one long-lived claude process per conversation.
     /// See docs/plans/cli-persistent-session-spike.md
     pub const GET_CLI_PERSISTENT_SESSION_ENABLED: &str = "get_cli_persistent_session_enabled";

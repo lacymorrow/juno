@@ -75,7 +75,9 @@ pub fn definition() -> ToolDefinition {
             or {\"remove\": \"<name>\"}, and an added server waits for the person's approval \
             before it runs. Settings marked protected (permission mode, ask before sending, \
             provider, model, API key, system prompt) cannot be changed by you: highlight \
-            them and tell the person to change them. Call `list` first if unsure of a key."
+            them and tell the person to change them. Call `list` first if unsure of a key. `open` and `highlight` return a `link` \
+            (juno://settings...): put it in your reply as a markdown link, for example \
+            [Voice settings](juno://settings/voice), and the person can click it to jump there."
             .to_string(),
         input_schema: json!({
             "type": "object",
@@ -224,6 +226,12 @@ async fn open(app: &AppHandle, pane: Option<&str>) -> Result<Value, String> {
         })?),
         None => None,
     };
+    open_pane(app, pane).await
+}
+
+/// Open the Settings window on a pane (or leave the pane alone). The one path
+/// for the tool's `open` and for `juno://settings/<pane>` links.
+pub async fn open_pane(app: &AppHandle, pane: Option<registry::Pane>) -> Result<Value, String> {
     let mut turned_on_advanced = false;
     if let Some(pane) = pane {
         if pane.advanced() && !advanced_on(app).await {
@@ -243,10 +251,13 @@ async fn open(app: &AppHandle, pane: Option<&str>) -> Result<Value, String> {
     Ok(json!({
         "opened": pane.map(registry::Pane::name).unwrap_or("Settings"),
         "turned_on_advanced_settings": turned_on_advanced,
+        "link": crate::deep_link::settings_link(pane, None),
     }))
 }
 
-async fn highlight(app: &AppHandle, key: SettingKey) -> Result<Value, String> {
+/// Open the window on a setting's pane, scroll to its row and flash it. The one
+/// path for the tool's `highlight` and for `juno://settings?highlight=` links.
+pub async fn highlight(app: &AppHandle, key: SettingKey) -> Result<Value, String> {
     let spec = key.spec();
     // A row behind the advanced toggle does not exist on screen until the
     // toggle is on, and "show me where it is" has to show it.
@@ -267,6 +278,7 @@ async fn highlight(app: &AppHandle, key: SettingKey) -> Result<Value, String> {
     Ok(json!({
         "highlighted": spec.label,
         "pane": spec.pane.name(),
+        "link": crate::deep_link::settings_link(Some(spec.pane), Some(key)),
         "protected": spec.protected,
         "turned_on_advanced_settings": turned_on_advanced,
     }))
