@@ -286,8 +286,8 @@ pub fn best_voice<'a>(voices: &'a [AvVoice], language: Option<&str>) -> Option<&
     voices
         .iter()
         .filter(|voice| in_language(voice))
-        .max_by_key(|voice| rank(*voice))
-        .or_else(|| voices.iter().max_by_key(|voice| rank(*voice)))
+        .max_by_key(|voice| rank(voice))
+        .or_else(|| voices.iter().max_by_key(|voice| rank(voice)))
 }
 
 // ---------------------------------------------------------------------------
