@@ -379,6 +379,13 @@ pub async fn submit_query(
     // arrives here too, and the voice turn already open keeps it.
     crate::turn_timing::begin_typed();
 
+    // A new task starts on the whole screen: the last task's working window,
+    // element ids and window picture must not steer this one. Sessions with
+    // their own id start fresh by construction; this clears the shared one.
+    crate::agent::tools::ax_targeting::reset_for_new_turn(
+        crate::utils::coordinates::DEFAULT_AGENT_KEY,
+    );
+
     // --- Answer a pending per-send approval (LAC-4058) by voice (LAC-4066) ---
     // Every query source funnels through here, including the push-to-talk /
     // hotkey and cloud-voice transcripts. While a connector send is waiting on

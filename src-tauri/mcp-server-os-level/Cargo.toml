@@ -41,7 +41,9 @@ image = { version = "0.25.1", features = ["png", "jpeg"] }
 libc = "0.2"
 objc = "0.2.7"
 once_cell = "1.19"
-screencapturekit = { version = "1.5.4", optional = true }
+# macos_14_0 only adds API (ignoresShadowsSingleWindow is used for window
+# capture); SCScreenshotManager already needs macOS 14 at runtime.
+screencapturekit = { version = "1.5.4", optional = true, features = ["macos_14_0"] }
 
 # Clipboard functionality now implemented using arboard (cross-platform, modern)
 # objc still needed for other platform interactions
