@@ -1029,6 +1029,78 @@ describe("FloatingBar", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(bar()).toHaveAttribute("data-layout", "voice");
   });
+
+  // ── A dictation into the composer ────────────────────────────────
+  //
+  // Dictation types what you say into whatever has the caret. With the caret
+  // in the pill's own box, the voice look used to unmount the box, so the
+  // keystrokes Rust posted at the end landed nowhere and the box came back
+  // empty.
+
+  it("keeps the composer, its draft and the caret through a dictation typed into it", async () => {
+    await renderBar();
+    const input = await openInput();
+    fireEvent.change(input, { target: { value: "hello " } });
+
+    // Fn+Control held: Rust marks the dictation, opens the mic, streams a
+    // partial, then closes the mic and runs the final decode.
+    await setBarState({ barState: "dictating", isDictationMode: true });
+    await setBarState({ barState: "listening", isDictationMode: true, audioLevel: 0.4 });
+
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("hello ");
+    expect(input).toHaveAttribute("placeholder", "Listening…");
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    // The mic is already open: no "talk to Juno" while it is.
+    expect(screen.queryByRole("button", { name: "Talk to Juno" })).not.toBeInTheDocument();
+
+    await setBarState({
+      barState: "transcribing",
+      isDictationMode: true,
+      transcriptionText: "world",
+      transcriptionProvisional: true,
+    });
+    expect(screen.getByRole("textbox")).toBe(input);
+
+    await setBarState({ barState: "transcribing", isDictationMode: true });
+    expect(input).toHaveAttribute("placeholder", "Transcribing…");
+
+    // Rust posts the words at the caret, as it does into any other app.
+    fireEvent.change(input, { target: { value: "hello world" } });
+    await setBarState({ barState: "default" });
+
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveValue("hello world");
+    expect(input).toHaveAttribute("placeholder", "Ask Juno");
+    expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
+  });
+
+  it("cancels the dictation, not the draft, from the X while one is landing in the composer", async () => {
+    await renderBar();
+    const input = await openInput();
+    fireEvent.change(input, { target: { value: "keep this" } });
+    await setBarState({ barState: "listening", isDictationMode: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close without sending" }));
+    await act(async () => {});
+
+    const { emit } = await import("@tauri-apps/api/event");
+    expect(emit).toHaveBeenCalledWith("dictation-cancel");
+    expect(input).toHaveValue("keep this");
+  });
+
+  it("still hands the composer over to a dictation aimed at another app", async () => {
+    await renderBar();
+    await openInput();
+    // The person moved to another app: the words are for it, not the pill.
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+
+    await setBarState({ barState: "listening", isDictationMode: true });
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(bar()).toHaveAttribute("data-layout", "voice");
+  });
 });
 
 // ── The steady frame ─────────────────────────────────────────────────
