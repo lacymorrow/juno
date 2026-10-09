@@ -550,6 +550,7 @@ export const COMMANDS = {
   SETTINGS_GET_ADVANCED_SETTINGS_ENABLED: 'get_advanced_settings_enabled',
   SETTINGS_SET_ADVANCED_SETTINGS_ENABLED: 'set_advanced_settings_enabled',
   SETTINGS_TAKE_PENDING_SETTINGS_NAVIGATION: 'take_pending_settings_navigation',
+  SETTINGS_OPEN_JUNO_LINK: 'open_juno_link',
   SETTINGS_GET_CLI_PERSISTENT_SESSION_ENABLED: 'get_cli_persistent_session_enabled',
   SETTINGS_SET_CLI_PERSISTENT_SESSION_ENABLED: 'set_cli_persistent_session_enabled',
   SETTINGS_GET_CLI_ASK_BEFORE_SEND_ENABLED: 'get_cli_ask_before_send_enabled',
