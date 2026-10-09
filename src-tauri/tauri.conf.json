@@ -165,6 +165,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["juno"]
+      }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZEQjgyRUFDMEFBMTIxN0EKUldSNklhRUtyQzY0YllnSTg0QTAxL0UwbEd1bGZkWDhrNTE4QnVORVhtYm9RaWNWTmZhZzR0WlIK",
       "endpoints": [

@@ -454,6 +454,14 @@ pub async fn take_pending_settings_navigation(
     Ok(crate::agent::tools::settings_tool::take_pending_navigation())
 }
 
+/// Follow a `juno://` link the person clicked in a reply. The window hands over
+/// the href and Rust decides; a link that is not one Juno knows does nothing.
+#[command]
+pub async fn open_juno_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    crate::deep_link::handle_url(&app, &url, 0);
+    Ok(())
+}
+
 /// Reset all settings to defaults that work on this machine.
 ///
 /// The policy lives in [`crate::settings::reset`], which is also where the

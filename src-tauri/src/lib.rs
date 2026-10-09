@@ -36,6 +36,7 @@ pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
 pub mod cursor_overlay; // Juno's cursor on screen: glow behind the real one, or a ghost in the background
 pub mod cursor_scale_migration; // Undo a pointer an older build left enlarged
+pub mod deep_link; // juno:// links: navigation only, never a change
 pub mod demo; // Golden demo builds that carry their own Anthropic key
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
@@ -301,6 +302,7 @@ pub fn run() {
 
     // --- Tauri Application Builder ---
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
@@ -799,6 +801,7 @@ pub fn run() {
             commands::settings::get_advanced_settings_enabled,
             commands::settings::set_advanced_settings_enabled,
             commands::settings::take_pending_settings_navigation,
+            commands::settings::open_juno_link,
             // Experimental: one long-lived `claude` process per conversation.
             // Off by default — docs/plans/cli-persistent-session-spike.md
             agent::providers::claude_cli_session::get_cli_persistent_session_enabled,
@@ -927,6 +930,9 @@ pub fn run() {
             // What is still loading after the bar is up. Before the bar exists,
             // so its first read is already the truth.
             readiness::start(&app_handle);
+
+            // juno:// links: the one that launched the app, and later ones.
+            deep_link::register(&app_handle);
 
             // The bar first, alone: every other declared window waits until it
             // is on screen (`startup_windows`). Each window is named for a demo
