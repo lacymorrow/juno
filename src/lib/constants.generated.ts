@@ -735,6 +735,7 @@ export const COMMANDS = {
   BAR_SET_BAR_FRAME: 'set_bar_frame',
   BAR_SET_BAR_HIT_REGIONS: 'set_bar_hit_regions',
   BAR_POINTER_HELD: 'bar_pointer_held',
+  BAR_DRAG_RELEASED: 'bar_drag_released',
   BAR_ORDER_ABOVE_SNAP_WELLS: 'bar_order_above_snap_wells',
   BAR_ENSURE_SNAP_WELLS_OVERLAYS: 'ensure_snap_wells_overlays',
   BAR_SHOW_BAR_WHEN_READY: 'show_bar_when_ready',

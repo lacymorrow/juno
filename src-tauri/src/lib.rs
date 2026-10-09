@@ -811,6 +811,7 @@ pub fn run() {
             commands::bar_position::set_bar_frame,
             commands::bar_position::set_bar_hit_regions,
             commands::bar_position::bar_pointer_held,
+            commands::bar_position::bar_drag_released,
             commands::bar_position::bar_order_above_snap_wells,
             commands::bar_position::ensure_snap_wells_overlays,
             commands::bar_position::show_bar_when_ready,

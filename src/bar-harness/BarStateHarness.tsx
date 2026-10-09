@@ -160,7 +160,7 @@ function NumberField({
 /** The snapshots Rust's `connectivity` module emits, one per status. */
 const CONNECTIVITY = {
   connected: { status: "connected", label: "Connected to Claude", provider: "Claude" },
-  offline: { status: "offline", label: "No internet connection", provider: "Claude" },
+  offline: { status: "offline", label: "Network unavailable", provider: "Claude" },
   provider_unreachable: { status: "provider_unreachable", label: "Can't reach Claude", provider: "Claude" },
   signed_out: { status: "signed_out", label: "Not signed in to Claude", provider: "Claude" },
 } as const;

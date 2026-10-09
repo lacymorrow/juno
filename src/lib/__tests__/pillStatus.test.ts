@@ -5,7 +5,7 @@ import { DOT_COLORS, dotLabel, dotTone, type Connectivity } from "@/lib/pillStat
 import { hintDetail, statusDotColor } from "@/components/FloatingBar";
 
 const connected: Connectivity = { status: "connected", label: "Connected to Claude", provider: "Claude" };
-const offline: Connectivity = { status: "offline", label: "No internet connection", provider: "Claude" };
+const offline: Connectivity = { status: "offline", label: "Network unavailable", provider: "Claude" };
 const unreachable: Connectivity = {
   status: "provider_unreachable",
   label: "Can't reach Claude",
@@ -54,7 +54,7 @@ describe("dotTone while Juno is still loading at launch", () => {
 
   it("says so in the tooltip, only at rest", () => {
     expect(dotLabel(UI.BAR_STATES_DEFAULT, connected, { loading: true })).toBe("Getting ready");
-    expect(dotLabel(UI.BAR_STATES_DEFAULT, offline, { loading: true })).toBe("No internet connection");
+    expect(dotLabel(UI.BAR_STATES_DEFAULT, offline, { loading: true })).toBe("Network unavailable");
     expect(dotLabel(UI.BAR_STATES_LOADING, connected, { loading: true })).toBe("Working");
   });
 
@@ -83,7 +83,7 @@ describe("dotLabel", () => {
   it("says what the dot shows", () => {
     expect(dotLabel(UI.BAR_STATES_DEFAULT, connected)).toBe("Connected to Claude");
     expect(dotLabel(UI.BAR_STATES_DEFAULT, null)).toBe("Connected");
-    expect(dotLabel(UI.BAR_STATES_DEFAULT, offline)).toBe("No internet connection");
+    expect(dotLabel(UI.BAR_STATES_DEFAULT, offline)).toBe("Network unavailable");
     expect(dotLabel(UI.BAR_STATES_LOADING, unreachable)).toBe("Can't reach Claude");
     expect(dotLabel(UI.BAR_STATES_LISTENING, offline)).toBe("Listening");
     expect(dotLabel(UI.BAR_STATES_DICTATING, connected)).toBe("Dictating");

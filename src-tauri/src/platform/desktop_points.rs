@@ -92,6 +92,13 @@ pub fn origin_under_cursor(cursor: (f64, f64), grab: (f64, f64)) -> (f64, f64) {
     (cursor.0 - grab.0, cursor.1 - grab.1)
 }
 
+/// A Cocoa screen point (y up) in the coordinates of a window whose frame
+/// origin (its bottom-left, y up) is `frame_origin`: what an `NSEvent` made
+/// for that window takes as its `location`. Both in points.
+pub fn point_in_window(screen: (f64, f64), frame_origin: (f64, f64)) -> (f64, f64) {
+    (screen.0 - frame_origin.0, screen.1 - frame_origin.1)
+}
+
 /// Which display contains a point, if any.
 pub fn monitor_index_at(rects: &[PointRect], p: (f64, f64)) -> Option<usize> {
     rects.iter().position(|r| r.contains(p))
@@ -199,6 +206,23 @@ mod tests {
             assert_eq!((o.0 + grab.0, o.1 + grab.1), c);
         }
         assert_eq!(cocoa_point_to_points((10.0, 982.0), primary_h), (10.0, 0.0));
+    }
+
+    #[test]
+    fn the_drag_starts_on_the_spot_pressed() {
+        // The drag window is placed with the grab under the cursor, then the
+        // OS drag is started with a mouse-down at that same cursor. In the
+        // window's own (bottom-up) coordinates that mouse-down is the grab.
+        let primary_h = 982.0;
+        let (w, h) = (164.0, 76.0);
+        let grab = (44.0, 30.0);
+        for cocoa in [(700.0, 500.0), (2000.0, 900.0), (-1200.0, 1300.0)] {
+            let top_left = origin_under_cursor(cocoa_point_to_points(cocoa, primary_h), grab);
+            let frame_origin = (top_left.0, primary_h - top_left.1 - h);
+            let at = point_in_window(cocoa, frame_origin);
+            assert_eq!(at, (grab.0, h - grab.1));
+            assert!(at.0 >= 0.0 && at.0 <= w && at.1 >= 0.0 && at.1 <= h);
+        }
     }
 
     #[test]

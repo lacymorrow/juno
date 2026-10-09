@@ -782,7 +782,9 @@ describe("FloatingBar", () => {
     await submitUserMessage("Play my liked songs on Spotify");
 
     // The pane's code loads on first open (it is lazy, warmed after launch).
-    const pane = await screen.findByTestId("bar-chat-pane");
+    // The first import of it in the run can take over a second on a loaded
+    // runner, so this waits longer than findBy's default.
+    const pane = await screen.findByTestId("bar-chat-pane", {}, { timeout: 5000 });
     expect(pane).toBeInTheDocument();
     expect(pane).toHaveClass("dark");
     expect(screen.getByText("Play my liked songs on Spotify")).toBeInTheDocument();
@@ -1228,7 +1230,7 @@ describe("FloatingBar expand control", () => {
 
 describe("FloatingBar status dot", () => {
   const dot = () => screen.getByRole("img");
-  const offline = { status: "offline", label: "No internet connection", provider: "Claude" };
+  const offline = { status: "offline", label: "Network unavailable", provider: "Claude" };
   const connected = { status: "connected", label: "Connected to Claude", provider: "Claude" };
 
   it("is neutral and says it is connected while Juno can answer", async () => {
@@ -1248,7 +1250,7 @@ describe("FloatingBar status dot", () => {
     await fire("connectivity-changed", offline);
     expect(dot()).toHaveAttribute("data-tone", "down");
     expect(dot()).toHaveStyle({ backgroundColor: "#FF453A" });
-    expect(dot()).toHaveAccessibleName("No internet connection");
+    expect(dot()).toHaveAccessibleName("Network unavailable");
 
     await fire("connectivity-changed", connected);
     expect(dot()).toHaveAttribute("data-tone", "neutral");
@@ -1280,13 +1282,26 @@ describe("FloatingBar tooltips", () => {
       ? { left: 100, top: 20, right: 140, bottom: 48 }
       : label === "Type to Juno"
         ? { left: 150, top: 20, right: 190, bottom: 48 }
-        : { left: 0, top: 0, right: 0, bottom: 0 };
+        : label === "dot"
+          ? dotBox()
+          : { left: 0, top: 0, right: 0, bottom: 0 };
+  // The dot rides the pill's leading edge. On a right-docked bar the idle
+  // pill grows 76pt leftward on hover, carrying the dot with it and putting
+  // the mic where the dot was.
+  const dotBox = () =>
+    screen.queryByTestId("floating-bar")?.getAttribute("data-layout") === "compact"
+      ? { left: 100, top: 36, right: 115, bottom: 48 }
+      : { left: 34, top: 26, right: 49, bottom: 41 };
 
   beforeEach(() => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
       this: HTMLElement,
     ) {
-      const box = boxes(this.getAttribute?.("aria-label"));
+      const box = boxes(
+        this.getAttribute?.("data-testid") === "floating-bar-dot-target"
+          ? "dot"
+          : this.getAttribute?.("aria-label"),
+      );
       return { ...box, width: box.right - box.left, height: box.bottom - box.top, x: box.left, y: box.top, toJSON() {} } as DOMRect;
     });
   });
@@ -1325,6 +1340,40 @@ describe("FloatingBar tooltips", () => {
 
     await move(300, 300); // off every control
     await waitFor(() => expect(type).toHaveAttribute("title", "Type to Juno"));
+  });
+
+  const offline = { status: "offline", label: "Network unavailable", provider: "Claude" };
+
+  it("says the network is unavailable when the forwarded cursor rests on a red dot", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    await hover(true);
+    await move(40, 33); // over the dot in the grown pill, Juno inactive
+    await settle(500);
+    expect(await screen.findByTestId("pill-tooltip")).toHaveTextContent("Network unavailable");
+  });
+
+  it("keeps naming the dot when hovering grows the pill out from under the cursor", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+    // The cursor arrives on the idle pill's dot; the pill grows and the mic
+    // is now where the dot was.
+    await hover(true);
+    expect(bar()).toHaveAttribute("data-layout", "hover");
+    await move(107, 42);
+    await move(108, 43); // a resting hand still trembles
+    await settle(500);
+    const tip = await screen.findByTestId("pill-tooltip");
+    expect(tip).toHaveTextContent("Network unavailable");
+    expect(tip).not.toHaveTextContent("Talk to Juno");
+
+    // Off the spot the dot was: the control under the cursor counts again.
+    await move(130, 30);
+    await settle(500);
+    await waitFor(() =>
+      expect(screen.getByTestId("pill-tooltip")).toHaveTextContent("Talk to Juno"),
+    );
   });
 
   it("says what the expand control does", async () => {
