@@ -35,7 +35,9 @@ const voiceMounts = vi.fn();
 
 vi.mock("../index", async () => {
   const { useEffect } = await import("react");
-  const stub = (id: string) => () => <div data-testid={`section-${id}`}>{id}</div>;
+  const stub = (id: string) => () => (
+    <div data-testid={`section-${id}`}>{id}</div>
+  );
   function VoiceStub() {
     useEffect(() => {
       voiceMounts();
@@ -69,7 +71,7 @@ vi.mock("../index", async () => {
 });
 
 import ModularSettingsWindow from "../ModularSettingsWindow";
-import { ROW_FLASH_CLASSES, ROW_FLASH_MS, flashRow, revealRow } from "../revealRow";
+import { ROW_FLASH_MS, flashRow, revealRow } from "../revealRow";
 import { COMMANDS, SETTINGS } from "@/lib/constants.generated";
 
 const invokeMock = vi.mocked(invoke);
@@ -86,8 +88,10 @@ function handlers() {
 
 function backend(pending: unknown, advanced = false) {
   invokeMock.mockImplementation(async (cmd: string) => {
-    if (cmd === COMMANDS.SETTINGS_TAKE_PENDING_SETTINGS_NAVIGATION) return pending;
-    if (cmd === COMMANDS.SETTINGS_GET_ADVANCED_SETTINGS_ENABLED) return advanced;
+    if (cmd === COMMANDS.SETTINGS_TAKE_PENDING_SETTINGS_NAVIGATION)
+      return pending;
+    if (cmd === COMMANDS.SETTINGS_GET_ADVANCED_SETTINGS_ENABLED)
+      return advanced;
     return undefined;
   });
 }
@@ -98,8 +102,10 @@ beforeEach(() => {
   loadAllSettings.mockClear();
   voiceMounts.mockClear();
   Element.prototype.scrollIntoView = vi.fn();
-  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) =>
-    setTimeout(() => cb(0), 0) as unknown as number,
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    (cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 0) as unknown as number,
   );
   vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
 });
@@ -121,10 +127,12 @@ describe("revealRow", () => {
     expect(row.scrollIntoView).toHaveBeenCalledWith(
       expect.objectContaining({ block: "center" }),
     );
-    for (const c of ROW_FLASH_CLASSES) expect(row.classList.contains(c)).toBe(true);
+    expect(row.style.outline).toContain("2px solid");
+    expect(row.style.backgroundColor).not.toBe("");
 
     vi.advanceTimersByTime(ROW_FLASH_MS);
-    for (const c of ROW_FLASH_CLASSES) expect(row.classList.contains(c)).toBe(false);
+    expect(row.style.outline).toBe("");
+    expect(row.style.backgroundColor).toBe("");
     row.remove();
   });
 
@@ -136,7 +144,7 @@ describe("revealRow", () => {
     vi.advanceTimersByTime(50);
     document.body.appendChild(row);
     vi.advanceTimersByTime(50);
-    expect(row.classList.contains(ROW_FLASH_CLASSES[0])).toBe(true);
+    expect(row.style.outline).toContain("2px solid");
     row.remove();
 
     // Never appears: no throw, nothing left running past the wait.
@@ -144,12 +152,29 @@ describe("revealRow", () => {
     vi.advanceTimersByTime(500);
   });
 
-  it("is flat: a system blue outline and a tint, never a glow or a spring", () => {
+  it("is flat: an inline system blue outline and a tint, never a glow or a spring", () => {
     const el = document.createElement("div");
     flashRow(el, 10);
-    expect(el.className).toMatch(/outline-\[#007AFF\]/);
-    expect(el.className).toMatch(/bg-\[#007AFF\]\/20/);
+    expect(el.style.outline).toBe("2px solid #007AFF");
+    expect(el.style.outlineOffset).toBe("-2px");
+    expect(el.style.backgroundColor).toBe("rgba(0, 122, 255, 0.2)");
+    expect(el.style.boxShadow).toBe("");
     expect(el.className).not.toMatch(/ring|shadow|glow|animate|spring/);
+  });
+
+  it("uses the dark blue and a stronger tint in a dark window", () => {
+    const scope = document.createElement("div");
+    scope.className = "dark";
+    const el = document.createElement("div");
+    scope.appendChild(el);
+    document.body.appendChild(scope);
+    try {
+      flashRow(el, 10);
+      expect(el.style.outline).toBe("2px solid #0A84FF");
+      expect(el.style.backgroundColor).toBe("rgba(10, 132, 255, 0.3)");
+    } finally {
+      scope.remove();
+    }
   });
 
   it("holds the mark about two and a half seconds", () => {
@@ -160,6 +185,7 @@ describe("revealRow", () => {
     const source = readFileSync(resolve(__dirname, "../ui.tsx"), "utf8");
     expect(source).toContain("outline-2");
     expect(source).toContain("outline-transparent");
+    expect(source).toContain("outline-color");
     expect(source).toContain("motion-reduce:transition-none");
   });
 });
@@ -172,9 +198,7 @@ describe("the agent points the Settings window", () => {
     expect(await screen.findByTestId("section-voice")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Audio" })).toBeTruthy();
     const row = document.getElementById("settings-row-juno-voice");
-    await waitFor(() =>
-      expect(row?.classList.contains(ROW_FLASH_CLASSES[0])).toBe(true),
-    );
+    await waitFor(() => expect(row?.style.outline).toContain("2px solid"));
     expect(row?.scrollIntoView).toHaveBeenCalled();
   });
 
@@ -182,7 +206,9 @@ describe("the agent points the Settings window", () => {
     backend(null);
     render(<ModularSettingsWindow />);
     expect(await screen.findByTestId("section-general")).toBeTruthy();
-    await waitFor(() => expect(handlers().has(SETTINGS.EVENTS_SETTINGS_NAVIGATE)).toBe(true));
+    await waitFor(() =>
+      expect(handlers().has(SETTINGS.EVENTS_SETTINGS_NAVIGATE)).toBe(true),
+    );
 
     act(() => {
       handlers().get(SETTINGS.EVENTS_SETTINGS_NAVIGATE)?.({
@@ -192,10 +218,8 @@ describe("the agent points the Settings window", () => {
     expect(await screen.findByTestId("section-security")).toBeTruthy();
     await waitFor(() =>
       expect(
-        document
-          .getElementById("settings-row-permission-mode")
-          ?.classList.contains(ROW_FLASH_CLASSES[0]),
-      ).toBe(true),
+        document.getElementById("settings-row-permission-mode")?.style.outline,
+      ).toContain("2px solid"),
     );
   });
 
@@ -222,10 +246,14 @@ describe("the agent points the Settings window", () => {
 
     // Rust turns advanced settings on and says so.
     await waitFor(() =>
-      expect(handlers().has(SETTINGS.EVENTS_ADVANCED_SETTINGS_CHANGED)).toBe(true),
+      expect(handlers().has(SETTINGS.EVENTS_ADVANCED_SETTINGS_CHANGED)).toBe(
+        true,
+      ),
     );
     act(() => {
-      handlers().get(SETTINGS.EVENTS_ADVANCED_SETTINGS_CHANGED)?.({ payload: true });
+      handlers().get(SETTINGS.EVENTS_ADVANCED_SETTINGS_CHANGED)?.({
+        payload: true,
+      });
     });
     expect(await screen.findByTestId("section-advanced")).toBeTruthy();
   });

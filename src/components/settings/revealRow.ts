@@ -11,18 +11,33 @@ import { SETTINGS_ROW_ID_PREFIX } from "./ui";
  */
 
 /**
- * The mark: a 2px system blue outline drawn inside the row (the row's base
- * classes reserve it transparent) over a stronger tint. Plain class strings
- * so Tailwind generates them. Only colour changes, so the row's own
- * `transition-colors` is the fade; reduced motion removes it and the mark
+ * The mark: a 2px system blue outline drawn inside the row over a stronger
+ * tint, set as inline styles. Classes lost this: the row reserves a
+ * transparent outline with a class of its own, same specificity, so the
+ * stylesheet order decided and transparent won. Inline always wins. Clearing
+ * the styles hands the row back to its transparent outline, and the row's own
+ * colour transition is the fade; reduced motion removes it and the mark
  * simply disappears at the end.
  */
-export const ROW_FLASH_CLASSES = [
-  "bg-[#007AFF]/20",
-  "dark:bg-[#0A84FF]/30",
-  "outline-[#007AFF]",
-  "dark:outline-[#0A84FF]",
-];
+export const ROW_FLASH_STYLE = {
+  light: { color: "#007AFF", tint: "rgba(0, 122, 255, 0.2)" },
+  dark: { color: "#0A84FF", tint: "rgba(10, 132, 255, 0.3)" },
+} as const;
+
+/**
+ * The window's actual theme. The settings window scopes a `.dark` class on
+ * its own root (`useSystemTheme`), so look up from the row; a `.light` scope
+ * wins over the OS; with neither, the OS setting.
+ */
+function isDark(el: HTMLElement): boolean {
+  const scope = el.closest(".dark, .light");
+  if (scope) return scope.classList.contains("dark");
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+}
 
 /** How long the mark is held before it eases out. */
 export const ROW_FLASH_MS = 2500;
@@ -38,10 +53,17 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-/** Tint a row, then take the tint away. */
+/** Mark a row, then take the mark away. */
 export function flashRow(el: HTMLElement, ms = ROW_FLASH_MS): void {
-  el.classList.add(...ROW_FLASH_CLASSES);
-  setTimeout(() => el.classList.remove(...ROW_FLASH_CLASSES), ms);
+  const look = isDark(el) ? ROW_FLASH_STYLE.dark : ROW_FLASH_STYLE.light;
+  el.style.outline = `2px solid ${look.color}`;
+  el.style.outlineOffset = "-2px";
+  el.style.backgroundColor = look.tint;
+  setTimeout(() => {
+    el.style.outline = "";
+    el.style.outlineOffset = "";
+    el.style.backgroundColor = "";
+  }, ms);
 }
 
 /**
