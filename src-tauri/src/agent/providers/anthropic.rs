@@ -2624,18 +2624,20 @@ mod computer_toolset_request_tests {
 
     #[test]
     fn toolset_only_models_select_the_toolset_path() {
-        // Opus 5.5 accepts no earlier tool type, so it is the one model worth
-        // the toolset's ~2x input-token overhead. Every other toolset-GA model
-        // stays on `computer_20251124` and is covered by the test below.
-        let model = model_ids::CLAUDE_OPUS_5_5;
-        let b = brain(model);
-        assert!(b.uses_computer_toolset(), "{model} should use the toolset");
-        assert_eq!(b.computer_toolset_name(), Some("computer"));
-        assert_eq!(
-            b.resolve_tool_api_type("computer", "computer_20251124"),
-            "computer_toolset_20260801",
-            "{model} should resolve the computer tool to the toolset type"
-        );
+        // Claude 5.5 and later accept no earlier tool type, so they are the
+        // models worth the toolset's ~2x input-token overhead. Every other
+        // toolset-GA model stays on `computer_20251124` and is covered by the
+        // test below.
+        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+            let b = brain(model);
+            assert!(b.uses_computer_toolset(), "{model} should use the toolset");
+            assert_eq!(b.computer_toolset_name(), Some("computer"));
+            assert_eq!(
+                b.resolve_tool_api_type("computer", "computer_20251124"),
+                "computer_toolset_20260801",
+                "{model} should resolve the computer tool to the toolset type"
+            );
+        }
     }
 
     #[test]
@@ -2673,18 +2675,19 @@ mod computer_toolset_request_tests {
     /// rather than an exact string.
     #[test]
     fn toolset_models_send_no_computer_use_beta_flag() {
-        let model = model_ids::CLAUDE_OPUS_5_5;
-        let b = brain(model);
-        assert_eq!(b.resolve_computer_use_beta_header(), None, "{model}");
-        let header = b.beta_header_value();
-        assert!(
-            !header.contains("computer-use"),
-            "{model} sent a computer-use beta flag in {header:?}"
-        );
-        assert!(
-            header.contains(crate::constants::api::beta_flags::PROMPT_CACHING),
-            "{model} lost prompt caching"
-        );
+        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+            let b = brain(model);
+            assert_eq!(b.resolve_computer_use_beta_header(), None, "{model}");
+            let header = b.beta_header_value();
+            assert!(
+                !header.contains("computer-use"),
+                "{model} sent a computer-use beta flag in {header:?}"
+            );
+            assert!(
+                header.contains(crate::constants::api::beta_flags::PROMPT_CACHING),
+                "{model} lost prompt caching"
+            );
+        }
     }
 
     /// The legacy regression guard for headers: each older model still sends
