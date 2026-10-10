@@ -853,7 +853,9 @@ pub fn provider_voices(engine: &str, inventory: &VoiceInventory) -> ProviderVoic
 pub fn default_voice(engine: &str, inventory: &VoiceInventory) -> Option<String> {
     match engine.to_ascii_lowercase().as_str() {
         "system" if prefers_system_voice(inventory) => Some(SYSTEM_DEFAULT_ID.to_string()),
-        "system" => followed_system_voice(inventory).or_else(|| best_macos_voice(&inventory.macos)),
+        "system" => followed_system_voice(inventory)
+            .or_else(|| best_macos_voice(&inventory.macos))
+            .or_else(|| Some(SYSTEM_DEFAULT_ID.to_string())),
         "kokoro" => {
             let rows = kokoro_voices(&inventory.kokoro);
             rows.iter()
@@ -1065,8 +1067,13 @@ pub fn voice_list(
             for row in rows {
                 options.push(JunoVoiceOption {
                     selected: !silent && resolution.voice.as_deref() == Some(row.id.as_str()),
+                    kind: if row.id == SYSTEM_DEFAULT_ID {
+                        "system"
+                    } else {
+                        "voice"
+                    }
+                    .to_string(),
                     id: row.id,
-                    kind: "voice".to_string(),
                     name: row.name,
                     descriptor: row.descriptor,
                     speaks: true,
