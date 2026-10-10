@@ -33,6 +33,8 @@
 //!   time, date
 //! - [`timer`]: start, check, cancel countdown timers (backend-owned)
 //! - [`apps`]: open or quit an installed app, open a website
+//! - [`agenda`]: "what's on my calendar today", "read my reminders", "what's
+//!   my next meeting", "turn on do not disturb" (only once already allowed)
 //! - [`settings_follow`]: "open settings" opens the settings of the app you
 //!   were in, and a short window to correct it
 //! - [`quit`]: "quit", "quit Juno": close Juno itself
@@ -41,6 +43,7 @@
 //! [`try_handle_local_intent`] is the single entry point `submit_query` calls.
 //! See `docs/plans/local-intents.md` for what was considered and cut.
 
+pub mod agenda;
 pub mod apps;
 pub mod media;
 pub mod quit;
@@ -124,6 +127,7 @@ pub enum LocalIntent {
     Timer(timer::TimerIntent),
     App(apps::AppIntent),
     Settings(settings_follow::SettingsIntent),
+    Agenda(agenda::AgendaIntent),
 }
 
 /// Parse everything but media, in precedence order. Apps come last because
@@ -139,6 +143,9 @@ fn parse_non_media(query: &str) -> Option<LocalIntent> {
     // Before apps: "open Music settings" would otherwise be an app name.
     if let Some(i) = settings_follow::parse(&utterance) {
         return Some(LocalIntent::Settings(i));
+    }
+    if let Some(i) = agenda::parse(&utterance) {
+        return Some(LocalIntent::Agenda(i));
     }
     apps::parse(&utterance).map(LocalIntent::App)
 }
@@ -270,6 +277,7 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
         LocalIntent::Timer(i) => timer::handle(app_handle, i),
         LocalIntent::App(i) => apps::handle(app_handle, i).await,
         LocalIntent::Settings(i) => settings_follow::handle(app_handle, i).await,
+        LocalIntent::Agenda(i) => agenda::handle(app_handle, i).await,
         LocalIntent::Media(_) => None,
     };
     let Some(reply) = reply else {

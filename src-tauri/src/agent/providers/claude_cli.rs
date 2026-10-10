@@ -514,7 +514,9 @@ something done. For Juno's own settings (its voice, shortcuts, devices, or where
 use the `settings` tool from the same server, never the desktop: it changes them live and \
 points the Settings window at them. \
 For Reminders, Calendar and Contacts use the juno server's reminders_, calendar_ and contacts_ \
-tools, never AppleScript, osascript or other shell commands.";
+tools, never AppleScript, osascript or other shell commands. \
+For music, directions, the person's own shortcuts and Do Not Disturb use music_play, \
+maps_directions, shortcuts_run and focus_set from the same server.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.
