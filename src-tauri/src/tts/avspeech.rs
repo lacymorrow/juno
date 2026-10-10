@@ -248,13 +248,19 @@ pub fn plan_voice(
         spoken.voice_name.as_deref(),
     ) {
         crate::tts::voices::SystemVoice::Unset => VoicePlan::LanguageDefault,
-        // A voice AVFoundation can build is spoken as chosen. A Siri voice, or
-        // one that is not installed, is not buildable here: the best installed
-        // voice for the language speaks instead.
-        _ => by_id().unwrap_or_else(|| match best_voice(voices, spoken.language.as_deref()) {
-            Some(voice) => VoicePlan::Identifier(voice.identifier.clone()),
-            None => VoicePlan::LanguageDefault,
-        }),
+        // AVFoundation never hands Siri voices to apps, so this path can only
+        // fake one with another voice (it used to pick Samantha or Ava). `say`
+        // with no `-v` speaks the System Voice itself, Siri included.
+        crate::tts::voices::SystemVoice::Siri => VoicePlan::UseSay,
+        // A voice AVFoundation can build is spoken as chosen. One that is not
+        // installed is not buildable here: the best installed voice for the
+        // language speaks instead.
+        crate::tts::voices::SystemVoice::Other => {
+            by_id().unwrap_or_else(|| match best_voice(voices, spoken.language.as_deref()) {
+                Some(voice) => VoicePlan::Identifier(voice.identifier.clone()),
+                None => VoicePlan::LanguageDefault,
+            })
+        }
     }
 }
 
@@ -1543,11 +1549,8 @@ mod tests {
             voice_name: None,
             language: Some("en".into()),
         };
-        // Not buildable here: the best installed voice (Ava Premium) speaks.
-        assert_eq!(
-            plan_voice(None, Some(&siri), &voices),
-            VoicePlan::Identifier("com.apple.voice.premium.en-US.Ava".to_string())
-        );
+        // Not buildable here: `say` speaks it.
+        assert_eq!(plan_voice(None, Some(&siri), &voices), VoicePlan::UseSay);
         // The person picks another voice: the same call now follows it.
         let named = voices.first().expect("a voice").clone();
         let chosen = SpokenContent {
@@ -1648,16 +1651,16 @@ mod tests {
     }
 
     #[test]
-    fn a_siri_system_voice_speaks_with_the_best_installed_voice() {
+    fn a_siri_system_voice_is_spoken_by_say() {
         let spoken = SpokenContent {
             voice_id: Some("com.apple.siri.natural.Simone".to_string()),
             voice_name: None,
             language: Some("en".to_string()),
         };
-        // `installed()` has Ava Premium: it outranks the compact voices.
+        // Even with Ava Premium installed: the person chose Siri, not Ava.
         assert_eq!(
             plan_voice(None, Some(&spoken), &installed()),
-            VoicePlan::Identifier("com.apple.voice.premium.en-US.Ava".to_string())
+            VoicePlan::UseSay
         );
     }
 
@@ -1721,15 +1724,12 @@ mod tests {
     }
 
     #[test]
-    fn a_siri_system_voice_with_no_voices_is_the_language_default() {
+    fn a_siri_system_voice_with_no_voices_is_spoken_by_say() {
         let spoken = SpokenContent {
             voice_id: Some("com.apple.siri.natural.Simone".to_string()),
             ..SpokenContent::default()
         };
-        assert_eq!(
-            plan_voice(None, Some(&spoken), &[]),
-            VoicePlan::LanguageDefault
-        );
+        assert_eq!(plan_voice(None, Some(&spoken), &[]), VoicePlan::UseSay);
     }
 
     #[test]
