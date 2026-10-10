@@ -53,6 +53,14 @@ export type ChatMessage = {
   target_app?: string;
   approval_timeout_seconds?: number;
   /**
+   * A request needed an app that is not connected (LAC-4210). The row renders
+   * as a card with one button, "Connect {app_name}"; the button runs the
+   * app's own consent flow in the browser and then retries `retry_query`.
+   */
+  connect_app?: { toolkit_slug: string; app_name: string };
+  /** The spoken/typed request to retry once the app connects. */
+  retry_query?: string;
+  /**
    * What a "Don't ask again" on this prompt would cover, in words a person can
    * read ("terminal commands", "the browser"), written by Rust.
    *

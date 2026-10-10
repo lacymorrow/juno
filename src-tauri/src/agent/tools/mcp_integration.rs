@@ -15,6 +15,89 @@ use uuid::Uuid;
 use crate::agent::core::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::constants::agent;
 
+/// The protocol revision offered to streamable HTTP servers. This is the
+/// revision that defines the transport itself (sessions, SSE responses, the
+/// version header), so an HTTP server necessarily speaks it or negotiates
+/// down in its initialize response.
+const HTTP_PROTOCOL_VERSION: &str = "2025-06-18";
+/// Header carrying the negotiated protocol version on every request.
+const HTTP_PROTOCOL_VERSION_HEADER: &str = "MCP-Protocol-Version";
+/// Header the server uses to assign, and the client to echo, the session.
+const HTTP_SESSION_ID_HEADER: &str = "Mcp-Session-Id";
+
+/// Why one HTTP exchange failed, kept apart so the OAuth retry can act on a
+/// 401 without string-matching an error message.
+enum HttpRequestFailure {
+    /// The server refused the credential. The one case worth a token refresh.
+    Unauthorized(String),
+    Other(String),
+}
+
+impl HttpRequestFailure {
+    fn into_message(self, server_name: &str) -> String {
+        match self {
+            Self::Unauthorized(detail) => format!(
+                "MCP server '{server_name}' rejected authentication ({detail}). \
+                 Reconnect it in Settings."
+            ),
+            Self::Other(message) => message,
+        }
+    }
+}
+
+/// Parse a `text/event-stream` body into the JSON-RPC response it carries.
+///
+/// Streamable HTTP lets a server answer a POST with an SSE stream instead of
+/// one JSON body. Each event's `data:` lines are accumulated (multi-line data
+/// joins with newlines, per the SSE spec), each complete event is parsed as
+/// JSON, and the response whose `id` matches the request wins; when no id
+/// matches, the last parsable JSON-RPC message is returned, which covers
+/// servers that interleave notifications before the response.
+fn parse_sse_response(body: &str, request_id: Option<u64>) -> Result<Value, String> {
+    let mut events: Vec<String> = Vec::new();
+    let mut current = String::new();
+
+    for line in body.lines() {
+        if let Some(data) = line.strip_prefix("data:") {
+            if !current.is_empty() {
+                current.push('\n');
+            }
+            current.push_str(data.strip_prefix(' ').unwrap_or(data));
+        } else if line.trim().is_empty() && !current.is_empty() {
+            events.push(std::mem::take(&mut current));
+        }
+        // Comment lines (`:`) and other fields (`event:`, `id:`, `retry:`)
+        // carry nothing this client needs.
+    }
+    if !current.is_empty() {
+        events.push(current);
+    }
+
+    let mut last_message: Option<Value> = None;
+    for event in &events {
+        let Ok(parsed) = serde_json::from_str::<Value>(event) else {
+            continue;
+        };
+        if let Some(expected) = request_id {
+            if parsed.get("id").and_then(Value::as_u64) == Some(expected) {
+                return Ok(parsed);
+            }
+        }
+        if parsed.get("result").is_some() || parsed.get("error").is_some() {
+            last_message = Some(parsed);
+        } else if last_message.is_none() {
+            last_message = Some(parsed);
+        }
+    }
+
+    last_message.ok_or_else(|| {
+        format!(
+            "SSE response carried no parsable JSON-RPC message ({} events)",
+            events.len()
+        )
+    })
+}
+
 /// Configuration for an external MCP server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MCPServerConfig {
@@ -35,6 +118,26 @@ pub struct MCPServerConfig {
     /// Defaults to false, including for configs saved before this field existed.
     #[serde(default)]
     pub approved: bool,
+    /// Extra HTTP headers sent on every request to an HTTP transport (for
+    /// example `x-consumer-api-key`). A value of the form
+    /// `keychain:{account}` is resolved at request time from the macOS
+    /// Keychain (service [`crate::secrets::MCP_HEADER_SERVICE`]), so a secret
+    /// never sits in the settings JSON on disk.
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    /// This server authenticates with MCP OAuth (RFC 9728 discovery, dynamic
+    /// client registration, PKCE). Tokens live in the Keychain under the
+    /// server id; `send_http_request` injects the bearer and refreshes once
+    /// on a 401 before giving up.
+    #[serde(default)]
+    pub oauth: bool,
+    /// Tool names (as the server names them, before prefixing) this config
+    /// refuses to register even when the server offers them. Composio's
+    /// remote workbench and remote bash land here: Juno already has a local
+    /// shell, and a second shell in someone else's cloud is a seam and a
+    /// billing line (LAC-4210).
+    #[serde(default)]
+    pub blocked_tools: Vec<String>,
 }
 
 impl MCPServerConfig {
@@ -52,6 +155,9 @@ impl MCPServerConfig {
             timeout_seconds: 30,
             max_retries: 3,
             approved: false,
+            headers: HashMap::new(),
+            oauth: false,
+            blocked_tools: Vec::new(),
         }
     }
 
@@ -103,6 +209,12 @@ pub struct MCPServerConnection {
     // HTTP transport (for servers exposed via HTTP JSON-RPC)
     http_client: Option<reqwest::Client>,
     http_url: Option<String>,
+    // Streamable HTTP session state: the server assigns a session on
+    // initialize via the `Mcp-Session-Id` response header and expects it
+    // echoed on every request after; the negotiated protocol version goes out
+    // as `MCP-Protocol-Version` the same way.
+    http_session_id: Option<String>,
+    http_protocol_version: Option<String>,
     // Error recovery tracking
     connection_attempts: u32,
     last_failure_time: Option<std::time::Instant>,
@@ -123,6 +235,8 @@ impl MCPServerConnection {
             stderr_reader: None,
             http_client: None,
             http_url: None,
+            http_session_id: None,
+            http_protocol_version: None,
             // Initialize error recovery fields
             connection_attempts: 0,
             last_failure_time: None,
@@ -424,12 +538,21 @@ impl MCPServerConnection {
 
     /// Send the MCP initialize request
     async fn initialize(&mut self) -> Result<(), String> {
+        // Streamable HTTP is a 2025 transport, so HTTP servers get the spec
+        // revision that defines it (sessions, SSE responses, the
+        // MCP-Protocol-Version header). Stdio servers keep the version this
+        // client has always sent them.
+        let offered_version = if self.is_http_transport() {
+            HTTP_PROTOCOL_VERSION
+        } else {
+            "2024-11-05"
+        };
         let request = json!({
             "jsonrpc": "2.0",
             "id": self.next_request_id(),
             "method": "initialize",
             "params": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": offered_version,
                 "capabilities": {
                     "tools": {
                         "execution": true
@@ -450,6 +573,16 @@ impl MCPServerConnection {
 
         if response.get("error").is_some() {
             return Err(format!("MCP server initialization failed: {}", response));
+        }
+
+        // Echo whatever version the server answered with on every later
+        // request; it may be older than the one offered.
+        if let Some(negotiated) = response
+            .get("result")
+            .and_then(|r| r.get("protocolVersion"))
+            .and_then(|v| v.as_str())
+        {
+            self.http_protocol_version = Some(negotiated.to_string());
         }
 
         debug!("MCP server '{}' initialized successfully", self.config.name);
@@ -524,6 +657,17 @@ impl MCPServerConnection {
 
         self.tools.clear();
         for tool_json in tools_array {
+            // A blocked tool never enters the catalog, so nothing downstream
+            // (model, UI, approval gate) has to know it exists.
+            if let Some(raw_name) = tool_json.get("name").and_then(|n| n.as_str()) {
+                if self.config.blocked_tools.iter().any(|b| b == raw_name) {
+                    info!(
+                        "Skipping blocked tool '{}' from MCP server '{}'",
+                        raw_name, self.config.name
+                    );
+                    continue;
+                }
+            }
             match self.parse_tool_definition(tool_json) {
                 Ok(tool_def) => {
                     debug!(
@@ -802,32 +946,139 @@ impl MCPServerConnection {
         })?
     }
 
-    /// Send a JSON-RPC request over HTTP to the configured endpoint
+    /// Send a JSON-RPC request over streamable HTTP to the configured
+    /// endpoint.
+    ///
+    /// Spec-complete where the old version was not (LAC-4210): configured
+    /// headers go out (secrets resolved from the Keychain, never read off
+    /// disk), the session id a server assigns on initialize is echoed back,
+    /// the negotiated protocol version rides the `MCP-Protocol-Version`
+    /// header, `text/event-stream` responses are parsed instead of failing
+    /// in `serde_json`, and a 401 on an OAuth server refreshes the token and
+    /// retries exactly once.
     async fn send_http_request(&mut self, request: Value) -> Result<Value, String> {
-        let client = self.get_http_client()?;
-        let url = self.ensure_http_url()?;
+        match self.send_http_once(&request).await {
+            Err(HttpRequestFailure::Unauthorized(detail)) if self.config.oauth => {
+                info!(
+                    "MCP server '{}' returned 401; refreshing OAuth token and retrying once",
+                    self.config.name
+                );
+                crate::agent::tools::mcp_oauth::refresh_tokens(&self.config.id)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "MCP server '{}' rejected its token ({}) and the refresh failed: {}. \
+                             Reconnect it in Settings.",
+                            self.config.name, detail, e
+                        )
+                    })?;
+                self.send_http_once(&request)
+                    .await
+                    .map_err(|e| e.into_message(&self.config.name))
+            }
+            other => other.map_err(|e| e.into_message(&self.config.name)),
+        }
+    }
+
+    /// One HTTP exchange, no retry policy.
+    async fn send_http_once(&mut self, request: &Value) -> Result<Value, HttpRequestFailure> {
+        let client = self.get_http_client().map_err(HttpRequestFailure::Other)?;
+        let url = self.ensure_http_url().map_err(HttpRequestFailure::Other)?;
         let req_timeout = Duration::from_secs(self.config.timeout_seconds);
-        let resp = client
+
+        let mut builder = client
             .post(url.clone())
             .header(
                 reqwest::header::ACCEPT,
                 "application/json, text/event-stream",
             )
-            .json(&request)
-            .timeout(req_timeout)
+            .header(
+                HTTP_PROTOCOL_VERSION_HEADER,
+                self.http_protocol_version
+                    .as_deref()
+                    .unwrap_or(HTTP_PROTOCOL_VERSION),
+            )
+            .json(request)
+            .timeout(req_timeout);
+
+        if let Some(session_id) = &self.http_session_id {
+            builder = builder.header(HTTP_SESSION_ID_HEADER, session_id);
+        }
+
+        for (name, value) in &self.config.headers {
+            let resolved = crate::secrets::resolve_header_value(value)
+                .await
+                .map_err(HttpRequestFailure::Other)?;
+            builder = builder.header(name, resolved);
+        }
+
+        if self.config.oauth {
+            if let Some(token) = crate::agent::tools::mcp_oauth::access_token(&self.config.id).await
+            {
+                builder = builder.header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"));
+            }
+        }
+
+        let resp = builder
             .send()
             .await
-            .map_err(|e| format!("HTTP request failed to {}: {}", url, e))?;
+            .map_err(|e| HttpRequestFailure::Other(format!("HTTP request failed to {url}: {e}")))?;
+
+        // The session id can arrive on any response; the initialize response
+        // is where Composio sends it.
+        if let Some(session_id) = resp
+            .headers()
+            .get(HTTP_SESSION_ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+        {
+            if self.http_session_id.as_deref() != Some(session_id) {
+                debug!(
+                    "MCP server '{}' assigned session id {}",
+                    self.config.name, session_id
+                );
+                self.http_session_id = Some(session_id.to_string());
+            }
+        }
+
         let status = resp.status();
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         let text = resp
             .text()
             .await
-            .map_err(|e| format!("Failed reading HTTP response: {}", e))?;
-        if !status.is_success() {
-            return Err(format!("HTTP MCP server returned {}: {}", status, text));
+            .map_err(|e| HttpRequestFailure::Other(format!("Failed reading HTTP response: {e}")))?;
+
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(HttpRequestFailure::Unauthorized(format!(
+                "401: {}",
+                text.chars().take(200).collect::<String>()
+            )));
         }
-        serde_json::from_str::<Value>(&text)
-            .map_err(|e| format!("Failed to parse HTTP JSON-RPC response: {} - {}", e, text))
+        if !status.is_success() {
+            return Err(HttpRequestFailure::Other(format!(
+                "HTTP MCP server returned {status}: {text}"
+            )));
+        }
+
+        // A notification is answered with 202 Accepted and no body.
+        if text.trim().is_empty() {
+            return Ok(json!({}));
+        }
+
+        if content_type.contains("text/event-stream") {
+            return parse_sse_response(&text, request.get("id").and_then(Value::as_u64))
+                .map_err(HttpRequestFailure::Other);
+        }
+
+        serde_json::from_str::<Value>(&text).map_err(|e| {
+            HttpRequestFailure::Other(format!(
+                "Failed to parse HTTP JSON-RPC response: {e} - {text}"
+            ))
+        })
     }
 
     /// Disconnect from the MCP server
@@ -1614,5 +1865,104 @@ impl MCPServerConnection {
                     timeout_duration.as_secs()
                 )
             })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn http_config() -> MCPServerConfig {
+        MCPServerConfig::new(
+            "composio".to_string(),
+            "https".to_string(),
+            vec!["https://connect.composio.dev/mcp".to_string()],
+        )
+    }
+
+    /// The registered name is the server prefix plus the server's own name,
+    /// and execution strips exactly that prefix on the way back out, so the
+    /// name Composio sees is the name it published.
+    #[test]
+    fn tool_names_round_trip_through_the_registration_prefix() {
+        let connection = MCPServerConnection::new(http_config());
+        let tool_def = connection
+            .parse_tool_definition(&json!({
+                "name": "COMPOSIO_MULTI_EXECUTE_TOOL",
+                "description": "Execute tools",
+                "inputSchema": {"type": "object"}
+            }))
+            .expect("tool definition parses");
+
+        assert_eq!(tool_def.name, "composio_COMPOSIO_MULTI_EXECUTE_TOOL");
+        assert_eq!(
+            tool_def.name.strip_prefix("composio_"),
+            Some("COMPOSIO_MULTI_EXECUTE_TOOL")
+        );
+    }
+
+    /// Streamable HTTP answers a POST as an SSE stream. The frames the spec
+    /// allows — comments, event names, multi-line data, notifications before
+    /// the response — must all resolve to the one JSON-RPC response.
+    #[test]
+    fn sse_responses_parse_down_to_the_matching_json_rpc_message() {
+        // The plain case: one event, one response.
+        let body =
+            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"ok\":true}}\n\n";
+        let parsed = parse_sse_response(body, Some(3)).expect("parses");
+        assert_eq!(parsed["result"]["ok"], json!(true));
+
+        // A notification interleaved before the response: the id match wins.
+        let body = concat!(
+            ": keepalive\n",
+            "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n",
+            "\n",
+            "data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"tools\":[]}}\n",
+            "\n"
+        );
+        let parsed = parse_sse_response(body, Some(7)).expect("parses");
+        assert_eq!(parsed["id"], json!(7));
+
+        // Multi-line data joins with newlines per the SSE spec.
+        let body = "data: {\"jsonrpc\":\"2.0\",\ndata: \"id\":1,\"result\":{}}\n\n";
+        let parsed = parse_sse_response(body, Some(1)).expect("parses");
+        assert_eq!(parsed["id"], json!(1));
+
+        // No id match: the last response-shaped message is returned rather
+        // than nothing.
+        let body = "data: {\"jsonrpc\":\"2.0\",\"id\":99,\"error\":{\"code\":-32600}}\n\n";
+        let parsed = parse_sse_response(body, Some(1)).expect("parses");
+        assert!(parsed.get("error").is_some());
+
+        // Garbage is an error, not a panic and not an empty success.
+        assert!(parse_sse_response("data: not json\n\n", Some(1)).is_err());
+        assert!(parse_sse_response("", Some(1)).is_err());
+    }
+
+    /// A blocked tool never enters the catalog: the config carries the list
+    /// and discovery honours it, so `COMPOSIO_REMOTE_BASH_TOOL` cannot reach
+    /// the model, the UI, or the gate.
+    #[test]
+    fn blocked_tools_round_trip_through_the_config() {
+        let mut config = http_config();
+        config.blocked_tools = vec!["COMPOSIO_REMOTE_BASH_TOOL".to_string()];
+        let serialized = serde_json::to_string(&config).expect("serializes");
+        let restored: MCPServerConfig = serde_json::from_str(&serialized).expect("deserializes");
+        assert_eq!(restored.blocked_tools, config.blocked_tools);
+        assert_eq!(restored.oauth, config.oauth);
+
+        // Configs saved before these fields existed still load.
+        let legacy = json!({
+            "id": "x", "name": "old", "description": null,
+            "command": "https", "args": ["https://example.com/mcp"],
+            "working_directory": null, "environment_variables": {},
+            "enabled": true, "auto_start": true,
+            "timeout_seconds": 30, "max_retries": 3
+        });
+        let restored: MCPServerConfig =
+            serde_json::from_value(legacy).expect("legacy config deserializes");
+        assert!(restored.headers.is_empty());
+        assert!(!restored.oauth);
+        assert!(restored.blocked_tools.is_empty());
     }
 }

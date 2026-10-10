@@ -288,6 +288,15 @@ pub mod cloud {
 }
 
 /// MCP server management command names
+/// Connected apps (LAC-4210): the connect card, the Connected apps group in
+/// Tools, and the Advanced BYO Composio toggle.
+pub mod integrations {
+    pub const GET_INTEGRATIONS_STATUS: &str = "get_integrations_status";
+    pub const SET_BYO_COMPOSIO_ENABLED: &str = "set_byo_composio_enabled";
+    pub const CONNECT_INTEGRATION_APP: &str = "connect_integration_app";
+    pub const DISCONNECT_INTEGRATION_APP: &str = "disconnect_integration_app";
+}
+
 pub mod mcp {
     /// Explicit user approval for an MCP server to spawn its configured command
     /// (spawn-approval gate, 2026-09 security audit).

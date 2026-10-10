@@ -31,6 +31,7 @@ import {
   ConfirmationAction,
 } from "@/components/ai-elements/confirmation";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { ConnectAppCard } from "@/components/chat/ConnectAppCard";
 import { Button } from "@/components/ui/button";
 import {
   Check,
@@ -735,6 +736,19 @@ export function ChatMessageComponent({
       console.error("Error allowing the tool for this conversation:", error);
     }
   }, [onApprovalUpdate]);
+
+  // A request needed an app that is not connected: the reply is a card with
+  // one button (LAC-4210). The card owns its own connect/connected/failed
+  // states; this row only places it.
+  if (msg.connect_app) {
+    return (
+      <ConnectAppCard
+        toolkitSlug={msg.connect_app.toolkit_slug}
+        appName={msg.connect_app.app_name}
+        retryQuery={msg.retry_query}
+      />
+    );
+  }
 
   // Thinking messages: collapsed, and they stay collapsed.
   //
