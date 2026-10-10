@@ -34,12 +34,7 @@ import {
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, Ear, EarOff, Maximize2, Mic, Square, Type, X } from "lucide-react";
 import { VoiceTurnControls } from "@/components/bar/VoiceTurnControls";
-import {
-  cancelVoiceTurn,
-  isDictationTurn,
-  isRecordingTurn,
-  sendVoiceTurn,
-} from "@/lib/voiceTurn";
+import { cancelVoiceTurn, isRecordingTurn, sendVoiceTurn } from "@/lib/voiceTurn";
 
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
@@ -705,6 +700,35 @@ function statusLabel(state: UIState, data: BarStateData): string | null {
   }
 }
 
+/**
+ * What the empty text box says. The box stays up through a voice or working
+ * state, so it also carries what the status row would have said: the mic is
+ * open, the words are being decoded, Juno is working, something went wrong.
+ * Live partial words are not shown: they are worse than the final.
+ */
+export function composerPlaceholder({
+  state,
+  data,
+  recording,
+  working,
+  paneOpen,
+}: {
+  state: UIState;
+  data: BarStateData;
+  recording: boolean;
+  working: boolean;
+  paneOpen: boolean;
+}): string {
+  if (recording || VOICE_STATES.includes(state)) return "Listening…";
+  if (state === UI.BAR_STATES_TRANSCRIBING) return "Transcribing…";
+  if (state === UI.BAR_STATES_ERROR) return data.currentError || "Something went wrong";
+  if (working) {
+    const label = statusLabel(state, data) ?? "working";
+    return `${label.charAt(0).toUpperCase()}${label.slice(1)}…`;
+  }
+  return paneOpen ? "Follow up…" : "Ask Juno";
+}
+
 const pillButton =
   "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/[0.12] hover:text-white";
 
@@ -1051,9 +1075,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // The text input is local until submit, so there is no per-keystroke IPC.
   const [inputOpen, setInputOpen] = useState(false);
   const [composerGrowth, setComposerGrowth] = useState(0);
-  // Whether the caret is in the composer, kept by its own focus and blur so
-  // it can be read the moment a dictation begins, before anything re-renders.
-  const composerHasCaretRef = useRef(false);
 
   // Whether a turn is in flight, readable from callbacks that are defined
   // above the derived state that works it out. Kept in step during render.
@@ -1327,11 +1348,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
   }, []);
 
-  /** The mic inside the text input: drop the draft and start listening. */
+  /** The mic inside the text input: start listening. The draft stays. */
   const switchToTalking = useCallback(() => {
-    closeInput();
     void startTalking();
-  }, [closeInput, startTalking]);
+  }, [startTalking]);
 
   /** Send what was said. This is what the old "Stop" button actually did. */
   const stopTalking = useCallback(() => sendVoiceTurn(), []);
@@ -1527,40 +1547,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     (WORKING_STATES.includes(currentUiState) && !isRecording) || chat.isProcessing;
   isWorkingRef.current = isWorking;
 
-  // === A DICTATION INTO THE COMPOSER ===
-  //
-  // Dictation types what you say into whatever has the caret. When that is
-  // this composer, the voice look must not take the pill over: the box
-  // unmounted, the keystrokes Rust posts at the end landed nowhere, and the
-  // box came back empty. So a dictation that finds the caret here, with Juno
-  // focused, keeps the composer. A dictation into another app and a spoken
-  // query to Juno still take the pill over as before.
-  //
-  // Keyed on what the microphone is doing, not on the dictation flag. On
-  // key-up Rust drops the flag, blips the bar to rest, then files the final
-  // decode as plain transcribing, and only then posts the words (v0.8.159
-  // keyed on the flag and let the box go half a second early). The final
-  // decode with the mic closed is the tail of whichever session just ended;
-  // it keeps the composer only if the caret is still in it, which after a
-  // spoken query it is not, because that query already took the pill over.
-  const dictating = isDictationTurn({
-    barState: currentUiState,
-    isDictationMode: barState.isDictationMode,
-  });
-  const finalDecode = currentUiState === UI.BAR_STATES_TRANSCRIBING && !isRecording;
-  const [dictationHeld, setDictationHeld] = useState(false);
-  const dictationInComposer =
-    (isVoice || isRecording || isWorking) &&
-    (dictating || finalDecode) &&
-    !chat.isProcessing &&
-    (dictationHeld || (composerHasCaretRef.current && document.hasFocus()));
-  useEffect(() => {
-    setDictationHeld(dictationInComposer);
-    // The composer is now the person's open one, whatever opened it, so it
-    // stays up with the words in it once Rust goes back to rest.
-    if (dictationInComposer) setInputOpen(true);
-  }, [dictationInComposer]);
-
   // === JUNO IS DRIVING ===
   //
   // Juno normally works without touching the pointer. While it holds the real
@@ -1645,11 +1631,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   // The input shows when the user opened it, while the backend is in its
   // input states, and between turns with the pane open so a follow-up is one
-  // click away. Voice and working states show status instead, except a
-  // dictation that is being typed into the composer itself.
-  const takenOver = (isVoice || isWorking) && !dictationInComposer;
-  const showInput =
-    !isDriving && !takenOver && (inputOpen || isInputState || (paneOpen && isIdle));
+  // click away. Once it is up it stays up through every voice and working
+  // state: the text box is where a dictation lands and where the next line
+  // is typed while Juno works, and the placeholder says what the microphone
+  // or the agent is doing. It used to give way to the status row the moment a
+  // voice state began, which unmounted the box a dictation was about to type
+  // into (#779, #780 chased that with a hold; this makes the hold unneeded).
+  // Only Juno holding the pointer still puts the box away: the pill has to
+  // say so in words.
+  const showInput = !isDriving && (inputOpen || isInputState || (paneOpen && isIdle));
   const label = driving
     ? drivingLabel(driving)
     : statusLabel(currentUiState, barState);
@@ -1668,19 +1658,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     const t = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(t);
   }, [showInput, inputOpen, layout]);
-
-  // A voice or working state that starts while the input is open (hotkey,
-  // wake word) takes over; the input is not waiting underneath.
-  useEffect(() => {
-    if (takenOver && inputOpen) closeInput();
-  }, [takenOver, inputOpen, closeInput]);
-
-  // An unmounted composer fires no blur, so the caret record is cleared here;
-  // otherwise the final decode after a spoken query would read a caret that
-  // left with the box and bring the box back for the agent's own turn.
-  useEffect(() => {
-    if (!showInput) composerHasCaretRef.current = false;
-  }, [showInput]);
 
   /**
    * The X, wherever it appears, and the Stop square: one meaning.
@@ -2221,23 +2198,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               }}
               onPaste={handlePaste}
               onMouseDown={activateWindow}
-              onFocus={() => {
-                composerHasCaretRef.current = true;
-                void handleFocus();
-              }}
-              onBlur={() => {
-                composerHasCaretRef.current = false;
-                handleInputBlur();
-              }}
-              placeholder={
-                dictationInComposer
-                  ? isRecording
-                    ? "Listening…"
-                    : "Transcribing…"
-                  : paneOpen
-                    ? "Follow up…"
-                    : "Ask Juno"
-              }
+              onFocus={handleFocus}
+              onBlur={handleInputBlur}
+              placeholder={composerPlaceholder({
+                state: currentUiState,
+                data: barState,
+                recording: isRecording,
+                working: isWorking,
+                paneOpen,
+              })}
               aria-label="Ask Juno"
               className={cn(
                 "min-w-0 flex-1 resize-none cursor-text border-none bg-transparent outline-none",
@@ -2251,11 +2220,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                   whatever app has focus, and this mic is the inverse of the
                   "type instead" control next to it. It opens a spoken turn to
                   Juno, the same one the pill's mic opens, so it says so.
-                  While a dictation is landing here the mic is already open,
-                  so the level takes its place. */}
-              {dictationInComposer ? (
+                  While a microphone is open the level takes its place; while
+                  Juno works there is nothing to open, so nothing is offered. */}
+              {isVoice || isRecording ? (
                 <AudioLevelBars audioLevel={barState.audioLevel} />
-              ) : (
+              ) : isWorking ? null : (
                 <button
                   type="button"
                   onClick={switchToTalking}
@@ -2270,10 +2239,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                 type="submit"
                 aria-label="Send"
                 title="Send"
-                disabled={!localInputValue.trim()}
+                disabled={!localInputValue.trim() || isWorking}
                 className={cn(
                   inputControlButton,
-                  localInputValue.trim()
+                  localInputValue.trim() && !isWorking
                     ? "bg-white/[0.16] text-white"
                     : "cursor-default opacity-40",
                 )}
