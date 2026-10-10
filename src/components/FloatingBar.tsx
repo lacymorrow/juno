@@ -33,7 +33,6 @@ import {
 } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, Ear, EarOff, Maximize2, Mic, Square, Type, X } from "lucide-react";
-import { VoiceTurnControls } from "@/components/bar/VoiceTurnControls";
 import { cancelVoiceTurn, isRecordingTurn, sendVoiceTurn } from "@/lib/voiceTurn";
 
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
@@ -143,7 +142,7 @@ interface UIInteractionEvent {
 
 // === LAYOUT ===
 
-export type BarLayout = "compact" | "hover" | "voice" | "status" | "full";
+export type BarLayout = "compact" | "hover" | "full";
 
 /**
  * Pill size per layout. The pill grows and shrinks in CSS inside a window that
@@ -157,12 +156,9 @@ export const BAR_LAYOUTS: Record<BarLayout, { width: number; height: number }> =
   // past it. The optional wake-phrase button is added on top via
   // pillExtraWidth.
   hover: { width: 148, height: 34 },
-  // Voice and status share a width on purpose. Listening used to open a 220px
-  // bar and then, the instant the mic closed, a 419px one, for a status word
-  // and a stop button. The extra 200px held nothing, and the jump happened
-  // mid-sentence, every time.
-  voice: { width: 260, height: 34 },
-  status: { width: 260, height: 34 },
+  // Every state past idle is the text box at one width. There used to be a
+  // narrower voice and status pill between hover and full, and the bar grew
+  // and shrank through them as the mic opened and closed; now it grows once.
   full: { width: 419, height: 44 },
 };
 
@@ -446,13 +442,11 @@ export function pickLayout({
   driving?: boolean;
 }): BarLayout {
   if (driving) return "full";
-  if (paneOpen || rosterVisible || inputOpen || INPUT_STATES.includes(state)) return "full";
-  if (VOICE_STATES.includes(state)) return "voice";
+  if (paneOpen || rosterVisible || inputOpen) return "full";
   if (IDLE_STATES.includes(state)) return hovered ? "hover" : "compact";
-  // Working, error, success, speaking: a label and one control, which is the
-  // same room listening needs, so the bar does not lurch wider the moment
-  // someone stops talking.
-  return "status";
+  // Everything else, listening, working, an error, a reply being spoken, is
+  // the text box with a placeholder that says so.
+  return "full";
 }
 
 // Purpose-built motions for the status dot; injected once into <head>.
@@ -722,11 +716,14 @@ export function composerPlaceholder({
   if (recording || VOICE_STATES.includes(state)) return "Listening…";
   if (state === UI.BAR_STATES_TRANSCRIBING) return "Transcribing…";
   if (state === UI.BAR_STATES_ERROR) return data.currentError || "Something went wrong";
-  if (working) {
-    const label = statusLabel(state, data) ?? "working";
-    return `${label.charAt(0).toUpperCase()}${label.slice(1)}…`;
+  if (IDLE_STATES.includes(state) || INPUT_STATES.includes(state)) {
+    return paneOpen ? "Follow up…" : "Ask Juno";
   }
-  return paneOpen ? "Follow up…" : "Ask Juno";
+  // Working, sending, speaking, done, stopping: the status row's word, said
+  // the way a placeholder says it. Ongoing work gets the ellipsis.
+  const label = statusLabel(state, data) ?? "working";
+  const said = `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+  return working ? `${said}…` : said;
 }
 
 const pillButton =
@@ -1080,32 +1077,20 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // above the derived state that works it out. Kept in step during render.
   const isWorkingRef = useRef(false);
 
-  // A request for the text input that cannot be honoured yet, because a voice
-  // or working session is still winding down and the bar closes the input
-  // while one is. Consumed by the effect that watches for the bar going quiet.
-  const wantsInputWhenClearRef = useRef(false);
-
   // Starting a new chat means wanting to type, so the pane stays up, empty,
   // with the caret in it. Rotating the backend conversation matters too: the
   // bar used to clear the screen while the agent kept appending to the same
   // conversation and memory buffer.
   //
   // Mid-answer it has to stop that answer first. Rotating under a live stream
-  // left the reply arriving into a conversation nobody could see any more, and
-  // the input this opens was closed again a frame later by the working state,
-  // so "New chat" read as a button that ate the screen and gave nothing back.
+  // left the reply arriving into a conversation nobody could see any more.
   // Stopping is what the person meant by starting again.
   const startNewChat = useCallback(() => {
     void (async () => {
-      const wasWorking = isWorkingRef.current;
-      if (wasWorking) await chat.stop();
+      if (isWorkingRef.current) await chat.stop();
       await invoke(COMMANDS.CONVERSATIONS_NEW_CONVERSATION).catch(() => {});
       chat.startNewChat();
       setPaneShown(true);
-      // The stop has been asked for but the backend may still be winding down,
-      // and it closes any input that is open while it does. Ask again once it
-      // is clear.
-      if (wasWorking) wantsInputWhenClearRef.current = true;
       setInputOpen(true);
     })();
   }, [chat.startNewChat, chat.stop]);
@@ -1373,23 +1358,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     [barState.barState, barState.isDictationMode],
   );
 
-  /**
-   * Changed their mind about talking: drop the audio and open the input.
-   *
-   * The input cannot simply be opened here. The backend is still in a voice
-   * state for the moment it takes the cancel to land, and while it is, the bar
-   * both refuses to show the composer and actively closes an input that is
-   * open. So the old version set a flag that was thrown away a frame later and
-   * the button did nothing at all: the person pressed "type instead", the mic
-   * closed, and they were left looking at the idle pill. The wish is recorded
-   * here and acted on when Rust says the session is actually over, which is the
-   * only thing that knows.
-   */
-  const switchToTyping = useCallback(async () => {
-    wantsInputWhenClearRef.current = true;
-    await cancelTalking();
-  }, [cancelTalking]);
-
   // Pictures pasted into the pill, as data URLs, alongside the typed text.
   const [pastedImages, setPastedImages] = useState<string[]>([]);
 
@@ -1538,7 +1506,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   const currentUiState = barState.barState;
   const isIdle = IDLE_STATES.includes(currentUiState);
-  const isInputState = INPUT_STATES.includes(currentUiState);
   const isVoice = VOICE_STATES.includes(currentUiState);
   // The microphone is open. Wider than `isVoice`: live words while you talk
   // arrive as TRANSCRIBING, which is otherwise a working state.
@@ -1615,34 +1582,32 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const showExpand = !paneOpen && !mainWindowOpen;
 
   // The hover pill carries a fourth control when there is a wake phrase to
-  // pause, and the voice and status pills carry the expand control while the
-  // chat is closed, so the pill is told to make room for each. The full pill
-  // already has the room, and the steady frame is sized for the full pill, so
-  // none of this can outgrow the window.
-  const pillExtraWidth =
-    (layout === "hover" && voiceConfigured) ||
-    ((layout === "voice" || layout === "status") && showExpand)
-      ? BAR_PILL_BUTTON_PX
-      : 0;
+  // pause, so it is told to make room for it. The full pill already has the
+  // room, and the steady frame is sized for the full pill, so this cannot
+  // outgrow the window.
+  const pillExtraWidth = layout === "hover" && voiceConfigured ? BAR_PILL_BUTTON_PX : 0;
 
   useEffect(() => {
     if (layout !== "hover") setHoveredButton(null);
   }, [layout]);
 
-  // The input shows when the user opened it, while the backend is in its
-  // input states, and between turns with the pane open so a follow-up is one
-  // click away. Once it is up it stays up through every voice and working
-  // state: the text box is where a dictation lands and where the next line
-  // is typed while Juno works, and the placeholder says what the microphone
-  // or the agent is doing. It used to give way to the status row the moment a
-  // voice state began, which unmounted the box a dictation was about to type
-  // into (#779, #780 chased that with a hold; this makes the hold unneeded).
+  // Past the idle pill, the bar is a text box. The person opened it, or the
+  // chat is up, or Rust is doing anything at all: listening, decoding,
+  // working, erroring, speaking. The box is where a dictation lands and where
+  // the next line is typed while Juno works, and its placeholder says what the
+  // microphone or the agent is doing. There used to be a status row for the
+  // voice and working states; the moment one began it replaced the box, which
+  // unmounted the box a dictation was about to type into (#779, #780 chased
+  // that with a hold; #782 kept an open box; this makes every state the box).
   // Only Juno holding the pointer still puts the box away: the pill has to
   // say so in words.
-  const showInput = !isDriving && (inputOpen || isInputState || (paneOpen && isIdle));
-  const label = driving
-    ? drivingLabel(driving)
-    : statusLabel(currentUiState, barState);
+  const showInput = !isDriving && (inputOpen || paneOpen || !isIdle);
+  const stopLabel =
+    isVoice || isRecording
+      ? "Cancel without sending"
+      : isWorking
+        ? "Stop Juno"
+        : "Close without sending";
 
   // Once the input is up, put the caret in it. After a turn ends with the
   // pane open, refocus only if this window is still the one the user is in:
@@ -1708,17 +1673,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     chat.stop,
     abandonInput,
   ]);
-
-  // "Type instead" and "New chat", honoured once the session they interrupted
-  // is really over. Anything that starts in the meantime (the hotkey, a wake
-  // word) outranks the request: the wish was to type instead of *that*
-  // session, not instead of whatever the person started next.
-  useEffect(() => {
-    if (!wantsInputWhenClearRef.current) return;
-    if (isVoice || isWorking) return;
-    wantsInputWhenClearRef.current = false;
-    openInput();
-  }, [isVoice, isWorking, openInput]);
 
   /**
    * Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
@@ -2217,8 +2171,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                 way to reach the mic, and no way out but Escape. */}
             <div className="flex shrink-0 items-center gap-1">
               {/* Not "switch to dictation": dictation types what you say into
-                  whatever app has focus, and this mic is the inverse of the
-                  "type instead" control next to it. It opens a spoken turn to
+                  whatever app has focus. This mic opens a spoken turn to
                   Juno, the same one the pill's mic opens, so it says so.
                   While a microphone is open the level takes its place; while
                   Juno works there is nothing to open, so nothing is offered. */}
@@ -2235,63 +2188,82 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                   <Mic className="size-3" />
                 </button>
               )}
-              <button
-                type="submit"
-                aria-label="Send"
-                title="Send"
-                disabled={!localInputValue.trim() || isWorking}
-                className={cn(
-                  inputControlButton,
-                  localInputValue.trim() && !isWorking
-                    ? "bg-white/[0.16] text-white"
-                    : "cursor-default opacity-40",
-                )}
-              >
-                <ArrowUp className="size-3" />
-              </button>
+              {/* The way back to the conversation while something is going
+                  on with the chat closed. Ahead of Send and the stop control,
+                  so the stop keeps the trailing edge in every state. */}
+              {showExpand && !isIdle && (
+                <button
+                  type="button"
+                  onClick={reopenPane}
+                  aria-label="Open chat"
+                  title="Open chat"
+                  className={inputControlButton}
+                >
+                  <Maximize2 className="size-3" />
+                </button>
+              )}
+              {/* One Send. While a turn is being recorded it finishes that
+                  turn and submits what was said (what "Stop" used to do);
+                  otherwise it sends the typed line. A wake-phrase capture has
+                  nothing to send by hand: the engine decides when it ends. */}
+              {isRecording ? (
+                <button
+                  type="button"
+                  onClick={() => void stopTalking()}
+                  aria-label="Send"
+                  title="Send what was said"
+                  className={cn(inputControlButton, "bg-white/[0.16] text-white")}
+                >
+                  <ArrowUp className="size-3" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  aria-label="Send"
+                  title="Send"
+                  disabled={!localInputValue.trim() || isWorking || isVoice}
+                  className={cn(
+                    inputControlButton,
+                    localInputValue.trim() && !isWorking && !isVoice
+                      ? "bg-white/[0.16] text-white"
+                      : "cursor-default opacity-40",
+                  )}
+                >
+                  <ArrowUp className="size-3" />
+                </button>
+              )}
+              {/* One stop control, one meaning: stop what is happening and put
+                  me back at rest. Its name says what that is right now. */}
               <button
                 type="button"
                 onClick={stopCurrentActivity}
-                aria-label="Close without sending"
-                title="Close without sending"
-                className={inputControlButton}
+                aria-label={stopLabel}
+                title={isWorking ? `${stopLabel} (Esc)` : stopLabel}
+                className={cn(inputControlButton, isWorking && "bg-white/[0.08]")}
               >
-                <X className="size-3" />
+                {isWorking ? <Square className="size-2.5 fill-current" /> : <X className="size-3" />}
               </button>
             </div>
           </form>
         ) : (
           <>
+            {/* Juno holds the pointer. The one state that is not the box: the
+                bar has to say so in words, and say how to make it stop. */}
             <span
-              className={cn(
-                "min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em]",
-                isDriving
-                  ? "text-white/80"
-                  : currentUiState === UI.BAR_STATES_ERROR
-                    ? "text-[#e8866a]/80"
-                    : "text-white/55",
-                // Live streaming partial: render provisional, swap to solid on final.
-                currentUiState === UI.BAR_STATES_TRANSCRIBING &&
-                  barState.transcriptionProvisional &&
-                  "italic text-white/40",
-              )}
+              className="min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em] text-white/80"
               data-testid="floating-bar-status"
             >
-              {isDriving ? `Juno is ${label}` : (label ?? "Ask Juno")}
+              {driving ? `Juno is ${drivingLabel(driving)}` : "Ask Juno"}
             </span>
             {/* Watching the pointer move on its own, the question is how to
                 make it stop. The stop-key monitor in Rust has always taken
                 Escape; nothing ever said so. */}
-            {isDriving && (
-              <kbd
-                className="shrink-0 rounded border border-white/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/55"
-                data-testid="floating-bar-stop-hint"
-              >
-                esc to stop
-              </kbd>
-            )}
-            {/* Ahead of every stop control, so Stop keeps its place at the
-                trailing edge whichever state this is. */}
+            <kbd
+              className="shrink-0 rounded border border-white/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/55"
+              data-testid="floating-bar-stop-hint"
+            >
+              esc to stop
+            </kbd>
             {showExpand && (
               <button
                 type="button"
@@ -2305,41 +2277,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             )}
             {/* And the same thing to press, for a hand that is already on the
                 mouse Juno is holding. The hint stays: it is the faster way. */}
-            {isDriving && (
-              <button
-                type="button"
-                onClick={stopCurrentActivity}
-                aria-label="Stop Juno"
-                title="Stop Juno (Esc)"
-                className={inputControlButton}
-              >
-                <X className="size-3" />
-              </button>
-            )}
-            {(isVoice || isRecording) && <AudioLevelBars audioLevel={barState.audioLevel} />}
-            {/* Send, type instead, cancel: in every recording state, live
-                words included, from the mapping every appearance shares. A
-                wake-phrase capture gets cancel only. */}
-            <VoiceTurnControls
-              state={barState}
-              onSend={() => void stopTalking()}
-              onType={() => void switchToTyping()}
-              onCancel={stopCurrentActivity}
-              buttonClassName={(control) =>
-                cn(inputControlButton, control === "send" && "bg-white/[0.16] text-white")
-              }
-            />
-            {isWorking && (
-              <button
-                type="button"
-                onClick={stopCurrentActivity}
-                aria-label="Stop Juno"
-                title="Stop Juno (Esc)"
-                className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/[0.08] text-white/60 transition-colors hover:bg-white/[0.16] hover:text-white"
-              >
-                <Square className="size-2.5 fill-current" />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={stopCurrentActivity}
+              aria-label="Stop Juno"
+              title="Stop Juno (Esc)"
+              className={inputControlButton}
+            >
+              <X className="size-3" />
+            </button>
           </>
         )}
       </div>
