@@ -1144,7 +1144,7 @@ where
             let spoken = draft.prompt();
             tauri::async_runtime::spawn(async move {
                 let state = app.state::<crate::state::AppState>();
-                let _ = crate::tts::invoke_tts(spoken, state, app.clone()).await;
+                let _ = crate::tts::invoke_tts(spoken, state, app.as_ref().clone()).await;
             });
         }
 
