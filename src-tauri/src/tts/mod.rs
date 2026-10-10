@@ -1491,6 +1491,28 @@ async fn play_rendered(
     }
 }
 
+/// The Mac's voice speaking in another engine's place: while Kokoro
+/// downloads, or after an engine failed. Same as the `system` provider, except
+/// that a Siri voice wins whenever one is reachable
+/// (`voices::stand_in_say_voice`).
+async fn invoke_mac_stand_in(text: String, state: AppState) -> Result<String, String> {
+    if is_tts_stop_requested() {
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+    let stored = state.get_system_voice().ok().flatten();
+    let device = state.get_output_device().ok().flatten();
+    let words_per_minute =
+        rate::effective("system", stored_rate(Some(&state))).and_then(rate::say_words_per_minute);
+    match voices::stand_in_voice(stored).await {
+        voices::StandInVoice::Siri => {
+            system::speak_with_say(text, None, device, words_per_minute).await
+        }
+        voices::StandInVoice::Mac(voice) => {
+            system::speak_directly(text, voice, device, words_per_minute).await
+        }
+    }
+}
+
 /// The engines tried for one utterance, in order. Every chain ends in the
 /// Mac's own voice, which needs nothing, so a failing engine never means
 /// silence.
@@ -1543,7 +1565,7 @@ async fn execute_tts_with_fallback(
                 return Err("offline; system voice cannot be rendered ahead".to_string());
             }
             warn!("Device appears offline, using system TTS directly");
-            return invoke_tts_for_provider(text, Some(app_state), "system").await;
+            return invoke_mac_stand_in(text, app_state).await;
         }
     }
 
@@ -1560,7 +1582,7 @@ async fn execute_tts_with_fallback(
         }
         info!("[Kokoro] Still downloading; the Mac's voice stands in");
         let line = kokoro::stand_in(&text);
-        return invoke_tts_for_provider(line, Some(app_state), "system").await;
+        return invoke_mac_stand_in(line, app_state).await;
     }
 
     let fallback_providers = fallback_chain(primary_provider);
@@ -1589,9 +1611,14 @@ async fn execute_tts_with_fallback(
             if is_primary { "primary" } else { "fallback" }
         );
 
-        match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider)
-            .await
+        let attempt = if *fallback_provider == "system"
+            && !primary_provider.eq_ignore_ascii_case("system")
         {
+            invoke_mac_stand_in(text.clone(), app_state.clone()).await
+        } else {
+            invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider).await
+        };
+        match attempt {
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
                     return Ok(result);
@@ -1616,9 +1643,7 @@ async fn execute_tts_with_fallback(
                 if is_primary && is_network_error {
                     warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
                     // For network errors, skip other cloud providers and go straight to system
-                    match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), "system")
-                        .await
-                    {
+                    match invoke_mac_stand_in(text.clone(), app_state.clone()).await {
                         Ok(system_result) => {
                             warn!("Network error detected, successfully fell back to system TTS");
                             return Ok(system_result);

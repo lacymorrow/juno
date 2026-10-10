@@ -63,7 +63,7 @@ describe("the notifications row shows what macOS allows", () => {
     render(<NotificationsGroup />);
 
     expect(
-      await screen.findByText("Notifications are off for Juno in System Settings."),
+      await screen.findByText("Turn on notifications for Juno in System Settings."),
     ).toBeInTheDocument();
     // Juno's own setting is on, but the system has them off: never "enabled".
     expect(screen.getByRole("switch")).toBeDisabled();
@@ -99,14 +99,14 @@ describe("the notifications row shows what macOS allows", () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).not.toBeChecked());
     expect(
-      screen.queryByRole("button", { name: /send a sample notification/i }),
+      screen.queryByRole("button", { name: /send test notification/i }),
     ).not.toBeInTheDocument();
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).toBeChecked());
     expect(invoke).not.toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
 
     // The icon is the one way to send one.
-    const sample = screen.getByRole("button", { name: /send a sample notification/i });
+    const sample = screen.getByRole("button", { name: /send test notification/i });
     fireEvent.click(sample);
     expect(invoke).toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
     await waitFor(() => expect(sample).toBeEnabled());
@@ -136,7 +136,7 @@ describe("the notifications row shows what macOS allows", () => {
     render(<NotificationsGroup />);
 
     fireEvent.click(
-      await screen.findByRole("button", { name: /send a sample notification/i }),
+      await screen.findByRole("button", { name: /send test notification/i }),
     );
     await screen.findByRole("button", { name: /open system settings/i });
     expect(

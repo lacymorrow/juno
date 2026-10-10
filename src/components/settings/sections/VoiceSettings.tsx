@@ -184,7 +184,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
           id="dont-speak"
           htmlFor="dont-speak-switch"
           label="Don't speak"
-          description="Juno writes answers and never says them out loud."
+          description="Juno replies in text instead of speaking out loud."
         >
           <Switch
             id="dont-speak-switch"

@@ -251,6 +251,33 @@ pub enum SystemVoice {
     Unset,
 }
 
+/// The voice `say` uses when the Mac speaks in another engine's place: while
+/// Kokoro downloads, or when an engine fails. A Siri voice whenever one can be
+/// reached, and the only way to reach one is the System Voice, spoken by `say`
+/// with no `-v` (AVFoundation does not list Siri voices to apps). Unset is
+/// Apple's default, which is a Siri voice on current macOS. Otherwise the
+/// Mac voice the person chose, if any. Pure.
+pub fn stand_in_say_voice(system: SystemVoice, stored: Option<String>) -> StandInVoice {
+    match system {
+        SystemVoice::Siri | SystemVoice::Unset => StandInVoice::Siri,
+        SystemVoice::Other => StandInVoice::Mac(stored),
+    }
+}
+
+/// Who speaks when the Mac stands in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StandInVoice {
+    /// The System Voice through `say` with no `-v`: Siri.
+    Siri,
+    /// The usual Mac path, with the person's chosen Mac voice if any.
+    Mac(Option<String>),
+}
+
+/// [`stand_in_say_voice`] for this Mac, read now.
+pub async fn stand_in_voice(stored: Option<String>) -> StandInVoice {
+    stand_in_say_voice(read_system_voice().await.0, stored)
+}
+
 /// Read the System Voice choice. Pure, so it is testable without a Mac.
 ///
 /// `SelectedVoiceID` looks like `com.apple.speech.synthesis.voice.custom.siri.*`
@@ -1536,6 +1563,21 @@ pub fn sync_engine_model(app_handle: &AppHandle, provider: &str) {
     });
 }
 
+/// Start the engine in force getting ready, first thing at launch.
+///
+/// On a new Mac Kokoro has its model to download before it can say a word.
+/// Starting before anything else, rather than after the voice lists have been
+/// read, gives the download the whole of onboarding to land in.
+pub async fn warm_engine_at_launch(app_handle: &AppHandle) {
+    let Ok(manager) = settings_manager(app_handle) else {
+        return;
+    };
+    match manager.get_audio_settings().await {
+        Ok(audio) => sync_engine_model(app_handle, &audio.tts_provider),
+        Err(e) => warn!("[Voices] Could not read the engine to warm it: {e}"),
+    }
+}
+
 /// Resolve, and make the resolution true.
 ///
 /// A list that lights one voice while the engine speaks in another is the
@@ -2258,6 +2300,30 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         assert!(list.options.iter().all(|o| o.kind != "silent"));
         assert!(list.speed.is_none(), "no speed row while silent");
         assert!(!list_for("kokoro", &kokoro_mac(), None).silent);
+    }
+
+    /// Standing in for another engine, the Mac speaks with Siri whenever the
+    /// System Voice is (or defaults to) Siri, and with the person's choice
+    /// otherwise.
+    #[test]
+    fn a_stand_in_prefers_siri() {
+        let chosen = Some("Daniel".to_string());
+        assert_eq!(
+            stand_in_say_voice(SystemVoice::Siri, chosen.clone()),
+            StandInVoice::Siri
+        );
+        assert_eq!(
+            stand_in_say_voice(SystemVoice::Unset, chosen.clone()),
+            StandInVoice::Siri
+        );
+        assert_eq!(
+            stand_in_say_voice(SystemVoice::Other, chosen.clone()),
+            StandInVoice::Mac(chosen)
+        );
+        assert_eq!(
+            stand_in_say_voice(SystemVoice::Other, None),
+            StandInVoice::Mac(None)
+        );
     }
 
     /// Off remembers the engine, and on returns to it.

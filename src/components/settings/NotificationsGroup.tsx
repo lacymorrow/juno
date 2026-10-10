@@ -138,15 +138,13 @@ export function NotificationsGroup() {
   const authorization = status?.authorization ?? null;
   const authorized = authorization === "authorized";
 
-  let description = "Checking.";
-  if (authorized) description = "Turn this off and Juno shows no banners.";
-  else if (authorization === "denied")
-    description = "Notifications are off for Juno in System Settings.";
-  else if (authorization === "not_determined")
-    description = "Juno needs your OK to show notifications.";
+  let description = "Allow Juno to display notifications on your computer.";
+  if (authorization === "denied")
+    description = "Turn on notifications for Juno in System Settings.";
   else if (authorization === "unavailable") {
     description =
-      status?.unavailable_reason ?? "Notifications are not available here.";
+      status?.unavailable_reason ??
+      "Notifications aren't available on this Mac.";
   }
 
   return (
@@ -181,14 +179,14 @@ export function NotificationsGroup() {
                     variant="ghost"
                     disabled={sending}
                     onClick={() => void sendSample()}
-                    aria-label="Send a sample notification"
+                    aria-label="Send test notification"
                     className="text-muted-foreground hover:text-foreground"
                   >
                     <MessageSquarePlus className="size-4" aria-hidden="true" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="text-[12px]">
-                  Send a sample
+                  Send test notification
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
