@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.165] - 2026-10-10
+
+### Added
+
+- **cli:** serve the Mac apps tools over Juno's MCP server, gated (LAC-4233) (#765) (fe0825d9)
+
 ## [0.8.164] - 2026-10-10
 
 ### Fixed
@@ -1277,7 +1283,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.164...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.165...HEAD
+[0.8.165]: https://github.com/lacymorrow/juno/compare/cua-v0.8.164...v0.8.165
 [0.8.164]: https://github.com/lacymorrow/juno/compare/cua-v0.8.163...v0.8.164
 [0.8.163]: https://github.com/lacymorrow/juno/compare/cua-v0.8.162...v0.8.163
 [0.8.162]: https://github.com/lacymorrow/juno/compare/cua-v0.8.161...v0.8.162
