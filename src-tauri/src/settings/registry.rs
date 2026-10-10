@@ -1260,6 +1260,10 @@ mod tests {
         assert_eq!(Pane::from_name("Security & Privacy"), Some(Pane::Security));
         // The retired Notifications pane's name lands where the row moved.
         assert_eq!(Pane::from_name("Notifications"), Some(Pane::General));
+        // Shown as Shortcuts; the old name and the id still find it.
+        assert_eq!(Pane::from_name("Shortcuts"), Some(Pane::Triggers));
+        assert_eq!(Pane::from_name("triggers"), Some(Pane::Triggers));
+        assert_eq!(Pane::from_name("Keyboard Shortcuts"), Some(Pane::Triggers));
         assert_eq!(Pane::from_name("nowhere"), None);
     }
 
