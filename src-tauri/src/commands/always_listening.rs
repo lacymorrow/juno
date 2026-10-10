@@ -30,7 +30,7 @@ pub async fn start_always_listening_mode(
 
     if crate::commands::triggers::armed_phrases_now(&app).is_empty() {
         info!("[Command] No voice trigger is armed, the microphone stays off");
-        return Err("No voice trigger is on".to_string());
+        return Err("No voice shortcut is on".to_string());
     }
 
     // Get current settings from centralized system

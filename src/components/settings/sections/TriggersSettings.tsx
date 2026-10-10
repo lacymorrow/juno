@@ -510,10 +510,10 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   if (loading) {
     return (
       <div className="space-y-6">
-        <SettingsGroup title="Triggers">
+        <SettingsGroup title="Shortcuts">
           <div className="flex items-center justify-center py-10 text-muted-foreground">
             <RefreshCw className="h-5 w-5 animate-spin" />
-            <span className="ml-2 text-[13px]">Loading triggers…</span>
+            <span className="ml-2 text-[13px]">Loading shortcuts…</span>
           </div>
         </SettingsGroup>
       </div>
@@ -523,7 +523,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   if (loadError) {
     return (
       <div className="space-y-6">
-        <SettingsGroup title="Triggers">
+        <SettingsGroup title="Shortcuts">
           <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
             <p className="text-[13px] text-muted-foreground">
               Couldn’t load your triggers. {loadError}
@@ -543,7 +543,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
       <DropdownMenuTrigger asChild>
         <Button size="sm">
           <Plus className="size-3.5" />
-          Add trigger
+          Add shortcut
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
@@ -569,17 +569,17 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   if (visibleTriggers.length === 0) {
     return (
       <div className="space-y-6">
-        <SettingsGroup title="Triggers">
+        <SettingsGroup title="Shortcuts">
           <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#00C7BE]/15 text-[#00C7BE]">
               <Zap className="h-6 w-6" />
             </span>
             <div className="space-y-1">
-              <p className="text-[14px] font-semibold">No triggers yet</p>
+              <p className="text-[14px] font-semibold">No shortcuts yet</p>
               <p className="text-[12px] leading-snug text-muted-foreground">
                 {advanced
-                  ? "A trigger is how you summon Juno: a key, a mouse button, or your voice."
-                  : "A trigger is how you summon Juno: a key or a mouse button."}
+                  ? "A shortcut is how you summon Juno: a key, a mouse button, or your voice."
+                  : "A shortcut is how you summon Juno: a key or a mouse button."}
               </p>
             </div>
             {addMenu}
@@ -600,7 +600,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   return (
     <div className="space-y-6">
       <SettingsGroup
-        title="Triggers"
+        title="Shortcuts"
         footer={
           advanced
             ? "Each row is one way to summon Juno. Mix keys, a mouse button and your voice however you like."

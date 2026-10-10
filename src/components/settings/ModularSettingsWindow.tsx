@@ -77,7 +77,7 @@ export const settingsCategories: MacCategory[] = [
   },
   {
     id: "triggers",
-    name: "Triggers",
+    name: "Shortcuts",
     icon: <Zap className="h-3.5 w-3.5" />,
     tile: "bg-[#00C7BE]",
     description: "How you summon Juno",
@@ -204,7 +204,7 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "general", rowId: "show-notifications", label: "Show notifications", keywords: "notifications alerts banners notify push test" },
   { sectionId: "advanced", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup", advanced: true },
   // Triggers
-  { sectionId: "triggers", rowId: "add-trigger", label: "Add trigger", keywords: "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
+  { sectionId: "triggers", rowId: "add-trigger", label: "Add shortcut", keywords: "trigger shortcut activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
   // Models
   { sectionId: "models", rowId: "model-row-parakeet-ctc", label: "Balanced dictation model", keywords: "parakeet balanced recommended dictation model download" },
   { sectionId: "models", rowId: "model-row-tiny-en", label: "Fast dictation model", keywords: "whisper tiny fast dictation model" },
