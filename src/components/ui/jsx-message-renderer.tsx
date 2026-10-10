@@ -27,6 +27,7 @@ import {
   TaskSummaryCard,
   NowPlayingCard,
   AgendaCard,
+  MessageCard,
 } from "@/components/ui/agent-cards";
 import { WhyBlock } from "@/components/ui/why-block";
 import {
@@ -451,6 +452,8 @@ const availableComponents = {
   NowPlayingCard,
   // Events and reminders from the Mac's own apps, one shape
   AgendaCard,
+  // A text or an email, as it went out (the send gate's card)
+  MessageCard,
   // Method rationale, collapsed by default (top-level <Why> is lifted out
   // before parsing; this covers a <Why> nested inside another component)
   Why: WhyBlock,

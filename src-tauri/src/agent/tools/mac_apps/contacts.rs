@@ -13,6 +13,7 @@ use objc2_contacts::{
     CNAuthorizationStatus, CNContact, CNContactEmailAddressesKey, CNContactFamilyNameKey,
     CNContactGivenNameKey, CNContactNicknameKey, CNContactOrganizationNameKey,
     CNContactPhoneNumbersKey, CNContactRelationsKey, CNContactStore, CNEntityType, CNKeyDescriptor,
+    CNPhoneNumber,
 };
 use objc2_foundation::{NSArray, NSError, NSString};
 use serde::Serialize;
@@ -29,18 +30,18 @@ const MAX_PEOPLE: usize = 5;
 const DIALOG_WAIT_SECS: u64 = 120;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-struct Labeled {
-    label: String,
-    value: String,
+pub(crate) struct Labeled {
+    pub(crate) label: String,
+    pub(crate) value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-struct Person {
-    name: String,
+pub(crate) struct Person {
+    pub(crate) name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     organization: Option<String>,
-    phones: Vec<Labeled>,
-    emails: Vec<Labeled>,
+    pub(crate) phones: Vec<Labeled>,
+    pub(crate) emails: Vec<Labeled>,
     /// Other people this card says they are related to: "mother", "Jane Doe".
     related: Vec<Labeled>,
     #[serde(skip)]
@@ -272,12 +273,19 @@ fn related_names(
     )
 }
 
-/// `contacts_find`
-pub fn find(input: &Value) -> Result<Value, String> {
-    let query = required_text(input, "query")?;
+/// The people a query found and the line said if a dialog ran, or a finished
+/// answer to hand back as is.
+pub(crate) type Found = Result<(Vec<Person>, Option<String>), Value>;
+
+/// Everyone a name or a relationship stands for, with access cleared first.
+///
+/// `Ok(Err(answer))` is a finished answer to hand back as is: access was
+/// declined, or "my wife" was asked with no card marked as the person's own.
+/// Shared by `contacts_find` and every tool that sends to a person by name.
+pub(crate) fn people_for(query: &str) -> Result<Found, String> {
     let asked = match clear(Domain::Contacts, status(), request) {
         Cleared::Go { asked } => asked,
-        Cleared::Stop(answer) => return Ok(answer),
+        Cleared::Stop(answer) => return Ok(Err(answer)),
     };
 
     // SAFETY: `+new` on a plain NSObject subclass.
@@ -293,11 +301,11 @@ pub fn find(input: &Value) -> Result<Value, String> {
                 }
             }
             None if is_possessive(query) => {
-                return Ok(json!({
+                return Ok(Err(json!({
                     "ok": false,
                     "summary": format!("Contacts does not know which card is yours, so I cannot tell who your {} is. Ask for a name instead.",
                         fold(query).trim_start_matches("my ").trim_start_matches("the ")),
-                }));
+                })));
             }
             None => {}
         }
@@ -316,6 +324,61 @@ pub fn find(input: &Value) -> Result<Value, String> {
         fresh
     });
     people.truncate(MAX_PEOPLE);
+    Ok(Ok((people, asked)))
+}
+
+/// A person as the recipient logic sees them.
+pub(crate) fn candidate(person: &Person) -> super::recipients::Candidate {
+    super::recipients::Candidate {
+        name: person.name.clone(),
+        phones: person
+            .phones
+            .iter()
+            .map(|p| (p.label.clone(), p.value.clone()))
+            .collect(),
+        emails: person
+            .emails
+            .iter()
+            .map(|e| (e.label.clone(), e.value.clone()))
+            .collect(),
+    }
+}
+
+/// The name on the card that has this phone number or email address, when
+/// Contacts access is already on. Never asks: labelling a sender is not worth
+/// a dialog, and the address is shown instead.
+pub(crate) fn name_for_address(address: &str) -> Option<String> {
+    if status() != Access::Granted {
+        return None;
+    }
+    // SAFETY: `+new` on a plain NSObject subclass.
+    let store = unsafe { CNContactStore::new() };
+    let keys = keys();
+    // SAFETY: predicates built from live strings, then a read on a live store.
+    let found = unsafe {
+        let predicate = if address.contains('@') {
+            CNContact::predicateForContactsMatchingEmailAddress(&NSString::from_str(address))
+        } else {
+            let number = CNPhoneNumber::phoneNumberWithStringValue(&NSString::from_str(address))?;
+            CNContact::predicateForContactsMatchingPhoneNumber(&number)
+        };
+        store.unifiedContactsMatchingPredicate_keysToFetch_error(&predicate, &keys)
+    }
+    .ok()?;
+    found
+        .to_vec()
+        .first()
+        .map(|c| person(c).name)
+        .filter(|name| !name.is_empty())
+}
+
+/// `contacts_find`
+pub fn find(input: &Value) -> Result<Value, String> {
+    let query = required_text(input, "query")?;
+    let (people, asked) = match people_for(query)? {
+        Ok(found) => found,
+        Err(answer) => return Ok(answer),
+    };
 
     let summary = if people.is_empty() {
         format!("Nobody in Contacts matches {query}.")

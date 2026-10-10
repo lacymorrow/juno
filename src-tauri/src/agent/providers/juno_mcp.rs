@@ -274,6 +274,7 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
             name,
             arguments,
             mode,
+            mac_apps::preview_send,
             |request| cli_approval::ask_person(app, request),
             mac_apps::dispatch,
         )
@@ -330,38 +331,80 @@ async fn permission_mode(app: &tauri::AppHandle) -> PermissionMode {
 /// ask again" on this path (the CLI's conversation is not one Juno keys grants
 /// to), so `granted` is false; Critical asks regardless.
 ///
-/// `ask` shows the sheet and `exec` runs the tool. They are parameters so a
-/// test can pin the order without an app: a declined ask never reaches `exec`.
-async fn run_gated<Ask, AskFut, Exec, ExecFut>(
+/// A send (a text or an email) asks the same way the in-process runner does:
+/// the recipient is resolved first (`preview`), the ask carries the message
+/// card, and the only answers that send are "send it" and the Send button. A
+/// name that matches more than one person is answered with the candidates and
+/// never asked about.
+///
+/// `preview` resolves a send, `ask` shows the sheet and `exec` runs the tool.
+/// They are parameters so a test can pin the order without an app: a declined
+/// ask never reaches `exec`.
+async fn run_gated<Preview, PreviewFut, Ask, AskFut, Exec, ExecFut>(
     name: &str,
     input: Value,
     mode: PermissionMode,
+    preview: Preview,
     ask: Ask,
     exec: Exec,
 ) -> Value
 where
+    Preview: FnOnce(String, Value) -> PreviewFut,
+    PreviewFut: std::future::Future<Output = Result<mac_apps::send::SendDraft, Value>>,
     Ask: FnOnce(ToolApprovalRequest) -> AskFut,
     AskFut: std::future::Future<Output = Option<bool>>,
     Exec: FnOnce(String, Value) -> ExecFut,
     ExecFut: std::future::Future<Output = Result<Value, String>>,
 {
     let risk = risk_classifier::classify_risk(name, &input);
-    if permission_policy::requires_approval(mode, &risk, false) {
-        let description = permission_policy::describe_action(name, &input);
+    if permission_policy::requires_approval_for(name, mode, &risk, false) {
+        let mut description = permission_policy::describe_action(name, &input);
+        let mut timeout = cli_approval::APPROVAL_TIMEOUT_SECS;
+        let mut message: Option<Value> = None;
+        if risk_classifier::is_send_tool(name) {
+            match preview(name.to_string(), input.clone()).await {
+                Ok(draft) => {
+                    description = draft.description();
+                    timeout = mac_apps::send::SEND_TIMEOUT_SECS;
+                    message = Some(draft.approval_payload());
+                }
+                // Nothing to ask about: ambiguous, unknown, no address.
+                Err(answer) => return to_mcp_content(answer),
+            }
+        }
+        let approval_id = uuid::Uuid::new_v4().to_string();
         let mut request = ToolApprovalRequest::new(
-            uuid::Uuid::new_v4().to_string(),
+            approval_id.clone(),
             name.to_string(),
             input.clone(),
             description.clone(),
         )
         .with_risk(risk)
-        .with_timeout(cli_approval::APPROVAL_TIMEOUT_SECS);
+        .with_timeout(timeout);
         if let Some(target) = risk_classifier::extract_target_app(name, &input) {
             request = request.with_target_app(target);
         }
+        if let Some(message) = message {
+            request = request.with_message(message);
+        }
+        let is_send = request.is_send();
 
-        match ask(request).await {
+        let answer = ask(request).await;
+        let correction = if is_send {
+            mac_apps::send::take_correction(&approval_id)
+        } else {
+            None
+        };
+        match answer {
             Some(true) => info!("[JunoMCP] Approved: {}", description),
+            Some(false) if is_send => {
+                info!("[JunoMCP] Not sent: {}", description);
+                return tool_error(&mac_apps::send::not_sent_text(correction.as_deref(), false));
+            }
+            None if is_send => {
+                info!("[JunoMCP] No answer to a send: {}", description);
+                return tool_error(&mac_apps::send::not_sent_text(None, true));
+            }
             Some(false) => {
                 info!("[JunoMCP] Declined: {}", description);
                 return tool_error(
@@ -508,8 +551,109 @@ mod tests {
         assert!(approve["inputSchema"]["properties"]["tool_name"].is_object());
     }
 
+    /// For tests where no send is involved: a preview must never be asked for.
+    async fn no_preview(name: String, _input: Value) -> Result<mac_apps::send::SendDraft, Value> {
+        panic!("{name} is not a send, so it is never previewed");
+    }
+
+    fn doug_draft(kind: mac_apps::send::SendKind) -> mac_apps::send::SendDraft {
+        mac_apps::send::SendDraft {
+            kind,
+            recipient: mac_apps::recipients::Recipient {
+                name: "Doug Keesler".to_string(),
+                address: "+17045550100".to_string(),
+                service: None,
+            },
+            subject: Some("Late".to_string()),
+            body: "I'm running late".to_string(),
+        }
+    }
+
+    /// The send gate on the CLI path: both send tools ask in every mode, the
+    /// ask carries the message card, and a no never sends.
+    #[tokio::test]
+    async fn a_send_over_mcp_asks_in_every_mode_with_the_message_card() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        for (name, kind) in [
+            ("messages_send", mac_apps::send::SendKind::Text),
+            ("mail_send", mac_apps::send::SendKind::Email),
+        ] {
+            for mode in [
+                PermissionMode::AskFirst,
+                PermissionMode::AskWhenRisky,
+                PermissionMode::DontAsk,
+            ] {
+                let ran = Arc::new(AtomicBool::new(false));
+                let ran_in = Arc::clone(&ran);
+                let result = run_gated(
+                    name,
+                    json!({"to": "Doug", "body": "I'm running late", "subject": "Late"}),
+                    mode,
+                    move |_n: String, _i: Value| async move { Ok(doug_draft(kind)) },
+                    move |request: ToolApprovalRequest| {
+                        assert!(request.is_send(), "{name} {mode:?}");
+                        let message = request.message.clone().unwrap_or(Value::Null);
+                        assert_eq!(message["to"], "Doug Keesler");
+                        assert!(message["prompt"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .ends_with("Say send it."));
+                        async { Some(false) }
+                    },
+                    move |_name: String, _input: Value| {
+                        ran_in.store(true, Ordering::SeqCst);
+                        async { Ok(json!({"sent": true})) }
+                    },
+                )
+                .await;
+                assert!(
+                    !ran.load(Ordering::SeqCst),
+                    "{name} {mode:?} sent after a no"
+                );
+                assert_eq!(result["isError"], true);
+                let text = result["content"][0]["text"].as_str().unwrap_or("");
+                assert!(text.starts_with("Not sent"), "{name}: {text}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_ambiguous_recipient_is_answered_without_asking_or_sending() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let touched = Arc::new(AtomicBool::new(false));
+        let asked_in = Arc::clone(&touched);
+        let ran_in = Arc::clone(&touched);
+        let result = run_gated(
+            "messages_send",
+            json!({"to": "Doug", "body": "hi"}),
+            PermissionMode::DontAsk,
+            |_n: String, _i: Value| async {
+                Err(json!({"ok": false, "sent": false, "candidates": ["Doug A", "Doug B"]}))
+            },
+            move |_request: ToolApprovalRequest| {
+                asked_in.store(true, Ordering::SeqCst);
+                async { Some(true) }
+            },
+            move |_name: String, _input: Value| {
+                ran_in.store(true, Ordering::SeqCst);
+                async { Ok(json!({"sent": true})) }
+            },
+        )
+        .await;
+        assert!(
+            !touched.load(Ordering::SeqCst),
+            "asked about or sent to an ambiguous name"
+        );
+        let text = result["content"][0]["text"].as_str().unwrap_or("");
+        assert!(text.contains("Doug B"), "{text}");
+    }
+
     #[test]
-    fn all_eight_mac_app_tools_are_offered() {
+    fn all_eighteen_mac_app_tools_are_offered() {
         let names = [
             "reminders_list",
             "reminders_create",
@@ -519,6 +663,16 @@ mod tests {
             "calendar_move_event",
             "calendar_delete_event",
             "contacts_find",
+            "messages_send",
+            "messages_recent",
+            "facetime_call",
+            "mail_unread",
+            "mail_search",
+            "mail_send",
+            "mail_draft",
+            "notes_create",
+            "notes_append",
+            "notes_search",
         ];
         for name in names {
             let tool = served(name);
@@ -565,6 +719,7 @@ mod tests {
                 name,
                 json!({"id": "abc@1"}),
                 mode,
+                no_preview,
                 move |request: ToolApprovalRequest| {
                     asked_in.store(true, Ordering::SeqCst);
                     assert_eq!(request.tool_name, name);
@@ -597,6 +752,7 @@ mod tests {
             "reminders_list",
             json!({}),
             PermissionMode::AskFirst,
+            no_preview,
             move |_request: ToolApprovalRequest| {
                 asked_in.store(true, Ordering::SeqCst);
                 async { Some(true) }

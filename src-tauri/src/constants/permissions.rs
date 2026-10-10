@@ -75,4 +75,8 @@ pub mod urls {
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars";
     pub const CONTACTS_PANEL: &str =
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts";
+    pub const FULL_DISK_ACCESS_PANEL: &str =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+    pub const AUTOMATION_PANEL: &str =
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation";
 }
