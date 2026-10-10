@@ -325,7 +325,7 @@ export function ModalSystem({
                     Configure accessibility permissions for screen control
                   </li>
                   <li>Adjust voice recognition settings</li>
-                  <li>Set up triggers: keys, mouse buttons, or a wake phrase</li>
+                  <li>Set up shortcuts: keys, mouse buttons, or a wake phrase</li>
                   <li>Enable developer tools for advanced features</li>
                 </ul>
               </section>

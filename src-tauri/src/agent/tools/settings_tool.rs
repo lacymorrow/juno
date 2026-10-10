@@ -95,7 +95,7 @@ pub fn definition() -> ToolDefinition {
                 },
                 "pane": {
                     "type": "string",
-                    "description": "For `open`: General, Triggers, Audio, Providers, Models, Tools, Automations, Network, Security, Advanced."
+                    "description": "For `open`: General, Shortcuts, Audio, Providers, Models, Tools, Automations, Network, Security, Advanced."
                 },
                 "enabled": {
                     "type": "boolean",
