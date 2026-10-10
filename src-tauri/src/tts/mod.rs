@@ -1550,6 +1550,19 @@ async fn execute_tts_with_fallback(
     if primary_provider.eq_ignore_ascii_case("off") {
         return Ok("TTS_DISABLED_BY_SETTING".to_string());
     }
+
+    // Kokoro still downloading is a wait of a minute or more, not seconds.
+    // The Mac's voice speaks meanwhile and says why, once; Kokoro says it is
+    // back when the download lands (`kokoro::announce_return`).
+    if primary_provider.eq_ignore_ascii_case("kokoro") && kokoro::downloading() {
+        if !allow_direct {
+            return Err("Kokoro is downloading; system voice cannot be rendered ahead".to_string());
+        }
+        info!("[Kokoro] Still downloading; the Mac's voice stands in");
+        let line = kokoro::stand_in(&text);
+        return invoke_tts_for_provider(line, Some(app_state), "system").await;
+    }
+
     let fallback_providers = fallback_chain(primary_provider);
 
     let fallback_providers: Vec<&str> = fallback_providers

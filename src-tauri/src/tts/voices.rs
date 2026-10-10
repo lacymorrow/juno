@@ -1245,6 +1245,14 @@ fn kokoro_voices_dir() -> Option<PathBuf> {
     )
 }
 
+/// Whether Kokoro's weights are on disk, so loading it is a parse and not a
+/// download. Same cache layout as [`kokoro_voices_dir`].
+pub fn kokoro_model_on_disk() -> bool {
+    kokoro_voices_dir()
+        .and_then(|voices| voices.parent().map(|dir| dir.join("kokoro-v1_0.pth")))
+        .is_some_and(|weights| weights.is_file())
+}
+
 /// The Kokoro voices on disk, by id.
 ///
 /// Empty is a real answer: the model and its voices download on the first
@@ -1517,6 +1525,7 @@ fn settings_manager(
 /// finishes the pane is told, because Kokoro's voices are on disk only once
 /// it has.
 pub fn sync_engine_model(app_handle: &AppHandle, provider: &str) {
+    crate::tts::kokoro::remember_app(app_handle);
     // The greeting rendered ahead follows the engine and voice in force.
     crate::greeting::refresh_cache(app_handle);
     let app = app_handle.clone();

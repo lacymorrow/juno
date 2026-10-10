@@ -2,8 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 
+import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type {
   NotificationSettings as Settings,
   NotificationStatus,
@@ -21,14 +28,15 @@ import { COMMANDS } from "@/lib/constants.generated";
  * whenever the window regains focus, so coming back from System Settings
  * updates the row without a restart.
  *
- * There is no test button. Turning notifications on, or allowing them, sends
- * one: the banner is the answer to "what will these look like". A failure is
- * logged by Rust, and the status read afterwards says what to change.
+ * The sample sits beside the switch as one small icon, not a row of its own.
+ * The banner is the answer, so there is no result line. A failure is logged
+ * by Rust, and the status read afterwards says what to change.
  */
 export function NotificationsGroup() {
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<NotificationStatus | null>(null);
+  const [sending, setSending] = useState(false);
 
   const readStatus = useCallback(async () => {
     try {
@@ -78,10 +86,13 @@ export function NotificationsGroup() {
   }, [readStatus]);
 
   const sendSample = async () => {
+    setSending(true);
     try {
       await invoke(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
     } catch (error) {
       console.warn("Sample notification failed:", error);
+    } finally {
+      setSending(false);
     }
     // The first send may have asked macOS; show whatever it now says.
     await readStatus();
@@ -100,9 +111,7 @@ export function NotificationsGroup() {
       toast.error(
         typeof error === "string" ? error : "Could not change that setting",
       );
-      return;
     }
-    if (next) await sendSample();
   };
 
   const allow = async () => {
@@ -111,7 +120,6 @@ export function NotificationsGroup() {
         COMMANDS.NOTIFICATIONS_REQUEST_NOTIFICATION_PERMISSION,
       );
       setStatus(answer);
-      if (answer?.authorization === "authorized" && enabled) await sendSample();
     } catch (error) {
       console.warn("Failed to ask for notifications:", error);
       await readStatus();
@@ -131,8 +139,7 @@ export function NotificationsGroup() {
   const authorized = authorization === "authorized";
 
   let description = "Checking.";
-  if (authorized)
-    description = "Turning this on sends one, so you know what to expect.";
+  if (authorized) description = "Turn this off and Juno shows no banners.";
   else if (authorization === "denied")
     description = "Notifications are off for Juno in System Settings.";
   else if (authorization === "not_determined")
@@ -164,6 +171,27 @@ export function NotificationsGroup() {
             >
               Open System Settings
             </Button>
+          )}
+          {authorized && enabled && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={sending}
+                    onClick={() => void sendSample()}
+                    aria-label="Send a sample notification"
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <MessageSquarePlus className="size-4" aria-hidden="true" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-[12px]">
+                  Send a sample
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           <Switch
             id="notifications-enabled"

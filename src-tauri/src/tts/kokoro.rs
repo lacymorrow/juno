@@ -27,7 +27,9 @@
 //!   `.await`.
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use std::sync::{Arc, Condvar, Mutex as StdMutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex as StdMutex, MutexGuard, OnceLock};
+use tauri::AppHandle;
 use tracing::{error, info, warn};
 
 /// The loaded model. `TtsModel` is `Send + Sync`, so sharing one is sound.
@@ -164,6 +166,61 @@ impl<M: Clone> ModelCell<M> {
 
 static KOKORO: ModelCell<KokoroModel> = ModelCell::new();
 
+// -- the first download ------------------------------------------------------
+//
+// On a new Mac Kokoro has to download before it can say a word. Juno does not
+// go quiet for that: she speaks in the Mac's voice, says why once, and when
+// her own voice lands she says so in it.
+
+/// Said once, in the Mac's voice, before the first thing she says while
+/// Kokoro is still downloading.
+pub const STAND_IN_LINE: &str = "One minute while I download my voice.";
+/// Said in Kokoro once the download lands, if the stand-in was heard.
+pub const BACK_LINE: &str = "Ah, that's better.";
+
+static STAND_IN_HEARD: AtomicBool = AtomicBool::new(false);
+static APP: OnceLock<AppHandle> = OnceLock::new();
+
+/// Kept so a load that finishes on its own can speak.
+pub fn remember_app(app: &AppHandle) {
+    let _ = APP.set(app.clone());
+}
+
+/// Kokoro cannot speak without first downloading its weights. A model on disk
+/// loads in seconds and is worth waiting for; a download is not.
+pub fn downloading() -> bool {
+    !KOKORO.is_ready() && !crate::tts::voices::kokoro_model_on_disk()
+}
+
+/// What the Mac's voice says in Kokoro's place: the stand-in line first, the
+/// first time, then just the text. Also makes sure a download is under way,
+/// so one that failed (offline at launch) is tried again.
+pub fn stand_in(text: &str) -> String {
+    sync_with_engine("kokoro", || {});
+    stand_in_text(&STAND_IN_HEARD, text)
+}
+
+fn stand_in_text(heard: &AtomicBool, text: &str) -> String {
+    if heard.swap(true, Ordering::SeqCst) {
+        text.to_string()
+    } else {
+        format!("{STAND_IN_LINE} {text}")
+    }
+}
+
+/// The model is ready. If the person heard the stand-in, say so in Kokoro.
+/// Queued like any other speech, so it waits its turn and stays quiet when
+/// Juno is silent.
+fn announce_return() {
+    if !KOKORO.is_ready() || !STAND_IN_HEARD.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    if let Some(app) = APP.get() {
+        info!("[Kokoro] Downloaded; back in Kokoro's voice");
+        crate::tts::enqueue_speech_always(BACK_LINE.to_string(), app.clone());
+    }
+}
+
 /// Why the last load failed, until one succeeds. The voice list says it, so a
 /// Kokoro that cannot get ready reads as a reason rather than as a pane stuck
 /// on "getting ready".
@@ -234,8 +291,9 @@ pub fn sync_with_engine(engine: &str, on_settled: impl FnOnce() + Send + 'static
                 warn!("[Kokoro] Warm-up synthesis failed: {}", e);
             }
         }
-        if let Err(e) = KOKORO.finish_preload(result) {
-            warn!("[Kokoro] Preload failed: {}", e);
+        match KOKORO.finish_preload(result) {
+            Ok(_) => announce_return(),
+            Err(e) => warn!("[Kokoro] Preload failed: {}", e),
         }
         on_settled();
     });
@@ -298,6 +356,21 @@ pub async fn invoke_kokoro_tts(text: String, voice: String, speed: f64) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The stand-in line is said once, before the first sentence, and not
+    /// again until her own voice is back.
+    #[test]
+    fn the_stand_in_line_is_said_once() {
+        let heard = AtomicBool::new(false);
+        assert_eq!(
+            stand_in_text(&heard, "It is sunny."),
+            "One minute while I download my voice. It is sunny."
+        );
+        assert_eq!(stand_in_text(&heard, "And warm."), "And warm.");
+        heard.store(false, Ordering::SeqCst);
+        assert!(stand_in_text(&heard, "Hi.").starts_with(STAND_IN_LINE));
+        assert!(!STAND_IN_LINE.contains('—') && !BACK_LINE.contains('—'));
+    }
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
     use std::time::Duration;
