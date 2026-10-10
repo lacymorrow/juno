@@ -297,11 +297,16 @@ pub fn classify_system_voice(id: Option<&str>, name: Option<&str>) -> SystemVoic
 }
 
 /// True when the Mac's own voice (`say` with no `-v`) should be Juno's
-/// default: only when nothing is recorded at all. A recorded choice is either
-/// a voice Juno can speak with (it follows it) or one it cannot, in which case
-/// the ranking picks the best installed voice.
+/// default: when it is a Siri voice, or nothing is recorded (Apple's default,
+/// a Siri voice on current macOS). Siri voices are the best voices a Mac has,
+/// better than any Premium download, and `say` with no `-v` is the only way
+/// to reach one. A recorded non-Siri choice is followed when Juno can speak
+/// it; otherwise the ranking picks the best installed voice.
 pub fn prefers_system_voice(inventory: &VoiceInventory) -> bool {
-    inventory.system_voice == SystemVoice::Unset
+    matches!(
+        inventory.system_voice,
+        SystemVoice::Siri | SystemVoice::Unset
+    )
 }
 
 /// The installed `say` voice the person's System Voice names, when Juno can
@@ -2701,21 +2706,33 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         assert_eq!(old.voice_name.as_deref(), Some("Ava"));
     }
 
-    /// A Siri voice cannot be spoken by Juno: the ranking picks the voice, and
-    /// the pane still offers the Mac's own voice but never says "Siri".
+    /// Siri is the best voice a Mac has, so a Siri System Voice is the
+    /// default: the Mac's own voice, even over a Premium download. Reported by
+    /// the owner: Siri set in Read & Speak, Juno speaking as Samantha.
     #[test]
-    fn a_siri_system_voice_uses_the_ranking_and_shows_no_siri_row() {
+    fn a_siri_system_voice_is_the_default() {
         let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Siri);
         let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some("Ava (Premium)"));
+        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
         let list = voice_list("system", "system", &inventory, &resolution);
-        assert!(list.options.iter().any(|o| o.id == SYSTEM_DEFAULT_ID));
-        assert!(list.options.iter().all(|o| !o.name.contains("Siri")));
+        assert!(list.options.iter().any(|o| o.id == "Ava (Premium)"));
         assert_eq!(list.options.iter().filter(|o| o.selected).count(), 1);
 
         let stock = with_system_voice(stock_mac(), SystemVoice::Siri);
         let resolution = resolve_voice("system", &stock, None);
-        assert_eq!(resolution.voice.as_deref(), Some("Samantha"));
+        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
+    }
+
+    /// A voice an older build auto-picked (the ranking's top row, never
+    /// chosen) gives way to Siri.
+    #[test]
+    fn an_auto_picked_voice_yields_to_siri() {
+        let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Siri);
+        let best = best_macos_voice(&inventory.macos);
+        let resolution = resolve_stored_voice("system", &inventory, best.as_deref(), false);
+        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
+        let kept = resolve_stored_voice("system", &inventory, best.as_deref(), true);
+        assert_eq!(kept.voice, best);
     }
 
     /// A voice Juno can speak is followed, and is what the pane shows.
