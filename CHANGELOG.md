@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.171] - 2026-10-10
+
+### Fixed
+
+- **tts:** prefer Siri; Your Mac's voice speaks your Siri voice (#788) (0f4a8986)
+
 ## [0.8.170] - 2026-10-10
 
 ### Added
@@ -1301,7 +1307,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.170...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.171...HEAD
+[0.8.171]: https://github.com/lacymorrow/juno/compare/cua-v0.8.170...v0.8.171
 [0.8.170]: https://github.com/lacymorrow/juno/compare/cua-v0.8.169...v0.8.170
 [0.8.169]: https://github.com/lacymorrow/juno/compare/cua-v0.8.168...v0.8.169
 [0.8.167]: https://github.com/lacymorrow/juno/compare/cua-v0.8.166...v0.8.167
