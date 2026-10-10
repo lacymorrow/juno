@@ -127,6 +127,18 @@ pub mod tool_names {
     pub const CALENDAR_DELETE_EVENT: &str = "calendar_delete_event";
     pub const CONTACTS_FIND: &str = "contacts_find";
 
+    // Mac app tools (Messages, FaceTime, Mail, Notes through constant AppleScript)
+    pub const MESSAGES_SEND: &str = "messages_send";
+    pub const MESSAGES_RECENT: &str = "messages_recent";
+    pub const FACETIME_CALL: &str = "facetime_call";
+    pub const MAIL_UNREAD: &str = "mail_unread";
+    pub const MAIL_SEARCH: &str = "mail_search";
+    pub const MAIL_SEND: &str = "mail_send";
+    pub const MAIL_DRAFT: &str = "mail_draft";
+    pub const NOTES_CREATE: &str = "notes_create";
+    pub const NOTES_APPEND: &str = "notes_append";
+    pub const NOTES_SEARCH: &str = "notes_search";
+
     // Scheduled automation tools (user-facing cron schedules)
     pub const CREATE_SCHEDULED_AUTOMATION: &str = "create_scheduled_automation";
     pub const LIST_SCHEDULED_AUTOMATIONS: &str = "list_scheduled_automations";

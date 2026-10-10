@@ -1,8 +1,13 @@
-//! # Mac apps: Reminders, Calendar, Contacts
+//! # Mac apps: Reminders, Calendar, Contacts, Messages, FaceTime, Mail, Notes
 //!
-//! Typed tools for the three apps the Mac already syncs, so the model fills
-//! slots and Rust does the work. The model no longer writes AppleScript for
-//! these (Siri parity slice 1, `docs/plans/siri-parity.md`).
+//! Typed tools for the apps the Mac already syncs, so the model fills slots
+//! and Rust does the work. The model no longer writes AppleScript for these
+//! (Siri parity slices 1 and 2, `docs/plans/siri-parity.md`).
+//!
+//! Slice 2 adds `messages`, `mail`, `notes` (constant AppleScript through
+//! `script`, every value as `argv`), `chat_db` (the Messages history, read
+//! only), `recipients` (who a message goes to) and `send` (the send gate's
+//! card, phrase and read-back wording).
 //!
 //! ## Shape
 //!
@@ -49,6 +54,18 @@ mod contacts;
 #[cfg(target_os = "macos")]
 mod reminders;
 
+#[cfg(target_os = "macos")]
+mod mail;
+#[cfg(target_os = "macos")]
+mod messages;
+#[cfg(target_os = "macos")]
+mod notes;
+
+pub mod chat_db;
+pub mod recipients;
+pub mod script;
+pub mod send;
+
 // ---------------------------------------------------------------------------
 // The catalog
 // ---------------------------------------------------------------------------
@@ -59,6 +76,10 @@ pub const READ_TOOLS: &[&str] = &[
     tool_names::REMINDERS_LIST,
     tool_names::CALENDAR_EVENTS,
     tool_names::CONTACTS_FIND,
+    tool_names::MESSAGES_RECENT,
+    tool_names::MAIL_UNREAD,
+    tool_names::MAIL_SEARCH,
+    tool_names::NOTES_SEARCH,
 ];
 
 /// How dates are written in and out of every tool.
@@ -176,6 +197,112 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             json!({"query": {"type": "string", "description": "A name, or a relationship such as \"my wife\"."}}),
             &["query"],
         ),
+        definition(
+            tool_names::MESSAGES_SEND,
+            "Send a text in Messages (iMessage, or SMS when that is the only way to reach them). The person is \
+             always shown the message and must say \"send it\" first; you do not ask them yourself. Pass the \
+             recipient as the person said it (a name, \"my wife\", or a number) and the body in their words. \
+             Use this instead of AppleScript. If more than one person matches, nothing is sent and the names \
+             come back: ask which one."
+                .to_string(),
+            json!({
+                "to": {"type": "string", "description": "Who to text: a name, a relationship, or a phone number or email."},
+                "body": {"type": "string", "description": "The message, exactly as it should arrive."}
+            }),
+            &["to", "body"],
+        ),
+        definition(
+            tool_names::MESSAGES_RECENT,
+            "Read recent messages the person received in Messages, newest first. Optionally only from one person. \
+             Use this for \"what did Sam text me\". Never use AppleScript or the screen for this."
+                .to_string(),
+            json!({
+                "from": {"type": "string", "description": "Only messages from this person (a name or an address)."},
+                "limit": {"type": "integer", "description": "How many, 1 to 20. Defaults to 5."}
+            }),
+            &[],
+        ),
+        definition(
+            tool_names::FACETIME_CALL,
+            "Start a FaceTime call to a person in Contacts, right away. Use this for \"FaceTime Mom\" or \"call Doug on FaceTime\"."
+                .to_string(),
+            json!({
+                "contact": {"type": "string", "description": "Who to call: a name, a relationship, or a number or email."},
+                "audio": {"type": "boolean", "description": "True for an audio-only call. Defaults to video."}
+            }),
+            &["contact"],
+        ),
+        definition(
+            tool_names::MAIL_UNREAD,
+            "List unread mail in the Mail app's inbox: who it is from, the subject, when. Use this instead of AppleScript."
+                .to_string(),
+            json!({"limit": {"type": "integer", "description": "How many, 1 to 20. Defaults to 5."}}),
+            &[],
+        ),
+        definition(
+            tool_names::MAIL_SEARCH,
+            format!(
+                "Find mail in the Mail app's inbox by subject or sender. Optionally only from one sender, or only \
+                 since a date. Use this instead of AppleScript. {note}"
+            ),
+            json!({
+                "query": {"type": "string", "description": "Words in the subject or the sender."},
+                "from": {"type": "string", "description": "Only mail whose sender contains this."},
+                "since": {"type": "string", "description": "Only mail received on or after this."}
+            }),
+            &["query"],
+        ),
+        definition(
+            tool_names::MAIL_SEND,
+            "Send an email from the Mail app. The person is always shown the email and must say \"send it\" \
+             first; you do not ask them yourself. Use mail_draft instead when they only want it written. Use \
+             this instead of AppleScript or a cloud mail tool for mail set up on this Mac."
+                .to_string(),
+            json!({
+                "to": {"type": "string", "description": "Who to email: a name, a relationship, or an email address."},
+                "subject": {"type": "string", "description": "The subject line."},
+                "body": {"type": "string", "description": "The email, exactly as it should arrive."}
+            }),
+            &["to", "subject", "body"],
+        ),
+        definition(
+            tool_names::MAIL_DRAFT,
+            "Write an email in the Mail app and leave it open, unsent, for the person to finish. Nothing is sent."
+                .to_string(),
+            json!({
+                "to": {"type": "string", "description": "Who it is for: a name, a relationship, or an email address."},
+                "subject": {"type": "string", "description": "The subject line."},
+                "body": {"type": "string", "description": "The email."}
+            }),
+            &["to", "body"],
+        ),
+        definition(
+            tool_names::NOTES_CREATE,
+            "Make a note in the Notes app. Reads it back. Use this instead of AppleScript.".to_string(),
+            json!({
+                "title": {"type": "string", "description": "The note's title, its first line."},
+                "body": {"type": "string", "description": "The rest of the note."},
+                "folder": {"type": "string", "description": "Notes folder. Defaults to the person's default folder."}
+            }),
+            &["title"],
+        ),
+        definition(
+            tool_names::NOTES_APPEND,
+            "Add text to the end of an existing note, found by its title. Reads it back. If more than one note \
+             matches, nothing is added and the titles come back."
+                .to_string(),
+            json!({
+                "note": {"type": "string", "description": "The note's title, or part of it."},
+                "text": {"type": "string", "description": "What to add."}
+            }),
+            &["note", "text"],
+        ),
+        definition(
+            tool_names::NOTES_SEARCH,
+            "Find notes in the Notes app whose title or text contains some words.".to_string(),
+            json!({"query": {"type": "string", "description": "Words to look for."}}),
+            &["query"],
+        ),
     ]
 }
 
@@ -191,7 +318,9 @@ pub async fn register_mac_apps_tools(
         };
         provider.register_async_tool(def, exec).await;
     }
-    tracing::info!("Registered Mac app tools (Reminders, Calendar, Contacts)");
+    tracing::info!(
+        "Registered Mac app tools (Reminders, Calendar, Contacts, Messages, Mail, Notes)"
+    );
 }
 
 /// Run one tool on a blocking thread and hand back what it observed.
@@ -215,13 +344,57 @@ fn execute(name: &str, input: &Value) -> Result<Value, String> {
         tool_names::CALENDAR_MOVE_EVENT => calendar::move_event(input),
         tool_names::CALENDAR_DELETE_EVENT => calendar::delete(input),
         tool_names::CONTACTS_FIND => contacts::find(input),
+        tool_names::MESSAGES_SEND => messages::send(input),
+        tool_names::MESSAGES_RECENT => messages::recent(input),
+        tool_names::FACETIME_CALL => messages::facetime(input),
+        tool_names::MAIL_UNREAD => mail::unread(input),
+        tool_names::MAIL_SEARCH => mail::search(input),
+        tool_names::MAIL_SEND => mail::send(input),
+        tool_names::MAIL_DRAFT => mail::draft(input),
+        tool_names::NOTES_CREATE => notes::create(input),
+        tool_names::NOTES_APPEND => notes::append(input),
+        tool_names::NOTES_SEARCH => notes::search(input),
         other => Err(format!("{other} is not a Mac app tool")),
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 fn execute(_name: &str, _input: &Value) -> Result<Value, String> {
-    Err("Reminders, Calendar and Contacts are only available on a Mac.".to_string())
+    Err("The Mac app tools are only available on a Mac.".to_string())
+}
+
+/// A send as it would go out, recipient resolved through Contacts, for the
+/// gate to draw and ask about before anything is sent.
+///
+/// `Ok(draft)`: show it and wait for "send it". `Err(answer)`: there is
+/// nothing to ask about (ambiguous name, no address, Contacts declined, not a
+/// send tool); hand this back as the tool's answer. Nothing was sent.
+pub async fn preview_send(name: String, input: Value) -> Result<send::SendDraft, Value> {
+    tauri::async_runtime::spawn_blocking(move || preview_blocking(&name, &input))
+        .await
+        .unwrap_or_else(|e| {
+            Err(json!({"ok": false, "summary": format!("The message was not sent: {e}")}))
+        })
+}
+
+#[cfg(target_os = "macos")]
+fn preview_blocking(name: &str, input: &Value) -> Result<send::SendDraft, Value> {
+    let found = match name {
+        tool_names::MESSAGES_SEND => messages::preview(input),
+        tool_names::MAIL_SEND => mail::preview(input),
+        other => Err(format!("{other} does not send anything")),
+    };
+    match found {
+        Ok(inner) => inner,
+        Err(e) => Err(json!({"ok": false, "sent": false, "summary": e})),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn preview_blocking(_name: &str, _input: &Value) -> Result<send::SendDraft, Value> {
+    Err(
+        json!({"ok": false, "sent": false, "summary": "Messages and Mail are only available on a Mac."}),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1169,7 +1342,7 @@ mod tests {
     #[test]
     fn the_catalog_matches_the_names_the_gate_knows() {
         let names: Vec<String> = tool_definitions().into_iter().map(|d| d.name).collect();
-        assert_eq!(names.len(), 8);
+        assert_eq!(names.len(), 18);
         for read in READ_TOOLS {
             assert!(names.iter().any(|n| n == read), "{read}");
         }

@@ -394,11 +394,29 @@ pub async fn submit_query(
     // new agent turn. This runs before the query is announced to any surface,
     // so nothing is left in a working state. A no-op when nothing is pending or
     // the text is not a clear yes/no.
-    if crate::agent::providers::cli_approval::try_answer_pending_approval(&state, trimmed_query)
+    //
+    // A waiting text or email (the send gate) is answered only by "send it" or
+    // the Send button. A bare yes leaves it waiting and Juno says the phrase;
+    // anything else said here is a correction the waiting gate hands back to
+    // the agent, so nothing is sent and the message is redone.
+    use crate::agent::providers::cli_approval::{self, AnswerSource, PendingAnswer};
+    match cli_approval::answer_pending_approval(&state, trimmed_query, AnswerSource::Deliberate)
         .await
     {
-        info!("Query answered a pending tool approval: {}", trimmed_query);
-        return Ok(());
+        PendingAnswer::NotAnAnswer => {}
+        PendingAnswer::Answered => {
+            info!("Query answered a pending tool approval: {}", trimmed_query);
+            return Ok(());
+        }
+        PendingAnswer::SayThePhrase(line) => {
+            info!("A bare yes to a waiting send; asking for the phrase");
+            let app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = app.state::<AppState>();
+                let _ = crate::tts::invoke_tts(line, state, app.clone()).await;
+            });
+            return Ok(());
+        }
     }
 
     // Phase D analytics: fire `onboarding_first_query` exactly once per process

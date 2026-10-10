@@ -170,6 +170,12 @@ pub struct ToolApprovalRequest {
     /// scoped to it and a new conversation starts clean.
     #[serde(default = "default_conversation_key")]
     pub conversation_key: String,
+    /// For a send (a text or an email): the message as it will go out, with
+    /// the recipient as Contacts resolved them. The approval is drawn as a
+    /// message card from this and answered by "send it" or the Send button.
+    /// `None` for every other kind of ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<Value>,
 }
 
 /// The conversation key for a runner with no session id of its own.
@@ -193,6 +199,7 @@ impl ToolApprovalRequest {
             target_app: None,
             timeout_seconds: 60,
             conversation_key: default_conversation_key(),
+            message: None,
         }
     }
 
@@ -210,6 +217,18 @@ impl ToolApprovalRequest {
     pub fn with_target_app(mut self, app: String) -> Self {
         self.target_app = Some(app);
         self
+    }
+
+    /// Mark this ask as a send, carrying the message card's data.
+    pub fn with_message(mut self, message: Value) -> Self {
+        self.message = Some(message);
+        self
+    }
+
+    /// Whether this ask is a send, answered only by "send it" or the button.
+    pub fn is_send(&self) -> bool {
+        self.message.is_some()
+            || crate::agent::tools::risk_classifier::is_send_tool(&self.tool_name)
     }
 
     pub fn with_timeout(mut self, seconds: u64) -> Self {

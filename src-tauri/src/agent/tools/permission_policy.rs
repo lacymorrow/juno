@@ -120,6 +120,33 @@ pub fn requires_approval(mode: PermissionMode, risk: &RiskLevel, granted: bool) 
     }
 }
 
+/// [`requires_approval`] for one named tool, with the Send floor first.
+///
+/// A tool that sends something to another person (a text, an email:
+/// [`risk_classifier::Consequence::Send`]) asks in every mode, Don't Ask
+/// included, and a "do not ask again" granted in this conversation never covers
+/// it, whatever its risk level says. Every gate that knows the tool's name
+/// calls this, not [`requires_approval`] directly: the in-process runner and
+/// the Mac app tools on Juno's MCP server.
+///
+/// [`risk_classifier::Consequence::Send`]: crate::agent::tools::risk_classifier::Consequence::Send
+pub fn requires_approval_for(
+    tool_name: &str,
+    mode: PermissionMode,
+    risk: &RiskLevel,
+    granted: bool,
+) -> bool {
+    if crate::agent::tools::risk_classifier::is_send_tool(tool_name) {
+        return true;
+    }
+    requires_approval(mode, risk, granted)
+}
+
+/// Whether a "do not ask again" may be granted for this tool. Never for a send.
+pub fn may_grant(tool_name: &str) -> bool {
+    !crate::agent::tools::risk_classifier::is_send_tool(tool_name)
+}
+
 /// Why an approval wait ended.
 ///
 /// Every variant resolves to `approved` or `denied`. There is deliberately no
@@ -266,6 +293,25 @@ pub fn describe_action(tool_name: &str, tool_input: &Value) -> String {
         "calendar_move_event" => "Move an event on your calendar".to_string(),
         "calendar_delete_event" => "Delete an event from your calendar".to_string(),
 
+        // Messages, Mail, Notes. The send gate shows the message itself; this
+        // sentence is what a surface without the card says.
+        "messages_send" => match field("to") {
+            Some(to) => format!("Text {}", clip(to, 60)),
+            None => "Send a text".to_string(),
+        },
+        "mail_send" => match field("to") {
+            Some(to) => format!("Email {}", clip(to, 60)),
+            None => "Send an email".to_string(),
+        },
+        "notes_create" => match field("title") {
+            Some(title) => format!("Make a note: {}", clip(title, 80)),
+            None => "Make a note".to_string(),
+        },
+        "notes_append" => match field("note") {
+            Some(note) => format!("Add to your note {}", clip(note, 80)),
+            None => "Add to a note".to_string(),
+        },
+
         "create_scheduled_automation" => {
             "Set up a task that runs on its own later, without you here".to_string()
         }
@@ -367,6 +413,38 @@ mod tests {
             assert!(requires_approval(mode, &RiskLevel::Critical, false));
             assert!(requires_approval(mode, &RiskLevel::Critical, true));
         }
+    }
+
+    #[test]
+    fn sending_a_text_or_an_email_asks_in_every_mode_and_is_never_granted() {
+        for name in ["messages_send", "mail_send"] {
+            assert!(!may_grant(name), "{name} must never be granted");
+            for mode in [
+                PermissionMode::AskFirst,
+                PermissionMode::AskWhenRisky,
+                PermissionMode::DontAsk,
+            ] {
+                for risk in [
+                    RiskLevel::Low,
+                    RiskLevel::Medium,
+                    RiskLevel::High,
+                    RiskLevel::Critical,
+                ] {
+                    assert!(
+                        requires_approval_for(name, mode, &risk, true),
+                        "{name} {mode:?} {risk:?}"
+                    );
+                }
+            }
+        }
+        // A draft is free: in Don't Ask it goes through like any Low action.
+        assert!(may_grant("mail_draft"));
+        assert!(!requires_approval_for(
+            "mail_draft",
+            PermissionMode::DontAsk,
+            &RiskLevel::Low,
+            false
+        ));
     }
 
     #[test]

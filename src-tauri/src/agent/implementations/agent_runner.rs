@@ -834,6 +834,16 @@ where
         use crate::agent::tools::risk_classifier;
         use crate::state::RiskLevel;
 
+        // A text or an email has its own ask: the message card, and only
+        // "send it" or the Send button answers it. It never rides along in a
+        // batch, so each message is seen on its own before it goes.
+        if let Some(send_idx) = batch
+            .iter()
+            .position(|t| risk_classifier::is_send_tool(&t.name))
+        {
+            return self.ask_to_send(batch, send_idx, cancel_rx).await;
+        }
+
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Classify each tool once and find the highest risk level.
@@ -865,7 +875,12 @@ where
             .await;
 
         // The one decision.
-        if !permission_policy::requires_approval(self.permission_mode().await, &max_risk, granted) {
+        if !permission_policy::requires_approval_for(
+            &riskiest_tool.name,
+            self.permission_mode().await,
+            &max_risk,
+            granted,
+        ) {
             return Ok(true);
         }
 
@@ -1026,6 +1041,155 @@ where
         }
 
         Ok(approved)
+    }
+
+    /// Write the same tool result for every call in a batch that did not run.
+    async fn record_not_run(
+        &self,
+        batch: &[crate::agent::core::ToolCall],
+        content: &str,
+    ) -> Result<(), AgentError> {
+        for tool_call in batch {
+            let mut mem = self.memory.lock().await;
+            mem.add_message(crate::agent::core::Message {
+                role: crate::agent::core::Role::Tool,
+                content: content.to_string(),
+                tool_calls: None,
+                tool_call_id: Some(tool_call.id.clone()),
+                name: Some(tool_call.name.clone()),
+                images: None,
+            })
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// The send gate (`risk_classifier::Consequence::Send`).
+    ///
+    /// Asks in every permission mode and never consults a "do not ask again"
+    /// grant. The recipient is resolved through Contacts first, so the card
+    /// shows who it really goes to; a name that matches more than one person
+    /// is answered with the candidates and never asked about or sent. The ask
+    /// is the message card plus the spoken line ending "Say send it."; the
+    /// phrase arrives through `cli_approval::answer_pending_approval` and
+    /// resolves the same pending approval the Send button does.
+    async fn ask_to_send(
+        &self,
+        batch: &[crate::agent::core::ToolCall],
+        send_idx: usize,
+        cancel_rx: &crate::state::CancelReceiver,
+    ) -> Result<bool, AgentError> {
+        use crate::agent::tools::mac_apps::{self, send};
+        use crate::state::RiskLevel;
+
+        if batch.len() > 1 {
+            self.record_not_run(batch, send::ONE_SEND_AT_A_TIME).await?;
+            return Ok(false);
+        }
+        let tool = &batch[send_idx];
+
+        let draft = match mac_apps::preview_send(tool.name.clone(), tool.input.clone()).await {
+            Ok(draft) => draft,
+            Err(answer) => {
+                let text = serde_json::to_string(&answer).unwrap_or_else(|_| answer.to_string());
+                self.record_not_run(batch, &text).await?;
+                return Ok(false);
+            }
+        };
+
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+        let conversation_key = self
+            .session_id
+            .as_ref()
+            .map(|id| id.as_str().to_string())
+            .unwrap_or_else(crate::state::default_conversation_key);
+        let approval_id = uuid::Uuid::new_v4().to_string();
+        let message = draft.approval_payload();
+        let request = crate::state::ToolApprovalRequest::new(
+            approval_id.clone(),
+            tool.name.clone(),
+            tool.input.clone(),
+            draft.description(),
+        )
+        .with_risk(RiskLevel::Critical)
+        .with_timeout(send::SEND_TIMEOUT_SECS)
+        .with_conversation(conversation_key)
+        .with_message(message.clone());
+
+        app_state.add_pending_tool_approval(request.clone()).await;
+        if let Err(e) = self.app_handle.emit(
+            events::tools::APPROVAL_REQUEST,
+            serde_json::json!({
+                "tool_name": request.tool_name,
+                "tool_id": request.tool_id,
+                "tool_input": request.tool_input,
+                "description": request.description,
+                "timestamp": request.timestamp,
+                "risk_level": request.risk_level,
+                "target_app": request.target_app,
+                "timeout_seconds": request.timeout_seconds,
+                "is_batch": false,
+                "batch_size": 1,
+                "always_allow_label": serde_json::Value::Null,
+                "consequence": "send",
+                "message": message,
+            }),
+        ) {
+            log::error!("Failed to emit the send approval: {}", e);
+        }
+
+        // Say the message and the phrase. The card stays as the answer surface.
+        {
+            let app = self.app_handle.clone();
+            let spoken = draft.prompt();
+            tauri::async_runtime::spawn(async move {
+                let state = app.state::<crate::state::AppState>();
+                let _ = crate::tts::invoke_tts(spoken, state, app.as_ref().clone()).await;
+            });
+        }
+
+        let marked_needs_input = self.mark_session_needs_input(&draft.description()).await;
+
+        let mut remaining = (send::SEND_TIMEOUT_SECS * 1000 / 50) as i64;
+        let mut decision: Option<bool> = None;
+        while remaining > 0 {
+            if *cancel_rx.borrow() {
+                app_state.remove_tool_approval(&approval_id).await;
+                let _ = send::take_correction(&approval_id);
+                self.emit_approval_resolved(&approval_id, ApprovalOutcome::Cancelled);
+                if marked_needs_input {
+                    self.clear_session_needs_input().await;
+                }
+                return Err(AgentError::Terminated);
+            }
+            if let Some(answer) = app_state.get_tool_approval_status(&approval_id).await {
+                decision = Some(answer);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            remaining -= 1;
+        }
+        app_state.remove_tool_approval(&approval_id).await;
+        if marked_needs_input {
+            self.clear_session_needs_input().await;
+        }
+
+        let outcome = match decision {
+            Some(true) => ApprovalOutcome::Allowed,
+            Some(false) => ApprovalOutcome::Denied,
+            None => ApprovalOutcome::TimedOut,
+        };
+        self.emit_approval_resolved(&approval_id, outcome);
+        let correction = send::take_correction(&approval_id);
+
+        if decision == Some(true) {
+            log::info!("Send approved: {}", draft.description());
+            return Ok(true);
+        }
+        let text = send::not_sent_text(correction.as_deref(), decision.is_none());
+        log::info!("Send not approved: {}", text);
+        self.record_not_run(batch, &text).await?;
+        Ok(false)
     }
 
     /// Tell the chat surface an approval question is over.

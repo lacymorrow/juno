@@ -24,6 +24,31 @@ Tiers: 0 is a local intent (no model), 1 is a typed tool the model calls, 2 is c
 | what's Doug's number | yes | 1 (`contacts_find`) | built, unrecorded | - | - |
 | what's my wife's email | yes | 1 (`contacts_find`, relationship) | built, unrecorded | - | - |
 
+## Messages, FaceTime, Mail, Notes (slice 2, LAC-4236)
+
+A send always stops on the message card and goes only on "send it" or the Send button. A bare "yes" never sends.
+
+| utterance | Siri on Mac | Juno tier | status | first-audio ms | recording |
+| --- | --- | --- | --- | --- | --- |
+| text Doug I'm running late | yes | 1 (`messages_send`, card, then "send it") | built, unrecorded | - | - |
+| send it | yes | approval phrase, no model | built, unrecorded | - | - |
+| tell my wife I'm on my way | yes | 1 (`messages_send`, relationship) | built, unrecorded | - | - |
+| text Doug, actually make it twenty minutes (correction on the card) | yes | 1 (`messages_send` redone) | built, unrecorded | - | - |
+| text Sam (two Sams in Contacts) | yes | 1 (`messages_send` returns both, asks which) | built, unrecorded | - | - |
+| what did Katie text me | yes | 1 (`messages_recent`, from) | built, unrecorded | - | - |
+| read my new messages | yes | 1 (`messages_recent`) | built, unrecorded | - | - |
+| what did Katie text me (Full Disk Access off) | yes | 1 (`messages_recent`, opens the setting) | built, unrecorded | - | - |
+| FaceTime Mom | yes | 1 (`facetime_call`) | built, unrecorded | - | - |
+| FaceTime audio Doug | yes | 1 (`facetime_call`, audio) | built, unrecorded | - | - |
+| read me my unread mail | yes | 1 (`mail_unread`) | built, unrecorded | - | - |
+| find the email from Katie about the invoice | yes | 1 (`mail_search`, from) | built, unrecorded | - | - |
+| any mail from Doug since Monday | yes | 1 (`mail_search`, since) | built, unrecorded | - | - |
+| email Doug that the store is live | yes | 1 (`mail_send`, card, then "send it") | built, unrecorded | - | - |
+| draft an email to Katie about Thursday | yes | 1 (`mail_draft`, never sends) | built, unrecorded | - | - |
+| make a note: pick up the drawings Thursday | yes | 1 (`notes_create`) | built, unrecorded | - | - |
+| add milk to my groceries note | yes | 1 (`notes_append`) | built, unrecorded | - | - |
+| find my note about the wifi password | yes | 1 (`notes_search`) | built, unrecorded | - | - |
+
 ## Later slices
 
-Messages, FaceTime, Mail, Notes (slice 2), Music, Maps, Shortcuts, Focus (slice 3), and the timing pass (slice 4) add their rows when they ship. System commands that tier 0 already answers (volume, dark mode, timers, open an app) are added in slice 4 with their numbers.
+Music, Maps, Shortcuts, Focus (slice 3), and the timing pass (slice 4) add their rows when they ship. System commands that tier 0 already answers (volume, dark mode, timers, open an app) are added in slice 4 with their numbers.

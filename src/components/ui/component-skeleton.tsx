@@ -14,6 +14,7 @@ const CARD_HEIGHTS: Record<string, string> = {
   WeatherCard: "h-36",
   NowPlayingCard: "h-24",
   AgendaCard: "h-24",
+  MessageCard: "h-32",
   FileListCard: "h-44",
   SystemStatusCard: "h-40",
   ComparisonCard: "h-48",
