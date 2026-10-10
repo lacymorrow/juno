@@ -90,7 +90,7 @@ impl Pane {
     pub fn name(self) -> &'static str {
         match self {
             Pane::General => "General",
-            Pane::Triggers => "Triggers",
+            Pane::Triggers => "Shortcuts",
             Pane::Audio => "Audio",
             Pane::Providers => "Providers",
             Pane::Models => "Models",
@@ -115,7 +115,8 @@ impl Pane {
     /// "audio" both reach the Audio pane, "ai" and "providers" the Providers
     /// pane, "security" and "security & privacy" the same one. Notifications
     /// lived in a pane of their own once and now sit in General, so the old
-    /// name still finds them.
+    /// name still finds them. The Triggers pane is shown as Shortcuts;
+    /// "triggers" and "keyboard shortcuts" reach it.
     pub fn from_name(name: &str) -> Option<Pane> {
         let wanted = name.trim().to_ascii_lowercase();
         Pane::ALL.into_iter().find(|pane| {
@@ -123,6 +124,7 @@ impl Pane {
                 || pane.name().to_ascii_lowercase() == wanted
                 || (*pane == Pane::Security && wanted == "privacy")
                 || (*pane == Pane::General && wanted == "notifications")
+                || (*pane == Pane::Triggers && wanted == "keyboard shortcuts")
         })
     }
 }
@@ -1258,6 +1260,10 @@ mod tests {
         assert_eq!(Pane::from_name("Security & Privacy"), Some(Pane::Security));
         // The retired Notifications pane's name lands where the row moved.
         assert_eq!(Pane::from_name("Notifications"), Some(Pane::General));
+        // Shown as Shortcuts; the old name and the id still find it.
+        assert_eq!(Pane::from_name("Shortcuts"), Some(Pane::Triggers));
+        assert_eq!(Pane::from_name("triggers"), Some(Pane::Triggers));
+        assert_eq!(Pane::from_name("Keyboard Shortcuts"), Some(Pane::Triggers));
         assert_eq!(Pane::from_name("nowhere"), None);
     }
 
