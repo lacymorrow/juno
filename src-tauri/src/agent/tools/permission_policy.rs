@@ -312,6 +312,24 @@ pub fn describe_action(tool_name: &str, tool_input: &Value) -> String {
             None => "Add to a note".to_string(),
         },
 
+        // Music, Maps, Shortcuts and Focus
+        "music_play" => match field("query") {
+            Some(query) => format!("Play {} in Music", clip(query, 80)),
+            None => "Play music".to_string(),
+        },
+        "maps_directions" => match field("to") {
+            Some(to) => format!("Get directions to {}", clip(to, 80)),
+            None => "Get directions in Maps".to_string(),
+        },
+        "shortcuts_run" => match field("name") {
+            Some(name) => format!("Run your shortcut {}", clip(name, 80)),
+            None => "Run one of your shortcuts".to_string(),
+        },
+        "focus_set" => match field("state") {
+            Some("off") => "Turn Do Not Disturb off".to_string(),
+            _ => "Turn Do Not Disturb on".to_string(),
+        },
+
         "create_scheduled_automation" => {
             "Set up a task that runs on its own later, without you here".to_string()
         }

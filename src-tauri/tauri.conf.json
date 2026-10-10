@@ -194,7 +194,8 @@
     "resources": [
       "../tauri-plugin-voice-transcription/models/*",
       "../public/sounds/**/*",
-      "resources/ggml-metal.metal"
+      "resources/ggml-metal.metal",
+      "resources/shortcuts/*"
     ],
     "macOS": {
       "entitlements": "juno.entitlements",

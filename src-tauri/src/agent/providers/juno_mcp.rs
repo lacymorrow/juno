@@ -653,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn all_eighteen_mac_app_tools_are_offered() {
+    fn every_mac_app_tool_is_offered() {
         let names = [
             "reminders_list",
             "reminders_create",
@@ -673,6 +673,11 @@ mod tests {
             "notes_create",
             "notes_append",
             "notes_search",
+            "music_play",
+            "maps_directions",
+            "shortcuts_list",
+            "shortcuts_run",
+            "focus_set",
         ];
         for name in names {
             let tool = served(name);

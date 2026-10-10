@@ -10,12 +10,12 @@ Tiers: 0 is a local intent (no model), 1 is a typed tool the model calls, 2 is c
 | --- | --- | --- | --- | --- | --- |
 | remind me to call Katie tomorrow at nine | yes | 1 (`reminders_create`) | built, unrecorded | - | - |
 | remind me to pick up the drawings Friday | yes | 1 (`reminders_create`, date only) | built, unrecorded | - | - |
-| what are my reminders | yes | 1 (`reminders_list`) | built, unrecorded | - | - |
+| what are my reminders | yes | 0 (local intent `agenda`, once Reminders is allowed), else 1 (`reminders_list`) | built, unrecorded | - | - |
 | what's due today | yes | 1 (`reminders_list`, due window) | built, unrecorded | - | - |
 | what's on my grocery list | yes | 1 (`reminders_list`, one list) | built, unrecorded | - | - |
 | mark call Katie done | yes | 1 (`reminders_complete`) | built, unrecorded | - | - |
 | what's on my calendar this afternoon | yes | 1 (`calendar_events`) | built, unrecorded | - | - |
-| what's my next meeting | yes | 1 (`calendar_events`) | built, unrecorded | - | - |
+| what's my next meeting | yes | 0 (local intent `agenda`, once Calendar is allowed), else 1 (`calendar_events`) | built, unrecorded | - | - |
 | am I free Thursday morning | yes | 1 (`calendar_events`) | built, unrecorded | - | - |
 | add dentist Thursday at three to my calendar | yes | 1 (`calendar_create_event`) | built, unrecorded | - | - |
 | add this to my calendar (invite on screen) | yes | 1 (`calendar_create_event` after reading the screen) | built, unrecorded | - | - |
@@ -49,6 +49,30 @@ A send always stops on the message card and goes only on "send it" or the Send b
 | add milk to my groceries note | yes | 1 (`notes_append`) | built, unrecorded | - | - |
 | find my note about the wifi password | yes | 1 (`notes_search`) | built, unrecorded | - | - |
 
+## Music, Maps, Shortcuts, Focus (slice 3, LAC-4243)
+
+| utterance | Siri on Mac | Juno tier | status | first-audio ms | recording |
+| --- | --- | --- | --- | --- | --- |
+| play Boards of Canada | yes | 1 (`music_play`, artist; the first call asks to control Music) | built, unrecorded | - | - |
+| play Roygbiv | yes | 1 (`music_play`, song) | built, unrecorded | - | - |
+| play the album Geogaddi | yes | 1 (`music_play`, album) | built, unrecorded | - | - |
+| play my workout playlist | yes | 1 (`music_play`, playlist) | built, unrecorded | - | - |
+| play Boards of Canada on Spotify | no | 1, answers that Spotify cannot be searched (cut: no scripting search) | built, unrecorded | - | - |
+| directions to the airport | yes | 1 (`maps_directions`) | built, unrecorded | - | - |
+| walking directions to Starbucks | yes | 1 (`maps_directions`, walking) | built, unrecorded | - | - |
+| how do I get to 123 Main Street from the office | yes | 1 (`maps_directions`, with a start) | built, unrecorded | - | - |
+| run my morning routine | yes | 1 (`shortcuts_run`, fuzzy name) | built, unrecorded | - | - |
+| what shortcuts do I have | yes | 1 (`shortcuts_list`) | built, unrecorded | - | - |
+| turn on the porch lights | yes | 1 (`shortcuts_run` on the person's own HomeKit shortcut) | built, unrecorded | - | - |
+| turn off the porch lights | yes | 1 (`shortcuts_run`) | built, unrecorded | - | - |
+| turn on do not disturb (first time) | yes | 1 (`focus_set`, adds the Juno Focus shortcut with one click) | built, unrecorded | - | - |
+| turn on do not disturb | yes | 0 (local intent `agenda`, once the shortcut is added) | built, unrecorded | - | - |
+| turn off do not disturb | yes | 0 (local intent `agenda`, once the shortcut is added) | built, unrecorded | - | - |
+| what's on my calendar today | yes | 0 (local intent `agenda`, once Calendar is allowed) | built, unrecorded | - | - |
+| what's on my calendar tomorrow | yes | 0 (local intent `agenda`) | built, unrecorded | - | - |
+| turn the brightness up | yes | cut, tier 2 only (no public API; not promised) | cut | - | - |
+| turn on Bluetooth | yes | cut, tier 2 only (no public API; not promised) | cut | - | - |
+
 ## Later slices
 
-Music, Maps, Shortcuts, Focus (slice 3), and the timing pass (slice 4) add their rows when they ship. System commands that tier 0 already answers (volume, dark mode, timers, open an app) are added in slice 4 with their numbers.
+The timing pass (slice 4) adds its rows when they ship. System commands that tier 0 already answers (volume, dark mode, timers, open an app) are added in slice 4 with their numbers.

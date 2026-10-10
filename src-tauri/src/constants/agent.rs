@@ -139,6 +139,13 @@ pub mod tool_names {
     pub const NOTES_APPEND: &str = "notes_append";
     pub const NOTES_SEARCH: &str = "notes_search";
 
+    // Mac app tools: Music, Maps, Shortcuts and Focus
+    pub const MUSIC_PLAY: &str = "music_play";
+    pub const MAPS_DIRECTIONS: &str = "maps_directions";
+    pub const SHORTCUTS_LIST: &str = "shortcuts_list";
+    pub const SHORTCUTS_RUN: &str = "shortcuts_run";
+    pub const FOCUS_SET: &str = "focus_set";
+
     // Scheduled automation tools (user-facing cron schedules)
     pub const CREATE_SCHEDULED_AUTOMATION: &str = "create_scheduled_automation";
     pub const LIST_SCHEDULED_AUTOMATIONS: &str = "list_scheduled_automations";
