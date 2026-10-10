@@ -1020,40 +1020,41 @@ describe("FloatingBar", () => {
     expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
   });
 
-  it("hands an open input over to a voice turn that starts from the hotkey", async () => {
+  // ── The box stays a box ──────────────────────────────────────────
+  //
+  // Once the text box is up it stays up through every voice and working
+  // state; the placeholder says what the microphone or the agent is doing.
+  // It used to give way to the status row, which unmounted the box a
+  // dictation was about to type into, so the words landed nowhere.
+
+  it("keeps an open input through a voice turn from the hotkey, and says it is listening", async () => {
     await renderBar();
-    await openInput();
+    const input = await openInput();
 
     await setBarState({ barState: "listening" });
 
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(bar()).toHaveAttribute("data-layout", "voice");
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveAttribute("placeholder", "Listening…");
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    // The mic is already open: no "talk to Juno" while it is.
+    expect(screen.queryByRole("button", { name: "Talk to Juno" })).not.toBeInTheDocument();
   });
-
-  // ── A dictation into the composer ────────────────────────────────
-  //
-  // Dictation types what you say into whatever has the caret. With the caret
-  // in the pill's own box, the voice look used to unmount the box, so the
-  // keystrokes Rust posted at the end landed nowhere and the box came back
-  // empty.
 
   it("keeps the composer, its draft and the caret through a dictation typed into it", async () => {
     await renderBar();
     const input = await openInput();
     fireEvent.change(input, { target: { value: "hello " } });
 
-    // Fn+Control held: Rust marks the dictation, opens the mic, streams a
-    // partial, then closes the mic and runs the final decode.
+    // Fn+Control held, then released: exactly the states Rust emits. The
+    // dictation flag drops on key-up and the bar blips to rest before the
+    // final decode shows as plain transcribing, and only then are the words
+    // posted at the caret. The box must be there, with the draft, throughout.
     await setBarState({ barState: "dictating", isDictationMode: true });
     await setBarState({ barState: "listening", isDictationMode: true, audioLevel: 0.4 });
-
     expect(screen.getByRole("textbox")).toBe(input);
     expect(input).toHaveFocus();
     expect(input).toHaveValue("hello ");
     expect(input).toHaveAttribute("placeholder", "Listening…");
-    expect(bar()).toHaveAttribute("data-layout", "full");
-    // The mic is already open: no "talk to Juno" while it is.
-    expect(screen.queryByRole("button", { name: "Talk to Juno" })).not.toBeInTheDocument();
 
     await setBarState({
       barState: "transcribing",
@@ -1062,19 +1063,17 @@ describe("FloatingBar", () => {
       transcriptionProvisional: true,
     });
     expect(screen.getByRole("textbox")).toBe(input);
+    // Live partial words are never shown.
+    expect(input).toHaveAttribute("placeholder", "Listening…");
 
-    // Key-up, exactly as Rust does it: the dictation flag drops and the bar
-    // blips to rest, then the final decode shows as plain transcribing, and
-    // only then are the words posted. The box must be there when they land.
     await setBarState({ barState: "default" });
     expect(screen.getByRole("textbox")).toBe(input);
-    await setBarState({ barState: "transcribing", isDictationMode: false });
+    await setBarState({ barState: "transcribing" });
     expect(screen.getByRole("textbox")).toBe(input);
     expect(input).toHaveFocus();
     expect(input).toHaveValue("hello ");
     expect(input).toHaveAttribute("placeholder", "Transcribing…");
 
-    // Rust posts the words at the caret, as it does into any other app.
     fireEvent.change(input, { target: { value: "hello world" } });
     await setBarState({ barState: "default" });
 
@@ -1098,31 +1097,40 @@ describe("FloatingBar", () => {
     expect(input).toHaveValue("keep this");
   });
 
-  it("does not bring the composer back for the final decode of a spoken query", async () => {
+  it("stays a box while Juno works on a typed line, saying so, with Send held and the X stopping", async () => {
     await renderBar();
-    await openInput();
+    const input = await openInput();
+    fireEvent.change(input, { target: { value: "Open Safari" } });
+    fireEvent.submit(input.closest("form")!);
+    await act(async () => {});
+    await submitUserMessage("Open Safari");
+    await setBarState({ barState: "loading", agentState: "working", isAgentWorking: true });
 
-    // The hotkey: a spoken query takes the pill over, then its final decode
-    // runs with the mic closed, then the agent works. No composer anywhere.
-    await setBarState({ barState: "listening" });
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    await setBarState({ barState: "transcribing" });
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("transcribing");
-    await setBarState({ barState: "submitting" });
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "Working…");
+    expect(screen.queryByRole("button", { name: "Talk to Juno" })).not.toBeInTheDocument();
+
+    // The next line can be typed now and goes once Juno is done.
+    fireEvent.change(input, { target: { value: "then close it" } });
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close without sending" }));
+    expect(invoke).toHaveBeenCalledWith("stop_all_operations");
+    expect(input).toHaveValue("then close it");
   });
 
-  it("still hands the composer over to a dictation aimed at another app", async () => {
+  it("keeps the draft when the mic inside the box opens a spoken turn", async () => {
     await renderBar();
-    await openInput();
-    // The person moved to another app: the words are for it, not the pill.
-    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const input = await openInput();
+    fireEvent.change(input, { target: { value: "draft" } });
 
-    await setBarState({ barState: "listening", isDictationMode: true });
+    fireEvent.click(screen.getByRole("button", { name: "Talk to Juno" }));
+    await act(async () => {});
 
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(bar()).toHaveAttribute("data-layout", "voice");
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "start" });
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveValue("draft");
   });
 });
 
