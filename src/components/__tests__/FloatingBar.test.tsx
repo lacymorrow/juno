@@ -293,12 +293,6 @@ describe("pillFootprint", () => {
       .toEqual({ width: 88, height: 76 });
     expect(pillFootprint({ layout: "hover", paneOpen: false, rosterVisible: false }))
       .toEqual({ width: 180, height: 76 });
-    expect(pillFootprint({ layout: "voice", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 292, height: 76 });
-    // Status shares voice's width so the bar does not lurch wider the moment
-    // the mic closes, for a word and a stop button.
-    expect(pillFootprint({ layout: "status", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 292, height: 76 });
     // Full used to carry its own pad and band (24 and 44 against 16 and 34),
     // which moved the anchor by 13px every time the pill went full: the lurch
     // on pane close. Same height, same anchor, whatever the layout.
@@ -327,19 +321,19 @@ describe("pointInRect", () => {
 
 describe("pickLayout", () => {
   const base = { hovered: false, inputOpen: false, paneOpen: false, rosterVisible: false };
-  it("is compact while idle, grows on hover, and goes full for anything with text", () => {
+  it("is compact while idle, grows on hover, and is the text box for everything else", () => {
     expect(pickLayout({ ...base, state: "default" })).toBe("compact");
     expect(pickLayout({ ...base, state: "dictation_ready" })).toBe("compact");
     expect(pickLayout({ ...base, state: "default", hovered: true })).toBe("hover");
-    expect(pickLayout({ ...base, state: "listening", hovered: true })).toBe("voice");
-    expect(pickLayout({ ...base, state: "always_listening" })).toBe("voice");
     expect(pickLayout({ ...base, state: "default", inputOpen: true })).toBe("full");
     expect(pickLayout({ ...base, state: "expanding" })).toBe("full");
-    // Working states carry a label and one control, not an input, so they get
-    // the status width rather than the full 419px.
-    expect(pickLayout({ ...base, state: "loading" })).toBe("status");
-    expect(pickLayout({ ...base, state: "error" })).toBe("status");
-    expect(pickLayout({ ...base, state: "transcribing" })).toBe("status");
+    // Listening, working, an error: the box, with a placeholder that says so.
+    // There used to be a narrower voice and status pill for these.
+    expect(pickLayout({ ...base, state: "listening", hovered: true })).toBe("full");
+    expect(pickLayout({ ...base, state: "always_listening" })).toBe("full");
+    expect(pickLayout({ ...base, state: "loading" })).toBe("full");
+    expect(pickLayout({ ...base, state: "error" })).toBe("full");
+    expect(pickLayout({ ...base, state: "transcribing" })).toBe("full");
     expect(pickLayout({ ...base, state: "default", paneOpen: true })).toBe("full");
     expect(pickLayout({ ...base, state: "default", rosterVisible: true })).toBe("full");
   });
@@ -472,15 +466,14 @@ describe("FloatingBar", () => {
     expect(windowSetFocus).not.toHaveBeenCalled();
   });
 
-  it("shows listening status with a stop control while the mic is open", async () => {
+  it("is the box, saying it is listening, while the mic is open; Send sends what was said", async () => {
     await renderBar();
 
     await setBarState({ barState: "listening", audioLevel: 0.6 });
 
-    expect(bar()).toHaveAttribute("data-layout", "voice");
-    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("listening");
-    // The voice pill, plus room for the expand control while the chat is closed.
-    expect(lastResize()).toMatchObject({ width: 324, height: 76 });
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Listening…");
+    expect(lastResize()).toMatchObject({ width: 451, height: 76 });
 
     // "Stop" used to be the only control and it submitted what you had said.
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -499,17 +492,18 @@ describe("FloatingBar", () => {
     expect(invoke).not.toHaveBeenCalledWith("agent_voice", { action: "stop" });
   });
 
-  it("can switch from talking to typing without sending", async () => {
+  it("lets you type while the mic is open, since the box is already there", async () => {
     await renderBar();
     await setBarState({ barState: "listening", audioLevel: 0.6 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Type instead" }));
-    await act(async () => {});
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "and also" } });
 
-    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "cancel" });
+    expect(input).toHaveValue("and also");
+    expect(screen.queryByRole("button", { name: "Type instead" })).not.toBeInTheDocument();
   });
 
-  it("renders a live partial as dimmed provisional text, then solid on final", async () => {
+  it("never shows live partial words; the placeholder says listening, then transcribing", async () => {
     await renderBar();
 
     await setBarState({ barState: "listening", isDictationMode: true, audioLevel: 0.4 });
@@ -522,45 +516,33 @@ describe("FloatingBar", () => {
       transcriptionText: "hello there",
       transcriptionProvisional: true,
     });
-    const status = screen.getByTestId("floating-bar-status");
-    expect(status).toHaveTextContent("hello there");
-    expect(status).toHaveClass("italic");
+    const input = screen.getByRole("textbox");
+    expect(input).toHaveAttribute("placeholder", "Listening…");
+    expect(screen.queryByText("hello there")).not.toBeInTheDocument();
 
-    // A later partial replaces, never appends, and stays provisional.
-    await setBarState({
-      barState: "transcribing",
-      isDictationMode: true,
-      transcriptionText: "hello there world",
-      transcriptionProvisional: true,
-    });
-    expect(status).toHaveTextContent("hello there world");
-    expect(status).not.toHaveTextContent("hello there hello there");
-
-    // The final result swaps the same span to solid.
+    // The mic closes and the final decode runs.
     await setBarState({
       barState: "transcribing",
       transcriptionText: "hello there world",
       transcriptionProvisional: false,
     });
-    expect(status).toHaveTextContent("hello there world");
-    expect(status).not.toHaveClass("italic");
+    expect(input).toHaveAttribute("placeholder", "Transcribing…");
+    expect(screen.queryByText("hello there world")).not.toBeInTheDocument();
   });
 
-  it("shows a processing state, not the listening look, once the mic closes", async () => {
+  it("says transcribing, with a stop and nothing to send, once the mic closes", async () => {
     await renderBar();
 
     await setBarState({ barState: "listening", audioLevel: 0.6 });
-    expect(bar()).toHaveAttribute("data-layout", "voice");
+    expect(bar()).toHaveAttribute("data-layout", "full");
 
-    // The backend sets transcribing the instant the mic stops. The bar keeps
-    // the same width it had while listening: the old behaviour jumped from
-    // 220px to 419px mid-sentence to show one more word.
+    // The backend sets transcribing the instant the mic stops. Same box,
+    // same width: nothing lurches mid-sentence.
     await setBarState({ barState: "transcribing" });
-    expect(bar()).toHaveAttribute("data-layout", "status");
-    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("transcribing");
-    // A processing state has a Stop control, and no live audio bars.
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Transcribing…");
     expect(screen.getByRole("button", { name: "Stop Juno" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
   it.each([
@@ -570,15 +552,14 @@ describe("FloatingBar", () => {
       "live words while you talk",
       { barState: "transcribing", transcriptionText: "testing", transcriptionProvisional: true },
     ],
-  ])("keeps Send, Type instead and Cancel in every recording state: %s", async (_name, state) => {
+  ])("keeps Send and Cancel in every recording state: %s", async (_name, state) => {
     await renderBar();
     await setBarState(state);
 
     // The owner's report: once speech was detected the bar switched to the
     // transcript with only a stop square, and there was no way to send with
     // the mouse.
-    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Type instead" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Cancel without sending" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop Juno" })).not.toBeInTheDocument();
 
@@ -637,11 +618,11 @@ describe("FloatingBar", () => {
     await renderBar();
     await setBarState({ barState: "always_listening", isAlwaysListening: true });
 
-    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("always listening");
+    expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Listening…");
     // The engine decides when the sentence ends, so there is nothing to commit
     // by hand. There is something to stop, though, and every other state that
     // has something to stop offers the same X.
-    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Cancel without sending" }));
     // The capture belongs to the always-listening engine, which only the
     // coordinated stop can reach; it re-arms the wake phrase on its way out.
@@ -830,14 +811,13 @@ describe("FloatingBar", () => {
     expect(screen.getByPlaceholderText("Follow up…")).toBeInTheDocument();
   });
 
-  it("shows status and a Stop control instead of the input while the agent works", async () => {
+  it("is the box saying Working…, with a Stop control, while the agent works", async () => {
     await renderBar();
 
     await submitUserMessage("Open Safari");
     await setBarState({ barState: "loading", agentState: "working", isAgentWorking: true });
 
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("working");
+    expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Working…");
 
     fireEvent.click(screen.getByRole("button", { name: "Stop Juno" }));
     expect(invoke).toHaveBeenCalledWith("stop_all_operations");
@@ -1089,7 +1069,7 @@ describe("FloatingBar", () => {
     fireEvent.change(input, { target: { value: "keep this" } });
     await setBarState({ barState: "listening", isDictationMode: true });
 
-    fireEvent.click(screen.getByRole("button", { name: "Close without sending" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel without sending" }));
     await act(async () => {});
 
     const { emit } = await import("@tauri-apps/api/event");
@@ -1115,7 +1095,7 @@ describe("FloatingBar", () => {
     fireEvent.change(input, { target: { value: "then close it" } });
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close without sending" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop Juno" }));
     expect(invoke).toHaveBeenCalledWith("stop_all_operations");
     expect(input).toHaveValue("then close it");
   });
@@ -1221,8 +1201,8 @@ describe("FloatingBar steady frame", () => {
     expect(lastRegions()).toEqual([{ x: 364, y: 0, width: 88, height: 76 }]);
 
     await setBarState({ barState: "listening", audioLevel: 0.6 });
-    // Listening carries the expand control while the chat is closed.
-    expect(lastRegions()).toEqual([{ x: 128, y: 0, width: 324, height: 76 }]);
+    // Listening is the box, docked on the right edge like every full state.
+    expect(lastRegions()).toEqual([{ x: 1, y: 0, width: 451, height: 76 }]);
 
     // Another look taking the window gets every mouse event back.
     unmount();
