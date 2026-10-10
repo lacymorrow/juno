@@ -45,7 +45,11 @@ pub fn decode_attributed_body(blob: &[u8]) -> Option<String> {
     let after = [b"NSString".as_slice(), b"NSMutableString".as_slice()]
         .iter()
         .find_map(|marker| find(blob, marker).map(|at| at + marker.len()))?;
-    let plus = blob.get(after..)?.iter().take(16).position(|b| *b == 0x2B)?;
+    let plus = blob
+        .get(after..)?
+        .iter()
+        .take(16)
+        .position(|b| *b == 0x2B)?;
     let mut at = after + plus + 1;
     let first = *blob.get(at)?;
     at += 1;
@@ -179,10 +183,7 @@ pub fn evidence_for(rows: &[Row], body: &str) -> Option<Evidence> {
 
 /// A list of integers for an `IN (...)`. Only integers ever reach SQL.
 pub fn id_list(ids: &[i64]) -> String {
-    ids.iter()
-        .map(i64::to_string)
-        .collect::<Vec<_>>()
-        .join(",")
+    ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +272,11 @@ const ORDINARY: &str =
     "COALESCE(m.associated_message_type, 0) = 0 AND COALESCE(m.item_type, 0) = 0";
 
 /// Messages received, newest first, from these handles or (empty) from anyone.
-pub fn received(path: &std::path::Path, handle_ids: &[i64], limit: usize) -> Result<Vec<Row>, String> {
+pub fn received(
+    path: &std::path::Path,
+    handle_ids: &[i64],
+    limit: usize,
+) -> Result<Vec<Row>, String> {
     let from = if handle_ids.is_empty() {
         String::new()
     } else {
@@ -286,7 +291,11 @@ pub fn received(path: &std::path::Path, handle_ids: &[i64], limit: usize) -> Res
 }
 
 /// What Juno sent to these handles since a moment (Unix seconds), newest first.
-pub fn sent_since(path: &std::path::Path, handle_ids: &[i64], since_unix: i64) -> Result<Vec<Row>, String> {
+pub fn sent_since(
+    path: &std::path::Path,
+    handle_ids: &[i64],
+    since_unix: i64,
+) -> Result<Vec<Row>, String> {
     if handle_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -326,7 +335,9 @@ mod tests {
         }
         out.extend_from_slice(bytes);
         // What follows the string in a real archive: its attributes.
-        out.extend_from_slice(&[0x86, 0x84, 0x02, 0x69, 0x49, 0x01, 0x0A, 0x92, 0x84, 0x84, 0x84]);
+        out.extend_from_slice(&[
+            0x86, 0x84, 0x02, 0x69, 0x49, 0x01, 0x0A, 0x92, 0x84, 0x84, 0x84,
+        ]);
         out.extend_from_slice(b"NSDictionary");
         out
     }
@@ -366,7 +377,10 @@ mod tests {
 
     #[test]
     fn a_row_with_null_text_reads_the_archive() {
-        let hex: String = blob("On my way").iter().map(|b| format!("{b:02X}")).collect();
+        let hex: String = blob("On my way")
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect();
         let row = row_from_json(&serde_json::json!({
             "rowid": 7, "from_me": 1, "date": 781_000_000_000_000_000i64,
             "text": null, "body_hex": hex, "is_sent": 1, "is_delivered": 0,
@@ -386,7 +400,10 @@ mod tests {
             apple_to_unix(781_000_000_000_000_000),
             781_000_000 + 978_307_200
         );
-        assert_eq!(apple_to_unix(unix_to_apple_ns(1_791_550_800)), 1_791_550_800);
+        assert_eq!(
+            apple_to_unix(unix_to_apple_ns(1_791_550_800)),
+            1_791_550_800
+        );
     }
 
     fn sent(text: &str, is_sent: bool, error: i64) -> Row {
@@ -409,8 +426,14 @@ mod tests {
             evidence_for(&[sent("I\u{2019}m running late", true, 0)], body),
             Some(Evidence::Confirmed)
         );
-        assert_eq!(evidence_for(&[sent(body, false, 0)], body), Some(Evidence::Waiting));
-        assert_eq!(evidence_for(&[sent(body, false, 22)], body), Some(Evidence::Failed));
+        assert_eq!(
+            evidence_for(&[sent(body, false, 0)], body),
+            Some(Evidence::Waiting)
+        );
+        assert_eq!(
+            evidence_for(&[sent(body, false, 22)], body),
+            Some(Evidence::Failed)
+        );
         assert_eq!(evidence_for(&[sent("something else", true, 0)], body), None);
         let mut theirs = sent(body, true, 0);
         theirs.from_me = false;

@@ -208,11 +208,17 @@ mod tests {
             .contains("Privacy_Automation"));
         for banned in ["TCC", "Apple events", "plist", "framework", "osascript"] {
             assert!(
-                !denied["summary"].as_str().unwrap_or_default().contains(banned),
+                !denied["summary"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains(banned),
                 "{banned}"
             );
         }
-        assert_eq!(error_result(App::Mail, ERR_TIMED_OUT, "")["access"], "asking");
+        assert_eq!(
+            error_result(App::Mail, ERR_TIMED_OUT, "")["access"],
+            "asking"
+        );
     }
 
     #[test]

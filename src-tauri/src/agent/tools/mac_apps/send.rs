@@ -317,7 +317,9 @@ pub fn sent_result(draft: &SendDraft, evidence: &Evidence) -> Value {
             false,
             match draft.kind {
                 SendKind::Text => "Messages has it, but it has not gone out yet.".to_string(),
-                SendKind::Email => "Mail has it in the outbox, but it has not gone out yet.".to_string(),
+                SendKind::Email => {
+                    "Mail has it in the outbox, but it has not gone out yet.".to_string()
+                }
             },
             Some(CardState::Sending),
         ),
@@ -420,7 +422,10 @@ mod tests {
     #[test]
     fn a_bare_yes_asks_for_the_phrase_and_a_no_cancels() {
         assert_eq!(classify_reply("yes", yes_no), Some(SendReply::SayThePhrase));
-        assert_eq!(classify_reply("okay", yes_no), Some(SendReply::SayThePhrase));
+        assert_eq!(
+            classify_reply("okay", yes_no),
+            Some(SendReply::SayThePhrase)
+        );
         assert_eq!(classify_reply("no", yes_no), Some(SendReply::Cancel));
         assert_eq!(
             classify_reply("don't send it", yes_no),
@@ -437,7 +442,9 @@ mod tests {
         );
         assert_eq!(
             classify_reply("send it to Katie instead", yes_no),
-            Some(SendReply::Correction("send it to Katie instead".to_string()))
+            Some(SendReply::Correction(
+                "send it to Katie instead".to_string()
+            ))
         );
     }
 
@@ -470,9 +477,15 @@ mod tests {
     #[test]
     fn the_card_tag_carries_every_field_as_json() {
         let tag = doug().card_tag(CardState::Draft);
-        assert!(tag.starts_with("<MessageCard state=\"draft\" kind=\"text\""), "{tag}");
+        assert!(
+            tag.starts_with("<MessageCard state=\"draft\" kind=\"text\""),
+            "{tag}"
+        );
         assert!(tag.contains("to={\"Doug Keesler\"}"), "{tag}");
-        assert!(tag.contains("body={\"I'm running ten minutes late\"}"), "{tag}");
+        assert!(
+            tag.contains("body={\"I'm running ten minutes late\"}"),
+            "{tag}"
+        );
         assert!(tag.ends_with(" />"), "{tag}");
         let mut quoted = doug();
         quoted.body = "say \"hi\" {now}".to_string();
@@ -500,7 +513,10 @@ mod tests {
             assert_eq!(out["sent"], false, "{evidence:?}");
             assert_ne!(out["summary"], "Sent.", "{evidence:?}");
             assert!(
-                !out["card"].as_str().unwrap_or_default().contains("state=\"sent\""),
+                !out["card"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("state=\"sent\""),
                 "{evidence:?}"
             );
         }

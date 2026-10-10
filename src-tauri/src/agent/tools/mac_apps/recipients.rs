@@ -357,7 +357,10 @@ mod tests {
         assert_eq!(address_kind("555"), None);
         assert_eq!(address_kind("doug @example.com"), None);
         assert_eq!(normalize_phone("+1 (704) 555-0100"), "+17045550100");
-        assert_eq!(address_key("+1 (704) 555-0100"), address_key("704.555.0100"));
+        assert_eq!(
+            address_key("+1 (704) 555-0100"),
+            address_key("704.555.0100")
+        );
         assert_eq!(address_key("Doug@Example.com"), "doug@example.com");
     }
 
@@ -370,10 +373,7 @@ mod tests {
         );
         let mut known = HashMap::new();
         known.insert(address_key("+17045550199"), vec![Service::Sms]);
-        known.insert(
-            address_key("doug@example.com"),
-            vec![Service::IMessage],
-        );
+        known.insert(address_key("doug@example.com"), vec![Service::IMessage]);
         assert_eq!(
             pick_for_text(&doug, &known),
             Some(("doug@example.com".to_string(), Service::IMessage))
@@ -433,7 +433,10 @@ mod tests {
         );
         // The full name settles it.
         let one = resolve("doug keesler", people, Channel::Text, &none());
-        assert!(matches!(one, Resolved::One(ref r) if r.name == "Doug Keesler"), "{one:?}");
+        assert!(
+            matches!(one, Resolved::One(ref r) if r.name == "Doug Keesler"),
+            "{one:?}"
+        );
 
         // Two cards with one name are still two people.
         let twins = vec![
@@ -453,10 +456,16 @@ mod tests {
             resolve("Doug", vec![doug], Channel::Email, &none()),
             Resolved::NoAddress("Doug".to_string())
         );
-        assert_eq!(resolve("Zed", vec![], Channel::Email, &none()), Resolved::NotFound);
+        assert_eq!(
+            resolve("Zed", vec![], Channel::Email, &none()),
+            Resolved::NotFound
+        );
         assert!(from_typed_address("704 555 0100", Channel::Email, &none()).is_none());
         let typed = from_typed_address("doug@example.com", Channel::Email, &none());
-        assert_eq!(typed.map(|r| r.address), Some("doug@example.com".to_string()));
+        assert_eq!(
+            typed.map(|r| r.address),
+            Some("doug@example.com".to_string())
+        );
     }
 
     #[test]

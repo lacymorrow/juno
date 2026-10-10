@@ -381,6 +381,8 @@ export function useBackendEvents({
 		timeout_seconds?: number;
 		/** What "Always allow" would cover. Null when it is not on offer. */
 		always_allow_label?: string | null;
+		/** Set for a send: the message card's data. */
+		message?: ChatMessage["message"];
 	}>(
 		EVENTS.TOOLS_APPROVAL_REQUEST,
 		(payload) => {
@@ -395,6 +397,7 @@ export function useBackendEvents({
 					risk_level: payload.risk_level,
 					target_app: payload.target_app,
 					always_allow_label: payload.always_allow_label ?? null,
+					message: payload.message ?? null,
 					approval_timeout_seconds: payload.timeout_seconds ?? 60,
 					timestamp: payload.timestamp,
 			}));

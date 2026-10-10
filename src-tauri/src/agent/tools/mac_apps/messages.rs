@@ -109,16 +109,14 @@ pub(crate) fn resolve_recipient(
     let known = known_services(history.as_ref());
 
     if recipients::address_kind(to).is_some() {
-        return Ok(
-            match recipients::from_typed_address(to, channel, &known) {
-                Some(recipient) => Ok(recipient),
-                None => Err(recipients::unresolved_result(
-                    to,
-                    &Resolved::NoAddress(to.to_string()),
-                    channel,
-                )),
-            },
-        );
+        return Ok(match recipients::from_typed_address(to, channel, &known) {
+            Some(recipient) => Ok(recipient),
+            None => Err(recipients::unresolved_result(
+                to,
+                &Resolved::NoAddress(to.to_string()),
+                channel,
+            )),
+        });
     }
 
     let (people, _asked) = match contacts::people_for(to)? {
@@ -137,12 +135,14 @@ pub(crate) fn resolve_recipient(
 pub(crate) fn preview(input: &Value) -> Result<Result<SendDraft, Value>, String> {
     let to = required_text(input, "to")?;
     let body = required_text(input, "body")?;
-    Ok(resolve_recipient(to, Channel::Text)?.map(|recipient| SendDraft {
-        kind: SendKind::Text,
-        recipient,
-        subject: None,
-        body: body.to_string(),
-    }))
+    Ok(
+        resolve_recipient(to, Channel::Text)?.map(|recipient| SendDraft {
+            kind: SendKind::Text,
+            recipient,
+            subject: None,
+            body: body.to_string(),
+        }),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -191,11 +191,7 @@ pub fn send(input: &Value) -> Result<Value, String> {
         .as_str()
         .to_string();
     let started = Local::now().timestamp();
-    let argv = vec![
-        draft.recipient.address.clone(),
-        draft.body.clone(),
-        service,
-    ];
+    let argv = vec![draft.recipient.address.clone(), draft.body.clone(), service];
     match script::run(&script::wrap(SEND_BODY), argv)? {
         Outcome::Ok(_) => {}
         Outcome::Err { number, message } => {
