@@ -44,9 +44,13 @@ use tracing::{debug, error, info, warn};
 use crate::agent::core::AgentError;
 use crate::agent::providers::cli_approval;
 use crate::agent::tools::anthropic_computer_use::{create_versioned_tools, run_computer_action};
+use crate::agent::tools::mac_apps;
+use crate::agent::tools::permission_policy::{self, PermissionMode};
+use crate::agent::tools::risk_classifier;
 use crate::agent::tools::settings_tool;
 use crate::agent::tools::tool_versioning::{ApiVersion, ToolVersionConfig};
 use crate::constants::agent::tool_names;
+use crate::state::ToolApprovalRequest;
 
 /// The MCP protocol revision this server speaks.
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -188,10 +192,11 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
 
 /// The tools this server offers, in MCP's shape.
 ///
-/// `computer`, plus `approve` (LAC-4058). Bash and file editing are the
-/// CLI's own, and better there: it already has them, they need no desktop,
-/// and routing them through Juno would add a hop for nothing. What Juno has
-/// that the CLI does not is a pointer people can see — and a person to ask
+/// `computer`, the Mac app tools (LAC-4233), and `approve` (LAC-4058). Bash
+/// and file editing are the CLI's own, and better there: it already has them,
+/// they need no desktop, and routing them through Juno would add a hop for
+/// nothing. What Juno has that the CLI does not is a pointer people can see,
+/// typed access to Reminders, Calendar and Contacts, and a person to ask
 /// before something goes out: `approve` is the CLI's
 /// `--permission-prompt-tool`, routed into Juno's approval sheet.
 fn tool_list() -> Vec<Value> {
@@ -209,6 +214,14 @@ fn tool_list() -> Vec<Value> {
                 })
             })
             .collect();
+    // The same definitions the API providers register: one schema, two roads.
+    tools.extend(mac_apps::tool_definitions().into_iter().map(|tool| {
+        json!({
+            "name": tool.name,
+            "description": tool.description,
+            "inputSchema": tool.input_schema,
+        })
+    }));
     // Juno's own settings: find, show and change them, with the guardrail
     // settings refused (`settings::registry`).
     let settings = settings_tool::definition();
@@ -255,6 +268,17 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
             }),
         });
     }
+    if is_mac_app_tool(name) {
+        let mode = permission_mode(app).await;
+        return Ok(run_gated(
+            name,
+            arguments,
+            mode,
+            |request| cli_approval::ask_person(app, request),
+            mac_apps::dispatch,
+        )
+        .await);
+    }
     if name != "computer" {
         return Err(RpcError::method_not_found(name));
     }
@@ -269,6 +293,105 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
             "isError": true
         })),
     }
+}
+
+fn is_mac_app_tool(name: &str) -> bool {
+    mac_apps::tool_definitions()
+        .iter()
+        .any(|tool| tool.name == name)
+}
+
+/// The person's permission mode, read fresh so a change in Settings applies to
+/// the next call. Unreadable settings fall back to the default, which asks more
+/// than "do not ask", never less.
+async fn permission_mode(app: &tauri::AppHandle) -> PermissionMode {
+    use tauri::Manager;
+    let Some(manager) = app.try_state::<crate::settings::manager::SettingsManager>() else {
+        return PermissionMode::default();
+    };
+    match manager.get_agent_settings().await {
+        Ok(settings) => PermissionMode::from_setting(&settings.permission_mode),
+        Err(e) => {
+            warn!(
+                "[JunoMCP] Could not read the permission mode, using the default: {}",
+                e
+            );
+            PermissionMode::default()
+        }
+    }
+}
+
+/// Run one Mac app tool behind Juno's own permission gate.
+///
+/// The CLI runs MCP tools without prompting, so without this a CLI turn could
+/// delete a calendar event in a mode that promises to ask. The decision is the
+/// same one the in-process runner makes: [`risk_classifier::classify_risk`]
+/// then [`permission_policy::requires_approval`]. There is no standing "do not
+/// ask again" on this path (the CLI's conversation is not one Juno keys grants
+/// to), so `granted` is false; Critical asks regardless.
+///
+/// `ask` shows the sheet and `exec` runs the tool. They are parameters so a
+/// test can pin the order without an app: a declined ask never reaches `exec`.
+async fn run_gated<Ask, AskFut, Exec, ExecFut>(
+    name: &str,
+    input: Value,
+    mode: PermissionMode,
+    ask: Ask,
+    exec: Exec,
+) -> Value
+where
+    Ask: FnOnce(ToolApprovalRequest) -> AskFut,
+    AskFut: std::future::Future<Output = Option<bool>>,
+    Exec: FnOnce(String, Value) -> ExecFut,
+    ExecFut: std::future::Future<Output = Result<Value, String>>,
+{
+    let risk = risk_classifier::classify_risk(name, &input);
+    if permission_policy::requires_approval(mode, &risk, false) {
+        let description = permission_policy::describe_action(name, &input);
+        let mut request = ToolApprovalRequest::new(
+            uuid::Uuid::new_v4().to_string(),
+            name.to_string(),
+            input.clone(),
+            description.clone(),
+        )
+        .with_risk(risk)
+        .with_timeout(cli_approval::APPROVAL_TIMEOUT_SECS);
+        if let Some(target) = risk_classifier::extract_target_app(name, &input) {
+            request = request.with_target_app(target);
+        }
+
+        match ask(request).await {
+            Some(true) => info!("[JunoMCP] Approved: {}", description),
+            Some(false) => {
+                info!("[JunoMCP] Declined: {}", description);
+                return tool_error(
+                    "The person declined, so Juno did not do this. Tell them it was not done; \
+                     they can ask again if they change their mind.",
+                );
+            }
+            None => {
+                info!("[JunoMCP] No answer in time: {}", description);
+                return tool_error(
+                    "No answer within 60 seconds, so Juno did not do this. Tell the person \
+                     their approval was needed and no answer arrived; they can ask again.",
+                );
+            }
+        }
+    }
+
+    match exec(name.to_string(), input).await {
+        Ok(value) => to_mcp_content(value),
+        Err(e) => tool_error(&e),
+    }
+}
+
+/// A tool that failed or was refused, in the shape the model reads and moves on
+/// from. Never a JSON-RPC error: that would end the CLI's turn.
+fn tool_error(text: &str) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": text }],
+        "isError": true
+    })
 }
 
 /// Turn a computer-tool result into MCP content blocks.
@@ -334,6 +457,13 @@ impl RpcError {
 mod tests {
     use super::*;
 
+    fn served(name: &str) -> Value {
+        tool_list()
+            .into_iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap_or(Value::Null)
+    }
+
     #[test]
     fn a_window_picture_carries_its_note_and_its_real_type() {
         let result = to_mcp_content(json!({
@@ -363,7 +493,7 @@ mod tests {
     #[test]
     fn the_computer_settings_and_approve_tools_are_offered() {
         let tools = tool_list();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 3 + mac_apps::tool_definitions().len());
         assert_eq!(tools[0]["name"], "computer");
         assert!(
             tools[0]["inputSchema"]["properties"]["action"].is_object(),
@@ -372,10 +502,111 @@ mod tests {
         // The permission prompt tool (LAC-4058) must exist on the server the
         // CLI is pointed at, or every gated call would hang and die.
         // Juno's own settings, so "change my voice" works on the CLI path.
-        assert_eq!(tools[1]["name"], "settings");
-        assert!(tools[1]["inputSchema"]["properties"]["action"].is_object());
-        assert_eq!(tools[2]["name"], "approve");
-        assert!(tools[2]["inputSchema"]["properties"]["tool_name"].is_object());
+        let settings = served("settings");
+        assert!(settings["inputSchema"]["properties"]["action"].is_object());
+        let approve = served("approve");
+        assert!(approve["inputSchema"]["properties"]["tool_name"].is_object());
+    }
+
+    #[test]
+    fn all_eight_mac_app_tools_are_offered() {
+        let names = [
+            "reminders_list",
+            "reminders_create",
+            "reminders_complete",
+            "calendar_events",
+            "calendar_create_event",
+            "calendar_move_event",
+            "calendar_delete_event",
+            "contacts_find",
+        ];
+        for name in names {
+            let tool = served(name);
+            assert_eq!(tool["name"], name, "{name} is not served to the CLI");
+            assert_eq!(
+                tool["inputSchema"]["type"], "object",
+                "{name} has no schema"
+            );
+            assert!(is_mac_app_tool(name));
+        }
+        assert_eq!(mac_apps::tool_definitions().len(), names.len());
+        // Nothing else of Juno's rides along: the CLI has its own shell and files.
+        for name in ["bash", "execute_bash", "browser_interact", "write_file"] {
+            assert!(served(name).is_null(), "{name} must not be served");
+            assert!(!is_mac_app_tool(name));
+        }
+    }
+
+    /// The gate that matters on this path: the CLI never prompts for an MCP
+    /// tool, so a Critical tool must reach Juno's sheet here, in every mode,
+    /// and a no must mean it never runs.
+    #[tokio::test]
+    async fn a_critical_tool_over_mcp_asks_and_does_not_run_when_declined() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let name = "calendar_delete_event";
+        assert_eq!(
+            risk_classifier::classify_risk(name, &json!({"id": "abc@1"})),
+            crate::state::RiskLevel::Critical
+        );
+
+        for mode in [
+            PermissionMode::AskFirst,
+            PermissionMode::AskWhenRisky,
+            PermissionMode::DontAsk,
+        ] {
+            let asked = Arc::new(AtomicBool::new(false));
+            let ran = Arc::new(AtomicBool::new(false));
+            let asked_in = Arc::clone(&asked);
+            let ran_in = Arc::clone(&ran);
+
+            let result = run_gated(
+                name,
+                json!({"id": "abc@1"}),
+                mode,
+                move |request: ToolApprovalRequest| {
+                    asked_in.store(true, Ordering::SeqCst);
+                    assert_eq!(request.tool_name, name);
+                    assert_eq!(request.risk_level, crate::state::RiskLevel::Critical);
+                    async { Some(false) }
+                },
+                move |_name: String, _input: Value| {
+                    ran_in.store(true, Ordering::SeqCst);
+                    async { Ok(json!({"deleted": true})) }
+                },
+            )
+            .await;
+
+            assert!(asked.load(Ordering::SeqCst), "{mode:?}: never asked");
+            assert!(!ran.load(Ordering::SeqCst), "{mode:?}: ran after a no");
+            assert_eq!(result["isError"], true, "{mode:?}");
+            let text = result["content"][0]["text"].as_str().unwrap_or("");
+            assert!(text.contains("declined"), "{mode:?}: {text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_runs_without_asking_and_a_failure_is_an_is_error() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let asked = Arc::new(AtomicBool::new(false));
+        let asked_in = Arc::clone(&asked);
+        let result = run_gated(
+            "reminders_list",
+            json!({}),
+            PermissionMode::AskFirst,
+            move |_request: ToolApprovalRequest| {
+                asked_in.store(true, Ordering::SeqCst);
+                async { Some(true) }
+            },
+            |_name: String, _input: Value| async { Err("Reminders is off.".to_string()) },
+        )
+        .await;
+        assert!(!asked.load(Ordering::SeqCst), "a read must not ask");
+        assert_eq!(result["isError"], true);
+        assert_eq!(result["content"][0]["text"], "Reminders is off.");
     }
 
     #[test]

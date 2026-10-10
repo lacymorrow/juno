@@ -512,7 +512,9 @@ the screenshot with 'window' so it shows just that window. The person keeps usin
 computer while you work: never bring a window to the front or click into their apps to get \
 something done. For Juno's own settings (its voice, shortcuts, devices, or where a setting is) \
 use the `settings` tool from the same server, never the desktop: it changes them live and \
-points the Settings window at them.";
+points the Settings window at them. \
+For Reminders, Calendar and Contacts use the juno server's reminders_, calendar_ and contacts_ \
+tools, never AppleScript, osascript or other shell commands.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.
