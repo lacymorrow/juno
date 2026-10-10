@@ -104,12 +104,6 @@ tell application "Music"
   end try
 end tell"#;
 
-/// Is Spotify running and playing? Mirrors the guard `commands::media` uses.
-const SPOTIFY_STATE: &str = r#"if application "Spotify" is running then
-  tell application "Spotify" to return (player state as string)
-end if
-return "not_running""#;
-
 /// AppleScript's "not authorized to send Apple events" error number.
 const NOT_AUTHORIZED: i64 = -1743;
 
