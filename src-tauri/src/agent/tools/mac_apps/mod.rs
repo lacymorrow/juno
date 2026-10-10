@@ -1441,7 +1441,10 @@ mod tests {
     #[test]
     fn the_catalog_matches_the_names_the_gate_knows() {
         let names: Vec<String> = tool_definitions().into_iter().map(|d| d.name).collect();
-        assert_eq!(names.len(), 18);
+        let mut unique = names.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len(), "a tool is registered twice");
         for read in READ_TOOLS {
             assert!(names.iter().any(|n| n == read), "{read}");
         }

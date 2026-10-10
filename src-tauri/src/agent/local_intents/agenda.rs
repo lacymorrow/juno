@@ -79,7 +79,7 @@ impl Patterns {
                 r"^what do i have(?: on (?:calendar|schedule|agenda))?(?: for)? (today|tomorrow)$",
             )?,
             reminders: Regex::new(r"^(?:read(?: out)?|what are) reminders$")?,
-            next: Regex::new(r"^(?:what is|when is) next (?:meeting|event|appointment)$")?,
+            next: Regex::new(r"^what is next (?:meeting|event|appointment)$")?,
             focus_on: Regex::new(&format!(
                 r"^(?:(?:turn|switch) on {DND}|(?:turn|switch) {DND} on|enable {DND}|{DND} on)$"
             ))?,
@@ -402,13 +402,12 @@ mod tests {
         ] {
             assert_eq!(p(q), Some(AgendaIntent::Reminders), "{q:?}");
         }
-        for q in [
-            "what's my next meeting",
-            "when is my next meeting",
-            "what's my next appointment",
-        ] {
+        for q in ["what's my next meeting", "what's my next appointment"] {
             assert_eq!(p(q), Some(AgendaIntent::NextMeeting), "{q:?}");
         }
+        // "when" is a clause word for every grammar, so this phrasing goes to
+        // the agent. A miss is the safe outcome.
+        assert_eq!(p("when is my next meeting"), None);
     }
 
     #[test]
