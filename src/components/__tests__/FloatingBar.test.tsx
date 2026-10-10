@@ -1063,7 +1063,15 @@ describe("FloatingBar", () => {
     });
     expect(screen.getByRole("textbox")).toBe(input);
 
-    await setBarState({ barState: "transcribing", isDictationMode: true });
+    // Key-up, exactly as Rust does it: the dictation flag drops and the bar
+    // blips to rest, then the final decode shows as plain transcribing, and
+    // only then are the words posted. The box must be there when they land.
+    await setBarState({ barState: "default" });
+    expect(screen.getByRole("textbox")).toBe(input);
+    await setBarState({ barState: "transcribing", isDictationMode: false });
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("hello ");
     expect(input).toHaveAttribute("placeholder", "Transcribing…");
 
     // Rust posts the words at the caret, as it does into any other app.
@@ -1088,6 +1096,21 @@ describe("FloatingBar", () => {
     const { emit } = await import("@tauri-apps/api/event");
     expect(emit).toHaveBeenCalledWith("dictation-cancel");
     expect(input).toHaveValue("keep this");
+  });
+
+  it("does not bring the composer back for the final decode of a spoken query", async () => {
+    await renderBar();
+    await openInput();
+
+    // The hotkey: a spoken query takes the pill over, then its final decode
+    // runs with the mic closed, then the agent works. No composer anywhere.
+    await setBarState({ barState: "listening" });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    await setBarState({ barState: "transcribing" });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("transcribing");
+    await setBarState({ barState: "submitting" });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
   it("still hands the composer over to a dictation aimed at another app", async () => {

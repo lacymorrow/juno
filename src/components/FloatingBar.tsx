@@ -1532,17 +1532,28 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // Dictation types what you say into whatever has the caret. When that is
   // this composer, the voice look must not take the pill over: the box
   // unmounted, the keystrokes Rust posts at the end landed nowhere, and the
-  // box came back empty. Decided from where the caret was when the dictation
-  // began and held for the rest of it (the final decode runs after the mic
-  // closes, still inside the dictation), so a dictation into another app and
-  // a spoken query to Juno still take the pill over as before.
+  // box came back empty. So a dictation that finds the caret here, with Juno
+  // focused, keeps the composer. A dictation into another app and a spoken
+  // query to Juno still take the pill over as before.
+  //
+  // Keyed on what the microphone is doing, not on the dictation flag. On
+  // key-up Rust drops the flag, blips the bar to rest, then files the final
+  // decode as plain transcribing, and only then posts the words (v0.8.159
+  // keyed on the flag and let the box go half a second early). The final
+  // decode with the mic closed is the tail of whichever session just ended;
+  // it keeps the composer only if the caret is still in it, which after a
+  // spoken query it is not, because that query already took the pill over.
   const dictating = isDictationTurn({
     barState: currentUiState,
     isDictationMode: barState.isDictationMode,
   });
+  const finalDecode = currentUiState === UI.BAR_STATES_TRANSCRIBING && !isRecording;
   const [dictationHeld, setDictationHeld] = useState(false);
   const dictationInComposer =
-    dictating && (dictationHeld || (composerHasCaretRef.current && document.hasFocus()));
+    (isVoice || isRecording || isWorking) &&
+    (dictating || finalDecode) &&
+    !chat.isProcessing &&
+    (dictationHeld || (composerHasCaretRef.current && document.hasFocus()));
   useEffect(() => {
     setDictationHeld(dictationInComposer);
     // The composer is now the person's open one, whatever opened it, so it
@@ -1663,6 +1674,13 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   useEffect(() => {
     if (takenOver && inputOpen) closeInput();
   }, [takenOver, inputOpen, closeInput]);
+
+  // An unmounted composer fires no blur, so the caret record is cleared here;
+  // otherwise the final decode after a spoken query would read a caret that
+  // left with the box and bring the box back for the agent's own turn.
+  useEffect(() => {
+    if (!showInput) composerHasCaretRef.current = false;
+  }, [showInput]);
 
   /**
    * The X, wherever it appears, and the Stop square: one meaning.
