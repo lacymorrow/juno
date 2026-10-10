@@ -195,7 +195,10 @@ pub async fn register_mac_apps_tools(
 }
 
 /// Run one tool on a blocking thread and hand back what it observed.
-async fn dispatch(name: String, input: Value) -> Result<Value, String> {
+///
+/// Also the executor behind the same tools on Juno's MCP server
+/// (`agent::providers::juno_mcp`), so the Claude CLI runs this exact path.
+pub(crate) async fn dispatch(name: String, input: Value) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || execute(&name, &input))
         .await
         .map_err(|e| format!("The Mac app request did not finish: {e}"))?
