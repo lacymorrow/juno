@@ -163,7 +163,10 @@ pub mod validation {
 
 /// Default values for settings
 pub mod defaults {
-    pub const TTS_PROVIDER: &str = "system";
+    /// Kokoro speaks unless somebody picks otherwise. Its chain ends in the
+    /// Mac's own voice (`tts::fallback_chain`), so a model that has not
+    /// downloaded, or will not load, still speaks.
+    pub const TTS_PROVIDER: &str = "kokoro";
     pub const SOUND_ENABLED: bool = true;
     /// The persistent Claude CLI session is on for anyone who has not turned it
     /// off. It saves 1.6-3.1s of process start on every follow-up, which is most

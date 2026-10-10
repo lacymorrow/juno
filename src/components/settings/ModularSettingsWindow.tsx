@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 import { useSystemTheme } from "@/hooks/useSystemTheme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  Bell,
   Boxes,
   Cpu,
   CalendarClock,
@@ -33,7 +32,6 @@ import {
   AdvancedSettings,
   AutomationsSettings,
   NetworkSettings,
-  NotificationSettings,
   ToolsSettings,
   TriggersSettings,
 } from "./index";
@@ -74,7 +72,8 @@ export const settingsCategories: MacCategory[] = [
     icon: <Settings className="h-3.5 w-3.5" />,
     tile: "bg-[#8E8E93]",
     description: "Basic app settings and preferences",
-    keywords: "startup launch login cursor appearance look",
+    // Carries the retired Notifications pane's search terms: that row lives here now.
+    keywords: "startup launch login cursor appearance look notifications alerts banners notify",
   },
   {
     id: "triggers",
@@ -114,14 +113,6 @@ export const settingsCategories: MacCategory[] = [
     tile: "bg-[#5856D6]",
     description: "Dictation models",
     keywords: "dictation whisper parakeet stt speech model fast balanced accurate download on device",
-  },
-  {
-    id: "notifications",
-    name: "Notifications",
-    icon: <Bell className="h-3.5 w-3.5" />,
-    tile: "bg-[#FF3B30]",
-    description: "Alerts, sounds, and delivery",
-    keywords: "alerts banners sounds badges push notify",
   },
   {
     id: "tools",
@@ -210,6 +201,7 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "general", rowId: "big-cursor-enabled", label: "Enable big cursor", keywords: "cursor pointer magnify enlarge big" },
   { sectionId: "general", rowId: "cursor-color", label: "Cursor color", keywords: "cursor color colour glow agent pointer accent blue pink green orange purple" },
   { sectionId: "general", rowId: "bar-appearance", label: "Bar appearance", keywords: "bar appearance look style pill island orb halo avatar persona floating preview" },
+  { sectionId: "general", rowId: "show-notifications", label: "Show notifications", keywords: "notifications alerts banners notify push test" },
   { sectionId: "advanced", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup", advanced: true },
   // Triggers
   { sectionId: "triggers", rowId: "add-trigger", label: "Add trigger", keywords: "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
@@ -220,7 +212,8 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   // Audio
   { sectionId: "voice", rowId: "audio-input-device", label: "Listen through", keywords: "microphone mic input device listen headphones airpods usb interface" },
   { sectionId: "voice", rowId: "audio-output-device", label: "Speak through", keywords: "speaker output device sound headphones airpods play" },
-  { sectionId: "voice", rowId: "juno-voice", label: "Juno's voice", keywords: "voice juno voice samantha alex daniel karen moira accent silent mute speak out loud" },
+  { sectionId: "voice", rowId: "dont-speak", label: "Don't speak", keywords: "silent silence mute quiet speak voice out loud talk" },
+  { sectionId: "voice", rowId: "juno-voice", label: "Juno's voice", keywords: "voice juno voice samantha alex daniel karen moira accent silent mute speak out loud", advanced: true },
   { sectionId: "voice", rowId: "voice-engine", label: "Voice engine", keywords: "tts text to speech voice engine elevenlabs kokoro local supertonic chatterbox replicate", advanced: true },
   // Providers
   { sectionId: "ai", rowId: "ai-provider", label: "Active Provider", keywords: "provider anthropic openai gemini claude" },
@@ -228,8 +221,6 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "ai", rowId: "temperature", label: "Temperature", keywords: "temperature randomness creativity sampling", advanced: true },
   { sectionId: "ai", rowId: "system-prompt", label: "System Prompt", keywords: "system prompt instructions persona", advanced: true },
   // Notifications
-  { sectionId: "notifications", rowId: "notification-type", label: "Notification method", keywords: "banner alert method delivery" },
-  { sectionId: "notifications", rowId: "position", label: "Position", keywords: "position corner placement screen" },
   // Security & Privacy. The approval row carries the retired Tools row's search
   // terms, so searching "approval" still lands on the control that works.
   { sectionId: "security", rowId: "permission-mode", label: "When Juno needs permission", keywords: "permission permissions approval approve approvals confirm ask autonomy allow always risky safe tools bash terminal don't ask" },
@@ -403,8 +394,6 @@ function SettingsWindowContent() {
         return <AIProviderSettings settings={settings} />;
       case "models":
         return <ModelsSettings />;
-      case "notifications":
-        return <NotificationSettings />;
       case "tools":
         return <ToolsSettings settings={settings} />;
       case "automations":

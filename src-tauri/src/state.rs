@@ -2379,7 +2379,10 @@ mod tests {
         assert!(!state.is_cloud_enabled());
 
         // Test getter methods - using unwrap in tests is acceptable
-        assert_eq!(state.get_tts_provider().unwrap(), "system");
+        assert_eq!(
+            state.get_tts_provider().unwrap(),
+            crate::constants::settings::defaults::TTS_PROVIDER
+        );
         assert!(!state.get_dictation_active().unwrap());
         assert!(state.get_sound_enabled().unwrap());
         assert!(!state.get_always_listening_active().unwrap());
@@ -2609,7 +2612,10 @@ mod tests {
         let state = AppState::new(None);
 
         // Check initial value
-        assert_eq!(state.get_tts_provider().unwrap(), "system");
+        assert_eq!(
+            state.get_tts_provider().unwrap(),
+            crate::constants::settings::defaults::TTS_PROVIDER
+        );
 
         // Update TTS provider using new setter method
         state.set_tts_provider("openai".to_string()).unwrap();

@@ -49,12 +49,12 @@ export interface VoiceSpeed {
 /** One row of the "Juno's voice" picker. */
 export interface JunoVoiceOption {
 	id: string;
-	/** "silent", "system" or "voice". */
+	/** "system" or "voice". */
 	kind: string;
 	name: string;
 	descriptor: string;
 	selected: boolean;
-	/** False for silence, which has nothing to audition. */
+	/** Whether picking it plays a sample. */
 	speaks: boolean;
 }
 
@@ -69,6 +69,8 @@ export interface JunoVoiceOption {
 export interface JunoVoiceList {
 	/** The stored engine. "off" means Juno is silent. */
 	provider: string;
+	/** Juno does not speak. The rows still show the voice it comes back in. */
+	silent: boolean;
 	/** The engine these rows belong to. */
 	engine: string;
 	/** That engine's name as a person would say it. */
@@ -76,7 +78,7 @@ export interface JunoVoiceList {
 	options: JunoVoiceOption[];
 	/** One sentence when there is something to say instead of rows. */
 	note: string | null;
-	/** The engines the advanced picker offers. Silence is not one: it is a row. */
+	/** The engines the advanced picker offers. Silence is its own switch. */
 	engines: { id: string; name: string }[];
 	/**
 	 * How fast Juno speaks. Absent when Juno is silent or the engine has no
@@ -197,7 +199,7 @@ const invalidateCache = (cacheKey?: keyof SettingsCache) => {
 export function useSettings() {
 	const { invokeCommand } = useInvoke();
 	// TTS Settings
-	const [ttsProvider, setTtsProvider] = useState<string>("system");
+	const [ttsProvider, setTtsProvider] = useState<string>("kokoro");
 
 	// Chatterbox TTS Settings
 	const [chatterboxReferenceAudioUrl, setChatterboxReferenceAudioUrl] = useState<string>("");
@@ -787,6 +789,18 @@ export function useSettings() {
 		}
 	}, [applyVoiceList]);
 
+	/** Turn speech off, or back on in the voice it had. */
+	const handleJunoSilentChange = useCallback(async (silent: boolean) => {
+		try {
+			await applyVoiceList(() =>
+				invoke<JunoVoiceList>(COMMANDS.AUDIO_SET_JUNO_SILENT, { silent }),
+			);
+		} catch (error) {
+			console.error("Failed to change whether Juno speaks:", error);
+			toast.error(String(error));
+		}
+	}, [applyVoiceList]);
+
 	/** Hear the voice already chosen again. */
 	const handlePreviewJunoVoice = useCallback(async () => {
 		try {
@@ -1234,6 +1248,7 @@ export function useSettings() {
 		handleJunoVoiceChange,
 		handlePreviewJunoVoice,
 		handleJunoVoiceRateChange,
+		handleJunoSilentChange,
 		dismissCaptureFailure: () => setCaptureFailure(null),
 		handleTtsProviderChange,
 		handleChatterboxSettingsChange,

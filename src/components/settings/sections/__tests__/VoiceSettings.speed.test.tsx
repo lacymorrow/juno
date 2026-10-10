@@ -13,6 +13,7 @@ import VoiceSettings from "../VoiceSettings";
 import { AdvancedSettingsProvider } from "../../AdvancedSettingsContext";
 import type { SettingsSectionProps } from "../../types";
 import type { JunoVoiceList } from "@/hooks/useSettings";
+import { COMMANDS } from "@/lib/constants.generated";
 
 const invokeMock = vi.mocked(invoke);
 
@@ -26,19 +27,12 @@ vi.stubGlobal("ResizeObserver", ResizeObserverStub);
 function list(overrides: Partial<JunoVoiceList> = {}): JunoVoiceList {
   return {
     provider: "system",
+    silent: false,
     engine: "system",
     engine_label: "Your Mac",
     note: null,
     engines: [{ id: "system", name: "Your Mac" }],
     options: [
-      {
-        id: "silent",
-        kind: "silent",
-        name: "Silent",
-        descriptor: "Juno writes the answer and never says it out loud.",
-        selected: false,
-        speaks: false,
-      },
       {
         id: "Samantha",
         kind: "voice",
@@ -59,7 +53,11 @@ function renderSection(
   debug = true,
 ) {
   invokeMock.mockImplementation(((command: string) =>
-    Promise.resolve(command === "get_debug_mode" ? debug : false)) as typeof invoke);
+    Promise.resolve(
+      command === "get_debug_mode"
+        ? debug
+        : command === COMMANDS.SETTINGS_GET_ADVANCED_SETTINGS_ENABLED,
+    )) as typeof invoke);
   const settings = {
     audioDevices: null,
     junoVoices: voices,

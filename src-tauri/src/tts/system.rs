@@ -93,6 +93,19 @@ pub async fn speak_directly(
             info!("[AVSpeech] Using say for this sentence: {reason}");
         }
     }
+    speak_with_say(text, voice, device, words_per_minute).await
+}
+
+/// `say` itself, skipping the in-process path. The one way to speak the
+/// System Voice when it is a Siri voice: AVFoundation does not hand Siri
+/// voices to apps, and `say` with no `-v` speaks whatever the System Voice is.
+#[cfg(target_os = "macos")]
+pub async fn speak_with_say(
+    text: String,
+    voice: Option<String>,
+    device: Option<String>,
+    words_per_minute: Option<u32>,
+) -> Result<String, String> {
     if crate::tts::is_tts_stop_requested() {
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
@@ -312,6 +325,17 @@ pub async fn invoke_system_tts(text: String) -> Result<String, String> {
         text
     );
     Err("System TTS is currently only implemented for macOS.".to_string())
+}
+
+/// Same signature as the macOS version so callers need no `cfg`.
+#[cfg(not(target_os = "macos"))]
+pub async fn speak_with_say(
+    text: String,
+    _voice: Option<String>,
+    _device: Option<String>,
+    _words_per_minute: Option<u32>,
+) -> Result<String, String> {
+    invoke_system_tts(text).await
 }
 
 /// Same signature as the macOS version so callers need no `cfg`.

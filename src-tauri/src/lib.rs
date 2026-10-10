@@ -403,6 +403,7 @@ pub fn run() {
             tts::voices::get_juno_voices,  // Juno's voice: the curated rows
             tts::voices::set_juno_voice,   // Juno's voice: pick one and hear it
             tts::voices::set_juno_voice_rate, // Juno's voice: how fast it speaks
+            tts::voices::set_juno_silent,     // Juno's voice: speech off or back on
             tts::voices::preview_juno_voice, // Juno's voice: hear it again
             commands::audio_devices::list_audio_devices, // Microphone and speaker lists
             commands::audio_devices::set_audio_input_device, // Which microphone Juno listens on

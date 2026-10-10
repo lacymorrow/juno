@@ -25,6 +25,7 @@ const invokeMock = vi.mocked(invoke);
 function macList(selected: string): JunoVoiceList {
   return {
     provider: "system",
+    silent: false,
     engine: "system",
     engine_label: "Your Mac",
     note: null,
@@ -47,6 +48,7 @@ function kokoroList(): JunoVoiceList {
   return {
     ...macList(""),
     provider: "kokoro",
+    silent: false,
     engine: "kokoro",
     engine_label: "Kokoro",
     options: [

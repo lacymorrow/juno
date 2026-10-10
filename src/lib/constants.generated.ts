@@ -619,6 +619,7 @@ export const COMMANDS = {
   AUDIO_GET_JUNO_VOICES: 'get_juno_voices',
   AUDIO_SET_JUNO_VOICE: 'set_juno_voice',
   AUDIO_SET_JUNO_VOICE_RATE: 'set_juno_voice_rate',
+  AUDIO_SET_JUNO_SILENT: 'set_juno_silent',
   AUDIO_PREVIEW_JUNO_VOICE: 'preview_juno_voice',
   TTS_INVOKE_TTS: 'invoke_tts',
   TTS_SET_TTS_PROVIDER: 'set_tts_provider_command',
@@ -1142,7 +1143,7 @@ export const KEYBOARD_SHORTCUTS = {
 // Everything else settings::defaults holds, with Rust's types kept: a Rust
 // bool arrives as a boolean, not the string 'true'.
 export const SETTING_DEFAULTS = {
-  TTS_PROVIDER: 'system',
+  TTS_PROVIDER: 'kokoro',
   SOUND_ENABLED: true,
   CLI_PERSISTENT_SESSION_ENABLED: true,
   DICTATION_CLIPBOARD_ENABLED: true,
