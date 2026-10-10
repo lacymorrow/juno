@@ -1491,6 +1491,49 @@ async fn play_rendered(
     }
 }
 
+/// The Mac's voice speaking in another engine's place: while Kokoro
+/// downloads, or after an engine failed. Same as the `system` provider, except
+/// that a Siri voice wins whenever one is reachable
+/// (`voices::stand_in_say_voice`).
+async fn invoke_mac_stand_in(text: String, state: AppState) -> Result<String, String> {
+    if is_tts_stop_requested() {
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+    let stored = state.get_system_voice().ok().flatten();
+    let device = state.get_output_device().ok().flatten();
+    let words_per_minute =
+        rate::effective("system", stored_rate(Some(&state))).and_then(rate::say_words_per_minute);
+    match voices::stand_in_voice(stored).await {
+        voices::StandInVoice::Siri => {
+            system::speak_with_say(text, None, device, words_per_minute).await
+        }
+        voices::StandInVoice::Mac(voice) => {
+            system::speak_directly(text, voice, device, words_per_minute).await
+        }
+    }
+}
+
+/// The engines tried for one utterance, in order. Every chain ends in the
+/// Mac's own voice, which needs nothing, so a failing engine never means
+/// silence.
+pub(crate) fn fallback_chain(primary_provider: &str) -> Vec<&'static str> {
+    match primary_provider.to_lowercase().as_str() {
+        "replicate" => vec!["replicate", "kokoro", "system"],
+        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
+        "chatterbox" => vec!["chatterbox", "kokoro", "system"],
+        "supertonic" => vec!["supertonic", "kokoro", "system"],
+        "kokoro" => vec!["kokoro", "system"],
+        "system" => vec!["system"],
+        _ => {
+            warn!(
+                "Unknown primary TTS provider: '{}'. Using system fallback only.",
+                primary_provider
+            );
+            vec!["system"]
+        }
+    }
+}
+
 // Execute TTS with fallback logic (no blocking, no race conditions)
 //
 // `allow_direct` is false when this render runs while another chunk is still
@@ -1522,27 +1565,27 @@ async fn execute_tts_with_fallback(
                 return Err("offline; system voice cannot be rendered ahead".to_string());
             }
             warn!("Device appears offline, using system TTS directly");
-            return invoke_tts_for_provider(text, Some(app_state), "system").await;
+            return invoke_mac_stand_in(text, app_state).await;
         }
     }
 
-    // Define the provider fallback order based on the primary provider
-    let fallback_providers = match primary_provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "kokoro", "system"],
-        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
-        "chatterbox" => vec!["chatterbox", "kokoro", "system"],
-        "supertonic" => vec!["supertonic", "kokoro", "system"],
-        "kokoro" => vec!["kokoro", "system"],
-        "system" => vec!["system"],
-        "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
-        _ => {
-            warn!(
-                "Unknown primary TTS provider: '{}'. Using system fallback only.",
-                primary_provider
-            );
-            vec!["system"]
+    if primary_provider.eq_ignore_ascii_case("off") {
+        return Ok("TTS_DISABLED_BY_SETTING".to_string());
+    }
+
+    // Kokoro still downloading is a wait of a minute or more, not seconds.
+    // The Mac's voice speaks meanwhile and says why, once; Kokoro says it is
+    // back when the download lands (`kokoro::announce_return`).
+    if primary_provider.eq_ignore_ascii_case("kokoro") && kokoro::downloading() {
+        if !allow_direct {
+            return Err("Kokoro is downloading; system voice cannot be rendered ahead".to_string());
         }
-    };
+        info!("[Kokoro] Still downloading; the Mac's voice stands in");
+        let line = kokoro::stand_in(&text);
+        return invoke_mac_stand_in(line, app_state).await;
+    }
+
+    let fallback_providers = fallback_chain(primary_provider);
 
     let fallback_providers: Vec<&str> = fallback_providers
         .into_iter()
@@ -1568,9 +1611,14 @@ async fn execute_tts_with_fallback(
             if is_primary { "primary" } else { "fallback" }
         );
 
-        match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider)
-            .await
+        let attempt = if *fallback_provider == "system"
+            && !primary_provider.eq_ignore_ascii_case("system")
         {
+            invoke_mac_stand_in(text.clone(), app_state.clone()).await
+        } else {
+            invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider).await
+        };
+        match attempt {
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
                     return Ok(result);
@@ -1595,9 +1643,7 @@ async fn execute_tts_with_fallback(
                 if is_primary && is_network_error {
                     warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
                     // For network errors, skip other cloud providers and go straight to system
-                    match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), "system")
-                        .await
-                    {
+                    match invoke_mac_stand_in(text.clone(), app_state.clone()).await {
                         Ok(system_result) => {
                             warn!("Network error detected, successfully fell back to system TTS");
                             return Ok(system_result);
@@ -1844,6 +1890,26 @@ pub async fn set_supertonic_settings_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Kokoro is the default, and when it cannot speak the Mac does.
+    #[test]
+    fn the_default_engine_falls_back_to_the_mac() {
+        let default = crate::constants::settings::defaults::TTS_PROVIDER;
+        assert_eq!(default, "kokoro");
+        assert_eq!(fallback_chain(default), vec!["kokoro", "system"]);
+    }
+
+    /// Whatever engine is chosen, the last one tried is the Mac's own voice.
+    #[test]
+    fn every_chain_ends_in_the_mac_voice() {
+        for engine in crate::tts::voices::ENGINES
+            .iter()
+            .copied()
+            .chain(["KOKORO", "unknown"])
+        {
+            assert_eq!(fallback_chain(engine).last(), Some(&"system"), "{engine}");
+        }
+    }
 
     #[test]
     fn holding_stops_every_player_once_and_releasing_resumes_them() {

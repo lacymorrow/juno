@@ -278,6 +278,10 @@ pub struct AudioSettings {
     pub system_voice_chosen: bool,
     #[serde(default = "AudioSettings::default_kokoro_voice")]
     pub kokoro_voice: String,
+    /// The engine that was speaking when Juno was told not to speak, so
+    /// turning speech back on returns to it. `None` returns to the default.
+    #[serde(default)]
+    pub engine_before_silent: Option<String>,
     #[serde(default)]
     pub chatterbox_reference_audio_url: Option<String>,
     #[serde(default = "AudioSettings::default_chatterbox_exaggeration")]
@@ -650,6 +654,7 @@ impl Default for AudioSettings {
             system_voice: None,
             system_voice_chosen: false,
             kokoro_voice: Self::default_kokoro_voice(),
+            engine_before_silent: None,
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: Self::default_chatterbox_exaggeration(),
             chatterbox_use_hd: false,

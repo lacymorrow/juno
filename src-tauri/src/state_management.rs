@@ -209,6 +209,10 @@ async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
 
     let app_state = app_handle.state::<AppState>();
 
+    // First impressions: on a new Mac Kokoro still has to download. Start it
+    // before anything else so it is ready by the end of onboarding.
+    crate::tts::voices::warm_engine_at_launch(&app_handle).await;
+
     // Load audio settings from centralized settings
     if let Err(e) =
         crate::commands::load_audio_settings_from_centralized_settings(&app_handle, &app_state)
