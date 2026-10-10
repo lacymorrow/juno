@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.162] - 2026-10-10
+
+### Added
+
+- stop the JSX prompt from demanding decoration (LAC-4177) (#733) (2cc3538a)
+
 ## [0.8.161] - 2026-10-10
 
 ### Fixed
@@ -1259,7 +1265,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.161...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.162...HEAD
+[0.8.162]: https://github.com/lacymorrow/juno/compare/cua-v0.8.161...v0.8.162
 [0.8.161]: https://github.com/lacymorrow/juno/compare/cua-v0.8.160...v0.8.161
 [0.8.160]: https://github.com/lacymorrow/juno/compare/cua-v0.8.159...v0.8.160
 [0.8.159]: https://github.com/lacymorrow/juno/compare/cua-v0.8.158...v0.8.159
