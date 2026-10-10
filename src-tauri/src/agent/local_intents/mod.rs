@@ -172,6 +172,16 @@ fn compile<T>(domain: &str, build: fn() -> Result<T, regex::Error>) -> Option<T>
 /// Run a program with arguments (never through a shell) on the blocking
 /// pool, bounded by [`COMMAND_TIMEOUT`]. Returns trimmed stdout.
 async fn run(program: &'static str, args: Vec<String>) -> Result<String, String> {
+    run_for(program, args, COMMAND_TIMEOUT).await
+}
+
+/// [`run`] with a caller's own bound, for a script that may sit behind a
+/// system dialog the person has to answer.
+async fn run_for(
+    program: &'static str,
+    args: Vec<String>,
+    timeout: Duration,
+) -> Result<String, String> {
     let task = tokio::task::spawn_blocking(move || {
         let output = std::process::Command::new(program)
             .args(&args)
@@ -183,7 +193,7 @@ async fn run(program: &'static str, args: Vec<String>) -> Result<String, String>
             Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
         }
     });
-    match tokio::time::timeout(COMMAND_TIMEOUT, task).await {
+    match tokio::time::timeout(timeout, task).await {
         Ok(Ok(result)) => result,
         Ok(Err(e)) => Err(format!("{} task failed: {}", program, e)),
         Err(_) => Err(format!("{} timed out", program)),
@@ -192,9 +202,20 @@ async fn run(program: &'static str, args: Vec<String>) -> Result<String, String>
 
 /// Run a constant AppleScript, passing any variable input as `argv`.
 async fn osascript(script: &str, argv: Vec<String>) -> Result<String, String> {
+    osascript_for(script, argv, COMMAND_TIMEOUT).await
+}
+
+/// [`osascript`] with its own time bound. Spawned from Juno's own process, so
+/// an Automation dialog macOS raises for it names Juno. The Mac app tools
+/// (`agent::tools::mac_apps::script`) run Messages, Mail and Notes through it.
+pub(crate) async fn osascript_for(
+    script: &str,
+    argv: Vec<String>,
+    timeout: Duration,
+) -> Result<String, String> {
     let mut args = vec!["-e".to_string(), script.to_string()];
     args.extend(argv);
-    run("osascript", args).await
+    run_for("osascript", args, timeout).await
 }
 
 /// Try to serve `query` locally. Returns `true` when it was handled and the

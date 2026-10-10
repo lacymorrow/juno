@@ -64,7 +64,9 @@ impl ToolCategory {
             ToolCategory::Browser => "Web browser automation and control",
             ToolCategory::Timer => "Task scheduling and timer management",
             ToolCategory::Basic => "File operations and basic text manipulation",
-            ToolCategory::MacApps => "Reminders, Calendar and Contacts on this Mac",
+            ToolCategory::MacApps => {
+                "Reminders, Calendar, Contacts, Messages, Mail and Notes on this Mac"
+            }
             ToolCategory::MCP => "External MCP server tools and integrations",
         }
     }
