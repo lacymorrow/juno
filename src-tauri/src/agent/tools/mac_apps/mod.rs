@@ -66,6 +66,13 @@ pub mod recipients;
 pub mod script;
 pub mod send;
 
+// Music, Maps, Shortcuts and Focus: external commands, not frameworks, so the
+// pure parts (matching, URLs, parsing) are built and tested everywhere.
+mod maps;
+mod music;
+mod proc;
+mod shortcuts;
+
 // ---------------------------------------------------------------------------
 // The catalog
 // ---------------------------------------------------------------------------
@@ -80,6 +87,7 @@ pub const READ_TOOLS: &[&str] = &[
     tool_names::MAIL_UNREAD,
     tool_names::MAIL_SEARCH,
     tool_names::NOTES_SEARCH,
+    tool_names::SHORTCUTS_LIST,
 ];
 
 /// How dates are written in and out of every tool.
@@ -109,6 +117,13 @@ fn definition(
 /// Every Mac app tool, with no app handle needed. Registration, the default
 /// tool configuration and the risk gate's drift tests all read this one list.
 pub fn tool_definitions() -> Vec<ToolDefinition> {
+    let mut tools = app_tool_definitions();
+    tools.extend(command_tool_definitions());
+    tools
+}
+
+/// Reminders, Calendar and Contacts.
+fn app_tool_definitions() -> Vec<ToolDefinition> {
     let note = DATE_NOTE;
     vec![
         definition(
@@ -306,6 +321,67 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+/// Music, Maps, Shortcuts and Focus.
+fn command_tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        definition(
+            tool_names::MUSIC_PLAY,
+            "Play something from the person's Apple Music library by name and report what is now playing. \
+             Apple Music only: Spotify cannot be searched, so if Spotify is in front the result says so and \
+             nothing plays. Use this instead of AppleScript. When it returns a `card`, finish with that tag exactly as given."
+                .to_string(),
+            json!({
+                "query": {"type": "string", "description": "What to play: a song, album, artist or playlist name, as the person said it."},
+                "kind": {"type": "string", "enum": ["song", "album", "artist", "playlist"], "description": "Narrow the search when the person said which. Leave out when they did not."}
+            }),
+            &["query"],
+        ),
+        definition(
+            tool_names::MAPS_DIRECTIONS,
+            "Open Maps with directions to a place. Starts from where the person is unless `from` is given. \
+             When it returns a `card`, finish with that tag exactly as given."
+                .to_string(),
+            json!({
+                "to": {"type": "string", "description": "The destination, as the person said it."},
+                "from": {"type": "string", "description": "Where to start. Leave out for the person's location."},
+                "mode": {"type": "string", "enum": ["driving", "walking", "transit"], "description": "How they are getting there."}
+            }),
+            &["to"],
+        ),
+        definition(
+            tool_names::SHORTCUTS_LIST,
+            "List the names of the shortcuts in the person's Shortcuts app. Anything they built there, \
+             such as lights, scenes or routines, can be run with shortcuts_run."
+                .to_string(),
+            json!({}),
+            &[],
+        ),
+        definition(
+            tool_names::SHORTCUTS_RUN,
+            "Run one of the person's own shortcuts by name. The name is matched to their list, ignoring case \
+             and punctuation; if more than one fits, nothing runs and the candidates come back so the person \
+             can choose. Optional text is given to the shortcut as its input. Stops waiting after 30 seconds. \
+             Use this for \"turn on the porch lights\" and anything else they have built."
+                .to_string(),
+            json!({
+                "name": {"type": "string", "description": "The shortcut's name, as the person said it."},
+                "input": {"type": "string", "description": "Text to give the shortcut, when it takes some."}
+            }),
+            &["name"],
+        ),
+        definition(
+            tool_names::FOCUS_SET,
+            "Turn Do Not Disturb on or off. The first time, Juno adds its own Focus shortcut to Shortcuts, which \
+             takes one click from the person; say so, then ask nothing else."
+                .to_string(),
+            json!({
+                "state": {"type": "string", "enum": ["on", "off"], "description": "Whether Do Not Disturb should be on or off."}
+            }),
+            &["state"],
+        ),
+    ]
+}
+
 /// Register all Mac app tools on a provider.
 pub async fn register_mac_apps_tools(
     provider: &mut crate::agent::implementations::tool_provider::LocalToolProvider,
@@ -354,6 +430,11 @@ fn execute(name: &str, input: &Value) -> Result<Value, String> {
         tool_names::NOTES_CREATE => notes::create(input),
         tool_names::NOTES_APPEND => notes::append(input),
         tool_names::NOTES_SEARCH => notes::search(input),
+        tool_names::MUSIC_PLAY => music::play(input),
+        tool_names::MAPS_DIRECTIONS => maps::directions(input),
+        tool_names::SHORTCUTS_LIST => shortcuts::list(input),
+        tool_names::SHORTCUTS_RUN => shortcuts::run(input),
+        tool_names::FOCUS_SET => shortcuts::focus(input),
         other => Err(format!("{other} is not a Mac app tool")),
     }
 }
@@ -395,6 +476,24 @@ fn preview_blocking(_name: &str, _input: &Value) -> Result<send::SendDraft, Valu
     Err(
         json!({"ok": false, "sent": false, "summary": "Messages and Mail are only available on a Mac."}),
     )
+}
+
+/// Whether the person has already allowed this app, asked without showing a
+/// dialog. Local intents use it: they answer only what is already allowed and
+/// leave the asking to the agent, in the moment.
+#[cfg(target_os = "macos")]
+pub(crate) fn access_granted(domain: Domain) -> bool {
+    eventkit::status(domain) == Access::Granted
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn access_granted(_domain: Domain) -> bool {
+    false
+}
+
+/// Whether the Juno Focus shortcut is in the person's Shortcuts. Blocking.
+pub(crate) fn focus_shortcut_installed() -> bool {
+    shortcuts::focus_installed()
 }
 
 // ---------------------------------------------------------------------------

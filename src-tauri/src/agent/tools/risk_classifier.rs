@@ -113,6 +113,11 @@ const MAC_APP_WRITE_TOOLS: &[&str] = &[
     "calendar_move_event",
     "notes_create",
     "notes_append",
+    // Act at once, undone by the person in the app or the shortcut they built.
+    "music_play",
+    "maps_directions",
+    "shortcuts_run",
+    "focus_set",
 ];
 
 /// Mac app deletes. Calendar has no Trash, and a deleted event can take its
@@ -240,6 +245,7 @@ pub const DELIBERATELY_UNGATED_TOOLS: &[&str] = &[
     // Starts something the person asked for and watches happen: a FaceTime
     // call rings on screen and is hung up with one click, the way Siri does it.
     "facetime_call",
+    "shortcuts_list",
     // Desktop and page input the person is watching happen
     "click_focused_element",
     "hold_key",

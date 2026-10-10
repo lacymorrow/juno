@@ -161,6 +161,11 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
         tool_names::NOTES_CREATE,
         tool_names::NOTES_APPEND,
         tool_names::NOTES_SEARCH,
+        tool_names::MUSIC_PLAY,
+        tool_names::MAPS_DIRECTIONS,
+        tool_names::SHORTCUTS_LIST,
+        tool_names::SHORTCUTS_RUN,
+        tool_names::FOCUS_SET,
     ] {
         map.insert(name, ToolCategory::MacApps);
     }
