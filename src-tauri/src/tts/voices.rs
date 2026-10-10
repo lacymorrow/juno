@@ -293,7 +293,7 @@ pub fn followed_system_voice(inventory: &VoiceInventory) -> Option<String> {
         .map(|voice| voice.name.clone())
 }
 
-/// The row for the Mac's own voice, shown only when nothing is recorded.
+/// The row for the Mac's own voice: always offered, first.
 fn system_voice_row() -> ProviderVoice {
     ProviderVoice {
         id: SYSTEM_DEFAULT_ID.to_string(),
@@ -828,10 +828,10 @@ pub fn provider_voices(engine: &str, inventory: &VoiceInventory) -> ProviderVoic
     match engine.to_ascii_lowercase().as_str() {
         "system" => {
             let mut rows = macos_voices(&inventory.macos);
-            if prefers_system_voice(inventory) {
-                // Nothing is recorded: the Mac's own voice leads.
-                rows.insert(0, system_voice_row());
-            }
+            // Always offered, so the person can choose to follow Read & Speak.
+            // Speaking it follows the System Voice live, and a Siri voice
+            // (which Juno cannot speak) falls back to the best installed one.
+            rows.insert(0, system_voice_row());
             ProviderVoices::Known(rows)
         }
         "kokoro" => ProviderVoices::Known(kokoro_voices(&inventory.kokoro)),
@@ -2531,15 +2531,15 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         assert_eq!(old.voice_name.as_deref(), Some("Ava"));
     }
 
-    /// A Siri voice cannot be spoken by Juno: the ranking picks the voice, the
-    /// pane lists no row for the Mac's own voice and says nothing about Siri.
+    /// A Siri voice cannot be spoken by Juno: the ranking picks the voice, and
+    /// the pane still offers the Mac's own voice but never says "Siri".
     #[test]
     fn a_siri_system_voice_uses_the_ranking_and_shows_no_siri_row() {
         let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Siri);
         let resolution = resolve_voice("system", &inventory, None);
         assert_eq!(resolution.voice.as_deref(), Some("Ava (Premium)"));
         let list = voice_list("system", &inventory, &resolution);
-        assert!(list.options.iter().all(|o| o.id != SYSTEM_DEFAULT_ID));
+        assert!(list.options.iter().any(|o| o.id == SYSTEM_DEFAULT_ID));
         assert!(list.options.iter().all(|o| !o.name.contains("Siri")));
         assert_eq!(list.options.iter().filter(|o| o.selected).count(), 1);
 
@@ -2612,14 +2612,20 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         assert!(list.options.iter().any(|o| o.id == "Ava (Premium)"));
     }
 
-    /// A named, non-Siri system voice changes nothing about the ranking.
+    /// A named, non-Siri system voice changes nothing about the ranking, and
+    /// the Mac's own voice can still be chosen.
     #[test]
     fn a_named_system_voice_keeps_the_ranking() {
         let inventory = with_system_voice(stock_mac(), SystemVoice::Other);
         let resolution = resolve_voice("system", &inventory, None);
         assert_eq!(resolution.voice.as_deref(), Some("Samantha"));
         let list = voice_list("system", &inventory, &resolution);
-        assert!(list.options.iter().all(|o| o.id != SYSTEM_DEFAULT_ID));
+        let own = list
+            .options
+            .iter()
+            .find(|o| o.id == SYSTEM_DEFAULT_ID)
+            .expect("the Mac's own voice is always offered");
+        assert!(!own.selected);
     }
 
     /// The Mac's own voice reaches `say` as no `-v`, speaker routing intact.
