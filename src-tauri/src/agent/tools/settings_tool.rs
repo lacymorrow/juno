@@ -95,7 +95,7 @@ pub fn definition() -> ToolDefinition {
                 },
                 "pane": {
                     "type": "string",
-                    "description": "For `open`: General, Triggers, Audio, Providers, Models, Notifications, Tools, Automations, Network, Security, Advanced."
+                    "description": "For `open`: General, Triggers, Audio, Providers, Models, Tools, Automations, Network, Security, Advanced."
                 },
                 "enabled": {
                     "type": "boolean",
@@ -562,6 +562,15 @@ async fn apply(app: &AppHandle, change: &AuthorizedChange) -> Result<(), String>
     match key {
         K::JunoVoice => {
             let wanted = want_text(change)?;
+            // Silence is a switch now, not a voice, but "set the voice to
+            // silent" still means it.
+            if matches!(
+                wanted.trim().to_lowercase().as_str(),
+                "silent" | "silence" | "off" | "mute" | "muted" | "none" | "don't speak"
+            ) {
+                crate::tts::voices::set_juno_silent(true, app.clone(), app_state(app)?).await?;
+                return Ok(());
+            }
             let list = crate::tts::voices::get_juno_voices(app.clone(), app_state(app)?).await?;
             let choices: Vec<(String, String)> = list
                 .options

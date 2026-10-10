@@ -8,6 +8,7 @@ import { COMMANDS, UI } from "@/lib/constants.generated";
 import { AppearancePicker } from "../AppearancePicker";
 import { useBarAppearance } from "../useBarAppearance";
 import { UpdatesGroup } from "../UpdatesGroup";
+import { NotificationsGroup } from "../NotificationsGroup";
 import { CursorColorPicker } from "../CursorColorPicker";
 
 export default function GeneralSettings(_props: SettingsSectionProps) {
@@ -182,6 +183,8 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
           />
         </SettingsRow>
       </SettingsGroup>
+
+      <NotificationsGroup />
 
       <UpdatesGroup />
 

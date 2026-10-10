@@ -49,7 +49,6 @@ pub enum Pane {
     Audio,
     Providers,
     Models,
-    Notifications,
     Tools,
     Automations,
     Network,
@@ -58,13 +57,12 @@ pub enum Pane {
 }
 
 impl Pane {
-    pub const ALL: [Pane; 11] = [
+    pub const ALL: [Pane; 10] = [
         Pane::General,
         Pane::Triggers,
         Pane::Audio,
         Pane::Providers,
         Pane::Models,
-        Pane::Notifications,
         Pane::Tools,
         Pane::Automations,
         Pane::Network,
@@ -80,7 +78,6 @@ impl Pane {
             Pane::Audio => "voice",
             Pane::Providers => "ai",
             Pane::Models => "models",
-            Pane::Notifications => "notifications",
             Pane::Tools => "tools",
             Pane::Automations => "automations",
             Pane::Network => "network",
@@ -97,7 +94,6 @@ impl Pane {
             Pane::Audio => "Audio",
             Pane::Providers => "Providers",
             Pane::Models => "Models",
-            Pane::Notifications => "Notifications",
             Pane::Tools => "Tools",
             Pane::Automations => "Automations",
             Pane::Network => "Network",
@@ -117,13 +113,16 @@ impl Pane {
 
     /// A pane by sidebar id or by visible name, ignoring case. "voice" and
     /// "audio" both reach the Audio pane, "ai" and "providers" the Providers
-    /// pane, "security" and "security & privacy" the same one.
+    /// pane, "security" and "security & privacy" the same one. Notifications
+    /// lived in a pane of their own once and now sit in General, so the old
+    /// name still finds them.
     pub fn from_name(name: &str) -> Option<Pane> {
         let wanted = name.trim().to_ascii_lowercase();
         Pane::ALL.into_iter().find(|pane| {
             pane.id() == wanted
                 || pane.name().to_ascii_lowercase() == wanted
                 || (*pane == Pane::Security && wanted == "privacy")
+                || (*pane == Pane::General && wanted == "notifications")
         })
     }
 }
@@ -1257,6 +1256,8 @@ mod tests {
         assert_eq!(Pane::from_name("Audio"), Some(Pane::Audio));
         assert_eq!(Pane::from_name("providers"), Some(Pane::Providers));
         assert_eq!(Pane::from_name("Security & Privacy"), Some(Pane::Security));
+        // The retired Notifications pane's name lands where the row moved.
+        assert_eq!(Pane::from_name("Notifications"), Some(Pane::General));
         assert_eq!(Pane::from_name("nowhere"), None);
     }
 

@@ -9,11 +9,11 @@ import type {
   NotificationStatus,
 } from "@/types/notifications";
 
-import { SettingsGroup, SettingsRow } from "../ui";
+import { SettingsGroup, SettingsRow } from "./ui";
 import { COMMANDS } from "@/lib/constants.generated";
 
 /**
- * Notifications.
+ * Notifications, one row in General.
  *
  * Rust reads what macOS currently allows for Juno and this draws it: ask when
  * macOS has never asked, point at System Settings when the person turned them
@@ -21,14 +21,14 @@ import { COMMANDS } from "@/lib/constants.generated";
  * whenever the window regains focus, so coming back from System Settings
  * updates the row without a restart.
  *
- * The test button has no result line: the banner is the answer. A failure is
+ * There is no test button. Turning notifications on, or allowing them, sends
+ * one: the banner is the answer to "what will these look like". A failure is
  * logged by Rust, and the status read afterwards says what to change.
  */
-export function NotificationSettings() {
+export function NotificationsGroup() {
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<NotificationStatus | null>(null);
-  const [testing, setTesting] = useState(false);
 
   const readStatus = useCallback(async () => {
     try {
@@ -47,7 +47,9 @@ export function NotificationSettings() {
     let mounted = true;
     (async () => {
       try {
-        const settings = await invoke<Settings>(COMMANDS.NOTIFICATIONS_GET_NOTIFICATION_SETTINGS);
+        const settings = await invoke<Settings>(
+          COMMANDS.NOTIFICATIONS_GET_NOTIFICATION_SETTINGS,
+        );
         if (mounted) setEnabled(settings.enabled);
       } catch (error) {
         console.error("Failed to load notification settings:", error);
@@ -75,23 +77,41 @@ export function NotificationSettings() {
     };
   }, [readStatus]);
 
+  const sendSample = async () => {
+    try {
+      await invoke(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
+    } catch (error) {
+      console.warn("Sample notification failed:", error);
+    }
+    // The first send may have asked macOS; show whatever it now says.
+    await readStatus();
+  };
+
   const change = async (next: boolean) => {
     const previous = enabled;
     setEnabled(next);
     try {
-      await invoke(COMMANDS.NOTIFICATIONS_SET_NOTIFICATIONS_ENABLED, { enabled: next });
+      await invoke(COMMANDS.NOTIFICATIONS_SET_NOTIFICATIONS_ENABLED, {
+        enabled: next,
+      });
     } catch (error) {
       console.error("Failed to change notifications:", error);
       setEnabled(previous);
-      toast.error(typeof error === "string" ? error : "Could not change that setting");
+      toast.error(
+        typeof error === "string" ? error : "Could not change that setting",
+      );
+      return;
     }
+    if (next) await sendSample();
   };
 
   const allow = async () => {
     try {
-      setStatus(
-        await invoke<NotificationStatus>(COMMANDS.NOTIFICATIONS_REQUEST_NOTIFICATION_PERMISSION),
+      const answer = await invoke<NotificationStatus>(
+        COMMANDS.NOTIFICATIONS_REQUEST_NOTIFICATION_PERMISSION,
       );
+      setStatus(answer);
+      if (answer?.authorization === "authorized" && enabled) await sendSample();
     } catch (error) {
       console.warn("Failed to ask for notifications:", error);
       await readStatus();
@@ -107,78 +127,54 @@ export function NotificationSettings() {
     }
   };
 
-  const sendTest = async () => {
-    setTesting(true);
-    try {
-      await invoke(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
-    } catch (error) {
-      console.warn("Test notification failed:", error);
-    } finally {
-      setTesting(false);
-    }
-    // The first send may have asked macOS; show whatever it now says.
-    await readStatus();
-  };
-
   const authorization = status?.authorization ?? null;
   const authorized = authorization === "authorized";
 
   let description = "Checking.";
-  if (authorized) description = "Turn this off and Juno stays silent.";
+  if (authorized)
+    description = "Turning this on sends one, so you know what to expect.";
   else if (authorization === "denied")
     description = "Notifications are off for Juno in System Settings.";
   else if (authorization === "not_determined")
     description = "Juno needs your OK to show notifications.";
   else if (authorization === "unavailable") {
-    description = status?.unavailable_reason ?? "Notifications are not available here.";
+    description =
+      status?.unavailable_reason ?? "Notifications are not available here.";
   }
 
   return (
-    <div className="space-y-6">
-      <SettingsGroup title="Notifications">
-        <SettingsRow
-          htmlFor="notifications-enabled"
-          label="Show notifications"
-          description={description}
-        >
-          <div className="flex items-center gap-3">
-            {authorization === "not_determined" && (
-              <Button size="sm" onClick={() => void allow()}>
-                Allow notifications
-              </Button>
-            )}
-            {authorization === "denied" && (
-              <Button size="sm" variant="outline" onClick={() => void openSystemSettings()}>
-                Open System Settings
-              </Button>
-            )}
-            <Switch
-              id="notifications-enabled"
-              checked={authorized && enabled}
-              disabled={loading || !authorized}
-              onCheckedChange={change}
-            />
-          </div>
-        </SettingsRow>
-
-        {authorized && (
-          <SettingsRow
-            label="Test"
-            description="Send one now, so you know what to expect."
-          >
+    <SettingsGroup title="Notifications">
+      <SettingsRow
+        id="show-notifications"
+        htmlFor="notifications-enabled"
+        label="Show notifications"
+        description={description}
+      >
+        <div className="flex items-center gap-3">
+          {authorization === "not_determined" && (
+            <Button size="sm" onClick={() => void allow()}>
+              Allow notifications
+            </Button>
+          )}
+          {authorization === "denied" && (
             <Button
               size="sm"
               variant="outline"
-              disabled={testing || !enabled}
-              onClick={() => void sendTest()}
+              onClick={() => void openSystemSettings()}
             >
-              {testing ? "Sending" : "Send one"}
+              Open System Settings
             </Button>
-          </SettingsRow>
-        )}
-      </SettingsGroup>
-    </div>
+          )}
+          <Switch
+            id="notifications-enabled"
+            checked={authorized && enabled}
+            disabled={loading || !authorized}
+            onCheckedChange={change}
+          />
+        </div>
+      </SettingsRow>
+    </SettingsGroup>
   );
 }
 
-export default NotificationSettings;
+export default NotificationsGroup;

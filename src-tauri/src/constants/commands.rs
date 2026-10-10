@@ -134,6 +134,8 @@ pub mod audio {
     pub const SET_JUNO_VOICE: &str = "set_juno_voice";
     /// How fast Juno speaks, for every engine that can change speed.
     pub const SET_JUNO_VOICE_RATE: &str = "set_juno_voice_rate";
+    /// Turn speech off, or back on to the engine that was speaking.
+    pub const SET_JUNO_SILENT: &str = "set_juno_silent";
     /// Say the sample again in the voice already chosen.
     pub const PREVIEW_JUNO_VOICE: &str = "preview_juno_voice";
 }

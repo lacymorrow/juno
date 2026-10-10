@@ -61,7 +61,6 @@ vi.mock("../index", async () => {
     VoiceSettings: VoiceStub,
     AIProviderSettings: stub("ai"),
     ModelsSettings: stub("models"),
-    NotificationSettings: stub("notifications"),
     ToolsSettings: stub("tools"),
     AutomationsSettings: stub("automations"),
     NetworkSettings: stub("network"),

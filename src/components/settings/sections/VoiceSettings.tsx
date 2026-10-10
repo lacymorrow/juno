@@ -132,6 +132,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     handleJunoVoiceChange,
     handlePreviewJunoVoice,
     handleJunoVoiceRateChange,
+    handleJunoSilentChange,
     handleTtsProviderChange,
     dismissCaptureFailure,
   } = settings;
@@ -176,7 +177,25 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <SettingsGroup title="Juno's voice" footer={voiceFooter}>
+      {/* The only voice control outside Advanced. Independent of the voice:
+          turning it off and on again comes back in the same one. */}
+      <SettingsGroup>
+        <SettingsRow
+          id="dont-speak"
+          htmlFor="dont-speak-switch"
+          label="Don't speak"
+          description="Juno writes answers and never says them out loud."
+        >
+          <Switch
+            id="dont-speak-switch"
+            checked={junoVoices?.silent ?? false}
+            disabled={!junoVoices}
+            onCheckedChange={(silent) => void handleJunoSilentChange(silent)}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup advanced title="Juno's voice" footer={voiceFooter}>
         {/* The engines come from Rust with the list, and the value is the
             engine the rows belong to, so the two cannot disagree. */}
         <SettingsRow advanced htmlFor="voice-engine" label="Engine">

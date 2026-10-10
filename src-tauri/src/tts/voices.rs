@@ -56,8 +56,6 @@ static AUDITION: AtomicU64 = AtomicU64::new(0);
 /// audition that runs long gets talked over by the next tap.
 pub const VOICE_SAMPLE_TEXT: &str = "Hi, I'm Juno. This is how I sound.";
 
-/// Entry id for "do not speak out loud".
-pub const SILENT_ID: &str = "silent";
 /// Entry id for "whichever voice the Mac is set to".
 pub const SYSTEM_DEFAULT_ID: &str = "system_default";
 /// The stored engine that means silence.
@@ -769,9 +767,8 @@ impl EngineNeeds {
     }
 }
 
-/// What each engine needs. This is the whole argument for the default: the
-/// Mac's own voice needs none of it and starts speaking as `say` starts
-/// synthesising, on every Mac Juno runs on.
+/// What each engine needs. The Mac's own voice needs none of it, which is
+/// why every fallback chain ends there.
 pub fn engine_needs(engine: &str) -> EngineNeeds {
     match engine.to_ascii_lowercase().as_str() {
         "system" | OFF_PROVIDER => EngineNeeds::default(),
@@ -810,16 +807,46 @@ pub fn engine_options() -> Vec<EngineOption> {
 
 /// The engine whose voices the pane lists.
 ///
-/// Silence is the engine switched off, so there is no engine to list. The
-/// Mac's own voice stands in, because it is the engine that coming back out of
-/// silence needs no account, no key and no download for, and picking one of
-/// its voices is how a person turns Juno's voice back on without going near
-/// the advanced pane.
-pub fn listed_engine(provider: &str) -> &str {
-    if provider.trim().is_empty() || provider.eq_ignore_ascii_case(OFF_PROVIDER) {
-        "system"
+/// Silence is the engine switched off, but the voices are still the ones that
+/// come back when speech does: the engine that was speaking before, or the
+/// default when nothing was.
+pub fn engine_in_force(provider: &str, before_silent: Option<&str>) -> String {
+    if !is_silent(provider) {
+        return provider.to_string();
+    }
+    before_silent
+        .map(str::trim)
+        .filter(|engine| ENGINES.iter().any(|e| e.eq_ignore_ascii_case(engine)))
+        .unwrap_or(crate::constants::settings::defaults::TTS_PROVIDER)
+        .to_ascii_lowercase()
+}
+
+/// Whether this stored engine means Juno does not speak.
+pub fn is_silent(provider: &str) -> bool {
+    provider.trim().is_empty() || provider.eq_ignore_ascii_case(OFF_PROVIDER)
+}
+
+/// [`engine_in_force`] for what is stored.
+fn stored_engine(audio: &crate::settings::AudioSettings) -> String {
+    engine_in_force(&audio.tts_provider, audio.engine_before_silent.as_deref())
+}
+
+/// What turning speech off or on writes: the engine in force, and the one
+/// remembered for the way back. Pure, so the round trip is testable.
+pub fn silence_change(
+    silent: bool,
+    provider: &str,
+    before_silent: Option<&str>,
+) -> (String, Option<String>) {
+    if silent {
+        let remembered = if is_silent(provider) {
+            before_silent.map(str::to_string)
+        } else {
+            Some(provider.to_string())
+        };
+        (OFF_PROVIDER.to_string(), remembered)
     } else {
-        provider
+        (engine_in_force(provider, before_silent), None)
     }
 }
 
@@ -993,9 +1020,9 @@ pub fn resolve_kokoro_voice(stored: Option<&str>) -> String {
 /// What the picker draws, one row each.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct JunoVoiceOption {
-    /// `silent`, `system_default`, or an id the active engine knows.
+    /// `system_default`, or an id the active engine knows.
     pub id: String,
-    /// `silent`, `system`, or `voice`. The row draws itself from this.
+    /// `system` or `voice`. The row draws itself from this.
     pub kind: String,
     pub name: String,
     pub descriptor: String,
@@ -1011,6 +1038,9 @@ pub struct JunoVoiceOption {
 pub struct JunoVoiceList {
     /// The stored engine. `off` means Juno is silent.
     pub provider: String,
+    /// Juno does not speak. The rows still show the voice that speaks when
+    /// it does again.
+    pub silent: bool,
     /// The engine these rows belong to.
     pub engine: String,
     /// That engine's name as a person would say it.
@@ -1032,7 +1062,7 @@ pub struct JunoVoiceList {
 impl JunoVoiceList {
     /// Attach the speed row for the stored rate.
     pub fn with_rate(mut self, stored_rate: f64) -> Self {
-        self.speed = if self.provider.eq_ignore_ascii_case(OFF_PROVIDER) {
+        self.speed = if self.silent {
             None
         } else {
             crate::tts::rate::speed_for(&self.engine, stored_rate)
@@ -1044,21 +1074,15 @@ impl JunoVoiceList {
 /// Build the rows.
 pub fn voice_list(
     provider: &str,
+    engine: &str,
     inventory: &VoiceInventory,
     resolution: &VoiceResolution,
 ) -> JunoVoiceList {
-    let silent = provider.eq_ignore_ascii_case(OFF_PROVIDER);
-    let engine = listed_engine(provider).to_string();
+    let silent = is_silent(provider);
+    let engine = engine.to_string();
     let is_mac = engine.eq_ignore_ascii_case("system");
 
-    let mut options = vec![JunoVoiceOption {
-        id: SILENT_ID.to_string(),
-        kind: SILENT_ID.to_string(),
-        name: "Silent".to_string(),
-        descriptor: "Juno writes the answer and never says it out loud.".to_string(),
-        selected: silent,
-        speaks: false,
-    }];
+    let mut options = Vec::new();
 
     let mut note: Option<String> = None;
 
@@ -1066,7 +1090,7 @@ pub fn voice_list(
         ProviderVoices::Known(rows) if !rows.is_empty() => {
             for row in rows {
                 options.push(JunoVoiceOption {
-                    selected: !silent && resolution.voice.as_deref() == Some(row.id.as_str()),
+                    selected: resolution.voice.as_deref() == Some(row.id.as_str()),
                     kind: if row.id == SYSTEM_DEFAULT_ID {
                         "system"
                     } else {
@@ -1088,7 +1112,7 @@ pub fn voice_list(
                 kind: "system".to_string(),
                 name: "Your Mac's voice".to_string(),
                 descriptor: "Whichever voice this Mac is set to use.".to_string(),
-                selected: !silent,
+                selected: true,
                 speaks: true,
             });
         }
@@ -1125,6 +1149,7 @@ pub fn voice_list(
 
     JunoVoiceList {
         provider: provider.to_string(),
+        silent,
         engine_label: engine_label(&engine).to_string(),
         engines: engine_options(),
         engine,
@@ -1516,7 +1541,7 @@ async fn resolve_and_list(
     audio: &mut crate::settings::AudioSettings,
     freshness: Freshness,
 ) -> Result<JunoVoiceList, String> {
-    let engine = listed_engine(&audio.tts_provider).to_string();
+    let engine = stored_engine(audio);
     let inventory = inventory_for(&engine, freshness).await;
     let stored = audio.voice_for(&engine).map(str::to_string);
     let resolution = resolve_stored_voice(
@@ -1542,7 +1567,10 @@ async fn resolve_and_list(
     push_voice_to_state(state, &engine, resolution.voice.as_deref())?;
     state.set_voice_rate(audio.voice_rate)?;
 
-    Ok(voice_list(&audio.tts_provider, &inventory, &resolution).with_rate(audio.voice_rate))
+    Ok(
+        voice_list(&audio.tts_provider, &engine, &inventory, &resolution)
+            .with_rate(audio.voice_rate),
+    )
 }
 
 /// Put the stored engine and voice in force: at startup, and after a reset.
@@ -1599,8 +1627,23 @@ pub async fn switch_engine(
         .await
         .map_err(|e| format!("Failed to get audio settings: {e}"))?;
 
-    audio.tts_provider = provider.clone();
-    let engine = listed_engine(&provider).to_string();
+    // Silence is its own switch. Changing the engine while it is on changes
+    // what speaks when it is turned off, and keeps Juno quiet until then.
+    if is_silent(&provider) {
+        let (stored, before) = silence_change(
+            true,
+            &audio.tts_provider,
+            audio.engine_before_silent.as_deref(),
+        );
+        audio.tts_provider = stored;
+        audio.engine_before_silent = before;
+    } else if is_silent(&audio.tts_provider) {
+        audio.engine_before_silent = Some(provider.clone());
+    } else {
+        audio.tts_provider = provider.clone();
+    }
+    let provider = audio.tts_provider.clone();
+    let engine = stored_engine(&audio);
     let inventory = inventory_for(&engine, Freshness::Recent).await;
     let stored = audio.voice_for(&engine).map(str::to_string);
     let resolution = resolve_stored_voice(
@@ -1621,10 +1664,10 @@ pub async fn switch_engine(
 
     info!(
         "[Voices] Engine is {} speaking as {}",
-        provider,
+        engine,
         resolution.voice.as_deref().unwrap_or("its own default")
     );
-    Ok(voice_list(&provider, &inventory, &resolution).with_rate(audio.voice_rate))
+    Ok(voice_list(&provider, &engine, &inventory, &resolution).with_rate(audio.voice_rate))
 }
 
 // ---------------------------------------------------------------------------
@@ -1665,31 +1708,11 @@ pub async fn set_juno_voice(
         .await
         .map_err(|e| format!("Failed to get audio settings: {e}"))?;
 
-    let engine = listed_engine(&audio.tts_provider).to_string();
+    let engine = stored_engine(&audio);
     // The pane was drawn from a fresh reading moments ago, so a recent one is
     // enough to check the id against, and it keeps a process spawn out of
     // the gap between the tap and the sound.
     let mut inventory = inventory_for(&engine, Freshness::Recent).await;
-
-    if id == SILENT_ID {
-        // Silence is the engine switched off. Every engine keeps the voice
-        // chosen for it, so coming back out of silence returns to it.
-        audio.tts_provider = OFF_PROVIDER.to_string();
-        manager
-            .set_audio_settings(&audio)
-            .await
-            .map_err(|e| format!("Failed to save Juno's voice: {e}"))?;
-        state.set_tts_provider(OFF_PROVIDER.to_string())?;
-        crate::tts::stop_speech();
-        sync_engine_model(&app_handle, OFF_PROVIDER);
-        info!("[Voices] Juno is silent");
-
-        let stored = audio.voice_for(&engine).map(str::to_string);
-        let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
-        return Ok(
-            voice_list(&audio.tts_provider, &inventory, &resolution).with_rate(audio.voice_rate)
-        );
-    }
 
     let offered = |inventory: &VoiceInventory| match provider_voices(&engine, inventory) {
         ProviderVoices::Known(rows) => rows.iter().any(|row| row.id == id),
@@ -1715,8 +1738,15 @@ pub async fn set_juno_voice(
             Some(id.clone())
         };
 
-    let provider_changed = !audio.tts_provider.eq_ignore_ascii_case(&engine);
-    audio.tts_provider = engine.clone();
+    // Picking a voice while Juno is silent picks what speaks once speech is
+    // back on. It does not turn speech on: that is its own switch.
+    let silent = is_silent(&audio.tts_provider);
+    let provider_changed = !silent && !audio.tts_provider.eq_ignore_ascii_case(&engine);
+    if silent {
+        audio.engine_before_silent = Some(engine.clone());
+    } else {
+        audio.tts_provider = engine.clone();
+    }
     audio.set_voice_for(&engine, chosen.clone());
     if engine.eq_ignore_ascii_case("system") {
         // From here the stored Mac voice is the person's, not a ranking's.
@@ -1727,7 +1757,7 @@ pub async fn set_juno_voice(
         .await
         .map_err(|e| format!("Failed to save Juno's voice: {e}"))?;
 
-    state.set_tts_provider(engine.clone())?;
+    state.set_tts_provider(audio.tts_provider.clone())?;
     push_voice_to_state(state.inner(), &engine, chosen.as_deref())?;
     if provider_changed {
         sync_engine_model(&app_handle, &engine);
@@ -1743,9 +1773,54 @@ pub async fn set_juno_voice(
         voice: chosen,
         substituted: false,
     };
-    let list = voice_list(&audio.tts_provider, &inventory, &resolution).with_rate(audio.voice_rate);
+    let list = voice_list(&audio.tts_provider, &engine, &inventory, &resolution)
+        .with_rate(audio.voice_rate);
     crate::greeting::refresh_cache(&app_handle);
     audition(&app_handle, state.inner(), &engine, &id);
+    Ok(list)
+}
+
+/// Turn Juno's speech off or back on.
+///
+/// Independent of the voice: off remembers the engine that was speaking, and
+/// on returns to it (or to the default, when nothing was). Answers with the
+/// list so the pane draws what Rust decided.
+#[tauri::command]
+pub async fn set_juno_silent(
+    silent: bool,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<JunoVoiceList, String> {
+    let _change = VOICE_CHANGE.lock().await;
+    let manager = settings_manager(&app_handle)?;
+    let mut audio = manager
+        .get_audio_settings()
+        .await
+        .map_err(|e| format!("Failed to get audio settings: {e}"))?;
+
+    let (provider, before) = silence_change(
+        silent,
+        &audio.tts_provider,
+        audio.engine_before_silent.as_deref(),
+    );
+    audio.tts_provider = provider.clone();
+    audio.engine_before_silent = before;
+    manager
+        .set_audio_settings(&audio)
+        .await
+        .map_err(|e| format!("Failed to save Juno's voice: {e}"))?;
+    state.set_tts_provider(provider.clone())?;
+    if silent {
+        crate::tts::stop_speech();
+    }
+    sync_engine_model(&app_handle, &provider);
+    info!(
+        "[Voices] Juno {}",
+        if silent { "is silent" } else { "speaks again" }
+    );
+
+    let list = resolve_and_list(&manager, state.inner(), &mut audio, Freshness::Recent).await?;
+    crate::greeting::refresh_cache(&app_handle);
     Ok(list)
 }
 
@@ -1780,7 +1855,7 @@ pub async fn set_juno_voice_rate(
     state.set_voice_rate(rate)?;
     info!("[Voices] Juno speaks at {rate:.2}x");
 
-    let engine = listed_engine(&audio.tts_provider).to_string();
+    let engine = stored_engine(&audio);
     let inventory = inventory_for(&engine, Freshness::Recent).await;
     let stored = audio.voice_for(&engine).map(str::to_string);
     let resolution = resolve_stored_voice(
@@ -1789,7 +1864,7 @@ pub async fn set_juno_voice_rate(
         stored.as_deref(),
         audio.system_voice_chosen,
     );
-    let list = voice_list(&audio.tts_provider, &inventory, &resolution).with_rate(rate);
+    let list = voice_list(&audio.tts_provider, &engine, &inventory, &resolution).with_rate(rate);
 
     // Hearing it is the point of moving the slider. Only when the engine in
     // force can change speed: otherwise the sample would sound the same.
@@ -1817,12 +1892,12 @@ pub async fn preview_juno_voice(
             .await
             .map_err(|e| format!("Failed to get audio settings: {e}"))?;
 
-        if audio.tts_provider.eq_ignore_ascii_case(OFF_PROVIDER) {
+        if is_silent(&audio.tts_provider) {
             // Silence is a choice. Replaying it would contradict it.
             return Ok(());
         }
 
-        let engine = listed_engine(&audio.tts_provider).to_string();
+        let engine = stored_engine(&audio);
         let inventory = inventory_for(&engine, Freshness::Recent).await;
         let stored = audio.voice_for(&engine).map(str::to_string);
         let resolution = resolve_stored_voice(
@@ -1903,9 +1978,9 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
     }
 
     fn list_for(provider: &str, inventory: &VoiceInventory, stored: Option<&str>) -> JunoVoiceList {
-        let engine = listed_engine(provider);
-        let resolution = resolve_voice(engine, inventory, stored);
-        voice_list(provider, inventory, &resolution)
+        let engine = engine_in_force(provider, None);
+        let resolution = resolve_voice(&engine, inventory, stored);
+        voice_list(provider, &engine, inventory, &resolution)
     }
 
     // -- parsing -----------------------------------------------------------
@@ -1985,12 +2060,10 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         for engine in ["elevenlabs", "replicate", "chatterbox"] {
             let list = list_for(engine, &VoiceInventory::default(), None);
             assert_eq!(list.engine, engine);
-            assert_eq!(
-                list.options.len(),
-                1,
-                "{engine} should offer silence and nothing it cannot honour"
+            assert!(
+                list.options.is_empty(),
+                "{engine} should offer nothing it cannot honour"
             );
-            assert_eq!(list.options[0].id, SILENT_ID);
             let note = list.note.unwrap_or_default();
             assert!(!note.is_empty(), "{engine} must say why there are no rows");
             assert!(!note.contains('—'), "{note}");
@@ -2002,7 +2075,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
     #[test]
     fn an_engine_with_nothing_installed_says_so() {
         let list = list_for("kokoro", &VoiceInventory::default(), None);
-        assert_eq!(list.options.len(), 1);
+        assert!(list.options.is_empty());
         assert!(list.note.unwrap_or_default().contains("Kokoro"));
     }
 
@@ -2116,10 +2189,10 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         assert_eq!(best_macos_voice(&bare.macos), None);
 
         let list = list_for("system", &bare, Some("Samantha"));
-        assert_eq!(list.options.len(), 2, "silence plus the Mac's own voice");
-        assert_eq!(list.options[1].id, SYSTEM_DEFAULT_ID);
-        assert!(list.options[1].selected);
-        assert!(list.options[1].speaks, "the Mac's own voice is not silence");
+        assert_eq!(list.options.len(), 1, "the Mac's own voice");
+        assert_eq!(list.options[0].id, SYSTEM_DEFAULT_ID);
+        assert!(list.options[0].selected);
+        assert!(list.options[0].speaks);
     }
 
     /// A row offers the best version of itself, so a download is in force
@@ -2166,33 +2239,48 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
 
     // -- silence -----------------------------------------------------------
 
+    /// Silence is a switch, not a row. While it is on the list still shows
+    /// the voice that speaks when it is off, with nothing to replay.
     #[test]
-    fn silence_is_a_row_and_it_does_not_speak() {
-        let list = list_for(OFF_PROVIDER, &stock_mac(), None);
-        let silent = &list.options[0];
-        assert_eq!(silent.id, SILENT_ID);
-        assert!(
-            silent.selected,
-            "silence is in force when the engine is off"
-        );
-        assert!(!silent.speaks, "selecting silence must not make a sound");
-        assert_eq!(
-            list.options.iter().filter(|o| o.selected).count(),
-            1,
-            "exactly one row is in force"
-        );
+    fn silence_is_a_switch_and_the_rows_stay_the_engines() {
+        let list = list_for(OFF_PROVIDER, &kokoro_mac(), None).with_rate(1.0);
+        assert!(list.silent);
+        assert_eq!(list.engine, "kokoro");
+        assert!(list.options.iter().all(|o| o.kind != "silent"));
+        assert!(list.speed.is_none(), "no speed row while silent");
+        assert!(!list_for("kokoro", &kokoro_mac(), None).silent);
     }
 
-    /// Silence has no engine, so the rows are the Mac's: picking one is how
-    /// somebody turns Juno's voice back on without the advanced pane.
+    /// Off remembers the engine, and on returns to it.
     #[test]
-    fn silence_still_offers_a_way_back() {
-        assert_eq!(listed_engine(OFF_PROVIDER), "system");
-        assert_eq!(listed_engine(""), "system");
-        assert_eq!(listed_engine("kokoro"), "kokoro");
+    fn turning_speech_back_on_returns_to_the_engine_that_was_speaking() {
+        let (off, remembered) = silence_change(true, "elevenlabs", None);
+        assert_eq!(off, OFF_PROVIDER);
+        assert_eq!(remembered.as_deref(), Some("elevenlabs"));
+        assert_eq!(engine_in_force(&off, remembered.as_deref()), "elevenlabs");
 
-        let list = list_for(OFF_PROVIDER, &stock_mac(), None);
-        assert!(list.options.iter().any(|o| o.id == "Samantha" && o.speaks));
+        // Off twice keeps the first engine, not "off".
+        let (_, again) = silence_change(true, &off, remembered.as_deref());
+        assert_eq!(again.as_deref(), Some("elevenlabs"));
+
+        let (on, cleared) = silence_change(false, &off, again.as_deref());
+        assert_eq!(on, "elevenlabs");
+        assert_eq!(cleared, None);
+    }
+
+    /// Silent from an older build, with nothing remembered, comes back on the
+    /// default engine. Turning on what is already on changes nothing.
+    #[test]
+    fn speech_back_on_with_nothing_remembered_is_the_default() {
+        let default = crate::constants::settings::defaults::TTS_PROVIDER;
+        assert_eq!(silence_change(false, OFF_PROVIDER, None).0, default);
+        assert_eq!(silence_change(false, "", None).0, default);
+        assert_eq!(
+            silence_change(false, OFF_PROVIDER, Some("nonsense")).0,
+            default
+        );
+        assert_eq!(silence_change(false, "system", None).0, "system");
+        assert_eq!(engine_in_force("kokoro", Some("system")), "kokoro");
     }
 
     #[test]
@@ -2295,27 +2383,28 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
 
     // -- the default engine ------------------------------------------------
 
-    /// The default is the engine that needs nothing: no key, no network, no
-    /// download, no server. Anything else is silence, or a wait, on a fresh
-    /// install.
+    /// The default is Kokoro: local, no key, no network once it is on disk.
+    /// The one thing it needs is the first download, and until that lands
+    /// (or if it never does) the fallback chain speaks with the Mac's voice,
+    /// which needs nothing. See `tts::fallback_chain`.
     #[test]
-    fn the_default_engine_needs_nothing() {
+    fn the_default_engine_is_kokoro_and_needs_only_a_download() {
         let default = crate::constants::settings::defaults::TTS_PROVIDER;
-        assert!(engine_needs(default).nothing(), "{default} needs something");
+        assert_eq!(engine_in_force(default, None), "kokoro");
         assert!(ENGINES.contains(&default));
-        assert_eq!(listed_engine(default), "system");
+        let needs = engine_needs(default);
+        assert!(needs.download);
+        assert!(!needs.account_key && !needs.network && !needs.server);
     }
 
-    /// Kokoro sounds good but downloads 82MB and renders a whole clip before
-    /// the first sound, and every cloud engine needs an account. None of them
-    /// can be the default for that reason, and each says why.
+    /// The Mac's voice is the floor every chain ends on, so it is the one
+    /// engine that needs nothing at all. Every cloud engine needs an account.
     #[test]
-    fn every_other_engine_needs_something_and_so_is_not_the_default() {
+    fn only_the_mac_voice_needs_nothing() {
+        assert!(engine_needs("system").nothing());
         for engine in ENGINES.iter().filter(|e| **e != "system") {
             assert!(!engine_needs(engine).nothing(), "{engine}");
-            assert_ne!(*engine, crate::constants::settings::defaults::TTS_PROVIDER);
         }
-        assert!(engine_needs("kokoro").download);
         for cloud in ["elevenlabs", "replicate", "chatterbox"] {
             assert!(engine_needs(cloud).account_key, "{cloud}");
         }
@@ -2326,8 +2415,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn an_intel_mac_gets_the_same_default_engine() {
-        assert_eq!(crate::constants::settings::defaults::TTS_PROVIDER, "system");
-        assert!(engine_needs(crate::constants::settings::defaults::TTS_PROVIDER).nothing());
+        assert_eq!(crate::constants::settings::defaults::TTS_PROVIDER, "kokoro");
     }
 
     // -- ranking by quality, not by name -----------------------------------
@@ -2545,7 +2633,7 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Siri);
         let resolution = resolve_voice("system", &inventory, None);
         assert_eq!(resolution.voice.as_deref(), Some("Ava (Premium)"));
-        let list = voice_list("system", &inventory, &resolution);
+        let list = voice_list("system", "system", &inventory, &resolution);
         assert!(list.options.iter().any(|o| o.id == SYSTEM_DEFAULT_ID));
         assert!(list.options.iter().all(|o| !o.name.contains("Siri")));
         assert_eq!(list.options.iter().filter(|o| o.selected).count(), 1);
@@ -2603,8 +2691,8 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         let inventory = with_system_voice(stock_mac(), SystemVoice::Unset);
         let resolution = resolve_voice("system", &inventory, None);
         assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-        let list = voice_list("system", &inventory, &resolution);
-        assert_eq!(list.options[1].name, "Your Mac's voice");
+        let list = voice_list("system", "system", &inventory, &resolution);
+        assert_eq!(list.options[0].name, "Your Mac's voice");
     }
 
     /// A downloaded voice does not beat the Mac's own voice when the person
@@ -2615,7 +2703,7 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Unset);
         let resolution = resolve_voice("system", &inventory, None);
         assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-        let list = voice_list("system", &inventory, &resolution);
+        let list = voice_list("system", "system", &inventory, &resolution);
         assert!(list.options.iter().any(|o| o.id == "Ava (Premium)"));
     }
 
@@ -2626,7 +2714,7 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         let inventory = with_system_voice(stock_mac(), SystemVoice::Other);
         let resolution = resolve_voice("system", &inventory, None);
         assert_eq!(resolution.voice.as_deref(), Some("Samantha"));
-        let list = voice_list("system", &inventory, &resolution);
+        let list = voice_list("system", "system", &inventory, &resolution);
         let own = list
             .options
             .iter()

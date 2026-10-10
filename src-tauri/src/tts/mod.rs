@@ -1491,6 +1491,27 @@ async fn play_rendered(
     }
 }
 
+/// The engines tried for one utterance, in order. Every chain ends in the
+/// Mac's own voice, which needs nothing, so a failing engine never means
+/// silence.
+pub(crate) fn fallback_chain(primary_provider: &str) -> Vec<&'static str> {
+    match primary_provider.to_lowercase().as_str() {
+        "replicate" => vec!["replicate", "kokoro", "system"],
+        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
+        "chatterbox" => vec!["chatterbox", "kokoro", "system"],
+        "supertonic" => vec!["supertonic", "kokoro", "system"],
+        "kokoro" => vec!["kokoro", "system"],
+        "system" => vec!["system"],
+        _ => {
+            warn!(
+                "Unknown primary TTS provider: '{}'. Using system fallback only.",
+                primary_provider
+            );
+            vec!["system"]
+        }
+    }
+}
+
 // Execute TTS with fallback logic (no blocking, no race conditions)
 //
 // `allow_direct` is false when this render runs while another chunk is still
@@ -1526,23 +1547,10 @@ async fn execute_tts_with_fallback(
         }
     }
 
-    // Define the provider fallback order based on the primary provider
-    let fallback_providers = match primary_provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "kokoro", "system"],
-        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
-        "chatterbox" => vec!["chatterbox", "kokoro", "system"],
-        "supertonic" => vec!["supertonic", "kokoro", "system"],
-        "kokoro" => vec!["kokoro", "system"],
-        "system" => vec!["system"],
-        "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
-        _ => {
-            warn!(
-                "Unknown primary TTS provider: '{}'. Using system fallback only.",
-                primary_provider
-            );
-            vec!["system"]
-        }
-    };
+    if primary_provider.eq_ignore_ascii_case("off") {
+        return Ok("TTS_DISABLED_BY_SETTING".to_string());
+    }
+    let fallback_providers = fallback_chain(primary_provider);
 
     let fallback_providers: Vec<&str> = fallback_providers
         .into_iter()
@@ -1844,6 +1852,26 @@ pub async fn set_supertonic_settings_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Kokoro is the default, and when it cannot speak the Mac does.
+    #[test]
+    fn the_default_engine_falls_back_to_the_mac() {
+        let default = crate::constants::settings::defaults::TTS_PROVIDER;
+        assert_eq!(default, "kokoro");
+        assert_eq!(fallback_chain(default), vec!["kokoro", "system"]);
+    }
+
+    /// Whatever engine is chosen, the last one tried is the Mac's own voice.
+    #[test]
+    fn every_chain_ends_in_the_mac_voice() {
+        for engine in crate::tts::voices::ENGINES
+            .iter()
+            .copied()
+            .chain(["KOKORO", "unknown"])
+        {
+            assert_eq!(fallback_chain(engine).last(), Some(&"system"), "{engine}");
+        }
+    }
 
     #[test]
     fn holding_stops_every_player_once_and_releasing_resumes_them() {

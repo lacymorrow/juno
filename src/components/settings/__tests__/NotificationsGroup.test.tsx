@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import { COMMANDS } from "@/lib/constants.generated";
-import NotificationSettings from "@/components/settings/sections/NotificationSettings";
+import NotificationsGroup from "@/components/settings/NotificationsGroup";
 import type { NotificationAuthorization, NotificationStatus } from "@/types/notifications";
 
 const status = (authorization: NotificationAuthorization): NotificationStatus => ({
@@ -45,7 +45,7 @@ describe("the notifications row shows what macOS allows", () => {
 
   it("not determined: the one action asks macOS, and the switch stays off", async () => {
     mockBackend(status("not_determined"));
-    render(<NotificationSettings />);
+    render(<NotificationsGroup />);
 
     const allow = await screen.findByRole("button", { name: /allow notifications/i });
     expect(screen.getByRole("switch")).toBeDisabled();
@@ -60,7 +60,7 @@ describe("the notifications row shows what macOS allows", () => {
 
   it("denied: one line, a button that opens Juno's pane, and a switch that reads off", async () => {
     mockBackend(status("denied"));
-    render(<NotificationSettings />);
+    render(<NotificationsGroup />);
 
     expect(
       await screen.findByText("Notifications are off for Juno in System Settings."),
@@ -76,7 +76,7 @@ describe("the notifications row shows what macOS allows", () => {
 
   it("denied: coming back to the window re-reads the answer", async () => {
     const setStatus = mockBackend(status("denied"));
-    render(<NotificationSettings />);
+    render(<NotificationsGroup />);
     await screen.findByRole("button", { name: /open system settings/i });
 
     setStatus(status("authorized"));
@@ -86,27 +86,44 @@ describe("the notifications row shows what macOS allows", () => {
     expect(screen.getByRole("switch")).toBeChecked();
   });
 
-  it("authorized: the switch is live and a test can be sent", async () => {
+  it("authorized: no test button; turning the switch on sends one", async () => {
     mockBackend(status("authorized"));
-    render(<NotificationSettings />);
+    render(<NotificationsGroup />);
 
-    const send = await screen.findByRole("button", { name: /send one/i });
-    expect(screen.getByRole("switch")).toBeEnabled();
-    expect(screen.getByRole("switch")).toBeChecked();
+    const toggle = await screen.findByRole("switch");
+    await waitFor(() => expect(toggle).toBeEnabled());
+    expect(toggle).toBeChecked();
+    expect(screen.queryByRole("button", { name: /send one/i })).not.toBeInTheDocument();
 
-    fireEvent.click(send);
-    expect(invoke).toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
-    // The banner is the answer: no "Sent." line that could be true while
-    // nothing appeared.
-    await waitFor(() => expect(send).toBeEnabled());
-    expect(screen.queryByText("Sent.")).not.toBeInTheDocument();
+    // Off sends nothing.
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(invoke).not.toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION);
+
+    // On sends one: the banner shows what to expect.
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION),
+    );
+    expect(invoke).toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_SET_NOTIFICATIONS_ENABLED, {
+      enabled: true,
+    });
+  });
+
+  it("not determined: allowing sends one", async () => {
+    mockBackend(status("not_determined"));
+    render(<NotificationsGroup />);
+    fireEvent.click(await screen.findByRole("button", { name: /allow notifications/i }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(COMMANDS.NOTIFICATIONS_TEST_NOTIFICATION),
+    );
   });
 
   it("authorized: a failed send shows no error, and the row re-reads macOS", async () => {
     let checks = 0;
     invoke.mockImplementation((command: string) => {
       if (command === COMMANDS.NOTIFICATIONS_GET_NOTIFICATION_SETTINGS)
-        return Promise.resolve({ enabled: true });
+        return Promise.resolve({ enabled: false });
       if (command === COMMANDS.NOTIFICATIONS_CHECK_NOTIFICATION_PERMISSION) {
         checks += 1;
         return Promise.resolve(status(checks === 1 ? "authorized" : "denied"));
@@ -115,9 +132,11 @@ describe("the notifications row shows what macOS allows", () => {
         return Promise.reject("macOS would not take the notification.");
       return Promise.resolve(null);
     });
-    render(<NotificationSettings />);
+    render(<NotificationsGroup />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /send one/i }));
+    const toggle = await screen.findByRole("switch");
+    await waitFor(() => expect(toggle).toBeEnabled());
+    fireEvent.click(toggle);
     await screen.findByRole("button", { name: /open system settings/i });
     expect(
       screen.queryByText("macOS would not take the notification."),
