@@ -4,7 +4,7 @@ Status: Phase 1 filed as LAC-4210 (2026-10-08). Pricing approved by Lacy 2026-10
 
 Shareable version: https://claude.ai/artifact/5zgJB2Cfw9EYdvDAzn3Pu1
 
-**One sentence: attach Composio Connect as a single remote MCP server, ship Gmail and Google Calendar only, and spend the real work on the approval gate, because Juno's risk classifier currently rates every unknown tool `Low` and would let `GMAIL_SEND_EMAIL` run unasked.**
+**One sentence: attach Composio Connect as a single remote MCP server, ship Gmail and Google Calendar only, connect just-in-time from the answer that needs it. The approval gate (Juno's classifier rates every unknown tool `Low`, so `GMAIL_SEND_EMAIL` runs unasked) is deferred to LAC-4213 and must land before integrations leave the Advanced beta toggle.**
 
 ## The first ten seconds
 
@@ -61,7 +61,7 @@ Juno is further along than it looks. It already is an MCP client.
 
 So the integration is small. The gaps are specific.
 
-### Gap 1, the approval gate. This is the whole job.
+### Gap 1, the approval gate (deferred, LAC-4213)
 
 **Deferred 2026-10-08 (Lacy): out of Phase 1, parked as LAC-4213. Must land before integrations leave the Advanced beta toggle.**
 
@@ -134,7 +134,7 @@ Connecting Gmail through Composio means a third party holds a refresh token for 
 
 ## Scope
 
-**Phase 1, the demo (LAC-4210).** HTTP transport fixed, generic MCP OAuth client, risk classification by inner slug plus the pinning tests, just-in-time connect card plus a Connected apps group that appears only after a connection, tested on Gmail and Google Calendar, behind an Advanced beta toggle, connecting via the person's own Composio account. Ship when "what's on my calendar" and "read me my unread mail" work by voice and "send Katie an email" stops and asks.
+**Phase 1, the demo (LAC-4210).** HTTP transport fixed, generic MCP OAuth client, just-in-time connect card plus a Connected apps group that appears only after a connection, tested on Gmail and Google Calendar, behind an Advanced beta toggle, connecting via the person's own Composio account. Ship when "what's on my calendar" and "read me my unread mail" work by voice. Sends run unasked in this phase; that is accepted behind the beta toggle.
 
 **Phase 2, the paid product.** Blocked on LAC-4128/4130/4134. Gateway proxies Composio with our key and the account id, checks `integrations`, debits the ledger per billed call.
 

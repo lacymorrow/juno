@@ -204,6 +204,7 @@ async fn discover(mcp_url: &str) -> Result<AuthServerMetadata, String> {
     let resource_metadata_url =
         advertised.unwrap_or_else(|| format!("{origin}/.well-known/oauth-protected-resource"));
 
+    require_secure_endpoint(&resource_metadata_url, "resource metadata")?;
     let resource_metadata: Value = client
         .get(&resource_metadata_url)
         .send()
@@ -233,20 +234,26 @@ async fn discover(mcp_url: &str) -> Result<AuthServerMetadata, String> {
         .map_err(|e| format!("Auth server metadata unreadable: {e}"))?;
 
     let endpoint = |key: &str| -> Result<String, String> {
-        metadata
+        let url = metadata
             .get(key)
             .and_then(Value::as_str)
             .map(|s| s.to_string())
-            .ok_or_else(|| format!("Auth server metadata is missing {key}"))
+            .ok_or_else(|| format!("Auth server metadata is missing {key}"))?;
+        require_secure_endpoint(&url, key)?;
+        Ok(url)
+    };
+    let registration_endpoint = match metadata.get("registration_endpoint").and_then(Value::as_str) {
+        Some(url) => {
+            require_secure_endpoint(url, "registration_endpoint")?;
+            Some(url.to_string())
+        }
+        None => None,
     };
 
     Ok(AuthServerMetadata {
         authorization_endpoint: endpoint("authorization_endpoint")?,
         token_endpoint: endpoint("token_endpoint")?,
-        registration_endpoint: metadata
-            .get("registration_endpoint")
-            .and_then(Value::as_str)
-            .map(|s| s.to_string()),
+        registration_endpoint,
         scopes_supported: metadata
             .get("scopes_supported")
             .and_then(Value::as_array)
@@ -271,6 +278,23 @@ fn extract_resource_metadata_url(header: &str) -> Option<String> {
 }
 
 /// `https://host[:port]` of a URL, no path.
+/// Every URL the auth flow follows comes from the server being connected, so a
+/// hostile server could advertise `shortcuts://`, `file://` or plain http and
+/// have `open::that` launch a scheme handler or send tokens in cleartext.
+/// Only https is followed, plus http on loopback for servers running on this Mac.
+fn require_secure_endpoint(raw: &str, what: &str) -> Result<(), String> {
+    let url = url::Url::parse(raw).map_err(|e| format!("Bad {what} URL: {e}"))?;
+    let loopback = matches!(
+        url.host_str(),
+        Some("127.0.0.1") | Some("localhost") | Some("[::1]")
+    );
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" if loopback => Ok(()),
+        scheme => Err(format!("{what} must be https, got {scheme:?}")),
+    }
+}
+
 fn url_origin(raw: &str) -> Result<String, String> {
     let parsed = url::Url::parse(raw).map_err(|e| format!("Invalid MCP URL {raw:?}: {e}"))?;
     let host = parsed
@@ -496,6 +520,26 @@ async fn wait_for_callback(listener: tokio::net::TcpListener) -> Result<Callback
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auth_endpoints_must_be_https_or_loopback() {
+        for ok in [
+            "https://connect.composio.dev/oauth/authorize",
+            "http://127.0.0.1:8080/token",
+            "http://localhost:3000/register",
+        ] {
+            assert!(require_secure_endpoint(ok, "endpoint").is_ok(), "{ok}");
+        }
+        for bad in [
+            "shortcuts://run-shortcut?name=Wipe",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "http://evil.example/token",
+            "sms:5551234",
+        ] {
+            assert!(require_secure_endpoint(bad, "endpoint").is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn pkce_challenge_is_the_rfc_7636_s256_of_the_verifier() {

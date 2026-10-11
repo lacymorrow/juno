@@ -83,9 +83,11 @@ fn parse_sse_response(body: &str, request_id: Option<u64>) -> Result<Value, Stri
                 return Ok(parsed);
             }
         }
-        if parsed.get("result").is_some() || parsed.get("error").is_some() {
-            last_message = Some(parsed);
-        } else if last_message.is_none() {
+        // A response beats a notification; any message beats none.
+        if parsed.get("result").is_some()
+            || parsed.get("error").is_some()
+            || last_message.is_none()
+        {
             last_message = Some(parsed);
         }
     }
