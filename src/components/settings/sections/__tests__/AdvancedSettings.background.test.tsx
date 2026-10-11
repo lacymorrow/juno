@@ -73,6 +73,14 @@ beforeEach(() => {
   mockBackend();
 });
 
+async function openInfo(el: HTMLElement, text: RegExp) {
+  const row = el.closest('[id^="settings-row-"]') as HTMLElement;
+  await act(async () => {
+    within(row).getByRole("button", { name: "More info" }).focus();
+  });
+  return (await screen.findAllByText(text))[0];
+}
+
 describe("Background settings", () => {
   it("shows what the backend says, not a guess", async () => {
     mockBackend({ background_mode: false, mouse_control: "always", dock_icon_visible: false });
@@ -137,7 +145,10 @@ describe("Background settings", () => {
   it("puts the whole way back into the Show Juno in description", async () => {
     await mount();
 
-    const description = screen.getByText(/keeps Juno out of the Dock/);
+    const description = await openInfo(
+      screen.getByRole("radiogroup", { name: "Show Juno in" }),
+      /keeps Juno out of the Dock/,
+    );
     expect(description).toHaveTextContent("click the Juno icon in the menu bar");
     expect(description).toHaveTextContent("Applications folder");
   });

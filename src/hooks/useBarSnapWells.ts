@@ -13,10 +13,12 @@
  * the drag hook it would call anyway.
  *
  * The Rust/React line: React decides which well (pure maths over monitor
- * rects in global points), Rust performs the moves, and the OS performs the
- * drag. A steady look is dragged as a window the size of its own shape
- * (`dragLayout`), so the OS's menu bar rule holds the shape, not a window far
- * taller than it.
+ * rects in global points), and Rust performs the moves, the drag included:
+ * from the drag start to the release, Rust puts the spot pressed under the
+ * cursor on every mouse-dragged event (`platform/bar_drag_follow.rs`). A
+ * steady look is dragged as a window the size of its own shape
+ * (`dragLayout`), so the menu bar rule every frame change goes through holds
+ * the shape, not a window far taller than it.
  *
  * Only the bar window snaps. `useDragWindow` also drags the floating panels,
  * which have no wells and must keep dragging without them, so every entry
@@ -60,6 +62,7 @@ import {
 import {
   dragLayout,
   getSteady,
+  grabInDragWindow,
   steadyLayout,
   steadySwapsSettled,
   swapSteadyLayout,
@@ -157,6 +160,72 @@ export async function applySteadyFrame(layout: SteadyLayout): Promise<void> {
 }
 
 /**
+ * What the page saw of the gesture, for Rust's `[Drag]` log lines. Screen
+ * points (DOM `screenX`/`screenY`) and milliseconds.
+ */
+export interface DragTrace {
+  pressX: number;
+  pressY: number;
+  crossX: number;
+  crossY: number;
+  pressToCrossMs: number;
+  /** `performance.now()` at the crossing; turned into a delay on the way out. */
+  crossedAt: number;
+}
+
+/** What Rust did with `startDrag` (`DragStart` in `bar_position.rs`). */
+type DragOutcome = "started" | "released" | "unsupported";
+
+/**
+ * Put the bar window down with `grab` (a point inside it, in points) under
+ * the cursor as it is right now, at `size`. `fallback` is the top-left used
+ * when the cursor cannot be read. Rust reads the cursor in the same
+ * main-thread call as the frame change, so nothing the page does can add lag
+ * between the two.
+ *
+ * With `startDrag`, Rust also starts the drag in that same call: from then
+ * until the release it moves the window on every mouse-dragged event, with
+ * `grab` under the cursor each time, so the bar cannot fall behind or drift
+ * however fast the hand goes. `drag` says what happened: "started" (Rust is
+ * carrying it), "released" (a flick, nothing to carry), or "unsupported" (or
+ * nothing, from an older backend), which leaves the OS drag to the caller.
+ */
+async function placeGrabUnderCursor(
+  fallback: { x: number; y: number },
+  size: { width: number; height: number },
+  grab: { x: number; y: number },
+  trace?: DragTrace | null,
+): Promise<{ origin: { x: number; y: number }; drag: DragOutcome | null }> {
+  const placed = await invoke<{ x: number; y: number; drag?: DragOutcome } | null>(
+    COMMANDS.BAR_SET_BAR_FRAME,
+    {
+      x: fallback.x,
+      y: fallback.y,
+      width: size.width,
+      height: size.height,
+      grabX: grab.x,
+      grabY: grab.y,
+      startDrag: true,
+      trace: trace
+        ? {
+            pressX: trace.pressX,
+            pressY: trace.pressY,
+            crossX: trace.crossX,
+            crossY: trace.crossY,
+            pressToCrossMs: trace.pressToCrossMs,
+            crossToRequestMs: performance.now() - trace.crossedAt,
+          }
+        : null,
+    },
+  );
+  const origin =
+    placed && Number.isFinite(placed.x) && Number.isFinite(placed.y)
+      ? { x: placed.x, y: placed.y }
+      : fallback;
+  return { origin, drag: placed?.drag ?? null };
+}
+
+/**
  * The steady layout for `well` on its display, or null when the display is
  * gone. Wells for a steady look are computed for its resting footprint.
  */
@@ -197,22 +266,61 @@ let lastShowPayload: Record<string, number> | null = null;
 // cursor with it, exactly as the drop indicator does.
 let footprintGrab: { x: number; y: number } | null = null;
 // Whether the button that started the drag is still believed held. The
-// shrink at drag start hands the window to the OS only while it is.
+// shrink at drag start starts the drag only while it is.
 let dragHeld = false;
 // Watches the button while a drag is armed, so a drag whose mouseup the page
-// never saw (the OS drag swallows events) still settles.
+// never saw (a release outside every window, or one the drag monitors
+// missed) still settles.
 let releaseWatch: ReturnType<typeof setInterval> | null = null;
 /** How often the release watch asks Rust whether the button is still down. */
 export const RELEASE_WATCH_MS = 150;
+// A look that is not steady is put back under the cursor before its drag;
+// the settle waits for that, so a quick release cannot glide first and then
+// have the placement land on top of the glide.
+let plainPlacement: Promise<void> | null = null;
+
+// ── Whether a bar drag is in progress ─────────────────────────────────────
+//
+// From the press crossing the threshold until the snap has settled. Tooltips
+// read it: nothing may pop up on a bar being carried, and one already open
+// closes the moment the drag starts.
+
+let barDragging = false;
+const draggingListeners = new Set<() => void>();
+
+function setBarDragging(next: boolean): void {
+  if (barDragging === next) return;
+  barDragging = next;
+  draggingListeners.forEach((fn) => fn());
+}
+
+/** True from the drag start until the snap has settled. */
+export function isBarDragging(): boolean {
+  return barDragging;
+}
+
+function subscribeBarDragging(fn: () => void): () => void {
+  draggingListeners.add(fn);
+  return () => {
+    draggingListeners.delete(fn);
+  };
+}
+
+/** Re-renders when a bar drag starts or finishes settling. */
+export function useBarDragging(): boolean {
+  return useSyncExternalStore(subscribeBarDragging, isBarDragging, isBarDragging);
+}
 
 /** Forget the in-flight gesture. For tests, which share one module instance. */
 export function resetBarSnapState(): void {
+  setBarDragging(false);
   snapArmed = false;
   snapAnimating = false;
   overlayShown = false;
   lastShowPayload = null;
   footprintGrab = null;
   dragHeld = false;
+  plainPlacement = null;
   stopReleaseWatch();
 }
 
@@ -318,45 +426,88 @@ export function answerOverlayReady(): void {
 }
 
 /**
- * A press on the bar has become a drag. Arms the snap and hands the window to
- * the OS drag.
+ * A press on the bar has become a drag. Arms the snap and has Rust carry the
+ * window with the cursor until the release.
  *
  * A steady look's window is far larger than its shape, and macOS keeps a
- * floating window's top edge below the menu bar during the OS drag, so a pill
- * docked low used to stop halfway up the screen. So first the window becomes
- * the shape (`dragLayout`): the same hidden swap a drop uses, with the pill
- * staying exactly where it is on screen. Then the OS drags it, and the menu
- * bar rule now holds the pill's own top edge, which is right. On release the
- * small window glides into the well and the settle swaps the steady layout
- * back. Every other look drags its window as it is.
+ * floating window's top edge below the menu bar on every frame change, so a
+ * pill docked low used to stop halfway up the screen. So first the window
+ * becomes the shape (`dragLayout`): the same hidden swap a drop uses, with the
+ * pill staying exactly where it is on screen. Then Rust moves it with the
+ * cursor, and the menu bar rule now holds the pill's own top edge, which is
+ * right. On release the small window glides into the well and the settle
+ * swaps the steady layout back. Every other look drags its window as it is.
  */
-export function startBarDrag(grabOffset: { x: number; y: number }): void {
+export function startBarDrag(
+  grabOffset: { x: number; y: number },
+  trace: DragTrace | null = null,
+): void {
   void armBarSnap(grabOffset);
   const win = getCurrentWindow();
   const osDrag = () =>
     win.startDragging().catch((error) => console.debug("barDrag: startDragging failed:", error));
-  if (isBarWindow()) {
-    dragHeld = true;
-    startReleaseWatch();
+  if (!isBarWindow()) {
+    void osDrag();
+    return;
   }
-  const steady = isBarWindow() ? getSteady(win.label) : null;
+  setBarDragging(true);
+  dragHeld = true;
+  startReleaseWatch();
+  const steady = getSteady(win.label);
   const layout = steady?.layout;
   if (!steady || !layout) {
-    void osDrag();
+    plainPlacement = startPlainDrag(win, grabOffset, osDrag, trace);
     return;
   }
   const footprint = steady.footprint ?? steady.spec.rest;
   const drag = dragLayout(layout, footprint);
+  const grab = grabInDragWindow(layout, footprint, grabOffset);
   swapSteadyLayout(win.label, drag, async (next) => {
-    await applySteadyFrame(next);
-    // The window is the shape now, still hidden for a frame. Released
-    // already (a flick) means there is nothing left to drag; the settle,
-    // queued behind this swap, glides it home.
-    if (dragHeld) void osDrag();
+    // Placed by the cursor, not where the shape was at the press: the
+    // threshold and the hidden frames before this let a fast flick carry the
+    // cursor well past the shape. Rust starts following in the same call, so
+    // the cursor cannot get ahead before it begins. Released already (a
+    // flick) means there is nothing left to drag; the settle, queued behind
+    // this swap, glides it home.
+    const placed = await placeGrabUnderCursor(next.origin, next.size, grab, trace);
+    if (!osDragHandled(placed.drag) && dragHeld) void osDrag();
+    return { ...next, origin: placed.origin };
   }).catch((error) => {
     console.debug("barDrag: drag layout failed:", error);
     if (dragHeld) void osDrag();
   });
+}
+
+/** Rust started the drag, or found nothing to drag: the page does nothing. */
+function osDragHandled(drag: DragOutcome | null): boolean {
+  return drag === "started" || drag === "released";
+}
+
+/**
+ * A look that resizes its own window (not steady) keeps its window for the
+ * drag, but it is put back under the cursor first: by the time the press
+ * becomes a drag the cursor is past the threshold. Rust starts following the
+ * cursor in the same call.
+ */
+async function startPlainDrag(
+  win: AppWindow,
+  grabOffset: { x: number; y: number },
+  osDrag: () => Promise<void>,
+  trace: DragTrace | null,
+): Promise<void> {
+  try {
+    const [origin, logical] = await Promise.all([windowOrigin(win), logicalWindowSize(win)]);
+    const placed = await placeGrabUnderCursor(
+      origin,
+      { width: logical.windowWidth, height: logical.windowHeight },
+      grabOffset,
+      trace,
+    );
+    if (osDragHandled(placed.drag)) return;
+  } catch (error) {
+    console.debug("barDrag: could not put the bar under the cursor:", error);
+  }
+  if (dragHeld) void osDrag();
 }
 
 /**
@@ -372,16 +523,28 @@ export async function settleBarSnap(): Promise<void> {
     lastShowPayload = null;
     void emit(EVENTS.SNAP_WELLS_HIDE);
   }
+  // Rust stops carrying the window (if a release it never saw left it on)
+  // before anything here glides it, so no follow move can land on the glide.
+  const released = dragHeld
+    ? invoke(COMMANDS.BAR_DRAG_RELEASED).catch(() => {})
+    : Promise.resolve();
   dragHeld = false;
   stopReleaseWatch();
-  if (!snapArmed || snapAnimating) return;
+  if (snapAnimating) return;
+  if (!snapArmed) {
+    setBarDragging(false);
+    return;
+  }
   snapArmed = false;
   snapAnimating = true;
   try {
+    await released;
     const win = getCurrentWindow();
     // The shrink at drag start may still be in flight on a quick flick; the
     // settle reads the layout it leaves behind.
     await steadySwapsSettled(win.label);
+    if (plainPlacement) await plainPlacement;
+    plainPlacement = null;
     const steady = getSteady(win.label);
     if (steady?.layout) {
       await settleSteady(win, steady.spec, steady.layout);
@@ -410,6 +573,7 @@ export async function settleBarSnap(): Promise<void> {
   } finally {
     snapAnimating = false;
     footprintGrab = null;
+    setBarDragging(false);
   }
 }
 

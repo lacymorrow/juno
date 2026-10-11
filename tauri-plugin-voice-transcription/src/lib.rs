@@ -64,6 +64,27 @@ pub fn is_capture_suppressed() -> bool {
     CAPTURE_SUPPRESSED.load(AtomicOrdering::SeqCst)
 }
 
+/// True from the plugin's setup until its background engine load ends, either
+/// way. The engine is never on the launch critical path, so something can ask
+/// for it while it is still loading; this is how a caller tells "still coming"
+/// from "never coming".
+static ENGINE_LOADING: AtomicBool = AtomicBool::new(false);
+
+/// Is the speech engine still loading in the background at launch?
+pub fn engine_loading() -> bool {
+    ENGINE_LOADING.load(AtomicOrdering::SeqCst)
+}
+
+/// Clears [`ENGINE_LOADING`] however the load task ends: done, failed, or
+/// panicked.
+struct EngineLoadingGuard;
+
+impl Drop for EngineLoadingGuard {
+    fn drop(&mut self) {
+        ENGINE_LOADING.store(false, AtomicOrdering::SeqCst);
+    }
+}
+
 /// Reads the STT provider name the host app has persisted, e.g. `"parakeet"`.
 ///
 /// The plugin is registered on the Tauri builder, long before any `AppHandle`
@@ -135,25 +156,6 @@ fn build_plugin<R: Runtime + 'static>(
         .setup(move |app, _api| {
             tracing::info!("=== Voice Transcription Plugin Initialization Starting ===");
 
-            // Check microphone permissions first
-            tracing::info!("Checking microphone permissions...");
-            let permission_status = mic_permissions::check_microphone_permission();
-            match permission_status {
-                mic_permissions::MicrophonePermissionStatus::Granted => {
-                    tracing::info!("✅ Microphone permission is already granted");
-                }
-                mic_permissions::MicrophonePermissionStatus::Denied => {
-                    tracing::warn!("⚠️ Microphone permission is denied. Voice features will not work until permission is granted.");
-                    tracing::warn!("💡 Please grant microphone access in System Settings > Privacy & Security > Microphone");
-                }
-                mic_permissions::MicrophonePermissionStatus::Undetermined => {
-                    tracing::info!("🔔 Microphone permission not yet requested. Will request when voice features are first used.");
-                }
-                mic_permissions::MicrophonePermissionStatus::NotApplicable => {
-                    tracing::info!("ℹ️ Microphone permission check not applicable on this platform");
-                }
-            }
-
             // Get model path from config or use default
             let config = VoiceTranscriptionConfig::default();
             tracing::info!("Default config model path: {}", config.model_path);
@@ -213,27 +215,6 @@ fn build_plugin<R: Runtime + 'static>(
             app.manage(voice_arc.clone());
             app.manage(alc_arc.clone());
 
-            // Which engine to boot. `config.stt_provider` is only this crate's
-            // default (Whisper); the host app knows what the person saved, so ask
-            // it first. Booting the wrong engine is not free — it loads a model,
-            // allocates its Metal buffers and warms it up, and all of that is
-            // thrown away seconds later when the app applies the saved choice.
-            let saved_provider = read_saved_provider.as_ref().and_then(|read| read(app));
-            // Both halves of the question: does this build contain Parakeet,
-            // and is the model on disk. An Intel build answers false to the
-            // first, so a saved "parakeet" boots Whisper instead of asking
-            // for an engine that was never linked in.
-            let parakeet_usable =
-                crate::parakeet_model::parakeet_ready(std::path::Path::new(&parakeet_model_dir));
-            let provider = startup_provider(saved_provider.as_deref(), parakeet_usable);
-            tracing::info!(
-                "[VoicePlugin] STT provider: {} (saved: {}, parakeet usable: {}, parakeet supported by this build: {})",
-                provider,
-                saved_provider.as_deref().unwrap_or("<none>"),
-                parakeet_usable,
-                crate::parakeet_model::PARAKEET_SUPPORTED
-            );
-
             // Load the STT model in a background task — model files can be >1 GB
             // and would freeze the Tauri startup if loaded on the setup thread.
             let model_path_bg = active_model_path.clone();
@@ -242,8 +223,57 @@ fn build_plugin<R: Runtime + 'static>(
 
             configure_metal_shader_path(app);
 
-            tracing::info!("Spawning background task to initialize '{}' engine...", provider);
+            // Everything from here runs off the launch path: the microphone
+            // permission read, the saved-provider read and the Parakeet file
+            // checks used to sit here on the main thread, before the first
+            // window was even built (30 to 250 ms of a launch).
+            ENGINE_LOADING.store(true, AtomicOrdering::SeqCst);
+            let read_saved_provider = read_saved_provider.clone();
+            tracing::info!("Spawning background task to initialize the speech engine...");
             tauri::async_runtime::spawn(async move {
+                let _loading = EngineLoadingGuard;
+                let app = &app_handle_bg;
+                // Check microphone permissions first
+                tracing::info!("Checking microphone permissions...");
+                let permission_status = mic_permissions::check_microphone_permission();
+                match permission_status {
+                    mic_permissions::MicrophonePermissionStatus::Granted => {
+                        tracing::info!("✅ Microphone permission is already granted");
+                    }
+                    mic_permissions::MicrophonePermissionStatus::Denied => {
+                        tracing::warn!("⚠️ Microphone permission is denied. Voice features will not work until permission is granted.");
+                        tracing::warn!("💡 Please grant microphone access in System Settings > Privacy & Security > Microphone");
+                    }
+                    mic_permissions::MicrophonePermissionStatus::Undetermined => {
+                        tracing::info!("🔔 Microphone permission not yet requested. Will request when voice features are first used.");
+                    }
+                    mic_permissions::MicrophonePermissionStatus::NotApplicable => {
+                        tracing::info!("ℹ️ Microphone permission check not applicable on this platform");
+                    }
+                }
+
+                // Which engine to boot. `config.stt_provider` is only this crate's
+                // default (Whisper); the host app knows what the person saved, so ask
+                // it first. Booting the wrong engine is not free: it loads a model,
+                // allocates its Metal buffers and warms it up, and all of that is
+                // thrown away seconds later when the app applies the saved choice.
+                let saved_provider = read_saved_provider.as_ref().and_then(|read| read(app));
+                // Both halves of the question: does this build contain Parakeet,
+                // and is the model on disk. An Intel build answers false to the
+                // first, so a saved "parakeet" boots Whisper instead of asking
+                // for an engine that was never linked in.
+                let parakeet_usable =
+                    crate::parakeet_model::parakeet_ready(std::path::Path::new(&parakeet_model_dir));
+                let provider = startup_provider(saved_provider.as_deref(), parakeet_usable);
+                tracing::info!(
+                    "[VoicePlugin] STT provider: {} (saved: {}, parakeet usable: {}, parakeet supported by this build: {})",
+                    provider,
+                    saved_provider.as_deref().unwrap_or("<none>"),
+                    parakeet_usable,
+                    crate::parakeet_model::PARAKEET_SUPPORTED
+                );
+
+
                 let model_path_bl = model_path_bg.clone();
                 let parakeet_bl = parakeet_dir_bg.clone();
 
@@ -261,10 +291,12 @@ fn build_plugin<R: Runtime + 'static>(
                         if let Ok(mut vc) = voice_arc.lock() {
                             vc.adopt(VoiceController::new_uninitialized(&model_path_bg, e));
                         }
+                        let _ = app_handle_bg.emit(crate::constants::engine::FAILED, ());
                         return;
                     }
                     Err(join_err) => {
                         tracing::error!("[VoicePlugin] Engine init task panicked: {}", join_err);
+                        let _ = app_handle_bg.emit(crate::constants::engine::FAILED, ());
                         return;
                     }
                 };

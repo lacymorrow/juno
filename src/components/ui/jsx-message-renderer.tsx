@@ -26,6 +26,9 @@ import {
   LinkCard,
   TaskSummaryCard,
   NowPlayingCard,
+  AgendaCard,
+  MessageCard,
+  PermissionAskCard,
 } from "@/components/ui/agent-cards";
 import { WhyBlock } from "@/components/ui/why-block";
 import {
@@ -448,6 +451,12 @@ const availableComponents = {
   TaskSummaryCard,
   // Live components — bound to real player state, never fake
   NowPlayingCard,
+  // Events and reminders from the Mac's own apps, one shape
+  AgendaCard,
+  // A text or an email, as it went out (the send gate's card)
+  MessageCard,
+  // "I need Reminders for that." and one Continue button, before any system dialog
+  PermissionAskCard,
   // Method rationale, collapsed by default (top-level <Why> is lifted out
   // before parsing; this covers a <Why> nested inside another component)
   Why: WhyBlock,

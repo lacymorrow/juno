@@ -133,7 +133,8 @@ pub struct UpdateStatus {
     pub available_version: Option<String>,
     /// Release notes for `available_version`.
     pub notes: Option<String>,
-    /// Why the last attempt failed, when `stage` is `Failed`.
+    /// Why the last attempt failed, when `stage` is `Failed`: one plain line
+    /// a person may read (see [`failure_line`]). The detail is in the log.
     pub error: Option<String>,
     /// Which feed the last check read.
     pub channel: UpdateChannel,
@@ -210,11 +211,23 @@ pub async fn check_and_install(app: &AppHandle, channel: UpdateChannel) {
         warn!("[Updater] {message}");
         update_status(app, |status| {
             status.stage = UpdateStage::Failed;
-            status.error = Some(message);
+            status.error = Some(failure_line(&message).to_string());
         });
     }
 
     IN_FLIGHT.store(false, Ordering::SeqCst);
+}
+
+/// What Settings shows after a check that did not finish. The raw reason
+/// names a feed URL and an error chain, which tells a person nothing they can
+/// act on; it goes to the log. A lost connection is worth saying plainly,
+/// because it explains itself and fixes itself.
+pub fn failure_line(message: &str) -> &'static str {
+    if crate::utils::network::is_network_error(message) {
+        "No internet connection. Juno will check again later."
+    } else {
+        "The last check didn't finish. Juno will check again later."
+    }
 }
 
 /// The body of a check. Split out so [`check_and_install`] owns the in-flight
@@ -331,6 +344,23 @@ pub async fn settings_for(app: &AppHandle) -> Result<(bool, UpdateChannel), Stri
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_failed_check_never_shows_a_url_or_an_error_chain() {
+        let offline = "could not read the stable feed: error sending request for url \
+                       (https://github.com/x/latest.json): dns error";
+        assert_eq!(
+            failure_line(offline),
+            "No internet connection. Juno will check again later."
+        );
+        let other = "could not read the stable feed: the signature did not verify";
+        let line = failure_line(other);
+        assert!(
+            !line.contains("signature") && !line.contains("http"),
+            "{line}"
+        );
+    }
+
     use super::*;
 
     #[test]

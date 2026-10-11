@@ -12,7 +12,7 @@ import {
   type PillFrame,
 } from "@/components/FloatingBar";
 import { computeWells, screenInsets, type MonitorRect } from "../snapWells";
-import { monitorsInPoints, type TauriMonitorLike } from "../desktopPoints";
+import { monitorsInPoints, originUnderCursor, type TauriMonitorLike } from "../desktopPoints";
 import {
   anchorScreenOrigin,
   contentPlacement,
@@ -20,6 +20,7 @@ import {
   dragLayout,
   dockedEdges,
   getSteady,
+  grabInDragWindow,
   registerSteady,
   resetSteady,
   roomForContent,
@@ -351,6 +352,71 @@ describe("the drag layout: drag the shape, not the stage", () => {
         mon.position.y + screenInsets(mon).top,
       );
     }
+  });
+});
+
+describe("the grab stays under the cursor: fast drags have no offset", () => {
+  const layouts = allLayouts();
+  const frames = allFrames();
+  // How far the cursor got between the press and the drag window being put
+  // down: none (a slow start), the threshold, a fast flick in each direction,
+  // and one long enough to be on another display already.
+  const TRAVELS = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 62, y: -31 },
+    { x: -140, y: 95 },
+    { x: 1700, y: -400 },
+  ];
+
+  it("puts the spot pressed under the live cursor, for every well, state and desk", () => {
+    const failures: string[] = [];
+    for (const { name, layout } of layouts) {
+      for (const frame of frames) {
+        const fp = footprint(layout, frame);
+        const drag = dragLayout(layout, fp);
+        const drawn = contentRect(layout, fp);
+        // Presses near each corner of the shape and at its centre, in the
+        // steady window's own coordinates (a DOM clientX/clientY).
+        const presses = [
+          { x: drawn.x + 1, y: drawn.y + 1 },
+          { x: drawn.x + fp.width - 1, y: drawn.y + 1 },
+          { x: drawn.x + 1, y: drawn.y + fp.height - 1 },
+          { x: drawn.x + fp.width - 1, y: drawn.y + fp.height - 1 },
+          { x: drawn.x + fp.width / 2, y: drawn.y + fp.height / 2 },
+        ];
+        for (const press of presses) {
+          const where = `${name} ${JSON.stringify(frame)} press ${JSON.stringify(press)}`;
+          const g = grabInDragWindow(layout, fp, press);
+          // The press is on the shape, so it is inside the drag window.
+          if (g.x < 0 || g.y < 0 || g.x > fp.width || g.y > fp.height) {
+            failures.push(`${where}: grab ${JSON.stringify(g)} outside the drag window`);
+            continue;
+          }
+          // The drop indicator and the settle measure the grab from the
+          // resting footprint; the drag window must agree with them.
+          if (g.x - drag.anchor.x !== press.x - layout.anchor.x || g.y - drag.anchor.y !== press.y - layout.anchor.y) {
+            failures.push(`${where}: footprint grab disagrees`);
+          }
+          const pressedOnScreen = { x: layout.origin.x + press.x, y: layout.origin.y + press.y };
+          for (const t of TRAVELS) {
+            const cursor = { x: pressedOnScreen.x + t.x, y: pressedOnScreen.y + t.y };
+            const placed = originUnderCursor(cursor, g);
+            // The spot pressed is exactly under the cursor...
+            if (placed.x + g.x !== cursor.x || placed.y + g.y !== cursor.y) {
+              failures.push(`${where} travel ${JSON.stringify(t)}: grab not under the cursor`);
+            }
+            // ...which is the old placement moved by exactly the travel. The
+            // old placement left that travel as a permanent offset; with none
+            // (a slow start) nothing moves at all.
+            if (placed.x - drag.origin.x !== t.x || placed.y - drag.origin.y !== t.y) {
+              failures.push(`${where} travel ${JSON.stringify(t)}: window off by more than the travel`);
+            }
+          }
+        }
+      }
+    }
+    expect(failures.slice(0, 10)).toEqual([]);
   });
 });
 

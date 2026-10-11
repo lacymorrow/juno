@@ -242,7 +242,11 @@ impl MacOSEngine {
         element: &UIElement,
         depth: usize,
     ) -> Result<JsonValue, AutomationError> {
-        const MAX_DEPTH: usize = 10; // Limit recursion depth
+        // Deep enough to reach the controls inside a web view. A React page in
+        // a WKWebView sits 20 to 40 levels below its window, so the old cap of
+        // 10 returned Juno's own pane as a few empty groups and no text field
+        // or buttons, while System Events saw them fine.
+        const MAX_DEPTH: usize = 60;
         if depth > MAX_DEPTH {
             return Ok(json!({ "error": "Max recursion depth reached" }));
         }

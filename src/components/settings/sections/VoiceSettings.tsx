@@ -5,8 +5,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
+import { useEventListener } from "@/hooks/useEventListener";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { VoicePicker } from "../VoicePicker";
@@ -26,6 +30,81 @@ const INSERTION_MODE_DESCRIPTIONS: Record<string, string> = {
  * sentinel that would later look like a device name.
  */
 const FOLLOW_SYSTEM = "__system__";
+
+/** "1.5x", "2x": the rate as a person says it. */
+function formatRate(rate: number): string {
+  return `${Number(rate.toFixed(2))}x`;
+}
+
+/**
+ * How fast Juno speaks. Drawn only when Rust says the engine in force has a
+ * speed control (`list.speed`), so there is never a slider that does nothing.
+ *
+ * The thumb follows the finger locally while it moves, and the change is sent
+ * once, when it is let go: moving it plays the sample, and a sample per pixel
+ * would be a stutter. Rust answers with the rate in force.
+ */
+function SpeedRow({
+  speed,
+  onCommit,
+}: {
+  speed: { value: number; min: number; max: number };
+  onCommit: (rate: number) => void;
+}) {
+  const [draft, setDraft] = useState(speed.value);
+  // Rust's answer wins whenever it arrives (a narrower range, a new engine).
+  useEffect(() => setDraft(speed.value), [speed.value]);
+
+  return (
+    <SettingsRow
+      htmlFor="voice-speed"
+      label="Speaking speed"
+      description="How fast Juno talks."
+    >
+      <div className="flex w-[210px] items-center gap-3">
+        <Slider
+          id="voice-speed"
+          aria-label="Speaking speed"
+          min={speed.min}
+          max={speed.max}
+          step={0.05}
+          value={[draft]}
+          onValueChange={([next]) => setDraft(next)}
+          onValueCommit={([next]) => onCommit(next)}
+        />
+        <span
+          className="w-10 shrink-0 text-right text-[12px] tabular-nums text-muted-foreground"
+          aria-hidden="true"
+        >
+          {formatRate(draft)}
+        </span>
+      </div>
+    </SettingsRow>
+  );
+}
+
+/**
+ * Whether debug mode is on. Rust answers; this only displays it.
+ *
+ * The speaking speed row is shown only then: speed is broken for most voices
+ * and providers, so it is not offered to anyone who has not asked for debug
+ * features. The agent's `settings` tool hides it on the same condition
+ * (`SettingSpec::debug_only`).
+ */
+export function useDebugMode(): boolean {
+  const [debug, setDebug] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    invoke<boolean>(COMMANDS.CORE_GET_DEBUG_MODE)
+      .then((on) => alive && setDebug(Boolean(on)))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEventListener<boolean>(EVENTS.BAR_DEBUG_MODE_CHANGED, (on) => setDebug(Boolean(on)));
+  return debug;
+}
 
 /**
  * Audio: which microphone Juno hears you on, which speaker it answers from,
@@ -52,9 +131,22 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     handleAudioOutputDeviceChange,
     handleJunoVoiceChange,
     handlePreviewJunoVoice,
+    handleJunoVoiceRateChange,
+    handleJunoSilentChange,
     handleTtsProviderChange,
     dismissCaptureFailure,
   } = settings;
+
+  const debugMode = useDebugMode();
+
+  // The Mac's voice can be changed in System Settings while this window is
+  // open. Coming back to it asks Rust to read the Mac again; Rust decides what
+  // the rows say.
+  useEffect(() => {
+    const onFocus = () => void loadJunoVoices();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [loadJunoVoices]);
 
   useEffect(() => {
     void loadAudioDevices();
@@ -85,7 +177,25 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <SettingsGroup title="Juno's voice" footer={voiceFooter}>
+      {/* The only voice control outside Advanced. Independent of the voice:
+          turning it off and on again comes back in the same one. */}
+      <SettingsGroup>
+        <SettingsRow
+          id="dont-speak"
+          htmlFor="dont-speak-switch"
+          label="Don't speak"
+          description="Juno replies in text instead of speaking out loud."
+        >
+          <Switch
+            id="dont-speak-switch"
+            checked={junoVoices?.silent ?? false}
+            disabled={!junoVoices}
+            onCheckedChange={(silent) => void handleJunoSilentChange(silent)}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup advanced title="Juno's voice" footer={voiceFooter}>
         {/* The engines come from Rust with the list, and the value is the
             engine the rows belong to, so the two cannot disagree. */}
         <SettingsRow advanced htmlFor="voice-engine" label="Engine">
@@ -118,6 +228,13 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             />
           }
         />
+
+        {debugMode && junoVoices?.speed && (
+          <SpeedRow
+            speed={junoVoices.speed}
+            onCommit={(rate) => void handleJunoVoiceRateChange(rate)}
+          />
+        )}
       </SettingsGroup>
 
       <TtsEngineGroup settings={settings} />

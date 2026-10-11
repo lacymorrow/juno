@@ -528,6 +528,11 @@ pub fn tray_menu_spec(chat_label: &str) -> Vec<MenuEntry> {
             "Show/Hide Floating Bar",
             Some("CmdOrCtrl+B"),
         ),
+        row(
+            tray_menu_ids::CENTER_FLOATING_BAR,
+            "Center Floating Bar",
+            None,
+        ),
         MenuEntry::Separator,
         row(tray_menu_ids::SETTINGS, "Settings...", Some("CmdOrCtrl+,")),
         MenuEntry::Separator,
@@ -1079,6 +1084,18 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
                 );
             }
         }
+        tray_menu_ids::CENTER_FLOATING_BAR => {
+            info!("[TrayMenu] Center Floating Bar menu item clicked");
+            // The bar owns its wells, so it does the move: same transaction as
+            // its first placement, aimed at the centre of the display it is on.
+            if let Err(e) = app_handle.emit(events::menu::CENTER_FLOATING_BAR_REQUESTED, ()) {
+                error!(
+                    "{} {}",
+                    prefixes::TRAY_MENU,
+                    format_error(templates::FAILED_TO_EMIT, "center floating bar", e)
+                );
+            }
+        }
         tray_menu_ids::DEVELOPER_TOOLS if super::SHOW_DEVELOPER_MENUS => {
             info!("[TrayMenu] Developer Tools menu item clicked");
             if let Err(e) = app_handle.emit(events::menu::DEVTOOLS_REQUESTED, ()) {
@@ -1150,9 +1167,12 @@ pub fn quit_app(app_handle: &AppHandle) {
 /// Handle TrayIconEvents like clicks on the icon itself
 pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIconEvent) {
     match event {
+        // On press, not release: menu bar extras act on the press, and the
+        // release never arrives for a click posted by automation (juno-cua,
+        // cliclick), which is how Juno records her own demos.
         tauri::tray::TrayIconEvent::Click {
             button: MouseButton::Left,
-            button_state: MouseButtonState::Up,
+            button_state: MouseButtonState::Down,
             ..
         } => {
             info!("[TrayIcon] Left click detected on tray icon");

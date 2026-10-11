@@ -23,6 +23,7 @@ import { ExamplePrompts, type BackendStatus } from "@/components/ExamplePrompts"
 import { InputControlNotices } from "@/components/input-control/InputControlNotices";
 import { PermissionNotice } from "@/components/permissions/PermissionNotice";
 import { cn } from "@/lib/utils";
+import { ReplyChips } from "@/components/chat/ReplyChips";
 
 // Helper function to determine if timestamp should be shown (similar to Slack/Apple Messages)
 function shouldShowTimestamp(
@@ -289,6 +290,7 @@ export const ChatContainerV2 = React.memo(function ChatContainerV2({
         )}
         <ConversationScrollButton />
       </Conversation>
+      <ReplyChips />
       <InputControlNotices />
       <PermissionNotice />
     </div>

@@ -702,6 +702,9 @@ impl BrainFactory {
         crate::agent::tools::schedule_tools::register_schedule_tools(provider, app_handle.clone())
             .await;
 
+        // Register Reminders, Calendar and Contacts tools (per-provider instance)
+        crate::agent::tools::mac_apps::register_mac_apps_tools(provider).await;
+
         // Register self-awareness and introspection tools (per-provider instance, development mode only)
         crate::agent::tools::register_self_awareness_tools(provider).await;
 

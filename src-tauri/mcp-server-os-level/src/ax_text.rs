@@ -172,6 +172,9 @@ pub use macos_impl::{bundle_id_for_pid, check_focused_field, describe_target, in
 #[cfg(target_os = "macos")]
 pub use macos_impl::{element_owner, CheckedField};
 
+#[cfg(target_os = "macos")]
+pub(crate) use macos_impl::window_id_of_window;
+
 #[cfg(not(target_os = "macos"))]
 pub fn element_owner(_element: &crate::UIElement) -> (Option<i32>, Option<u32>) {
     (None, None)
@@ -280,7 +283,7 @@ mod macos_impl {
         })
     }
 
-    fn window_id_of_window(window: AXUIElementRef) -> Option<u32> {
+    pub(crate) fn window_id_of_window(window: AXUIElementRef) -> Option<u32> {
         let get = ax_get_window_fn()?;
         let mut id: u32 = 0;
         let err = unsafe { get(window, &mut id) };

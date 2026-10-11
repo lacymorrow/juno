@@ -293,12 +293,6 @@ describe("pillFootprint", () => {
       .toEqual({ width: 88, height: 76 });
     expect(pillFootprint({ layout: "hover", paneOpen: false, rosterVisible: false }))
       .toEqual({ width: 180, height: 76 });
-    expect(pillFootprint({ layout: "voice", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 292, height: 76 });
-    // Status shares voice's width so the bar does not lurch wider the moment
-    // the mic closes, for a word and a stop button.
-    expect(pillFootprint({ layout: "status", paneOpen: false, rosterVisible: false }))
-      .toEqual({ width: 292, height: 76 });
     // Full used to carry its own pad and band (24 and 44 against 16 and 34),
     // which moved the anchor by 13px every time the pill went full: the lurch
     // on pane close. Same height, same anchor, whatever the layout.
@@ -327,19 +321,19 @@ describe("pointInRect", () => {
 
 describe("pickLayout", () => {
   const base = { hovered: false, inputOpen: false, paneOpen: false, rosterVisible: false };
-  it("is compact while idle, grows on hover, and goes full for anything with text", () => {
+  it("is compact while idle, grows on hover, and is the text box for everything else", () => {
     expect(pickLayout({ ...base, state: "default" })).toBe("compact");
     expect(pickLayout({ ...base, state: "dictation_ready" })).toBe("compact");
     expect(pickLayout({ ...base, state: "default", hovered: true })).toBe("hover");
-    expect(pickLayout({ ...base, state: "listening", hovered: true })).toBe("voice");
-    expect(pickLayout({ ...base, state: "always_listening" })).toBe("voice");
     expect(pickLayout({ ...base, state: "default", inputOpen: true })).toBe("full");
     expect(pickLayout({ ...base, state: "expanding" })).toBe("full");
-    // Working states carry a label and one control, not an input, so they get
-    // the status width rather than the full 419px.
-    expect(pickLayout({ ...base, state: "loading" })).toBe("status");
-    expect(pickLayout({ ...base, state: "error" })).toBe("status");
-    expect(pickLayout({ ...base, state: "transcribing" })).toBe("status");
+    // Listening, working, an error: the box, with a placeholder that says so.
+    // There used to be a narrower voice and status pill for these.
+    expect(pickLayout({ ...base, state: "listening", hovered: true })).toBe("full");
+    expect(pickLayout({ ...base, state: "always_listening" })).toBe("full");
+    expect(pickLayout({ ...base, state: "loading" })).toBe("full");
+    expect(pickLayout({ ...base, state: "error" })).toBe("full");
+    expect(pickLayout({ ...base, state: "transcribing" })).toBe("full");
     expect(pickLayout({ ...base, state: "default", paneOpen: true })).toBe("full");
     expect(pickLayout({ ...base, state: "default", rosterVisible: true })).toBe("full");
   });
@@ -472,15 +466,14 @@ describe("FloatingBar", () => {
     expect(windowSetFocus).not.toHaveBeenCalled();
   });
 
-  it("shows listening status with a stop control while the mic is open", async () => {
+  it("is the box, saying it is listening, while the mic is open; Send sends what was said", async () => {
     await renderBar();
 
     await setBarState({ barState: "listening", audioLevel: 0.6 });
 
-    expect(bar()).toHaveAttribute("data-layout", "voice");
-    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("listening");
-    // The voice pill, plus room for the expand control while the chat is closed.
-    expect(lastResize()).toMatchObject({ width: 324, height: 76 });
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Listening…");
+    expect(lastResize()).toMatchObject({ width: 451, height: 76 });
 
     // "Stop" used to be the only control and it submitted what you had said.
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -499,17 +492,18 @@ describe("FloatingBar", () => {
     expect(invoke).not.toHaveBeenCalledWith("agent_voice", { action: "stop" });
   });
 
-  it("can switch from talking to typing without sending", async () => {
+  it("lets you type while the mic is open, since the box is already there", async () => {
     await renderBar();
     await setBarState({ barState: "listening", audioLevel: 0.6 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Type instead" }));
-    await act(async () => {});
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "and also" } });
 
-    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "cancel" });
+    expect(input).toHaveValue("and also");
+    expect(screen.queryByRole("button", { name: "Type instead" })).not.toBeInTheDocument();
   });
 
-  it("renders a live partial as dimmed provisional text, then solid on final", async () => {
+  it("never shows live partial words; the placeholder says listening, then transcribing", async () => {
     await renderBar();
 
     await setBarState({ barState: "listening", isDictationMode: true, audioLevel: 0.4 });
@@ -522,45 +516,33 @@ describe("FloatingBar", () => {
       transcriptionText: "hello there",
       transcriptionProvisional: true,
     });
-    const status = screen.getByTestId("floating-bar-status");
-    expect(status).toHaveTextContent("hello there");
-    expect(status).toHaveClass("italic");
+    const input = screen.getByRole("textbox");
+    expect(input).toHaveAttribute("placeholder", "Listening…");
+    expect(screen.queryByText("hello there")).not.toBeInTheDocument();
 
-    // A later partial replaces, never appends, and stays provisional.
-    await setBarState({
-      barState: "transcribing",
-      isDictationMode: true,
-      transcriptionText: "hello there world",
-      transcriptionProvisional: true,
-    });
-    expect(status).toHaveTextContent("hello there world");
-    expect(status).not.toHaveTextContent("hello there hello there");
-
-    // The final result swaps the same span to solid.
+    // The mic closes and the final decode runs.
     await setBarState({
       barState: "transcribing",
       transcriptionText: "hello there world",
       transcriptionProvisional: false,
     });
-    expect(status).toHaveTextContent("hello there world");
-    expect(status).not.toHaveClass("italic");
+    expect(input).toHaveAttribute("placeholder", "Transcribing…");
+    expect(screen.queryByText("hello there world")).not.toBeInTheDocument();
   });
 
-  it("shows a processing state, not the listening look, once the mic closes", async () => {
+  it("says transcribing, with a stop and nothing to send, once the mic closes", async () => {
     await renderBar();
 
     await setBarState({ barState: "listening", audioLevel: 0.6 });
-    expect(bar()).toHaveAttribute("data-layout", "voice");
+    expect(bar()).toHaveAttribute("data-layout", "full");
 
-    // The backend sets transcribing the instant the mic stops. The bar keeps
-    // the same width it had while listening: the old behaviour jumped from
-    // 220px to 419px mid-sentence to show one more word.
+    // The backend sets transcribing the instant the mic stops. Same box,
+    // same width: nothing lurches mid-sentence.
     await setBarState({ barState: "transcribing" });
-    expect(bar()).toHaveAttribute("data-layout", "status");
-    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("transcribing");
-    // A processing state has a Stop control, and no live audio bars.
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Transcribing…");
     expect(screen.getByRole("button", { name: "Stop Juno" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
   it.each([
@@ -570,15 +552,14 @@ describe("FloatingBar", () => {
       "live words while you talk",
       { barState: "transcribing", transcriptionText: "testing", transcriptionProvisional: true },
     ],
-  ])("keeps Send, Type instead and Cancel in every recording state: %s", async (_name, state) => {
+  ])("keeps Send and Cancel in every recording state: %s", async (_name, state) => {
     await renderBar();
     await setBarState(state);
 
     // The owner's report: once speech was detected the bar switched to the
     // transcript with only a stop square, and there was no way to send with
     // the mouse.
-    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Type instead" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Cancel without sending" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop Juno" })).not.toBeInTheDocument();
 
@@ -637,11 +618,11 @@ describe("FloatingBar", () => {
     await renderBar();
     await setBarState({ barState: "always_listening", isAlwaysListening: true });
 
-    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("always listening");
+    expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Listening…");
     // The engine decides when the sentence ends, so there is nothing to commit
     // by hand. There is something to stop, though, and every other state that
     // has something to stop offers the same X.
-    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Cancel without sending" }));
     // The capture belongs to the always-listening engine, which only the
     // coordinated stop can reach; it re-arms the wake phrase on its way out.
@@ -781,7 +762,10 @@ describe("FloatingBar", () => {
 
     await submitUserMessage("Play my liked songs on Spotify");
 
-    const pane = screen.getByTestId("bar-chat-pane");
+    // The pane's code loads on first open (it is lazy, warmed after launch).
+    // The first import of it in the run can take over a second on a loaded
+    // runner, so this waits longer than findBy's default.
+    const pane = await screen.findByTestId("bar-chat-pane", {}, { timeout: 5000 });
     expect(pane).toBeInTheDocument();
     expect(pane).toHaveClass("dark");
     expect(screen.getByText("Play my liked songs on Spotify")).toBeInTheDocument();
@@ -799,7 +783,7 @@ describe("FloatingBar", () => {
     // that it has finished working.
     await fire("agent-active", false);
 
-    expect(screen.getByText("It is half past nine.")).toBeInTheDocument();
+    expect(await screen.findByText("It is half past nine.")).toBeInTheDocument();
     expect(screen.getByTestId("bar-chat-pane-status")).toHaveTextContent("esc to close");
   });
 
@@ -827,14 +811,13 @@ describe("FloatingBar", () => {
     expect(screen.getByPlaceholderText("Follow up…")).toBeInTheDocument();
   });
 
-  it("shows status and a Stop control instead of the input while the agent works", async () => {
+  it("is the box saying Working…, with a Stop control, while the agent works", async () => {
     await renderBar();
 
     await submitUserMessage("Open Safari");
     await setBarState({ barState: "loading", agentState: "working", isAgentWorking: true });
 
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.getByTestId("floating-bar-status")).toHaveTextContent("working");
+    expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Working…");
 
     fireEvent.click(screen.getByRole("button", { name: "Stop Juno" }));
     expect(invoke).toHaveBeenCalledWith("stop_all_operations");
@@ -1017,14 +1000,117 @@ describe("FloatingBar", () => {
     expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
   });
 
-  it("hands an open input over to a voice turn that starts from the hotkey", async () => {
+  // ── The box stays a box ──────────────────────────────────────────
+  //
+  // Once the text box is up it stays up through every voice and working
+  // state; the placeholder says what the microphone or the agent is doing.
+  // It used to give way to the status row, which unmounted the box a
+  // dictation was about to type into, so the words landed nowhere.
+
+  it("keeps an open input through a voice turn from the hotkey, and says it is listening", async () => {
     await renderBar();
-    await openInput();
+    const input = await openInput();
 
     await setBarState({ barState: "listening" });
 
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(bar()).toHaveAttribute("data-layout", "voice");
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveAttribute("placeholder", "Listening…");
+    expect(bar()).toHaveAttribute("data-layout", "full");
+    // The mic is already open: no "talk to Juno" while it is.
+    expect(screen.queryByRole("button", { name: "Talk to Juno" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the composer, its draft and the caret through a dictation typed into it", async () => {
+    await renderBar();
+    const input = await openInput();
+    fireEvent.change(input, { target: { value: "hello " } });
+
+    // Fn+Control held, then released: exactly the states Rust emits. The
+    // dictation flag drops on key-up and the bar blips to rest before the
+    // final decode shows as plain transcribing, and only then are the words
+    // posted at the caret. The box must be there, with the draft, throughout.
+    await setBarState({ barState: "dictating", isDictationMode: true });
+    await setBarState({ barState: "listening", isDictationMode: true, audioLevel: 0.4 });
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("hello ");
+    expect(input).toHaveAttribute("placeholder", "Listening…");
+
+    await setBarState({
+      barState: "transcribing",
+      isDictationMode: true,
+      transcriptionText: "world",
+      transcriptionProvisional: true,
+    });
+    expect(screen.getByRole("textbox")).toBe(input);
+    // Live partial words are never shown.
+    expect(input).toHaveAttribute("placeholder", "Listening…");
+
+    await setBarState({ barState: "default" });
+    expect(screen.getByRole("textbox")).toBe(input);
+    await setBarState({ barState: "transcribing" });
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("hello ");
+    expect(input).toHaveAttribute("placeholder", "Transcribing…");
+
+    fireEvent.change(input, { target: { value: "hello world" } });
+    await setBarState({ barState: "default" });
+
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveValue("hello world");
+    expect(input).toHaveAttribute("placeholder", "Ask Juno");
+    expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
+  });
+
+  it("cancels the dictation, not the draft, from the X while one is landing in the composer", async () => {
+    await renderBar();
+    const input = await openInput();
+    fireEvent.change(input, { target: { value: "keep this" } });
+    await setBarState({ barState: "listening", isDictationMode: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel without sending" }));
+    await act(async () => {});
+
+    const { emit } = await import("@tauri-apps/api/event");
+    expect(emit).toHaveBeenCalledWith("dictation-cancel");
+    expect(input).toHaveValue("keep this");
+  });
+
+  it("stays a box while Juno works on a typed line, saying so, with Send held and the X stopping", async () => {
+    await renderBar();
+    const input = await openInput();
+    fireEvent.change(input, { target: { value: "Open Safari" } });
+    fireEvent.submit(input.closest("form")!);
+    await act(async () => {});
+    await submitUserMessage("Open Safari");
+    await setBarState({ barState: "loading", agentState: "working", isAgentWorking: true });
+
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "Working…");
+    expect(screen.queryByRole("button", { name: "Talk to Juno" })).not.toBeInTheDocument();
+
+    // The next line can be typed now and goes once Juno is done.
+    fireEvent.change(input, { target: { value: "then close it" } });
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop Juno" }));
+    expect(invoke).toHaveBeenCalledWith("stop_all_operations");
+    expect(input).toHaveValue("then close it");
+  });
+
+  it("keeps the draft when the mic inside the box opens a spoken turn", async () => {
+    await renderBar();
+    const input = await openInput();
+    fireEvent.change(input, { target: { value: "draft" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Talk to Juno" }));
+    await act(async () => {});
+
+    expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "start" });
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input).toHaveValue("draft");
   });
 });
 
@@ -1115,8 +1201,8 @@ describe("FloatingBar steady frame", () => {
     expect(lastRegions()).toEqual([{ x: 364, y: 0, width: 88, height: 76 }]);
 
     await setBarState({ barState: "listening", audioLevel: 0.6 });
-    // Listening carries the expand control while the chat is closed.
-    expect(lastRegions()).toEqual([{ x: 128, y: 0, width: 324, height: 76 }]);
+    // Listening is the box, docked on the right edge like every full state.
+    expect(lastRegions()).toEqual([{ x: 1, y: 0, width: 451, height: 76 }]);
 
     // Another look taking the window gets every mouse event back.
     unmount();
@@ -1222,5 +1308,160 @@ describe("FloatingBar expand control", () => {
 
     await fire("bar-main-window-opened", null);
     expect(screen.queryByRole("button", { name: "Open chat" })).not.toBeInTheDocument();
+  });
+});
+
+describe("FloatingBar status dot", () => {
+  const dot = () => screen.getByRole("img");
+  const offline = { status: "offline", label: "Network unavailable", provider: "Claude" };
+  const connected = { status: "connected", label: "Connected to Claude", provider: "Claude" };
+
+  it("is neutral and says it is connected while Juno can answer", async () => {
+    await renderBar();
+    await fire("connectivity-changed", connected);
+    expect(dot()).toHaveAttribute("data-tone", "neutral");
+    expect(dot()).toHaveAccessibleName("Connected to Claude");
+  });
+
+  it("asks Rust for the status on mount", async () => {
+    await renderBar();
+    expect(invoke).toHaveBeenCalledWith("get_connectivity");
+  });
+
+  it("goes system red when the connection is lost, and back when it returns", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    expect(dot()).toHaveAttribute("data-tone", "down");
+    expect(dot()).toHaveStyle({ backgroundColor: "#FF453A" });
+    expect(dot()).toHaveAccessibleName("Network unavailable");
+
+    await fire("connectivity-changed", connected);
+    expect(dot()).toHaveAttribute("data-tone", "neutral");
+  });
+
+  it("goes system blue while listening, even offline", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    await setBarState({ barState: "listening", voiceMode: "agent" });
+    expect(dot()).toHaveAttribute("data-tone", "listening");
+    expect(dot()).toHaveStyle({ backgroundColor: "#0A84FF" });
+    expect(dot()).toHaveAccessibleName("Listening");
+  });
+
+  it("never changes size or position with its meaning (#511)", async () => {
+    await renderBar();
+    const before = screen.getByTestId("floating-bar-dot-target").getAttribute("style");
+    const sizeBefore = dot().className;
+    await fire("connectivity-changed", offline);
+    await setBarState({ barState: "listening", voiceMode: "agent" });
+    expect(screen.getByTestId("floating-bar-dot-target").getAttribute("style")).toBe(before);
+    expect(dot().className).toBe(sizeBefore);
+  });
+});
+
+describe("FloatingBar tooltips", () => {
+  const boxes = (label: string | null) =>
+    label === "Talk to Juno"
+      ? { left: 100, top: 20, right: 140, bottom: 48 }
+      : label === "Type to Juno"
+        ? { left: 150, top: 20, right: 190, bottom: 48 }
+        : label === "dot"
+          ? dotBox()
+          : { left: 0, top: 0, right: 0, bottom: 0 };
+  // The dot rides the pill's leading edge. On a right-docked bar the idle
+  // pill grows 76pt leftward on hover, carrying the dot with it and putting
+  // the mic where the dot was.
+  const dotBox = () =>
+    screen.queryByTestId("floating-bar")?.getAttribute("data-layout") === "compact"
+      ? { left: 100, top: 36, right: 115, bottom: 48 }
+      : { left: 34, top: 26, right: 49, bottom: 41 };
+
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const box = boxes(
+        this.getAttribute?.("data-testid") === "floating-bar-dot-target"
+          ? "dot"
+          : this.getAttribute?.("aria-label"),
+      );
+      return { ...box, width: box.right - box.left, height: box.bottom - box.top, x: box.left, y: box.top, toJSON() {} } as DOMRect;
+    });
+  });
+
+  it("names the mic and its live shortcut when the forwarded cursor rests on it", async () => {
+    invoke.mockImplementation((...args: unknown[]) =>
+      args[0] === "get_trigger_hints"
+        ? Promise.resolve({
+            agent: { shortcut: "Control+Option", gesture: "Hold", sentence: "Hold to talk to Juno" },
+            dictation: null,
+          })
+        : defaultInvoke(...args),
+    );
+    await renderBar();
+    await hover(true);
+
+    await move(120, 30); // over the mic, Juno inactive
+    expect(screen.queryByTestId("pill-tooltip")).toBeNull(); // not before the delay
+    await settle(500);
+    const tip = await screen.findByTestId("pill-tooltip");
+    expect(tip).toHaveTextContent("Talk to Juno");
+    expect(tip).toHaveTextContent("Hold ⌃⌥");
+    // The native title steps aside while the tooltip shows, so there is one.
+    expect(screen.getByRole("button", { name: "Talk to Juno" })).not.toHaveAttribute("title");
+  });
+
+  it("labels the type button and keeps the title as a fallback when closed", async () => {
+    await renderBar();
+    await hover(true);
+    const type = screen.getByRole("button", { name: "Type to Juno" });
+    expect(type).toHaveAttribute("title", "Type to Juno");
+
+    await move(170, 30);
+    await settle(500);
+    expect(await screen.findByTestId("pill-tooltip")).toHaveTextContent("Type to Juno");
+
+    await move(300, 300); // off every control
+    await waitFor(() => expect(type).toHaveAttribute("title", "Type to Juno"));
+  });
+
+  const offline = { status: "offline", label: "Network unavailable", provider: "Claude" };
+
+  it("says the network is unavailable when the forwarded cursor rests on a red dot", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    await hover(true);
+    await move(40, 33); // over the dot in the grown pill, Juno inactive
+    await settle(500);
+    expect(await screen.findByTestId("pill-tooltip")).toHaveTextContent("Network unavailable");
+  });
+
+  it("keeps naming the dot when hovering grows the pill out from under the cursor", async () => {
+    await renderBar();
+    await fire("connectivity-changed", offline);
+    expect(bar()).toHaveAttribute("data-layout", "compact");
+    // The cursor arrives on the idle pill's dot; the pill grows and the mic
+    // is now where the dot was.
+    await hover(true);
+    expect(bar()).toHaveAttribute("data-layout", "hover");
+    await move(107, 42);
+    await move(108, 43); // a resting hand still trembles
+    await settle(500);
+    const tip = await screen.findByTestId("pill-tooltip");
+    expect(tip).toHaveTextContent("Network unavailable");
+    expect(tip).not.toHaveTextContent("Talk to Juno");
+
+    // Off the spot the dot was: the control under the cursor counts again.
+    await move(130, 30);
+    await settle(500);
+    await waitFor(() =>
+      expect(screen.getByTestId("pill-tooltip")).toHaveTextContent("Talk to Juno"),
+    );
+  });
+
+  it("says what the expand control does", async () => {
+    await renderBar();
+    await hover(true);
+    expect(screen.getByRole("button", { name: "Open chat" })).toHaveAttribute("title", "Open chat");
   });
 });

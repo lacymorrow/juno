@@ -57,6 +57,8 @@ pub mod always_listening {
 pub mod engine {
     /// The speech engine finished loading in the background.
     pub const READY: &str = "voice-engine-ready";
+    /// The background load ended without an engine. Nothing is coming.
+    pub const FAILED: &str = "voice-engine-failed";
     /// No Whisper model file was found at startup.
     pub const WHISPER_MODEL_NOT_FOUND: &str = "whisper-model-not-found";
 }

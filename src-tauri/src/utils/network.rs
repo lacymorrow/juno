@@ -110,4 +110,40 @@ pub fn is_network_error(error_msg: &str) -> bool {
         || error_lower.contains(crate::constants::error_messages::patterns::CONNECTION_REFUSED)
         || error_lower.contains("connection reset")
         || error_lower.contains("temporary failure in name resolution")
+        // reqwest says "operation timed out", not "timeout".
+        || error_lower.contains("timed out")
+        // A response body cut off mid-stream (Wi-Fi dropped during an answer).
+        || error_lower.contains("error decoding response body")
+        || error_lower.contains("failed to read stream line")
+        || error_lower.contains("incomplete message")
+        || error_lower.contains("broken pipe")
+        || error_lower.contains("stream stalled")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_network_error;
+
+    #[test]
+    fn a_connection_lost_mid_answer_reads_as_offline() {
+        for message in [
+            "LLM error: Failed to read stream line: request or response body error: operation timed out",
+            "LLM error: HTTP request failed: error sending request for url (https://api.anthropic.com/v1/messages)",
+            "error decoding response body",
+            "hyper::Error(IncompleteMessage): connection closed before message completed",
+            "LLM error: stream stalled: no data for 90s",
+        ] {
+            assert!(is_network_error(message), "{message}");
+        }
+    }
+
+    #[test]
+    fn an_ordinary_failure_does_not() {
+        for message in [
+            "Anthropic API error 400 (invalid_request_error): prompt is too long",
+            "Agent reached maximum steps.",
+        ] {
+            assert!(!is_network_error(message), "{message}");
+        }
+    }
 }

@@ -98,7 +98,7 @@ fn forget_session(conversation_id: &str) {
 }
 
 /// Which Juno conversation this run belongs to.
-async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<String> {
+pub(super) async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<String> {
     use tauri::Manager;
     let handle = app_handle.as_ref()?;
     let state = handle.try_state::<crate::state::AppState>()?;
@@ -409,20 +409,26 @@ pub fn start_warm_spare(app: tauri::AppHandle) {
 
     let generation = std::sync::Arc::new(AtomicU64::new(0));
     let listener_app = app.clone();
-    app.listen_any(
+    let reprime = std::sync::Arc::new(move || {
+        let mine = generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let generation = std::sync::Arc::clone(&generation);
+        let app = listener_app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(SPARE_SETTINGS_DEBOUNCE).await;
+            if generation.load(Ordering::Relaxed) == mine {
+                prewarm_persistent_session(app).await;
+            }
+        });
+    });
+    // Audio settings count too: turning Juno's voice off (or on) changes the
+    // system prompt, and with it the fingerprint a spare is adopted by.
+    for event in [
         crate::constants::settings::events::PROVIDER_SETTINGS_CHANGED,
-        move |_| {
-            let mine = generation.fetch_add(1, Ordering::Relaxed) + 1;
-            let generation = std::sync::Arc::clone(&generation);
-            let app = listener_app.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(SPARE_SETTINGS_DEBOUNCE).await;
-                if generation.load(Ordering::Relaxed) == mine {
-                    prewarm_persistent_session(app).await;
-                }
-            });
-        },
-    );
+        crate::constants::settings::events::AUDIO_SETTINGS_CHANGED,
+    ] {
+        let reprime = std::sync::Arc::clone(&reprime);
+        app.listen_any(event, move |_| (*reprime)());
+    }
 
     tauri::async_runtime::spawn(prewarm_persistent_session(app));
 }
@@ -454,6 +460,17 @@ pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
         debug!("[CliSession] No turn has run yet; no warm spare until one has");
         return;
     };
+    // The remembered prompt asks for speech, or deliberately does not, to match
+    // Juno's voice at the time. If the voice has been switched since, a spare
+    // started from it could never be adopted, so none is kept. The next turn
+    // starts cold, remembers the prompt it ran with and primes from that.
+    if claude_cli_session::remembered_voice(&app)
+        != Some(crate::agent::voice_policy::voice_enabled_now(&app))
+    {
+        debug!("[CliSession] Juno's voice changed since the last turn; no warm spare until a turn has run");
+        claude_cli_session::stop_spare();
+        return;
+    }
 
     let config = crate::agent::providers::config::load_provider_config(Some(&app));
     let Some(mut provider_config) = config.resolve_provider(Provider::ClaudeCli) else {
@@ -482,11 +499,24 @@ pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
 /// System-prompt guidance appended when Juno's tool server is wired in.
 /// Without this, models tend to fall back to `cliclick`/`screencapture` via
 /// Bash even when MCP computer-use tools are available (LAC-3692).
-const MCP_TOOL_GUIDANCE: &str = "You have a desktop automation tool from the \"juno\" MCP \
-server: `computer`, which takes screenshots and moves, clicks, types, scrolls and presses keys. \
-For ANY desktop or GUI automation use it. Do NOT use shell commands like cliclick, \
-screencapture, or osascript for desktop automation: they bypass Juno, so the pointer moves with \
-nothing on screen saying that Juno is the one moving it.";
+pub(super) const MCP_TOOL_GUIDANCE: &str =
+    "You have a desktop automation tool from the \"juno\" MCP \
+server: `computer`. For ANY desktop or GUI automation use it. Do NOT use shell commands like \
+cliclick, screencapture, or osascript for desktop automation: they bypass Juno, so the pointer \
+moves with nothing on screen saying that Juno is the one moving it. \
+Work through accessibility first: list a window's controls with {\"action\": \"elements\", \
+\"window\": \"<app or window title>\"} and press them by id ({\"action\": \"left_click\", \
+\"element\": \"e7\"}); read results from the listed values. Name the window on every action. \
+Only fall back to screenshots and coordinates when a window lists no controls, and then take \
+the screenshot with 'window' so it shows just that window. The person keeps using their \
+computer while you work: never bring a window to the front or click into their apps to get \
+something done. For Juno's own settings (its voice, shortcuts, devices, or where a setting is) \
+use the `settings` tool from the same server, never the desktop: it changes them live and \
+points the Settings window at them. \
+For Reminders, Calendar and Contacts use the juno server's reminders_, calendar_ and contacts_ \
+tools, never AppleScript, osascript or other shell commands. \
+For music, directions, the person's own shortcuts and Do Not Disturb use music_play, \
+maps_directions, shortcuts_run and focus_set from the same server.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.
@@ -580,6 +610,9 @@ pub struct ClaudeCliBrain {
     /// at construction from the hidden `providers[].effort` setting, so the
     /// stream loop never has to reach for the store.
     effort: String,
+    /// The person set `providers[].effort` themselves. Their level is then used
+    /// for every turn, spoken or typed; see [`effort_for_turn`].
+    effort_explicit: bool,
     /// Whether the CLI may load the MCP servers on the person's own Claude
     /// account — claude.ai connectors (Slack, Gmail, Drive) and user-level
     /// servers. When false, `build_args` passes `--strict-mcp-config` so
@@ -607,6 +640,7 @@ impl ClaudeCliBrain {
             .unwrap_or_else(|| model_aliases::SONNET.to_string());
 
         let effort = resolve_effort(config.effort.as_deref());
+        let effort_explicit = effort_is_explicit(config.effort.as_deref());
 
         info!(
             "Initializing Claude CLI brain (binary: {}, model: {}, effort: {})",
@@ -620,6 +654,7 @@ impl ClaudeCliBrain {
             model,
             system_prompt: config.system_prompt.clone(),
             effort,
+            effort_explicit,
             load_account_mcp: config.load_account_mcp,
             observed_session: std::sync::Mutex::new(None),
         })
@@ -768,6 +803,17 @@ impl ClaudeCliBrain {
 
         let (mcp_config, ask_before_send) = turn_environment(app_handle.as_ref()).await;
 
+        // A spoken turn runs at a lower effort than a typed one, unless the
+        // person chose a level. Logged on the [TurnTiming] line for A/B.
+        let voice = crate::turn_timing::open_turn_is_voice();
+        let turn_effort = effort_for_turn(&self.effort, self.effort_explicit, voice);
+        crate::turn_timing::note_effort(&turn_effort);
+        info!(
+            "Claude CLI turn effort: {} ({})",
+            turn_effort,
+            if voice { "voice" } else { "typed" }
+        );
+
         // On unless the person turned it off: run this turn in one long-lived process
         // kept alive for the conversation, instead of spawning a fresh one here.
         // Worth ~1.6-3.1s per follow-up — see docs/plans/cli-persistent-session-spike.md.
@@ -794,6 +840,7 @@ impl ClaudeCliBrain {
                     session_id: &session_id,
                     session_is_new,
                     query,
+                    effort: &turn_effort,
                     app_handle: handle,
                     message_id: message_id.clone(),
                     cancel_rx: cancel_rx.clone(),
@@ -866,6 +913,7 @@ impl ClaudeCliBrain {
                 mcp_config.as_deref(),
                 ask_before_send,
             );
+            set_effort_arg(&mut args, &turn_effort);
             if !include_partial_messages {
                 strip_partial_messages(&mut args);
             }
@@ -1276,6 +1324,15 @@ impl ClaudeCliBrain {
                                         // multi-byte UTF-8.
                                         let delta: String =
                                             text.chars().skip(previous_char_count).collect();
+                                        if previous_char_count == 0 {
+                                            Self::separate_text_block(
+                                                app_handle,
+                                                msg_id,
+                                                &mut tts_stream,
+                                                &mut accumulated_text,
+                                                &mut spoken_blocks,
+                                            );
+                                        }
                                         previous_char_count = char_count;
                                         Self::emit_display_text(
                                             app_handle,
@@ -1347,16 +1404,11 @@ impl ClaudeCliBrain {
         }
 
         // The `result` event carries the raw final text, tags included. Strip
-        // it for display and speak any block the assistant events did not
-        // already cover (older CLI builds emit no assistant events).
+        // it for display, and speak from it only when the stream carried no
+        // text at all (older CLI builds emit no assistant events).
+        let stream_carried_text = !spoken_blocks.is_empty() || !accumulated_text.trim().is_empty();
         let final_result = final_result.map(|raw| {
-            // Named apart from the content-block map above, which is a
-            // different `blocks` entirely.
-            let (display, tts_blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
-            let unspoken: Vec<String> = tts_blocks
-                .into_iter()
-                .filter(|b| !spoken_blocks.contains(b))
-                .collect();
+            let (display, unspoken) = result_text(&raw, stream_carried_text);
             if !unspoken.is_empty() {
                 info!(
                     "Speaking {} TTS block(s) found only in the Claude CLI result",
@@ -1392,6 +1444,12 @@ impl ClaudeCliBrain {
     ) {
         let inner_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        // A new content block, or the end of the message, ends the text block
+        // before it. A `<TTS>` the model left open there stops being spoken.
+        if matches!(inner_type, "content_block_start" | "message_stop") {
+            Self::end_text_block(app_handle, msg_id, tts_stream, spoken_blocks);
+        }
 
         match inner_type {
             "message_start" => {
@@ -1469,8 +1527,18 @@ impl ClaudeCliBrain {
                             },
                         );
                     }
-                    // Plain text needs no bookkeeping: its deltas go straight
-                    // out, and nothing has to be closed when it stops.
+                    // A new text block is a new paragraph. Between two
+                    // blocks there is usually a tool call, and the model
+                    // starts the next one with no leading space, so without
+                    // this "window." and "That went" render as "window.That".
+                    "text" => Self::separate_text_block(
+                        app_handle,
+                        msg_id,
+                        tts_stream,
+                        accumulated_text,
+                        spoken_blocks,
+                    ),
+                    // Other blocks need no bookkeeping.
                     _ => {}
                 }
             }
@@ -1607,6 +1675,53 @@ impl ClaudeCliBrain {
             Self::emit_chunk_with_tts(handle, display_delta, msg_id, &tts_blocks);
         }
         spoken_blocks.extend(tts_blocks);
+    }
+
+    /// Start a new text block on its own paragraph. A no-op at the start of
+    /// the answer and when the text already ends in whitespace, so it never
+    /// stacks blank lines. Goes through [`Self::emit_display_text`] so the
+    /// break stays in sequence with the `<TTS>` parser.
+    pub(super) fn separate_text_block(
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        accumulated_text: &mut String,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        Self::end_text_block(app_handle, msg_id, tts_stream, spoken_blocks);
+        if let Some(separator) = text_block_separator(accumulated_text) {
+            Self::emit_display_text(
+                app_handle,
+                msg_id,
+                separator,
+                tts_stream,
+                accumulated_text,
+                spoken_blocks,
+            );
+        }
+    }
+
+    /// A text block ended. Speak what is left of a `<TTS>` block the model
+    /// never closed, and close it, so the text that follows (the next
+    /// message's display text, after a tool call) is shown, not read aloud.
+    pub(super) fn end_text_block(
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        let released = tts_stream.end_block();
+        if released.is_empty() {
+            return;
+        }
+        info!(
+            "Closed a <TTS> block the model left open at the end of a text block: {:?}",
+            released
+        );
+        if let Some(handle) = app_handle {
+            Self::emit_chunk_with_tts(handle, String::new(), msg_id, &released);
+        }
+        spoken_blocks.extend(released);
     }
 
     /// End-of-stream companion to [`Self::emit_display_text`]: flush what the
@@ -1875,6 +1990,54 @@ fn resolve_effort(configured: Option<&str>) -> String {
     }
 }
 
+/// What a turn's `result` frame adds: its display text (tags stripped), and
+/// the spoken blocks to say now.
+///
+/// The result is only a fallback voice, for a CLI that streamed no text at
+/// all. When the stream carried text it already spoke every block once, and
+/// re-splitting the result to find "unspoken" blocks is how a turn talks past
+/// its spoken line: the result's split can disagree with the stream's (a block
+/// the stream closed at a content-block boundary reads to the end of the
+/// result, a sentence that spans two text blocks splits differently), and every
+/// disagreement was spoken a second time or read display text aloud.
+pub(super) fn result_text(raw: &str, stream_carried_text: bool) -> (String, Vec<String>) {
+    let (display, blocks) = crate::agent::tts_tags::split_tts_tags(raw);
+    if stream_carried_text {
+        (display, Vec::new())
+    } else {
+        (display, blocks)
+    }
+}
+
+/// Whether `configured` is a level the person set and the CLI accepts. An
+/// unknown value was dropped by [`resolve_effort`], so it is not a choice to
+/// respect.
+fn effort_is_explicit(configured: Option<&str>) -> bool {
+    use crate::constants::settings::defaults::CLAUDE_CLI_EFFORT_LEVELS;
+    configured.is_some_and(|level| CLAUDE_CLI_EFFORT_LEVELS.contains(&level))
+}
+
+/// The effort one turn runs at. A spoken turn gets
+/// [`CLAUDE_CLI_VOICE_EFFORT`](crate::constants::settings::defaults::CLAUDE_CLI_VOICE_EFFORT)
+/// so the first spoken line is not held behind a long plan; a typed turn keeps
+/// `base`. A level the person set themselves wins either way.
+fn effort_for_turn(base: &str, explicit: bool, voice: bool) -> String {
+    if voice && !explicit {
+        crate::constants::settings::defaults::CLAUDE_CLI_VOICE_EFFORT.to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+/// Replace the value after `--effort` in a built argument list.
+fn set_effort_arg(args: &mut [String], effort: &str) {
+    if let Some(idx) = args.iter().position(|a| a == "--effort") {
+        if let Some(value) = args.get_mut(idx + 1) {
+            *value = effort.to_string();
+        }
+    }
+}
+
 /// Drop [`PARTIAL_MESSAGES_FLAG`] from an argument list, for a `claude` build
 /// too old to accept it. The flag is standalone, so nothing follows it to
 /// remove as well.
@@ -2132,6 +2295,15 @@ fn describe_computer_action(input: &Value) -> Option<String> {
 
 /// Extract text content from a Claude CLI assistant message JSON object.
 /// Handles both `content` array format and direct `content` string.
+/// What goes between the text so far and a new text block: a paragraph
+/// break, unless there is no text yet or it already ends in whitespace.
+pub(super) fn text_block_separator(text_so_far: &str) -> Option<&'static str> {
+    match text_so_far.chars().last() {
+        Some(last) if !last.is_whitespace() => Some("\n\n"),
+        _ => None,
+    }
+}
+
 pub(super) fn extract_text_from_message(message: &Value) -> String {
     // Try content array format: {"content": [{"type": "text", "text": "..."}]}
     if let Some(content_array) = message.get("content").and_then(|v| v.as_array()) {
@@ -2139,6 +2311,9 @@ pub(super) fn extract_text_from_message(message: &Value) -> String {
         for block in content_array {
             if block.get("type").and_then(|v| v.as_str()) == Some("text") {
                 if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
+                    if let Some(separator) = text_block_separator(&text) {
+                        text.push_str(separator);
+                    }
                     text.push_str(t);
                 }
             }
@@ -2252,6 +2427,74 @@ mod tests {
     }
 
     #[test]
+    fn text_blocks_in_one_message_do_not_run_together() {
+        let message = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "I'll redo it in the Calculator window."},
+                {"type": "tool_use", "name": "computer", "input": {}},
+                {"type": "text", "text": "That went into Zed instead."}
+            ]
+        });
+        assert_eq!(
+            extract_text_from_message(&message),
+            "I'll redo it in the Calculator window.\n\nThat went into Zed instead."
+        );
+    }
+
+    #[test]
+    fn separator_only_between_text_that_needs_one() {
+        assert_eq!(text_block_separator(""), None);
+        assert_eq!(text_block_separator("Done. "), None);
+        assert_eq!(text_block_separator("Done.\n"), None);
+        assert_eq!(text_block_separator("Done."), Some("\n\n"));
+        assert_eq!(text_block_separator("世界"), Some("\n\n"));
+    }
+
+    /// The live path: text blocks separated by a tool call, streamed as
+    /// deltas, reach the answer as two paragraphs. This is the
+    /// "window.That went into Zed" bug from the 2026-10-08 Calculator run.
+    #[test]
+    fn streamed_text_blocks_across_a_tool_call_are_separate_paragraphs() {
+        let mut blocks = std::collections::HashMap::new();
+        let mut pending_tools = std::collections::HashMap::new();
+        let mut streamed_messages = std::collections::HashSet::new();
+        let mut partial_message_id = None;
+        let mut saw_text_delta = false;
+        let mut tts_stream = crate::agent::tts_tags::TtsTagStream::new();
+        let mut accumulated = String::new();
+        let mut spoken = Vec::new();
+
+        let events = [
+            serde_json::json!({"type": "message_start", "message": {"id": "m1"}}),
+            serde_json::json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Redoing it in the Calculator window."}}),
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+            serde_json::json!({"type": "message_start", "message": {"id": "m2"}}),
+            serde_json::json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "That went into Zed instead."}}),
+        ];
+        for event in &events {
+            ClaudeCliBrain::handle_stream_event(
+                event,
+                &None,
+                "msg",
+                &mut blocks,
+                &mut pending_tools,
+                &mut streamed_messages,
+                &mut partial_message_id,
+                &mut saw_text_delta,
+                &mut tts_stream,
+                &mut accumulated,
+                &mut spoken,
+            );
+        }
+        assert_eq!(
+            accumulated,
+            "Redoing it in the Calculator window.\n\nThat went into Zed instead."
+        );
+    }
+
+    #[test]
     fn test_extract_text_from_content_string() {
         let message = serde_json::json!({
             "content": "Hello world!"
@@ -2326,6 +2569,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2350,6 +2594,7 @@ mod tests {
             model: "opus".to_string(),
             system_prompt: Some("You are helpful.".to_string()),
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2370,6 +2615,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2393,6 +2639,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2419,6 +2666,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             // Connectors off: the strict flag must ride with the config.
             load_account_mcp: false,
             observed_session: std::sync::Mutex::new(None),
@@ -2450,6 +2698,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2467,6 +2716,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2495,6 +2745,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2514,6 +2765,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2552,6 +2804,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         }
@@ -2817,6 +3070,50 @@ echo '{{"type":"result","result":"answered the old way"}}'"#,
         assert_eq!(resolve_effort(Some("xhigh")), "xhigh");
         assert_eq!(resolve_effort(Some("banana")), "high");
         assert_eq!(resolve_effort(None), "high");
+    }
+
+    #[test]
+    fn the_result_is_spoken_only_when_the_stream_carried_no_text() {
+        // The stream closed the first block at its content-block boundary;
+        // the result alone would read the display text after it aloud.
+        let raw = "<TTS>Opening it now\n\nHere is the list. One. Two.";
+        let (_, fallback) = result_text(raw, false);
+        assert!(!fallback.is_empty());
+        let (display, spoken) = result_text(raw, true);
+        assert!(spoken.is_empty());
+        assert_eq!(display, "");
+        let (display, spoken) = result_text("<TTS>Hi there.</TTS>Shown.", true);
+        assert!(spoken.is_empty());
+        assert_eq!(display, "Shown.");
+    }
+
+    #[test]
+    fn a_spoken_turn_runs_at_voice_effort_unless_the_person_chose_one() {
+        use crate::constants::settings::defaults::{CLAUDE_CLI_EFFORT, CLAUDE_CLI_VOICE_EFFORT};
+        assert_eq!(CLAUDE_CLI_VOICE_EFFORT, "medium");
+        // Default: typed keeps high, spoken drops to medium.
+        assert_eq!(effort_for_turn(CLAUDE_CLI_EFFORT, false, false), "high");
+        assert_eq!(effort_for_turn(CLAUDE_CLI_EFFORT, false, true), "medium");
+        // An explicit level is respected for both.
+        assert_eq!(effort_for_turn("xhigh", true, true), "xhigh");
+        assert_eq!(effort_for_turn("low", true, false), "low");
+        // Only a valid stored level counts as a choice.
+        assert!(effort_is_explicit(Some("high")));
+        assert!(!effort_is_explicit(Some("banana")));
+        assert!(!effort_is_explicit(None));
+    }
+
+    #[test]
+    fn the_turn_effort_replaces_the_spawn_effort_in_one_shot_args() {
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        let mut args = brain.build_args("hello", None, None, false);
+        set_effort_arg(&mut args, "medium");
+        let idx = args
+            .iter()
+            .position(|a| a == "--effort")
+            .expect("--effort is always passed");
+        assert_eq!(args[idx + 1], "medium");
+        assert_eq!(args.iter().filter(|a| *a == "--effort").count(), 1);
     }
 
     #[test]

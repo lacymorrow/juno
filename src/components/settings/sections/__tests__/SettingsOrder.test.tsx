@@ -69,7 +69,7 @@ const voiceSettings = {
 } as unknown as SettingsSectionProps["settings"];
 
 describe("settings order and labels", () => {
-  it("General: Appearance, then Startup, then Updates", async () => {
+  it("General: Appearance, then Startup, Notifications, then Updates", async () => {
     backend(false);
     const { container } = render(
       <AdvancedSettingsProvider>
@@ -77,14 +77,12 @@ describe("settings order and labels", () => {
       </AdvancedSettingsProvider>,
     );
     await screen.findByText("Open at login");
-    expect(order(container.textContent ?? "", ["Appearance", "Startup", "Updates"])).toEqual([
-      "Appearance",
-      "Startup",
-      "Updates",
-    ]);
+    expect(
+      order(container.textContent ?? "", ["Appearance", "Startup", "Notifications", "Updates"]),
+    ).toEqual(["Appearance", "Startup", "Notifications", "Updates"]);
   });
 
-  it("Audio: Juno's voice, Sound, Microphone, Speaker, with Default labels", async () => {
+  it("Audio: Don't speak, then Sound, Microphone, Speaker; Juno's voice only with Advanced", async () => {
     backend(false);
     const { container } = render(
       <AdvancedSettingsProvider>
@@ -93,8 +91,9 @@ describe("settings order and labels", () => {
     );
     await screen.findByText("Play sounds");
     const text = container.textContent ?? "";
-    expect(order(text, ["Juno's voice", "Sound", "Microphone", "Speaker"])).toEqual([
-      "Juno's voice",
+    expect(text).not.toContain("Juno's voice");
+    expect(order(text, ["Don't speak", "Sound", "Microphone", "Speaker"])).toEqual([
+      "Don't speak",
       "Sound",
       "Microphone",
       "Speaker",

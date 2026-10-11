@@ -25,6 +25,7 @@
 
 pub mod accessibility_tools; // Native macOS accessibility tools for element-level interaction
 pub mod anthropic_computer_use; // Add the new Anthropic Computer Use tools
+pub mod ax_targeting; // Accessibility-first targeting: element listing, working window, window pictures
 pub mod basic_tools; // Ensure basic_tools is declared
 pub mod browser_controller;
 pub mod browser_tools;
@@ -36,13 +37,15 @@ pub mod display_info_tools; // Screen resolution and display information tools
 pub mod enhanced_coding_tools;
 pub mod enhanced_visual_reasoning;
 pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
+pub mod mac_apps; // Reminders, Calendar and Contacts through EventKit and Contacts
 pub mod mcp_integration;
 pub mod mcp_oauth; // Generic OAuth for remote MCP servers: discovery, DCR, PKCE, Keychain
 pub mod path_security; // Shared canonicalization + workspace-boundary enforcement for file tools
 pub mod permission_policy; // The one decision: does this action need asking, and what do we call it
 pub mod safari_tools; // Native Safari DOM automation with AppleScript injection
 pub mod self_awareness_tools; // Self-building and introspection capabilities
-                              // pub mod self_improvement; // Research-backed autonomous code generation system - TODO: Fix module not found
+pub mod settings_tool; // The agent drives its own Settings window (list, get, set, open, highlight)
+                       // pub mod self_improvement; // Research-backed autonomous code generation system - TODO: Fix module not found
 
 pub mod risk_classifier; // Automatic risk level classification for tool approval gating
 pub mod schedule_tools; // User-facing scheduled automations (cron-based agent tasks)

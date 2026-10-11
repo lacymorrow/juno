@@ -5,7 +5,7 @@ export { default as AIProviderSettings } from './sections/AIProviderSettings';
 export { default as ModelsSettings } from './sections/ModelsSettings';
 export { default as SecuritySettings } from './sections/SecuritySettings';
 export { default as AdvancedSettings } from './sections/AdvancedSettings';
-export { default as NotificationSettings } from './sections/NotificationSettings';
+export { NotificationsGroup } from './NotificationsGroup';
 export { default as NetworkSettings } from './sections/NetworkSettings';
 export { default as ToolsSettings } from './sections/ToolsSettings';
 export { default as TriggersSettings } from './sections/TriggersSettings';

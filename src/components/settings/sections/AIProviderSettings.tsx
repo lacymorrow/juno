@@ -123,6 +123,7 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
           }
         >
           <SettingsRow
+            id="api-key"
             below={
               settings.activeProvider === "claude_cli" ? (
                 <div className="rounded-md border border-border bg-muted/40 p-4">
@@ -255,7 +256,8 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
               advanced
               htmlFor="load-account-mcp"
               label="Load account MCP connectors"
-              description="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
+              description="Use your Claude account connectors in chats."
+            info="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
             >
               <Switch
                 id="load-account-mcp"
