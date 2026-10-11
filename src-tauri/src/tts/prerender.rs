@@ -14,9 +14,13 @@
 //! left to the ordinary speaking path. If the render is not ready when the
 //! line is wanted, the caller speaks it the ordinary way.
 //!
-//! The Mac's voice is stored as 16-bit WAV and played through the in-process
-//! player, which honours the Speaker setting. Every other engine's bytes are
-//! stored as they came and played the way that engine always plays.
+//! The Mac's voice is rendered by `say -o` with no `-v`, so it is the System
+//! Voice (Siri) exactly as `say` would speak it, stored as 16-bit WAV and
+//! played through the in-process player (`pcm_player`), which honours the
+//! Speaker setting. When the System Voice is not a Siri voice nothing is
+//! rendered or played for it (`voices::mac_voice_allowed`). Every other
+//! engine's bytes are stored as they came and played the way that engine
+//! always plays.
 
 use crate::settings::AudioSettings;
 use crate::tts::rate;
@@ -27,7 +31,9 @@ use tauri::{AppHandle, Manager};
 use tracing::{debug, info, warn};
 
 /// Bump to invalidate every cached file (a change in how they are rendered).
-const CACHE_VERSION: u32 = 1;
+/// 2: the Mac's voice is `say -o` only; version 1 files may hold a non-Siri
+/// voice rendered in-process.
+const CACHE_VERSION: u32 = 2;
 
 /// Cached files start with this, so stale ones can be cleared without
 /// touching anything else in the directory.
@@ -94,9 +100,8 @@ pub fn key_for(
     let engine = audio.tts_provider.trim().to_ascii_lowercase();
     let stored_rate = audio.voice_rate;
     let voice = match engine.as_str() {
-        "system" => {
-            crate::tts::voices::system_voice_for_say(audio.voice_for("system")).unwrap_or_default()
-        }
+        // Always the System Voice: there is no Mac voice name to key on.
+        "system" => String::new(),
         "kokoro" => crate::tts::voices::resolve_kokoro_voice(audio.voice_for("kokoro")),
         "supertonic" => format!(
             "{}|{}|{:.3}",
@@ -159,6 +164,11 @@ fn cache_dir(app: &AppHandle) -> Option<PathBuf> {
 /// The line, if it is rendered for the settings in force right now.
 pub async fn ready_for(app: &AppHandle, text: &str) -> Option<Prerendered> {
     let key = current_key(app, text).await?;
+    // The System Voice may have changed to a non-Siri voice since this was
+    // rendered; then it is not played.
+    if key.engine == "system" && !crate::tts::voices::mac_voice_allowed().await {
+        return None;
+    }
     let stem = key.stem();
     ready()
         .as_ref()
@@ -183,6 +193,10 @@ async fn refresh(app: &AppHandle, text: &str) -> Result<(), String> {
         *ready() = None;
         return Ok(());
     };
+    if key.engine == "system" && !crate::tts::voices::mac_voice_allowed().await {
+        *ready() = None;
+        return Err("the System Voice is not a Siri voice".to_string());
+    }
     let stem = key.stem();
     if ready().as_ref().is_some_and(|(s, _)| *s == stem) {
         return Ok(());
@@ -248,19 +262,9 @@ async fn render(key: &LineKey) -> Result<Prerendered, String> {
     Ok(Prerendered::Encoded(encoded))
 }
 
-/// The Mac's voice: in-process when it can honour the voice exactly, else
-/// `say -o`, which renders the same voice `say` would speak with.
+/// The Mac's voice: `say -o` with no `-v`, which renders the System Voice,
+/// Siri included, exactly as `say` would speak it.
 async fn render_system(key: &LineKey, rate: f64) -> Result<Prerendered, String> {
-    let voice = Some(key.voice.as_str()).filter(|v| !v.is_empty());
-    match crate::tts::avspeech::render_pcm(&key.text, voice, rate).await {
-        Ok((samples, sample_rate)) => {
-            return Ok(Prerendered::Pcm {
-                samples: Arc::new(samples),
-                rate: sample_rate,
-            })
-        }
-        Err(e) => debug!("[Prerender] In-process render unavailable ({e}); using say -o"),
-    }
     let file = tempfile::Builder::new()
         .prefix("juno-line-")
         .suffix(".wav")
@@ -275,7 +279,6 @@ async fn render_system(key: &LineKey, rate: f64) -> Result<Prerendered, String> 
     ];
     args.extend(crate::tts::system::say_arguments_at(
         &key.text,
-        voice,
         None,
         rate::say_words_per_minute(rate),
     ));
@@ -428,11 +431,27 @@ mod tests {
 
     #[test]
     fn a_new_voice_is_a_new_file() {
-        let mut settings = audio("system");
+        let mut settings = audio("supertonic");
         let before = key_for(&settings, LINE, None).expect("cached").stem();
-        settings.system_voice = Some("Daniel".to_string());
+        settings.supertonic_voice = "F1".to_string();
         let after = key_for(&settings, LINE, None).expect("cached").stem();
         assert_ne!(before, after);
+    }
+
+    /// A Mac voice name an older build stored never reaches the render: the
+    /// Mac's voice is always the System Voice, so the key ignores it.
+    #[test]
+    fn a_stored_mac_voice_name_is_not_rendered() {
+        let mut named = audio("system");
+        named.system_voice = Some("Samantha".to_string());
+        let key = key_for(&named, LINE, None).expect("cached");
+        assert_eq!(key.voice, "");
+        assert_eq!(
+            key.stem(),
+            key_for(&audio("system"), LINE, None)
+                .expect("cached")
+                .stem()
+        );
     }
 
     #[test]

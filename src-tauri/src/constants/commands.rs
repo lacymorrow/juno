@@ -138,6 +138,9 @@ pub mod audio {
     pub const SET_JUNO_SILENT: &str = "set_juno_silent";
     /// Say the sample again in the voice already chosen.
     pub const PREVIEW_JUNO_VOICE: &str = "preview_juno_voice";
+    /// Open System Settings > Accessibility > Read & Speak, where the Mac's
+    /// voice (a Siri voice) is chosen.
+    pub const OPEN_READ_AND_SPEAK: &str = "open_read_and_speak";
 }
 
 /// TTS command names

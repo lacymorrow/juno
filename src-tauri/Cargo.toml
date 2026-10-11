@@ -134,9 +134,6 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # (agent/tools/mac_apps/). Only the classes those tools touch are switched on.
 objc2-event-kit = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "EKObject", "EKTypes", "EKCalendar", "EKCalendarItem", "EKAlarm", "EKEvent", "EKReminder", "EKEventStore"] }
 objc2-contacts = { version = "0.3", default-features = false, features = ["std", "block2", "CNContact", "CNContactStore", "CNContact_Predicates", "CNLabeledValue", "CNPhoneNumber", "CNContactRelation"] }
-# The Mac's voice in-process (tts/avspeech.rs): AVSpeechSynthesizer rendering
-# to buffers that Juno plays on the chosen speaker.
-objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioBuffer", "AVAudioFormat", "AVAudioTypes", "AVSpeechSynthesis"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "UNUserNotificationCenter", "UNNotificationSettings", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationSound", "UNNotificationTrigger"] }
 # Metal GPU acceleration for Kokoro-82M on Apple Silicon
 any-tts = { version = "0.1", default-features = false, features = ["kokoro", "download", "metal"] }

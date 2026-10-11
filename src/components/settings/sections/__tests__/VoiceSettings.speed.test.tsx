@@ -34,12 +34,13 @@ function list(overrides: Partial<JunoVoiceList> = {}): JunoVoiceList {
     engines: [{ id: "system", name: "Your Mac" }],
     options: [
       {
-        id: "Samantha",
-        kind: "voice",
-        name: "Samantha",
-        descriptor: "American English.",
+        id: "system_default",
+        kind: "system",
+        name: "Your Mac's voice",
+        descriptor: "Uses the Siri voice you pick in Read & Speak.",
         selected: true,
         speaks: true,
+        link: "Open Read & Speak",
       },
     ],
     speed: { value: 1, min: 0.75, max: 2 },
@@ -104,7 +105,7 @@ describe("Audio: how fast Juno speaks", () => {
 
   it("reads the voices again when the window regains focus", async () => {
     const { loadJunoVoices } = renderSection(list());
-    await screen.findByText("Samantha");
+    await screen.findByText("Your Mac's voice");
     const before = vi.mocked(loadJunoVoices).mock.calls.length;
     fireEvent.focus(window);
     expect(vi.mocked(loadJunoVoices).mock.calls.length).toBe(before + 1);
@@ -112,21 +113,21 @@ describe("Audio: how fast Juno speaks", () => {
 
   it("hides the speed unless debug mode is on", async () => {
     renderSection(list(), undefined, false);
-    await screen.findByText("Samantha");
+    await screen.findByText("Your Mac's voice");
     expect(screen.queryByText("Speaking speed")).not.toBeInTheDocument();
     expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   });
 
   it("draws no speed control when the engine has none", async () => {
     renderSection(list({ speed: null }));
-    await screen.findByText("Samantha");
+    await screen.findByText("Your Mac's voice");
     expect(screen.queryByText("Speaking speed")).not.toBeInTheDocument();
     expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   });
 
   it("draws no speed control when the answer carries no speed at all", async () => {
     renderSection(list({ speed: undefined }));
-    await screen.findByText("Samantha");
+    await screen.findByText("Your Mac's voice");
     expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   });
 

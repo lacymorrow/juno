@@ -53,3 +53,8 @@ Option (a) is in `src-tauri/src/tts/avspeech.rs`. Two more measurements made whi
 - With no System Voice ever chosen, AVFoundation's default voice and `say` with no `-v` render the same duration to the sample, so that case runs in-process too. A Siri System Voice cannot be used by another app and stays on `say`.
 
 Each sentence logs `[SpeechTiming] engine=avspeech first_audio_ms=...`, or `engine=say` when it fell back.
+
+## Removed (fix/siri-or-provider-only, 2026-10-11)
+
+The in-process path is gone. It could only speak MacinTalk and Vocalizer voices: AVFoundation lists no Siri voices to a third-party app and cannot build one by id, so on a Mac whose System Voice is Siri (Simone, here) its "language default" was `com.apple.voice.compact.en-US.Samantha`, and Juno spoke as Samantha while Read & Speak said Simone. The rule now: Juno speaks only in a Siri voice or a provider's voice. The Mac's voice is always `say` with no `-v`, which does speak the Siri System Voice, and when the System Voice is read as a non-Siri voice the Mac's voice is not used at all (`voices::mac_voice_is_siri_or_unknown`). The cost is the `say` latency in the table above. The greeting is still rendered ahead (`say -o`, no `-v`) and played in-process by `tts/pcm_player.rs`, so it does not pay it.
+
