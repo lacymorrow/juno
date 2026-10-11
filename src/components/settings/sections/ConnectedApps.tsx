@@ -94,10 +94,7 @@ export function ConnectedApps() {
   return (
     <>
       {apps.length > 0 && (
-        <SettingsGroup
-          title="Connected apps"
-          footer="Juno asks before an app sends, deletes, or shares anything."
-        >
+        <SettingsGroup title="Connected apps">
           {apps.map((app) => (
             <SettingsRow
               key={app.toolkit_slug}
