@@ -834,6 +834,12 @@ where
         use crate::agent::tools::risk_classifier;
         use crate::state::RiskLevel;
 
+        // Permissions come first: a system dialog never lands unannounced, and
+        // the send gate below resolves names through Contacts.
+        if !self.ask_for_permissions(batch, cancel_rx).await? {
+            return Ok(false);
+        }
+
         // A text or an email has its own ask: the message card, and only
         // "send it" or the Send button answers it. It never rides along in a
         // batch, so each message is seen on its own before it goes.
@@ -1041,6 +1047,85 @@ where
         }
 
         Ok(approved)
+    }
+
+    /// The permission preflight (`mac_apps::preflight`), shared with the MCP
+    /// path. Everything allowed: `Ok(true)` and not a word said. A permission
+    /// never asked: one line and a Continue button, and only "continue" (said
+    /// or pressed) brings the system dialog up. Declined, or no answer:
+    /// `Ok(false)` with the reason recorded for the model.
+    async fn ask_for_permissions(
+        &self,
+        batch: &[crate::agent::core::ToolCall],
+        cancel_rx: &crate::state::CancelReceiver,
+    ) -> Result<bool, AgentError> {
+        use crate::agent::providers::cli_approval;
+        use crate::agent::tools::mac_apps::preflight::{self, Preflight};
+
+        for tool in batch {
+            let asked = match preflight::preflight(&tool.name, &tool.input).await {
+                Preflight::Clear => continue,
+                Preflight::Blocked(answer) => {
+                    let text =
+                        serde_json::to_string(&answer).unwrap_or_else(|_| answer.to_string());
+                    self.record_not_run(batch, &text).await?;
+                    return Ok(false);
+                }
+                Preflight::Ask(asked) => asked,
+            };
+
+            let conversation_key = self
+                .session_id
+                .as_ref()
+                .map(|id| id.as_str().to_string())
+                .unwrap_or_else(crate::state::default_conversation_key);
+            let request = preflight::ask_request(&tool.name, &tool.input, &asked)
+                .with_conversation(conversation_key);
+            let ask_id = request.tool_id.clone();
+            let description = request.description.clone();
+            let app_state = self.app_handle.state::<crate::state::AppState>();
+            let marked_needs_input = self.mark_session_needs_input(&description).await;
+
+            let mut cancel = cancel_rx.clone();
+            let decision = tokio::select! {
+                answer = cli_approval::ask_person(&self.app_handle, request) => answer,
+                _ = cancel.wait_for(|&v| v) => {
+                    app_state.remove_tool_approval(&ask_id).await;
+                    self.emit_approval_resolved(&ask_id, ApprovalOutcome::Cancelled);
+                    if marked_needs_input {
+                        self.clear_session_needs_input().await;
+                    }
+                    return Err(AgentError::Terminated);
+                }
+            };
+            if marked_needs_input {
+                self.clear_session_needs_input().await;
+            }
+            let outcome = match decision {
+                Some(true) => ApprovalOutcome::Allowed,
+                Some(false) => ApprovalOutcome::Denied,
+                None => ApprovalOutcome::TimedOut,
+            };
+            self.emit_approval_resolved(&ask_id, outcome);
+
+            let refusal = match decision {
+                Some(true) => {
+                    match preflight::continue_after_ask(&tool.name, &tool.input, asked).await {
+                        Preflight::Clear => continue,
+                        Preflight::Blocked(answer) => {
+                            serde_json::to_string(&answer).unwrap_or_else(|_| answer.to_string())
+                        }
+                        Preflight::Ask(_) => preflight::NOT_ALLOWED_YET.to_string(),
+                    }
+                }
+                Some(false) => preflight::NOT_CONTINUED.to_string(),
+                None => preflight::NOT_ANSWERED.to_string(),
+            };
+            log::info!("Permission ask not cleared for {}", tool.name);
+            self.record_not_run(batch, &refusal).await?;
+            return Ok(false);
+        }
+        Ok(true)
     }
 
     /// Write the same tool result for every call in a batch that did not run.

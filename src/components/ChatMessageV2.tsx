@@ -33,6 +33,7 @@ import {
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
 import { MessageCard } from "@/components/ui/agent-cards/message-card";
+import { PermissionAskCard } from "@/components/ui/agent-cards/permission-ask-card";
 import {
   Check,
   Copy,
@@ -587,6 +588,25 @@ function ApprovalPrompt({
             variant="text"
           />
         )}
+      </div>
+    );
+  }
+
+  // A permission ask: one line and one button. Once answered, the card goes
+  // quietly: nothing about permissions stays on screen.
+  if (msg.permission) {
+    if (msg.approval_state !== "pending") return null;
+    return (
+      <div className="w-full">
+        <PermissionAskCard
+          line={msg.permission.line}
+          onContinue={toolId ? () => onApprove(toolId) : undefined}
+        />
+        <ApprovalCountdown
+          timeoutSeconds={msg.approval_timeout_seconds ?? 120}
+          isPending
+          variant="text"
+        />
       </div>
     );
   }

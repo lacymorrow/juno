@@ -76,6 +76,16 @@ export type ChatMessage = {
     body?: string;
     prompt?: string;
   } | null;
+  /**
+   * Set only for a permission ask (`mac_apps::preflight`): the one line, and
+   * the prompt that was spoken. Drawn as a PermissionAskCard with one button,
+   * Continue, answered by that button or by saying "continue".
+   */
+  permission?: {
+    line?: string;
+    prompt?: string;
+    permissions?: string[];
+  } | null;
   continuation_request_id?: string;
   continuation_state?: "pending" | "stopped" | "continued";
   tts_metadata?: {
