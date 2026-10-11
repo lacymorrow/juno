@@ -8,6 +8,7 @@ import { COMMANDS, UI } from "@/lib/constants.generated";
 import { AppearancePicker } from "../AppearancePicker";
 import { useBarAppearance } from "../useBarAppearance";
 import { UpdatesGroup } from "../UpdatesGroup";
+import { NotificationsGroup } from "../NotificationsGroup";
 import { CursorColorPicker } from "../CursorColorPicker";
 
 export default function GeneralSettings(_props: SettingsSectionProps) {
@@ -130,7 +131,7 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
     <div className="space-y-6">
       <SettingsGroup
         title="Appearance"
-        footer="Your bar changes as you browse. Every look goes through the same moments: resting, listening, dictating, done."
+        footer="Every look covers the same moments: resting, listening, dictating, done."
       >
         <SettingsRow
           id="bar-appearance"
@@ -182,6 +183,8 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
           />
         </SettingsRow>
       </SettingsGroup>
+
+      <NotificationsGroup />
 
       <UpdatesGroup />
 

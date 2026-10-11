@@ -712,5 +712,11 @@ export function TaskSummaryCard({
 }
 
 // Live components (bound to real state) live in their own files.
+export { AgendaCard } from "./agenda-card";
+export { MessageCard } from "./message-card";
+export { PermissionAskCard } from "./permission-ask-card";
+export type { PermissionAskCardProps } from "./permission-ask-card";
+export type { MessageCardProps, MessageCardState } from "./message-card";
+export type { AgendaCardProps, AgendaCardItem } from "./agenda-card";
 export { NowPlayingCard, mediaAppLabel } from "./now-playing-card";
 export type { NowPlayingCardProps, MediaState, MediaApp } from "./now-playing-card";

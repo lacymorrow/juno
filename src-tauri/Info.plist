@@ -47,6 +47,29 @@
     <key>NSDownloadsFolderUsageDescription</key>
     <string>Juno needs access to your Downloads folder to help with file operations and automation tasks.</string>
 
+    <!-- Reminders, Calendar and Contacts: asked in the moment, the first time a request needs them -->
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Juno needs access to your reminders to read them out, add new ones and mark them done when you ask.</string>
+
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Juno needs access to your calendar to tell you what is coming up and to add or move events when you ask.</string>
+
+    <key>NSContactsUsageDescription</key>
+    <string>Juno needs access to your contacts to find a phone number, an email address or a family member when you ask.</string>
+
+    <!-- juno:// links (navigation only). Also declared under plugins.deep-link in tauri.conf.json. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.juno.desktop</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>juno</string>
+            </array>
+        </dict>
+    </array>
+
     <key>LSUIElement</key>
     <false/>
 

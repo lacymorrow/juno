@@ -6,21 +6,24 @@
 //! millisecond offsets from the key release:
 //!
 //! ```text
-//! [TurnTiming] turn=7 outcome=first_audio released=0 transcript_final=412 llm_request_sent=455 llm_first_token=1210 first_tts_text=1388 first_audio=1702 provider=claude_cli/persistent-warm model=sonnet tts=kokoro source=voice
+//! [TurnTiming] turn=7 outcome=first_audio released=0 transcript_final=412 llm_request_sent=455 llm_first_token=1210 first_tts_text=1388 first_audio=1702 provider=claude_cli/persistent-warm model=sonnet effort=medium tts=kokoro source=voice
 //! ```
 //!
 //! A stage the turn never reached prints as `-`. Grep `[TurnTiming]` in the log.
 //!
 //! A typed query opens a turn too ([`begin_typed`]), timed from the submit, so
 //! `released=0` is the moment it was sent and `transcript_final` is `-`.
-//! `source=` tells the two apart.
+//! `source=` tells the two apart. `effort=` is the Claude CLI effort the turn
+//! ran at (`-` for other providers), so voice and typed effort can be compared.
 //!
 //! The tracker is deliberately passive. A turn opens on a hold-key release
 //! ([`begin`]), each stage records the first time it is reached ([`mark`]), and
 //! the line goes out once: when audio starts, when the turn ends without any
 //! ([`finish`]), or when the next release supersedes it. Marks with no open turn
 //! (typed queries, previews) are ignored, so nothing outside a voice turn pays
-//! more than one uncontended lock. Nothing here changes what Juno does.
+//! more than one uncontended lock. Nothing here changes what Juno does, with
+//! one read-only exception: [`open_turn_is_voice`] is the only place that knows
+//! a query was spoken, and the Claude CLI provider asks it to pick the effort.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -99,6 +102,8 @@ pub struct TurnTimer {
     marks: [Option<Duration>; 5],
     provider: Option<String>,
     model: Option<String>,
+    /// The Claude CLI `--effort` the turn ran at.
+    effort: Option<String>,
     tts_engine: Option<String>,
     /// `voice` for a hold-key release, `typed` for a query sent from the composer.
     source: &'static str,
@@ -113,6 +118,7 @@ impl TurnTimer {
             marks: [None; 5],
             provider: None,
             model: None,
+            effort: None,
             tts_engine: None,
             source: SOURCE_VOICE,
         }
@@ -161,6 +167,13 @@ impl TurnTimer {
         }
     }
 
+    /// Which effort the model ran at. First wins.
+    pub fn note_effort(&mut self, effort: &str) {
+        if self.effort.is_none() {
+            self.effort = Some(effort.to_string());
+        }
+    }
+
     /// Which engine spoke. First wins.
     pub fn note_tts_engine(&mut self, engine: &str) {
         if self.tts_engine.is_none() {
@@ -179,9 +192,10 @@ impl TurnTimer {
         }
         let field = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".to_string());
         out.push_str(&format!(
-            " provider={} model={} tts={} source={}",
+            " provider={} model={} effort={} tts={} source={}",
             field(&self.provider),
             field(&self.model),
+            field(&self.effort),
             field(&self.tts_engine),
             self.source
         ));
@@ -274,6 +288,19 @@ impl Tracker {
         }
     }
 
+    pub fn note_effort(&mut self, effort: &str) {
+        if let Some(timer) = self.current.as_mut() {
+            timer.note_effort(effort);
+        }
+    }
+
+    /// Whether the open turn began as a hold-key release.
+    pub fn open_turn_is_voice(&self) -> bool {
+        self.current
+            .as_ref()
+            .is_some_and(|timer| timer.source == SOURCE_VOICE)
+    }
+
     pub fn note_tts_engine(&mut self, engine: &str) {
         if let Some(timer) = self.current.as_mut() {
             timer.note_tts_engine(engine);
@@ -361,6 +388,19 @@ pub fn note_llm(provider: &str, model: &str) {
     with_tracker(|t| t.note_llm(provider, model));
 }
 
+/// Record which Claude CLI effort the open turn ran at.
+pub fn note_effort(effort: &str) {
+    with_tracker(|t| t.note_effort(effort));
+}
+
+/// Whether the query being answered now was spoken (a hold-key release opened
+/// the turn) rather than typed. Every query passes [`begin_typed`] on submit,
+/// which leaves a voice turn waiting for its first request in place and opens
+/// a typed turn otherwise, so at request time the open turn names the source.
+pub fn open_turn_is_voice() -> bool {
+    with_tracker(|t| t.open_turn_is_voice())
+}
+
 /// Record which TTS engine the open turn spoke with.
 pub fn note_tts_engine(engine: &str) {
     with_tracker(|t| t.note_tts_engine(engine));
@@ -407,7 +447,7 @@ mod tests {
             line,
             "turn=1 outcome=first_audio released=0 transcript_final=400 llm_request_sent=450 \
              llm_first_token=1200 first_tts_text=1380 first_audio=1700 \
-             provider=claude_cli/persistent-warm model=sonnet tts=kokoro source=voice"
+             provider=claude_cli/persistent-warm model=sonnet effort=- tts=kokoro source=voice"
         );
         // Emitted once: the turn is gone, later marks do nothing.
         assert!(tracker.mark_at(Stage::FirstAudio, t0 + ms(2000)).is_none());
@@ -439,7 +479,7 @@ mod tests {
         assert_eq!(
             line,
             "turn=2 outcome=timeout released=0 transcript_final=300 llm_request_sent=- \
-             llm_first_token=- first_tts_text=- first_audio=- provider=- model=- tts=- source=voice"
+             llm_first_token=- first_tts_text=- first_audio=- provider=- model=- effort=- tts=- source=voice"
         );
     }
 
@@ -514,6 +554,26 @@ mod tests {
             "{line}"
         );
         assert!(line.ends_with("source=typed"), "{line}");
+    }
+
+    #[test]
+    fn the_open_turn_names_the_query_source_and_effort() {
+        let t0 = Instant::now();
+        let mut tracker = Tracker::default();
+        assert!(!tracker.open_turn_is_voice(), "no turn, not voice");
+        tracker.begin(1, t0);
+        assert!(tracker.open_turn_is_voice());
+        // The spoken query reaches the submit path: still the voice turn.
+        assert!(tracker.begin_typed(|| 2, t0 + ms(400)).is_none());
+        assert!(tracker.open_turn_is_voice());
+        tracker.note_effort("medium");
+        tracker.note_effort("high");
+        tracker.mark_at(Stage::LlmRequestSent, t0 + ms(450));
+        let line = tracker.finish(None, "x").unwrap_or_default();
+        assert!(line.contains("model=- effort=medium tts=-"), "{line}");
+        // A typed query after it is typed.
+        assert!(tracker.begin_typed(|| 3, t0 + ms(900)).is_some());
+        assert!(!tracker.open_turn_is_voice());
     }
 
     #[test]

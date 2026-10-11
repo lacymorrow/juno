@@ -38,7 +38,7 @@ fn env_key_for(provider: &Provider) -> Option<&'static str> {
 }
 
 /// Whether `config`'s active provider could actually run right now.
-fn active_has_credential(config: &ProviderConfig) -> bool {
+pub(crate) fn active_has_credential(config: &ProviderConfig) -> bool {
     // A demo build carries a compiled-in Anthropic key, so it is never short
     // of credentials and must not be moved off the provider that key is for.
     if crate::demo::is_demo_build() {

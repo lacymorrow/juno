@@ -114,6 +114,38 @@ pub mod tool_names {
     pub const SET_FILE_MONITOR: &str = "set_file_monitor";
     pub const CHECK_EXPIRED_TIMERS: &str = "check_expired_timers";
 
+    // Juno's own Settings window: list, read, change, open and highlight
+    pub const SETTINGS: &str = "settings";
+
+    // Mac app tools (Reminders, Calendar, Contacts through EventKit and Contacts)
+    pub const REMINDERS_LIST: &str = "reminders_list";
+    pub const REMINDERS_CREATE: &str = "reminders_create";
+    pub const REMINDERS_COMPLETE: &str = "reminders_complete";
+    pub const CALENDAR_EVENTS: &str = "calendar_events";
+    pub const CALENDAR_CREATE_EVENT: &str = "calendar_create_event";
+    pub const CALENDAR_MOVE_EVENT: &str = "calendar_move_event";
+    pub const CALENDAR_DELETE_EVENT: &str = "calendar_delete_event";
+    pub const CONTACTS_FIND: &str = "contacts_find";
+
+    // Mac app tools (Messages, FaceTime, Mail, Notes through constant AppleScript)
+    pub const MESSAGES_SEND: &str = "messages_send";
+    pub const MESSAGES_RECENT: &str = "messages_recent";
+    pub const FACETIME_CALL: &str = "facetime_call";
+    pub const MAIL_UNREAD: &str = "mail_unread";
+    pub const MAIL_SEARCH: &str = "mail_search";
+    pub const MAIL_SEND: &str = "mail_send";
+    pub const MAIL_DRAFT: &str = "mail_draft";
+    pub const NOTES_CREATE: &str = "notes_create";
+    pub const NOTES_APPEND: &str = "notes_append";
+    pub const NOTES_SEARCH: &str = "notes_search";
+
+    // Mac app tools: Music, Maps, Shortcuts and Focus
+    pub const MUSIC_PLAY: &str = "music_play";
+    pub const MAPS_DIRECTIONS: &str = "maps_directions";
+    pub const SHORTCUTS_LIST: &str = "shortcuts_list";
+    pub const SHORTCUTS_RUN: &str = "shortcuts_run";
+    pub const FOCUS_SET: &str = "focus_set";
+
     // Scheduled automation tools (user-facing cron schedules)
     pub const CREATE_SCHEDULED_AUTOMATION: &str = "create_scheduled_automation";
     pub const LIST_SCHEDULED_AUTOMATIONS: &str = "list_scheduled_automations";

@@ -40,12 +40,14 @@ pub const APPROVE_TOOL_NAME: &str = "approve";
 /// Tools the CLI may use without a per-call prompt. The CLI's own toolset
 /// keeps working exactly as it did under skip-permissions; what changes is
 /// connector writes. Juno's `computer` is listed so desktop automation never
-/// round-trips through the prompt either.
-pub const ALLOWED_TOOLS: &str =
-    "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit,TodoWrite,Task,mcp__juno__computer";
+/// round-trips through the prompt either, and so is `settings`, whose
+/// guardrail settings are refused by construction
+/// (`settings::registry::authorize_set`).
+pub const ALLOWED_TOOLS: &str = "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit,\
+     TodoWrite,Task,mcp__juno__computer,mcp__juno__settings";
 
 /// How long the sheet waits for an answer before denying.
-const APPROVAL_TIMEOUT_SECS: u64 = 60;
+pub const APPROVAL_TIMEOUT_SECS: u64 = 60;
 
 /// After a denial, an identical ask inside this window is denied without a
 /// new sheet, the way `permission_gate.rs` stops a tool loop from nagging.
@@ -233,7 +235,9 @@ fn names_a_gated_act(tool: &str) -> bool {
 /// fix for that is a structural spend signal, not a longer verb list.
 pub fn verdict_for(tool_name: &str) -> Verdict {
     // Juno's own server: the computer tool is in `--allowedTools`, but a
-    // call that lands here anyway is Juno driving its own desktop.
+    // call that lands here anyway is Juno driving its own desktop. The Mac app
+    // tools are not waved through by this: `juno_mcp` runs Juno's own
+    // permission gate on them before they execute.
     if tool_name.starts_with("mcp__juno__") {
         return Verdict::Allow;
     }
@@ -362,6 +366,84 @@ fn describe(tool_name: &str, input: &Value) -> String {
     line
 }
 
+/// Show the approval sheet for one request, wait, and return the answer.
+///
+/// `Some(true)` approved, `Some(false)` declined, `None` no answer before the
+/// request's timeout. This is the one sheet both CLI gates use: `approve`
+/// (the CLI's permission prompt) and the gate in front of Juno's own Mac app
+/// tools on the MCP server (`juno_mcp`), which the CLI never prompts for.
+pub async fn ask_person(app: &tauri::AppHandle, request: ToolApprovalRequest) -> Option<bool> {
+    let request_id = request.tool_id.clone();
+    let description = request.description.clone();
+    let timeout_secs = request.timeout_seconds;
+
+    let app_state = app.state::<AppState>();
+    app_state.add_pending_tool_approval(request.clone()).await;
+
+    let mut approval_event = json!({
+        "tool_name": request.tool_name,
+        "tool_id": request.tool_id,
+        "tool_input": request.tool_input,
+        "description": request.description,
+        "timestamp": request.timestamp,
+        "risk_level": request.risk_level,
+        "target_app": request.target_app,
+        "timeout_seconds": request.timeout_seconds,
+        "is_batch": false,
+        "batch_size": 1
+    });
+    // A send is drawn as the message card and answered only by "send it".
+    if let (Some(message), Some(map)) = (&request.message, approval_event.as_object_mut()) {
+        map.insert("message".to_string(), message.clone());
+        map.insert("consequence".to_string(), json!("send"));
+        map.insert("always_allow_label".to_string(), Value::Null);
+    }
+    // A permission ask is drawn as the one-line card with Continue.
+    if let (Some(permission), Some(map)) = (&request.permission, approval_event.as_object_mut()) {
+        map.insert("permission".to_string(), permission.clone());
+        map.insert("consequence".to_string(), json!("permission"));
+        map.insert("always_allow_label".to_string(), Value::Null);
+    }
+    if let Err(e) = app.emit(events::tools::APPROVAL_REQUEST, approval_event) {
+        warn!("[CliApproval] Failed to emit approval request: {}", e);
+    }
+    info!("[CliApproval] Waiting for approval: {}", description);
+
+    // On voice, say what is being asked; the sheet stays on screen as the
+    // answer surface either way. `invoke_tts` already no-ops when the TTS
+    // provider is off or something else is speaking.
+    {
+        let app = app.clone();
+        // A send says the message and the phrase; anything else asks Allow.
+        let spoken = request
+            .message
+            .as_ref()
+            .or(request.permission.as_ref())
+            .and_then(|m| m.get("prompt"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{description}. Allow?"));
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            let _ = crate::tts::invoke_tts(spoken, state, app.clone()).await;
+        });
+    }
+
+    // Poll at 50 ms, the same cadence as the in-process approval wait.
+    let mut remaining = (timeout_secs * 1000 / 50) as i64;
+    let mut decision: Option<bool> = None;
+    while remaining > 0 {
+        if let Some(answer) = app_state.get_tool_approval_status(&request_id).await {
+            decision = Some(answer);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        remaining -= 1;
+    }
+    app_state.remove_tool_approval(&request_id).await;
+    decision
+}
+
 /// Handle a `tools/call` for `approve`: decide, maybe show the sheet, wait,
 /// and answer in the CLI's permission-prompt shape.
 pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value {
@@ -394,9 +476,8 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
     }
 
     let description = describe(tool_name, &input);
-    let request_id = uuid::Uuid::new_v4().to_string();
     let request = ToolApprovalRequest::new(
-        request_id.clone(),
+        uuid::Uuid::new_v4().to_string(),
         tool_name.to_string(),
         input.clone(),
         description.clone(),
@@ -404,50 +485,7 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
     .with_risk(RiskLevel::High)
     .with_timeout(APPROVAL_TIMEOUT_SECS);
 
-    let app_state = app.state::<AppState>();
-    app_state.add_pending_tool_approval(request.clone()).await;
-
-    let approval_event = json!({
-        "tool_name": request.tool_name,
-        "tool_id": request.tool_id,
-        "tool_input": request.tool_input,
-        "description": request.description,
-        "timestamp": request.timestamp,
-        "risk_level": request.risk_level,
-        "target_app": request.target_app,
-        "timeout_seconds": request.timeout_seconds,
-        "is_batch": false,
-        "batch_size": 1
-    });
-    if let Err(e) = app.emit(events::tools::APPROVAL_REQUEST, approval_event) {
-        warn!("[CliApproval] Failed to emit approval request: {}", e);
-    }
-    info!("[CliApproval] Waiting for approval: {}", description);
-
-    // On voice, say what is being asked; the sheet stays on screen as the
-    // answer surface either way. `invoke_tts` already no-ops when the TTS
-    // provider is off or something else is speaking.
-    {
-        let app = app.clone();
-        let spoken = format!("{description}. Allow?");
-        tauri::async_runtime::spawn(async move {
-            let state = app.state::<AppState>();
-            let _ = crate::tts::invoke_tts(spoken, state, app.clone()).await;
-        });
-    }
-
-    // Poll at 50 ms, the same cadence as the in-process approval wait.
-    let mut remaining = (APPROVAL_TIMEOUT_SECS * 1000 / 50) as i64;
-    let mut decision: Option<bool> = None;
-    while remaining > 0 {
-        if let Some(answer) = app_state.get_tool_approval_status(&request_id).await {
-            decision = Some(answer);
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        remaining -= 1;
-    }
-    app_state.remove_tool_approval(&request_id).await;
+    let decision = ask_person(app, request).await;
 
     match decision {
         Some(true) => {
@@ -633,14 +671,145 @@ pub fn parse_spoken_approval(text: &str) -> Option<bool> {
 /// is not a clear affirm/deny, so it is safe to call on every voice/query
 /// entry point.
 pub async fn try_answer_pending_approval(app_state: &AppState, text: &str) -> bool {
-    let decision = match parse_spoken_approval(text) {
-        Some(decision) => decision,
-        None => return false,
-    };
+    !matches!(
+        answer_pending_approval(app_state, text, AnswerSource::Ambient).await,
+        PendingAnswer::NotAnAnswer
+    )
+}
+
+/// Where a reply came from, which decides whether it can be a correction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnswerSource {
+    /// A query the person deliberately spoke or typed (`submit_query`). While
+    /// a send waits, anything that is not "send it" or a no is a correction.
+    Deliberate,
+    /// Always-listening speech. Only "send it" or a clear no touch a waiting
+    /// send; other talk in the room never cancels it.
+    Ambient,
+}
+
+/// What a reply did to the pending approvals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingAnswer {
+    /// Not an answer to anything; carry on with the query.
+    NotAnAnswer,
+    /// It answered (approved, denied, or changed a waiting send).
+    Answered,
+    /// A clean yes to a waiting send. Nothing was sent; say this line.
+    SayThePhrase(String),
+}
+
+/// Answer pending approvals from a spoken or typed reply.
+///
+/// A waiting send (a text or an email) is answered first and on its own
+/// terms (`mac_apps::send::classify_reply`): "send it" (or "send") approves
+/// it, the same as the Send button; a clear no denies it; a bare "yes" leaves
+/// it waiting and asks for the phrase; anything else said deliberately is a
+/// correction, recorded for the waiting gate, which then hands the words to
+/// the agent to redo the message. Every other approval keeps the yes/no rules
+/// below, and a bare "yes" never reaches a send through them.
+pub async fn answer_pending_approval(
+    app_state: &AppState,
+    text: &str,
+    source: AnswerSource,
+) -> PendingAnswer {
+    use crate::agent::tools::mac_apps::preflight::{self as permission, ContinueReply};
+    use crate::agent::tools::mac_apps::send::{self, SendReply};
 
     let pending = app_state.get_pending_tool_approvals().await;
     if pending.is_empty() {
-        return false;
+        return PendingAnswer::NotAnAnswer;
+    }
+    let (mut asks, pending): (Vec<_>, Vec<_>) =
+        pending.into_iter().partition(|r| r.is_permission());
+    // One already answered is the waiter's to collect, not to answer again.
+    asks.retain(|r| r.approved.is_none());
+
+    // A waiting permission ask ("I need Reminders for that.") is answered on
+    // its own terms: "continue" brings the system dialog up, a clear no drops
+    // it, and anything else said on purpose is a new request, so the ask is
+    // dropped and the words carry on as a query. Overheard talk changes
+    // nothing.
+    if !asks.is_empty() {
+        match permission::classify_reply(text, parse_spoken_approval) {
+            ContinueReply::Continue => {
+                for request in &asks {
+                    app_state.approve_tool(&request.tool_id).await;
+                }
+                info!(
+                    "[CliApproval] '{}' continued {} permission ask(s)",
+                    text,
+                    asks.len()
+                );
+                return PendingAnswer::Answered;
+            }
+            ContinueReply::Cancel => {
+                for request in &asks {
+                    app_state.deny_tool(&request.tool_id).await;
+                }
+                return PendingAnswer::Answered;
+            }
+            ContinueReply::Other => {
+                if source == AnswerSource::Deliberate {
+                    for request in &asks {
+                        app_state.deny_tool(&request.tool_id).await;
+                    }
+                    info!("[CliApproval] '{}' replaced a waiting permission ask", text);
+                }
+                if pending.is_empty() {
+                    return PendingAnswer::NotAnAnswer;
+                }
+            }
+        }
+    }
+    let (sends, others): (Vec<_>, Vec<_>) = pending.into_iter().partition(|r| r.is_send());
+
+    if !sends.is_empty() {
+        let Some(reply) = send::classify_reply(text, parse_spoken_approval) else {
+            return PendingAnswer::NotAnAnswer;
+        };
+        match reply {
+            SendReply::Send => {
+                for request in &sends {
+                    app_state.approve_tool(&request.tool_id).await;
+                }
+                info!(
+                    "[CliApproval] '{}' sent {} waiting message(s)",
+                    text,
+                    sends.len()
+                );
+                return PendingAnswer::Answered;
+            }
+            SendReply::Cancel => {
+                for request in &sends {
+                    app_state.deny_tool(&request.tool_id).await;
+                }
+                return PendingAnswer::Answered;
+            }
+            SendReply::SayThePhrase => {
+                return PendingAnswer::SayThePhrase(send::SAY_SEND_IT.to_string());
+            }
+            SendReply::Correction(words) => {
+                if source == AnswerSource::Ambient {
+                    return PendingAnswer::NotAnAnswer;
+                }
+                for request in &sends {
+                    send::record_correction(&request.tool_id, &words);
+                    app_state.deny_tool(&request.tool_id).await;
+                }
+                info!("[CliApproval] '{}' changed a waiting message", text);
+                return PendingAnswer::Answered;
+            }
+        }
+    }
+
+    let decision = match parse_spoken_approval(text) {
+        Some(decision) => decision,
+        None => return PendingAnswer::NotAnAnswer,
+    };
+    let pending = others;
+    if pending.is_empty() {
+        return PendingAnswer::NotAnAnswer;
     }
 
     // There is at most one CLI approval waiting at a time (handle_approve
@@ -660,7 +829,7 @@ pub async fn try_answer_pending_approval(app_state: &AppState, text: &str) -> bo
         pending.len(),
         if decision { "allow" } else { "deny" }
     );
-    true
+    PendingAnswer::Answered
 }
 
 #[cfg(test)]
@@ -936,6 +1105,12 @@ mod tests {
     #[test]
     fn junos_own_tools_never_prompt() {
         assert_eq!(verdict_for("mcp__juno__computer"), Verdict::Allow);
+        assert_eq!(verdict_for("mcp__juno__settings"), Verdict::Allow);
+        assert!(ALLOWED_TOOLS.split(',').any(|t| t == "mcp__juno__settings"));
+        // Juno's own send tools are asked about once, by `juno_mcp::run_gated`
+        // with the message card, not a second time by the CLI's prompt.
+        assert_eq!(verdict_for("mcp__juno__messages_send"), Verdict::Allow);
+        assert_eq!(verdict_for("mcp__juno__mail_send"), Verdict::Allow);
     }
 
     #[test]
@@ -1121,6 +1296,76 @@ mod tests {
         // be handled as a normal query.
         state.clear_pending_tool_approvals().await;
         assert!(!try_answer_pending_approval(&state, "yes").await);
+    }
+
+    /// The voice path into a waiting send: "send it" approves the same pending
+    /// approval the Send button does; a bare "yes" never does.
+    #[tokio::test]
+    async fn only_send_it_answers_a_waiting_text() {
+        let state = AppState::new(None);
+        let text = || {
+            ToolApprovalRequest::new(
+                "send-1".to_string(),
+                "messages_send".to_string(),
+                json!({ "to": "Doug", "body": "running late" }),
+                "Text Doug Keesler: running late".to_string(),
+            )
+            .with_message(json!({ "to": "Doug Keesler", "body": "running late" }))
+        };
+
+        // A bare yes leaves it waiting and asks for the phrase.
+        for yes in ["yes", "ok", "yeah", "yes send"] {
+            state.clear_pending_tool_approvals().await;
+            state.add_pending_tool_approval(text()).await;
+            let answer = answer_pending_approval(&state, yes, AnswerSource::Deliberate).await;
+            assert_eq!(
+                answer,
+                PendingAnswer::SayThePhrase("Say send it.".to_string()),
+                "{yes}"
+            );
+            assert_eq!(
+                state.get_tool_approval_status("send-1").await,
+                None,
+                "{yes}"
+            );
+        }
+
+        // "send it" approves it.
+        state.clear_pending_tool_approvals().await;
+        state.add_pending_tool_approval(text()).await;
+        assert!(try_answer_pending_approval(&state, "Send it.").await);
+        assert_eq!(state.get_tool_approval_status("send-1").await, Some(true));
+
+        // "don't send it" cancels; nothing is sent.
+        state.clear_pending_tool_approvals().await;
+        state.add_pending_tool_approval(text()).await;
+        assert!(try_answer_pending_approval(&state, "don't send it").await);
+        assert_eq!(state.get_tool_approval_status("send-1").await, Some(false));
+
+        // A deliberate correction denies it and hands the words over.
+        state.clear_pending_tool_approvals().await;
+        state.add_pending_tool_approval(text()).await;
+        let answer =
+            answer_pending_approval(&state, "make it twenty minutes", AnswerSource::Deliberate)
+                .await;
+        assert_eq!(answer, PendingAnswer::Answered);
+        assert_eq!(state.get_tool_approval_status("send-1").await, Some(false));
+        assert_eq!(
+            crate::agent::tools::mac_apps::send::take_correction("send-1").as_deref(),
+            Some("make it twenty minutes")
+        );
+
+        // Talk in the room never touches it.
+        state.clear_pending_tool_approvals().await;
+        state.add_pending_tool_approval(text()).await;
+        assert!(!try_answer_pending_approval(&state, "make it twenty minutes").await);
+        // "send it later" is a clean affirm to the general parser, so it only
+        // asks for the phrase again; the message has not gone.
+        assert_eq!(
+            answer_pending_approval(&state, "send it later", AnswerSource::Ambient).await,
+            PendingAnswer::SayThePhrase("Say send it.".to_string())
+        );
+        assert_eq!(state.get_tool_approval_status("send-1").await, None);
     }
 
     #[test]

@@ -31,7 +31,22 @@ export interface SttDownloadProgress {
 	total_bytes: number;
 	percent: number;
 	activate_when_done: boolean;
+	/**
+	 * The connection dropped and the backend is waiting to try again. It
+	 * resumes on its own; the UI says so in one plain line.
+	 */
+	waiting?: boolean;
 }
+
+/**
+ * The line shown when a download could not even start. The backend's own
+ * reason goes to the console, never to the screen: it can carry a URL or an
+ * error chain, and neither helps a person decide what to do next.
+ */
+export const DOWNLOAD_DID_NOT_START = "The download didn't start. Try again.";
+
+/** Shown while a download waits out a lost connection. */
+export const DOWNLOAD_WAITING_FOR_NETWORK = "No internet connection. Juno will try again.";
 
 export interface SttModelsStatus {
 	arch: string;
@@ -137,7 +152,8 @@ export function useSttModels() {
 				await invoke(COMMANDS.STT_MODELS_DOWNLOAD, { modelId, activate: false });
 				await reload();
 			} catch (error) {
-				setDownloadError({ modelId, error: String(error), cancelled: false });
+				console.warn("Speech-to-text model download did not start:", error);
+				setDownloadError({ modelId, error: DOWNLOAD_DID_NOT_START, cancelled: false });
 			}
 		},
 		[reload],

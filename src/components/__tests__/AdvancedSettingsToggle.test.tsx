@@ -61,7 +61,6 @@ vi.mock("../settings/index", () => {
     GeneralSettings: stub("general"),
     VoiceSettings: stub("voice"),
     AIProviderSettings: stub("ai"),
-    NotificationSettings: stub("notifications"),
     ToolsSettings: stub("tools"),
     AutomationsSettings: stub("automations"),
     NetworkSettings: stub("network"),
@@ -109,7 +108,6 @@ const BASIC_SECTIONS = [
   "General",
   "Audio",
   "Providers",
-  "Notifications",
   "Security & Privacy",
 ];
 const ADVANCED_SECTIONS = ["Tools", "Automations", "Network", "Advanced"];
@@ -143,7 +141,6 @@ describe("visibleCategories", () => {
       // Models is where the dictation model lives (Fast / Balanced / Most
       // accurate); everyone gets to choose, so it is not advanced-gated.
       "models",
-      "notifications",
       "security",
     ]);
   });

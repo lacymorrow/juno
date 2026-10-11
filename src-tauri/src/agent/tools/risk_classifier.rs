@@ -96,8 +96,67 @@ const VERB_IN_INPUT_TOOLS: &[&str] = &[
     "browser_interact",
 ];
 
+/// Tools that are the `computer` tool under another schema: each call maps
+/// onto a `computer` action and is classified exactly as that action is.
+const COMPUTER_SCHEMA_TOOLS: &[&str] = &["app_controls"];
+
 /// Agent self-scheduling.
 const SCHEDULING_TOOLS: &[&str] = &["create_scheduled_automation", "delete_scheduled_automation"];
+
+/// Mac app writes that the person can undo in the app itself: a reminder or an
+/// event added, a reminder ticked off, an event moved. Read back after every
+/// write (`agent::tools::mac_apps`), so a bad one is visible at once.
+const MAC_APP_WRITE_TOOLS: &[&str] = &[
+    "reminders_create",
+    "reminders_complete",
+    "calendar_create_event",
+    "calendar_move_event",
+    "notes_create",
+    "notes_append",
+    // Act at once, undone by the person in the app or the shortcut they built.
+    "music_play",
+    "maps_directions",
+    "shortcuts_run",
+    "focus_set",
+];
+
+/// Mac app deletes. Calendar has no Trash, and a deleted event can take its
+/// invitations with it, so there is no construction that makes this safe to
+/// run unasked. Critical, because Critical is the one level no permission mode
+/// and no standing "do not ask again" waives.
+const MAC_APP_DELETE_TOOLS: &[&str] = &["calendar_delete_event"];
+
+/// Tools that send something to another person: a text, an email.
+///
+/// Nothing on this Mac takes a sent message back. These carry the
+/// [`Consequence::Send`] class, which asks in every permission mode, is never
+/// covered by a standing "do not ask again", and is answered only by the phrase
+/// "send it" or the Send button (`mac_apps::send`). They are also Critical, so
+/// every older check that reads the risk level alone already stops for them.
+/// Pinned by `mac_app_tests::sending_a_text_or_an_email_asks_in_every_mode`.
+pub const SEND_TOOLS: &[&str] = &["messages_send", "mail_send"];
+
+/// What an action does that a person cannot take back, beyond its risk level.
+///
+/// One class today. It exists as its own type rather than as a fifth
+/// [`RiskLevel`] because the level is ordered and compared all over the app,
+/// and a send is not "more critical than critical": it is a different kind of
+/// ask, with its own card and its own phrase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Consequence {
+    /// It goes to another person and cannot be unsent.
+    Send,
+}
+
+/// The consequence class of a tool, if it has one.
+pub fn consequence_of(tool_name: &str) -> Option<Consequence> {
+    SEND_TOOLS.contains(&tool_name).then_some(Consequence::Send)
+}
+
+/// Whether this tool sends something to another person.
+pub fn is_send_tool(tool_name: &str) -> bool {
+    consequence_of(tool_name) == Some(Consequence::Send)
+}
 
 /// Generic names that no Juno tool uses, kept on purpose.
 ///
@@ -176,6 +235,17 @@ pub const DELIBERATELY_UNGATED_TOOLS: &[&str] = &[
     "safari_extract_dom",
     "safari_get_url",
     "safari_list_clickable_elements",
+    "reminders_list",
+    "calendar_events",
+    "contacts_find",
+    "messages_recent",
+    "mail_unread",
+    "mail_search",
+    "notes_search",
+    // Starts something the person asked for and watches happen: a FaceTime
+    // call rings on screen and is hung up with one click, the way Siri does it.
+    "facetime_call",
+    "shortcuts_list",
     // Desktop and page input the person is watching happen
     "click_focused_element",
     "hold_key",
@@ -190,6 +260,9 @@ pub const DELIBERATELY_UNGATED_TOOLS: &[&str] = &[
     // Changes nothing lasting
     "safari_clear_cache",
     "set_clipboard_content",
+    // A Mail draft sends nothing. It sits in Drafts, open on screen, until the
+    // person sends or deletes it (drafts are free, #648).
+    "mail_draft",
 ];
 
 /// Every tool name [`classify_risk`] has an arm for.
@@ -205,7 +278,11 @@ pub fn guarded_tool_names() -> Vec<&'static str> {
         .chain(BROWSER_NAV_TOOLS)
         .chain(FORM_FILL_TOOLS)
         .chain(VERB_IN_INPUT_TOOLS)
+        .chain(COMPUTER_SCHEMA_TOOLS)
         .chain(SCHEDULING_TOOLS)
+        .chain(MAC_APP_WRITE_TOOLS)
+        .chain(MAC_APP_DELETE_TOOLS)
+        .chain(SEND_TOOLS)
         .copied()
         .collect();
     names.sort_unstable();
@@ -222,6 +299,17 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
 
         // Computer use actions (screenshot/cursor are safe; keyboard combos vary)
         "computer" => classify_computer_use_risk(tool_input),
+
+        // The same actions offered under the `app_controls` schema. A call
+        // that does not map is refused by the tool, so it changes nothing.
+        name if COMPUTER_SCHEMA_TOOLS.contains(&name) => {
+            match crate::agent::tools::anthropic_computer_use::app_controls_to_computer_input(
+                tool_input,
+            ) {
+                Ok(computer) => classify_computer_use_risk(&computer),
+                Err(_) => RiskLevel::Low,
+            }
+        }
 
         // File mutations
         name if FILE_WRITE_TOOLS.contains(&name) => classify_file_write_risk(tool_input),
@@ -300,6 +388,17 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
         // ends, so creation requires human confirmation
         "create_scheduled_automation" => RiskLevel::High,
         "delete_scheduled_automation" => RiskLevel::Medium,
+
+        // Reminders and Calendar writes the person can undo in the app.
+        name if MAC_APP_WRITE_TOOLS.contains(&name) => RiskLevel::Medium,
+
+        // Deleting a calendar event asks in every mode. Pinned by
+        // `mac_app_tests::deleting_a_calendar_event_asks_in_every_mode`.
+        name if MAC_APP_DELETE_TOOLS.contains(&name) => RiskLevel::Critical,
+
+        // Sending a text or an email. Critical so the level alone already asks
+        // everywhere; the Send consequence on top decides how it asks.
+        name if SEND_TOOLS.contains(&name) => RiskLevel::Critical,
 
         // Everything else is low risk by default
         _ => RiskLevel::Low,
@@ -1418,6 +1517,9 @@ mod gate_name_truth {
         for definition in get_safari_tool_definitions() {
             names.insert(definition.name);
         }
+        for definition in crate::agent::tools::mac_apps::tool_definitions() {
+            names.insert(definition.name);
+        }
         for definition in
             create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124))
         {
@@ -1661,6 +1763,167 @@ mod gate_name_truth {
                 !sentence.starts_with("Use "),
                 "{name:?} falls through to the generic sentence: {sentence:?}. A \
                  prompt about a file has to name what happens to it."
+            );
+        }
+    }
+}
+
+/// The Mac app tools and the gate that names them. A safeguard is only real if
+/// something fails when it comes loose from what it names.
+#[cfg(test)]
+mod mac_app_tests {
+    use super::*;
+    use crate::agent::tools::mac_apps;
+    use crate::agent::tools::permission_policy::{requires_approval, PermissionMode};
+    use crate::constants::agent::tool_names;
+    use serde_json::json;
+
+    const MODES: [PermissionMode; 3] = [
+        PermissionMode::AskFirst,
+        PermissionMode::AskWhenRisky,
+        PermissionMode::DontAsk,
+    ];
+
+    #[test]
+    fn deleting_a_calendar_event_asks_in_every_mode() {
+        // The name the tool registers under is the name the gate classifies.
+        let registered: Vec<String> = mac_apps::tool_definitions()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+        assert!(registered
+            .iter()
+            .any(|n| n == tool_names::CALENDAR_DELETE_EVENT));
+        assert_eq!(tool_names::CALENDAR_DELETE_EVENT, "calendar_delete_event");
+        assert!(guarded_tool_names().contains(&"calendar_delete_event"));
+
+        let risk = classify_risk(tool_names::CALENDAR_DELETE_EVENT, &json!({"id": "abc@1"}));
+        assert_eq!(risk, RiskLevel::Critical);
+        for mode in MODES {
+            assert!(
+                requires_approval(mode, &risk, false),
+                "{mode:?} lets calendar_delete_event through unasked"
+            );
+            assert!(
+                requires_approval(mode, &risk, true),
+                "{mode:?} lets a standing grant cover calendar_delete_event"
+            );
+        }
+    }
+
+    /// The Send gate, pinned to both tools by name (the dead-control rule): if
+    /// either tool is renamed, loses its class, or a mode or a standing grant
+    /// starts covering it, this fails.
+    #[test]
+    fn sending_a_text_or_an_email_asks_in_every_mode() {
+        use crate::agent::tools::permission_policy::requires_approval_for;
+
+        let registered: Vec<String> = mac_apps::tool_definitions()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+        for name in [tool_names::MESSAGES_SEND, tool_names::MAIL_SEND] {
+            assert!(
+                registered.iter().any(|n| n == name),
+                "{name} not registered"
+            );
+            assert!(guarded_tool_names().contains(&name), "{name} not guarded");
+            assert_eq!(consequence_of(name), Some(Consequence::Send), "{name}");
+            assert!(is_send_tool(name));
+
+            let input = json!({"to": "Doug", "body": "running late", "subject": "Late"});
+            let risk = classify_risk(name, &input);
+            assert_eq!(risk, RiskLevel::Critical, "{name}");
+            for mode in MODES {
+                assert!(
+                    requires_approval_for(name, mode, &risk, false),
+                    "{mode:?} lets {name} send unasked"
+                );
+                assert!(
+                    requires_approval_for(name, mode, &risk, true),
+                    "{mode:?} lets a standing grant cover {name}"
+                );
+                // Even if the level were ever lowered, the class still asks.
+                assert!(
+                    requires_approval_for(name, mode, &RiskLevel::Low, true),
+                    "{mode:?}: {name} at Low with a grant went through"
+                );
+            }
+        }
+        assert_eq!(tool_names::MESSAGES_SEND, "messages_send");
+        assert_eq!(tool_names::MAIL_SEND, "mail_send");
+        assert_eq!(SEND_TOOLS, &["messages_send", "mail_send"]);
+    }
+
+    #[test]
+    fn a_draft_and_a_call_do_not_carry_the_send_class() {
+        for name in [
+            tool_names::MAIL_DRAFT,
+            tool_names::FACETIME_CALL,
+            tool_names::NOTES_CREATE,
+            tool_names::MESSAGES_RECENT,
+        ] {
+            assert_eq!(consequence_of(name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn every_mac_app_tool_has_a_class_that_matches_what_it_does() {
+        for definition in mac_apps::tool_definitions() {
+            let risk = classify_risk(&definition.name, &json!({}));
+            let reads = mac_apps::READ_TOOLS.contains(&definition.name.as_str());
+            if reads {
+                assert_eq!(risk, RiskLevel::Low, "{} only reads", definition.name);
+                assert!(
+                    DELIBERATELY_UNGATED_TOOLS.contains(&definition.name.as_str()),
+                    "{} reads, so it is listed as deliberately ungated",
+                    definition.name
+                );
+            } else if definition.name == tool_names::CALENDAR_DELETE_EVENT
+                || is_send_tool(&definition.name)
+            {
+                assert_eq!(risk, RiskLevel::Critical, "{}", definition.name);
+            } else if DELIBERATELY_UNGATED_TOOLS.contains(&definition.name.as_str()) {
+                assert_eq!(risk, RiskLevel::Low, "{}", definition.name);
+                assert!(
+                    [tool_names::FACETIME_CALL, tool_names::MAIL_DRAFT]
+                        .contains(&definition.name.as_str()),
+                    "{} is ungated without a reason written here",
+                    definition.name
+                );
+            } else {
+                assert_eq!(
+                    risk,
+                    RiskLevel::Medium,
+                    "{} writes and can be undone",
+                    definition.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reversible_writes_ask_only_in_ask_first() {
+        for name in MAC_APP_WRITE_TOOLS {
+            let risk = classify_risk(name, &json!({}));
+            assert!(requires_approval(PermissionMode::AskFirst, &risk, false));
+            assert!(!requires_approval(
+                PermissionMode::AskWhenRisky,
+                &risk,
+                false
+            ));
+            assert!(!requires_approval(PermissionMode::DontAsk, &risk, false));
+        }
+    }
+
+    #[test]
+    fn the_prompt_for_each_write_reads_as_a_sentence() {
+        use crate::agent::tools::permission_policy::describe_action;
+        for name in MAC_APP_WRITE_TOOLS.iter().chain(MAC_APP_DELETE_TOOLS) {
+            let sentence = describe_action(name, &json!({"title": "Call Katie"}));
+            assert!(
+                !sentence.contains('_') && !sentence.starts_with("Use "),
+                "{name}: {sentence}"
             );
         }
     }

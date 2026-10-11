@@ -32,7 +32,7 @@ pub const DESKTOP_CURSOR_OVERLAY_LABEL: &str = "desktop-cursor-overlay";
 /// losing its transparency and therefore its vibrant sidebar the first time
 /// somebody closed it with the red X. Two descriptions of one window was the
 /// defect; there is now one.
-fn find_declared_window<'a>(
+pub(crate) fn find_declared_window<'a>(
     windows: &'a [DeclaredWindowConfig],
     label: &str,
 ) -> Option<&'a DeclaredWindowConfig> {
@@ -553,6 +553,13 @@ pub async fn restore_after_onboarding(app: &AppHandle) {
             if let Err(e) = open_main_window(app.clone()).await {
                 warn!("Could not restore the chat window after onboarding: {}", e);
             }
+            continue;
+        }
+        // The bar coming back after setup is Juno's first appearance, so it
+        // is revealed rather than shown (see `intro.rs`). The greeting waits
+        // for the bar to be visible, so the voice still follows the picture.
+        if label == window_labels::FLOATING_BAR {
+            crate::intro::show_bar_with_reveal(app);
             continue;
         }
         // Shown, never focused: these are overlays, and focusing one would

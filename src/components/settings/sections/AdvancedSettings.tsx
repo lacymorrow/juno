@@ -291,13 +291,14 @@ export default function AdvancedSettings({
         footer={
           backgroundError
             ? "These settings could not be loaded. Reopen Settings to try again."
-            : "Juno works in other apps without interrupting you. When something can only be done with the real pointer, it asks first."
+            : undefined
         }
       >
         <SettingsRow
           htmlFor="background-mode"
           label="Work in the background"
-          description="Juno acts on other apps without taking your cursor or your active window, so you can keep working."
+          description="Work in other apps without taking your cursor."
+          info="Juno acts on other apps without taking your cursor or your active window, so you can keep working."
         >
           <Switch
             id="background-mode"
@@ -310,7 +311,8 @@ export default function AdvancedSettings({
         <SettingsRow
           id="mouse-control"
           label="Mouse control"
-          description="Some steps need the real pointer. Ask each time, or let Juno take it whenever it needs to."
+          description="When a step needs the real pointer."
+          info="Some steps need the real pointer. Ask each time, or let Juno take it whenever it needs to."
         >
           <SegmentedChoice
             id="mouse-control"
@@ -325,7 +327,8 @@ export default function AdvancedSettings({
         <SettingsRow
           id="show-juno-in"
           label="Show Juno in"
-          description="Menu bar only keeps Juno out of the Dock and the app switcher. To get the Dock icon back, click the Juno icon in the menu bar and choose Dock or Both here. Opening Juno from your Applications folder also brings its window back."
+          description="Where Juno's icon appears."
+          info="Menu bar only keeps Juno out of the Dock and the app switcher. To get the Dock icon back, click the Juno icon in the menu bar and choose Dock or Both here. Opening Juno from your Applications folder also brings its window back."
         >
           <SegmentedChoice
             id="show-juno-in"
@@ -340,7 +343,6 @@ export default function AdvancedSettings({
 
       <SettingsGroup
         title="Developer Options"
-        footer="Advanced settings for developers and power users."
       >
         <SettingsRow
           htmlFor="debug-mode"
@@ -381,7 +383,8 @@ export default function AdvancedSettings({
         <SettingsRow
           htmlFor="cli-persistent-session"
           label="Persistent Claude session"
-          description="Keeps one Claude CLI process alive per conversation, so follow-up replies start 1.6–3.1s faster. If that process hangs, a reply can stall before Juno falls back to the standard path; nothing is lost either way. Applies to the Claude CLI provider, from your next message."
+          description="Faster follow-up replies with the Claude CLI."
+          info="Keeps one Claude CLI process alive per conversation, so follow-up replies start 1.6–3.1s faster. If that process hangs, a reply can stall before Juno falls back to the standard path; nothing is lost either way. Applies to the Claude CLI provider, from your next message."
         >
           <Switch
             id="cli-persistent-session"
@@ -394,12 +397,13 @@ export default function AdvancedSettings({
 
       <SettingsGroup
         title="Beta"
-        footer="Beta features are still being proven out. They can be turned off here at any time."
+        footer="Beta features can be turned off any time."
       >
         <SettingsRow
           htmlFor="smart-routing"
           label="Smart routing"
-          description="Picks a model for each request and decides whether Juno needs to use your computer. Applies to the Anthropic API provider, from your next message."
+          description="Picks the model for each request."
+          info="Picks a model for each request and decides whether Juno needs to use your computer. Applies to the Anthropic API provider, from your next message."
         >
           <Switch
             id="smart-routing"

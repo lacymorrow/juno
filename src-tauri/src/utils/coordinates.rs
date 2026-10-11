@@ -405,8 +405,152 @@ pub fn get_current_standard_resolution() -> Result<(u32, u32), String> {
 /// Transforms coordinates from scaled screenshot space to original screen space (LEGACY)
 /// Maintained for backward compatibility - now uses standard resolution scaling
 pub fn transform_to_screen_coordinates(scaled_x: f64, scaled_y: f64) -> (f64, f64) {
+    // Coordinates refer to the last screenshot the agent took. When that was
+    // one window on its own, they are pixels in that window's picture.
+    if let CoordinateFrame::Window {
+        window_id,
+        origin,
+        scale,
+        ..
+    } = current_frame()
+    {
+        let live_origin = live_window_origin(window_id).unwrap_or(origin);
+        let (x, y) = window_image_to_screen(scaled_x, scaled_y, live_origin, scale);
+        info!(
+            "Transformed coordinates: window {} image ({}, {}) → screen ({:.1}, {:.1}) [origin: ({:.1}, {:.1}), scale: {:.3}]",
+            window_id, scaled_x, scaled_y, x, y, live_origin.0, live_origin.1, scale
+        );
+        return (x, y);
+    }
     // For backward compatibility, treat input as standard resolution coordinates
     transform_standard_to_screen_coordinates(scaled_x, scaled_y)
+}
+
+/// What the agent's coordinates are measured against: the last screenshot it
+/// took. A full screenshot means screen coordinates at the standard
+/// resolution; a screenshot of one window means pixels in that window's
+/// picture, from its top-left corner.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CoordinateFrame {
+    Screen,
+    Window {
+        pid: i32,
+        window_id: u32,
+        /// The window's top-left corner in screen points when it was captured.
+        /// Used only if the window can no longer be found; otherwise its live
+        /// position is read, so a window moved since still gets the click.
+        origin: (f64, f64),
+        /// Screen points per image pixel.
+        scale: f64,
+    },
+}
+
+impl CoordinateFrame {
+    /// The window this frame is measured against, if it is one window.
+    pub fn window(&self) -> Option<(i32, u32)> {
+        match *self {
+            CoordinateFrame::Window { pid, window_id, .. } => Some((pid, window_id)),
+            CoordinateFrame::Screen => None,
+        }
+    }
+}
+
+tokio::task_local! {
+    /// Which agent the running computer action belongs to. Parallel sessions
+    /// each keep their own frame: one session's window picture must never
+    /// change how another session's coordinates are read.
+    static AGENT_KEY: String;
+}
+
+/// The key for the agent with no session id (the Claude CLI's one agent).
+pub const DEFAULT_AGENT_KEY: &str = "default";
+
+/// Run `fut` as `agent`'s computer action, so frames and targets it sets are
+/// its own.
+pub async fn scoped_to_agent<F: std::future::Future>(agent: Option<&str>, fut: F) -> F::Output {
+    AGENT_KEY
+        .scope(agent.unwrap_or(DEFAULT_AGENT_KEY).to_string(), fut)
+        .await
+}
+
+/// The agent the current action belongs to; `None` outside any agent action
+/// (a Tauri command from the UI), which always reads screen coordinates.
+pub fn agent_key() -> Option<String> {
+    AGENT_KEY.try_with(|key| key.clone()).ok()
+}
+
+static FRAMES: Lazy<std::sync::Mutex<std::collections::HashMap<String, CoordinateFrame>>> =
+    Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Set by the screenshot the agent just took.
+pub fn set_frame(frame: CoordinateFrame) {
+    let Some(key) = agent_key() else {
+        return;
+    };
+    if let Ok(mut frames) = FRAMES.lock() {
+        frames.insert(key, frame);
+    }
+}
+
+/// Put an agent back on screen coordinates (a new turn).
+pub fn reset_frame(agent: &str) {
+    if let Ok(mut frames) = FRAMES.lock() {
+        frames.remove(agent);
+    }
+}
+
+pub fn current_frame() -> CoordinateFrame {
+    let Some(key) = agent_key() else {
+        return CoordinateFrame::Screen;
+    };
+    FRAMES
+        .lock()
+        .ok()
+        .and_then(|frames| frames.get(&key).copied())
+        .unwrap_or(CoordinateFrame::Screen)
+}
+
+/// A pixel in a window's picture, as a screen point.
+pub fn window_image_to_screen(x: f64, y: f64, origin: (f64, f64), scale: f64) -> (f64, f64) {
+    (origin.0 + x * scale, origin.1 + y * scale)
+}
+
+/// A screen point, as a pixel in a window's picture.
+pub fn screen_to_window_image(x: f64, y: f64, origin: (f64, f64), scale: f64) -> (f64, f64) {
+    if scale <= 0.0 {
+        return (x - origin.0, y - origin.1);
+    }
+    ((x - origin.0) / scale, (y - origin.1) / scale)
+}
+
+/// A screen point in whatever frame the agent is reading: the inverse of
+/// [`transform_to_screen_coordinates`].
+pub fn screen_to_frame(x: f64, y: f64) -> (f64, f64) {
+    match current_frame() {
+        CoordinateFrame::Window {
+            window_id,
+            origin,
+            scale,
+            ..
+        } => {
+            let live_origin = live_window_origin(window_id).unwrap_or(origin);
+            screen_to_window_image(x, y, live_origin, scale)
+        }
+        CoordinateFrame::Screen => transform_screen_to_standard_coordinates(x, y),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn live_window_origin(window_id: u32) -> Option<(f64, f64)> {
+    computer_use_ai_sdk::platforms::macos::display::list_window_records()
+        .into_iter()
+        .find(|w| w.id == window_id)
+        .map(|w| (w.bounds.0, w.bounds.1))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn live_window_origin(_window_id: u32) -> Option<(f64, f64)> {
+    None
 }
 
 /// Transforms coordinates from original screen space to scaled screenshot space (LEGACY)
@@ -431,5 +575,46 @@ pub fn reset_scaling_info() {
         info!("Reset screenshot scaling info to default values");
     } else {
         tracing::error!("Failed to acquire write lock on SCREENSHOT_SCALE for reset");
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+
+    #[test]
+    fn a_window_picture_pixel_maps_to_the_screen_and_back() {
+        // Calculator at (368, 410), pictured at one pixel per point.
+        let (x, y) = window_image_to_screen(29.0, 320.0, (368.0, 410.0), 1.0);
+        assert_eq!((x, y), (397.0, 730.0));
+        assert_eq!(
+            screen_to_window_image(x, y, (368.0, 410.0), 1.0),
+            (29.0, 320.0)
+        );
+    }
+
+    #[test]
+    fn a_shrunk_picture_scales_back_up() {
+        // A 2560-point-wide window sent as 1280 pixels: 2 points per pixel.
+        let (x, y) = window_image_to_screen(100.0, 50.0, (0.0, 30.0), 2.0);
+        assert_eq!((x, y), (200.0, 130.0));
+    }
+
+    #[tokio::test]
+    async fn a_window_frame_is_the_agents_own() {
+        let frame = CoordinateFrame::Window {
+            pid: 70,
+            window_id: 11502,
+            origin: (368.0, 410.0),
+            scale: 1.0,
+        };
+        scoped_to_agent(Some("frame-test-a"), async move { set_frame(frame) }).await;
+        let other = scoped_to_agent(Some("frame-test-b"), async { current_frame() }).await;
+        assert_eq!(other, CoordinateFrame::Screen);
+        let own = scoped_to_agent(Some("frame-test-a"), async { current_frame() }).await;
+        assert_eq!(own, frame);
+        reset_frame("frame-test-a");
+        let reset = scoped_to_agent(Some("frame-test-a"), async { current_frame() }).await;
+        assert_eq!(reset, CoordinateFrame::Screen);
     }
 }

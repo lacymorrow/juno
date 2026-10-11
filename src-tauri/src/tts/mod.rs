@@ -1,5 +1,8 @@
+pub mod avspeech;
 pub mod elevenlabs;
 pub mod kokoro;
+pub mod prerender;
+pub mod rate;
 pub mod replicate;
 pub mod speech_level;
 pub mod supertonic;
@@ -237,6 +240,35 @@ fn audio_processes() -> std::sync::MutexGuard<'static, AudioProcesses> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The hold, readable without the lock. Speech played inside Juno (the Mac's
+/// voice through `avspeech`) has no process to `SIGSTOP`; its audio callback
+/// reads this instead, plays silence while it is set and resumes from the same
+/// sample when it clears. Written only under `JUNO_AUDIO`, next to
+/// `held_since`.
+static HELD_SILENT: AtomicBool = AtomicBool::new(false);
+
+fn sync_held(processes: &AudioProcesses) {
+    HELD_SILENT.store(processes.held_since.is_some(), Ordering::SeqCst);
+}
+
+/// True while a microphone is open and Juno must not be heard.
+pub(crate) fn is_held_silent() -> bool {
+    HELD_SILENT.load(Ordering::SeqCst)
+}
+
+/// In-process speech started: the same stale-hold check a spawned player
+/// gets in [`register_audio_pid`], so a leaked hold cannot silence it for good.
+pub(crate) fn release_stale_hold() {
+    let mut processes = audio_processes();
+    let stale = processes.release_if_stale(std::time::Instant::now());
+    sync_held(&processes);
+    if !stale.is_empty() {
+        warn!("[TTS] A capture hold outlived its session; letting Juno speak again");
+        #[cfg(unix)]
+        signal_players(&stale, libc::SIGCONT);
+    }
+}
+
 /// Send `signal` to each of Juno's players. Unix only; a no-op elsewhere.
 fn signal_players(pids: &[u32], signal: i32) {
     #[cfg(unix)]
@@ -264,6 +296,7 @@ pub(crate) fn register_audio_pid(pid: u32) {
     crate::turn_timing::mark(crate::turn_timing::Stage::FirstAudio);
     let mut processes = audio_processes();
     let stale = processes.release_if_stale(std::time::Instant::now());
+    sync_held(&processes);
     if !stale.is_empty() {
         warn!("[TTS] A capture hold outlived its session; letting Juno speak again");
         #[cfg(unix)]
@@ -285,6 +318,7 @@ pub(crate) fn unregister_audio_pid(pid: u32) {
 pub fn hold_for_capture() {
     let mut processes = audio_processes();
     let pids = processes.hold(std::time::Instant::now());
+    sync_held(&processes);
     if !pids.is_empty() {
         info!(
             "[TTS] Holding {} player(s) while the microphone is open",
@@ -300,6 +334,7 @@ pub fn hold_for_capture() {
 pub fn release_after_capture() {
     let mut processes = audio_processes();
     let pids = processes.release();
+    sync_held(&processes);
     if !pids.is_empty() {
         info!("[TTS] Resuming {} held player(s)", pids.len());
     }
@@ -698,8 +733,12 @@ pub fn stop_speech() {
     kill_audio_processes();
 }
 
-/// SIGTERM every audio process Juno spawned. Does not touch the queue.
+/// Stop everything Juno is playing: SIGTERM to every audio process it
+/// spawned, and the Mac's voice when it is speaking in-process. Every stop
+/// (Escape, `stop_coordinator`, a new turn, an audition) comes through here.
+/// Does not touch the queue.
 fn kill_audio_processes() {
+    avspeech::stop_all();
     let pids_to_kill: Vec<u32> = audio_processes().pids.clone();
 
     if pids_to_kill.is_empty() {
@@ -1012,6 +1051,57 @@ pub async fn invoke_tts(
         execute_tts_with_completion_tracking(filtered_text, &provider, &state, &app_handle).await;
 
     // CRITICAL FIX 6: Cleanup happens in execute_tts_with_completion_tracking after actual audio completion
+    result
+}
+
+/// Play a line rendered ahead of time (the launch greeting), with everything
+/// [`invoke_tts`] gives a spoken line: it skips when something is already
+/// speaking, honours speech being off, holds the echo guard and the Escape
+/// key while it plays, and stops on every stop path. The Mac's voice plays on
+/// the chosen speaker through the in-process player; other engines' audio
+/// plays the way theirs always does.
+///
+/// `Err` only when the audio could not be played at all, so the caller can
+/// speak the line the ordinary way instead.
+pub async fn speak_prerendered(
+    audio: prerender::Prerendered,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    if is_tts_playing() || with_queue(|queue| queue.is_busy()) {
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+    let _guard = TTS_MUTEX.lock().await;
+    if is_tts_playing() {
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+    reset_tts_stop_flag();
+
+    let provider = state
+        .get_tts_provider()
+        .map_err(|e| format!("Failed to get tts_provider: {}", e))?;
+    if provider.is_empty() || provider.eq_ignore_ascii_case("off") {
+        return Ok("TTS_DISABLED_BY_SETTING".to_string());
+    }
+    crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+    crate::turn_timing::note_tts_engine(&provider);
+
+    set_tts_playing(true);
+    register_tts_escape_key(&app_handle).await;
+
+    let result = match audio {
+        prerender::Prerendered::Pcm { samples, rate } => {
+            let device = state.get_output_device().ok().flatten();
+            match avspeech::play_pcm(&samples, rate, device.as_deref()).await {
+                avspeech::Spoken::Status(status) => Ok(status.to_string()),
+                avspeech::Spoken::UseSay(reason) => Err(reason),
+            }
+        }
+        prerender::Prerendered::Encoded(encoded) => play_rendered(Ok(encoded), &state).await,
+    };
+
+    set_tts_playing(false);
+    unregister_tts_escape_key(&app_handle).await;
     result
 }
 
@@ -1401,6 +1491,49 @@ async fn play_rendered(
     }
 }
 
+/// The Mac's voice speaking in another engine's place: while Kokoro
+/// downloads, or after an engine failed. Same as the `system` provider, except
+/// that a Siri voice wins whenever one is reachable
+/// (`voices::stand_in_say_voice`).
+async fn invoke_mac_stand_in(text: String, state: AppState) -> Result<String, String> {
+    if is_tts_stop_requested() {
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+    let stored = state.get_system_voice().ok().flatten();
+    let device = state.get_output_device().ok().flatten();
+    let words_per_minute =
+        rate::effective("system", stored_rate(Some(&state))).and_then(rate::say_words_per_minute);
+    match voices::stand_in_voice(stored).await {
+        voices::StandInVoice::Siri => {
+            system::speak_with_say(text, None, device, words_per_minute).await
+        }
+        voices::StandInVoice::Mac(voice) => {
+            system::speak_directly(text, voice, device, words_per_minute).await
+        }
+    }
+}
+
+/// The engines tried for one utterance, in order. Every chain ends in the
+/// Mac's own voice, which needs nothing, so a failing engine never means
+/// silence.
+pub(crate) fn fallback_chain(primary_provider: &str) -> Vec<&'static str> {
+    match primary_provider.to_lowercase().as_str() {
+        "replicate" => vec!["replicate", "kokoro", "system"],
+        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
+        "chatterbox" => vec!["chatterbox", "kokoro", "system"],
+        "supertonic" => vec!["supertonic", "kokoro", "system"],
+        "kokoro" => vec!["kokoro", "system"],
+        "system" => vec!["system"],
+        _ => {
+            warn!(
+                "Unknown primary TTS provider: '{}'. Using system fallback only.",
+                primary_provider
+            );
+            vec!["system"]
+        }
+    }
+}
+
 // Execute TTS with fallback logic (no blocking, no race conditions)
 //
 // `allow_direct` is false when this render runs while another chunk is still
@@ -1423,33 +1556,36 @@ async fn execute_tts_with_fallback(
     // If it's a cloud provider, do a quick network check first
     if is_cloud_provider {
         info!("Cloud TTS provider detected, checking network connectivity...");
-        let is_online = crate::utils::network::is_online().await;
+        // The network monitor already knows when there is no route, and
+        // answers at once; the slower probe only runs when it thinks there is.
+        let is_online =
+            crate::connectivity::network_up() && crate::utils::network::is_online().await;
         if !is_online {
             if !allow_direct {
                 return Err("offline; system voice cannot be rendered ahead".to_string());
             }
             warn!("Device appears offline, using system TTS directly");
-            return invoke_tts_for_provider(text, Some(app_state), "system").await;
+            return invoke_mac_stand_in(text, app_state).await;
         }
     }
 
-    // Define the provider fallback order based on the primary provider
-    let fallback_providers = match primary_provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "kokoro", "system"],
-        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
-        "chatterbox" => vec!["chatterbox", "kokoro", "system"],
-        "supertonic" => vec!["supertonic", "kokoro", "system"],
-        "kokoro" => vec!["kokoro", "system"],
-        "system" => vec!["system"],
-        "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
-        _ => {
-            warn!(
-                "Unknown primary TTS provider: '{}'. Using system fallback only.",
-                primary_provider
-            );
-            vec!["system"]
+    if primary_provider.eq_ignore_ascii_case("off") {
+        return Ok("TTS_DISABLED_BY_SETTING".to_string());
+    }
+
+    // Kokoro still downloading is a wait of a minute or more, not seconds.
+    // The Mac's voice speaks meanwhile and says why, once; Kokoro says it is
+    // back when the download lands (`kokoro::announce_return`).
+    if primary_provider.eq_ignore_ascii_case("kokoro") && kokoro::downloading() {
+        if !allow_direct {
+            return Err("Kokoro is downloading; system voice cannot be rendered ahead".to_string());
         }
-    };
+        info!("[Kokoro] Still downloading; the Mac's voice stands in");
+        let line = kokoro::stand_in(&text);
+        return invoke_mac_stand_in(line, app_state).await;
+    }
+
+    let fallback_providers = fallback_chain(primary_provider);
 
     let fallback_providers: Vec<&str> = fallback_providers
         .into_iter()
@@ -1475,9 +1611,14 @@ async fn execute_tts_with_fallback(
             if is_primary { "primary" } else { "fallback" }
         );
 
-        match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider)
-            .await
+        let attempt = if *fallback_provider == "system"
+            && !primary_provider.eq_ignore_ascii_case("system")
         {
+            invoke_mac_stand_in(text.clone(), app_state.clone()).await
+        } else {
+            invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider).await
+        };
+        match attempt {
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
                     return Ok(result);
@@ -1502,9 +1643,7 @@ async fn execute_tts_with_fallback(
                 if is_primary && is_network_error {
                     warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
                     // For network errors, skip other cloud providers and go straight to system
-                    match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), "system")
-                        .await
-                    {
+                    match invoke_mac_stand_in(text.clone(), app_state.clone()).await {
                         Ok(system_result) => {
                             warn!("Network error detected, successfully fell back to system TTS");
                             return Ok(system_result);
@@ -1558,6 +1697,13 @@ pub async fn play_sample(base64_audio: &str) -> Result<(), String> {
     handle.wait_for_completion().await
 }
 
+/// The stored voice rate, or normal pace when state is unavailable.
+fn stored_rate(state: Option<&AppState>) -> f64 {
+    state
+        .and_then(|s| s.get_voice_rate().ok())
+        .unwrap_or(rate::DEFAULT_RATE)
+}
+
 // Invoke TTS for a specific provider name
 pub async fn invoke_tts_for_provider(
     text: String,
@@ -1573,7 +1719,10 @@ pub async fn invoke_tts_for_provider(
     }
 
     match provider.to_lowercase().as_str() {
-        "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
+        "elevenlabs" => {
+            let speed = rate::effective("elevenlabs", stored_rate(_state.as_ref()));
+            elevenlabs::invoke_elevenlabs_tts(text, speed).await
+        }
         "kokoro" => {
             // An embedding that is not on disk is not a slow voice: `any_tts`
             // loads `voices/<id>.pt` straight off disk and never fetches a
@@ -1583,7 +1732,9 @@ pub async fn invoke_tts_for_provider(
             // been open to have resolved it.
             let stored = _state.as_ref().and_then(|s| s.get_kokoro_voice().ok());
             let voice = voices::resolve_kokoro_voice(stored.as_deref());
-            kokoro::invoke_kokoro_tts(text, voice).await
+            let speed = rate::effective("kokoro", stored_rate(_state.as_ref()))
+                .unwrap_or(rate::DEFAULT_RATE);
+            kokoro::invoke_kokoro_tts(text, voice, speed).await
         }
         "replicate" => replicate::invoke_replicate_tts(text).await,
         "chatterbox" => {
@@ -1617,6 +1768,12 @@ pub async fn invoke_tts_for_provider(
                     supertonic::DEFAULT_VOICE.to_string(),
                     supertonic::DEFAULT_SPEED,
                 ));
+            // The Supertonic setting is the engine's own trim; the voice rate
+            // scales it, so 1.0x leaves it exactly where it was.
+            let speed = (speed
+                * rate::effective("supertonic", stored_rate(_state.as_ref()))
+                    .unwrap_or(rate::DEFAULT_RATE))
+            .clamp(0.5, 2.0);
             supertonic::invoke_supertonic_tts(text, server_url, voice, speed).await
         }
         // Straight to the speakers rather than to a file and back. This is the
@@ -1636,7 +1793,9 @@ pub async fn invoke_tts_for_provider(
                 .as_ref()
                 .and_then(|s| s.get_output_device().ok())
                 .flatten();
-            system::speak_directly(text, voice, device).await
+            let words_per_minute = rate::effective("system", stored_rate(_state.as_ref()))
+                .and_then(rate::say_words_per_minute);
+            system::speak_directly(text, voice, device, words_per_minute).await
         }
         "off" => {
             warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
@@ -1731,6 +1890,26 @@ pub async fn set_supertonic_settings_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Kokoro is the default, and when it cannot speak the Mac does.
+    #[test]
+    fn the_default_engine_falls_back_to_the_mac() {
+        let default = crate::constants::settings::defaults::TTS_PROVIDER;
+        assert_eq!(default, "kokoro");
+        assert_eq!(fallback_chain(default), vec!["kokoro", "system"]);
+    }
+
+    /// Whatever engine is chosen, the last one tried is the Mac's own voice.
+    #[test]
+    fn every_chain_ends_in_the_mac_voice() {
+        for engine in crate::tts::voices::ENGINES
+            .iter()
+            .copied()
+            .chain(["KOKORO", "unknown"])
+        {
+            assert_eq!(fallback_chain(engine).last(), Some(&"system"), "{engine}");
+        }
+    }
 
     #[test]
     fn holding_stops_every_player_once_and_releasing_resumes_them() {

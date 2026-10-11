@@ -23,6 +23,9 @@ pub mod tray_menu_ids {
     pub const TALK: &str = "tray-talk";
     /// Cancel the current turn
     pub const CANCEL: &str = "tray-cancel";
+    /// Put the floating bar back in the middle of its display. The way back
+    /// when a drag leaves it somewhere it cannot be grabbed.
+    pub const CENTER_FLOATING_BAR: &str = "center-floating-bar";
 }
 
 pub mod app_menu_ids {

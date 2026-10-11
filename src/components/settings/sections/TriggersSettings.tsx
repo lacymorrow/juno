@@ -30,7 +30,7 @@ import { useEventListener } from "@/hooks/useEventListener";
 import { useDerivedIssues } from "@/hooks/useDerivedIssues";
 
 import { SettingsSectionProps } from "../types";
-import { SettingsGroup } from "../ui";
+import { SETTINGS_ROW_ID_PREFIX, SettingsGroup } from "../ui";
 import { useAdvancedSettings } from "../AdvancedSettingsContext";
 import { ShortcutRecorder } from "../ShortcutRecorder";
 import { KeyCaps } from "../KeyCaps";
@@ -510,10 +510,10 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   if (loading) {
     return (
       <div className="space-y-6">
-        <SettingsGroup title="Triggers">
+        <SettingsGroup title="Shortcuts">
           <div className="flex items-center justify-center py-10 text-muted-foreground">
             <RefreshCw className="h-5 w-5 animate-spin" />
-            <span className="ml-2 text-[13px]">Loading triggers…</span>
+            <span className="ml-2 text-[13px]">Loading shortcuts…</span>
           </div>
         </SettingsGroup>
       </div>
@@ -523,7 +523,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   if (loadError) {
     return (
       <div className="space-y-6">
-        <SettingsGroup title="Triggers">
+        <SettingsGroup title="Shortcuts">
           <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
             <p className="text-[13px] text-muted-foreground">
               Couldn’t load your triggers. {loadError}
@@ -543,7 +543,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
       <DropdownMenuTrigger asChild>
         <Button size="sm">
           <Plus className="size-3.5" />
-          Add trigger
+          Add shortcut
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
@@ -569,17 +569,17 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   if (visibleTriggers.length === 0) {
     return (
       <div className="space-y-6">
-        <SettingsGroup title="Triggers">
+        <SettingsGroup title="Shortcuts">
           <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#00C7BE]/15 text-[#00C7BE]">
               <Zap className="h-6 w-6" />
             </span>
             <div className="space-y-1">
-              <p className="text-[14px] font-semibold">No triggers yet</p>
+              <p className="text-[14px] font-semibold">No shortcuts yet</p>
               <p className="text-[12px] leading-snug text-muted-foreground">
                 {advanced
-                  ? "A trigger is how you summon Juno: a key, a mouse button, or your voice."
-                  : "A trigger is how you summon Juno: a key or a mouse button."}
+                  ? "A shortcut is how you summon Juno: a key, a mouse button, or your voice."
+                  : "A shortcut is how you summon Juno: a key or a mouse button."}
               </p>
             </div>
             {addMenu}
@@ -591,6 +591,8 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
 
   /* ------------------------------- list ---------------------------------- */
 
+  const anchors = triggerAnchors(triggers);
+
   const usesFn = visibleTriggers.some(
     (t) => t.enabled && isFnBinding(t.binding),
   );
@@ -598,7 +600,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
   return (
     <div className="space-y-6">
       <SettingsGroup
-        title="Triggers"
+        title="Shortcuts"
         footer={
           advanced
             ? "Each row is one way to summon Juno. Mix keys, a mouse button and your voice however you like."
@@ -608,6 +610,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         {visibleTriggers.map((trigger) => (
           <TriggerRow
             key={trigger.id}
+            anchor={anchors.get(trigger.id)}
             trigger={trigger}
             editing={editingKey === trigger.id}
             bindingTab={bindingTab[trigger.id] ?? "keyboard"}
@@ -680,9 +683,34 @@ interface TriggerRowProps {
       key recorded by pressing it and one chosen here take the same path. */
   onSetBinding: (id: string, binding: Binding | null) => Promise<void>;
   onRemove: () => void;
+  /** Row anchor for search and the agent's `settings` tool, if this row has one. */
+  anchor?: string;
+}
+
+/**
+ * The first key or mouse row for each target is the one the agent's
+ * `settings` tool calls "the shortcut" (Rust: `settings_tool::shortcut_row`),
+ * so that row carries the anchor the tool highlights.
+ */
+const TRIGGER_ANCHOR: Record<Trigger["target"], string> = {
+  agent: "trigger-agent",
+  dictation: "trigger-dictation",
+};
+
+/** Anchor for each row id: the first non-voice row per target gets one. */
+function triggerAnchors(triggers: Trigger[]): Map<string, string> {
+  const anchors = new Map<string, string>();
+  const claimed = new Set<string>();
+  for (const t of triggers) {
+    if (t.gesture === "say" || claimed.has(t.target)) continue;
+    claimed.add(t.target);
+    anchors.set(t.id, TRIGGER_ANCHOR[t.target]);
+  }
+  return anchors;
 }
 
 function TriggerRow({
+  anchor,
   trigger,
   editing,
   bindingTab,
@@ -709,7 +737,14 @@ function TriggerRow({
   const setBindingNow = (binding: Binding | null) => onSetBinding(key, binding);
 
   return (
-    <div className="px-4 py-3">
+    <div
+      id={anchor ? `${SETTINGS_ROW_ID_PREFIX}${anchor}` : undefined}
+      className={cn(
+        "px-4 py-3",
+        anchor &&
+          "scroll-mt-16 transition-colors duration-300 motion-reduce:transition-none",
+      )}
+    >
       <div className="flex items-center gap-3">
         <span
           className={cn(

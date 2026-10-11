@@ -13,6 +13,8 @@
  */
 
 import {
+  lazy,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -31,7 +33,6 @@ import {
 } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowUp, Ear, EarOff, Maximize2, Mic, Square, Type, X } from "lucide-react";
-import { VoiceTurnControls } from "@/components/bar/VoiceTurnControls";
 import { cancelVoiceTurn, isRecordingTurn, sendVoiceTurn } from "@/lib/voiceTurn";
 
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
@@ -69,7 +70,25 @@ import {
 import { cursorInPoints } from "@/lib/desktopPoints";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { AgentRosterStrip } from "./AgentRosterStrip";
-import { BarChatPane } from "./bar/BarChatPane";
+import { PillTooltip, PILL_TOOLTIP_DELAY_MS } from "@/components/bar/PillTooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { shortcutCaps } from "@/components/settings/KeyCaps";
+import type { TriggerHints } from "@/components/onboarding/Onboarding";
+import { useConnectivity } from "@/hooks/useConnectivity";
+import { useStartupReadiness } from "@/hooks/useStartupReadiness";
+import { takeBootBarPosition } from "@/lib/barBoot";
+import { DOT_COLORS, dotLabel, dotTone, type Connectivity } from "@/lib/pillStatus";
+// The conversation pane renders markdown, maths and diagrams: most of the
+// bar's script, and none of it needed to draw the pill. It loads after the
+// bar is on screen (`warmChatPane`), so the first open is still instant.
+const loadChatPane = () => import("./bar/BarChatPane");
+const BarChatPane = lazy(() => loadChatPane().then((m) => ({ default: m.BarChatPane })));
+/** How long after the pill is placed its pane's code is fetched. */
+const CHAT_PANE_WARM_MS = 1500;
+/** Fetch the pane's code in the background, once the pill has been placed. */
+function warmChatPane() {
+  void loadChatPane().catch((error) => console.debug("FloatingBar: pane preload failed:", error));
+}
 import type { BarAppearance } from "@/components/bar/barAppearance";
 
 /**
@@ -123,7 +142,7 @@ interface UIInteractionEvent {
 
 // === LAYOUT ===
 
-export type BarLayout = "compact" | "hover" | "voice" | "status" | "full";
+export type BarLayout = "compact" | "hover" | "full";
 
 /**
  * Pill size per layout. The pill grows and shrinks in CSS inside a window that
@@ -137,12 +156,9 @@ export const BAR_LAYOUTS: Record<BarLayout, { width: number; height: number }> =
   // past it. The optional wake-phrase button is added on top via
   // pillExtraWidth.
   hover: { width: 148, height: 34 },
-  // Voice and status share a width on purpose. Listening used to open a 220px
-  // bar and then, the instant the mic closed, a 419px one, for a status word
-  // and a stop button. The extra 200px held nothing, and the jump happened
-  // mid-sentence, every time.
-  voice: { width: 260, height: 34 },
-  status: { width: 260, height: 34 },
+  // Every state past idle is the text box at one width. There used to be a
+  // narrower voice and status pill between hover and full, and the bar grew
+  // and shrank through them as the mic opened and closed; now it grows once.
   full: { width: 419, height: 44 },
 };
 
@@ -401,6 +417,13 @@ export function pointInRect(
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+/** The dot's hover target where it is drawn now, or null when it is not drawn. */
+function idleDotRect(el: HTMLElement | null): DOMRect | null {
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return r.width === 0 && r.height === 0 ? null : r;
+}
+
 /** Which layout a combination of backend state and local UI state gets. */
 export function pickLayout({
   state,
@@ -419,13 +442,11 @@ export function pickLayout({
   driving?: boolean;
 }): BarLayout {
   if (driving) return "full";
-  if (paneOpen || rosterVisible || inputOpen || INPUT_STATES.includes(state)) return "full";
-  if (VOICE_STATES.includes(state)) return "voice";
+  if (paneOpen || rosterVisible || inputOpen) return "full";
   if (IDLE_STATES.includes(state)) return hovered ? "hover" : "compact";
-  // Working, error, success, speaking: a label and one control, which is the
-  // same room listening needs, so the bar does not lurch wider the moment
-  // someone stops talking.
-  return "status";
+  // Everything else, listening, working, an error, a reply being spoken, is
+  // the text box with a placeholder that says so.
+  return "full";
 }
 
 // Purpose-built motions for the status dot; injected once into <head>.
@@ -433,6 +454,12 @@ const BAR_KEYFRAMES = `
 @keyframes fbar-idle {
   0%, 100% { opacity: 0.4; transform: scale(1); }
   50%      { opacity: 0.6; transform: scale(1.08); }
+}
+/* Still loading after launch: a slow, shallow pulse. No scale, no glow; the
+   dot only fades. Reduce Motion stops it at the inline 0.6. */
+@keyframes fbar-warm {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.9; }
 }
 @keyframes fbar-breathe {
   0%, 100% { opacity: 0.6; transform: scale(1); }
@@ -473,104 +500,133 @@ const BAR_KEYFRAMES = `
 `;
 
 // === STATUS DOT ===
-// One dot; state is communicated through motion and colour, not icons.
+// One dot; state is communicated through motion and colour, not icons. The
+// colour says one of three things (see `lib/pillStatus.ts`): fine (neutral),
+// listening (system blue), or Juno cannot answer right now (system red).
+// Nothing else gets a colour, so red is never confused with a passing error
+// and blue is never anything but an open microphone or Juno at the pointer.
 
 /** macOS system blue, the only accent the bar uses. */
 const SYSTEM_BLUE = "#0A84FF";
 
-function StatusDot({
-  state,
-  audioLevel,
-  driving = false,
-  voicePaused = false,
-}: {
-  state: UIState;
-  audioLevel: number;
-  driving?: boolean;
-  /** A wake phrase is configured, but its engine is paused right now. */
-  voicePaused?: boolean;
-}) {
-  const dot = "size-[7px] shrink-0 rounded-full";
-
-  // Juno has the physical cursor. That outranks every other status: the same
-  // travelling motion as working, in system blue, so it reads as Juno moving
-  // the pointer rather than as a fault.
-  if (driving) {
-    return (
-      <div
-        data-testid="floating-bar-driving-dot"
-        className={cn(dot)}
-        style={{
-          backgroundColor: SYSTEM_BLUE,
-          animation: "fbar-orbit 1.1s ease-in-out infinite",
-        }}
-      />
-    );
-  }
-
+/** The dot's motion for a bar state. Motion says what Juno is doing. */
+function dotMotion(state: UIState, voicePaused: boolean): string | undefined {
   switch (state) {
     case UI.BAR_STATES_LISTENING:
     case UI.BAR_STATES_ALWAYS_LISTENING:
     case UI.BAR_STATES_DICTATING:
-      return (
-        <div className="relative flex shrink-0 items-center justify-center">
-          <div
-            className={cn(dot, "relative z-10 bg-white")}
-            style={{
-              animation: "fbar-breathe 1.4s ease-in-out infinite",
-              opacity: Math.max(0.5, audioLevel),
-            }}
-          />
-        </div>
-      );
+      return "fbar-breathe 1.4s ease-in-out infinite";
     case UI.BAR_STATES_TRANSCRIBING:
     case UI.BAR_STATES_SUBMITTING:
     case UI.BAR_STATES_LOADING:
     case UI.BAR_STATES_AGENT_RESPONDING:
     case UI.BAR_STATES_FINISHING:
     case UI.BAR_STATES_STOPPING:
-      return (
-        <div
-          className={cn(dot, "bg-white/80")}
-          style={{ animation: "fbar-orbit 1.1s ease-in-out infinite" }}
-        />
-      );
+      return "fbar-orbit 1.1s ease-in-out infinite";
     case UI.BAR_STATES_SPEAKING:
-      return (
-        <div
-          className={cn(dot, "bg-white/80")}
-          style={{ animation: "fbar-ripple 1.4s ease-out infinite" }}
-        />
-      );
+      return "fbar-ripple 1.4s ease-out infinite";
     case UI.BAR_STATES_ERROR:
-      return (
-        <div
-          className={cn(dot, "bg-[#e8866a]")}
-          style={{ animation: "fbar-shake 0.4s ease-out" }}
-        />
-      );
+      return "fbar-shake 0.4s ease-out";
     case UI.BAR_STATES_SUCCESS:
-      return <div className={cn(dot, "bg-[#7aba8a]")} />;
     case UI.BAR_STATES_INPUT:
     case UI.BAR_STATES_EXPANDING:
-      return <div className={cn(dot, "bg-white/70")} />;
     case UI.BAR_STATES_DICTATION_READY:
-      return <div className={cn(dot, "bg-[#e8b36a]")} />;
+      return undefined;
     default:
-      // At rest the dot is the only thing on screen, so it carries whether Juno
-      // is listening for its wake phrase. Armed keeps the slow idle breath;
-      // paused is dimmer and still, because a dot that moves the same way in
-      // both states tells a person nothing about whether they can be heard.
-      return (
-        <div
-          data-testid={voicePaused ? "floating-bar-voice-paused" : undefined}
-          className={cn(dot, voicePaused ? "bg-white/30" : "bg-white")}
-          style={
-            voicePaused ? undefined : { animation: "fbar-idle 4s ease-in-out infinite" }
-          }
-        />
-      );
+      // At rest the dot carries whether Juno is listening for its wake
+      // phrase: armed keeps the slow idle breath, paused is still.
+      return voicePaused ? undefined : "fbar-idle 4s ease-in-out infinite";
   }
+}
+
+/** The neutral dot's opacity per state, unchanged from before colour meant status. */
+function neutralShade(state: UIState, voicePaused: boolean): string {
+  switch (state) {
+    case UI.BAR_STATES_TRANSCRIBING:
+    case UI.BAR_STATES_SUBMITTING:
+    case UI.BAR_STATES_LOADING:
+    case UI.BAR_STATES_AGENT_RESPONDING:
+    case UI.BAR_STATES_FINISHING:
+    case UI.BAR_STATES_STOPPING:
+    case UI.BAR_STATES_SPEAKING:
+    case UI.BAR_STATES_ERROR:
+      return "rgba(255,255,255,0.8)";
+    case UI.BAR_STATES_INPUT:
+    case UI.BAR_STATES_EXPANDING:
+    case UI.BAR_STATES_DICTATION_READY:
+      return "rgba(255,255,255,0.7)";
+    case UI.BAR_STATES_SUCCESS:
+      return "#ffffff";
+    default:
+      return voicePaused ? "rgba(255,255,255,0.3)" : "#ffffff";
+  }
+}
+
+/** The dot's fill: what `dotTone` decided, or the neutral shade for the state. */
+export function statusDotColor(
+  state: UIState,
+  connectivity: Connectivity | null,
+  {
+    driving = false,
+    voicePaused = false,
+    loading = false,
+  }: { driving?: boolean; voicePaused?: boolean; loading?: boolean } = {},
+): string {
+  if (driving) return SYSTEM_BLUE;
+  const tone = dotTone(state, connectivity, loading);
+  return tone === "neutral" ? neutralShade(state, voicePaused) : DOT_COLORS[tone];
+}
+
+export function StatusDot({
+  state,
+  audioLevel,
+  connectivity,
+  driving = false,
+  voicePaused = false,
+  loading = false,
+}: {
+  state: UIState;
+  audioLevel: number;
+  connectivity: Connectivity | null;
+  driving?: boolean;
+  /** A wake phrase is configured, but its engine is paused right now. */
+  voicePaused?: boolean;
+  /** Just launched: what the first request needs is still loading. */
+  loading?: boolean;
+}) {
+  const tone = driving ? "listening" : dotTone(state, connectivity, loading);
+  const listening = tone === "listening" && !driving;
+  // One element in every state, the same size, so nothing about the dot
+  // moves or reflows when its meaning changes (#511); only the fill and the
+  // motion do. The fill cross-fades.
+  return (
+    <div
+      role="img"
+      aria-label={dotLabel(state, connectivity, { driving, voicePaused, loading })}
+      data-testid={
+        driving
+          ? "floating-bar-driving-dot"
+          : voicePaused && state === UI.BAR_STATES_DEFAULT
+            ? "floating-bar-voice-paused"
+            : "floating-bar-status-dot"
+      }
+      data-tone={tone}
+      className="size-[7px] shrink-0 rounded-full transition-[background-color] duration-200 ease-out motion-reduce:transition-none"
+      style={{
+        backgroundColor: statusDotColor(state, connectivity, { driving, voicePaused, loading }),
+        // Down is a fact, not a mood: a steady, full-strength red. The resting
+        // breath would dim it to half.
+        animation: driving
+          ? "fbar-orbit 1.1s ease-in-out infinite"
+          : tone === "loading"
+            ? "fbar-warm 1.6s ease-in-out infinite"
+            : tone === "down" && dotMotion(state, voicePaused)?.startsWith("fbar-idle")
+              ? undefined
+              : dotMotion(state, voicePaused),
+        opacity: listening ? Math.max(0.5, audioLevel) : tone === "loading" ? 0.6 : undefined,
+      }}
+    />
+  );
 }
 
 /** Real-time audio feedback while a microphone is open. */
@@ -590,6 +646,17 @@ function AudioLevelBars({ audioLevel }: { audioLevel: number }) {
       ))}
     </div>
   );
+}
+
+/**
+ * A trigger hint as tooltip detail: the gesture and the key caps, "Hold ⌃⌥".
+ * Null when nothing keyboard-shaped is bound.
+ */
+export function hintDetail(hint: { shortcut: string; gesture: string } | null): string | null {
+  if (!hint || !hint.shortcut.trim()) return null;
+  const caps = shortcutCaps(hint.shortcut);
+  if (caps.length === 0) return null;
+  return `${hint.gesture} ${caps.map((cap) => cap.glyph).join("")}`;
 }
 
 /** Lower-case status label for the non-input states; null when none applies. */
@@ -625,6 +692,38 @@ function statusLabel(state: UIState, data: BarStateData): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * What the empty text box says. The box stays up through a voice or working
+ * state, so it also carries what the status row would have said: the mic is
+ * open, the words are being decoded, Juno is working, something went wrong.
+ * Live partial words are not shown: they are worse than the final.
+ */
+export function composerPlaceholder({
+  state,
+  data,
+  recording,
+  working,
+  paneOpen,
+}: {
+  state: UIState;
+  data: BarStateData;
+  recording: boolean;
+  working: boolean;
+  paneOpen: boolean;
+}): string {
+  if (recording || VOICE_STATES.includes(state)) return "Listening…";
+  if (state === UI.BAR_STATES_TRANSCRIBING) return "Transcribing…";
+  if (state === UI.BAR_STATES_ERROR) return data.currentError || "Something went wrong";
+  if (IDLE_STATES.includes(state) || INPUT_STATES.includes(state)) {
+    return paneOpen ? "Follow up…" : "Ask Juno";
+  }
+  // Working, sending, speaking, done, stopping: the status row's word, said
+  // the way a placeholder says it. Ongoing work gets the ellipsis.
+  const label = statusLabel(state, data) ?? "working";
+  const said = `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+  return working ? `${said}…` : said;
 }
 
 const pillButton =
@@ -762,8 +861,18 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // while another app is active; the native tracking area forwards the
   // cursor position and we light the button under it ourselves.
   const [hoveredButton, setHoveredButton] = useState<
-    "mic" | "type" | "chat" | "listen" | null
+    "dot" | "mic" | "type" | "chat" | "listen" | null
   >(null);
+  const dotRef = useRef<HTMLDivElement>(null);
+  // The layout on screen, for the hover callbacks below (set at render).
+  const shownLayoutRef = useRef<BarLayout>("compact");
+  // Where the dot was in the idle pill when the cursor came to it. Hovering
+  // grows the pill away from the edge it is docked to, which carries the dot
+  // (on its leading edge) out from under a resting cursor: on a right-docked
+  // bar it slid 76pt left and the cursor landed on a button. The dot is what
+  // the person pointed at, so it stays the hovered control until the cursor
+  // leaves the spot where the dot was.
+  const dotLatchRef = useRef<DOMRect | null>(null);
   const micRef = useRef<HTMLButtonElement>(null);
   const typeRef = useRef<HTMLButtonElement>(null);
   const chatRef = useRef<HTMLButtonElement>(null);
@@ -775,6 +884,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       clearTimeout(leaveTimerRef.current);
       leaveTimerRef.current = null;
     }
+    // Read before the pill grows: this is the dot the person can see.
+    if (shownLayoutRef.current === "compact") dotLatchRef.current = idleDotRect(dotRef.current);
     setHovered(true);
   }, []);
 
@@ -792,6 +903,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         console.debug("FloatingBar: cursor check failed:", error);
       }
       if (!inside) {
+        dotLatchRef.current = null;
         setHovered(false);
         setHoveredButton(null);
       }
@@ -807,15 +919,26 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     if (moveFrameRef.current !== null) return;
     moveFrameRef.current = requestAnimationFrame(() => {
       moveFrameRef.current = null;
-      const hit = (ref: React.RefObject<HTMLButtonElement | null>) => {
+      const hit = (ref: React.RefObject<HTMLElement | null>) => {
         const el = ref.current;
         if (!el) return false;
         const r = el.getBoundingClientRect();
         if (r.width === 0 && r.height === 0) return false;
         return pointInRect(x, y, r);
       };
+      const latch = dotLatchRef.current;
+      if (latch && pointInRect(x, y, latch)) {
+        setHoveredButton("dot");
+        return;
+      }
+      dotLatchRef.current = null;
+      if (shownLayoutRef.current === "compact" && hit(dotRef)) {
+        dotLatchRef.current = idleDotRect(dotRef.current);
+      }
       setHoveredButton(
-        hit(micRef)
+        hit(dotRef)
+          ? "dot"
+          : hit(micRef)
           ? "mic"
           : hit(typeRef)
             ? "type"
@@ -897,6 +1020,16 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   const dismissPane = useCallback(() => setPaneShown(false), []);
 
+  // Rust says whether a turn Claude started ran in a conversation that is not
+  // on screen. While one did, a click anywhere on the pill opens it.
+  const [elsewhere, setElsewhere] = useState(false);
+  const elsewhereRef = useRef(false);
+  elsewhereRef.current = elsewhere;
+  useEventListener<{ conversation_id: string | null }>(
+    EVENTS.BAR_CONVERSATION_ELSEWHERE,
+    (payload) => setElsewhere(Boolean(payload?.conversation_id)),
+  );
+
   /**
    * The chat button on the idle pill: show the conversation here, in the pane.
    *
@@ -913,8 +1046,24 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         console.error("FloatingBar: could not close the main window:", error),
       );
     }
+    // Claude ran a turn of its own in another conversation: that is the one
+    // to show. Rust loads it and the pane repopulates from its snapshot.
+    if (elsewhereRef.current) {
+      void invoke(COMMANDS.CONVERSATIONS_OPEN_CLAUDE_TURN_CONVERSATION).catch((error) =>
+        console.debug("FloatingBar: could not open the conversation:", error),
+      );
+    }
     setPaneShown(true);
   }, [mainWindowOpen]);
+
+  const openElsewhereOnClick = useCallback(
+    (e: React.MouseEvent) => {
+      // The pill's own buttons keep doing what they say.
+      if ((e.target as HTMLElement).closest("button")) return;
+      reopenPane();
+    },
+    [reopenPane],
+  );
 
   // The full-size window taking over, and handing back.
   useEventListener(EVENTS.BAR_MAIN_WINDOW_OPENED, () => setMainWindowOpen(true));
@@ -928,32 +1077,20 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // above the derived state that works it out. Kept in step during render.
   const isWorkingRef = useRef(false);
 
-  // A request for the text input that cannot be honoured yet, because a voice
-  // or working session is still winding down and the bar closes the input
-  // while one is. Consumed by the effect that watches for the bar going quiet.
-  const wantsInputWhenClearRef = useRef(false);
-
   // Starting a new chat means wanting to type, so the pane stays up, empty,
   // with the caret in it. Rotating the backend conversation matters too: the
   // bar used to clear the screen while the agent kept appending to the same
   // conversation and memory buffer.
   //
   // Mid-answer it has to stop that answer first. Rotating under a live stream
-  // left the reply arriving into a conversation nobody could see any more, and
-  // the input this opens was closed again a frame later by the working state,
-  // so "New chat" read as a button that ate the screen and gave nothing back.
+  // left the reply arriving into a conversation nobody could see any more.
   // Stopping is what the person meant by starting again.
   const startNewChat = useCallback(() => {
     void (async () => {
-      const wasWorking = isWorkingRef.current;
-      if (wasWorking) await chat.stop();
+      if (isWorkingRef.current) await chat.stop();
       await invoke(COMMANDS.CONVERSATIONS_NEW_CONVERSATION).catch(() => {});
       chat.startNewChat();
       setPaneShown(true);
-      // The stop has been asked for but the backend may still be winding down,
-      // and it closes any input that is open while it does. Ask again once it
-      // is clear.
-      if (wasWorking) wantsInputWhenClearRef.current = true;
       setInputOpen(true);
     })();
   }, [chat.startNewChat, chat.stop]);
@@ -965,6 +1102,34 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   mainWindowOpenRef.current = mainWindowOpen;
   useEventListener(EVENTS.MENU_NEW_CHAT_REQUESTED, () => {
     if (!mainWindowOpenRef.current) startNewChat();
+  });
+
+  // The tray's "Center Floating Bar": the way back when a drag leaves the bar
+  // somewhere it cannot be grabbed. Same transaction as the first placement,
+  // aimed at the centre well of the display the bar is on.
+  useEventListener(EVENTS.MENU_CENTER_FLOATING_BAR_REQUESTED, () => {
+    void (async () => {
+      try {
+        const [pos, mons] = await Promise.all([
+          windowOrigin(getCurrentWindow()),
+          availableMonitors(),
+        ]);
+        if (!mons.length) return;
+        const rects = toMonitorRects(mons);
+        const wells = steadyWells(rects, PILL_STEADY_SPEC);
+        const mon = Math.max(0, monitorIndexAt(rects, pos.x, pos.y));
+        const target = wellForSlot(SLOT.center, mon, wells);
+        const rect = target ? rects[target.monitorIndex] : undefined;
+        if (!target || !rect) return;
+        const next = steadyLayout(target, rect, PILL_STEADY_SPEC);
+        await applySteadyFrame(next);
+        setSteadyLayout(windowLabel, next);
+        setDockSlot(windowLabel, { fx: target.fx, fy: target.fy });
+        await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y }).catch(() => {});
+      } catch (error) {
+        console.debug("FloatingBar: center failed:", error);
+      }
+    })();
   });
 
   // External open/close of the pane: the tray "Show/Hide Chat" toggles it, so a
@@ -1064,6 +1229,25 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     setPaneShown(false);
   }, [closeInput]);
 
+  // === CONNECTIVITY AND SHORTCUTS (for the dot and the tooltips) ===
+  //
+  // Whether Juno can answer is Rust's to say; the dot only shows it.
+  const connectivity = useConnectivity();
+  const warmingUp = useStartupReadiness();
+  // The talk shortcut, named in the mic's tooltip. Read from the live trigger
+  // registry, never written here, so the tooltip cannot teach a dead key.
+  const [triggerHints, setTriggerHints] = useState<TriggerHints | null>(null);
+  const readTriggerHints = useCallback(() => {
+    invoke<TriggerHints>(COMMANDS.TRIGGERS_GET_TRIGGER_HINTS)
+      .then((hints) => setTriggerHints(hints ?? null))
+      .catch((error) => console.debug("FloatingBar: no trigger hints:", error));
+  }, []);
+  useEffect(() => {
+    readTriggerHints();
+  }, [readTriggerHints]);
+  useEventListener(EVENTS.TRIGGERS_CHANGED, readTriggerHints);
+  const talkShortcut = hintDetail(triggerHints?.agent ?? null);
+
   // === THE WAKE PHRASE ===
   //
   // Two separate facts, both answered by Rust rather than inferred here.
@@ -1149,11 +1333,10 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     }
   }, []);
 
-  /** The mic inside the text input: drop the draft and start listening. */
+  /** The mic inside the text input: start listening. The draft stays. */
   const switchToTalking = useCallback(() => {
-    closeInput();
     void startTalking();
-  }, [closeInput, startTalking]);
+  }, [startTalking]);
 
   /** Send what was said. This is what the old "Stop" button actually did. */
   const stopTalking = useCallback(() => sendVoiceTurn(), []);
@@ -1174,23 +1357,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       }),
     [barState.barState, barState.isDictationMode],
   );
-
-  /**
-   * Changed their mind about talking: drop the audio and open the input.
-   *
-   * The input cannot simply be opened here. The backend is still in a voice
-   * state for the moment it takes the cancel to land, and while it is, the bar
-   * both refuses to show the composer and actively closes an input that is
-   * open. So the old version set a flag that was thrown away a frame later and
-   * the button did nothing at all: the person pressed "type instead", the mic
-   * closed, and they were left looking at the idle pill. The wish is recorded
-   * here and acted on when Rust says the session is actually over, which is the
-   * only thing that knows.
-   */
-  const switchToTyping = useCallback(async () => {
-    wantsInputWhenClearRef.current = true;
-    await cancelTalking();
-  }, [cancelTalking]);
 
   // Pictures pasted into the pill, as data URLs, alongside the typed text.
   const [pastedImages, setPastedImages] = useState<string[]>([]);
@@ -1340,7 +1506,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   const currentUiState = barState.barState;
   const isIdle = IDLE_STATES.includes(currentUiState);
-  const isInputState = INPUT_STATES.includes(currentUiState);
   const isVoice = VOICE_STATES.includes(currentUiState);
   // The microphone is open. Wider than `isVoice`: live words while you talk
   // arrive as TRANSCRIBING, which is otherwise a working state.
@@ -1417,31 +1582,32 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const showExpand = !paneOpen && !mainWindowOpen;
 
   // The hover pill carries a fourth control when there is a wake phrase to
-  // pause, and the voice and status pills carry the expand control while the
-  // chat is closed, so the pill is told to make room for each. The full pill
-  // already has the room, and the steady frame is sized for the full pill, so
-  // none of this can outgrow the window.
-  const pillExtraWidth =
-    (layout === "hover" && voiceConfigured) ||
-    ((layout === "voice" || layout === "status") && showExpand)
-      ? BAR_PILL_BUTTON_PX
-      : 0;
+  // pause, so it is told to make room for it. The full pill already has the
+  // room, and the steady frame is sized for the full pill, so this cannot
+  // outgrow the window.
+  const pillExtraWidth = layout === "hover" && voiceConfigured ? BAR_PILL_BUTTON_PX : 0;
 
   useEffect(() => {
     if (layout !== "hover") setHoveredButton(null);
   }, [layout]);
 
-  // The input shows when the user opened it, while the backend is in its
-  // input states, and between turns with the pane open so a follow-up is one
-  // click away. Voice and working states show status instead.
-  const showInput =
-    !isDriving &&
-    !isWorking &&
-    !isVoice &&
-    (inputOpen || isInputState || (paneOpen && isIdle));
-  const label = driving
-    ? drivingLabel(driving)
-    : statusLabel(currentUiState, barState);
+  // Past the idle pill, the bar is a text box. The person opened it, or the
+  // chat is up, or Rust is doing anything at all: listening, decoding,
+  // working, erroring, speaking. The box is where a dictation lands and where
+  // the next line is typed while Juno works, and its placeholder says what the
+  // microphone or the agent is doing. There used to be a status row for the
+  // voice and working states; the moment one began it replaced the box, which
+  // unmounted the box a dictation was about to type into (#779, #780 chased
+  // that with a hold; #782 kept an open box; this makes every state the box).
+  // Only Juno holding the pointer still puts the box away: the pill has to
+  // say so in words.
+  const showInput = !isDriving && (inputOpen || paneOpen || !isIdle);
+  const stopLabel =
+    isVoice || isRecording
+      ? "Cancel without sending"
+      : isWorking
+        ? "Stop Juno"
+        : "Close without sending";
 
   // Once the input is up, put the caret in it. After a turn ends with the
   // pane open, refocus only if this window is still the one the user is in:
@@ -1457,12 +1623,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     const t = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(t);
   }, [showInput, inputOpen, layout]);
-
-  // A voice or working state that starts while the input is open (hotkey,
-  // wake word) takes over; the input is not waiting underneath.
-  useEffect(() => {
-    if ((isVoice || isWorking) && inputOpen) closeInput();
-  }, [isVoice, isWorking, inputOpen, closeInput]);
 
   /**
    * The X, wherever it appears, and the Stop square: one meaning.
@@ -1514,17 +1674,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     abandonInput,
   ]);
 
-  // "Type instead" and "New chat", honoured once the session they interrupted
-  // is really over. Anything that starts in the meantime (the hotkey, a wake
-  // word) outranks the request: the wish was to type instead of *that*
-  // session, not instead of whatever the person started next.
-  useEffect(() => {
-    if (!wantsInputWhenClearRef.current) return;
-    if (isVoice || isWorking) return;
-    wantsInputWhenClearRef.current = false;
-    openInput();
-  }, [isVoice, isWorking, openInput]);
-
   /**
    * Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
    *
@@ -1570,7 +1719,13 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     let cancelled = false;
     void (async () => {
       try {
-        const saved = await invoke<{ x: number; y: number } | null>(COMMANDS.BAR_GET_BAR_POSITION);
+        // Rust wrote the stored well into the page at launch; ask only when
+        // it did not (a reload, a preview, an older backend).
+        const booted = takeBootBarPosition();
+        const saved =
+          booted !== undefined
+            ? booted
+            : await invoke<{ x: number; y: number } | null>(COMMANDS.BAR_GET_BAR_POSITION);
         const [pos, mons] = await Promise.all([
           windowOrigin(getCurrentWindow()),
           availableMonitors(),
@@ -1610,6 +1765,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       } finally {
         if (!cancelled) {
           setPlaced(true);
+          // After the reveal has the bar on screen, not during it.
+          setTimeout(warmChatPane, CHAT_PANE_WARM_MS);
           await invoke(COMMANDS.BAR_SHOW_BAR_WHEN_READY).catch((error) =>
             console.error("FloatingBar: could not show the bar:", error),
           );
@@ -1691,6 +1848,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // The typed text makes the pill taller; the band grows with it, so the pane
   // slides rather than jumps.
   const shownLayout = frame.layout;
+  shownLayoutRef.current = shownLayout;
   const growth = frame.composerGrowth;
   const pill = {
     width: BAR_LAYOUTS[shownLayout].width + frame.extraWidth,
@@ -1698,6 +1856,9 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   };
   const band = BAR_BAND + growth;
   const place = contentPlacement(dockLayout);
+  // Tooltips open toward the side the pill grows: the steady frame always has
+  // the pane's worth of room there, so a tooltip is never clipped by the window.
+  const tooltipSide = growUp ? "top" : "bottom";
 
   // The pane and roster render either below the pill (docked in the top half,
   // growing down) or above it (bottom half, growing up); only the margin side
@@ -1711,6 +1872,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       // closed, with nothing connecting the two.
       style={{ animation: "fbar-reveal 0.18s ease-out both" }}
     >
+      <Suspense fallback={null}>
       <BarChatPane
         messages={chat.messages}
         isProcessing={isWorking}
@@ -1725,6 +1887,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
         onDismiss={dismissPane}
         onNewChat={startNewChat}
       />
+      </Suspense>
     </div>
   ) : null;
 
@@ -1742,6 +1905,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     // The whole window: transparent, never resized per state. Clicks on it
     // outside the column pass through to whatever is underneath (Rust flips
     // the window's mouse handling as the cursor crosses the column's edge).
+    <TooltipProvider delayDuration={PILL_TOOLTIP_DELAY_MS} skipDelayDuration={300}>
     <div className="relative h-screen w-screen select-none overflow-hidden">
       <div
         data-testid="floating-bar-column"
@@ -1793,6 +1957,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       <div
         data-testid="floating-bar"
         data-state={currentUiState}
+        onClick={elsewhere ? openElsewhereOnClick : undefined}
         data-layout={shownLayout}
         data-driving={isDriving ? "" : undefined}
         className={cn(
@@ -1835,64 +2000,111 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             vertically centred, so it never reflows, never teleports, and never
             flickers out between states — the pill just grows around it and the
             content appears to its right. */}
-        <div
-          className="pointer-events-none absolute top-1/2 -translate-y-1/2"
-          style={{ left: DOT_HOME_LEFT }}
+        <PillTooltip
+          label={dotLabel(currentUiState, connectivity, {
+            driving: isDriving,
+            voicePaused: voiceConfigured && !voiceListening,
+            loading: warmingUp,
+          })}
+          forcedOpen={hoveredButton === "dot"}
+          side={tooltipSide}
+          // The dot's target sits mid-pill; clear the pill's edge the way the
+          // buttons' tooltips do.
+          sideOffset={pill.height / 2 - 7.5 + 3}
         >
-          <StatusDot
-            state={currentUiState}
-            audioLevel={barState.audioLevel}
-            driving={isDriving}
-            voicePaused={voiceConfigured && !voiceListening}
-          />
-        </div>
+          {/* A 15px hover target around the 7px dot, offset by its own
+              padding so the dot itself sits exactly where it always has. */}
+          <div
+            ref={dotRef}
+            data-testid="floating-bar-dot-target"
+            className="absolute top-1/2 -translate-y-1/2 p-1"
+            style={{ left: DOT_HOME_LEFT - 4 }}
+          >
+            <StatusDot
+              state={currentUiState}
+              audioLevel={barState.audioLevel}
+              connectivity={connectivity}
+              driving={isDriving}
+              voicePaused={voiceConfigured && !voiceListening}
+              loading={warmingUp}
+            />
+          </div>
+        </PillTooltip>
 
         {shownLayout === "compact" ? null : shownLayout === "hover" ? (
           <div
             className="flex items-center gap-1"
             style={{ animation: "fbar-reveal 0.18s ease-out both" }}
           >
-            <button
-              ref={micRef}
-              type="button"
-              onClick={startTalking}
-              aria-label="Talk to Juno"
-              title="Talk to Juno"
-              data-phover={hoveredButton === "mic" ? "" : undefined}
-              className={cn(pillButton, hoveredButton === "mic" && "bg-white/[0.12] text-white")}
+            <PillTooltip
+              label="Talk to Juno"
+              detail={talkShortcut}
+              forcedOpen={hoveredButton === "mic"}
+              blocked={hoveredButton === "dot"}
+              side={tooltipSide}
             >
-              <Mic className="size-3.5" />
-            </button>
-            <button
-              ref={typeRef}
-              type="button"
-              onClick={openInput}
-              aria-label="Type to Juno"
-              title="Type to Juno"
-              data-phover={hoveredButton === "type" ? "" : undefined}
-              className={cn(pillButton, hoveredButton === "type" && "bg-white/[0.12] text-white")}
+              <button
+                ref={micRef}
+                type="button"
+                onClick={startTalking}
+                aria-label="Talk to Juno"
+                title="Talk to Juno"
+                data-phover={hoveredButton === "mic" ? "" : undefined}
+                className={cn(pillButton, hoveredButton === "mic" && "bg-white/[0.12] text-white")}
+              >
+                <Mic className="size-3.5" />
+              </button>
+            </PillTooltip>
+            <PillTooltip
+              label="Type to Juno"
+              forcedOpen={hoveredButton === "type"}
+              blocked={hoveredButton === "dot"}
+              side={tooltipSide}
             >
-              <Type className="size-3.5" />
-            </button>
+              <button
+                ref={typeRef}
+                type="button"
+                onClick={openInput}
+                aria-label="Type to Juno"
+                title="Type to Juno"
+                data-phover={hoveredButton === "type" ? "" : undefined}
+                className={cn(pillButton, hoveredButton === "type" && "bg-white/[0.12] text-white")}
+              >
+                <Type className="size-3.5" />
+              </button>
+            </PillTooltip>
             {/* Always offered. This used to appear only when a conversation
                 had been dismissed, so after "New chat" emptied the history
                 there was no way back into the pane at all. */}
-            <button
-              ref={chatRef}
-              type="button"
-              onClick={reopenPane}
-              aria-label="Open chat"
-              title="Open chat"
-              data-phover={hoveredButton === "chat" ? "" : undefined}
-              className={cn(pillButton, hoveredButton === "chat" && "bg-white/[0.12] text-white")}
+            <PillTooltip
+              label="Open chat"
+              forcedOpen={hoveredButton === "chat"}
+              blocked={hoveredButton === "dot"}
+              side={tooltipSide}
             >
-              <Maximize2 className="size-3.5" />
-            </button>
+              <button
+                ref={chatRef}
+                type="button"
+                onClick={reopenPane}
+                aria-label="Open chat"
+                title="Open chat"
+                data-phover={hoveredButton === "chat" ? "" : undefined}
+                className={cn(pillButton, hoveredButton === "chat" && "bg-white/[0.12] text-white")}
+              >
+                <Maximize2 className="size-3.5" />
+              </button>
+            </PillTooltip>
             {/* The wake phrase, when there is one. A microphone that is open
                 all day is worth being able to close for a while without going
                 to Settings and taking the trigger away, which is a different
                 and more permanent thing to mean. */}
             {voiceConfigured && (
+              <PillTooltip
+                label={voiceListening ? "Stop listening for the wake phrase" : "Listen for the wake phrase"}
+                forcedOpen={hoveredButton === "listen"}
+              blocked={hoveredButton === "dot"}
+                side={tooltipSide}
+              >
               <button
                 ref={listenRef}
                 type="button"
@@ -1911,6 +2123,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               >
                 {voiceListening ? <Ear className="size-3.5" /> : <EarOff className="size-3.5" />}
               </button>
+              </PillTooltip>
             )}
           </div>
         ) : showInput && shownLayout === "full" ? (
@@ -1941,7 +2154,13 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               onMouseDown={activateWindow}
               onFocus={handleFocus}
               onBlur={handleInputBlur}
-              placeholder={paneOpen ? "Follow up…" : "Ask Juno"}
+              placeholder={composerPlaceholder({
+                state: currentUiState,
+                data: barState,
+                recording: isRecording,
+                working: isWorking,
+                paneOpen,
+              })}
               aria-label="Ask Juno"
               className={cn(
                 "min-w-0 flex-1 resize-none cursor-text border-none bg-transparent outline-none",
@@ -1952,75 +2171,99 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                 way to reach the mic, and no way out but Escape. */}
             <div className="flex shrink-0 items-center gap-1">
               {/* Not "switch to dictation": dictation types what you say into
-                  whatever app has focus, and this mic is the inverse of the
-                  "type instead" control next to it. It opens a spoken turn to
-                  Juno, the same one the pill's mic opens, so it says so. */}
-              <button
-                type="button"
-                onClick={switchToTalking}
-                aria-label="Talk to Juno"
-                title="Talk to Juno"
-                className={inputControlButton}
-              >
-                <Mic className="size-3" />
-              </button>
-              <button
-                type="submit"
-                aria-label="Send"
-                title="Send"
-                disabled={!localInputValue.trim()}
-                className={cn(
-                  inputControlButton,
-                  localInputValue.trim()
-                    ? "bg-white/[0.16] text-white"
-                    : "cursor-default opacity-40",
-                )}
-              >
-                <ArrowUp className="size-3" />
-              </button>
+                  whatever app has focus. This mic opens a spoken turn to
+                  Juno, the same one the pill's mic opens, so it says so.
+                  While a microphone is open the level takes its place; while
+                  Juno works there is nothing to open, so nothing is offered. */}
+              {isVoice || isRecording ? (
+                <AudioLevelBars audioLevel={barState.audioLevel} />
+              ) : isWorking ? null : (
+                <button
+                  type="button"
+                  onClick={switchToTalking}
+                  aria-label="Talk to Juno"
+                  title="Talk to Juno"
+                  className={inputControlButton}
+                >
+                  <Mic className="size-3" />
+                </button>
+              )}
+              {/* The way back to the conversation while something is going
+                  on with the chat closed. Ahead of Send and the stop control,
+                  so the stop keeps the trailing edge in every state. */}
+              {showExpand && !isIdle && (
+                <button
+                  type="button"
+                  onClick={reopenPane}
+                  aria-label="Open chat"
+                  title="Open chat"
+                  className={inputControlButton}
+                >
+                  <Maximize2 className="size-3" />
+                </button>
+              )}
+              {/* One Send. While a turn is being recorded it finishes that
+                  turn and submits what was said (what "Stop" used to do);
+                  otherwise it sends the typed line. A wake-phrase capture has
+                  nothing to send by hand: the engine decides when it ends. */}
+              {isRecording ? (
+                <button
+                  type="button"
+                  onClick={() => void stopTalking()}
+                  aria-label="Send"
+                  title="Send what was said"
+                  className={cn(inputControlButton, "bg-white/[0.16] text-white")}
+                >
+                  <ArrowUp className="size-3" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  aria-label="Send"
+                  title="Send"
+                  disabled={!localInputValue.trim() || isWorking || isVoice}
+                  className={cn(
+                    inputControlButton,
+                    localInputValue.trim() && !isWorking && !isVoice
+                      ? "bg-white/[0.16] text-white"
+                      : "cursor-default opacity-40",
+                  )}
+                >
+                  <ArrowUp className="size-3" />
+                </button>
+              )}
+              {/* One stop control, one meaning: stop what is happening and put
+                  me back at rest. Its name says what that is right now. */}
               <button
                 type="button"
                 onClick={stopCurrentActivity}
-                aria-label="Close without sending"
-                title="Close without sending"
-                className={inputControlButton}
+                aria-label={stopLabel}
+                title={isWorking ? `${stopLabel} (Esc)` : stopLabel}
+                className={cn(inputControlButton, isWorking && "bg-white/[0.08]")}
               >
-                <X className="size-3" />
+                {isWorking ? <Square className="size-2.5 fill-current" /> : <X className="size-3" />}
               </button>
             </div>
           </form>
         ) : (
           <>
+            {/* Juno holds the pointer. The one state that is not the box: the
+                bar has to say so in words, and say how to make it stop. */}
             <span
-              className={cn(
-                "min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em]",
-                isDriving
-                  ? "text-white/80"
-                  : currentUiState === UI.BAR_STATES_ERROR
-                    ? "text-[#e8866a]/80"
-                    : "text-white/55",
-                // Live streaming partial: render provisional, swap to solid on final.
-                currentUiState === UI.BAR_STATES_TRANSCRIBING &&
-                  barState.transcriptionProvisional &&
-                  "italic text-white/40",
-              )}
+              className="min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em] text-white/80"
               data-testid="floating-bar-status"
             >
-              {isDriving ? `Juno is ${label}` : (label ?? "Ask Juno")}
+              {driving ? `Juno is ${drivingLabel(driving)}` : "Ask Juno"}
             </span>
             {/* Watching the pointer move on its own, the question is how to
                 make it stop. The stop-key monitor in Rust has always taken
                 Escape; nothing ever said so. */}
-            {isDriving && (
-              <kbd
-                className="shrink-0 rounded border border-white/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/55"
-                data-testid="floating-bar-stop-hint"
-              >
-                esc to stop
-              </kbd>
-            )}
-            {/* Ahead of every stop control, so Stop keeps its place at the
-                trailing edge whichever state this is. */}
+            <kbd
+              className="shrink-0 rounded border border-white/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/55"
+              data-testid="floating-bar-stop-hint"
+            >
+              esc to stop
+            </kbd>
             {showExpand && (
               <button
                 type="button"
@@ -2034,41 +2277,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             )}
             {/* And the same thing to press, for a hand that is already on the
                 mouse Juno is holding. The hint stays: it is the faster way. */}
-            {isDriving && (
-              <button
-                type="button"
-                onClick={stopCurrentActivity}
-                aria-label="Stop Juno"
-                title="Stop Juno (Esc)"
-                className={inputControlButton}
-              >
-                <X className="size-3" />
-              </button>
-            )}
-            {(isVoice || isRecording) && <AudioLevelBars audioLevel={barState.audioLevel} />}
-            {/* Send, type instead, cancel: in every recording state, live
-                words included, from the mapping every appearance shares. A
-                wake-phrase capture gets cancel only. */}
-            <VoiceTurnControls
-              state={barState}
-              onSend={() => void stopTalking()}
-              onType={() => void switchToTyping()}
-              onCancel={stopCurrentActivity}
-              buttonClassName={(control) =>
-                cn(inputControlButton, control === "send" && "bg-white/[0.16] text-white")
-              }
-            />
-            {isWorking && (
-              <button
-                type="button"
-                onClick={stopCurrentActivity}
-                aria-label="Stop Juno"
-                title="Stop Juno (Esc)"
-                className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/[0.08] text-white/60 transition-colors hover:bg-white/[0.16] hover:text-white"
-              >
-                <Square className="size-2.5 fill-current" />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={stopCurrentActivity}
+              aria-label="Stop Juno"
+              title="Stop Juno (Esc)"
+              className={inputControlButton}
+            >
+              <X className="size-3" />
+            </button>
           </>
         )}
       </div>
@@ -2079,5 +2296,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
       {!growUp && chatPaneNode}
       </div>
     </div>
+    </TooltipProvider>
   );
 }

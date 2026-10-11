@@ -10,7 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
-import { COMMANDS } from "@/lib/constants.generated";
+import { COMMANDS, SETTINGS } from "@/lib/constants.generated";
+import { useEventListener } from "@/hooks/useEventListener";
 
 /**
  * Advanced-settings visibility.
@@ -79,6 +80,12 @@ export function AdvancedSettingsProvider({
       toast.error("Failed to update advanced settings");
     }
   }, []);
+
+  // The agent can turn advanced settings on ("show me the system prompt"),
+  // and Rust announces every change, so the window follows without a reload.
+  useEventListener<boolean>(SETTINGS.EVENTS_ADVANCED_SETTINGS_CHANGED, (enabled) => {
+    if (mountedRef.current) setAdvancedState(Boolean(enabled));
+  });
 
   const value = useMemo(
     () => ({ advanced, loading, setAdvanced }),

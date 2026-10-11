@@ -977,6 +977,7 @@ impl ToolMetadata {
                     ("🔧", "Basic operation", "standard", Some("short"))
                 }
             }
+            ToolCategory::MacApps => ("📅", "Using a Mac app", "standard", Some("short")),
             ToolCategory::MCP => ("🔌", "External tool", "standard", Some("medium")),
         };
 
@@ -1539,6 +1540,12 @@ pub fn emit_streaming_text_chunk(
     let (cleaned_text, point_tags) = parse_point_tags(&text);
     for tag in &point_tags {
         emit_cursor_point(app_handle, tag);
+    }
+
+    // Keep what the person was shown or told, so a turn cut short can still
+    // be saved to the conversation history.
+    if let Some(id) = message_id.as_deref() {
+        crate::conversation_history::record_streamed(id, &cleaned_text, tts_content.as_deref());
     }
 
     let event_data = serde_json::json!({

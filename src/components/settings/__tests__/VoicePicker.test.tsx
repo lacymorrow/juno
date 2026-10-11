@@ -7,19 +7,12 @@ import { VoicePicker } from "../VoicePicker";
 function macList(selectedId = "Samantha", overrides: Partial<JunoVoiceList> = {}): JunoVoiceList {
   return {
     provider: "system",
+    silent: false,
     engine: "system",
     engine_label: "Your Mac",
     note: null,
     engines: [],
     options: [
-      {
-        id: "silent",
-        kind: "silent",
-        name: "Silent",
-        descriptor: "Juno writes the answer and never says it out loud.",
-        selected: selectedId === "silent",
-        speaks: false,
-      },
       {
         id: "Samantha",
         kind: "voice",
@@ -45,19 +38,12 @@ function macList(selectedId = "Samantha", overrides: Partial<JunoVoiceList> = {}
 function kokoroList(): JunoVoiceList {
   return {
     provider: "kokoro",
+    silent: false,
     engine: "kokoro",
     engine_label: "Kokoro",
     note: null,
     engines: [],
     options: [
-      {
-        id: "silent",
-        kind: "silent",
-        name: "Silent",
-        descriptor: "Juno writes the answer and never says it out loud.",
-        selected: false,
-        speaks: false,
-      },
       {
         id: "af_heart",
         kind: "voice",
@@ -126,13 +112,6 @@ describe("VoicePicker", () => {
     expect(screen.queryByRole("radio", { name: /Daniel/ })).toBeNull();
   });
 
-  /// Silence has nothing to audition, so it must not offer to play.
-  it("silence does not offer a sound", () => {
-    renderPicker(macList());
-    const silent = screen.getByRole("radio", { name: /Silent/ });
-    expect(silent.querySelector("svg.lucide-volume2")).toBeNull();
-  });
-
   it("the speaking row says it is speaking", () => {
     renderPicker(macList(), {
       voice: "Samantha",
@@ -174,25 +153,16 @@ describe("VoicePicker", () => {
   /// rows it cannot honour.
   it("shows the note when there is something to say instead of rows", () => {
     renderPicker(
-      macList("silent", {
+      macList("none", {
         provider: "elevenlabs",
         engine: "elevenlabs",
         engine_label: "ElevenLabs",
         note: "ElevenLabs speaks with the voice set on your ElevenLabs account, not here.",
-        options: [
-          {
-            id: "silent",
-            kind: "silent",
-            name: "Silent",
-            descriptor: "Juno writes the answer and never says it out loud.",
-            selected: false,
-            speaks: false,
-          },
-        ],
+        options: [],
       }),
     );
     expect(screen.getByText(/not here/)).toBeInTheDocument();
-    expect(screen.getAllByRole("radio")).toHaveLength(1);
+    expect(screen.queryAllByRole("radio")).toHaveLength(0);
   });
 
   /// Waiting on Rust is a designed state, not a blank card.

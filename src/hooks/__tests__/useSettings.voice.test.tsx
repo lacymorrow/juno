@@ -25,6 +25,7 @@ const invokeMock = vi.mocked(invoke);
 function macList(selected: string): JunoVoiceList {
   return {
     provider: "system",
+    silent: false,
     engine: "system",
     engine_label: "Your Mac",
     note: null,
@@ -47,6 +48,7 @@ function kokoroList(): JunoVoiceList {
   return {
     ...macList(""),
     provider: "kokoro",
+    silent: false,
     engine: "kokoro",
     engine_label: "Kokoro",
     options: [
@@ -162,5 +164,46 @@ describe("useSettings: Juno's voice is whatever Rust answered last", () => {
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith(COMMANDS.AUDIO_GET_JUNO_VOICES),
     );
+  });
+});
+
+describe("useSettings: how fast Juno speaks", () => {
+  it("sends the rate to Rust and draws the list Rust answers with", async () => {
+    const answered: JunoVoiceList = {
+      ...macList("Samantha"),
+      speed: { value: 1.5, min: 0.75, max: 2 },
+    };
+    invokeMock.mockImplementation(((command: string) => {
+      if (command === COMMANDS.AUDIO_SET_JUNO_VOICE_RATE) return Promise.resolve(answered);
+      if (command === COMMANDS.AUDIO_GET_JUNO_VOICES) return Promise.resolve(macList("Samantha"));
+      return Promise.resolve(undefined);
+    }) as typeof invoke);
+
+    const { result } = renderHook(() => useSettings());
+    // The pane's own read lands first; the rate is a later answer.
+    await waitFor(() => expect(result.current.junoVoices).not.toBeNull());
+    expect(result.current.junoVoices?.speed).toBeUndefined();
+    await act(async () => {
+      await result.current.handleJunoVoiceRateChange(1.5);
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith(COMMANDS.AUDIO_SET_JUNO_VOICE_RATE, {
+      rate: 1.5,
+    });
+    expect(result.current.junoVoices?.speed).toEqual({ value: 1.5, min: 0.75, max: 2 });
+  });
+
+  it("says so when Rust refuses the rate", async () => {
+    invokeMock.mockImplementation(((command: string) =>
+      command === COMMANDS.AUDIO_SET_JUNO_VOICE_RATE
+        ? Promise.reject("The speed has to be a number.")
+        : Promise.resolve(undefined)) as typeof invoke);
+
+    const { result } = renderHook(() => useSettings());
+    await act(async () => {
+      await result.current.handleJunoVoiceRateChange(Number.NaN);
+    });
+
+    expect(toast.error).toHaveBeenCalledWith("The speed has to be a number.");
   });
 });

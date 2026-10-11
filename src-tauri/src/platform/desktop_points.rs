@@ -69,6 +69,29 @@ pub fn window_origin_to_points(position: (i32, i32), window_scale: f64) -> (f64,
     (position.0 as f64 / s, position.1 as f64 / s)
 }
 
+/// A Cocoa global point (`NSEvent.mouseLocation`: points, y up from the
+/// primary display's bottom edge) in global desktop points (y down from its
+/// top). One flip against the primary display's height, exact on every display.
+pub fn cocoa_point_to_points(p: (f64, f64), primary_height: f64) -> (f64, f64) {
+    (p.0, primary_height - p.1)
+}
+
+/// The top-left of a Cocoa frame (origin at its bottom-left, y up) in global
+/// desktop points.
+pub fn cocoa_frame_top_left(origin: (f64, f64), height: f64, primary_height: f64) -> (f64, f64) {
+    (origin.0, primary_height - origin.1 - height)
+}
+
+/// The window top-left that puts `grab` (a point inside the window, measured
+/// from its top-left) exactly under `cursor`. Both in points. This is what
+/// keeps the spot the user pressed under the cursor when the bar's drag
+/// window is placed, and on every move of the drag after it
+/// (`bar_drag_follow`, which does the same sum in Cocoa's y-up space).
+/// Mirror: `originUnderCursor` in `src/lib/desktopPoints.ts`.
+pub fn origin_under_cursor(cursor: (f64, f64), grab: (f64, f64)) -> (f64, f64) {
+    (cursor.0 - grab.0, cursor.1 - grab.1)
+}
+
 /// Which display contains a point, if any.
 pub fn monitor_index_at(rects: &[PointRect], p: (f64, f64)) -> Option<usize> {
     rects.iter().position(|r| r.contains(p))
@@ -162,6 +185,30 @@ mod tests {
         assert_eq!(window_origin_to_points((1600, 100), 1.0), (1600.0, 100.0));
         // The same point on a 2x display reports double.
         assert_eq!(window_origin_to_points((3200, 200), 2.0), (1600.0, 100.0));
+    }
+
+    #[test]
+    fn the_grab_lands_under_the_cursor_on_every_display() {
+        // Primary 982 points tall. A cursor on the external above-left of it
+        // has a negative Cocoa x and a y above the primary's top.
+        let primary_h = 982.0;
+        for cocoa in [(700.0, 500.0), (2000.0, 900.0), (-1200.0, 1300.0)] {
+            let c = cocoa_point_to_points(cocoa, primary_h);
+            let grab = (44.0, 30.0);
+            let o = origin_under_cursor(c, grab);
+            assert_eq!((o.0 + grab.0, o.1 + grab.1), c);
+        }
+        assert_eq!(cocoa_point_to_points((10.0, 982.0), primary_h), (10.0, 0.0));
+    }
+
+    #[test]
+    fn a_cocoa_frame_reads_back_as_its_top_left() {
+        // A 164x76 window whose top-left is (300, 100) points on a 982-tall
+        // primary has its Cocoa origin at y = 982 - 100 - 76.
+        assert_eq!(
+            cocoa_frame_top_left((300.0, 806.0), 76.0, 982.0),
+            (300.0, 100.0)
+        );
     }
 
     #[test]

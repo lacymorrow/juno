@@ -33,15 +33,21 @@
 //!   time, date
 //! - [`timer`]: start, check, cancel countdown timers (backend-owned)
 //! - [`apps`]: open or quit an installed app, open a website
+//! - [`agenda`]: "what's on my calendar today", "read my reminders", "what's
+//!   my next meeting", "turn on do not disturb" (only once already allowed)
+//! - [`settings_follow`]: "open settings" opens the settings of the app you
+//!   were in, and a short window to correct it
 //! - [`quit`]: "quit", "quit Juno": close Juno itself
 //! - [`stop`]: a bare "stop" or "cancel" while a run is in flight
 //!
 //! [`try_handle_local_intent`] is the single entry point `submit_query` calls.
 //! See `docs/plans/local-intents.md` for what was considered and cut.
 
+pub mod agenda;
 pub mod apps;
 pub mod media;
 pub mod quit;
+pub mod settings_follow;
 pub mod stop;
 pub mod system;
 pub mod timer;
@@ -94,6 +100,23 @@ impl Reply {
             ..Self::text(line)
         }
     }
+
+    /// Shown only: the spoken line already went out ahead of the action
+    /// ([`speak_ahead`]). A failure after it stays quiet rather than
+    /// following the acknowledgement with a second, contradicting line.
+    pub fn unspoken(self) -> Self {
+        Self {
+            spoken: String::new(),
+            ..self
+        }
+    }
+}
+
+/// Say `line` now, before the action it describes has run, so the person
+/// hears the acknowledgement while the window is still opening. Joins the
+/// turn's speech queue like any spoken chunk.
+pub(crate) fn speak_ahead(app_handle: &AppHandle, line: &str) {
+    crate::tts::enqueue_speech(line.to_string(), app_handle.clone());
 }
 
 /// A parsed local request.
@@ -103,6 +126,8 @@ pub enum LocalIntent {
     System(system::SystemIntent),
     Timer(timer::TimerIntent),
     App(apps::AppIntent),
+    Settings(settings_follow::SettingsIntent),
+    Agenda(agenda::AgendaIntent),
 }
 
 /// Parse everything but media, in precedence order. Apps come last because
@@ -114,6 +139,13 @@ fn parse_non_media(query: &str) -> Option<LocalIntent> {
     }
     if let Some(i) = timer::parse(&utterance) {
         return Some(LocalIntent::Timer(i));
+    }
+    // Before apps: "open Music settings" would otherwise be an app name.
+    if let Some(i) = settings_follow::parse(&utterance) {
+        return Some(LocalIntent::Settings(i));
+    }
+    if let Some(i) = agenda::parse(&utterance) {
+        return Some(LocalIntent::Agenda(i));
     }
     apps::parse(&utterance).map(LocalIntent::App)
 }
@@ -147,6 +179,16 @@ fn compile<T>(domain: &str, build: fn() -> Result<T, regex::Error>) -> Option<T>
 /// Run a program with arguments (never through a shell) on the blocking
 /// pool, bounded by [`COMMAND_TIMEOUT`]. Returns trimmed stdout.
 async fn run(program: &'static str, args: Vec<String>) -> Result<String, String> {
+    run_for(program, args, COMMAND_TIMEOUT).await
+}
+
+/// [`run`] with a caller's own bound, for a script that may sit behind a
+/// system dialog the person has to answer.
+async fn run_for(
+    program: &'static str,
+    args: Vec<String>,
+    timeout: Duration,
+) -> Result<String, String> {
     let task = tokio::task::spawn_blocking(move || {
         let output = std::process::Command::new(program)
             .args(&args)
@@ -158,7 +200,7 @@ async fn run(program: &'static str, args: Vec<String>) -> Result<String, String>
             Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
         }
     });
-    match tokio::time::timeout(COMMAND_TIMEOUT, task).await {
+    match tokio::time::timeout(timeout, task).await {
         Ok(Ok(result)) => result,
         Ok(Err(e)) => Err(format!("{} task failed: {}", program, e)),
         Err(_) => Err(format!("{} timed out", program)),
@@ -167,9 +209,20 @@ async fn run(program: &'static str, args: Vec<String>) -> Result<String, String>
 
 /// Run a constant AppleScript, passing any variable input as `argv`.
 async fn osascript(script: &str, argv: Vec<String>) -> Result<String, String> {
+    osascript_for(script, argv, COMMAND_TIMEOUT).await
+}
+
+/// [`osascript`] with its own time bound. Spawned from Juno's own process, so
+/// an Automation dialog macOS raises for it names Juno. The Mac app tools
+/// (`agent::tools::mac_apps::script`) run Messages, Mail and Notes through it.
+pub(crate) async fn osascript_for(
+    script: &str,
+    argv: Vec<String>,
+    timeout: Duration,
+) -> Result<String, String> {
     let mut args = vec!["-e".to_string(), script.to_string()];
     args.extend(argv);
-    run("osascript", args).await
+    run_for("osascript", args, timeout).await
 }
 
 /// Try to serve `query` locally. Returns `true` when it was handled and the
@@ -193,6 +246,18 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
         return true;
     }
 
+    // A correction of the settings window just opened ("no, not that",
+    // "Mac settings"). Fires only while that action is under 60 s old.
+    if let Some(correction) = settings_follow::correction_for(query) {
+        if let Some(reply) = settings_follow::handle_correction(app_handle, correction).await {
+            emit_reply(app_handle, reply).await;
+            settings_follow::publish(app_handle);
+            return true;
+        }
+    }
+    // Anything else is an unrelated turn: the chance to correct has passed.
+    settings_follow::forget(app_handle);
+
     if let Some(intent) = parse_media_intent(query) {
         if let Some(reply) = media::handle(app_handle, intent).await {
             emit_reply(app_handle, reply).await;
@@ -211,47 +276,108 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
         LocalIntent::System(i) => system::handle(app_handle, i).await,
         LocalIntent::Timer(i) => timer::handle(app_handle, i),
         LocalIntent::App(i) => apps::handle(app_handle, i).await,
+        LocalIntent::Settings(i) => settings_follow::handle(app_handle, i).await,
+        LocalIntent::Agenda(i) => agenda::handle(app_handle, i).await,
         LocalIntent::Media(_) => None,
     };
     let Some(reply) = reply else {
         return false;
     };
-    log::info!("Local intent {:?} served: {}", intent, reply.spoken);
+    let served = if reply.spoken.is_empty() {
+        &reply.display
+    } else {
+        &reply.spoken
+    };
+    log::info!("Local intent {:?} served: {}", intent, served);
     emit_reply(app_handle, reply).await;
+    settings_follow::publish(app_handle);
     true
 }
 
-async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
+/// When a locally served reply last finished, for [`replied_within`].
+static LAST_REPLY: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// A frontend "stop" that lands this soon after a local reply is not a
+/// decision about that reply: nobody can read an answer and reach for Stop in
+/// this long. The log of 2026-10-09 shows one arriving 70 ms after "Opened
+/// ghostty settings." was served, which cut the reply's speech and dropped the
+/// chip's.
+pub const STOP_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Whether a local reply finished within `window`.
+pub fn replied_within(window: std::time::Duration) -> bool {
+    LAST_REPLY
+        .lock()
+        .ok()
+        .and_then(|last| *last)
+        .is_some_and(|at| at.elapsed() < window)
+}
+
+/// Show and speak `reply` as a whole turn: the bar goes working and back,
+/// exactly as it does for a model's answer.
+pub(crate) async fn emit_reply(app_handle: &AppHandle, reply: Reply) {
     let agent_state = if reply.failed { "Failed" } else { "Finished" };
     crate::commands::ui_commands::handle_agent_started(app_handle).await;
 
+    let display = reply.display.clone();
+    emit_reply_message(app_handle, reply, agent_state);
+
+    crate::commands::ui_commands::handle_agent_stopped(app_handle).await;
+    crate::commands::ui_commands::handle_backend_response(
+        app_handle,
+        Some(display),
+        agent_state.to_string(),
+    )
+    .await;
+    if let Ok(mut last) = LAST_REPLY.lock() {
+        *last = Some(std::time::Instant::now());
+    }
+}
+
+/// Append `reply` to the conversation as an assistant message and speak its
+/// spoken line, without touching the bar's lifecycle. For a turn that is
+/// already running and will close itself.
+pub(crate) fn emit_reply_message(app_handle: &AppHandle, reply: Reply, agent_state: &str) {
     let message_id = uuid::Uuid::new_v4().to_string();
     crate::agent::tool_logger::emit_stream_start(app_handle, message_id.clone());
     crate::agent::tool_logger::emit_streaming_text_chunk(
         app_handle,
         reply.display.clone(),
         Some(message_id.clone()),
-        Some(reply.spoken),
+        spoken_line(reply.spoken),
     );
     crate::agent::tool_logger::emit_stream_end_with_state(
         app_handle,
         message_id,
-        reply.display.clone(),
+        reply.display,
         agent_state.to_string(),
     );
+}
 
-    crate::commands::ui_commands::handle_agent_stopped(app_handle).await;
-    crate::commands::ui_commands::handle_backend_response(
-        app_handle,
-        Some(reply.display),
-        agent_state.to_string(),
-    )
-    .await;
+/// The line still to speak, if any. Empty when it was spoken ahead.
+fn spoken_line(spoken: String) -> Option<String> {
+    Some(spoken).filter(|line| !line.trim().is_empty())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reply_spoken_ahead_is_not_spoken_again() {
+        let done = Reply::text("Opening Ghostty settings.").unspoken();
+        assert_eq!(done.display, "Opening Ghostty settings.");
+        assert_eq!(spoken_line(done.spoken), None);
+        // A failure after the acknowledgement stays quiet.
+        let failed = Reply::failure("I couldn't open Ghostty settings.").unspoken();
+        assert!(failed.failed);
+        assert_eq!(spoken_line(failed.spoken), None);
+        // An ordinary reply is still spoken.
+        assert_eq!(
+            spoken_line(Reply::text("Volume 40%.").spoken).as_deref(),
+            Some("Volume 40%.")
+        );
+    }
 
     #[test]
     fn each_domain_is_reachable_from_the_entry_parser() {

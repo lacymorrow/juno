@@ -580,7 +580,9 @@ where
 
             // Skip runner-level logging for "computer" tool — it self-logs with
             // enhanced metadata inside anthropic_computer_use.rs
-            if tool_call.name != "computer" {
+            if tool_call.name != "computer"
+                && tool_call.name != crate::agent::tools::anthropic_computer_use::APP_CONTROLS_TOOL
+            {
                 crate::agent::tool_logger::log_tool_call_request(
                     &self.app_handle,
                     &tool_call.name,
@@ -646,7 +648,9 @@ where
 
             // Skip runner-level result logging for "computer" tool — it self-logs
             // with enhanced metadata inside anthropic_computer_use.rs
-            if tool_call.name != "computer" {
+            if tool_call.name != "computer"
+                && tool_call.name != crate::agent::tools::anthropic_computer_use::APP_CONTROLS_TOOL
+            {
                 match &tool_result {
                     Ok(result) => {
                         let success = !tool_failed;
@@ -830,6 +834,22 @@ where
         use crate::agent::tools::risk_classifier;
         use crate::state::RiskLevel;
 
+        // Permissions come first: a system dialog never lands unannounced, and
+        // the send gate below resolves names through Contacts.
+        if !self.ask_for_permissions(batch, cancel_rx).await? {
+            return Ok(false);
+        }
+
+        // A text or an email has its own ask: the message card, and only
+        // "send it" or the Send button answers it. It never rides along in a
+        // batch, so each message is seen on its own before it goes.
+        if let Some(send_idx) = batch
+            .iter()
+            .position(|t| risk_classifier::is_send_tool(&t.name))
+        {
+            return self.ask_to_send(batch, send_idx, cancel_rx).await;
+        }
+
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Classify each tool once and find the highest risk level.
@@ -861,7 +881,12 @@ where
             .await;
 
         // The one decision.
-        if !permission_policy::requires_approval(self.permission_mode().await, &max_risk, granted) {
+        if !permission_policy::requires_approval_for(
+            &riskiest_tool.name,
+            self.permission_mode().await,
+            &max_risk,
+            granted,
+        ) {
             return Ok(true);
         }
 
@@ -1024,6 +1049,236 @@ where
         Ok(approved)
     }
 
+    /// The permission preflight (`mac_apps::preflight`), shared with the MCP
+    /// path. Everything allowed: `Ok(true)` and not a word said. A permission
+    /// never asked: one line and a Continue button, and only "continue" (said
+    /// or pressed) brings the system dialog up. Declined, or no answer:
+    /// `Ok(false)` with the reason recorded for the model.
+    async fn ask_for_permissions(
+        &self,
+        batch: &[crate::agent::core::ToolCall],
+        cancel_rx: &crate::state::CancelReceiver,
+    ) -> Result<bool, AgentError> {
+        use crate::agent::providers::cli_approval;
+        use crate::agent::tools::mac_apps::preflight::{self, Preflight};
+
+        for tool in batch {
+            let asked = match preflight::preflight(&tool.name, &tool.input).await {
+                Preflight::Clear => continue,
+                Preflight::Blocked(answer) => {
+                    let text =
+                        serde_json::to_string(&answer).unwrap_or_else(|_| answer.to_string());
+                    self.record_not_run(batch, &text).await?;
+                    return Ok(false);
+                }
+                Preflight::Ask(asked) => asked,
+            };
+
+            let conversation_key = self
+                .session_id
+                .as_ref()
+                .map(|id| id.as_str().to_string())
+                .unwrap_or_else(crate::state::default_conversation_key);
+            let request = preflight::ask_request(&tool.name, &tool.input, &asked)
+                .with_conversation(conversation_key);
+            let ask_id = request.tool_id.clone();
+            let description = request.description.clone();
+            let app_state = self.app_handle.state::<crate::state::AppState>();
+            let marked_needs_input = self.mark_session_needs_input(&description).await;
+
+            let mut cancel = cancel_rx.clone();
+            let decision = tokio::select! {
+                answer = cli_approval::ask_person(&self.app_handle, request) => answer,
+                // Drop the watch guard inside the branch future so nothing
+                // non-Send is held across the awaits below.
+                _ = async { cancel.wait_for(|&v| v).await.map(|_| ()) } => {
+                    app_state.remove_tool_approval(&ask_id).await;
+                    self.emit_approval_resolved(&ask_id, ApprovalOutcome::Cancelled);
+                    if marked_needs_input {
+                        self.clear_session_needs_input().await;
+                    }
+                    return Err(AgentError::Terminated);
+                }
+            };
+            if marked_needs_input {
+                self.clear_session_needs_input().await;
+            }
+            let outcome = match decision {
+                Some(true) => ApprovalOutcome::Allowed,
+                Some(false) => ApprovalOutcome::Denied,
+                None => ApprovalOutcome::TimedOut,
+            };
+            self.emit_approval_resolved(&ask_id, outcome);
+
+            let refusal = match decision {
+                Some(true) => {
+                    match preflight::continue_after_ask(&tool.name, &tool.input, asked).await {
+                        Preflight::Clear => continue,
+                        Preflight::Blocked(answer) => {
+                            serde_json::to_string(&answer).unwrap_or_else(|_| answer.to_string())
+                        }
+                        Preflight::Ask(_) => preflight::NOT_ALLOWED_YET.to_string(),
+                    }
+                }
+                Some(false) => preflight::NOT_CONTINUED.to_string(),
+                None => preflight::NOT_ANSWERED.to_string(),
+            };
+            log::info!("Permission ask not cleared for {}", tool.name);
+            self.record_not_run(batch, &refusal).await?;
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /// Write the same tool result for every call in a batch that did not run.
+    async fn record_not_run(
+        &self,
+        batch: &[crate::agent::core::ToolCall],
+        content: &str,
+    ) -> Result<(), AgentError> {
+        for tool_call in batch {
+            let mut mem = self.memory.lock().await;
+            mem.add_message(crate::agent::core::Message {
+                role: crate::agent::core::Role::Tool,
+                content: content.to_string(),
+                tool_calls: None,
+                tool_call_id: Some(tool_call.id.clone()),
+                name: Some(tool_call.name.clone()),
+                images: None,
+            })
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// The send gate (`risk_classifier::Consequence::Send`).
+    ///
+    /// Asks in every permission mode and never consults a "do not ask again"
+    /// grant. The recipient is resolved through Contacts first, so the card
+    /// shows who it really goes to; a name that matches more than one person
+    /// is answered with the candidates and never asked about or sent. The ask
+    /// is the message card plus the spoken line ending "Say send it."; the
+    /// phrase arrives through `cli_approval::answer_pending_approval` and
+    /// resolves the same pending approval the Send button does.
+    async fn ask_to_send(
+        &self,
+        batch: &[crate::agent::core::ToolCall],
+        send_idx: usize,
+        cancel_rx: &crate::state::CancelReceiver,
+    ) -> Result<bool, AgentError> {
+        use crate::agent::tools::mac_apps::{self, send};
+        use crate::state::RiskLevel;
+
+        if batch.len() > 1 {
+            self.record_not_run(batch, send::ONE_SEND_AT_A_TIME).await?;
+            return Ok(false);
+        }
+        let tool = &batch[send_idx];
+
+        let draft = match mac_apps::preview_send(tool.name.clone(), tool.input.clone()).await {
+            Ok(draft) => draft,
+            Err(answer) => {
+                let text = serde_json::to_string(&answer).unwrap_or_else(|_| answer.to_string());
+                self.record_not_run(batch, &text).await?;
+                return Ok(false);
+            }
+        };
+
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+        let conversation_key = self
+            .session_id
+            .as_ref()
+            .map(|id| id.as_str().to_string())
+            .unwrap_or_else(crate::state::default_conversation_key);
+        let approval_id = uuid::Uuid::new_v4().to_string();
+        let message = draft.approval_payload();
+        let request = crate::state::ToolApprovalRequest::new(
+            approval_id.clone(),
+            tool.name.clone(),
+            tool.input.clone(),
+            draft.description(),
+        )
+        .with_risk(RiskLevel::Critical)
+        .with_timeout(send::SEND_TIMEOUT_SECS)
+        .with_conversation(conversation_key)
+        .with_message(message.clone());
+
+        app_state.add_pending_tool_approval(request.clone()).await;
+        if let Err(e) = self.app_handle.emit(
+            events::tools::APPROVAL_REQUEST,
+            serde_json::json!({
+                "tool_name": request.tool_name,
+                "tool_id": request.tool_id,
+                "tool_input": request.tool_input,
+                "description": request.description,
+                "timestamp": request.timestamp,
+                "risk_level": request.risk_level,
+                "target_app": request.target_app,
+                "timeout_seconds": request.timeout_seconds,
+                "is_batch": false,
+                "batch_size": 1,
+                "always_allow_label": serde_json::Value::Null,
+                "consequence": "send",
+                "message": message,
+            }),
+        ) {
+            log::error!("Failed to emit the send approval: {}", e);
+        }
+
+        // Say the message and the phrase. The card stays as the answer surface.
+        {
+            let app = self.app_handle.clone();
+            let spoken = draft.prompt();
+            tauri::async_runtime::spawn(async move {
+                let state = app.state::<crate::state::AppState>();
+                let _ = crate::tts::invoke_tts(spoken, state, app.as_ref().clone()).await;
+            });
+        }
+
+        let marked_needs_input = self.mark_session_needs_input(&draft.description()).await;
+
+        let mut remaining = (send::SEND_TIMEOUT_SECS * 1000 / 50) as i64;
+        let mut decision: Option<bool> = None;
+        while remaining > 0 {
+            if *cancel_rx.borrow() {
+                app_state.remove_tool_approval(&approval_id).await;
+                let _ = send::take_correction(&approval_id);
+                self.emit_approval_resolved(&approval_id, ApprovalOutcome::Cancelled);
+                if marked_needs_input {
+                    self.clear_session_needs_input().await;
+                }
+                return Err(AgentError::Terminated);
+            }
+            if let Some(answer) = app_state.get_tool_approval_status(&approval_id).await {
+                decision = Some(answer);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            remaining -= 1;
+        }
+        app_state.remove_tool_approval(&approval_id).await;
+        if marked_needs_input {
+            self.clear_session_needs_input().await;
+        }
+
+        let outcome = match decision {
+            Some(true) => ApprovalOutcome::Allowed,
+            Some(false) => ApprovalOutcome::Denied,
+            None => ApprovalOutcome::TimedOut,
+        };
+        self.emit_approval_resolved(&approval_id, outcome);
+        let correction = send::take_correction(&approval_id);
+
+        if decision == Some(true) {
+            log::info!("Send approved: {}", draft.description());
+            return Ok(true);
+        }
+        let text = send::not_sent_text(correction.as_deref(), decision.is_none());
+        log::info!("Send not approved: {}", text);
+        self.record_not_run(batch, &text).await?;
+        Ok(false)
+    }
+
     /// Tell the chat surface an approval question is over.
     ///
     /// Fires for every outcome including Allowed, which the frontend already
@@ -1145,7 +1400,11 @@ where
                 Ok(result) => {
                     // For computer tool with screenshot data, preserve the full JSON
                     // so the Anthropic provider can extract the base64 image later
-                    if tool_call.name == "computer" && result.output.get("base64_image").is_some() {
+                    if (tool_call.name == "computer"
+                        || tool_call.name
+                            == crate::agent::tools::anthropic_computer_use::APP_CONTROLS_TOOL)
+                        && result.output.get("base64_image").is_some()
+                    {
                         serde_json::to_string(&result.output)
                             .unwrap_or_else(|_| tool_result_content(&result.output))
                     } else {
@@ -1223,6 +1482,18 @@ where
         let remaining_time = max_wait.saturating_sub(start_time.elapsed());
         if remaining_time.as_millis() >= 10 {
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Add Juno's reply for this turn to memory, which tees it into the
+    /// conversation history. Best effort: history must never fail a turn.
+    async fn save_reply(&self, text: &str, interrupted: bool) {
+        let Some(message) = crate::conversation_history::reply_message(text, interrupted) else {
+            return;
+        };
+        let mut mem = self.memory.lock().await;
+        if let Err(e) = mem.add_message(message).await {
+            log::debug!("Could not keep the reply in history: {e}");
         }
     }
 
@@ -1405,6 +1676,9 @@ where
             // Handle agent action
             match action {
                 AgentAction::Finish(text) => {
+                    // Keep the reply in the conversation. The raw text still
+                    // has its spoken blocks, which the history keeps in order.
+                    self.save_reply(&text, false).await;
                     let final_response = self.speak_and_strip_tts(text);
                     log::info!("Agent finished with text response: \"{}\"", final_response);
                     self.transition_state(AgentState::Finished).await;
@@ -1482,18 +1756,30 @@ where
             // Brain supports streaming - generate a message ID and call streaming method
             let message_id = uuid::Uuid::new_v4().to_string();
             log::debug!("Using streaming brain with message ID: {}", message_id);
-            self.brain
+            let outcome = self
+                .brain
                 .decide_next_action_streaming(
                     &messages,
                     &tools,
                     Some((*self.app_handle).clone()),
-                    Some(message_id),
+                    Some(message_id.clone()),
                     // Session-aware cancel channel (merged session+global for
                     // session-tracked runs) so subprocess-based brains can kill
                     // their child on focused-session cancel (LAC-3697).
                     Some(cancel_rx.clone()),
                 )
-                .await?
+                .await;
+            // Whatever was streamed is either the final reply (kept by the
+            // run loop) or, if the turn was cut short, saved here.
+            let streamed = crate::conversation_history::take_streamed(&message_id);
+            match outcome {
+                Ok(action) => action,
+                Err(e) => {
+                    let interrupted = matches!(e, AgentError::Terminated);
+                    self.save_reply(&streamed, interrupted).await;
+                    return Err(e);
+                }
+            }
         } else {
             // Fall back to regular brain method
             log::debug!("Using non-streaming brain");

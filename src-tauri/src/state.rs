@@ -170,6 +170,18 @@ pub struct ToolApprovalRequest {
     /// scoped to it and a new conversation starts clean.
     #[serde(default = "default_conversation_key")]
     pub conversation_key: String,
+    /// For a send (a text or an email): the message as it will go out, with
+    /// the recipient as Contacts resolved them. The approval is drawn as a
+    /// message card from this and answered by "send it" or the Send button.
+    /// `None` for every other kind of ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<Value>,
+    /// For a permission ask (`mac_apps::preflight`): the one line the card
+    /// shows and the prompt that is spoken. The approval is drawn as a
+    /// PermissionAskCard and answered by "continue" or its Continue button.
+    /// `None` for every other kind of ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission: Option<Value>,
 }
 
 /// The conversation key for a runner with no session id of its own.
@@ -193,6 +205,8 @@ impl ToolApprovalRequest {
             target_app: None,
             timeout_seconds: 60,
             conversation_key: default_conversation_key(),
+            message: None,
+            permission: None,
         }
     }
 
@@ -210,6 +224,31 @@ impl ToolApprovalRequest {
     pub fn with_target_app(mut self, app: String) -> Self {
         self.target_app = Some(app);
         self
+    }
+
+    /// Mark this ask as a send, carrying the message card's data.
+    pub fn with_message(mut self, message: Value) -> Self {
+        self.message = Some(message);
+        self
+    }
+
+    /// Mark this ask as a permission ask, carrying the card's line and prompt.
+    pub fn with_permission(mut self, permission: Value) -> Self {
+        self.permission = Some(permission);
+        self
+    }
+
+    /// Whether this ask is "I need X for that", answered by "continue" or the
+    /// Continue button. It is about the tool's permissions, never the send.
+    pub fn is_permission(&self) -> bool {
+        self.permission.is_some()
+    }
+
+    /// Whether this ask is a send, answered only by "send it" or the button.
+    pub fn is_send(&self) -> bool {
+        !self.is_permission()
+            && (self.message.is_some()
+                || crate::agent::tools::risk_classifier::is_send_tool(&self.tool_name))
     }
 
     pub fn with_timeout(mut self, seconds: u64) -> Self {
@@ -237,6 +276,8 @@ pub struct AudioSettings {
     pub supertonic_server_url: String,
     pub supertonic_voice: String,
     pub supertonic_speed: f64,
+    /// How fast Juno speaks; see `tts::rate`.
+    pub voice_rate: f64,
     /// Whether a dictation session is running right now.
     ///
     /// A liveness flag and nothing more: it goes false the moment the session
@@ -280,6 +321,7 @@ impl Default for AudioSettings {
             supertonic_server_url: crate::tts::supertonic::DEFAULT_SERVER_URL.to_string(),
             supertonic_voice: crate::tts::supertonic::DEFAULT_VOICE.to_string(),
             supertonic_speed: crate::tts::supertonic::DEFAULT_SPEED,
+            voice_rate: crate::tts::rate::DEFAULT_RATE,
             dictation_active: false,
             dictation_clipboard_enabled: true,
             dictation_insertion_mode:
@@ -739,6 +781,20 @@ impl AppState {
             .lock()
             .map(|mut settings| settings.supertonic_speed = speed)
             .map_err(|e| format_error(templates::FAILED_TO_SET, "Supertonic speed", e))
+    }
+
+    pub fn get_voice_rate(&self) -> Result<f64, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.voice_rate)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "voice rate", e))
+    }
+
+    pub fn set_voice_rate(&self, rate: f64) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.voice_rate = crate::tts::rate::sanitize(rate))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "voice rate", e))
     }
 
     pub fn get_dictation_active(&self) -> Result<bool, String> {
@@ -2362,7 +2418,10 @@ mod tests {
         assert!(!state.is_cloud_enabled());
 
         // Test getter methods - using unwrap in tests is acceptable
-        assert_eq!(state.get_tts_provider().unwrap(), "system");
+        assert_eq!(
+            state.get_tts_provider().unwrap(),
+            crate::constants::settings::defaults::TTS_PROVIDER
+        );
         assert!(!state.get_dictation_active().unwrap());
         assert!(state.get_sound_enabled().unwrap());
         assert!(!state.get_always_listening_active().unwrap());
@@ -2592,7 +2651,10 @@ mod tests {
         let state = AppState::new(None);
 
         // Check initial value
-        assert_eq!(state.get_tts_provider().unwrap(), "system");
+        assert_eq!(
+            state.get_tts_provider().unwrap(),
+            crate::constants::settings::defaults::TTS_PROVIDER
+        );
 
         // Update TTS provider using new setter method
         state.set_tts_provider("openai".to_string()).unwrap();

@@ -308,6 +308,16 @@ pub async fn allow_tool_for_conversation(
         return Ok(false);
     };
 
+    // A send is answered once, every time. The prompt never offers this button
+    // for one, and a stale or scripted call cannot turn it into a standing yes.
+    if !crate::agent::tools::permission_policy::may_grant(&request.tool_name) {
+        info!(
+            "{} is never granted for a conversation; answering this one only",
+            request.tool_name
+        );
+        return Ok(state.approve_tool(&tool_id).await);
+    }
+
     state
         .grant_tool_for_conversation(&request.conversation_key, &request.tool_name)
         .await;

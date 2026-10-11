@@ -7,6 +7,7 @@ use crate::state::AppState;
 use crate::utils::coordinates;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
+use tauri::Emitter;
 use tauri::State;
 use tracing::warn;
 use tracing::{error, info};
@@ -593,13 +594,31 @@ pub async fn get_agent_execution_progress(
 
 /// Set debug mode enabled/disabled
 #[tauri::command]
-pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_debug_mode(
+    enabled: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     info!("Setting debug mode to: {}", enabled);
 
     let _ = state.set_debug_mode(enabled);
+    if let Err(e) = app.emit(crate::constants::events::bar::DEBUG_MODE_CHANGED, enabled) {
+        warn!("Failed to emit debug mode change: {}", e);
+    }
 
     info!("Debug mode successfully set to: {}", enabled);
     Ok(())
+}
+
+/// Whether debug mode is on: the Advanced switch, a debug build, or
+/// `RUST_LOG=debug`. The one answer for the window and for the `settings`
+/// tool, which both hide debug-only settings (speaking speed) without it.
+pub fn debug_mode_active(state: &AppState) -> bool {
+    state.is_debug_mode()
+        || cfg!(debug_assertions)
+        || std::env::var("RUST_LOG")
+            .unwrap_or_default()
+            .contains("debug")
 }
 
 /// Get current debug mode status

@@ -33,6 +33,8 @@ import {
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { ConnectAppCard } from "@/components/chat/ConnectAppCard";
 import { Button } from "@/components/ui/button";
+import { MessageCard } from "@/components/ui/agent-cards/message-card";
+import { PermissionAskCard } from "@/components/ui/agent-cards/permission-ask-card";
 import {
   Check,
   Copy,
@@ -556,6 +558,59 @@ function ApprovalPrompt({
 }) {
   const toolId = msg.tool_id;
   const detail = msg.content?.trim();
+
+  // A send (a text or an email): the question is the message itself, with one
+  // action, Send. "Send it" spoken resolves the same approval from Rust; the
+  // card follows the row's state, draft, then sending once allowed.
+  if (msg.message) {
+    if (msg.approval_state === "denied") {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground italic">
+          <XCircle className="h-3 w-3 text-muted-foreground/50" />
+          <span>Not sent</span>
+        </span>
+      );
+    }
+    return (
+      <div className="w-full">
+        <MessageCard
+          state={msg.approval_state === "approved" ? "sending" : "draft"}
+          kind={msg.message.kind}
+          to={msg.message.to}
+          address={msg.message.address}
+          subject={msg.message.subject}
+          body={msg.message.body}
+          onSend={toolId ? () => onApprove(toolId) : undefined}
+        />
+        {msg.approval_state === "pending" && (
+          <ApprovalCountdown
+            timeoutSeconds={msg.approval_timeout_seconds ?? 120}
+            isPending
+            variant="text"
+          />
+        )}
+      </div>
+    );
+  }
+
+  // A permission ask: one line and one button. Once answered, the card goes
+  // quietly: nothing about permissions stays on screen.
+  if (msg.permission) {
+    if (msg.approval_state !== "pending") return null;
+    return (
+      <div className="w-full">
+        <PermissionAskCard
+          line={msg.permission.line}
+          onContinue={toolId ? () => onApprove(toolId) : undefined}
+        />
+        <ApprovalCountdown
+          timeoutSeconds={msg.approval_timeout_seconds ?? 120}
+          isPending
+          variant="text"
+        />
+      </div>
+    );
+  }
 
   if (msg.approval_state === "approved") {
     return (

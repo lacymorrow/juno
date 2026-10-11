@@ -32,6 +32,10 @@ pub mod settings {
     pub const SET_AUTOSTART_ENABLED: &str = "set_autostart_enabled";
     pub const GET_ADVANCED_SETTINGS_ENABLED: &str = "get_advanced_settings_enabled";
     pub const SET_ADVANCED_SETTINGS_ENABLED: &str = "set_advanced_settings_enabled";
+    /// The pane and row the agent asked for before the window existed.
+    pub const TAKE_PENDING_SETTINGS_NAVIGATION: &str = "take_pending_settings_navigation";
+    /// A `juno://` link clicked in a reply; Rust parses and follows it.
+    pub const OPEN_JUNO_LINK: &str = "open_juno_link";
     /// Beta: one long-lived claude process per conversation.
     /// See docs/plans/cli-persistent-session-spike.md
     pub const GET_CLI_PERSISTENT_SESSION_ENABLED: &str = "get_cli_persistent_session_enabled";
@@ -128,6 +132,10 @@ pub mod audio {
     pub const GET_JUNO_VOICES: &str = "get_juno_voices";
     /// Choose a voice. Speaking the sample is part of choosing.
     pub const SET_JUNO_VOICE: &str = "set_juno_voice";
+    /// How fast Juno speaks, for every engine that can change speed.
+    pub const SET_JUNO_VOICE_RATE: &str = "set_juno_voice_rate";
+    /// Turn speech off, or back on to the engine that was speaking.
+    pub const SET_JUNO_SILENT: &str = "set_juno_silent";
     /// Say the sample again in the voice already chosen.
     pub const PREVIEW_JUNO_VOICE: &str = "preview_juno_voice";
 }
@@ -193,6 +201,8 @@ pub mod windows {
     pub const CLOSE_MAIN_WINDOW: &str = "close_main_window";
     pub const OPEN_MAIN_WINDOW: &str = "open_main_window";
     pub const OPEN_SETTINGS_WINDOW: &str = "open_settings_window";
+    /// Tap a suggested-reply chip under a locally served reply
+    pub const RUN_REPLY_CHIP: &str = "run_reply_chip";
     pub const CLOSE_WINDOW: &str = "close_window";
     pub const FOCUS_WINDOW: &str = "focus_window";
     pub const GET_WINDOW_INFO: &str = "get_window_info";
@@ -336,6 +346,10 @@ pub mod agent_sessions {
 /// App-level commands: build info, config directory, diagnostics
 pub mod app {
     pub const GET_BUILD_INFO: &str = "get_build_info";
+    /// Network and provider health, for the bar's status dot.
+    pub const GET_CONNECTIVITY: &str = "get_connectivity";
+    /// What is still loading after launch, for the bar's status dot.
+    pub const GET_STARTUP_READINESS: &str = "get_startup_readiness";
     pub const OPEN_CONFIG_DIRECTORY: &str = "open_config_directory";
     pub const TEST_SYSTEM_CONTEXT: &str = "test_system_context";
 }
@@ -354,6 +368,7 @@ pub mod bar {
     pub const SET_BAR_FRAME: &str = "set_bar_frame";
     pub const SET_BAR_HIT_REGIONS: &str = "set_bar_hit_regions";
     pub const POINTER_HELD: &str = "bar_pointer_held";
+    pub const DRAG_RELEASED: &str = "bar_drag_released";
     pub const ORDER_ABOVE_SNAP_WELLS: &str = "bar_order_above_snap_wells";
     pub const ENSURE_SNAP_WELLS_OVERLAYS: &str = "ensure_snap_wells_overlays";
     pub const SHOW_BAR_WHEN_READY: &str = "show_bar_when_ready";
@@ -371,6 +386,7 @@ pub mod conversations {
     pub const NEW_CONVERSATION: &str = "new_conversation";
     pub const DELETE_CONVERSATION: &str = "delete_conversation";
     pub const GET_CURRENT_CONVERSATION_ID: &str = "get_current_conversation_id";
+    pub const OPEN_CLAUDE_TURN_CONVERSATION: &str = "open_claude_turn_conversation";
     pub const SAVE_CHAT_EXPORT: &str = "save_chat_export";
     pub const LOAD_CHAT_IMPORT: &str = "load_chat_import";
 }
@@ -432,6 +448,14 @@ pub mod onboarding {
     pub const TEST_GLOBAL_SHORTCUTS_WORKING: &str = "test_global_shortcuts_working";
     pub const GET_LAST_ONBOARDING_PHASE: &str = "get_last_onboarding_phase";
     pub const RECORD_ONBOARDING_EVENT: &str = "record_onboarding_event";
+}
+
+/// How Juno first appears
+pub mod intro {
+    /// The intro window is loaded and about to draw: hand it the plan.
+    pub const READY: &str = "intro_ready";
+    /// Run the reveal again on the bar that is on screen (developer control).
+    pub const REPLAY: &str = "replay_intro";
 }
 
 /// Scheduled automations

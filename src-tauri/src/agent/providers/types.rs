@@ -767,17 +767,18 @@ impl Provider {
                     router_role: None,
                 },
             ],
-            // Codex CLI: chat-only through the person's ChatGPT plan. No
-            // Anthropic tool version applies. IDs are what `codex app-server`
-            // `model/list` returned for a ChatGPT login on 2026-10-07 (codex-cli
-            // 0.159.0); `gpt-5-codex` and `gpt-5` are refused with a 400 on
-            // ChatGPT accounts. The plan's catalog moves, so re-check with
-            // `model/list` rather than from memory.
+            // Codex CLI: the person's ChatGPT plan. Drives the desktop through
+            // Juno's own in-process MCP server (`codex_session::mcp_config_args`),
+            // like the Claude CLI, so no Anthropic tool version applies. IDs are
+            // what `codex app-server` `model/list` returned for a ChatGPT login
+            // on 2026-10-07 (codex-cli 0.159.0); `gpt-5-codex` and `gpt-5` are
+            // refused with a 400 on ChatGPT accounts. The plan's catalog moves,
+            // so re-check with `model/list` rather than from memory.
             Provider::CodexCli => &[
                 ModelDefinition {
                     id: "gpt-6-luna",
                     name: "GPT-6 Luna (via Codex)",
-                    computer_use: ComputerUse::No,
+                    computer_use: ComputerUse::FunctionTools,
                     availability: Availability::Current,
                     toolset_ga: false,
                     image_tier: ImageTier::Standard,
@@ -789,7 +790,7 @@ impl Provider {
                 ModelDefinition {
                     id: "gpt-5.6-terra",
                     name: "GPT-5.6 Terra (via Codex)",
-                    computer_use: ComputerUse::No,
+                    computer_use: ComputerUse::FunctionTools,
                     availability: Availability::Current,
                     toolset_ga: false,
                     image_tier: ImageTier::Standard,
@@ -801,7 +802,7 @@ impl Provider {
                 ModelDefinition {
                     id: "gpt-5.6-luna",
                     name: "GPT-5.6 Luna (via Codex)",
-                    computer_use: ComputerUse::No,
+                    computer_use: ComputerUse::FunctionTools,
                     availability: Availability::Current,
                     toolset_ga: false,
                     image_tier: ImageTier::Standard,

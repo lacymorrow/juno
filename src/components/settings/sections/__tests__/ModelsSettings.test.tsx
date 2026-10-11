@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -8,10 +8,11 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 import ModelsSettings from "../ModelsSettings";
 import { AdvancedSettingsProvider } from "../../AdvancedSettingsContext";
-import { COMMANDS } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import type { SttModelInfo, SttModelsStatus } from "@/hooks/useSttModels";
 
 const invokeMock = vi.mocked(invoke);
@@ -254,7 +255,9 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Try again: Balanced" })).toBeEnabled(),
     );
-    expect(screen.getByRole("alert")).toHaveTextContent(/Download failed/);
+    // A plain line, never the backend's reason (which can carry a URL).
+    expect(screen.getByRole("alert")).toHaveTextContent("The download didn't start. Try again.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/huggingface/);
   });
 
   it("disables Download with a reason when offline; downloaded models are unaffected", async () => {
@@ -302,5 +305,98 @@ describe("Models pane: delete", () => {
     fireEvent.click(screen.getByRole("button", { name: "Keep" }));
     expect(screen.getByRole("button", { name: "Use Balanced" })).toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalledWith(COMMANDS.STT_MODELS_DELETE, expect.anything());
+  });
+});
+
+describe("Models pane: a lost connection is a pause, not a dead end", () => {
+  /** Capture the pane's event handlers so a test can play the backend. */
+  function captureEvents() {
+    const handlers = new Map<string, (event: { payload: unknown }) => void>();
+    vi.mocked(listen).mockImplementation(async (event, handler) => {
+      handlers.set(event as string, handler as (event: { payload: unknown }) => void);
+      return () => {};
+    });
+    return (event: string, payload: unknown) => {
+      const handler = handlers.get(event);
+      if (!handler) throw new Error(`no listener for ${event}`);
+      act(() => handler({ payload }));
+    };
+  }
+
+  it("says it will try again while waiting for the network, and keeps Cancel", async () => {
+    mockBackend(() =>
+      status(arm64Models(), {
+        download: {
+          model_id: "parakeet-ctc",
+          bytes_downloaded: 100 * 1024 * 1024,
+          total_bytes: 612 * 1024 * 1024,
+          percent: 16,
+          activate_when_done: false,
+          waiting: true,
+        },
+      }),
+    );
+    await mount();
+    const parakeet = screen.getByTestId("model-row-parakeet-ctc");
+    expect(within(parakeet).getByText("No internet connection. Juno will try again.")).toBeInTheDocument();
+    expect(within(parakeet).queryByText(/16%/)).not.toBeInTheDocument();
+    expect(within(parakeet).getByRole("button", { name: "Cancel download" })).toBeEnabled();
+  });
+
+  it("goes back to percent the moment bytes flow again", async () => {
+    const emit = captureEvents();
+    mockBackend(() => status(arm64Models()));
+    await mount();
+    await waitFor(() => expect(vi.mocked(listen)).toHaveBeenCalled());
+    const progress = {
+      model_id: "parakeet-ctc",
+      bytes_downloaded: 0,
+      total_bytes: 612 * 1024 * 1024,
+      percent: 20,
+      activate_when_done: false,
+    };
+    emit(EVENTS.STT_MODELS_DOWNLOAD_PROGRESS, { ...progress, waiting: true });
+    const parakeet = screen.getByTestId("model-row-parakeet-ctc");
+    expect(within(parakeet).getByText("No internet connection. Juno will try again.")).toBeInTheDocument();
+    emit(EVENTS.STT_MODELS_DOWNLOAD_PROGRESS, { ...progress, waiting: false });
+    expect(within(parakeet).queryByText(/Juno will try again/)).not.toBeInTheDocument();
+    expect(within(parakeet).getByText(/20%/)).toBeInTheDocument();
+  });
+
+  it("returns to Try again after a failed download, with no spinner left behind", async () => {
+    const emit = captureEvents();
+    let current = status(arm64Models(), {
+      download: {
+        model_id: "parakeet-ctc",
+        bytes_downloaded: 10,
+        total_bytes: 612 * 1024 * 1024,
+        percent: 1,
+        activate_when_done: false,
+      },
+    });
+    mockBackend(() => current);
+    await mount();
+    await waitFor(() =>
+      expect(within(screen.getByTestId("model-row-parakeet-ctc")).getByLabelText("Download progress")).toBeInTheDocument(),
+    );
+
+    // The backend gives up: the in-flight slot is empty and the event says why.
+    current = status(arm64Models());
+    emit(EVENTS.STT_MODELS_DOWNLOAD_ERROR, {
+      model_id: "parakeet-ctc",
+      error: "No internet connection. Try again when you're back online.",
+      cancelled: false,
+    });
+
+    const parakeet = screen.getByTestId("model-row-parakeet-ctc");
+    await waitFor(() =>
+      expect(within(parakeet).getByRole("button", { name: "Try again: Balanced" })).toBeEnabled(),
+    );
+    expect(within(parakeet).queryByLabelText("Download progress")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Downloading Balanced/)).not.toBeInTheDocument();
+    expect(within(parakeet).getByRole("alert")).toHaveTextContent(
+      "No internet connection. Try again when you're back online.",
+    );
+    expect(within(parakeet).getByRole("alert")).not.toHaveTextContent(/failed/i);
   });
 });

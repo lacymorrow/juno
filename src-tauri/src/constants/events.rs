@@ -76,6 +76,12 @@ pub mod agent_sessions {
     pub const NEEDS_INPUT: &str = "agent-session-needs-input";
 }
 
+/// Suggested-reply chips under a locally served reply
+pub mod chips {
+    /// Payload: `{ chips: [{ id, label }] }`. An empty list clears the row.
+    pub const REPLY_CHIPS: &str = "reply-chips";
+}
+
 /// Streaming events
 pub mod streaming {
     pub const TEXT_STREAM: &str = "agent-text-stream";
@@ -224,6 +230,7 @@ pub mod menu {
     pub const IMPORT_CHAT_REQUESTED: &str = "import-chat-requested";
     pub const EXPORT_CHAT_REQUESTED: &str = "export-chat-requested";
     pub const TOGGLE_FLOATING_BAR_REQUESTED: &str = "toggle-floating-bar-requested";
+    pub const CENTER_FLOATING_BAR_REQUESTED: &str = "center-floating-bar-requested";
     pub const TOGGLE_DEV_PANEL_REQUESTED: &str = "toggle-dev-panel-requested";
     pub const TOGGLE_FULLSCREEN_REQUESTED: &str = "toggle-fullscreen-requested";
     pub const MINIMIZE_WINDOW_REQUESTED: &str = "minimize-window-requested";
@@ -399,6 +406,12 @@ pub mod system {
     pub const MOUSE_MOVED_WINDOW: &str = "mouse-moved-window";
     pub const BACKEND_RESPONSE: &str = "backend-response";
     pub const PROVIDER_SETTINGS_CHANGED: &str = "provider_settings_changed";
+    /// Network or provider health changed. Payload: `connectivity::Snapshot`
+    /// (`status`, `label`, `provider`).
+    pub const CONNECTIVITY_CHANGED: &str = "connectivity-changed";
+    /// What is still loading after launch changed. Payload:
+    /// `readiness::Snapshot` (`loading`, `pending`).
+    pub const STARTUP_READINESS_CHANGED: &str = "startup-readiness-changed";
 
     // Application lifecycle events
     pub const APP_READY: &str = "app-ready";
@@ -432,6 +445,9 @@ pub mod bar {
     pub const COMPLETE_TRANSITION: &str = "floating-bar-complete-transition";
     pub const CLEAR_ERROR: &str = "floating-bar-clear-error";
     pub const CONFIG_CHANGED: &str = "floating-bar-config-changed";
+    /// Debug mode was toggled in settings. Payload: the new bool. The bar
+    /// window outlines itself while it is on, to make resizes visible.
+    pub const DEBUG_MODE_CHANGED: &str = "bar-debug-mode-changed";
     /// Reopen the chat pane if a conversation is retained, or close it if it is
     /// already open (tray "Show/Hide Chat"). Frontend flips its dismissed state.
     pub const TOGGLE_PANE: &str = "bar-toggle-pane";
@@ -446,6 +462,11 @@ pub mod bar {
     pub const MAIN_WINDOW_OPENED: &str = "bar-main-window-opened";
     /// The full-size chat window went away. The bar takes the conversation back.
     pub const MAIN_WINDOW_CLOSED: &str = "bar-main-window-closed";
+    /// Claude started a turn on its own in a conversation that is not on
+    /// screen. Payload has a nullable `conversation_id` string field; while
+    /// it is set, clicking the bar opens that conversation. Null once it has
+    /// been opened.
+    pub const CONVERSATION_ELSEWHERE: &str = "bar-conversation-elsewhere";
 }
 
 /// Snap-well overlay. Window to window: the bar emits these while it is being
