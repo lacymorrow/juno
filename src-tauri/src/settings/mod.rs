@@ -265,15 +265,12 @@ pub struct AudioSettings {
     /// by `afplay`, which can only use the system output device.
     #[serde(default)]
     pub output_device: Option<String>,
-    /// Which macOS voice speaks as Juno, by `say -v` name. `None` means the
-    /// voice the Mac is already set to use.
+    /// The Mac row's id (`system_default`) once resolved. Juno never names a
+    /// Mac voice, so any other value (a name an older build stored) resolves
+    /// to it; see `tts::voices::resolve_voice`.
     #[serde(default)]
     pub system_voice: Option<String>,
-    /// True once the person has picked a Mac voice in the Audio pane. Until
-    /// then `system_voice` is only something Juno wrote down after ranking the
-    /// installed voices (a build before the Mac's own voice became the default
-    /// stored "Samantha" for everyone), so it is not a choice and the Mac's own
-    /// voice replaces it. See `tts::voices::resolve_stored_voice`.
+    /// Written by older builds; read by nothing. Kept so their stores load.
     #[serde(default)]
     pub system_voice_chosen: bool,
     #[serde(default = "AudioSettings::default_kokoro_voice")]

@@ -1,6 +1,6 @@
-pub mod avspeech;
 pub mod elevenlabs;
 pub mod kokoro;
+pub mod pcm_player;
 pub mod prerender;
 pub mod rate;
 pub mod replicate;
@@ -240,8 +240,8 @@ fn audio_processes() -> std::sync::MutexGuard<'static, AudioProcesses> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// The hold, readable without the lock. Speech played inside Juno (the Mac's
-/// voice through `avspeech`) has no process to `SIGSTOP`; its audio callback
+/// The hold, readable without the lock. Audio played inside Juno (the
+/// greeting through `pcm_player`) has no process to `SIGSTOP`; its audio callback
 /// reads this instead, plays silence while it is set and resumes from the same
 /// sample when it clears. Written only under `JUNO_AUDIO`, next to
 /// `held_since`.
@@ -256,7 +256,7 @@ pub(crate) fn is_held_silent() -> bool {
     HELD_SILENT.load(Ordering::SeqCst)
 }
 
-/// In-process speech started: the same stale-hold check a spawned player
+/// In-process playback started: the same stale-hold check a spawned player
 /// gets in [`register_audio_pid`], so a leaked hold cannot silence it for good.
 pub(crate) fn release_stale_hold() {
     let mut processes = audio_processes();
@@ -734,11 +734,11 @@ pub fn stop_speech() {
 }
 
 /// Stop everything Juno is playing: SIGTERM to every audio process it
-/// spawned, and the Mac's voice when it is speaking in-process. Every stop
+/// spawned, and the in-process player. Every stop
 /// (Escape, `stop_coordinator`, a new turn, an audition) comes through here.
 /// Does not touch the queue.
 fn kill_audio_processes() {
-    avspeech::stop_all();
+    pcm_player::stop_all();
     let pids_to_kill: Vec<u32> = audio_processes().pids.clone();
 
     if pids_to_kill.is_empty() {
@@ -1092,9 +1092,9 @@ pub async fn speak_prerendered(
     let result = match audio {
         prerender::Prerendered::Pcm { samples, rate } => {
             let device = state.get_output_device().ok().flatten();
-            match avspeech::play_pcm(&samples, rate, device.as_deref()).await {
-                avspeech::Spoken::Status(status) => Ok(status.to_string()),
-                avspeech::Spoken::UseSay(reason) => Err(reason),
+            match pcm_player::play_pcm(&samples, rate, device.as_deref()).await {
+                pcm_player::Spoken::Status(status) => Ok(status.to_string()),
+                pcm_player::Spoken::Unplayable(reason) => Err(reason),
             }
         }
         prerender::Prerendered::Encoded(encoded) => play_rendered(Ok(encoded), &state).await,
@@ -1382,6 +1382,9 @@ async fn play_rendered(
             } else if result == "TTS_CONTENT_FILTERED" {
                 info!("TTS content was filtered out");
                 Ok(result)
+            } else if result == NO_VOICE {
+                // Nothing allowed to speak it; the text is on screen.
+                Ok(result)
             } else if result == "TTS_COMPLETED" {
                 // Already spoken. The system provider streams out of `say`
                 // rather than handing back audio to play, so there is nothing
@@ -1491,33 +1494,25 @@ async fn play_rendered(
     }
 }
 
-/// The Mac's voice speaking in another engine's place: while Kokoro
-/// downloads, or after an engine failed. Same as the `system` provider, except
-/// that a Siri voice wins whenever one is reachable
-/// (`voices::stand_in_say_voice`).
-async fn invoke_mac_stand_in(text: String, state: AppState) -> Result<String, String> {
-    if is_tts_stop_requested() {
-        return Ok("TTS_STOPPED_BY_USER".to_string());
-    }
-    let stored = state.get_system_voice().ok().flatten();
-    let device = state.get_output_device().ok().flatten();
-    let words_per_minute =
-        rate::effective("system", stored_rate(Some(&state))).and_then(rate::say_words_per_minute);
-    match voices::stand_in_voice(stored).await {
-        voices::StandInVoice::Siri => {
-            system::speak_with_say(text, None, device, words_per_minute).await
-        }
-        voices::StandInVoice::Mac(voice) => {
-            system::speak_directly(text, voice, device, words_per_minute).await
-        }
-    }
-}
+/// The status for a sentence nothing was allowed to speak: the System Voice
+/// is not a Siri voice and no other engine could take it. The text is on
+/// screen; nothing is said about the silence (Juno fails silently).
+pub(crate) const NO_VOICE: &str = "TTS_NO_VOICE";
 
-/// The engines tried for one utterance, in order. Every chain ends in the
-/// Mac's own voice, which needs nothing, so a failing engine never means
-/// silence.
-pub(crate) fn fallback_chain(primary_provider: &str) -> Vec<&'static str> {
-    match primary_provider.to_lowercase().as_str() {
+/// The engines tried for one utterance, in order. Pure.
+///
+/// Every chain ends in the Mac's own voice, which needs nothing, so a failing
+/// engine never means silence, but only while that voice is a Siri voice
+/// (`mac_voice_allowed`, see `voices::mac_voice_is_siri_or_unknown`). When it
+/// is not, the Mac's voice is dropped from every chain, and a chain left empty
+/// (the Mac was the engine) falls to Kokoro when its model is on disk, or to
+/// nothing at all: silence beats a voice that is not Siri.
+pub(crate) fn fallback_chain(
+    primary_provider: &str,
+    mac_voice_allowed: bool,
+    kokoro_on_disk: bool,
+) -> Vec<&'static str> {
+    let mut chain = match primary_provider.to_lowercase().as_str() {
         "replicate" => vec!["replicate", "kokoro", "system"],
         "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
         "chatterbox" => vec!["chatterbox", "kokoro", "system"],
@@ -1531,6 +1526,65 @@ pub(crate) fn fallback_chain(primary_provider: &str) -> Vec<&'static str> {
             );
             vec!["system"]
         }
+    };
+    if !mac_voice_allowed {
+        chain.retain(|engine| *engine != "system");
+        if chain.is_empty() && kokoro_on_disk {
+            chain.push("kokoro");
+        }
+    }
+    chain
+}
+
+/// The local engine that speaks when the chosen one cannot (offline, or a
+/// network error): the Mac's own voice when it may speak, else Kokoro when its
+/// model is on disk, else nothing. Pure.
+pub(crate) fn local_floor(mac_voice_allowed: bool, kokoro_on_disk: bool) -> Option<&'static str> {
+    if mac_voice_allowed {
+        Some("system")
+    } else if kokoro_on_disk {
+        Some("kokoro")
+    } else {
+        None
+    }
+}
+
+/// Whether the Mac's voice may stand in while Kokoro downloads. When it may
+/// not, the stand-in line is never said, so "Ah, that's better." never
+/// follows it either (`kokoro::STAND_IN_HEARD` stays false). Pure.
+pub(crate) fn mac_stands_in_for_download(mac_voice_allowed: bool) -> bool {
+    mac_voice_allowed
+}
+
+/// What the Mac's voice may do, logged once each time the answer changes.
+static MAC_VOICE_DECISION: StdMutex<Option<bool>> = StdMutex::new(None);
+
+/// Whether the Mac's own voice may speak now, logging the decision when it
+/// changes so a silent Juno can be explained from the log.
+async fn mac_voice_allowed_logged() -> bool {
+    let allowed = voices::mac_voice_allowed().await;
+    let changed = MAC_VOICE_DECISION
+        .lock()
+        .map(|mut last| last.replace(allowed) != Some(allowed))
+        .unwrap_or(false);
+    if changed {
+        if allowed {
+            info!("[TTS] The Mac's voice may speak: the System Voice is Siri or unread");
+        } else {
+            info!(
+                "[TTS] The System Voice is not a Siri voice: the Mac's voice is left out; Kokoro speaks if it is on disk, else nothing"
+            );
+        }
+    }
+    allowed
+}
+
+/// Speak with the local floor (see [`local_floor`]), or stay silent.
+async fn speak_with_local_floor(text: String, app_state: AppState) -> Result<String, String> {
+    let mac_allowed = mac_voice_allowed_logged().await;
+    match local_floor(mac_allowed, voices::kokoro_model_on_disk()) {
+        Some(engine) => invoke_tts_for_provider(text, Some(app_state), engine).await,
+        None => Ok(NO_VOICE.to_string()),
     }
 }
 
@@ -1564,8 +1618,8 @@ async fn execute_tts_with_fallback(
             if !allow_direct {
                 return Err("offline; system voice cannot be rendered ahead".to_string());
             }
-            warn!("Device appears offline, using system TTS directly");
-            return invoke_mac_stand_in(text, app_state).await;
+            warn!("Device appears offline, using a local voice directly");
+            return speak_with_local_floor(text, app_state).await;
         }
     }
 
@@ -1575,17 +1629,31 @@ async fn execute_tts_with_fallback(
 
     // Kokoro still downloading is a wait of a minute or more, not seconds.
     // The Mac's voice speaks meanwhile and says why, once; Kokoro says it is
-    // back when the download lands (`kokoro::announce_return`).
+    // back when the download lands (`kokoro::announce_return`). Only when the
+    // Mac's voice is a Siri voice: otherwise nothing speaks until Kokoro can,
+    // and neither line is said.
     if primary_provider.eq_ignore_ascii_case("kokoro") && kokoro::downloading() {
         if !allow_direct {
             return Err("Kokoro is downloading; system voice cannot be rendered ahead".to_string());
         }
+        if !mac_stands_in_for_download(mac_voice_allowed_logged().await) {
+            kokoro::keep_downloading();
+            return Ok(NO_VOICE.to_string());
+        }
         info!("[Kokoro] Still downloading; the Mac's voice stands in");
         let line = kokoro::stand_in(&text);
-        return invoke_mac_stand_in(line, app_state).await;
+        return invoke_tts_for_provider(line, Some(app_state), "system").await;
     }
 
-    let fallback_providers = fallback_chain(primary_provider);
+    let mac_allowed = mac_voice_allowed_logged().await;
+    let fallback_providers = fallback_chain(
+        primary_provider,
+        mac_allowed,
+        voices::kokoro_model_on_disk(),
+    );
+    if fallback_providers.is_empty() {
+        return Ok(NO_VOICE.to_string());
+    }
 
     let fallback_providers: Vec<&str> = fallback_providers
         .into_iter()
@@ -1611,13 +1679,8 @@ async fn execute_tts_with_fallback(
             if is_primary { "primary" } else { "fallback" }
         );
 
-        let attempt = if *fallback_provider == "system"
-            && !primary_provider.eq_ignore_ascii_case("system")
-        {
-            invoke_mac_stand_in(text.clone(), app_state.clone()).await
-        } else {
-            invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider).await
-        };
+        let attempt =
+            invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider).await;
         match attempt {
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
@@ -1641,16 +1704,16 @@ async fn execute_tts_with_fallback(
                     return Err(e);
                 }
                 if is_primary && is_network_error {
-                    warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
-                    // For network errors, skip other cloud providers and go straight to system
-                    match invoke_mac_stand_in(text.clone(), app_state.clone()).await {
-                        Ok(system_result) => {
-                            warn!("Network error detected, successfully fell back to system TTS");
-                            return Ok(system_result);
+                    warn!("Primary TTS provider '{}' failed with network error: {}. Trying a local voice immediately.", fallback_provider, e);
+                    // For network errors, skip other cloud providers and go straight to a local voice
+                    match speak_with_local_floor(text.clone(), app_state.clone()).await {
+                        Ok(local_result) => {
+                            warn!("Network error detected, fell back to a local voice");
+                            return Ok(local_result);
                         }
-                        Err(system_error) => {
-                            error!("Even system TTS failed: {}", system_error);
-                            return Err(format!("Network error with primary provider and system TTS also failed: {}", system_error));
+                        Err(local_error) => {
+                            error!("Even the local voice failed: {}", local_error);
+                            return Err(format!("Network error with primary provider and the local voice also failed: {}", local_error));
                         }
                     }
                 } else {
@@ -1687,6 +1750,7 @@ pub async fn render_sample(
             | "TTS_CONTENT_FILTERED"
             | "TTS_ALREADY_PLAYING"
             | "TTS_SOUND_DISABLED"
+            | NO_VOICE
     );
     Ok(if already_done { None } else { Some(rendered) })
 }
@@ -1776,26 +1840,22 @@ pub async fn invoke_tts_for_provider(
             .clamp(0.5, 2.0);
             supertonic::invoke_supertonic_tts(text, server_url, voice, speed).await
         }
-        // Straight to the speakers rather than to a file and back. This is the
-        // one provider that can start talking immediately, and making it wait
-        // on a full render was what put several seconds between the reply
-        // appearing and Juno saying it.
-        //
-        // It is also the only provider that can be pointed at a chosen
-        // speaker: `say` takes an output device, `afplay` plays to the system
-        // one and takes no device at all.
+        // The System Voice, through `say` with no `-v`: the only way to speak
+        // with a Siri voice. Straight to the speakers rather than to a file
+        // and back, and pointed at the chosen speaker (`say -a`). Refused
+        // outright when the System Voice is not a Siri voice, so no caller
+        // can reach a non-Siri Mac voice by naming this engine.
         "system" => {
-            let voice = _state
-                .as_ref()
-                .and_then(|s| s.get_system_voice().ok())
-                .flatten();
+            if !mac_voice_allowed_logged().await {
+                return Err("the System Voice is not a Siri voice".to_string());
+            }
             let device = _state
                 .as_ref()
                 .and_then(|s| s.get_output_device().ok())
                 .flatten();
             let words_per_minute = rate::effective("system", stored_rate(_state.as_ref()))
                 .and_then(rate::say_words_per_minute);
-            system::speak_directly(text, voice, device, words_per_minute).await
+            system::speak_with_say(text, device, words_per_minute).await
         }
         "off" => {
             warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
@@ -1891,24 +1951,89 @@ pub async fn set_supertonic_settings_command(
 mod tests {
     use super::*;
 
-    /// Kokoro is the default, and when it cannot speak the Mac does.
+    /// Kokoro is the default, and when it cannot speak the Mac does, while
+    /// the Mac's voice is Siri.
     #[test]
     fn the_default_engine_falls_back_to_the_mac() {
         let default = crate::constants::settings::defaults::TTS_PROVIDER;
         assert_eq!(default, "kokoro");
-        assert_eq!(fallback_chain(default), vec!["kokoro", "system"]);
+        assert_eq!(
+            fallback_chain(default, true, false),
+            vec!["kokoro", "system"]
+        );
     }
 
-    /// Whatever engine is chosen, the last one tried is the Mac's own voice.
+    /// While the Mac's voice is Siri (or unread), every chain ends in it.
     #[test]
-    fn every_chain_ends_in_the_mac_voice() {
+    fn every_chain_ends_in_the_mac_voice_when_it_is_siri() {
         for engine in crate::tts::voices::ENGINES
             .iter()
             .copied()
             .chain(["KOKORO", "unknown"])
         {
-            assert_eq!(fallback_chain(engine).last(), Some(&"system"), "{engine}");
+            for kokoro_on_disk in [true, false] {
+                assert_eq!(
+                    fallback_chain(engine, true, kokoro_on_disk).last(),
+                    Some(&"system"),
+                    "{engine}"
+                );
+            }
         }
+    }
+
+    /// A System Voice that is not Siri is in no chain at all.
+    #[test]
+    fn a_non_siri_mac_voice_is_in_no_chain() {
+        for engine in crate::tts::voices::ENGINES
+            .iter()
+            .copied()
+            .chain(["KOKORO", "unknown"])
+        {
+            for kokoro_on_disk in [true, false] {
+                assert!(
+                    !fallback_chain(engine, false, kokoro_on_disk).contains(&"system"),
+                    "{engine}"
+                );
+            }
+        }
+    }
+
+    /// The Mac as the engine, with its voice not Siri: Kokoro when it is on
+    /// disk, otherwise nothing speaks.
+    #[test]
+    fn the_mac_as_engine_without_siri_is_kokoro_or_silence() {
+        assert_eq!(fallback_chain("system", false, true), vec!["kokoro"]);
+        assert!(fallback_chain("system", false, false).is_empty());
+        assert_eq!(fallback_chain("kokoro", false, true), vec!["kokoro"]);
+        assert_eq!(fallback_chain("kokoro", false, false), vec!["kokoro"]);
+        assert_eq!(
+            fallback_chain("elevenlabs", false, false),
+            vec!["elevenlabs", "kokoro"]
+        );
+        assert_eq!(fallback_chain("system", true, true), vec!["system"]);
+    }
+
+    /// Offline or on a network error: the Mac's voice when it is Siri, then
+    /// Kokoro on disk, then nothing.
+    #[test]
+    fn the_local_floor_is_never_a_non_siri_mac_voice() {
+        assert_eq!(local_floor(true, false), Some("system"));
+        assert_eq!(local_floor(false, true), Some("kokoro"));
+        assert_eq!(local_floor(false, false), None);
+    }
+
+    /// While Kokoro downloads, the Mac stands in (and says why) only when its
+    /// voice is Siri; otherwise neither line is said.
+    #[test]
+    fn the_download_stand_in_needs_a_siri_voice() {
+        assert!(mac_stands_in_for_download(true));
+        assert!(!mac_stands_in_for_download(false));
+    }
+
+    /// Silence is a status, so it is never mistaken for audio to decode.
+    #[test]
+    fn no_voice_is_a_status_not_audio() {
+        assert!(is_status_result(NO_VOICE));
     }
 
     #[test]
