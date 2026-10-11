@@ -117,15 +117,16 @@ pub fn label_matches(raw_label: &str, wanted: &[&str]) -> bool {
 // Access
 // ---------------------------------------------------------------------------
 
-fn status() -> Access {
+pub(super) fn status() -> Access {
     // SAFETY: a class method that only reads the current answer.
     let raw: CNAuthorizationStatus =
         unsafe { CNContactStore::authorizationStatusForEntityType(CNEntityType::Contacts) };
     access_from_contacts(raw.0)
 }
 
-/// Show the system dialog and wait for the answer.
-fn request() -> Option<Access> {
+/// Show the system dialog and wait for the answer. Only the preflight calls
+/// this, after the person said "continue".
+pub(super) fn request() -> Option<Access> {
     let (tx, rx) = oneshot::channel::<bool>();
     let slot = Mutex::new(Some(tx));
     // SAFETY: `+new` on a plain NSObject subclass.
@@ -283,7 +284,7 @@ pub(crate) type Found = Result<(Vec<Person>, Option<String>), Value>;
 /// declined, or "my wife" was asked with no card marked as the person's own.
 /// Shared by `contacts_find` and every tool that sends to a person by name.
 pub(crate) fn people_for(query: &str) -> Result<Found, String> {
-    let asked = match clear(Domain::Contacts, status(), request) {
+    let asked = match clear(Domain::Contacts, status()) {
         Cleared::Go { asked } => asked,
         Cleared::Stop(answer) => return Ok(Err(answer)),
     };

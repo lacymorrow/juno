@@ -398,6 +398,12 @@ pub async fn ask_person(app: &tauri::AppHandle, request: ToolApprovalRequest) ->
         map.insert("consequence".to_string(), json!("send"));
         map.insert("always_allow_label".to_string(), Value::Null);
     }
+    // A permission ask is drawn as the one-line card with Continue.
+    if let (Some(permission), Some(map)) = (&request.permission, approval_event.as_object_mut()) {
+        map.insert("permission".to_string(), permission.clone());
+        map.insert("consequence".to_string(), json!("permission"));
+        map.insert("always_allow_label".to_string(), Value::Null);
+    }
     if let Err(e) = app.emit(events::tools::APPROVAL_REQUEST, approval_event) {
         warn!("[CliApproval] Failed to emit approval request: {}", e);
     }
@@ -412,6 +418,7 @@ pub async fn ask_person(app: &tauri::AppHandle, request: ToolApprovalRequest) ->
         let spoken = request
             .message
             .as_ref()
+            .or(request.permission.as_ref())
             .and_then(|m| m.get("prompt"))
             .and_then(Value::as_str)
             .map(str::to_string)
@@ -706,11 +713,54 @@ pub async fn answer_pending_approval(
     text: &str,
     source: AnswerSource,
 ) -> PendingAnswer {
+    use crate::agent::tools::mac_apps::preflight::{self as permission, ContinueReply};
     use crate::agent::tools::mac_apps::send::{self, SendReply};
 
     let pending = app_state.get_pending_tool_approvals().await;
     if pending.is_empty() {
         return PendingAnswer::NotAnAnswer;
+    }
+    let (mut asks, pending): (Vec<_>, Vec<_>) =
+        pending.into_iter().partition(|r| r.is_permission());
+    // One already answered is the waiter's to collect, not to answer again.
+    asks.retain(|r| r.approved.is_none());
+
+    // A waiting permission ask ("I need Reminders for that.") is answered on
+    // its own terms: "continue" brings the system dialog up, a clear no drops
+    // it, and anything else said on purpose is a new request, so the ask is
+    // dropped and the words carry on as a query. Overheard talk changes
+    // nothing.
+    if !asks.is_empty() {
+        match permission::classify_reply(text, parse_spoken_approval) {
+            ContinueReply::Continue => {
+                for request in &asks {
+                    app_state.approve_tool(&request.tool_id).await;
+                }
+                info!(
+                    "[CliApproval] '{}' continued {} permission ask(s)",
+                    text,
+                    asks.len()
+                );
+                return PendingAnswer::Answered;
+            }
+            ContinueReply::Cancel => {
+                for request in &asks {
+                    app_state.deny_tool(&request.tool_id).await;
+                }
+                return PendingAnswer::Answered;
+            }
+            ContinueReply::Other => {
+                if source == AnswerSource::Deliberate {
+                    for request in &asks {
+                        app_state.deny_tool(&request.tool_id).await;
+                    }
+                    info!("[CliApproval] '{}' replaced a waiting permission ask", text);
+                }
+                if pending.is_empty() {
+                    return PendingAnswer::NotAnAnswer;
+                }
+            }
+        }
     }
     let (sends, others): (Vec<_>, Vec<_>) = pending.into_iter().partition(|r| r.is_send());
 
