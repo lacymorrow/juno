@@ -23,7 +23,6 @@
 use serde_json::{json, Value};
 
 use crate::constants::agent::tool_names;
-use crate::constants::permissions::urls;
 use crate::state::{RiskLevel, ToolApprovalRequest};
 
 use super::script::App;
