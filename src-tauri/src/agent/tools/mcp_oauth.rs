@@ -242,7 +242,10 @@ async fn discover(mcp_url: &str) -> Result<AuthServerMetadata, String> {
         require_secure_endpoint(&url, key)?;
         Ok(url)
     };
-    let registration_endpoint = match metadata.get("registration_endpoint").and_then(Value::as_str) {
+    let registration_endpoint = match metadata
+        .get("registration_endpoint")
+        .and_then(Value::as_str)
+    {
         Some(url) => {
             require_secure_endpoint(url, "registration_endpoint")?;
             Some(url.to_string())
