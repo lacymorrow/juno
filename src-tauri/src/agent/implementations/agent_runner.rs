@@ -1089,7 +1089,9 @@ where
             let mut cancel = cancel_rx.clone();
             let decision = tokio::select! {
                 answer = cli_approval::ask_person(&self.app_handle, request) => answer,
-                _ = cancel.wait_for(|&v| v) => {
+                // Drop the watch guard inside the branch future so nothing
+                // non-Send is held across the awaits below.
+                _ = async { cancel.wait_for(|&v| v).await.map(|_| ()) } => {
                     app_state.remove_tool_approval(&ask_id).await;
                     self.emit_approval_resolved(&ask_id, ApprovalOutcome::Cancelled);
                     if marked_needs_input {
