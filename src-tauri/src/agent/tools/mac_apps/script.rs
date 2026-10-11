@@ -97,6 +97,7 @@ pub enum App {
     Messages,
     Mail,
     Notes,
+    Music,
 }
 
 impl App {
@@ -105,6 +106,18 @@ impl App {
             App::Messages => "Messages",
             App::Mail => "Mail",
             App::Notes => "Notes",
+            App::Music => "Music",
+        }
+    }
+
+    /// The app's bundle id, which is how macOS names the target of an
+    /// Automation permission.
+    pub fn bundle_id(self) -> &'static str {
+        match self {
+            App::Messages => "com.apple.MobileSMS",
+            App::Mail => "com.apple.mail",
+            App::Notes => "com.apple.Notes",
+            App::Music => "com.apple.Music",
         }
     }
 }

@@ -218,19 +218,6 @@ fn needs_full_disk_access() -> Value {
     full_disk_access_result()
 }
 
-/// One sentence, one action.
-pub(crate) fn full_disk_access_result() -> Value {
-    json!({
-        "ok": false,
-        "access": "denied",
-        "summary": "I need Full Disk Access to read your messages.",
-        "card": format!(
-            "<MessageCard needsAccess=\"Full Disk Access\" reason={{\"I need Full Disk Access to read your messages.\"}} settingsUrl=\"{}\" />",
-            urls::FULL_DISK_ACCESS_PANEL
-        ),
-    })
-}
-
 /// `messages_recent`
 pub fn recent(input: &Value) -> Result<Value, String> {
     let limit = input
@@ -421,21 +408,6 @@ mod tests {
         assert!(!safe_for_url("doug@example.com?x=1"));
         assert!(!safe_for_url("a b"));
         assert!(!safe_for_url(""));
-    }
-
-    #[test]
-    fn the_full_disk_access_answer_is_one_sentence_and_one_action() {
-        let out = full_disk_access_result();
-        assert_eq!(
-            out["summary"],
-            "I need Full Disk Access to read your messages."
-        );
-        let card = out["card"].as_str().unwrap_or_default();
-        assert!(card.contains("Privacy_AllFiles"), "{card}");
-        for banned in ["TCC", "plist", "chat.db", "framework", "sqlite"] {
-            assert!(!out["summary"].as_str().unwrap_or_default().contains(banned));
-            assert!(!card.contains(banned), "{banned} in {card}");
-        }
     }
 
     #[test]

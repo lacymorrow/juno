@@ -106,13 +106,17 @@ The ask is one card and one phrase. The card shows the recipient as Contacts res
 
 ### Permissions, progressively, right before the act
 
-Decided by Lacy 2026-10-08: after the basics (microphone, accessibility, screen recording), every permission is disclosed progressively. Nothing is requested at install or in onboarding. Juno asks for a permission in the moment it is about to run the command that needs it, says why in one spoken line ("I need Reminders for that."), and brings the dialog up itself. The person is never sent to find a setting on their own.
+Decided by Lacy 2026-10-08, refined 2026-10-10 (LAC-4234): after the basics (microphone, accessibility, screen recording), every permission is disclosed progressively. Nothing is requested at install or in onboarding. **A system dialog never lands unannounced.** Before a Mac app tool runs, Juno checks the permission silently (`mac_apps::preflight`, one table of what each tool needs, used by both the API runner and the MCP gate). Three outcomes:
 
-How each kind is brought up:
+1. **Granted.** The tool runs. Nothing is said, no banner.
+2. **Not yet asked.** Juno speaks and shows one line with one action: "I need Reminders for that." and a Continue button. The system dialog is brought up only when the person taps Continue or says "continue" (the whole utterance; "go ahead", "ok" and a bare "yes" also count, since nothing is sent). Several missing permissions are asked in sequence behind that one Continue. Anything else said is a new request and the ask is dropped.
+3. **Declined, restricted, or no dialog exists** (Full Disk Access, Automation once denied). The denied result: one sentence and the one action that opens the right Privacy pane. The floating helper over System Settings is the second half of LAC-4234.
 
-- **Reminders, Calendar, Contacts.** The system dialog appears when the tool first calls the framework. Juno speaks the line, calls, and the dialog is the next thing on screen.
-- **Controlling a specific app (Messages, Mail, Notes, Music).** The Automation dialog comes from macOS the first time Juno scripts that app, one per app. Juno says "I need to control Messages for that" and runs the script; the dialog is the next thing on screen. It must come from the Tauri main process so the dialog names Juno (see gotchas).
-- **Full Disk Access (reading Messages).** macOS has no prompt for it. Juno says "I need Full Disk Access to read your messages", opens the Privacy pane on that row, and shows the one card with that action. When the person comes back, the read runs without being asked again.
+How each kind is checked and brought up:
+
+- **Reminders, Calendar, Contacts.** EventKit and Contacts `authorizationStatus`, read without a dialog. The request call runs only after Continue.
+- **Controlling a specific app (Messages, Mail, Notes, Music).** `AEDeterminePermissionToAutomateTarget` with `askUserIfNeeded = false` reads the state silently (0 granted, -1744 never asked, -1743 denied; -600 means the app is not running, so it is started hidden in the background and read again). The same call with `askUserIfNeeded = true` brings the dialog up after Continue. It runs in Juno's main process so the dialog names Juno (see gotchas).
+- **Full Disk Access (reading Messages).** macOS has no prompt for it. A read of the Messages history is the probe; off is outcome 3 with the one card.
 
 Declined is designed, not an error: one sentence, one action that changes it, never a framework name, a plist key, or the word TCC (capability-shaped UX). Nothing already granted is asked again, and nothing is asked that the current request does not need.
 

@@ -9,6 +9,7 @@ Tiers: 0 is a local intent (no model), 1 is a typed tool the model calls, 2 is c
 | utterance | Siri on Mac | Juno tier | status | first-audio ms | recording |
 | --- | --- | --- | --- | --- | --- |
 | remind me to call Katie tomorrow at nine | yes | 1 (`reminders_create`) | built, unrecorded | - | - |
+| remind me to call Katie (Reminders not yet allowed) | yes | 1 (`reminders_create` behind the permission preflight: "I need Reminders for that." + Continue, then the system dialog) | built, unrecorded | - | - |
 | remind me to pick up the drawings Friday | yes | 1 (`reminders_create`, date only) | built, unrecorded | - | - |
 | what are my reminders | yes | 0 (local intent `agenda`, once Reminders is allowed), else 1 (`reminders_list`) | built, unrecorded | - | - |
 | what's due today | yes | 1 (`reminders_list`, due window) | built, unrecorded | - | - |
@@ -37,7 +38,7 @@ A send always stops on the message card and goes only on "send it" or the Send b
 | text Sam (two Sams in Contacts) | yes | 1 (`messages_send` returns both, asks which) | built, unrecorded | - | - |
 | what did Katie text me | yes | 1 (`messages_recent`, from) | built, unrecorded | - | - |
 | read my new messages | yes | 1 (`messages_recent`) | built, unrecorded | - | - |
-| what did Katie text me (Full Disk Access off) | yes | 1 (`messages_recent`, opens the setting) | built, unrecorded | - | - |
+| what did Katie text me (Full Disk Access off) | yes | 1 (`messages_recent` blocked by the permission preflight: one sentence + the button that opens the Full Disk Access pane) | built, unrecorded | - | - |
 | FaceTime Mom | yes | 1 (`facetime_call`) | built, unrecorded | - | - |
 | FaceTime audio Doug | yes | 1 (`facetime_call`, audio) | built, unrecorded | - | - |
 | read me my unread mail | yes | 1 (`mail_unread`) | built, unrecorded | - | - |

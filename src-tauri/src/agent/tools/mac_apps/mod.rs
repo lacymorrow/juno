@@ -22,10 +22,13 @@
 //!
 //! ## Permission, in the moment
 //!
-//! Nothing is asked at install. The first call that needs an app checks its
-//! authorization. Not determined: the tool says what it is asking for, brings
-//! the system dialog up and waits for the answer. Denied: one sentence and one
-//! button. Nothing here names a framework, a plist key or the privacy database.
+//! Nothing is asked at install, and no system dialog ever lands unannounced.
+//! `preflight` checks every permission a tool needs, silently, before the tool
+//! runs (see that module). Granted: the tool runs and nothing is said. Not yet
+//! asked: Juno says what it needs and waits for "continue" or the button, and
+//! only then brings the system dialog up. Denied: one sentence and one button.
+//! The tools themselves never trigger a dialog. Nothing here names a
+//! framework, a plist key or the privacy database.
 //!
 //! ## What a write reports
 //!
@@ -62,6 +65,7 @@ mod messages;
 mod notes;
 
 pub mod chat_db;
+pub mod preflight;
 pub mod recipients;
 pub mod script;
 pub mod send;
@@ -922,7 +926,7 @@ pub fn access_from_contacts(raw: isize) -> Access {
 pub enum Gate {
     /// Go ahead.
     Proceed,
-    /// Bring the system dialog up and wait for the answer.
+    /// Never asked: the preflight asks, in words, before any dialog.
     Ask,
     /// Stop with the denied answer.
     Denied,
@@ -937,11 +941,6 @@ pub fn gate(access: Access) -> Gate {
         Access::Denied => Gate::Denied,
         Access::Restricted => Gate::Restricted,
     }
-}
-
-/// The line that says what Juno is asking for, in plain words.
-pub fn ask_line(domain: Domain) -> String {
-    format!("Asking for access to {}.", domain.label())
 }
 
 /// The no: one sentence, one action. The card carries the button.
@@ -967,43 +966,50 @@ pub fn restricted_result(domain: Domain) -> Value {
     })
 }
 
-/// The dialog was shown and not answered in time.
-pub fn waiting_result(domain: Domain) -> Value {
+/// The check found the app not asked yet and a tool reached it anyway. The
+/// preflight asks first, so this is a race, not the normal path: nothing was
+/// shown and nothing ran.
+pub fn not_asked_result(domain: Domain) -> Value {
     json!({
         "ok": false,
         "access": "asking",
-        "summary": format!("{} Answer the box on screen, then ask me again.", ask_line(domain)),
+        "summary": format!("I need {} for that. Ask me again and I will check with you first.", domain.label()),
     })
 }
 
-/// What a platform check came to, once the dialog (if any) has been through.
+/// One sentence, one action: Full Disk Access has no system dialog, so the
+/// card carries the button that opens its row.
+pub(crate) fn full_disk_access_result() -> Value {
+    json!({
+        "ok": false,
+        "access": "denied",
+        "summary": "I need Full Disk Access to read your messages.",
+        "card": format!(
+            "<MessageCard needsAccess=\"Full Disk Access\" reason={{\"I need Full Disk Access to read your messages.\"}} settingsUrl=\"{}\" />",
+            urls::FULL_DISK_ACCESS_PANEL
+        ),
+    })
+}
+
+/// What a platform check came to.
 #[derive(Debug)]
 pub enum Cleared {
-    /// Use the app. `asked` carries the line to repeat when a dialog just ran.
+    /// Use the app. `asked` is always `None` now that no tool shows a dialog;
+    /// the field stays until the result shapes that carry it are simplified.
     Go { asked: Option<String> },
     /// Return this as the tool result.
     Stop(Value),
 }
 
-/// Fold the status before and after asking into the next step. Pure, so the
-/// whole decision table is tested without a Mac.
-pub fn clear(
-    domain: Domain,
-    before: Access,
-    after_asking: impl FnOnce() -> Option<Access>,
-) -> Cleared {
+/// Fold the status into the next step. Pure, so the whole decision table is
+/// tested without a Mac. It never asks: a not-yet-asked app is the
+/// preflight's to bring up, so here it is a stop.
+pub fn clear(domain: Domain, before: Access) -> Cleared {
     match gate(before) {
         Gate::Proceed => Cleared::Go { asked: None },
+        Gate::Ask => Cleared::Stop(not_asked_result(domain)),
         Gate::Denied => Cleared::Stop(denied_result(domain)),
         Gate::Restricted => Cleared::Stop(restricted_result(domain)),
-        Gate::Ask => match after_asking() {
-            Some(Access::Granted) => Cleared::Go {
-                asked: Some(ask_line(domain)),
-            },
-            Some(Access::Restricted) => Cleared::Stop(restricted_result(domain)),
-            Some(_) => Cleared::Stop(denied_result(domain)),
-            None => Cleared::Stop(waiting_result(domain)),
-        },
     }
 }
 
@@ -1096,8 +1102,9 @@ pub(crate) mod eventkit {
         access_from_eventkit(raw.0)
     }
 
-    /// Show the system dialog and wait for the answer.
-    fn request(domain: Domain) -> Option<Access> {
+    /// Show the system dialog and wait for the answer. Only the preflight
+    /// calls this, after the person said "continue".
+    pub(crate) fn request(domain: Domain) -> Option<Access> {
         let (tx, rx) = oneshot::channel::<bool>();
         let slot = Mutex::new(Some(tx));
         let store = new_store();
@@ -1121,9 +1128,9 @@ pub(crate) mod eventkit {
         Some(status(domain))
     }
 
-    /// Check the app's access; if it was never asked, ask now.
+    /// Check the app's access. Never shows a dialog.
     pub fn clear_access(domain: Domain) -> Cleared {
-        clear(domain, status(domain), || request(domain))
+        clear(domain, status(domain))
     }
 }
 
@@ -1351,52 +1358,36 @@ mod tests {
     }
 
     #[test]
-    fn not_determined_says_what_is_being_asked_then_follows_the_answer() {
-        assert_eq!(
-            ask_line(Domain::Reminders),
-            "Asking for access to Reminders."
-        );
-
-        let yes = clear(Domain::Reminders, Access::NotDetermined, || {
-            Some(Access::Granted)
-        });
-        assert!(
-            matches!(yes, Cleared::Go { asked: Some(ref l) } if l == "Asking for access to Reminders.")
-        );
-
-        let no = clear(Domain::Calendar, Access::NotDetermined, || {
-            Some(Access::Denied)
-        });
-        assert!(matches!(no, Cleared::Stop(ref v) if v["access"] == "denied"));
-
-        let silent = clear(Domain::Contacts, Access::NotDetermined, || None);
-        assert!(
-            matches!(silent, Cleared::Stop(ref v) if v["access"] == "asking"
-            && v["summary"].as_str().unwrap_or_default().starts_with("Asking for access to Contacts."))
-        );
-
-        let known = clear(Domain::Reminders, Access::Granted, || None);
-        assert!(
-            matches!(known, Cleared::Go { asked: None }),
-            "a granted app is never asked again"
-        );
+    fn a_tool_never_asks_the_system_itself() {
+        let never = clear(Domain::Reminders, Access::NotDetermined);
+        assert!(matches!(never, Cleared::Stop(ref v) if v["access"] == "asking"));
+        assert!(matches!(
+            clear(Domain::Calendar, Access::Denied),
+            Cleared::Stop(ref v) if v["access"] == "denied"
+        ));
+        assert!(matches!(
+            clear(Domain::Contacts, Access::Restricted),
+            Cleared::Stop(ref v) if v["access"] == "restricted"
+        ));
+        assert!(matches!(
+            clear(Domain::Reminders, Access::Granted),
+            Cleared::Go { asked: None }
+        ));
     }
 
     #[test]
-    fn a_dialog_is_never_shown_for_an_answer_already_given() {
-        let never = || -> Option<Access> { panic!("asked again") };
-        assert!(matches!(
-            clear(Domain::Reminders, Access::Denied, never),
-            Cleared::Stop(_)
-        ));
-        assert!(matches!(
-            clear(Domain::Reminders, Access::Restricted, never),
-            Cleared::Stop(_)
-        ));
-        assert!(matches!(
-            clear(Domain::Reminders, Access::Granted, never),
-            Cleared::Go { .. }
-        ));
+    fn the_full_disk_access_answer_is_one_sentence_and_one_action() {
+        let out = full_disk_access_result();
+        assert_eq!(
+            out["summary"],
+            "I need Full Disk Access to read your messages."
+        );
+        let card = out["card"].as_str().unwrap_or_default();
+        assert!(card.contains("Privacy_AllFiles"), "{card}");
+        for banned in ["TCC", "plist", "chat.db", "framework", "sqlite"] {
+            assert!(!out["summary"].as_str().unwrap_or_default().contains(banned));
+            assert!(!card.contains(banned), "{banned} in {card}");
+        }
     }
 
     #[test]

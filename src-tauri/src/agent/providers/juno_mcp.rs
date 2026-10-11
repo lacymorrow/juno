@@ -269,6 +269,11 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
         });
     }
     if is_mac_app_tool(name) {
+        // Before anything else, and before the send gate resolves a name through
+        // Contacts: no system dialog lands unannounced.
+        if let Some(early) = permissions_first(app, name, &arguments).await {
+            return Ok(early);
+        }
         let mode = permission_mode(app).await;
         return Ok(run_gated(
             name,
@@ -293,6 +298,36 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
             "content": [{ "type": "text", "text": e }],
             "isError": true
         })),
+    }
+}
+
+/// The permission preflight for one Mac app tool (`mac_apps::preflight`).
+///
+/// `None`: everything it needs is allowed (or was just allowed), so run it.
+/// `Some(answer)`: hand this back as the tool's answer and do not run it. A
+/// permission that was never asked becomes one line and a Continue button; the
+/// system dialog comes up only after "continue" or the button.
+async fn permissions_first(app: &tauri::AppHandle, name: &str, input: &Value) -> Option<Value> {
+    use mac_apps::preflight::{self, Preflight};
+
+    let asked = match preflight::preflight(name, input).await {
+        Preflight::Clear => return None,
+        Preflight::Blocked(answer) => return Some(to_mcp_content(answer)),
+        Preflight::Ask(asked) => asked,
+    };
+    let request = preflight::ask_request(name, input, &asked);
+    info!(
+        "[JunoMCP] Asking before a system dialog: {}",
+        request.description
+    );
+    match cli_approval::ask_person(app, request).await {
+        Some(true) => match preflight::continue_after_ask(name, input, asked).await {
+            Preflight::Clear => None,
+            Preflight::Blocked(answer) => Some(to_mcp_content(answer)),
+            Preflight::Ask(_) => Some(tool_error(preflight::NOT_ALLOWED_YET)),
+        },
+        Some(false) => Some(tool_error(preflight::NOT_CONTINUED)),
+        None => Some(tool_error(preflight::NOT_ANSWERED)),
     }
 }
 

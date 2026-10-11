@@ -383,6 +383,8 @@ export function useBackendEvents({
 		always_allow_label?: string | null;
 		/** Set for a send: the message card's data. */
 		message?: ChatMessage["message"];
+		/** Set for a permission ask: the line the card shows. */
+		permission?: ChatMessage["permission"];
 	}>(
 		EVENTS.TOOLS_APPROVAL_REQUEST,
 		(payload) => {
@@ -398,6 +400,7 @@ export function useBackendEvents({
 					target_app: payload.target_app,
 					always_allow_label: payload.always_allow_label ?? null,
 					message: payload.message ?? null,
+					permission: payload.permission ?? null,
 					approval_timeout_seconds: payload.timeout_seconds ?? 60,
 					timestamp: payload.timestamp,
 			}));

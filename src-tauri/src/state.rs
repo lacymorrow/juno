@@ -176,6 +176,12 @@ pub struct ToolApprovalRequest {
     /// `None` for every other kind of ask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<Value>,
+    /// For a permission ask (`mac_apps::preflight`): the one line the card
+    /// shows and the prompt that is spoken. The approval is drawn as a
+    /// PermissionAskCard and answered by "continue" or its Continue button.
+    /// `None` for every other kind of ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission: Option<Value>,
 }
 
 /// The conversation key for a runner with no session id of its own.
@@ -200,6 +206,7 @@ impl ToolApprovalRequest {
             timeout_seconds: 60,
             conversation_key: default_conversation_key(),
             message: None,
+            permission: None,
         }
     }
 
@@ -225,10 +232,23 @@ impl ToolApprovalRequest {
         self
     }
 
+    /// Mark this ask as a permission ask, carrying the card's line and prompt.
+    pub fn with_permission(mut self, permission: Value) -> Self {
+        self.permission = Some(permission);
+        self
+    }
+
+    /// Whether this ask is "I need X for that", answered by "continue" or the
+    /// Continue button. It is about the tool's permissions, never the send.
+    pub fn is_permission(&self) -> bool {
+        self.permission.is_some()
+    }
+
     /// Whether this ask is a send, answered only by "send it" or the button.
     pub fn is_send(&self) -> bool {
-        self.message.is_some()
-            || crate::agent::tools::risk_classifier::is_send_tool(&self.tool_name)
+        !self.is_permission()
+            && (self.message.is_some()
+                || crate::agent::tools::risk_classifier::is_send_tool(&self.tool_name))
     }
 
     pub fn with_timeout(mut self, seconds: u64) -> Self {
