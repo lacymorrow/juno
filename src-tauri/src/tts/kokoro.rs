@@ -168,9 +168,10 @@ static KOKORO: ModelCell<KokoroModel> = ModelCell::new();
 
 // -- the first download ------------------------------------------------------
 //
-// On a new Mac Kokoro has to download before it can say a word. Juno does not
-// go quiet for that: she speaks in the Mac's voice, says why once, and when
-// her own voice lands she says so in it.
+// On a new Mac Kokoro has to download before it can say a word. When the
+// Mac's voice is a Siri voice Juno does not go quiet for that: she speaks in
+// it, says why once, and when her own voice lands she says so in it. When it
+// is not, she stays quiet until Kokoro can speak, and says neither line.
 
 /// Said once, in the Mac's voice, before the first thing she says while
 /// Kokoro is still downloading.
@@ -196,8 +197,14 @@ pub fn downloading() -> bool {
 /// first time, then just the text. Also makes sure a download is under way,
 /// so one that failed (offline at launch) is tried again.
 pub fn stand_in(text: &str) -> String {
-    sync_with_engine("kokoro", || {});
+    keep_downloading();
     stand_in_text(&STAND_IN_HEARD, text)
+}
+
+/// Make sure a download is under way, so one that failed (offline at launch)
+/// is tried again. Used on its own when nothing may stand in.
+pub fn keep_downloading() {
+    sync_with_engine("kokoro", || {});
 }
 
 fn stand_in_text(heard: &AtomicBool, text: &str) -> String {

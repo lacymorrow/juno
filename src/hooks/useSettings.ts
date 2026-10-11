@@ -56,6 +56,11 @@ export interface JunoVoiceOption {
 	selected: boolean;
 	/** Whether picking it plays a sample. */
 	speaks: boolean;
+	/**
+	 * A link under the row when its voice is set somewhere else. The Mac's
+	 * row says "Open Read & Speak" and opens it through Rust.
+	 */
+	link?: string | null;
 }
 
 /**

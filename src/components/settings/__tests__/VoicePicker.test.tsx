@@ -1,10 +1,20 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
+
+import { invoke } from "@tauri-apps/api/core";
+import { COMMANDS } from "@/lib/constants.generated";
 import type { JunoVoiceList, VoiceAudition } from "@/hooks/useSettings";
 import { VoicePicker } from "../VoicePicker";
 
-/** The shape Rust hands over when the Mac is speaking. */
-function macList(selectedId = "Samantha", overrides: Partial<JunoVoiceList> = {}): JunoVoiceList {
+const invokeMock = vi.mocked(invoke);
+
+/**
+ * The shape Rust hands over when the Mac is speaking: one row, the Mac's own
+ * voice (Siri, set in Read & Speak), never a named Mac voice.
+ */
+function macList(descriptor = "Uses the Siri voice you pick in Read & Speak."): JunoVoiceList {
   return {
     provider: "system",
     silent: false,
@@ -14,28 +24,20 @@ function macList(selectedId = "Samantha", overrides: Partial<JunoVoiceList> = {}
     engines: [],
     options: [
       {
-        id: "Samantha",
-        kind: "voice",
-        name: "Samantha",
-        descriptor: "American English. On every Mac.",
-        selected: selectedId === "Samantha",
+        id: "system_default",
+        kind: "system",
+        name: "Your Mac's voice",
+        descriptor,
+        selected: true,
         speaks: true,
-      },
-      {
-        id: "Daniel",
-        kind: "voice",
-        name: "Daniel",
-        descriptor: "British English.",
-        selected: selectedId === "Daniel",
-        speaks: true,
+        link: "Open Read & Speak",
       },
     ],
-    ...overrides,
   };
 }
 
 /** The shape Rust hands over when Kokoro is speaking. */
-function kokoroList(): JunoVoiceList {
+function kokoroList(selectedId = "af_heart", overrides: Partial<JunoVoiceList> = {}): JunoVoiceList {
   return {
     provider: "kokoro",
     silent: false,
@@ -49,12 +51,25 @@ function kokoroList(): JunoVoiceList {
         kind: "voice",
         name: "Heart",
         descriptor: "American English, female.",
-        selected: true,
+        selected: selectedId === "af_heart",
+        speaks: true,
+      },
+      {
+        id: "am_michael",
+        kind: "voice",
+        name: "Michael",
+        descriptor: "American English, male.",
+        selected: selectedId === "am_michael",
         speaks: true,
       },
     ],
+    ...overrides,
   };
 }
+
+beforeEach(() => {
+  invokeMock.mockClear();
+});
 
 function renderPicker(list: JunoVoiceList | null, audition: VoiceAudition | null = null) {
   const onChange = vi.fn();
@@ -69,58 +84,91 @@ describe("VoicePicker", () => {
   /// The whole design: choosing is how you hear it. The handler that saves the
   /// choice is the handler that speaks, so a row tap must reach it.
   it("picking a voice is what plays it", () => {
-    const { onChange, onReplay } = renderPicker(macList());
-    fireEvent.click(screen.getByRole("radio", { name: /Daniel/ }));
-    expect(onChange).toHaveBeenCalledWith("Daniel");
+    const { onChange, onReplay } = renderPicker(kokoroList());
+    fireEvent.click(screen.getByRole("radio", { name: /Michael/ }));
+    expect(onChange).toHaveBeenCalledWith("am_michael");
     expect(onReplay).not.toHaveBeenCalled();
   });
 
   /// Tapping the voice already in force is not a no-op: it is "say that again".
   it("picking the voice already chosen plays it again instead of re-saving", () => {
-    const { onChange, onReplay } = renderPicker(macList());
-    fireEvent.click(screen.getByRole("radio", { name: /Samantha/ }));
+    const { onChange, onReplay } = renderPicker(kokoroList());
+    fireEvent.click(screen.getByRole("radio", { name: /Heart/ }));
     expect(onReplay).toHaveBeenCalledTimes(1);
     expect(onChange).not.toHaveBeenCalled();
   });
 
   it("exactly one row is in force", () => {
-    renderPicker(macList("Daniel"));
+    renderPicker(kokoroList("am_michael"));
     const checked = screen
       .getAllByRole("radio")
       .filter((row) => row.getAttribute("aria-checked") === "true");
     expect(checked).toHaveLength(1);
-    expect(checked[0]).toHaveTextContent("Daniel");
+    expect(checked[0]).toHaveTextContent("Michael");
   });
 
   /// Every row carries a name and one honest line, the way the appearance
   /// catalog does. A name on its own is not a choice.
   it("every row shows a name and one line", () => {
-    renderPicker(macList());
-    for (const option of macList().options) {
+    renderPicker(kokoroList());
+    for (const option of kokoroList().options) {
       expect(screen.getByText(option.name)).toBeInTheDocument();
       expect(screen.getByText(option.descriptor)).toBeInTheDocument();
     }
   });
 
-  /// The defect this component was rewritten for: the rows are the active
-  /// engine's, and nothing here invents a list of its own. Give it Kokoro's
-  /// voices and Kokoro's voices are what it draws.
+  /// The Mac offers its own voice and nothing else: Juno never speaks in a
+  /// named Mac voice, only the Siri voice chosen in Read & Speak.
+  it("the Mac is one row, its own voice", () => {
+    renderPicker(macList());
+    const rows = screen.getAllByRole("radio");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("Your Mac's voice");
+    expect(rows[0]).toHaveTextContent("Uses the Siri voice you pick in Read & Speak.");
+  });
+
+  /// Where the Mac's voice is set is one tap away, and Rust opens it.
+  it("the Mac row opens Read & Speak through Rust, without picking", () => {
+    const { onChange, onReplay } = renderPicker(macList());
+    fireEvent.click(screen.getByRole("button", { name: "Open Read & Speak" }));
+    expect(invokeMock).toHaveBeenCalledWith(COMMANDS.AUDIO_OPEN_READ_AND_SPEAK);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onReplay).not.toHaveBeenCalled();
+  });
+
+  /// When the Mac's voice is not a Siri voice the row says how to fix it,
+  /// in the words Rust chose.
+  it("says how to pick a Siri voice when the Mac's is not one", () => {
+    renderPicker(macList("Pick a Siri voice in Read & Speak and Juno will use it."));
+    expect(
+      screen.getByText("Pick a Siri voice in Read & Speak and Juno will use it."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Read & Speak" })).toBeInTheDocument();
+  });
+
+  /// A row with no link draws none.
+  it("only a row Rust gave a link has one", () => {
+    renderPicker(kokoroList());
+    expect(screen.queryByRole("button", { name: "Open Read & Speak" })).toBeNull();
+  });
+
+  /// The rows are the active engine's, and nothing here invents a list of
+  /// its own. Give it Kokoro's voices and Kokoro's voices are what it draws.
   it("draws whichever engine's voices it was given", () => {
     renderPicker(kokoroList());
     expect(screen.getByRole("radio", { name: /Heart/ })).toBeInTheDocument();
-    expect(screen.queryByRole("radio", { name: /Samantha/ })).toBeNull();
-    expect(screen.queryByRole("radio", { name: /Daniel/ })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /Your Mac's voice/ })).toBeNull();
   });
 
   it("the speaking row says it is speaking", () => {
-    renderPicker(macList(), {
-      voice: "Samantha",
-      engine: "system",
+    renderPicker(kokoroList(), {
+      voice: "af_heart",
+      engine: "kokoro",
       state: "speaking",
       message: null,
     });
-    expect(screen.getByRole("radio", { name: /Samantha/ })).toHaveTextContent("Speaking");
-    expect(screen.getByRole("radio", { name: /Daniel/ })).not.toHaveTextContent("Speaking");
+    expect(screen.getByRole("radio", { name: /Heart/ })).toHaveTextContent("Speaking");
+    expect(screen.getByRole("radio", { name: /Michael/ })).not.toHaveTextContent("Speaking");
   });
 
   /// An engine that loads a model takes seconds before a sound comes out.
@@ -153,7 +201,7 @@ describe("VoicePicker", () => {
   /// rows it cannot honour.
   it("shows the note when there is something to say instead of rows", () => {
     renderPicker(
-      macList("none", {
+      kokoroList("none", {
         provider: "elevenlabs",
         engine: "elevenlabs",
         engine_label: "ElevenLabs",

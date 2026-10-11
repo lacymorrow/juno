@@ -143,6 +143,8 @@ Considered and cut: routing cloud audio to a chosen speaker (`afplay` plays to t
 
 Considered and cut: a button that opens System Settings to download the better voices (Juno cannot install one, so the pane says where they are and does not pretend to fetch them); using a Siri voice, which `say` and `AVSpeechSynthesizer` will not give a third-party app.
 
+Superseded 2026-10-11 (fix/siri-or-provider-only): the Mac offers one row, its own voice, which `say` with no `-v` speaks as the Siri voice chosen in Read & Speak, and the row links there. Named Mac voices and the quality ranking are gone; a non-Siri System Voice is never spoken.
+
 ## What was considered and cut
 
 - A separate "Advanced dictation timing" group. The thresholds above become defaults, not settings.

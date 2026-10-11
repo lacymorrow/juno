@@ -39,7 +39,7 @@ pub const SILENCE: f32 = 0.01;
 /// gives no signal when sound begins. Confirm on hardware.
 pub const PLAYER_LEAD_MS: u64 = 60;
 /// How long `say` takes from spawn to its first sound, measured roughly as a
-/// tenth of a second (see `system::speak_directly`).
+/// tenth of a second (see `system::speak_with_say`).
 pub const SAY_LEAD_MS: u64 = 120;
 /// A clip whose loudest frame is quieter than this is treated as silence
 /// rather than amplified into a moving mouth.

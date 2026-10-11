@@ -1,3 +1,16 @@
+//! The Mac's own voice: `say` with no `-v`, and nothing else.
+//!
+//! `say` with no voice speaks the System Voice chosen under System Settings >
+//! Accessibility > Read & Speak, Siri voices included. Nothing else on the Mac
+//! reaches a Siri voice: AVFoundation lists none to a third-party app and
+//! cannot build one by id. So Juno never names a Mac voice. A `-v` can only
+//! ever pick a MacinTalk or Vocalizer voice (Samantha and friends), which is
+//! exactly the voice Juno must never speak in. Whether the System Voice is
+//! allowed at all is decided in `voices::mac_voice_is_siri_or_unknown`.
+//!
+//! The cost is latency: each `say` spends 0.8 to 2.0 s before its first sound
+//! (`docs/research/say-latency.md`). A Siri voice is worth it.
+
 #[cfg(target_os = "macos")]
 use crate::constants::errors::templates;
 #[cfg(target_os = "macos")]
@@ -9,7 +22,7 @@ use std::process::Command;
 #[cfg(target_os = "macos")]
 use tempfile::NamedTempFile;
 #[cfg(target_os = "macos")]
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -20,22 +33,20 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 
 /// The `say` arguments for one utterance.
 ///
-/// Pure so the two things a person chose in Audio settings (the voice and the
-/// speaker) can be proved to reach the command. A chooser that does not change
-/// what runs is the defect this codebase keeps producing.
+/// Pure so the speaker a person chose in Audio settings can be proved to
+/// reach the command. There is deliberately no voice parameter: `-v` is how a
+/// non-Siri voice gets spoken, so it cannot be built here at all.
 ///
-/// `-v` is the voice by name and `-a` the output device by name; both are
-/// omitted when nothing was chosen, which leaves `say` on the Mac's own
-/// settings.
-pub fn say_arguments(text: &str, voice: Option<&str>, device: Option<&str>) -> Vec<String> {
-    say_arguments_at(text, voice, device, None)
+/// `-a` is the output device by name, omitted when nothing was chosen, which
+/// leaves `say` on the Mac's own output.
+pub fn say_arguments(text: &str, device: Option<&str>) -> Vec<String> {
+    say_arguments_at(text, device, None)
 }
 
 /// [`say_arguments`] with a pace: `-r` is words per minute, and `None` leaves
 /// `say` at the Mac's own.
 pub fn say_arguments_at(
     text: &str,
-    voice: Option<&str>,
     device: Option<&str>,
     words_per_minute: Option<u32>,
 ) -> Vec<String> {
@@ -43,10 +54,6 @@ pub fn say_arguments_at(
     if let Some(wpm) = words_per_minute {
         args.push("-r".to_string());
         args.push(wpm.to_string());
-    }
-    if let Some(voice) = voice.map(str::trim).filter(|v| !v.is_empty()) {
-        args.push("-v".to_string());
-        args.push(voice.to_string());
     }
     if let Some(device) = device.map(str::trim).filter(|d| !d.is_empty()) {
         args.push("-a".to_string());
@@ -56,53 +63,13 @@ pub fn say_arguments_at(
     args
 }
 
-/// Speak straight out of `say`, without synthesising a file first.
+/// Speak straight out of `say`, in the System Voice.
 ///
-/// `invoke_system_tts` renders the whole clip to an .m4a and hands back base64
-/// for the caller to play with afplay. That is two serial steps, and on a
-/// sentence of any length the first one takes seconds: measured at about 3.5s
-/// before a single sound came out, with the reply already on screen by then.
-/// The request was that Juno's voice arrive before the text, and it already
-/// started first; it just had nothing to play yet.
-///
-/// `say` on its own starts speaking almost immediately and streams as it goes,
-/// so this is the difference between hearing her in a tenth of a second and
-/// hearing her in four. The file route stays for the providers that genuinely
-/// return audio data.
-///
-/// A voice `say` will not use is retried without one rather than left as
-/// silence; see the comment on the retry.
-#[cfg(target_os = "macos")]
-pub async fn speak_directly(
-    text: String,
-    voice: Option<String>,
-    device: Option<String>,
-    words_per_minute: Option<u32>,
-) -> Result<String, String> {
-    if crate::tts::is_tts_stop_requested() {
-        return Ok("TTS_STOPPED_BY_USER".to_string());
-    }
-
-    // In-process first: the same voice, rate and speaker, starting in tens of
-    // milliseconds instead of a second or two. Anything it cannot honour
-    // exactly comes back here and `say` speaks it, as before.
-    let rate = crate::tts::avspeech::rate_from_words_per_minute(words_per_minute);
-    match crate::tts::avspeech::speak(&text, voice.as_deref(), device.as_deref(), rate).await {
-        crate::tts::avspeech::Spoken::Status(status) => return Ok(status.to_string()),
-        crate::tts::avspeech::Spoken::UseSay(reason) => {
-            info!("[AVSpeech] Using say for this sentence: {reason}");
-        }
-    }
-    speak_with_say(text, voice, device, words_per_minute).await
-}
-
-/// `say` itself, skipping the in-process path. The one way to speak the
-/// System Voice when it is a Siri voice: AVFoundation does not hand Siri
-/// voices to apps, and `say` with no `-v` speaks whatever the System Voice is.
+/// `say` starts speaking as soon as it has loaded and streams as it goes, so
+/// nothing is rendered to a file first.
 #[cfg(target_os = "macos")]
 pub async fn speak_with_say(
     text: String,
-    voice: Option<String>,
     device: Option<String>,
     words_per_minute: Option<u32>,
 ) -> Result<String, String> {
@@ -111,22 +78,14 @@ pub async fn speak_with_say(
     }
 
     info!(
-        "Speaking via system TTS: {} chars, voice {}, out of {}",
+        "Speaking via system TTS: {} chars, the System Voice, out of {}",
         text.chars().count(),
-        voice.as_deref().unwrap_or("the Mac's own"),
         device.as_deref().unwrap_or("the system output")
     );
 
     let spawned = std::time::Instant::now();
-    let status = run_say(say_arguments_at(
-        &text,
-        voice.as_deref(),
-        device.as_deref(),
-        words_per_minute,
-    ))
-    .await?;
+    let status = run_say(say_arguments_at(&text, device.as_deref(), words_per_minute)).await?;
     // `say` gives no signal when sound begins, so only the whole run is known.
-    // Compare with `engine=avspeech first_audio_ms`.
     info!(
         "[SpeechTiming] engine=say first_audio_ms=- total_ms={} chars={}",
         spawned.elapsed().as_millis(),
@@ -141,34 +100,6 @@ pub async fn speak_with_say(
     if status.success() {
         return Ok("TTS_COMPLETED".to_string());
     }
-
-    // A voice that has been uninstalled, or renamed by a macOS update, makes
-    // `say` exit without a sound. The Mac's own voice saying it is better than
-    // silence, so the one thing dropped on the retry is `-v`, and the log says
-    // which voice went missing. The voice stored for the Mac is resolved
-    // against the installed list whenever the Audio pane is opened; this is
-    // what covers the time before that.
-    if let Some(missing) = voice.as_deref() {
-        warn!("[TTS] 'say' would not use {missing} ({status}); retrying with the Mac's own voice");
-        let retry = run_say(say_arguments_at(
-            &text,
-            None,
-            device.as_deref(),
-            words_per_minute,
-        ))
-        .await?;
-        if crate::tts::is_tts_stop_requested() {
-            return Ok("TTS_STOPPED_BY_USER".to_string());
-        }
-        if retry.success() {
-            return Ok("TTS_COMPLETED".to_string());
-        }
-        return Err(format!(
-            "'say' exited with {} using {}, and with {} using the Mac's own voice",
-            status, missing, retry
-        ));
-    }
-
     Err(format!("'say' exited with {}", status))
 }
 
@@ -241,9 +172,7 @@ pub async fn invoke_system_tts(text: String) -> Result<String, String> {
         Command::new("say")
             .arg("-o")
             .arg(&output_path_for_cmd)
-            // Optionally specify voice, format, etc. here if needed
-            // .arg("-v")
-            // .arg("Alex") // Example voice
+            // No `-v`: the System Voice, Siri included.
             .arg(&text_clone)
             .output() // Use output() to wait for completion and capture stderr
     })
@@ -331,18 +260,6 @@ pub async fn invoke_system_tts(text: String) -> Result<String, String> {
 #[cfg(not(target_os = "macos"))]
 pub async fn speak_with_say(
     text: String,
-    _voice: Option<String>,
-    _device: Option<String>,
-    _words_per_minute: Option<u32>,
-) -> Result<String, String> {
-    invoke_system_tts(text).await
-}
-
-/// Same signature as the macOS version so callers need no `cfg`.
-#[cfg(not(target_os = "macos"))]
-pub async fn speak_directly(
-    text: String,
-    _voice: Option<String>,
     _device: Option<String>,
     _words_per_minute: Option<u32>,
 ) -> Result<String, String> {
@@ -353,68 +270,72 @@ pub async fn speak_directly(
 mod tests {
     use super::{say_arguments, say_arguments_at};
 
-    /// Nothing chosen means nothing imposed: `say` keeps the Mac's own voice
-    /// and output device.
+    /// Nothing chosen means nothing imposed: `say` keeps the System Voice and
+    /// the Mac's output device.
     #[test]
     fn no_choices_pass_only_the_text() {
-        assert_eq!(say_arguments("hello", None, None), vec!["hello"]);
-    }
-
-    /// The point of the voice picker: the chosen voice reaches the command.
-    #[test]
-    fn a_chosen_voice_reaches_say() {
-        assert_eq!(
-            say_arguments("hello", Some("Daniel"), None),
-            vec!["-v", "Daniel", "hello"]
-        );
+        assert_eq!(say_arguments("hello", None), vec!["hello"]);
     }
 
     /// The point of the speaker picker: the chosen device reaches the command.
     #[test]
     fn a_chosen_speaker_reaches_say() {
         assert_eq!(
-            say_arguments("hello", None, Some("MacBook Air Speakers")),
+            say_arguments("hello", Some("MacBook Air Speakers")),
             vec!["-a", "MacBook Air Speakers", "hello"]
-        );
-    }
-
-    #[test]
-    fn both_choices_reach_say_with_the_text_last() {
-        assert_eq!(
-            say_arguments("hello", Some("Karen"), Some("AirPods Pro")),
-            vec!["-v", "Karen", "-a", "AirPods Pro", "hello"]
         );
     }
 
     /// A stored empty string is not a device named "", and passing `-a ""`
     /// would make `say` fail rather than fall back.
     #[test]
-    fn blank_choices_are_dropped() {
-        assert_eq!(say_arguments("hi", Some("  "), Some("")), vec!["hi"]);
+    fn a_blank_speaker_is_dropped() {
+        assert_eq!(say_arguments("hi", Some("  ")), vec!["hi"]);
     }
 
-    /// A voice name with a space is one argument, not two.
+    /// A device name with a space is one argument, not two.
     #[test]
     fn a_name_with_a_space_stays_one_argument() {
         assert_eq!(
-            say_arguments("hi", Some("Grandma (Enhanced)"), None),
-            vec!["-v", "Grandma (Enhanced)", "hi"]
+            say_arguments("hi", Some("AirPods Pro")),
+            vec!["-a", "AirPods Pro", "hi"]
         );
     }
 
     #[test]
     fn a_pace_reaches_say_ahead_of_the_text() {
         assert_eq!(
-            say_arguments_at("hello", Some("Daniel"), None, Some(263)),
-            vec!["-r", "263", "-v", "Daniel", "hello"]
+            say_arguments_at("hello", None, Some(263)),
+            vec!["-r", "263", "hello"]
         );
     }
 
     #[test]
     fn no_pace_adds_no_flag() {
         assert_eq!(
-            say_arguments_at("hello", None, None, None),
-            say_arguments("hello", None, None)
+            say_arguments_at("hello", None, None),
+            say_arguments("hello", None)
         );
+    }
+
+    /// Juno never names a Mac voice: whatever the text, device and pace, the
+    /// arguments carry no `-v`, so `say` speaks the System Voice (Siri).
+    #[test]
+    fn the_system_engine_never_passes_a_voice() {
+        for text in ["hello", "-v Samantha", "Samantha"] {
+            for device in [None, Some("AirPods Pro"), Some("")] {
+                for pace in [None, Some(131), Some(350)] {
+                    let args = say_arguments_at(text, device, pace);
+                    let flags: Vec<&String> = args[..args.len() - 1].iter().collect();
+                    assert!(
+                        !flags
+                            .iter()
+                            .any(|a| a.as_str() == "-v" || a.starts_with("--voice")),
+                        "{args:?}"
+                    );
+                    assert_eq!(args.last().map(String::as_str), Some(text));
+                }
+            }
+        }
     }
 }

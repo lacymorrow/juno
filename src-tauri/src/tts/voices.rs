@@ -1,34 +1,31 @@
 //! Juno's voice: the voices the engine that is speaking actually has.
 //!
-//! The list is a function of the active engine, computed here. That is the
-//! whole correction to the first version of this file, which offered a curated
-//! list of macOS voices no matter which engine was doing the talking. Choose
-//! Kokoro and the pane went on showing Samantha and Daniel, which Kokoro has
-//! never heard of, and picking one quietly switched the engine back to the
-//! Mac. A control that names a behaviour it is not wired to is the defect this
-//! codebase keeps producing; the fix is that nothing about voices is decided
-//! in the UI. Rust owns which voices exist, which one is active, whether it is
-//! valid for the current engine and what the default is. React draws that.
+//! The list is a function of the active engine, computed here. Rust owns which
+//! voices exist, which one is active, whether it is valid for the current
+//! engine and what the default is. React draws that. A control that names a
+//! behaviour it is not wired to is the defect this codebase keeps producing.
 //!
-//! A voice id belongs to the engine that named it. "Samantha" means nothing to
-//! Kokoro and "af_heart" means nothing to `say`, so the choice is stored per
-//! engine (`settings::AudioSettings::voice_for`) and changing engine resolves
-//! to a voice the new engine has rather than carrying a dangling id across.
+//! A voice id belongs to the engine that named it. "af_heart" means nothing to
+//! `say`, so the choice is stored per engine (`settings::AudioSettings::voice_for`)
+//! and changing engine resolves to a voice the new engine has rather than
+//! carrying a dangling id across.
 //!
-//! Curated, not dumped, for the Mac. `say -v '?'` lists more than a hundred
-//! voices, most of them other languages and novelty voices ("Bad News", "Pipe
-//! Organ"), and a hundred rows is not a choice. The catalog below is the short
-//! list, and each entry offers the best version of itself this Mac has: the
-//! Premium and Enhanced downloads replace the compact one in place, with no
-//! code change, because the quality is in the name `say` reports.
+//! # The Mac's voice is Siri, or nothing
 //!
-//! On the good voices: the voices that sound like Siri are not reachable from
-//! here. `say` and `NSSpeechSynthesizer` see the MacinTalk and Vocalizer
-//! voices; the Siri voices are a separate, entitled synthesiser
-//! (`SiriTTS.framework`), and `AVSpeechSynthesizer` will not give them to an
-//! app that is not Apple's. The best Juno can do is pick the best voice that
-//! is installed, prefer Premium and Enhanced over compact when they are there,
-//! and say where the better ones come from when they are not.
+//! Juno only ever speaks in a Siri voice or in one of its providers' voices.
+//! On the Mac that means one row, "Your Mac's voice", spoken by `say` with no
+//! `-v`: the System Voice chosen in System Settings > Accessibility > Read &
+//! Speak. That is the only route to a Siri voice. `say -v` reaches only the
+//! MacinTalk and Vocalizer voices (Samantha, Ava and the rest), and
+//! AVFoundation lists no Siri voices to a third-party app, so Juno names no
+//! Mac voice at all. A named voice stored by an older build resolves to the
+//! one row.
+//!
+//! When the System Voice is positively read as a non-Siri voice, the Mac's
+//! voice is not used anywhere: not as the engine, not as a fallback, not as
+//! a stand-in (see [`mac_voice_is_siri_or_unknown`]). A reading that fails is
+//! trusted, because `say` with no `-v` speaks whatever the System Voice is and
+//! Apple's default on current macOS is a Siri voice.
 
 // The audition states, aliased so each emit reads as one line.
 use crate::constants::events::juno_voice::{
@@ -40,9 +37,9 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex as StdMutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter, State};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// Which audition is current.
 ///
@@ -68,130 +65,8 @@ pub const KOKORO_DEFAULT_VOICE: &str = "af_heart";
 pub const SUPERTONIC_DEFAULT_VOICE: &str = "M1";
 
 // ---------------------------------------------------------------------------
-// The macOS catalog
+// The Mac's voice
 // ---------------------------------------------------------------------------
-
-/// How good a macOS voice is, as `say` reports it in the name.
-///
-/// Apple ships one compact version of each voice and offers an Enhanced and a
-/// Premium download; a downloaded one appears as a separate entry, "Samantha
-/// (Enhanced)". Ordered worst to best on purpose: the derived `Ord` is what
-/// picks the best installed version of a voice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum VoiceQuality {
-    Compact,
-    Enhanced,
-    Premium,
-}
-
-/// Which version of a voice a `say` name is.
-pub fn voice_quality(name: &str) -> VoiceQuality {
-    let lower = name.to_ascii_lowercase();
-    if lower.contains("(premium)") {
-        VoiceQuality::Premium
-    } else if lower.contains("(enhanced)") {
-        VoiceQuality::Enhanced
-    } else {
-        VoiceQuality::Compact
-    }
-}
-
-/// The voice behind a `say` name: "Ava (Premium)" is Ava.
-pub fn voice_base_name(name: &str) -> &str {
-    match name.find('(') {
-        Some(paren) => name[..paren].trim_end(),
-        None => name.trim(),
-    }
-}
-
-/// One curated macOS voice, by the name it has with no quality suffix.
-pub struct CatalogVoice {
-    /// The base `say -v` name. The stored value is the full name of whichever
-    /// version is installed, which may carry a suffix.
-    pub name: &'static str,
-    /// The locale `say` is expected to report for it. An installed voice whose
-    /// locale disagrees is dropped, so the descriptor cannot lie about the
-    /// accent.
-    pub locale_prefix: &'static str,
-    /// One line. What can be checked, never a tone nobody here has heard.
-    pub descriptor: &'static str,
-}
-
-/// The short list, best first.
-///
-/// The order is the default chain: with nothing stored, Juno speaks as the
-/// highest-quality entry on this Mac, and this is the tiebreak when two
-/// entries are the same quality. American English leads because Juno's own
-/// sample sentence and prompts are American English.
-///
-/// Ava, Zoe, Allison, Tom, Serena, Oliver and Lee are the modern Vocalizer
-/// voices, which Apple offers as Enhanced and Premium downloads. Samantha,
-/// Daniel, Karen and Moira are the compact ones every Mac has; they are last
-/// because they are the voices somebody means by "robotic".
-pub const SYSTEM_VOICE_CATALOG: &[CatalogVoice] = &[
-    CatalogVoice {
-        name: "Ava",
-        locale_prefix: "en_US",
-        descriptor: "American English.",
-    },
-    CatalogVoice {
-        name: "Zoe",
-        locale_prefix: "en_US",
-        descriptor: "American English.",
-    },
-    CatalogVoice {
-        name: "Allison",
-        locale_prefix: "en_US",
-        descriptor: "American English.",
-    },
-    CatalogVoice {
-        name: "Tom",
-        locale_prefix: "en_US",
-        descriptor: "American English.",
-    },
-    CatalogVoice {
-        name: "Serena",
-        locale_prefix: "en_GB",
-        descriptor: "British English.",
-    },
-    CatalogVoice {
-        name: "Oliver",
-        locale_prefix: "en_GB",
-        descriptor: "British English.",
-    },
-    CatalogVoice {
-        name: "Lee",
-        locale_prefix: "en_AU",
-        descriptor: "Australian English.",
-    },
-    CatalogVoice {
-        name: "Samantha",
-        locale_prefix: "en_US",
-        descriptor: "American English. On every Mac.",
-    },
-    CatalogVoice {
-        name: "Daniel",
-        locale_prefix: "en_GB",
-        descriptor: "British English.",
-    },
-    CatalogVoice {
-        name: "Karen",
-        locale_prefix: "en_AU",
-        descriptor: "Australian English.",
-    },
-    CatalogVoice {
-        name: "Moira",
-        locale_prefix: "en_IE",
-        descriptor: "Irish English.",
-    },
-];
-
-/// A voice `say` says it has.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InstalledVoice {
-    pub name: String,
-    pub locale: String,
-}
 
 /// One row an engine offers, before it becomes a picker row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,71 +92,48 @@ pub enum ProviderVoices {
 
 /// Everything the resolver needs to know about this machine.
 ///
-/// Gathered once per command rather than per voice: listing the Mac's voices
-/// spawns a process and listing Kokoro's reads a directory.
+/// Gathered once per command rather than per voice: reading the System Voice
+/// runs a process and listing Kokoro's voices reads a directory.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VoiceInventory {
-    /// What `say -v '?'` reports.
-    pub macos: Vec<InstalledVoice>,
     /// The Kokoro voice embeddings on disk, by id.
     pub kokoro: Vec<String>,
     /// Why Kokoro could not get ready, when its last load failed.
     pub kokoro_problem: Option<String>,
     /// What the Mac's own voice is, as far as its settings say.
     pub system_voice: SystemVoice,
-    /// The `say` name of the System Voice when Juno can speak it ("Ava (Premium)").
-    pub system_voice_name: Option<String>,
 }
 
-/// The voice `say` uses when it is given no `-v`, which is the one chosen
-/// under System Settings > Accessibility > Spoken Content > System Voice.
-///
-/// Siri voices are not in `say -v '?'` and cannot be named, so running `say`
-/// with no voice is the only way Juno can speak with one.
+/// The voice `say` uses when it is given no `-v`: the one chosen under System
+/// Settings > Accessibility > Read & Speak.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SystemVoice {
-    /// A voice was chosen and it is not a Siri voice. If it is a good one it
-    /// is also in `say -v '?'`, and the ranking already finds it.
-    #[default]
+    /// The settings name a voice, and it is not a Siri voice.
     Other,
     /// The chosen voice is a Siri voice.
     Siri,
-    /// Nothing is recorded, so the Mac uses whatever Apple's current default
-    /// is. On a recent macOS that is not Samantha.
+    /// Nothing could be read, or nothing is recorded. `say` then speaks
+    /// Apple's default, which is a Siri voice on current macOS.
+    #[default]
     Unset,
 }
 
-/// The voice `say` uses when the Mac speaks in another engine's place: while
-/// Kokoro downloads, or when an engine fails. A Siri voice whenever one can be
-/// reached, and the only way to reach one is the System Voice, spoken by `say`
-/// with no `-v` (AVFoundation does not list Siri voices to apps). Unset is
-/// Apple's default, which is a Siri voice on current macOS. Otherwise the
-/// Mac voice the person chose, if any. Pure.
-pub fn stand_in_say_voice(system: SystemVoice, stored: Option<String>) -> StandInVoice {
-    match system {
-        SystemVoice::Siri | SystemVoice::Unset => StandInVoice::Siri,
-        SystemVoice::Other => StandInVoice::Mac(stored),
-    }
-}
-
-/// Who speaks when the Mac stands in.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StandInVoice {
-    /// The System Voice through `say` with no `-v`: Siri.
-    Siri,
-    /// The usual Mac path, with the person's chosen Mac voice if any.
-    Mac(Option<String>),
-}
-
-/// [`stand_in_say_voice`] for this Mac, read now.
-pub async fn stand_in_voice(stored: Option<String>) -> StandInVoice {
-    stand_in_say_voice(read_system_voice().await.0, stored)
+/// The gate: may Juno speak with the Mac's own voice at all?
+///
+/// Yes for a Siri voice, and yes when the reading found nothing (a failed
+/// read is trusted: `say` speaks the System Voice and Juno cannot know
+/// better). No only when the settings positively name a voice that is not
+/// Siri. Then the Mac's voice is never used: not as the engine, not as a
+/// fallback and not as a stand-in while Kokoro downloads. Pure.
+pub fn mac_voice_is_siri_or_unknown(voice: SystemVoice) -> bool {
+    voice != SystemVoice::Other
 }
 
 /// Read the System Voice choice. Pure, so it is testable without a Mac.
 ///
-/// `SelectedVoiceID` looks like `com.apple.speech.synthesis.voice.custom.siri.*`
-/// or `com.apple.voice.premium.en-US.Zoe`; the name is the display name.
+/// The id looks like `com.apple.siri.natural.Simone`,
+/// `com.apple.speech.synthesis.voice.custom.siri.*` or
+/// `com.apple.voice.premium.en-US.Zoe`; the name is the display name.
 pub fn classify_system_voice(id: Option<&str>, name: Option<&str>) -> SystemVoice {
     let id = id.map(str::trim).filter(|v| !v.is_empty());
     let name = name.map(str::trim).filter(|v| !v.is_empty());
@@ -296,39 +148,28 @@ pub fn classify_system_voice(id: Option<&str>, name: Option<&str>) -> SystemVoic
     }
 }
 
-/// True when the Mac's own voice (`say` with no `-v`) should be Juno's
-/// default: when it is a Siri voice, or nothing is recorded (Apple's default,
-/// a Siri voice on current macOS). Siri voices are the best voices a Mac has,
-/// better than any Premium download, and `say` with no `-v` is the only way
-/// to reach one. A recorded non-Siri choice is followed when Juno can speak
-/// it; otherwise the ranking picks the best installed voice.
-pub fn prefers_system_voice(inventory: &VoiceInventory) -> bool {
-    matches!(
-        inventory.system_voice,
-        SystemVoice::Siri | SystemVoice::Unset
-    )
-}
+/// What the Mac row's link says. It opens Read & Speak, where the voice is set.
+pub const READ_AND_SPEAK_LINK: &str = "Open Read & Speak";
 
-/// The installed `say` voice the person's System Voice names, when Juno can
-/// speak with it. `None` for Siri voices and anything not installed.
-pub fn followed_system_voice(inventory: &VoiceInventory) -> Option<String> {
-    if inventory.system_voice != SystemVoice::Other {
-        return None;
-    }
-    let name = inventory.system_voice_name.as_deref()?.trim();
-    inventory
-        .macos
-        .iter()
-        .find(|voice| voice.name.eq_ignore_ascii_case(name))
-        .map(|voice| voice.name.clone())
-}
+/// System Settings > Accessibility > Read & Speak, most specific first. The
+/// anchor is a best guess for macOS 26; the second opens Accessibility.
+pub const READ_AND_SPEAK_URLS: [&str; 2] = [
+    "x-apple.systempreferences:com.apple.Accessibility-Settings.extension?SpokenContent",
+    "x-apple.systempreferences:com.apple.Accessibility-Settings.extension",
+];
 
-/// The row for the Mac's own voice: always offered, first.
-fn system_voice_row() -> ProviderVoice {
+/// The one row the Mac offers: its own voice, which is a Siri voice when the
+/// person picked one in Read & Speak.
+fn system_voice_row(system_voice: SystemVoice) -> ProviderVoice {
+    let descriptor = if mac_voice_is_siri_or_unknown(system_voice) {
+        "Uses the Siri voice you pick in Read & Speak."
+    } else {
+        "Pick a Siri voice in Read & Speak and Juno will use it."
+    };
     ProviderVoice {
         id: SYSTEM_DEFAULT_ID.to_string(),
         name: "Your Mac's voice".to_string(),
-        descriptor: "Whichever voice this Mac is set to use.".to_string(),
+        descriptor: descriptor.to_string(),
     }
 }
 
@@ -361,49 +202,43 @@ pub fn parse_voice_selections(json: &str, languages: &[String]) -> Option<(Strin
     })
 }
 
-/// The `say`-style name of a voice from its AVFoundation id, so it can be
-/// found in the installed list: `com.apple.voice.premium.en-US.Ava` is
-/// "Ava (Premium)", `...enhanced...` is "Ava (Enhanced)", `...compact...` is
-/// "Ava". `None` for ids that do not have that shape (Siri voices included). Pure.
-pub fn say_name_from_id(id: &str) -> Option<String> {
-    let parts: Vec<&str> = id.split('.').collect();
-    let ["com", "apple", "voice", quality, _locale, name] = parts.as_slice() else {
-        return None;
-    };
-    if name.is_empty() {
-        return None;
-    }
-    match *quality {
-        "premium" => Some(format!("{name} (Premium)")),
-        "enhanced" => Some(format!("{name} (Enhanced)")),
-        "compact" => Some((*name).to_string()),
-        _ => None,
+/// The System Voice as read from the Mac's settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SpokenContent {
+    pub voice_id: Option<String>,
+    pub voice_name: Option<String>,
+}
+
+/// The System Voice from both places it can live. The macOS 26 selection wins;
+/// the old domain is what older macOS (and a Mac never touched) still has. Pure.
+pub fn spoken_content_from(
+    selection: Option<(String, String)>,
+    old_id: Option<String>,
+    old_name: Option<String>,
+) -> SpokenContent {
+    match selection {
+        Some((_, id)) => SpokenContent {
+            voice_id: Some(id),
+            voice_name: None,
+        },
+        None => SpokenContent {
+            voice_id: old_id,
+            voice_name: old_name,
+        },
     }
 }
 
-/// The System Voice from both places it can live. The macOS 26 key wins; the
-/// old domain is what older macOS (and a Mac never touched) still has. Pure.
-pub fn spoken_content_from(
-    selections_json: Option<&str>,
-    languages: &[String],
-    old_id: Option<String>,
-    old_name: Option<String>,
-) -> crate::tts::avspeech::SpokenContent {
-    match selections_json.and_then(|json| parse_voice_selections(json, languages)) {
-        Some((language, id)) => {
-            let voice_name = say_name_from_id(&id);
-            crate::tts::avspeech::SpokenContent {
-                voice_id: Some(id),
-                voice_name,
-                language: Some(language),
-            }
-        }
-        None => crate::tts::avspeech::SpokenContent {
-            voice_id: old_id,
-            voice_name: old_name,
-            language: languages.first().cloned(),
-        },
-    }
+/// Where the System Voice reading came from, for the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpokenSource {
+    /// `defaults export`, answered by cfprefsd.
+    Preferences,
+    /// The preferences file, read directly (needs Full Disk Access).
+    File,
+    /// The pre-macOS 26 `com.apple.speech.voice.prefs` domain.
+    OldDomain,
+    /// Nothing answered.
+    Nothing,
 }
 
 /// Where the System Voice choice is written, newest first.
@@ -418,17 +253,30 @@ pub fn spoken_prefs_files() -> Vec<PathBuf> {
     ]
 }
 
-/// Read the System Voice. Blocking; runs `plutil` and `defaults`, both
+/// The key the macOS 26 System Voice lives under.
+const SELECTIONS_KEY: &str = "SpokenContentDefaultVoiceSelectionsByLanguage";
+
+/// Read the System Voice. Blocking; runs `defaults` and `plutil`, all
 /// read-only.
+///
+/// cfprefsd first: `com.apple.Accessibility.plist` is protected, so an app
+/// without Full Disk Access usually cannot open the file, while asking the
+/// preferences daemon for the domain can still answer. The file is the second
+/// try, and the old domain the third.
 #[cfg(target_os = "macos")]
-pub fn read_spoken_content_blocking() -> crate::tts::avspeech::SpokenContent {
-    fn run(cmd: &str, args: &[&str]) -> Option<String> {
-        let output = std::process::Command::new(cmd).args(args).output().ok()?;
+pub fn read_spoken_content_blocking() -> (SpokenContent, SpokenSource) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    fn finish(output: std::process::Output) -> Option<String> {
         output
             .status
             .success()
             .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
             .filter(|v| !v.is_empty())
+    }
+    fn run(cmd: &str, args: &[&str]) -> Option<String> {
+        finish(Command::new(cmd).args(args).output().ok()?)
     }
     fn extract(file: &std::path::Path, key: &str) -> Option<String> {
         run(
@@ -436,12 +284,29 @@ pub fn read_spoken_content_blocking() -> crate::tts::avspeech::SpokenContent {
             &["-extract", key, "json", "-o", "-", &file.to_string_lossy()],
         )
     }
-    fn old(key: &str) -> Option<String> {
-        run("defaults", &["read", "com.apple.speech.voice.prefs", key])
+    fn through_prefs(domain: &str, key: &str) -> Option<String> {
+        let plist = Command::new("defaults")
+            .args(["export", domain, "-"])
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())?
+            .stdout;
+        let mut child = Command::new("plutil")
+            .args(["-extract", key, "json", "-o", "-", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            // plutil reads all of its input before it writes anything, so
+            // writing first and then waiting cannot deadlock.
+            let _ = stdin.write_all(&plist);
+        }
+        finish(child.wait_with_output().ok()?)
     }
-    let selections = spoken_prefs_files()
-        .first()
-        .and_then(|file| extract(file, "SpokenContentDefaultVoiceSelectionsByLanguage"));
+
     let mut languages: Vec<String> = Vec::new();
     if let Some(home) = std::env::var_os("HOME") {
         let global = PathBuf::from(home).join("Library/Preferences/.GlobalPreferences.plist");
@@ -456,226 +321,60 @@ pub fn read_spoken_content_blocking() -> crate::tts::avspeech::SpokenContent {
         }
     }
     languages.push("en".to_string());
-    spoken_content_from(
-        selections.as_deref(),
-        &languages,
-        old("SelectedVoiceID"),
-        old("SelectedVoiceName"),
-    )
+
+    let selected = |json: Option<String>| json.and_then(|j| parse_voice_selections(&j, &languages));
+    if let Some(selection) = selected(through_prefs("com.apple.Accessibility", SELECTIONS_KEY)) {
+        return (
+            spoken_content_from(Some(selection), None, None),
+            SpokenSource::Preferences,
+        );
+    }
+    let from_file = spoken_prefs_files()
+        .first()
+        .and_then(|file| extract(file, SELECTIONS_KEY));
+    if let Some(selection) = selected(from_file) {
+        return (
+            spoken_content_from(Some(selection), None, None),
+            SpokenSource::File,
+        );
+    }
+    let old = |key: &str| run("defaults", &["read", "com.apple.speech.voice.prefs", key]);
+    let content = spoken_content_from(None, old("SelectedVoiceID"), old("SelectedVoiceName"));
+    let source = if content.voice_id.is_some() || content.voice_name.is_some() {
+        SpokenSource::OldDomain
+    } else {
+        SpokenSource::Nothing
+    };
+    (content, source)
+}
+
+/// How long a reading of the System Voice is trusted without looking again.
+pub const MAC_VOICE_FRESH_FOR: Duration = Duration::from_secs(10);
+
+/// Whether a reading of the System Voice must be redone before it is used.
+/// The person can change it at any time, so a reading is stale when the
+/// preferences file has been written since (its modification time moved), or
+/// when it is simply old. Pure.
+pub fn reading_is_stale(
+    age: Duration,
+    mtime_when_read: Option<SystemTime>,
+    mtime_now: Option<SystemTime>,
+) -> bool {
+    age >= MAC_VOICE_FRESH_FOR || mtime_when_read != mtime_now
 }
 
 /// Which voice will actually speak, and whether that is the one asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VoiceResolution {
-    /// The voice in force. `None` means the engine's own default, which for
-    /// the Mac is whatever voice System Settings is set to.
+    /// The voice in force. `None` means the engine's own default.
     pub voice: Option<String>,
     /// True when something was stored that this engine cannot honour.
     pub substituted: bool,
 }
 
 // ---------------------------------------------------------------------------
-// Parsing and enumeration
+// The other engines' voices
 // ---------------------------------------------------------------------------
-
-/// Read `say -v '?'`.
-///
-/// One line per voice: a name (which can contain spaces and a quality suffix
-/// in brackets), the locale, then `#` and the voice's own sample sentence.
-/// Pure, so the parsing is testable without running anything.
-pub fn parse_say_voice_list(stdout: &str) -> Vec<InstalledVoice> {
-    let mut voices = Vec::new();
-    for line in stdout.lines() {
-        let before_sample = line.split('#').next().unwrap_or("").trim();
-        if before_sample.is_empty() {
-            continue;
-        }
-        // The locale is the last column; everything before it is the name, and
-        // the name is where the spaces are ("Bad News", "Ava (Premium)").
-        let Some((name, locale)) = before_sample.rsplit_once(char::is_whitespace) else {
-            continue;
-        };
-        let name = name.trim();
-        let locale = locale.trim();
-        if name.is_empty() || locale.is_empty() {
-            continue;
-        }
-        voices.push(InstalledVoice {
-            name: name.to_string(),
-            locale: locale.to_string(),
-        });
-    }
-    voices
-}
-
-/// The best installed version of one catalog entry.
-///
-/// An entry whose installed locale disagrees with the catalog is dropped: the
-/// descriptor names an accent, and offering a voice under the wrong accent is
-/// worse than offering one voice fewer.
-fn best_installed<'a>(
-    entry: &CatalogVoice,
-    installed: &'a [InstalledVoice],
-) -> Option<&'a InstalledVoice> {
-    installed
-        .iter()
-        .filter(|voice| {
-            voice_base_name(&voice.name) == entry.name
-                && voice.locale.starts_with(entry.locale_prefix)
-        })
-        .max_by_key(|voice| voice_quality(&voice.name))
-}
-
-fn is_english(locale: &str) -> bool {
-    locale.starts_with("en_") || locale.starts_with("en-")
-}
-
-/// The accent, from the locale `say` reports. Used for a downloaded voice the
-/// catalog does not name, so its row still says something checkable.
-fn accent_for_locale(locale: &str) -> &'static str {
-    match locale.get(3..5).unwrap_or("") {
-        "US" => "American English.",
-        "GB" => "British English.",
-        "AU" => "Australian English.",
-        "IE" => "Irish English.",
-        "IN" => "Indian English.",
-        "ZA" => "South African English.",
-        "NZ" => "New Zealand English.",
-        _ => "English.",
-    }
-}
-
-/// What a row says about itself. The quality is worth one word when it is
-/// better than the version every Mac already has.
-fn with_quality(descriptor: &str, quality: VoiceQuality) -> String {
-    match quality {
-        VoiceQuality::Premium => format!("{descriptor} Premium."),
-        VoiceQuality::Enhanced => format!("{descriptor} Enhanced."),
-        VoiceQuality::Compact => descriptor.to_string(),
-    }
-}
-
-/// How a Mac voice ranks. Higher is better; see [`MacCandidate::rank`].
-type MacRank<'a> = (
-    VoiceQuality,
-    bool,
-    bool,
-    std::cmp::Reverse<usize>,
-    std::cmp::Reverse<&'a str>,
-);
-
-/// One Mac voice worth offering, with what it takes to rank it.
-struct MacCandidate<'a> {
-    voice: &'a InstalledVoice,
-    /// Its place in [`SYSTEM_VOICE_CATALOG`], when the catalog names it.
-    catalog_rank: Option<usize>,
-    descriptor: &'static str,
-}
-
-impl<'a> MacCandidate<'a> {
-    /// Quality first, always: a downloaded voice is the point of downloading
-    /// it, and the compact ones are what somebody means by "robotic". Then a
-    /// voice the catalog vouches for, then American English (Juno's prompts
-    /// and sample are American English), then catalog order, then the name,
-    /// so the ranking is total and never flickers between two reads.
-    fn rank(&self) -> MacRank<'a> {
-        (
-            voice_quality(&self.voice.name),
-            self.catalog_rank.is_some(),
-            self.voice.locale.starts_with("en_US"),
-            std::cmp::Reverse(self.catalog_rank.unwrap_or(usize::MAX)),
-            std::cmp::Reverse(self.voice.name.as_str()),
-        )
-    }
-}
-
-/// Every Mac voice worth offering, best first.
-///
-/// The catalog, each entry at the best version installed, plus any other
-/// English voice this Mac has as an Enhanced or Premium download. Those are
-/// exactly the voices somebody went to System Settings to get, so they are
-/// offered whatever they are called. Compact voices outside the catalog are
-/// not: that is where the novelty voices live ("Bad News", "Bubbles").
-fn mac_candidates(installed: &[InstalledVoice]) -> Vec<MacCandidate<'_>> {
-    let mut candidates: Vec<MacCandidate<'_>> = SYSTEM_VOICE_CATALOG
-        .iter()
-        .enumerate()
-        .filter_map(|(rank, entry)| {
-            Some(MacCandidate {
-                voice: best_installed(entry, installed)?,
-                catalog_rank: Some(rank),
-                descriptor: entry.descriptor,
-            })
-        })
-        .collect();
-
-    for voice in installed {
-        let base = voice_base_name(&voice.name);
-        let quality = voice_quality(&voice.name);
-        let in_catalog = SYSTEM_VOICE_CATALOG
-            .iter()
-            .any(|entry| entry.name == base && voice.locale.starts_with(entry.locale_prefix));
-        if in_catalog || quality == VoiceQuality::Compact || !is_english(&voice.locale) {
-            continue;
-        }
-        // One row per voice: keep the best version of it.
-        match candidates.iter_mut().find(|c| {
-            c.catalog_rank.is_none()
-                && voice_base_name(&c.voice.name) == base
-                && c.voice.locale == voice.locale
-        }) {
-            Some(existing) if voice_quality(&existing.voice.name) >= quality => {}
-            Some(existing) => existing.voice = voice,
-            None => candidates.push(MacCandidate {
-                voice,
-                catalog_rank: None,
-                descriptor: accent_for_locale(&voice.locale),
-            }),
-        }
-    }
-
-    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.rank()));
-    candidates
-}
-
-/// The voices this Mac has worth offering, best first, so the default is the
-/// row at the top.
-pub fn macos_voices(installed: &[InstalledVoice]) -> Vec<ProviderVoice> {
-    mac_candidates(installed)
-        .into_iter()
-        .map(|candidate| ProviderVoice {
-            id: candidate.voice.name.clone(),
-            name: voice_base_name(&candidate.voice.name).to_string(),
-            descriptor: with_quality(candidate.descriptor, voice_quality(&candidate.voice.name)),
-        })
-        .collect()
-}
-
-/// The default macOS voice: the top of the ranking.
-///
-/// 1. A Premium voice, catalog first, then any other English one.
-/// 2. An Enhanced voice, same order.
-/// 3. A compact catalog voice. On a Mac with nothing downloaded this is
-///    Samantha, because Samantha is what a Mac ships with.
-/// 4. `None`, which runs `say` with no `-v` at all and so uses whichever
-///    voice the Mac is set to. A missing voice must not produce silence, and
-///    the Mac's own choice is a real voice.
-///
-/// Chosen by rank, never by name, so a voice Apple ships next year is the
-/// default the day somebody downloads it.
-pub fn best_macos_voice(installed: &[InstalledVoice]) -> Option<String> {
-    mac_candidates(installed)
-        .first()
-        .map(|candidate| candidate.voice.name.clone())
-}
-
-/// True when this Mac has no English voice better than the compact ones. The
-/// pane offers the control that gets a better one.
-pub fn only_compact_voices(installed: &[InstalledVoice]) -> bool {
-    !installed.iter().any(|voice| {
-        is_english(&voice.locale) && voice_quality(&voice.name) > VoiceQuality::Compact
-    })
-}
 
 /// "af_heart" is the voice called Heart.
 fn kokoro_voice_name(id: &str) -> String {
@@ -800,7 +499,7 @@ impl EngineNeeds {
 }
 
 /// What each engine needs. The Mac's own voice needs none of it, which is
-/// why every fallback chain ends there.
+/// why every fallback chain ends there whenever it is a Siri voice.
 pub fn engine_needs(engine: &str) -> EngineNeeds {
     match engine.to_ascii_lowercase().as_str() {
         "system" | OFF_PROVIDER => EngineNeeds::default(),
@@ -885,14 +584,8 @@ pub fn silence_change(
 /// What this engine offers.
 pub fn provider_voices(engine: &str, inventory: &VoiceInventory) -> ProviderVoices {
     match engine.to_ascii_lowercase().as_str() {
-        "system" => {
-            let mut rows = macos_voices(&inventory.macos);
-            // Always offered, so the person can choose to follow Read & Speak.
-            // Speaking it follows the System Voice live, and a Siri voice
-            // (which Juno cannot speak) falls back to the best installed one.
-            rows.insert(0, system_voice_row());
-            ProviderVoices::Known(rows)
-        }
+        // One row, never a named voice: see the module docs.
+        "system" => ProviderVoices::Known(vec![system_voice_row(inventory.system_voice)]),
         "kokoro" => ProviderVoices::Known(kokoro_voices(&inventory.kokoro)),
         "supertonic" => ProviderVoices::Known(supertonic_voices()),
         "elevenlabs" => ProviderVoices::Elsewhere(
@@ -911,10 +604,7 @@ pub fn provider_voices(engine: &str, inventory: &VoiceInventory) -> ProviderVoic
 /// This engine's default voice.
 pub fn default_voice(engine: &str, inventory: &VoiceInventory) -> Option<String> {
     match engine.to_ascii_lowercase().as_str() {
-        "system" if prefers_system_voice(inventory) => Some(SYSTEM_DEFAULT_ID.to_string()),
-        "system" => followed_system_voice(inventory)
-            .or_else(|| best_macos_voice(&inventory.macos))
-            .or_else(|| Some(SYSTEM_DEFAULT_ID.to_string())),
+        "system" => Some(SYSTEM_DEFAULT_ID.to_string()),
         "kokoro" => {
             let rows = kokoro_voices(&inventory.kokoro);
             rows.iter()
@@ -930,25 +620,24 @@ pub fn default_voice(engine: &str, inventory: &VoiceInventory) -> Option<String>
 /// Which voice this engine will speak in, given what was stored for it.
 ///
 /// A stored id this engine does not have resolves to the engine's default
-/// rather than being passed through: handing `say` a voice that has been
-/// uninstalled, or Kokoro an embedding that is not on disk, is silence.
+/// rather than being passed through: handing Kokoro an embedding that is not
+/// on disk is silence.
 pub fn resolve_voice(
     engine: &str,
     inventory: &VoiceInventory,
     stored: Option<&str>,
 ) -> VoiceResolution {
-    let stored = stored.map(str::trim).filter(|voice| !voice.is_empty());
-
-    // The Mac's own voice is `say` with no `-v`, so it exists on every Mac. A
-    // reading that failed to find the System Voice must not turn it into a
-    // different voice and write that over the store.
-    if engine.eq_ignore_ascii_case("system") && stored == Some(SYSTEM_DEFAULT_ID) {
+    // The Mac has one voice, its own. A named voice an older build stored
+    // ("Samantha") is not a choice that went missing, it is a voice Juno no
+    // longer speaks in, so it resolves quietly to the one row.
+    if engine.eq_ignore_ascii_case("system") {
         return VoiceResolution {
             voice: Some(SYSTEM_DEFAULT_ID.to_string()),
             substituted: false,
         };
     }
 
+    let stored = stored.map(str::trim).filter(|voice| !voice.is_empty());
     match provider_voices(engine, inventory) {
         ProviderVoices::Known(rows) => {
             // Nothing to check against. Juno cannot call the stored choice
@@ -984,48 +673,6 @@ pub fn resolve_voice(
     }
 }
 
-/// [`resolve_voice`] for a stored value that may not have been a choice.
-///
-/// Builds before the Mac's own voice became the default ranked the installed
-/// voices and wrote the winner (Samantha, on a stock Mac) to the store. That
-/// is indistinguishable from a pick, so it kept winning over the Mac's own
-/// voice: the greeting, which runs before any voice reaches `AppState`, spoke
-/// in the Mac's voice while every reply spoke in Samantha. A Mac voice the
-/// person never picked, and that is just the old ranking's top row, gives way
-/// to the Mac's own voice when that is the default. A voice they did pick
-/// (`chosen`) is never touched.
-pub fn resolve_stored_voice(
-    engine: &str,
-    inventory: &VoiceInventory,
-    stored: Option<&str>,
-    chosen: bool,
-) -> VoiceResolution {
-    let trimmed = stored.map(str::trim).filter(|voice| !voice.is_empty());
-    if engine.eq_ignore_ascii_case("system") && !chosen && prefers_system_voice(inventory) {
-        if let Some(voice) = trimmed {
-            if voice != SYSTEM_DEFAULT_ID
-                && Some(voice) == best_macos_voice(&inventory.macos).as_deref()
-            {
-                return VoiceResolution {
-                    voice: Some(SYSTEM_DEFAULT_ID.to_string()),
-                    substituted: false,
-                };
-            }
-        }
-    }
-    if engine.eq_ignore_ascii_case("system") && !chosen {
-        if let (Some(voice), Some(followed)) = (trimmed, followed_system_voice(inventory)) {
-            if Some(voice) == best_macos_voice(&inventory.macos).as_deref() {
-                return VoiceResolution {
-                    voice: Some(followed),
-                    substituted: false,
-                };
-            }
-        }
-    }
-    resolve_voice(engine, inventory, stored)
-}
-
 /// The Kokoro voice that will actually load.
 ///
 /// Called on the speaking path, where there is no settings window open to have
@@ -1034,11 +681,8 @@ pub fn resolve_stored_voice(
 /// is an error and then silence.
 pub fn resolve_kokoro_voice(stored: Option<&str>) -> String {
     let inventory = VoiceInventory {
-        macos: Vec::new(),
         kokoro: installed_kokoro_voices(),
-        kokoro_problem: None,
-        system_voice: SystemVoice::default(),
-        system_voice_name: None,
+        ..VoiceInventory::default()
     };
     resolve_voice("kokoro", &inventory, stored)
         .voice
@@ -1062,6 +706,9 @@ pub struct JunoVoiceOption {
     pub selected: bool,
     /// Whether selecting this row makes a sound. Silence does not audition.
     pub speaks: bool,
+    /// A link under the row, when the voice is set somewhere else: the Mac
+    /// row opens Read & Speak (`open_read_and_speak`). The words to show.
+    pub link: Option<String>,
 }
 
 /// The whole answer the Audio pane renders: the rows, the engine they belong
@@ -1112,7 +759,6 @@ pub fn voice_list(
 ) -> JunoVoiceList {
     let silent = is_silent(provider);
     let engine = engine.to_string();
-    let is_mac = engine.eq_ignore_ascii_case("system");
 
     let mut options = Vec::new();
 
@@ -1121,32 +767,19 @@ pub fn voice_list(
     match provider_voices(&engine, inventory) {
         ProviderVoices::Known(rows) if !rows.is_empty() => {
             for row in rows {
+                let is_mac_row = row.id == SYSTEM_DEFAULT_ID;
                 options.push(JunoVoiceOption {
                     selected: resolution.voice.as_deref() == Some(row.id.as_str()),
-                    kind: if row.id == SYSTEM_DEFAULT_ID {
-                        "system"
-                    } else {
-                        "voice"
-                    }
-                    .to_string(),
+                    kind: if is_mac_row { "system" } else { "voice" }.to_string(),
+                    // A Mac voice that is not Siri is never spoken, so its
+                    // row plays nothing; the link is how to fix it.
+                    speaks: !is_mac_row || mac_voice_is_siri_or_unknown(inventory.system_voice),
+                    link: is_mac_row.then(|| READ_AND_SPEAK_LINK.to_string()),
                     id: row.id,
                     name: row.name,
                     descriptor: row.descriptor,
-                    speaks: true,
                 });
             }
-        }
-        // Nothing curated is installed. One honest row beats an empty list:
-        // the Mac still has a voice, Juno just cannot name it.
-        ProviderVoices::Known(_) if is_mac => {
-            options.push(JunoVoiceOption {
-                id: SYSTEM_DEFAULT_ID.to_string(),
-                kind: "system".to_string(),
-                name: "Your Mac's voice".to_string(),
-                descriptor: "Whichever voice this Mac is set to use.".to_string(),
-                selected: true,
-                speaks: true,
-            });
         }
         // Kokoro downloads its model and voices as it loads, which starts the
         // moment it is chosen. Until that lands there is nothing to list, and
@@ -1154,7 +787,7 @@ pub fn voice_list(
         ProviderVoices::Known(_) => {
             note = Some(match &inventory.kokoro_problem {
                 Some(problem) => format!(
-                    "{} could not get ready: {}. Your Mac's voice speaks until it can.",
+                    "{} could not get ready: {}.",
                     engine_label(&engine),
                     problem.trim().trim_end_matches('.')
                 ),
@@ -1172,10 +805,7 @@ pub fn voice_list(
     if note.is_none() && resolution.substituted {
         note = Some(format!(
             "The voice that was chosen is not on this Mac any more, so {} is speaking instead.",
-            resolution
-                .voice
-                .as_deref()
-                .unwrap_or("your Mac's own voice")
+            resolution.voice.as_deref().unwrap_or("its default voice")
         ));
     }
 
@@ -1195,58 +825,89 @@ pub fn voice_list(
 // Reading this machine
 // ---------------------------------------------------------------------------
 
-/// Ask `say` which voices this Mac has.
-///
-/// `say -v '?'` prints the list and speaks nothing.
-#[cfg(target_os = "macos")]
-async fn installed_macos_voices() -> Vec<InstalledVoice> {
-    let output = tokio::task::spawn_blocking(|| {
-        std::process::Command::new("say")
-            .arg("-v")
-            .arg("?")
-            .output()
-    })
-    .await;
+/// The last reading of the System Voice: when, the preferences file's
+/// modification time then, and what it said.
+static MAC_VOICE: StdMutex<Option<(Instant, Option<SystemTime>, SystemVoice)>> =
+    StdMutex::new(None);
 
-    match output {
-        Ok(Ok(output)) if output.status.success() => {
-            parse_say_voice_list(&String::from_utf8_lossy(&output.stdout))
-        }
-        Ok(Ok(output)) => {
-            warn!("[Voices] say -v '?' exited with {}", output.status);
-            Vec::new()
-        }
-        Ok(Err(e)) => {
-            warn!("[Voices] Could not list the Mac's voices: {e}");
-            Vec::new()
-        }
-        Err(e) => {
-            warn!("[Voices] Listing the Mac's voices did not finish: {e}");
-            Vec::new()
-        }
+/// Where the last reading came from, so a change is logged once.
+#[cfg(target_os = "macos")]
+static MAC_VOICE_SOURCE: StdMutex<Option<(SpokenSource, Option<String>)>> = StdMutex::new(None);
+
+/// When the System Voice preferences were last written: the newest of the
+/// Accessibility plist (macOS 26) and the old Speech one. A `stat`, which
+/// works even where reading the file does not.
+fn spoken_prefs_mtime() -> Option<SystemTime> {
+    spoken_prefs_files()
+        .iter()
+        .filter_map(|path| std::fs::metadata(path).ok()?.modified().ok())
+        .max()
+}
+
+/// Forget the reading, so the next use reads the System Voice again.
+pub fn forget_mac_voice() {
+    if let Ok(mut slot) = MAC_VOICE.lock() {
+        *slot = None;
     }
 }
 
-/// Ask the Mac which System Voice is chosen, and what it is called.
+/// Read the System Voice now, and log where the answer came from when that
+/// changes. Only the voice id is logged.
 #[cfg(target_os = "macos")]
-async fn read_system_voice() -> (SystemVoice, Option<String>) {
-    tokio::task::spawn_blocking(|| {
-        let spoken = read_spoken_content_blocking();
-        let kind = classify_system_voice(spoken.voice_id.as_deref(), spoken.voice_name.as_deref());
-        (kind, spoken.voice_name)
-    })
-    .await
-    .unwrap_or_default()
+async fn read_system_voice_now() -> SystemVoice {
+    let read = tokio::task::spawn_blocking(read_spoken_content_blocking).await;
+    let Ok((spoken, source)) = read else {
+        return SystemVoice::Unset;
+    };
+    let kind = classify_system_voice(spoken.voice_id.as_deref(), spoken.voice_name.as_deref());
+    let seen = (source, spoken.voice_id.clone());
+    let changed = MAC_VOICE_SOURCE
+        .lock()
+        .map(|mut last| {
+            let changed = last.as_ref() != Some(&seen);
+            *last = Some(seen);
+            changed
+        })
+        .unwrap_or(false);
+    if changed {
+        match source {
+            SpokenSource::Nothing => info!(
+                "[Voices] Could not read the System Voice; trusting say with no -v ({kind:?})"
+            ),
+            _ => info!(
+                "[Voices] System Voice read through {source:?}: {} ({kind:?})",
+                spoken.voice_id.as_deref().unwrap_or("no id")
+            ),
+        }
+    }
+    kind
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn read_system_voice() -> (SystemVoice, Option<String>) {
-    (SystemVoice::Other, None)
+async fn read_system_voice_now() -> SystemVoice {
+    SystemVoice::Unset
 }
 
-#[cfg(not(target_os = "macos"))]
-async fn installed_macos_voices() -> Vec<InstalledVoice> {
-    Vec::new()
+/// The System Voice, from a recent reading when nothing has changed since.
+async fn read_system_voice() -> SystemVoice {
+    let mtime = spoken_prefs_mtime();
+    let cached = MAC_VOICE.lock().ok().and_then(|slot| *slot);
+    if let Some((at, seen, voice)) = cached {
+        if !reading_is_stale(at.elapsed(), seen, mtime) {
+            return voice;
+        }
+    }
+    let voice = read_system_voice_now().await;
+    if let Ok(mut slot) = MAC_VOICE.lock() {
+        *slot = Some((Instant::now(), mtime, voice));
+    }
+    voice
+}
+
+/// Whether the Mac's own voice may speak right now. See
+/// [`mac_voice_is_siri_or_unknown`].
+pub async fn mac_voice_allowed() -> bool {
+    mac_voice_is_siri_or_unknown(read_system_voice().await)
 }
 
 /// Where `any_tts` keeps the Kokoro voice embeddings.
@@ -1312,77 +973,41 @@ pub fn installed_kokoro_voices() -> Vec<String> {
     ids
 }
 
-/// The Mac's voices as last read, and when.
-///
-/// Listing them spawns `say`, and that spawn used to sit between a tap on a
-/// voice and the sample starting. A tap only needs to check the id it was
-/// handed against a list the pane was drawn from moments ago, so it reads
-/// this; drawing the pane always reads afresh, so a voice downloaded while
-/// Juno is running shows up the next time the pane opens.
-static MAC_VOICES: StdMutex<Option<(Instant, Vec<InstalledVoice>)>> = StdMutex::new(None);
-const MAC_VOICES_FRESH_FOR: Duration = Duration::from_secs(60);
-
 /// How old a reading of this machine may be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Freshness {
     /// Read it now.
     Now,
-    /// A reading from the last minute will do.
+    /// A recent reading will do.
     Recent,
 }
 
-async fn macos_inventory(freshness: Freshness) -> Vec<InstalledVoice> {
-    if freshness == Freshness::Recent {
-        let cached = MAC_VOICES
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone())
-            .filter(|(read_at, _)| read_at.elapsed() < MAC_VOICES_FRESH_FOR);
-        if let Some((_, voices)) = cached {
-            return voices;
-        }
-    }
-    let voices = installed_macos_voices().await;
-    if !voices.is_empty() {
-        if let Ok(mut guard) = MAC_VOICES.lock() {
-            *guard = Some((Instant::now(), voices.clone()));
-        }
-    }
-    voices
-}
-
 /// Everything this engine needs known about this machine, and nothing else:
-/// the Mac's list costs a process and Kokoro's costs a directory read.
+/// the System Voice costs a process and Kokoro's voices a directory read.
 pub async fn inventory_for(engine: &str, freshness: Freshness) -> VoiceInventory {
-    // Reading the Mac fresh is how the pane learns the System Voice changed;
-    // the voice that speaks must learn it from the same moment, not from a
-    // reading made earlier.
-    if freshness == Freshness::Now && engine.eq_ignore_ascii_case("system") {
-        crate::tts::avspeech::forget_spoken_content();
+    let is_mac = engine.eq_ignore_ascii_case("system");
+    let is_kokoro = engine.eq_ignore_ascii_case("kokoro");
+    // Reading fresh is how the pane learns the System Voice changed; the
+    // voice that speaks learns it from the same moment.
+    if freshness == Freshness::Now && is_mac {
+        forget_mac_voice();
     }
-    let (system_voice, system_voice_name) = if engine.eq_ignore_ascii_case("system") {
-        read_system_voice().await
-    } else {
-        (SystemVoice::default(), None)
-    };
     VoiceInventory {
-        macos: if engine.eq_ignore_ascii_case("system") {
-            macos_inventory(freshness).await
-        } else {
-            Vec::new()
-        },
-        kokoro: if engine.eq_ignore_ascii_case("kokoro") {
+        kokoro: if is_kokoro {
             installed_kokoro_voices()
         } else {
             Vec::new()
         },
-        kokoro_problem: if engine.eq_ignore_ascii_case("kokoro") {
+        kokoro_problem: if is_kokoro {
             crate::tts::kokoro::load_problem()
         } else {
             None
         },
-        system_voice,
-        system_voice_name,
+        system_voice: if is_mac {
+            read_system_voice().await
+        } else {
+            SystemVoice::Unset
+        },
     }
 }
 
@@ -1390,21 +1015,14 @@ pub async fn inventory_for(engine: &str, freshness: Freshness) -> VoiceInventory
 ///
 /// The one place an engine's voice reaches `AppState`, so no call site can put
 /// a voice under an engine that does not own it.
-/// The `-v` value for a stored Mac voice: the Mac's own voice is no `-v`.
-pub fn system_voice_for_say(voice: Option<&str>) -> Option<String> {
-    voice
-        .filter(|voice| *voice != SYSTEM_DEFAULT_ID)
-        .map(str::to_string)
-}
-
 pub fn push_voice_to_state(
     state: &AppState,
     engine: &str,
     voice: Option<&str>,
 ) -> Result<(), String> {
     match engine.to_ascii_lowercase().as_str() {
-        // The Mac's own voice is `say` with no `-v`.
-        "system" => state.set_system_voice(system_voice_for_say(voice)),
+        // The Mac's own voice is `say` with no `-v`, so no name is ever kept.
+        "system" => state.set_system_voice(None),
         "kokoro" => state.set_kokoro_voice(voice.unwrap_or(KOKORO_DEFAULT_VOICE).to_string()),
         "supertonic" => {
             state.set_supertonic_voice(voice.unwrap_or(SUPERTONIC_DEFAULT_VOICE).to_string())
@@ -1455,10 +1073,10 @@ fn report_audition(
 /// when the real answer arrived. Now the choice is answered immediately and
 /// the sound reports itself.
 ///
-/// `preparing` is emitted before anything slow starts. The Mac's voice is
-/// speaking within a tenth of a second, but Kokoro loads an 82MB model on its
-/// first sample, and several silent seconds with nothing on screen is the
-/// thing that reads as broken.
+/// `preparing` is emitted before anything slow starts. `say` takes a second or
+/// two to start and Kokoro loads an 82MB model on its first sample, and
+/// several silent seconds with nothing on screen is the thing that reads as
+/// broken.
 ///
 /// `voice` names the row for the pane only. What actually speaks is the voice
 /// stored for the engine, which both callers have just resolved.
@@ -1478,6 +1096,14 @@ fn audition(app_handle: &AppHandle, state: &AppState, engine: &str, voice: &str)
         // `say` streams as it synthesises, so the Mac's voice is already
         // speaking. Every other engine renders a whole clip first.
         if engine.eq_ignore_ascii_case("system") {
+            // A Mac voice that is not Siri is never spoken, not even as a
+            // sample. Nothing is wrong to report: the row already says how
+            // to fix it.
+            if !mac_voice_allowed().await {
+                info!("[Voices] The System Voice is not a Siri voice; no sample");
+                report_audition(&app, &voice, &engine, EVENT_DONE, None);
+                return;
+            }
             report_audition(&app, &voice, &engine, EVENT_SPEAKING, None);
         }
 
@@ -1600,12 +1226,7 @@ async fn resolve_and_list(
     let engine = stored_engine(audio);
     let inventory = inventory_for(&engine, freshness).await;
     let stored = audio.voice_for(&engine).map(str::to_string);
-    let resolution = resolve_stored_voice(
-        &engine,
-        &inventory,
-        stored.as_deref(),
-        audio.system_voice_chosen,
-    );
+    let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
 
     if resolution.voice != stored {
         if resolution.substituted {
@@ -1631,11 +1252,10 @@ async fn resolve_and_list(
 
 /// Put the stored engine and voice in force: at startup, and after a reset.
 ///
-/// The best voice this Mac has is only the default if it is actually in
-/// force. With nothing stored, `say` used to run on whichever voice System
-/// Settings happens to be set to, which on a Mac upgraded from an old one is a
-/// voice from 2005. A reset wrote the defaults to disk and left the running
-/// app speaking in the old voice until the next launch, so it runs this too.
+/// A stored choice is only the default if it is actually in force. A reset
+/// writes the defaults to disk, and without this the running app would keep
+/// speaking in the old voice until the next launch, so it runs this too. It
+/// is also where a Mac voice an older build named is retired for good.
 pub async fn apply_stored_voice(app_handle: &AppHandle, state: &AppState) -> Result<(), String> {
     let _change = VOICE_CHANGE.lock().await;
     let manager = settings_manager(app_handle)?;
@@ -1702,12 +1322,7 @@ pub async fn switch_engine(
     let engine = stored_engine(&audio);
     let inventory = inventory_for(&engine, Freshness::Recent).await;
     let stored = audio.voice_for(&engine).map(str::to_string);
-    let resolution = resolve_stored_voice(
-        &engine,
-        &inventory,
-        stored.as_deref(),
-        audio.system_voice_chosen,
-    );
+    let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
     audio.set_voice_for(&engine, resolution.voice.clone());
 
     manager
@@ -1766,33 +1381,25 @@ pub async fn set_juno_voice(
 
     let engine = stored_engine(&audio);
     // The pane was drawn from a fresh reading moments ago, so a recent one is
-    // enough to check the id against, and it keeps a process spawn out of
-    // the gap between the tap and the sound.
+    // enough to check the id against.
     let mut inventory = inventory_for(&engine, Freshness::Recent).await;
 
     let offered = |inventory: &VoiceInventory| match provider_voices(&engine, inventory) {
         ProviderVoices::Known(rows) => rows.iter().any(|row| row.id == id),
         ProviderVoices::Elsewhere(_) => false,
     };
-    let chosen =
-        if id == SYSTEM_DEFAULT_ID && engine.eq_ignore_ascii_case("system") && !offered(&inventory)
-        {
-            // A Mac whose list has no row for it: nothing imposed.
-            None
-        } else {
-            if !offered(&inventory) {
-                // A voice installed since the last reading.
-                inventory = inventory_for(&engine, Freshness::Now).await;
-            }
-            if !offered(&inventory) {
-                return Err(format!(
-                    "{} has no voice called {}.",
-                    engine_label(&engine),
-                    id
-                ));
-            }
-            Some(id.clone())
-        };
+    if !offered(&inventory) {
+        // Something new since the last reading.
+        inventory = inventory_for(&engine, Freshness::Now).await;
+    }
+    if !offered(&inventory) {
+        return Err(format!(
+            "{} has no voice called {}.",
+            engine_label(&engine),
+            id
+        ));
+    }
+    let chosen = Some(id.clone());
 
     // Picking a voice while Juno is silent picks what speaks once speech is
     // back on. It does not turn speech on: that is its own switch.
@@ -1804,10 +1411,6 @@ pub async fn set_juno_voice(
         audio.tts_provider = engine.clone();
     }
     audio.set_voice_for(&engine, chosen.clone());
-    if engine.eq_ignore_ascii_case("system") {
-        // From here the stored Mac voice is the person's, not a ranking's.
-        audio.system_voice_chosen = true;
-    }
     manager
         .set_audio_settings(&audio)
         .await
@@ -1914,12 +1517,7 @@ pub async fn set_juno_voice_rate(
     let engine = stored_engine(&audio);
     let inventory = inventory_for(&engine, Freshness::Recent).await;
     let stored = audio.voice_for(&engine).map(str::to_string);
-    let resolution = resolve_stored_voice(
-        &engine,
-        &inventory,
-        stored.as_deref(),
-        audio.system_voice_chosen,
-    );
+    let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
     let list = voice_list(&audio.tts_provider, &engine, &inventory, &resolution).with_rate(rate);
 
     // Hearing it is the point of moving the slider. Only when the engine in
@@ -1956,12 +1554,7 @@ pub async fn preview_juno_voice(
         let engine = stored_engine(&audio);
         let inventory = inventory_for(&engine, Freshness::Recent).await;
         let stored = audio.voice_for(&engine).map(str::to_string);
-        let resolution = resolve_stored_voice(
-            &engine,
-            &inventory,
-            stored.as_deref(),
-            audio.system_voice_chosen,
-        );
+        let resolution = resolve_voice(&engine, &inventory, stored.as_deref());
         let row = resolution
             .voice
             .unwrap_or_else(|| SYSTEM_DEFAULT_ID.to_string());
@@ -1972,64 +1565,41 @@ pub async fn preview_juno_voice(
     Ok(())
 }
 
+/// Open System Settings > Accessibility > Read & Speak, where the Mac's voice
+/// is chosen. The link under the "Your Mac's voice" row.
+///
+/// Tries the Read & Speak anchor, then Accessibility itself.
+#[tauri::command]
+pub async fn open_read_and_speak() -> Result<(), String> {
+    for url in READ_AND_SPEAK_URLS {
+        match std::process::Command::new("open").arg(url).status() {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => warn!("[Voices] `open {}` exited with {}", url, status),
+            Err(e) => error!("[Voices] `open {}` failed: {}", url, e),
+        }
+    }
+    Err("Could not open System Settings".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Real `say -v '?'` output, including the shapes that break naive
-    /// parsing: a name with a space, a quality suffix in brackets, and a
-    /// sample sentence containing a '#'.
-    const SAY_OUTPUT: &str = "\
-Albert              en_US    # Hello, my name is Albert.
-Bad News            en_US    # The light you see at the end of the tunnel is the headlamp of a train.
-Daniel              en_GB    # Hello, my name is Daniel. I am a British-English voice.
-Fred                en_US    # Hello, my name is Fred. Issue #1 is me.
-Karen               en_AU    # Hello, my name is Karen. I am an Australian-English voice.
-Moira               en_IE    # Hello, my name is Moira. I am an Irish-English voice.
-Samantha            en_US    # Hello, my name is Samantha. I am an American-English voice.
-Thomas              fr_FR    # Bonjour, je m'appelle Thomas.
-";
-
-    /// The same Mac after somebody downloaded the good voices.
-    const SAY_OUTPUT_WITH_DOWNLOADS: &str = "\
-Ava (Premium)       en_US    # Hello, my name is Ava.
-Daniel              en_GB    # Hello, my name is Daniel.
-Daniel (Enhanced)   en_GB    # Hello, my name is Daniel.
-Samantha            en_US    # Hello, my name is Samantha.
-Samantha (Enhanced) en_US    # Hello, my name is Samantha.
-";
-
-    fn stock_mac() -> VoiceInventory {
-        VoiceInventory {
-            macos: parse_say_voice_list(SAY_OUTPUT),
-            kokoro: Vec::new(),
-            kokoro_problem: None,
-            system_voice: SystemVoice::default(),
-            system_voice_name: None,
-        }
-    }
-
-    fn mac_with_downloads() -> VoiceInventory {
-        VoiceInventory {
-            macos: parse_say_voice_list(SAY_OUTPUT_WITH_DOWNLOADS),
-            kokoro: Vec::new(),
-            kokoro_problem: None,
-            system_voice: SystemVoice::default(),
-            system_voice_name: None,
-        }
-    }
-
     fn kokoro_mac() -> VoiceInventory {
         VoiceInventory {
-            macos: parse_say_voice_list(SAY_OUTPUT),
             kokoro: vec![
                 "af_heart".to_string(),
                 "am_michael".to_string(),
                 "bf_emma".to_string(),
             ],
-            kokoro_problem: None,
-            system_voice: SystemVoice::default(),
-            system_voice_name: None,
+            ..VoiceInventory::default()
+        }
+    }
+
+    fn mac(voice: SystemVoice) -> VoiceInventory {
+        VoiceInventory {
+            system_voice: voice,
+            ..VoiceInventory::default()
         }
     }
 
@@ -2039,38 +1609,232 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         voice_list(provider, &engine, inventory, &resolution)
     }
 
-    // -- parsing -----------------------------------------------------------
+    // -- the gate ----------------------------------------------------------
 
+    /// Juno speaks in a Siri voice or a provider's voice, never another Mac
+    /// voice. A failed reading is trusted: `say` speaks the System Voice.
     #[test]
-    fn a_name_with_a_space_survives_parsing() {
-        let voices = parse_say_voice_list(SAY_OUTPUT);
-        assert!(voices.iter().any(|v| v.name == "Bad News"));
+    fn only_a_siri_or_unread_system_voice_may_speak() {
+        assert!(mac_voice_is_siri_or_unknown(SystemVoice::Siri));
+        assert!(mac_voice_is_siri_or_unknown(SystemVoice::Unset));
+        assert!(!mac_voice_is_siri_or_unknown(SystemVoice::Other));
     }
 
+    /// Knowing nothing is not knowing it is someone else.
     #[test]
-    fn a_quality_suffix_survives_parsing_and_is_read() {
-        let voices = parse_say_voice_list(SAY_OUTPUT_WITH_DOWNLOADS);
-        assert!(voices.iter().any(|v| v.name == "Samantha (Enhanced)"));
-        assert_eq!(voice_quality("Samantha (Enhanced)"), VoiceQuality::Enhanced);
-        assert_eq!(voice_quality("Ava (Premium)"), VoiceQuality::Premium);
-        assert_eq!(voice_quality("Samantha"), VoiceQuality::Compact);
-        assert_eq!(voice_base_name("Ava (Premium)"), "Ava");
-        assert_eq!(voice_base_name("Samantha"), "Samantha");
+    fn the_default_reading_is_unset() {
+        assert_eq!(SystemVoice::default(), SystemVoice::Unset);
+        assert_eq!(VoiceInventory::default().system_voice, SystemVoice::Unset);
     }
 
+    // -- the Mac's one row -------------------------------------------------
+
+    /// The Mac offers exactly one row, its own voice, whatever was stored.
     #[test]
-    fn every_parsed_voice_has_a_name_and_a_locale() {
-        let voices = parse_say_voice_list(SAY_OUTPUT);
-        assert_eq!(voices.len(), 8, "{voices:?}");
-        for voice in voices {
-            assert!(!voice.name.is_empty());
-            assert!(voice.locale.contains('_'), "{:?}", voice.locale);
+    fn the_mac_offers_exactly_one_row() {
+        for voice in [SystemVoice::Siri, SystemVoice::Unset, SystemVoice::Other] {
+            for stored in [
+                None,
+                Some("Samantha"),
+                Some("Ava (Premium)"),
+                Some(SYSTEM_DEFAULT_ID),
+            ] {
+                let list = list_for("system", &mac(voice), stored);
+                assert_eq!(list.options.len(), 1, "{voice:?} {stored:?}");
+                let row = &list.options[0];
+                assert_eq!(row.id, SYSTEM_DEFAULT_ID);
+                assert_eq!(row.kind, "system");
+                assert_eq!(row.name, "Your Mac's voice");
+                assert!(row.selected);
+                assert_eq!(row.link.as_deref(), Some(READ_AND_SPEAK_LINK));
+                assert!(list.note.is_none(), "{:?}", list.note);
+            }
         }
+    }
+
+    /// The defect: Simone set in Read & Speak, Juno speaking as Samantha.
+    /// A named Mac voice from an older build is not a voice Juno speaks in
+    /// any more; it resolves quietly to the Mac's own.
+    #[test]
+    fn a_stored_samantha_resolves_to_the_macs_own_voice() {
+        for voice in [SystemVoice::Siri, SystemVoice::Unset, SystemVoice::Other] {
+            let resolution = resolve_voice("system", &mac(voice), Some("Samantha"));
+            assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
+            assert!(!resolution.substituted);
+        }
+        assert_eq!(
+            default_voice("system", &mac(SystemVoice::Unset)).as_deref(),
+            Some(SYSTEM_DEFAULT_ID)
+        );
+    }
+
+    /// The row says how it works, and how to fix it when the Mac's voice is
+    /// not a Siri voice. A row that will not speak does not offer to.
+    #[test]
+    fn the_mac_row_says_where_its_voice_is_set() {
+        let siri = list_for("system", &mac(SystemVoice::Siri), None);
+        assert_eq!(
+            siri.options[0].descriptor,
+            "Uses the Siri voice you pick in Read & Speak."
+        );
+        assert!(siri.options[0].speaks);
+
+        let other = list_for("system", &mac(SystemVoice::Other), None);
+        assert_eq!(
+            other.options[0].descriptor,
+            "Pick a Siri voice in Read & Speak and Juno will use it."
+        );
+        assert!(!other.options[0].speaks);
+        for row in [&siri.options[0], &other.options[0]] {
+            assert!(!row.descriptor.contains('—'));
+        }
+    }
+
+    /// Only the Mac row links anywhere.
+    #[test]
+    fn only_the_mac_row_has_a_link() {
+        let kokoro = list_for("kokoro", &kokoro_mac(), None);
+        assert!(kokoro.options.iter().all(|o| o.link.is_none()));
+    }
+
+    /// The most specific pane first, then Accessibility itself.
+    #[test]
+    fn read_and_speak_opens_the_accessibility_pane() {
+        assert!(READ_AND_SPEAK_URLS[0].ends_with("?SpokenContent"));
+        for url in READ_AND_SPEAK_URLS {
+            assert!(url.starts_with(
+                "x-apple.systempreferences:com.apple.Accessibility-Settings.extension"
+            ));
+        }
+    }
+
+    /// The Mac's own voice reaches `say` as no `-v`, for the greeting and
+    /// every reply alike, whatever an older build stored.
+    #[test]
+    fn the_greeting_and_a_reply_speak_the_same_voice() {
+        let state = AppState::new(None);
+        let greeting = state.get_system_voice().unwrap();
+        let resolution = resolve_voice("system", &mac(SystemVoice::Unset), Some("Samantha"));
+        push_voice_to_state(&state, "system", resolution.voice.as_deref()).unwrap();
+        push_voice_to_state(&state, "system", Some("Samantha")).unwrap();
+        let reply = state.get_system_voice().unwrap();
+        assert_eq!(greeting, None);
+        assert_eq!(reply, None);
+        assert_eq!(crate::tts::system::say_arguments("hi", None), vec!["hi"]);
+    }
+
+    // -- reading the System Voice ------------------------------------------
+
+    const NEW_SELECTIONS: &str = r#"["en",{"boundLanguage":"en","_type":"Speech.VoiceSelection","voiceId":"com.apple.siri.natural.Simone","_version":0}]"#;
+
+    fn langs(list: &[&str]) -> Vec<String> {
+        list.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn the_system_voice_choice_is_read_from_its_id_or_name() {
+        assert_eq!(classify_system_voice(None, None), SystemVoice::Unset);
+        assert_eq!(
+            classify_system_voice(Some(" "), Some("")),
+            SystemVoice::Unset
+        );
+        assert_eq!(
+            classify_system_voice(Some("com.apple.siri.natural.Simone"), None),
+            SystemVoice::Siri
+        );
+        assert_eq!(
+            classify_system_voice(
+                Some("com.apple.speech.synthesis.voice.custom.siri.nicky"),
+                None
+            ),
+            SystemVoice::Siri
+        );
+        assert_eq!(
+            classify_system_voice(Some("com.apple.voice.compact.en-US.Samantha"), None),
+            SystemVoice::Other
+        );
+        assert_eq!(
+            classify_system_voice(
+                Some("com.apple.voice.premium.en-US.Ava"),
+                Some("Ava (Premium)")
+            ),
+            SystemVoice::Other
+        );
+    }
+
+    #[test]
+    fn the_macos_26_voice_selection_is_read_by_language() {
+        assert_eq!(
+            parse_voice_selections(NEW_SELECTIONS, &langs(&["en"])),
+            Some((
+                "en".to_string(),
+                "com.apple.siri.natural.Simone".to_string()
+            ))
+        );
+        let two = r#"["en",{"voiceId":"a.en"},"fr",{"voiceId":"a.fr"}]"#;
+        let fr = parse_voice_selections(two, &langs(&["fr", "en"]));
+        assert_eq!(fr.map(|(_, id)| id).as_deref(), Some("a.fr"));
+        let en = parse_voice_selections(two, &langs(&["de", "en"]));
+        assert_eq!(en.map(|(_, id)| id).as_deref(), Some("a.en"));
+        assert_eq!(parse_voice_selections(two, &langs(&["de"])), None);
+        assert_eq!(parse_voice_selections("not json", &langs(&["en"])), None);
+        assert_eq!(parse_voice_selections("[]", &langs(&["en"])), None);
+    }
+
+    #[test]
+    fn the_new_key_wins_and_the_old_domain_is_the_fallback() {
+        let selection = parse_voice_selections(NEW_SELECTIONS, &langs(&["en"]));
+        let new = spoken_content_from(
+            selection,
+            Some("old.id".to_string()),
+            Some("Old".to_string()),
+        );
+        assert_eq!(
+            new.voice_id.as_deref(),
+            Some("com.apple.siri.natural.Simone")
+        );
+        assert_eq!(new.voice_name, None);
+        assert_eq!(
+            classify_system_voice(new.voice_id.as_deref(), new.voice_name.as_deref()),
+            SystemVoice::Siri
+        );
+
+        let old = spoken_content_from(
+            None,
+            Some("com.apple.voice.premium.en-US.Ava".to_string()),
+            Some("Ava".to_string()),
+        );
+        assert_eq!(
+            old.voice_id.as_deref(),
+            Some("com.apple.voice.premium.en-US.Ava")
+        );
+        assert_eq!(old.voice_name.as_deref(), Some("Ava"));
+
+        let nothing = spoken_content_from(None, None, None);
+        assert_eq!(
+            classify_system_voice(nothing.voice_id.as_deref(), nothing.voice_name.as_deref()),
+            SystemVoice::Unset
+        );
+    }
+
+    #[test]
+    fn a_changed_system_voice_is_read_again() {
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+        let t1 = t0 + Duration::from_secs(2);
+        let young = Duration::from_secs(1);
+        // Nothing moved and the reading is young: reuse it.
+        assert!(!reading_is_stale(young, Some(t0), Some(t0)));
+        assert!(!reading_is_stale(young, None, None));
+        // The preferences file was written since: read again, however young.
+        assert!(reading_is_stale(young, Some(t0), Some(t1)));
+        assert!(reading_is_stale(young, None, Some(t1)));
+        assert!(reading_is_stale(young, Some(t0), None));
+        // An old reading is read again even if the file looks unchanged.
+        assert!(reading_is_stale(MAC_VOICE_FRESH_FOR, Some(t0), Some(t0)));
     }
 
     // -- the list is a function of the engine ------------------------------
 
-    /// The defect this file was rewritten for: Kokoro was offered macOS voices.
     #[test]
     fn the_list_belongs_to_the_engine_that_is_speaking() {
         let kokoro = list_for("kokoro", &kokoro_mac(), None);
@@ -2078,35 +1842,11 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         assert_eq!(kokoro.engine_label, "Kokoro");
         let ids: Vec<&str> = kokoro.options.iter().map(|o| o.id.as_str()).collect();
         assert!(ids.contains(&"af_heart"), "{ids:?}");
-        for mac_voice in ["Samantha", "Daniel", "Karen", "Moira"] {
-            assert!(
-                !ids.contains(&mac_voice),
-                "{mac_voice} is not a voice Kokoro has"
-            );
-        }
+        assert!(!ids.contains(&SYSTEM_DEFAULT_ID), "{ids:?}");
 
         let mac = list_for("system", &kokoro_mac(), None);
         let ids: Vec<&str> = mac.options.iter().map(|o| o.id.as_str()).collect();
-        assert!(ids.contains(&"Samantha"), "{ids:?}");
-        assert!(!ids.contains(&"af_heart"), "{ids:?}");
-    }
-
-    /// A hundred voices is not a choice, and a novelty voice is not a choice
-    /// either.
-    #[test]
-    fn the_mac_list_curates_rather_than_dumping() {
-        let list = list_for("system", &stock_mac(), None);
-        assert!(
-            list.options.len() <= SYSTEM_VOICE_CATALOG.len() + 1,
-            "{} rows",
-            list.options.len()
-        );
-        for noise in ["Bad News", "Fred", "Albert", "Thomas"] {
-            assert!(
-                !list.options.iter().any(|o| o.name == noise),
-                "{noise} should not be offered"
-            );
-        }
+        assert_eq!(ids, vec![SYSTEM_DEFAULT_ID]);
     }
 
     /// An engine whose voices Juno cannot enumerate says so. Rows it could not
@@ -2137,29 +1877,17 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
 
     // -- switching engines -------------------------------------------------
 
-    /// The pin for the bug: switching engine must leave a voice the new engine
-    /// actually has, not the one the old engine named.
+    /// Switching engine must leave a voice the new engine actually has, not
+    /// the one the old engine named.
     #[test]
     fn switching_engine_yields_a_voice_that_engine_has() {
         let inventory = kokoro_mac();
-
-        // On the Mac, with a Mac voice stored.
-        let mac = resolve_voice("system", &inventory, Some("Daniel"));
-        assert_eq!(mac.voice.as_deref(), Some("Daniel"));
-
-        // Switch to Kokoro. The Mac's voice means nothing here.
-        let kokoro = resolve_voice("kokoro", &inventory, Some("Daniel"));
+        let kokoro = resolve_voice("kokoro", &inventory, Some(SYSTEM_DEFAULT_ID));
         assert_eq!(kokoro.voice.as_deref(), Some(KOKORO_DEFAULT_VOICE));
         assert!(kokoro.substituted, "the pane has to be able to say why");
 
-        // And back again.
         let back = resolve_voice("system", &inventory, Some("af_heart"));
-        assert!(back.substituted);
-        assert_eq!(
-            back.voice,
-            best_macos_voice(&inventory.macos),
-            "a Kokoro id must not survive into `say`"
-        );
+        assert_eq!(back.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
     }
 
     /// A stored id the engine does not know resolves to that engine's default,
@@ -2172,9 +1900,9 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
                 resolution.voice.is_some(),
                 "{engine} resolved to silence: {resolution:?}"
             );
-            assert!(resolution.substituted, "{engine}");
             assert_eq!(resolution.voice, default_voice(engine, &kokoro_mac()));
         }
+        assert!(resolve_voice("kokoro", &kokoro_mac(), Some("Nobody")).substituted);
     }
 
     /// Resolving twice must not keep moving: the resolution is what gets
@@ -2188,81 +1916,6 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
             assert_eq!(once.voice, twice.voice, "{engine}");
             assert!(!twice.substituted, "{engine} kept reporting a substitution");
         }
-    }
-
-    // -- the default chain -------------------------------------------------
-
-    /// Rung 3: a stock Mac has only compact voices, and Samantha is the one
-    /// every Mac has.
-    #[test]
-    fn a_stock_mac_defaults_to_the_voice_every_mac_has() {
-        assert_eq!(
-            best_macos_voice(&stock_mac().macos),
-            Some("Samantha".to_string())
-        );
-        assert!(
-            only_compact_voices(&stock_mac().macos),
-            "the pane should offer to go and get a better one"
-        );
-    }
-
-    /// Rungs 1 and 2: a downloaded voice is the point of downloading it, so
-    /// quality wins over catalog position, and Premium wins over Enhanced.
-    #[test]
-    fn a_downloaded_voice_wins_over_a_compact_one() {
-        let inventory = mac_with_downloads();
-        assert_eq!(
-            best_macos_voice(&inventory.macos),
-            Some("Ava (Premium)".to_string())
-        );
-        assert!(!only_compact_voices(&inventory.macos));
-
-        // With no Premium installed, the best Enhanced one wins, even though
-        // the compact Samantha sits higher in the catalog than Daniel.
-        let enhanced_only: Vec<InstalledVoice> = inventory
-            .macos
-            .iter()
-            .filter(|voice| voice_quality(&voice.name) != VoiceQuality::Premium)
-            .cloned()
-            .collect();
-        assert_eq!(
-            voice_quality(&best_macos_voice(&enhanced_only).unwrap_or_default()),
-            VoiceQuality::Enhanced
-        );
-    }
-
-    /// Rung 4: a Mac with none of the catalog still speaks. `None` runs `say`
-    /// with no `-v`, which is the voice the Mac is set to, not silence.
-    #[test]
-    fn a_mac_with_no_catalog_voice_falls_back_to_the_macs_own() {
-        let bare = VoiceInventory {
-            macos: parse_say_voice_list("Zarvox              en_US    # Hello.\n"),
-            kokoro: Vec::new(),
-            kokoro_problem: None,
-            system_voice: SystemVoice::default(),
-            system_voice_name: None,
-        };
-        assert_eq!(best_macos_voice(&bare.macos), None);
-
-        let list = list_for("system", &bare, Some("Samantha"));
-        assert_eq!(list.options.len(), 1, "the Mac's own voice");
-        assert_eq!(list.options[0].id, SYSTEM_DEFAULT_ID);
-        assert!(list.options[0].selected);
-        assert!(list.options[0].speaks);
-    }
-
-    /// A row offers the best version of itself, so a download is in force
-    /// without anybody choosing again.
-    #[test]
-    fn a_row_offers_the_best_version_of_itself() {
-        let rows = macos_voices(&mac_with_downloads().macos);
-        let samantha = rows
-            .iter()
-            .find(|row| row.name == "Samantha")
-            .expect("Samantha is installed");
-        assert_eq!(samantha.id, "Samantha (Enhanced)");
-        assert!(samantha.descriptor.ends_with("Enhanced."));
-        assert_eq!(rows.iter().filter(|row| row.name == "Samantha").count(), 1);
     }
 
     /// Kokoro's default is the one embedding the downloader always fetches.
@@ -2305,30 +1958,6 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         assert!(list.options.iter().all(|o| o.kind != "silent"));
         assert!(list.speed.is_none(), "no speed row while silent");
         assert!(!list_for("kokoro", &kokoro_mac(), None).silent);
-    }
-
-    /// Standing in for another engine, the Mac speaks with Siri whenever the
-    /// System Voice is (or defaults to) Siri, and with the person's choice
-    /// otherwise.
-    #[test]
-    fn a_stand_in_prefers_siri() {
-        let chosen = Some("Daniel".to_string());
-        assert_eq!(
-            stand_in_say_voice(SystemVoice::Siri, chosen.clone()),
-            StandInVoice::Siri
-        );
-        assert_eq!(
-            stand_in_say_voice(SystemVoice::Unset, chosen.clone()),
-            StandInVoice::Siri
-        );
-        assert_eq!(
-            stand_in_say_voice(SystemVoice::Other, chosen.clone()),
-            StandInVoice::Mac(chosen)
-        );
-        assert_eq!(
-            stand_in_say_voice(SystemVoice::Other, None),
-            StandInVoice::Mac(None)
-        );
     }
 
     /// Off remembers the engine, and on returns to it.
@@ -2378,75 +2007,7 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         }
     }
 
-    /// A voice that was uninstalled must not leave the list showing nothing in
-    /// force while a different voice does the talking.
-    #[test]
-    fn an_uninstalled_choice_lights_the_voice_that_will_actually_speak() {
-        let list = list_for("system", &stock_mac(), Some("Fiona"));
-        let lit = list
-            .options
-            .iter()
-            .find(|o| o.selected)
-            .map(|o| o.id.clone())
-            .unwrap_or_default();
-        assert_eq!(
-            lit,
-            best_macos_voice(&stock_mac().macos).unwrap_or_default()
-        );
-        assert!(
-            list.note.unwrap_or_default().contains("not on this Mac"),
-            "the pane has to say why the selection moved"
-        );
-    }
-
     // -- the words ---------------------------------------------------------
-
-    #[test]
-    fn every_descriptor_is_one_plain_line() {
-        for entry in SYSTEM_VOICE_CATALOG {
-            assert!(!entry.descriptor.is_empty(), "{} has no line", entry.name);
-            assert!(
-                entry.descriptor.ends_with('.'),
-                "{} is not a sentence",
-                entry.name
-            );
-            assert!(
-                !entry.descriptor.contains('—'),
-                "{} uses an em dash",
-                entry.name
-            );
-            assert!(
-                !entry.descriptor.contains('\n'),
-                "{} is more than one line",
-                entry.name
-            );
-        }
-    }
-
-    /// Every catalog entry names an English accent, because the descriptor is
-    /// the only thing separating two rows that both just say a name.
-    #[test]
-    fn every_catalog_entry_is_an_english_voice() {
-        for entry in SYSTEM_VOICE_CATALOG {
-            assert!(
-                entry.locale_prefix.starts_with("en_"),
-                "{} is {}",
-                entry.name,
-                entry.locale_prefix
-            );
-        }
-    }
-
-    /// A voice installed under a different accent than the catalog claims is
-    /// dropped, because the descriptor names the accent.
-    #[test]
-    fn a_locale_mismatch_drops_the_entry() {
-        let wrong = vec![InstalledVoice {
-            name: "Daniel".to_string(),
-            locale: "en_US".to_string(),
-        }];
-        assert!(macos_voices(&wrong).is_empty());
-    }
 
     #[test]
     fn the_sample_is_short_enough_to_interrupt() {
@@ -2464,9 +2025,8 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
     // -- the default engine ------------------------------------------------
 
     /// The default is Kokoro: local, no key, no network once it is on disk.
-    /// The one thing it needs is the first download, and until that lands
-    /// (or if it never does) the fallback chain speaks with the Mac's voice,
-    /// which needs nothing. See `tts::fallback_chain`.
+    /// The one thing it needs is the first download. See `tts::fallback_chain`
+    /// for what speaks until it lands.
     #[test]
     fn the_default_engine_is_kokoro_and_needs_only_a_download() {
         let default = crate::constants::settings::defaults::TTS_PROVIDER;
@@ -2477,8 +2037,8 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         assert!(!needs.account_key && !needs.network && !needs.server);
     }
 
-    /// The Mac's voice is the floor every chain ends on, so it is the one
-    /// engine that needs nothing at all. Every cloud engine needs an account.
+    /// The Mac's voice is the one engine that needs nothing at all. Every
+    /// cloud engine needs an account.
     #[test]
     fn only_the_mac_voice_needs_nothing() {
         assert!(engine_needs("system").nothing());
@@ -2498,52 +2058,6 @@ Samantha (Enhanced) en_US    # Hello, my name is Samantha.
         assert_eq!(crate::constants::settings::defaults::TTS_PROVIDER, "kokoro");
     }
 
-    // -- ranking by quality, not by name -----------------------------------
-
-    /// A downloaded voice the catalog has never heard of is still the best
-    /// voice on the Mac, and the default, because it is ranked by quality.
-    /// The novelty voices stay out.
-    #[test]
-    fn a_downloaded_voice_the_catalog_does_not_name_wins_on_quality() {
-        let installed = parse_say_voice_list(
-            "\
-Eddy (English (US)) en_US    # Hello! My name is Eddy.
-Evan (Enhanced)     en_US    # Hello! My name is Evan.
-Samantha            en_US    # Hello! My name is Samantha.
-Bubbles             en_US    # Hello! My name is Bubbles.
-",
-        );
-        assert_eq!(
-            best_macos_voice(&installed),
-            Some("Evan (Enhanced)".to_string())
-        );
-        let rows = macos_voices(&installed);
-        assert_eq!(rows[0].id, "Evan (Enhanced)", "the default is the top row");
-        assert_eq!(rows[0].name, "Evan");
-        assert_eq!(rows[0].descriptor, "American English. Enhanced.");
-        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
-        assert!(!names.contains(&"Eddy"), "{names:?}");
-        assert!(!names.contains(&"Bubbles"), "{names:?}");
-        assert!(!only_compact_voices(&installed));
-    }
-
-    /// With nothing stored (a fresh install, or a reset) the Mac speaks in the
-    /// best voice installed, and the list is ordered so that is the top row.
-    #[test]
-    fn nothing_stored_resolves_to_the_best_voice_installed() {
-        let inventory = mac_with_downloads();
-        let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some("Ava (Premium)"));
-        assert!(!resolution.substituted);
-        let rows = macos_voices(&inventory.macos);
-        assert_eq!(rows[0].id, "Ava (Premium)");
-        let qualities: Vec<VoiceQuality> = rows.iter().map(|r| voice_quality(&r.id)).collect();
-        let mut sorted = qualities.clone();
-        sorted.sort();
-        sorted.reverse();
-        assert_eq!(qualities, sorted, "best first");
-    }
-
     // -- each engine lists its own voices ----------------------------------
 
     /// Every engine's rows are that engine's voices and nobody else's, and the
@@ -2551,15 +2065,12 @@ Bubbles             en_US    # Hello! My name is Bubbles.
     #[test]
     fn every_engine_lists_only_its_own_voices() {
         let inventory = kokoro_mac();
-        let mac_ids: Vec<String> = inventory.macos.iter().map(|v| v.name.clone()).collect();
         for engine in ENGINES {
             let list = list_for(engine, &inventory, None);
             assert_eq!(list.engine, *engine);
-            let rows: Vec<&JunoVoiceOption> =
-                list.options.iter().filter(|o| o.kind == "voice").collect();
-            for row in &rows {
+            for row in &list.options {
                 let belongs = match *engine {
-                    "system" => mac_ids.contains(&row.id),
+                    "system" => row.id == SYSTEM_DEFAULT_ID,
                     "kokoro" => inventory.kokoro.contains(&row.id),
                     "supertonic" => ["M1", "F1"].contains(&row.id.as_str()),
                     _ => false,
@@ -2569,7 +2080,7 @@ Bubbles             en_US    # Hello! My name is Bubbles.
             let resolved = resolve_voice(engine, &inventory, None).voice;
             if let Some(voice) = resolved {
                 assert!(
-                    rows.iter().any(|row| row.id == voice),
+                    list.options.iter().any(|row| row.id == voice),
                     "{engine} resolved to {voice}, which it does not list"
                 );
             }
@@ -2609,296 +2120,11 @@ Bubbles             en_US    # Hello! My name is Bubbles.
         }
     }
 
-    // -- the Mac's own voice -------------------------------------------------
-
-    fn with_system_voice(mut inventory: VoiceInventory, voice: SystemVoice) -> VoiceInventory {
-        inventory.system_voice = voice;
-        inventory
-    }
-
-    fn langs(list: &[&str]) -> Vec<String> {
-        list.iter().map(|l| l.to_string()).collect()
-    }
-
-    const NEW_SELECTIONS: &str = r#"["en",{"boundLanguage":"en","_type":"Speech.VoiceSelection","voiceId":"com.apple.siri.natural.Simone","_version":0}]"#;
-
-    #[test]
-    fn the_system_voice_choice_is_read_from_its_id_or_name() {
-        assert_eq!(classify_system_voice(None, None), SystemVoice::Unset);
-        assert_eq!(
-            classify_system_voice(Some("com.apple.siri.natural.Simone"), None),
-            SystemVoice::Siri
-        );
-        assert_eq!(
-            classify_system_voice(
-                Some("com.apple.voice.premium.en-US.Ava"),
-                Some("Ava (Premium)")
-            ),
-            SystemVoice::Other
-        );
-    }
-
-    #[test]
-    fn the_macos_26_voice_selection_is_read_by_language() {
-        assert_eq!(
-            parse_voice_selections(NEW_SELECTIONS, &langs(&["en"])),
-            Some((
-                "en".to_string(),
-                "com.apple.siri.natural.Simone".to_string()
-            ))
-        );
-        let two = r#"["en",{"voiceId":"a.en"},"fr",{"voiceId":"a.fr"}]"#;
-        let fr = parse_voice_selections(two, &langs(&["fr", "en"]));
-        assert_eq!(fr.map(|(_, id)| id).as_deref(), Some("a.fr"));
-        let en = parse_voice_selections(two, &langs(&["de", "en"]));
-        assert_eq!(en.map(|(_, id)| id).as_deref(), Some("a.en"));
-        assert_eq!(parse_voice_selections(two, &langs(&["de"])), None);
-        assert_eq!(parse_voice_selections("not json", &langs(&["en"])), None);
-        assert_eq!(parse_voice_selections("[]", &langs(&["en"])), None);
-    }
-
-    #[test]
-    fn an_av_id_becomes_the_say_name() {
-        assert_eq!(
-            say_name_from_id("com.apple.voice.premium.en-US.Ava").as_deref(),
-            Some("Ava (Premium)")
-        );
-        assert_eq!(
-            say_name_from_id("com.apple.voice.enhanced.en-US.Zoe").as_deref(),
-            Some("Zoe (Enhanced)")
-        );
-        assert_eq!(
-            say_name_from_id("com.apple.voice.compact.en-US.Samantha").as_deref(),
-            Some("Samantha")
-        );
-        assert_eq!(say_name_from_id("com.apple.siri.natural.Simone"), None);
-    }
-
-    #[test]
-    fn the_new_key_wins_and_the_old_domain_is_the_fallback() {
-        let new = spoken_content_from(
-            Some(NEW_SELECTIONS),
-            &langs(&["en"]),
-            Some("old.id".to_string()),
-            Some("Old".to_string()),
-        );
-        assert_eq!(
-            new.voice_id.as_deref(),
-            Some("com.apple.siri.natural.Simone")
-        );
-        assert_eq!(new.voice_name, None);
-        assert_eq!(new.language.as_deref(), Some("en"));
-        assert_eq!(
-            classify_system_voice(new.voice_id.as_deref(), new.voice_name.as_deref()),
-            SystemVoice::Siri
-        );
-
-        let old = spoken_content_from(
-            None,
-            &langs(&["en"]),
-            Some("com.apple.voice.premium.en-US.Ava".to_string()),
-            Some("Ava".to_string()),
-        );
-        assert_eq!(
-            old.voice_id.as_deref(),
-            Some("com.apple.voice.premium.en-US.Ava")
-        );
-        assert_eq!(old.voice_name.as_deref(), Some("Ava"));
-    }
-
-    /// Siri is the best voice a Mac has, so a Siri System Voice is the
-    /// default: the Mac's own voice, even over a Premium download. Reported by
-    /// the owner: Siri set in Read & Speak, Juno speaking as Samantha.
-    #[test]
-    fn a_siri_system_voice_is_the_default() {
-        let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Siri);
-        let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-        let list = voice_list("system", "system", &inventory, &resolution);
-        assert!(list.options.iter().any(|o| o.id == "Ava (Premium)"));
-        assert_eq!(list.options.iter().filter(|o| o.selected).count(), 1);
-
-        let stock = with_system_voice(stock_mac(), SystemVoice::Siri);
-        let resolution = resolve_voice("system", &stock, None);
-        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-    }
-
-    /// A voice an older build auto-picked (the ranking's top row, never
-    /// chosen) gives way to Siri.
-    #[test]
-    fn an_auto_picked_voice_yields_to_siri() {
-        let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Siri);
-        let best = best_macos_voice(&inventory.macos);
-        let resolution = resolve_stored_voice("system", &inventory, best.as_deref(), false);
-        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-        let kept = resolve_stored_voice("system", &inventory, best.as_deref(), true);
-        assert_eq!(kept.voice, best);
-    }
-
-    /// A voice Juno can speak is followed, and is what the pane shows.
-    #[test]
-    fn a_buildable_system_voice_is_followed() {
-        let mut inventory = with_system_voice(mac_with_downloads(), SystemVoice::Other);
-        inventory.system_voice_name = Some("Ava (Premium)".to_string());
-        assert_eq!(
-            followed_system_voice(&inventory).as_deref(),
-            Some("Ava (Premium)")
-        );
-        let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some("Ava (Premium)"));
-
-        // Chosen but not installed here: the ranking, not silence.
-        inventory.system_voice_name = Some("Nobody (Premium)".to_string());
-        assert_eq!(followed_system_voice(&inventory), None);
-        assert!(resolve_voice("system", &inventory, None).voice.is_some());
-    }
-
-    /// An old auto-picked top voice yields when the person's chosen voice is
-    /// a different one that can be spoken.
-    #[test]
-    fn an_auto_picked_voice_yields_to_the_followed_one() {
-        let mut inventory = with_system_voice(mac_with_downloads(), SystemVoice::Other);
-        inventory.system_voice_name = Some("Samantha (Enhanced)".to_string());
-        let best = best_macos_voice(&inventory.macos);
-        assert_eq!(best.as_deref(), Some("Ava (Premium)"));
-        let resolution = resolve_stored_voice("system", &inventory, best.as_deref(), false);
-        assert_eq!(resolution.voice.as_deref(), Some("Samantha (Enhanced)"));
-        let kept = resolve_stored_voice("system", &inventory, best.as_deref(), true);
-        assert_eq!(kept.voice, best);
-    }
-
-    /// An explicit pick still wins over the default.
-    #[test]
-    fn a_chosen_voice_is_kept_when_the_system_voice_is_siri() {
-        let inventory = with_system_voice(stock_mac(), SystemVoice::Siri);
-        let resolution = resolve_voice("system", &inventory, Some("Samantha"));
-        assert_eq!(resolution.voice.as_deref(), Some("Samantha"));
-        assert!(!resolution.substituted);
-    }
-
-    /// No recorded choice and nothing better downloaded: the Mac's own voice,
-    /// under an honest name because nothing says it is Siri.
-    #[test]
-    fn an_unset_system_voice_with_only_compact_voices_is_the_macs_own() {
-        let inventory = with_system_voice(stock_mac(), SystemVoice::Unset);
-        let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-        let list = voice_list("system", "system", &inventory, &resolution);
-        assert_eq!(list.options[0].name, "Your Mac's voice");
-    }
-
-    /// A downloaded voice does not beat the Mac's own voice when the person
-    /// never chose one: the untouched default is Siri on current macOS. The
-    /// downloaded voices stay in the list to pick.
-    #[test]
-    fn an_unset_system_voice_beats_a_downloaded_one() {
-        let inventory = with_system_voice(mac_with_downloads(), SystemVoice::Unset);
-        let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-        let list = voice_list("system", "system", &inventory, &resolution);
-        assert!(list.options.iter().any(|o| o.id == "Ava (Premium)"));
-    }
-
-    /// A named, non-Siri system voice changes nothing about the ranking, and
-    /// the Mac's own voice can still be chosen.
-    #[test]
-    fn a_named_system_voice_keeps_the_ranking() {
-        let inventory = with_system_voice(stock_mac(), SystemVoice::Other);
-        let resolution = resolve_voice("system", &inventory, None);
-        assert_eq!(resolution.voice.as_deref(), Some("Samantha"));
-        let list = voice_list("system", "system", &inventory, &resolution);
-        let own = list
-            .options
-            .iter()
-            .find(|o| o.id == SYSTEM_DEFAULT_ID)
-            .expect("the Mac's own voice is always offered");
-        assert!(!own.selected);
-    }
-
-    /// The Mac's own voice reaches `say` as no `-v`, speaker routing intact.
-    #[test]
-    fn the_system_voice_row_reaches_say_without_a_voice_flag() {
-        assert_eq!(system_voice_for_say(Some(SYSTEM_DEFAULT_ID)), None);
-        assert_eq!(
-            system_voice_for_say(Some("Samantha")),
-            Some("Samantha".to_string())
-        );
-        let args = crate::tts::system::say_arguments("hi", None, Some("AirPods Pro"));
-        assert_eq!(args, vec!["-a", "AirPods Pro", "hi"]);
-    }
-
-    /// The defect: a build that ranked voices stored "Samantha" as if it were
-    /// a pick, so replies spoke in Samantha while the greeting (voice not yet
-    /// in `AppState`) spoke in the Mac's own. An unchosen auto-pick yields.
-    #[test]
-    fn an_old_auto_picked_voice_gives_way_to_the_macs_own() {
-        let inventory = with_system_voice(stock_mac(), SystemVoice::Unset);
-        let best = best_macos_voice(&inventory.macos);
-        assert_eq!(best.as_deref(), Some("Samantha"));
-        let resolution = resolve_stored_voice("system", &inventory, Some("Samantha"), false);
-        assert_eq!(resolution.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-        assert!(!resolution.substituted);
-    }
-
-    /// A voice the person picked is theirs, even when it is the top row.
-    #[test]
-    fn a_chosen_voice_is_never_replaced() {
-        let inventory = with_system_voice(stock_mac(), SystemVoice::Unset);
-        let resolution = resolve_stored_voice("system", &inventory, Some("Samantha"), true);
-        assert_eq!(resolution.voice.as_deref(), Some("Samantha"));
-        let other = resolve_stored_voice("system", &inventory, Some("Daniel"), false);
-        assert_eq!(other.voice.as_deref(), Some("Daniel"));
-    }
-
-    /// An unset Mac voice stays `system_default`, and a failed reading of the
-    /// System Voice cannot rewrite a stored `system_default` into a name.
-    #[test]
-    fn an_unset_mac_voice_stays_system_default() {
-        let unset = with_system_voice(stock_mac(), SystemVoice::Unset);
-        assert_eq!(
-            resolve_stored_voice("system", &unset, None, false)
-                .voice
-                .as_deref(),
-            Some(SYSTEM_DEFAULT_ID)
-        );
-        assert_eq!(
-            resolve_stored_voice("system", &unset, Some(SYSTEM_DEFAULT_ID), false)
-                .voice
-                .as_deref(),
-            Some(SYSTEM_DEFAULT_ID)
-        );
-        let misread = with_system_voice(stock_mac(), SystemVoice::Other);
-        let kept = resolve_stored_voice("system", &misread, Some(SYSTEM_DEFAULT_ID), false);
-        assert_eq!(kept.voice.as_deref(), Some(SYSTEM_DEFAULT_ID));
-        assert!(!kept.substituted);
-    }
-
-    /// The greeting and a reply both read the voice from `AppState` through
-    /// `invoke_tts_for_provider`, so what the resolution pushes there is the
-    /// one voice Juno speaks in: the Mac's own is no `-v` for both.
-    #[test]
-    fn the_greeting_and_a_reply_resolve_the_same_voice() {
-        let inventory = with_system_voice(stock_mac(), SystemVoice::Unset);
-        let state = AppState::new(None);
-        // Before anything is applied, which is when the greeting can run.
-        let greeting = state.get_system_voice().unwrap();
-        // The old stored Samantha, applied the way startup applies it.
-        let resolution = resolve_stored_voice("system", &inventory, Some("Samantha"), false);
-        push_voice_to_state(&state, "system", resolution.voice.as_deref()).unwrap();
-        let reply = state.get_system_voice().unwrap();
-        assert_eq!(greeting, None);
-        assert_eq!(reply, greeting);
-        assert_eq!(
-            crate::tts::system::say_arguments("hi", reply.as_deref(), None),
-            vec!["hi"]
-        );
-    }
-
     // -- speed -------------------------------------------------------------
 
     #[test]
     fn the_speed_row_shows_for_an_engine_that_can_change_speed() {
-        let list = list_for("system", &stock_mac(), None).with_rate(1.5);
+        let list = list_for("system", &VoiceInventory::default(), None).with_rate(1.5);
         let speed = list.speed.expect("the Mac's voice can change speed");
         assert_eq!(speed.value, 1.5);
         assert_eq!((speed.min, speed.max), (0.75, 2.0));
@@ -2907,19 +2133,21 @@ Bubbles             en_US    # Hello! My name is Bubbles.
     #[test]
     fn the_speed_row_is_absent_when_the_engine_has_no_speed_control() {
         for provider in ["replicate", "chatterbox"] {
-            let list = list_for(provider, &stock_mac(), None).with_rate(1.5);
+            let list = list_for(provider, &VoiceInventory::default(), None).with_rate(1.5);
             assert!(list.speed.is_none(), "{provider} has no speed control");
         }
     }
 
     #[test]
     fn silence_has_no_speed_row() {
-        let list = list_for("off", &stock_mac(), None).with_rate(1.5);
+        let list = list_for("off", &VoiceInventory::default(), None).with_rate(1.5);
         assert!(list.speed.is_none());
     }
 
     #[test]
     fn a_new_list_has_no_speed_until_one_is_attached() {
-        assert!(list_for("system", &stock_mac(), None).speed.is_none());
+        assert!(list_for("system", &VoiceInventory::default(), None)
+            .speed
+            .is_none());
     }
 }
