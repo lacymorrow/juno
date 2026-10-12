@@ -18,7 +18,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -121,6 +121,11 @@ pub mod model_aliases {
 /// Maximum time to wait for the Claude CLI subprocess before killing it.
 /// Claude CLI may run multi-step agent loops, so this is generous.
 const CLI_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// How many attached images to keep on disk for the one-shot CLI path.
+/// Generous next to the handful a single turn writes, small enough that the
+/// dir cannot grow without bound.
+const ATTACHMENT_CACHE_MAX_FILES: usize = 64;
 
 /// Asks the CLI for the raw streaming events rather than finished messages
 /// only. Everything the user sees while Juno works depends on it.
@@ -631,7 +636,41 @@ fn save_attachment_files(images: &[String]) -> Vec<PathBuf> {
             Err(e) => warn!("Could not write an attachment to {}: {e}", path.display()),
         }
     }
+    prune_attachment_cache(&dir);
     paths
+}
+
+/// Delete the oldest files in the attachments dir beyond
+/// [`ATTACHMENT_CACHE_MAX_FILES`].
+///
+/// Nothing else ever cleans this dir up, and the files are the person's own
+/// screenshots and photos, so without a cap every picture they ever pasted
+/// would sit on disk forever. Pruning on the newest-first ordering can only
+/// reach files from earlier turns: the ones this turn just wrote are the
+/// newest, so the CLI never loses a file out from under it.
+fn prune_attachment_cache(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            Some((meta.modified().ok()?, entry.path()))
+        })
+        .collect();
+    if files.len() <= ATTACHMENT_CACHE_MAX_FILES {
+        return;
+    }
+    files.sort();
+    for (_, path) in files.iter().take(files.len() - ATTACHMENT_CACHE_MAX_FILES) {
+        if let Err(e) = std::fs::remove_file(path) {
+            debug!("Could not prune attachment {}: {e}", path.display());
+        }
+    }
 }
 
 /// Extend a one-shot query to point at the attachment files on disk.
@@ -2689,6 +2728,37 @@ mod tests {
         assert!(query.contains("/tmp/b.jpg"));
         // No attachments saved: the person's text goes through untouched.
         assert_eq!(query_with_image_paths("hello", &[]), "hello");
+    }
+
+    #[test]
+    fn attachment_prune_keeps_the_newest_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = dir.path();
+        let total = ATTACHMENT_CACHE_MAX_FILES + 3;
+        for i in 0..total {
+            let path = dir.join(format!("{:03}.png", i));
+            std::fs::write(&path, b"x").expect("write");
+            let mtime = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_000 + i as u64);
+            std::fs::File::open(&path)
+                .expect("open")
+                .set_modified(mtime)
+                .expect("set mtime");
+        }
+        prune_attachment_cache(dir);
+        let mut left: Vec<String> = std::fs::read_dir(dir)
+            .expect("read_dir")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left.len(), ATTACHMENT_CACHE_MAX_FILES);
+        // The three oldest went; the newest, which is what a live turn just
+        // wrote, stayed.
+        assert_eq!(left.first().map(String::as_str), Some("003.png"));
+        assert_eq!(
+            left.last().map(String::as_str),
+            Some(format!("{:03}.png", total - 1).as_str())
+        );
     }
 
     #[test]
