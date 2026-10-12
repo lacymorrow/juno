@@ -2134,13 +2134,98 @@ async fn get_specialist_system_prompt(agent_type: &str, app_handle: &tauri::AppH
     prompt_manager.get_specialist_prompt(agent_type)
 }
 
+// --- Prompt For The Next Turn ---
+
+/// The system prompt the next agent turn will run with in the configured mode,
+/// built without running one.
+///
+/// The Claude CLI warm spare is started with it at launch, so the first
+/// conversation adopts a booted process instead of paying the cold boot. It is
+/// built as [`process_agent_query`] builds it, except that the tool lists hold
+/// only the MCP tools: the full lists exist only inside a running turn, and the
+/// default prompts do not use them. A turn whose prompt still comes out
+/// different (a custom prompt that lists tools, a query sent to the other
+/// agent mode) does not match the spare's fingerprint and starts cold, as it
+/// would have with no spare.
+pub(crate) async fn next_turn_system_prompt(app_handle: &tauri::AppHandle) -> String {
+    use crate::agent::prompts::types::{PromptContext, PromptType};
+
+    let companion_mode = match app_handle.try_state::<crate::settings::manager::SettingsManager>() {
+        Some(mgr) => mgr
+            .get_agent_settings()
+            .await
+            .map(|s| s.companion_mode)
+            .unwrap_or(false),
+        None => false,
+    };
+    let multi_agent = !companion_mode
+        && BrainFactory::get_agent_mode_with_app_handle(app_handle).await == AgentMode::Multi;
+
+    let prompt_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+        Ok(sm) => PromptManager::load_from_centralized_settings(&sm)
+            .await
+            .unwrap_or_else(|_| PromptManager::new()),
+        Err(_) => PromptManager::new(),
+    };
+
+    let mcp_tools: Vec<String> = match app_handle.try_state::<AppState>() {
+        Some(state) if !companion_mode => {
+            let mcp_manager = state.get_mcp_manager().await;
+            let guard = mcp_manager.lock().await;
+            guard
+                .get_all_tools()
+                .await
+                .into_iter()
+                .map(|t| t.tool_definition.name)
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+    let prompt_context = PromptContext {
+        user_preferences: None,
+        task_context: None,
+        available_tools: mcp_tools.clone(),
+        available_mcp_tools: mcp_tools,
+        provider_constraints: None,
+        custom_variables: std::collections::HashMap::new(),
+    };
+
+    let system_prompt = if companion_mode {
+        prompt_manager
+            .get_prompt(PromptType::SystemCompanion, Some(prompt_context))
+            .unwrap_or_else(|_| prompt_manager.get_default_system_prompt())
+    } else if multi_agent {
+        prompt_manager
+            .get_prompt(PromptType::OrchestratorPersonality, Some(prompt_context))
+            .unwrap_or_else(|_| prompt_manager.get_orchestrator_personality_prompt())
+    } else {
+        prompt_manager
+            .get_prompt(PromptType::SystemDefault, Some(prompt_context))
+            .unwrap_or_else(|_| prompt_manager.get_default_system_prompt())
+    };
+
+    let system_prompt = append_persistent_memory(system_prompt, app_handle, false);
+    inject_chat_only_notice(system_prompt, app_handle)
+}
+
 // --- Persistent Memory Injection ---
 
 /// Appends the user's persistent memory block to a system prompt.
 /// Silently skips injection on any error so agent execution is never blocked.
 fn inject_persistent_memory(system_prompt: String, app_handle: &tauri::AppHandle) -> String {
+    append_persistent_memory(system_prompt, app_handle, true)
+}
+
+/// [`inject_persistent_memory`], and with `record_access` false, without
+/// counting the entries as used: for a prompt built ahead of a turn.
+fn append_persistent_memory(
+    system_prompt: String,
+    app_handle: &tauri::AppHandle,
+    record_access: bool,
+) -> String {
     let store = PersistentMemoryStore::new(app_handle.clone());
     match store.build_injection_block() {
+        Ok(Some((block, _))) if !record_access => format!("{}{}", system_prompt, block),
         Ok(Some((block, ids))) => {
             let entry_count = ids.len();
             // Record access in a background task so we don't block the agent start path
@@ -2253,6 +2338,28 @@ pub async fn clear_conversation_history(state: State<'_, AppState>) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::is_jsx_content;
+
+    /// `next_turn_system_prompt` builds the prompt the warm spare is started
+    /// with before any turn has listed its tools. That only matches the turn's
+    /// prompt while the default prompts leave the tool lists out.
+    #[test]
+    fn the_default_prompts_do_not_list_tools() {
+        use crate::agent::prompts::DefaultPrompts;
+        for template in [
+            DefaultPrompts::system_default(),
+            DefaultPrompts::system_default_development(),
+            DefaultPrompts::system_companion(),
+            DefaultPrompts::orchestrator_personality(),
+        ] {
+            for placeholder in ["{{available_tools}}", "{{available_mcp_tools}}"] {
+                assert!(
+                    !template.content.contains(placeholder),
+                    "{} uses {placeholder}",
+                    template.id
+                );
+            }
+        }
+    }
 
     #[test]
     fn jsx_detection_accepts_any_capitalized_component_tag() {
