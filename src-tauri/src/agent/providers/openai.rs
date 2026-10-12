@@ -22,13 +22,52 @@ struct OpenAIRequest {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct OpenAIMessage {
     role: String,
-    content: Option<String>,
+    content: Option<OpenAIContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<OpenAIToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+}
+
+/// OpenAI message content: a plain string for text-only turns, or an array of
+/// typed parts when the person attached images. Untagged, so a response
+/// (always a string) and either request shape share the one field.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(untagged)]
+enum OpenAIContent {
+    Text(String),
+    Parts(Vec<OpenAIContentPart>),
+}
+
+impl OpenAIContent {
+    /// The readable text in this content, whatever shape it arrived in.
+    fn text(&self) -> String {
+        match self {
+            OpenAIContent::Text(text) => text.clone(),
+            OpenAIContent::Parts(parts) => parts
+                .iter()
+                .filter_map(|part| match part {
+                    OpenAIContentPart::Text { text } => Some(text.as_str()),
+                    OpenAIContentPart::ImageUrl { .. } => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum OpenAIContentPart {
+    Text { text: String },
+    ImageUrl { image_url: OpenAIImageUrl },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct OpenAIImageUrl {
+    url: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -190,7 +229,7 @@ impl OpenAIBrain {
     }
 
     // Helper to convert our internal Message format to OpenAI's format
-    fn convert_message_to_openai(&self, message: &Message) -> Result<OpenAIMessage, AgentError> {
+    fn convert_message_to_openai(message: &Message) -> Result<OpenAIMessage, AgentError> {
         let role = match message.role {
             Role::User => "user",
             Role::Assistant => "assistant",
@@ -221,13 +260,35 @@ impl OpenAIBrain {
             None
         };
 
+        // A user turn with attachments becomes a parts array — image_url
+        // parts carrying the data URLs, then the text. Every other turn
+        // stays a plain string.
+        let images = match message.role {
+            Role::User => message.images.as_deref().unwrap_or_default(),
+            _ => &[],
+        };
+        let content = if !images.is_empty() {
+            let mut parts: Vec<OpenAIContentPart> = images
+                .iter()
+                .map(|url| OpenAIContentPart::ImageUrl {
+                    image_url: OpenAIImageUrl { url: url.clone() },
+                })
+                .collect();
+            if !message.content.is_empty() {
+                parts.push(OpenAIContentPart::Text {
+                    text: message.content.clone(),
+                });
+            }
+            Some(OpenAIContent::Parts(parts))
+        } else if message.content.is_empty() {
+            None
+        } else {
+            Some(OpenAIContent::Text(message.content.clone()))
+        };
+
         Ok(OpenAIMessage {
             role: role.to_string(),
-            content: if message.content.is_empty() {
-                None
-            } else {
-                Some(message.content.clone())
-            },
+            content,
             tool_calls,
             tool_call_id: message.tool_call_id.clone(),
             name: message.name.clone(),
@@ -249,7 +310,7 @@ impl AgentBrain for OpenAIBrain {
         if let Some(system) = &self.system_prompt {
             openai_messages.push(OpenAIMessage {
                 role: "system".to_string(),
-                content: Some(system.clone()),
+                content: Some(OpenAIContent::Text(system.clone())),
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
@@ -257,7 +318,7 @@ impl AgentBrain for OpenAIBrain {
         }
 
         for message in messages {
-            match self.convert_message_to_openai(message) {
+            match Self::convert_message_to_openai(message) {
                 Ok(msg) => openai_messages.push(msg),
                 Err(e) => {
                     log::warn!("Error converting message to OpenAI format: {}", e);
@@ -383,14 +444,50 @@ impl AgentBrain for OpenAIBrain {
         }
 
         // If no tool calls, return the message content as a text response
-        match &message.content {
-            Some(content) if !content.is_empty() => Ok(AgentAction::Finish(content.clone())),
+        match message.content.as_ref().map(OpenAIContent::text) {
+            Some(content) if !content.is_empty() => Ok(AgentAction::Finish(content)),
             _ => {
                 log::warn!("OpenAI response had no content");
                 Err(AgentError::LlmError(
                     "OpenAI response had no content".to_string(),
                 ))
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_attachment_becomes_an_image_url_part() {
+        let message = Message::from_user(
+            "what is this?",
+            Some(vec!["data:image/png;base64,aGk=".to_string()]),
+        );
+        let converted = OpenAIBrain::convert_message_to_openai(&message).expect("converts");
+        let Some(OpenAIContent::Parts(parts)) = converted.content else {
+            panic!("a user turn with an attachment should convert to content parts");
+        };
+        assert_eq!(parts.len(), 2);
+        let OpenAIContentPart::ImageUrl { image_url } = &parts[0] else {
+            panic!("the first part should carry the image");
+        };
+        assert_eq!(image_url.url, "data:image/png;base64,aGk=");
+        let OpenAIContentPart::Text { text } = &parts[1] else {
+            panic!("the second part should carry the text");
+        };
+        assert_eq!(text, "what is this?");
+    }
+
+    #[test]
+    fn text_only_user_turn_stays_a_plain_string() {
+        let message = Message::from_user("hello", None);
+        let converted = OpenAIBrain::convert_message_to_openai(&message).expect("converts");
+        match converted.content {
+            Some(OpenAIContent::Text(text)) => assert_eq!(text, "hello"),
+            other => panic!("expected plain string content, got {other:?}"),
         }
     }
 }
